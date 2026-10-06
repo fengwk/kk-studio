@@ -31,13 +31,10 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -61,7 +58,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -161,8 +157,8 @@ class ModelRequestDebugServiceTest {
             .map(HarnessModelRequestDebugDTO.SubagentDTO::getName)
             .toList());
     assertEquals("SHORT", debug.getCacheControl().getRetention());
-    assertEquals("pc2-key", debug.getCacheControl().getAffinityKey());
-    assertEquals(List.of("SYSTEM", "TOOLS"), debug.getCacheControl().getBreakpoints());
+    // key 直接就是 session UUID 文本：读取投影绝不哈希、也不重新派生 affinity。
+    assertEquals(SESSION_ID.toString(), debug.getCacheControl().getKey());
   }
 
   /**
@@ -367,17 +363,7 @@ class ModelRequestDebugServiceTest {
       return new MessagePayload(
           message,
           new AssistantMessageMetadata(
-              GenerationStopReason.COMPLETE,
-              new ModelUsage(1, 1, 0, 0, 0, 0, 2),
-              new ModelCost(
-                  "USD",
-                  BigDecimal.ZERO,
-                  BigDecimal.ZERO,
-                  BigDecimal.ZERO,
-                  BigDecimal.ZERO,
-                  BigDecimal.ZERO,
-                  BigDecimal.ZERO,
-                  BigDecimal.ZERO)),
+              GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, 0, 0, 2), null),
           null);
     }
     return new MessagePayload(message, null, null);
@@ -451,29 +437,14 @@ class ModelRequestDebugServiceTest {
             "wire-model",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            new ModelPricing(
-                "USD",
-                "standard",
-                "default",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)),
+            false),
         // 冻结请求只携带 Agent 正文唯一的 systemInstruction 与零 tool binding。
         new ModelVariant("default"),
         512,
         "system instruction",
         List.of(),
         List.of(new SubagentBinding("coder", "Codes solutions.")),
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "pc2-key",
-            Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)));
+        new ProviderCacheControl(PromptCacheRetention.SHORT, SESSION_ID.toString()));
   }
 
   /** 从当前工作目录向上定位 reactor 根（同时含 platform 与 web 模块源码）。 */

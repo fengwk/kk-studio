@@ -172,7 +172,8 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
-  public static HarnessSessionEntryDTO toEntryDto(Entry entry) {
+  /** Entry 投影；{@code usageCost} 是读取时按当前目录价现算的费用（不可计价时为 null），绝不进入 {@code payloadJson}。 */
+  public static HarnessSessionEntryDTO toEntryDto(Entry entry, HarnessUsageCostDTO usageCost) {
     Objects.requireNonNull(entry, "entry");
     HarnessSessionEntryDTO dto = new HarnessSessionEntryDTO();
     dto.setEntryId(entry.id().toString());
@@ -181,6 +182,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setEntryType(entry.payload().type().name());
     dto.setPayloadJson(ENTRY_PAYLOADS.encode(entry.payload()));
     dto.setCreateTime(entry.createdAt());
+    dto.setUsageCost(usageCost);
     return dto;
   }
 
@@ -264,16 +266,24 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
+  /**
+   * 映射一个一致的 Thread 快照；DTO 列表为不可变副本。
+   *
+   * <p>{@code entryPath} 的每个 Entry 都带上读取时费用投影：Thread 历史与 Session Entry tree 走同一份投影，因此前端无需为费用额外请求。
+   */
   public static HarnessThreadSnapshotDTO toSnapshotDto(
-      ThreadSnapshot snapshot, ManualCompactionAvailability manualCompaction) {
+      ThreadSnapshot snapshot,
+      ManualCompactionAvailability manualCompaction,
+      Map<UUID, HarnessUsageCostDTO> usageCosts) {
     Objects.requireNonNull(snapshot, "snapshot");
     Objects.requireNonNull(manualCompaction, "manualCompaction");
+    Objects.requireNonNull(usageCosts, "usageCosts");
     HarnessThreadSnapshotDTO dto = new HarnessThreadSnapshotDTO();
     dto.setVersion(Long.toString(snapshot.thread().version()));
     dto.setThread(toThreadDto(snapshot));
     List<HarnessSessionEntryDTO> entries = new ArrayList<>(snapshot.entryPath().entries().size());
     for (Entry entry : snapshot.entryPath().entries()) {
-      entries.add(toEntryDto(entry));
+      entries.add(toEntryDto(entry, usageCosts.get(entry.id())));
     }
     dto.setEntries(List.copyOf(entries));
     List<HarnessThreadCommandDTO> queued = new ArrayList<>(snapshot.queuedCommands().size());
@@ -335,7 +345,8 @@ public final class HarnessRuntimeResponseMapper {
     }
     HarnessAcceptedCommandsDTO dto = new HarnessAcceptedCommandsDTO();
     dto.setSession(toSessionDto(accepted.session()));
-    dto.setRootEntry(toEntryDto(accepted.rootEntry()));
+    // 创建回执只回显 root entry 本身，它不是读取投影，因此显式不带费用。
+    dto.setRootEntry(toEntryDto(accepted.rootEntry(), null));
     dto.setThread(toThreadDto(currentSnapshot));
     List<HarnessThreadCommandDTO> commands = new ArrayList<>(accepted.acceptedCommands().size());
     for (ThreadCommand command : accepted.acceptedCommands()) {

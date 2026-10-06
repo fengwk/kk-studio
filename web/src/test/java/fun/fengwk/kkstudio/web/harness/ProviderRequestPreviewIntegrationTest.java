@@ -225,10 +225,10 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     assertEquals(requestsBefore, providerRequests.get(), "预览不得触发任何 transport");
 
     // 请求体事实：最终 wire 请求含真实历史、新草稿文本、权威附件文件名与权威 blobId，且不含凭据/endpoint。
-    assertEquals(HarnessProviderRequestPreviewDTO.KIND, preview.getKind());
+    assertEquals(HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW, preview.getKind());
     assertEquals("OPENAI", preview.getProviderType());
     assertEquals("acceptance-stub", preview.getModelName());
-    assertEquals(HarnessProviderRequestPreviewDTO.SNAPSHOT_NOTICE, preview.getSnapshotNotice());
+    assertEquals(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE, preview.getNotice());
     assertEquals(
         fixture.headEntryId().toString(), preview.getSourceHeadEntryId(), "预览必须绑定当前 source head");
     assertEquals(

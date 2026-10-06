@@ -6,7 +6,10 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
@@ -32,30 +35,32 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 发送前 Provider 协议请求体预览：在只读快照上用正式发送路径的规划、物化、Provider 解析与协议编码生成最终请求体，不写任何 durable 状态、不消费 upload、不触发
+ * 发送前 Provider 协议请求体预览：在只读事实上用正式发送路径的规划、物化、Provider 解析与协议编码生成最终请求体，不写任何 durable 状态、不消费 upload、不触发
  * transport。
  *
- * <p>预览与正式发送严格同源：candidate 历史由同一纯 {@link TurnPlanPreview}（内部复用 ThreadProcessor 的同一 {@code
- * TurnPlanBuilder}）构造，冻结请求来自同一 {@link DatabaseTurnResolver#planLive}，请求投影来自同一 {@link
- * ModelRequestMaterializer}，有效请求来自同一 {@link DatabaseProviderResolutionService#resolve}（含同一 Resource
- * 物化、cache control 规范化与 connection generation 校验），最终字节来自同一 {@link
- * ProviderAdapter#encodeRequestBody}。 因此只要前置事实一致，预览体与实际发送体逐字节一致。
+ * <p>三个入口只在「事实边界」上不同：既有 Thread 的下一轮草稿用快照 cursor 与空闲/queued/压缩判定；本地分支草稿只有 Session 与分支起点
+ * Entry，草稿尚未落库为 Thread，因此 candidate Thread/Entry id 都只是本次内存 UUID；历史模型输出以 ROOT 到其 parent 为请求前缀，并把该
+ * 输出的记录时间显式交给规划，绝不用当前时间冒充。
  *
- * <p>预览 fail-closed：草稿只允许「SET_* 设置前缀 + 恰好一条末尾 USER_MESSAGE」（GOAL / CUSTOM_MESSAGE 是各自的专属功能，
- * 不属于本预览），Thread 必须空闲、无 queued 命令且 cursor（head + next command sequence）一致，下一步必定是自动压缩时明确拒绝。 附件只做
- * READY 的只读 peek（不 retain、不删除、不增 Session ref），RESOURCE 仍必须由目标 Session 持有。预览不再要求客户端伪造产品 owner：目标
- * Thread 的 Session 就是附件归属的权威来源。
- *
- * <p>预览是点击时快照：它与随后真正发送之间没有任何 CAS，因此绝不声称发送结果与预览相同；{@link
- * HarnessProviderRequestPreviewDTO#snapshotNotice} 是响应契约的一部分。所有拒绝消息都是稳定且安全的文本，不回显 credential、
- * Authorization header、URL、上传/对象存储内部标识或规划自由文本详情。
+ * <p>预览与正式发送同源：candidate 历史由同一 {@link TurnPlanPreview} 构造，冻结请求来自同一 {@link
+ * DatabaseTurnResolver#planLive(UUID, EntryPath, Instant)}，有效请求来自同一 {@link
+ * DatabaseProviderResolutionService#resolve}，最终字节来自同一 {@link
+ * ProviderAdapter#encodeRequestBody}。附件只做 READY 的只读 peek，RESOURCE 仍必须由目标 Session 持有。压缩 Turn
+ * 的模型调用属于压缩专用 planning/encoder，本入口显式 typed 拒绝而不是重建一个错误的 live 请求。
  */
 public final class ProviderRequestPreviewService {
+
+  /** 尚未落库的分支草稿没有 Thread cursor：它的第一批命令就是该新 Thread 的 sequence 起点。 */
+  private static final long FIRST_COMMAND_SEQUENCE = 1L;
 
   private final HarnessRuntime runtime;
   private final DatabaseTurnResolver turnResolver;
@@ -97,7 +102,7 @@ public final class ProviderRequestPreviewService {
    *
    * @param threadId path 中的目标 Thread，必须与 batch 的 threadId 完全一致
    * @param command 与发送完全相同的通用命令批（target 必须是 THREAD）
-   * @return 最终请求体、UTF-8 字节数、providerType/modelName、source head cursor 与快照提示
+   * @return 最终请求体、UTF-8 字节数、providerType/modelName、source head cursor 与固定 notice
    * @throws ProviderRequestPreviewUnavailableException 当前事实不允许精确预览（快照漂移、非空闲、queued、压缩、附件未 READY、
    *     adapter 不支持预览或编码失败）
    */
@@ -114,15 +119,95 @@ public final class ProviderRequestPreviewService {
     // Thread 都在任何 upload 行锁、blob 读取与 Session ref 查询之前失败。
     List<NewThreadCommand> prepared =
         contentPreparer.prepare(snapshot.thread().sessionId(), command.commands());
+    Instant now = clock.instant();
     EntryPath candidatePath =
         TurnPlanPreview.inputCandidatePath(
-            threadId,
-            snapshot.entryPath(),
-            snapshot.thread().nextCommandSequence(),
-            prepared,
-            clock.instant());
+            threadId, snapshot.entryPath(), snapshot.thread().nextCommandSequence(), prepared, now);
+    return planAndEncode(
+        threadId,
+        candidatePath,
+        now,
+        snapshot.entryPath().head().id(),
+        HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW,
+        HarnessProviderRequestPreviewDTO.DRAFT_NOTICE);
+  }
 
-    LiveTurnPlan plan = turnResolver.planLive(threadId, candidatePath);
+  /**
+   * 现算一次本地分支草稿的 Provider 协议请求体预览：草稿尚未落库为 Thread，因此边界只有 Session 与分支起点 Entry （ROOT 或已关闭的 TURN_END，与
+   * NEW_THREAD 的合法落点一致）。
+   *
+   * <p>不做任何 Thread cursor / queued / 空闲 / 自动压缩判定（那些事实属于既有 Thread），也绝不为了预览先创建 Thread。
+   *
+   * @param sessionId path 中的目标 Session；不存在时由 {@link HarnessRuntime} 以 typed 异常拒绝
+   * @param startEntryId 草稿分支起点，必须属于该 Session
+   * @param commands 与发送完全相同的通用命令批（SET_* 前缀 + 末尾 USER_MESSAGE）
+   */
+  public HarnessProviderRequestPreviewDTO previewDraft(
+      UUID sessionId, UUID startEntryId, List<NewThreadCommand> commands) {
+    Objects.requireNonNull(sessionId, "sessionId");
+    Objects.requireNonNull(startEntryId, "startEntryId");
+    Objects.requireNonNull(commands, "commands");
+    requirePreviewCommandShape(commands);
+
+    Map<UUID, Entry> entries = sessionEntries(sessionId);
+    Entry source = requireSessionEntry(entries, startEntryId, "start entry");
+    requireDraftStartEntry(source);
+    EntryPath sourcePath = entryPath(entries, source.id());
+    List<NewThreadCommand> prepared = contentPreparer.prepare(sessionId, commands);
+
+    Instant now = clock.instant();
+    UUID candidateThreadId = UUID.randomUUID();
+    EntryPath candidatePath =
+        TurnPlanPreview.inputCandidatePath(
+            candidateThreadId, sourcePath, FIRST_COMMAND_SEQUENCE, prepared, now);
+    return planAndEncode(
+        candidateThreadId,
+        candidatePath,
+        now,
+        source.id(),
+        HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW,
+        HarnessProviderRequestPreviewDTO.DRAFT_NOTICE);
+  }
+
+  /**
+   * 现算一次历史模型输出的 Provider 协议请求体预览：请求前缀严格是 ROOT 到该输出的 parent，规划时间显式取该输出的记录时间。
+   *
+   * <p>catalog 与 Provider 配置都已不是当时的那一份，因此这里按当前定义重建；响应以 {@link
+   * HarnessProviderRequestPreviewDTO#HISTORICAL_NOTICE} 明确声明它不等于原始发送字节。
+   *
+   * @param sessionId path 中的目标 Session；不存在时由 {@link HarnessRuntime} 以 typed 异常拒绝
+   * @param entryId 被查看的模型输出 Entry，必须属于该 Session 且携带 assistantMetadata
+   */
+  public HarnessProviderRequestPreviewDTO previewHistorical(UUID sessionId, UUID entryId) {
+    Objects.requireNonNull(sessionId, "sessionId");
+    Objects.requireNonNull(entryId, "entryId");
+
+    Map<UUID, Entry> entries = sessionEntries(sessionId);
+    Entry output = requireSessionEntry(entries, entryId, "entry");
+    requireLiveReconstructible(entries, output);
+    UUID requestHeadEntryId = requireRequestHead(output);
+    EntryPath requestPath = entryPath(entries, requestHeadEntryId);
+    Instant recordedAt = output.createdAt();
+    // 历史路径可能不属于任何一个现存 Thread；规划本身不回查 Thread 归属，因此这里同样只给 candidate id。
+    UUID candidateThreadId = UUID.randomUUID();
+    return planAndEncode(
+        candidateThreadId,
+        requestPath,
+        recordedAt,
+        requestHeadEntryId,
+        HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW,
+        HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
+  }
+
+  /** 三种预览共用的只读尾部：冻结规划 -> 物化 -> 正式协议编码 -> 稳定响应投影。 */
+  private HarnessProviderRequestPreviewDTO planAndEncode(
+      UUID candidateThreadId,
+      EntryPath candidatePath,
+      Instant plannedAt,
+      UUID sourceHeadEntryId,
+      String kind,
+      String notice) {
+    LiveTurnPlan plan = turnResolver.planLive(candidateThreadId, candidatePath, plannedAt);
     if (plan instanceof LiveTurnPlan.Rejected) {
       // 规划的错误码与自由文本详情都不属于公开预览协议。
       throw new ProviderRequestPreviewUnavailableException(
@@ -133,15 +218,98 @@ public final class ProviderRequestPreviewService {
     byte[] body = encodeRequestBody(spec.providerType(), spec, request);
 
     HarnessProviderRequestPreviewDTO dto = new HarnessProviderRequestPreviewDTO();
-    dto.setKind(HarnessProviderRequestPreviewDTO.KIND);
-    dto.setGeneratedAt(clock.instant());
+    dto.setKind(kind);
+    dto.setGeneratedAt(plannedAt);
     dto.setProviderType(spec.providerType().name());
     dto.setModelName(spec.model().modelName());
     dto.setBodyByteSize(body.length);
     dto.setBodyJson(new String(body, StandardCharsets.UTF_8));
-    dto.setSourceHeadEntryId(snapshot.entryPath().head().id().toString());
-    dto.setSnapshotNotice(HarnessProviderRequestPreviewDTO.SNAPSHOT_NOTICE);
+    dto.setSourceHeadEntryId(sourceHeadEntryId.toString());
+    dto.setNotice(notice);
     return dto;
+  }
+
+  /** Session 的完整 Entry tree（含非 head 分支）：id 索引同时充当祖先解析的事实来源。 */
+  private Map<UUID, Entry> sessionEntries(UUID sessionId) {
+    List<Entry> entries = runtime.getSessionEntries(sessionId);
+    Map<UUID, Entry> entriesById = new LinkedHashMap<>(entries.size());
+    for (Entry entry : entries) {
+      entriesById.put(entry.id(), entry);
+    }
+    return entriesById;
+  }
+
+  /** 预览的 Entry 边界必须属于 path 上的 Session；跨 Session 引用是客户端错误（400），绝不回退到其它 Session 的 Entry。 */
+  private static Entry requireSessionEntry(Map<UUID, Entry> entries, UUID entryId, String name) {
+    Entry entry = entries.get(entryId);
+    if (entry == null) {
+      throw new IllegalArgumentException(name + " does not belong to the session: " + entryId);
+    }
+    return entry;
+  }
+
+  /**
+   * 草稿分支起点必须与 NEW_THREAD 的合法落点一致：ROOT 或已关闭的 TURN_END。
+   *
+   * <p>消息内部、工具结果或仍在进行中的回合都无法承载新 Turn，预览必须与正式接受一样在触碰任何规划/编码之前确定性拒绝；起点自身就是 durable
+   * 记录的一部分，因此不需要（也不允许）调用方伪造 owner 或先创建 Thread。
+   */
+  private static void requireDraftStartEntry(Entry entry) {
+    EntryType type = entry.payload().type();
+    if (type != EntryType.ROOT && type != EntryType.TURN_END) {
+      throw new IllegalArgumentException(
+          "draft preview requires a ROOT or TURN_END start entry but got " + type);
+    }
+  }
+
+  /** 压缩 Turn 的模型调用走压缩专用 planning/encoder，live 入口无法重建；这里显式 typed 拒绝，绝不拿普通 live 规划冒充历史。 */
+  private static void requireLiveReconstructible(Map<UUID, Entry> entries, Entry output) {
+    Entry cursor = output;
+    while (cursor != null) {
+      if (cursor.payload() instanceof TurnStartPayload start) {
+        if (start.compaction() != null) {
+          throw new ProviderRequestPreviewUnavailableException(
+              Reason.PREVIEW_UNSUPPORTED,
+              "compaction model calls are not reconstructible through the live request path");
+        }
+        return;
+      }
+      UUID parentEntryId = cursor.parentEntryId();
+      cursor = parentEntryId == null ? null : entries.get(parentEntryId);
+    }
+  }
+
+  /** 历史预览只接受模型输出本身：请求前缀就是它的 parent，因此本次输出与未来历史绝不进入请求体。 */
+  private static UUID requireRequestHead(Entry output) {
+    if (!(output.payload() instanceof MessagePayload message)
+        || message.assistantMetadata() == null) {
+      throw new IllegalArgumentException(
+          "provider request preview requires an assistant model output entry");
+    }
+    if (output.parentEntryId() == null) {
+      throw new IllegalStateException(
+          "assistant model output must have a request head entry: " + output.id());
+    }
+    return output.parentEntryId();
+  }
+
+  /**
+   * 从 Session Entry tree 复原 root-to-head 路径；parent 缺失说明 durable 树已损坏，直接失败而不是给出错误前缀。路径合法性（单一
+   * Session、ROOT 在前、parent 链连续、Turn grammar）由 {@link EntryPath} 权威校验，因此无法承载新 Turn 的分支起点会与正式接受
+   * 一样被确定性拒绝。
+   */
+  private static EntryPath entryPath(Map<UUID, Entry> entries, UUID headEntryId) {
+    LinkedList<Entry> chain = new LinkedList<>();
+    UUID cursor = headEntryId;
+    while (cursor != null) {
+      Entry entry = entries.get(cursor);
+      if (entry == null) {
+        throw new IllegalStateException("session entry parent is missing: " + cursor);
+      }
+      chain.addFirst(entry);
+      cursor = entry.parentEntryId();
+    }
+    return new EntryPath(chain);
   }
 
   /** preview 只覆盖既有 Thread：target 必须是 THREAD 且 threadId 与 path 完全一致。 */
