@@ -15,6 +15,7 @@ import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
+import { interactionService } from '@/shared/api/interaction-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
@@ -103,6 +104,13 @@ vi.mock('@/shared/api/environment-service', () => ({
 vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
     listChatSessions: vi.fn(),
+  },
+}))
+// 根交互卡片：根面板通过 GET /interactions?rootThreadId= 汇聚待决审批与问卷。
+vi.mock('@/shared/api/interaction-service', () => ({
+  interactionService: {
+    listInteractions: vi.fn(),
+    submitInteraction: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -250,6 +258,10 @@ beforeEach(() => {
   vi.mocked(harnessService.previewProviderRequest).mockReset()
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.getThreadTree).mockResolvedValue([])
+  vi.mocked(interactionService.listInteractions).mockResolvedValue({
+    items: [],
+    nextCursor: null,
+  })
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
@@ -812,7 +824,10 @@ describe('AgentPane orchestration', () => {
       </QueryClientProvider>,
     )
 
-    await user.click(composer)
+    // 新 QueryClient 下 Thread 身份需要重新加载：根控制区在身份就绪前不出现，
+    // 因此这里重新获取 composer 而不是复用重绑前的节点。
+    const composerAfterRebind = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composerAfterRebind)
     await user.keyboard('/thread{Enter}')
     await user.click(await screen.findByRole('option', { name: /session/ }))
     await user.click(await screen.findByRole('option', { name: /thread A/ }))

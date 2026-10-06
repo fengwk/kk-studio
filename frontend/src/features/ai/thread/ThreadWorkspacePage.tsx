@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
+import { ChildThreadRootLink, ChildThreadView } from '@/features/ai/runtime/ChildThreadView'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
@@ -61,6 +62,10 @@ export function ThreadWorkspacePage() {
 
   const thread = threadQuery.data.thread
   const title = thread.name || thread.threadId
+  // 子代理是只读视图：独立地址只挂载 Thread 投影，不挂草稿、上传与人工执行 Hook，
+  // 并保留返回执行根的入口；根地址仍然进入完整的 pane（含根控制区）。
+  const isChildThread = thread.parentThreadId != null
+  const rootThreadId = thread.yoloPolicy.rootThreadId ?? null
 
   return (
     <section className="chat-workspace screen active">
@@ -79,14 +84,26 @@ export function ThreadWorkspacePage() {
         </div>
       </header>
       <div className="chat-pane-grid layout-single">
-        <AgentPane
-          paneId={`thread-${threadId}`}
-          agents={agentsQuery.data?.results ?? []}
-          environments={environmentsQuery.data ?? []}
-          initialTarget={{ kind: 'BOUND_THREAD', threadId }}
-          capabilities={{ allowNewSession: false }}
-          focused
-        />
+        {isChildThread ? (
+          <section className="chat-pane focused" data-pane-id={`thread-${threadId}`}>
+            <ChildThreadView
+              threadId={threadId}
+              environments={environmentsQuery.data ?? []}
+              controls={rootThreadId == null
+                ? null
+                : <ChildThreadRootLink rootThreadId={rootThreadId} />}
+            />
+          </section>
+        ) : (
+          <AgentPane
+            paneId={`thread-${threadId}`}
+            agents={agentsQuery.data?.results ?? []}
+            environments={environmentsQuery.data ?? []}
+            initialTarget={{ kind: 'BOUND_THREAD', threadId }}
+            capabilities={{ allowNewSession: false }}
+            focused
+          />
+        )}
       </div>
     </section>
   )

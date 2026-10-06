@@ -8,6 +8,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { interactionService } from '@/shared/api/interaction-service'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -44,6 +45,12 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/interaction-service', () => ({
+  interactionService: {
+    listInteractions: vi.fn(),
+    submitInteraction: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -264,6 +271,10 @@ describe('ThreadWorkspacePage', () => {
     vi.mocked(agentService.listProviders).mockResolvedValue({ results: [], total: 0 })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(harnessService.decideApproval).mockResolvedValue(undefined)
+    vi.mocked(interactionService.listInteractions).mockResolvedValue({
+      items: [],
+      nextCursor: null,
+    })
   })
 
   it('renders invalid ID error state when threadId is not a canonical UUID and does not call harness', () => {
@@ -310,58 +321,56 @@ describe('ThreadWorkspacePage', () => {
     expect(chatService.listChatSessions).not.toHaveBeenCalled()
   })
 
-  it('renders ToolApprovalBar in child thread timeline and clicking Allow calls harnessService.decideApproval with child thread ID', async () => {
+  it('aggregates a descendant approval in the root pane and writes back to the original invocation', async () => {
+    // 子 Thread 不再内联审批：根面板通过 GET /interactions?rootThreadId= 汇聚待决审批，
+    // 决策仍写回原始来源 Thread 与 invocation。
     const user = userEvent.setup()
-    const snapshot = snapshotWithPendingTool(CHILD_THREAD_ID)
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot)
-
-    renderPage(`/threads/${CHILD_THREAD_ID}`)
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+    const rootId = '00000000-0000-4000-8000-000000000010'
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue({
+      ...snapshotWithPendingTool(rootId),
+      thread: thread({
+        threadId: rootId,
+        parentThreadId: null,
+        name: 'Root Agent',
+        status: 'IDLE',
+        processing: false,
+      }),
+      entries: [],
+      toolInvocations: [],
+    })
+    vi.mocked(interactionService.listInteractions).mockResolvedValue({
+      items: [{
+        interactionId: 'inv-bash-1',
+        status: 'WAITING_APPROVAL',
+        threadId: CHILD_THREAD_ID,
+        rootThreadId: rootId,
+        sessionId: 'session-child',
+        owner: { type: 'CHAT', chatId: 'chat-1', issueId: null, agentName: null },
+        toolCallId: 'call-bash-1',
+        toolName: 'bash',
+        argumentsJson: '{"command":"rm -rf /tmp/test"}',
+        approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
+        createTime: '2026-07-28T10:00:01Z',
+      }],
+      nextCursor: null,
     })
 
-    const allowButton = screen.getByRole('button', { name: '允许' })
-    expect(allowButton).toBeInTheDocument()
+    renderPage(`/threads/${rootId}`)
+
+    const allowButton = await screen.findByRole('button', { name: '允许' })
     expect(allowButton).not.toBeDisabled()
+    expect(interactionService.listInteractions).toHaveBeenCalledWith(rootId, null, 20)
 
     await user.click(allowButton)
 
     await waitFor(() => {
       expect(harnessService.decideApproval).toHaveBeenCalledTimes(1)
     })
-
     const [targetThreadId, invocationId, payload] = vi.mocked(harnessService.decideApproval).mock.calls[0]
     expect(targetThreadId).toBe(CHILD_THREAD_ID)
     expect(invocationId).toBe('inv-bash-1')
     expect(payload.decision).toBe('ALLOW')
     expect(payload.decisionId).toBeDefined()
-  })
-
-  it('renders ToolApprovalBar and clicking Deny calls harnessService.decideApproval with DENY for child thread ID', async () => {
-    const user = userEvent.setup()
-    const snapshot = snapshotWithPendingTool(CHILD_THREAD_ID)
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot)
-
-    renderPage(`/threads/${CHILD_THREAD_ID}`)
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument()
-    })
-
-    const denyButton = screen.getByRole('button', { name: '拒绝' })
-    expect(denyButton).toBeInTheDocument()
-
-    await user.click(denyButton)
-
-    await waitFor(() => {
-      expect(harnessService.decideApproval).toHaveBeenCalledTimes(1)
-    })
-
-    const [targetThreadId, invocationId, payload] = vi.mocked(harnessService.decideApproval).mock.calls[0]
-    expect(targetThreadId).toBe(CHILD_THREAD_ID)
-    expect(invocationId).toBe('inv-bash-1')
-    expect(payload.decision).toBe('DENY')
   })
 
   it('isolates child thread routing from IssueAgent and Chat owner state without crosstalk', async () => {
@@ -390,67 +399,60 @@ describe('ThreadWorkspacePage', () => {
     expect(chatService.listChatSessions).not.toHaveBeenCalled()
   })
 
-  it('exposes the same interactive composer as a normal Thread and isolates two child snapshots when the route changes', async () => {
-    // 子 Thread 工作区与普通 Thread 能力一致（可输入、可设置、可 Goal/Stop）；
-    // 切换 child 后旧消息、排队、审批与该 Thread 自己的草稿都不得残留到另一个 child。
+  it('renders a child route as a read-only projection without composer or inline mutations', async () => {
+    // 子 Thread 工作区只挂 Thread 投影：没有草稿输入、设置与命令表，也不内联审批；
+    // 切换到另一个 child 后旧消息与旧草稿都不得残留。
     const user = userEvent.setup()
+    const rootId = '00000000-0000-4000-8000-000000000010'
     await saveThreadDraftParts(CHILD_THREAD_ID, [createTextPart('stale child draft')], [])
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) => {
       if (threadId === OTHER_CHILD_THREAD_ID) {
-        return snapshotFor(OTHER_CHILD_THREAD_ID)
+        return {
+          ...snapshotFor(OTHER_CHILD_THREAD_ID),
+          thread: thread({
+            threadId: OTHER_CHILD_THREAD_ID,
+            parentThreadId: rootId,
+            name: 'Idle Child',
+            status: 'IDLE',
+            processing: false,
+          }),
+        }
       }
-      return snapshotFor(CHILD_THREAD_ID, {
-        toolInvocations: snapshotWithPendingTool(CHILD_THREAD_ID).toolInvocations,
-        entries: [
-          userEntry('parent only', 'entry-parent'),
-          ...snapshotWithPendingTool(CHILD_THREAD_ID).entries,
-        ],
-      })
+      return {
+        ...snapshotFor(CHILD_THREAD_ID, {
+          entries: [userEntry('parent only', 'entry-parent')],
+          toolInvocations: [],
+        }),
+        thread: thread({
+          threadId: CHILD_THREAD_ID,
+          parentThreadId: rootId,
+          name: 'Waiting Parent',
+          status: 'WAITING_APPROVAL',
+          yoloPolicy: { mode: 'FOLLOW', rootThreadId: rootId },
+        }),
+      }
     })
 
     renderPage(`/threads/${CHILD_THREAD_ID}`)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+      expect(screen.getAllByText('Waiting Parent').length).toBeGreaterThan(0)
     })
-    // 子 Thread 工作区提供完整交互面：可编辑 composer、设置与命令表（含 goal / stop）。
-    const composer = screen.getByRole('textbox', { name: '给 AI 发送消息' })
-    expect(composer).toHaveAttribute('contenteditable', 'true')
-    expect(composer).toHaveAttribute('aria-disabled', 'false')
-    expect(screen.getByRole('button', { name: '发送消息' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toBeEnabled()
-    await user.click(screen.getByRole('button', { name: '打开命令表' }))
-    const palette = await screen.findByRole('listbox', { name: '命令表' })
-    expect(within(palette).getByRole('option', { name: /goal/ })).toHaveAttribute('aria-disabled', 'false')
-    expect(within(palette).getByRole('option', { name: /stop/ })).toHaveAttribute('aria-disabled', 'false')
-    await user.keyboard('{Escape}')
-
-    expect(screen.getByText('parent only')).toBeInTheDocument()
-    expect(screen.getByText('parent queued')).toBeInTheDocument()
-    expect(screen.getByText('等待审批')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '允许' }))
-    await waitFor(() => {
-      expect(harnessService.decideApproval).toHaveBeenCalledWith(
-        CHILD_THREAD_ID,
-        'inv-bash-1',
-        expect.objectContaining({ decision: 'ALLOW' }),
-      )
-    })
-
-    await user.click(screen.getByRole('button', { name: '打开另一个 Thread' }))
-
-    await waitFor(() => {
-      expect(screen.getAllByText('Idle Child').length).toBeGreaterThan(0)
-    })
-    expect(screen.queryByText('parent only')).not.toBeInTheDocument()
-    expect(screen.queryByText('parent queued')).not.toBeInTheDocument()
+    expect(screen.getByText('只读查看')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '返回执行根' })).toHaveAttribute('href', `/threads/${rootId}`)
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '发送消息' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
-    expect(screen.queryByText('等待审批')).not.toBeInTheDocument()
+    expect(screen.getByText('parent only')).toBeInTheDocument()
+
+    // 返回执行根：路由切到 root 地址，重新加载 root 快照；子 Thread 草稿不会跟随。
+    vi.mocked(harnessService.getThreadSnapshot).mockClear()
+    await user.click(screen.getByRole('link', { name: '返回执行根' }))
+
+    await waitFor(() => {
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(rootId)
+    })
     expect(screen.queryByText('stale child draft')).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toBeInTheDocument()
-    expect(screen.getByText('child only')).toBeInTheDocument()
-    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(OTHER_CHILD_THREAD_ID)
   })
 
   it('does not expose the inactive relationship tree on a child thread', async () => {
@@ -500,8 +502,10 @@ describe('ThreadWorkspacePage', () => {
     ])
 
     renderPage(`/threads/${CHILD_THREAD_ID}`)
-    expect(await screen.findByRole('button', { name: '允许' })).toBeEnabled()
+    await screen.findByText('只读查看')
     expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
+    // 只读子视图不查询执行树，也不提供任何写入口。
     expect(harnessService.getThreadTree).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
   })
 })

@@ -10,6 +10,9 @@ import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueri
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
 import { translate } from '@/shared/i18n'
 
+/** 只读 Thread 投影的完整形状：控制面（controller）是它的超集。 */
+export type ThreadProjection = ReturnType<typeof useThreadProjection>
+
 /**
  * 只读 Thread 投影：快照查询、实时流、timeline/events、usage 与运行时展示标签。
  *

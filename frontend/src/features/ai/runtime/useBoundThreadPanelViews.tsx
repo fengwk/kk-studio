@@ -7,18 +7,11 @@ import {
 import { useModelRequestDebug } from '@/features/ai/runtime/useModelRequestDebug'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
-import type {
-  ChatPanelLabels,
-  ChatPanelTranscriptInput,
-} from '@/features/ai/runtime/ChatPanel'
-import type { ToolDialogueMessage, TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
+import type { ThreadPaneLabels } from '@/features/ai/runtime/ThreadPane'
+import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
-import type {
-  HarnessSessionEntryDTO,
-  HarnessThreadCommandDTO,
-} from '@/shared/api/contracts/ai-runtime'
 
-/** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影。 */
+/** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影（只读视图状态）。 */
 export interface BoundThreadPreviewOptions {
   onPreview?: () => void
   previewLoading?: boolean
@@ -122,7 +115,7 @@ export function useBoundThreadPanelLabels(
     }
     branchUsage: TurnUsage | null
   },
-): ChatPanelLabels {
+): ThreadPaneLabels {
   const environmentName = controller.runtimeLabels.environmentName
   const boundEnvCard = environmentName
     ? environments.find((e) => e.name === environmentName)
@@ -144,51 +137,5 @@ export function useBoundThreadPanelLabels(
     environmentReady,
     branchUsage: controller.branchUsage,
     contextWindow: controller.runtimeLabels.contextWindow,
-  }
-}
-
-export function buildBoundThreadTranscript(options: {
-  controller: {
-    timeline: ChatPanelTranscriptInput['timeline']
-    bodyRef: RefObject<HTMLDivElement | null>
-    entries: HarnessSessionEntryDTO[]
-    queuedCommands: HarnessThreadCommandDTO[]
-    messagesLoading: boolean
-    messagesError: unknown
-    approvalPending: boolean
-    decideApproval: (
-      invocationId: string,
-      decision: 'ALLOW' | 'DENY',
-      targetThreadId?: string,
-    ) => Promise<void>
-  }
-  threadId: string
-  initialConversationScrollTop: number | null
-  onDenyApproval?: () => void
-}): ChatPanelTranscriptInput {
-  const { controller } = options
-  return {
-    timeline: controller.timeline,
-    bodyRef: controller.bodyRef,
-    initialScrollTop: options.initialConversationScrollTop,
-    resetKey: options.threadId,
-    eventCount: controller.entries.length + controller.queuedCommands.length,
-    loading: controller.messagesLoading,
-    error: controller.messagesError,
-    approvalPending: controller.approvalPending,
-    onDecideApproval: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => {
-      if (!message.invocationId) {
-        return
-      }
-      if (decision === 'DENY') {
-        options.onDenyApproval?.()
-      }
-      // 返回精确的决策请求：审批条据此在本地 pending 与 settle 之间同步反馈。
-      return controller.decideApproval(
-        message.invocationId,
-        decision,
-        message.threadId || options.threadId,
-      )
-    },
   }
 }
