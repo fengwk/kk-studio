@@ -30,10 +30,8 @@ export {
   ChildThreadRootLink,
   ChildThreadView,
 } from '@/features/ai/runtime/ChildThreadView'
-export {
-  ThreadLink,
-  ThreadNavigationContext,
-} from '@/features/ai/runtime/ThreadLink'
+export { ThreadLink } from '@/features/ai/runtime/ThreadLink'
+export { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 export { useThreadNavigation } from '@/features/ai/runtime/useThreadNavigation'
 export {
   useAgentThreadController,

@@ -5,7 +5,7 @@ import {
   ChildThreadRootLink,
 } from '@/features/ai/runtime/ChildThreadView'
 import { RootAgentPane } from '@/features/ai/runtime/RootAgentPane'
-import { ThreadNavigationContext } from '@/features/ai/runtime/ThreadLink'
+import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 import {
   useThreadNavigation,
 } from '@/features/ai/runtime/useThreadNavigation'
