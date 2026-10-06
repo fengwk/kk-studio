@@ -27,7 +27,8 @@ import {
  *
  * 创建型 owner 只接受 CHAT（ISSUE_AGENT 由 Issue 业务工作流拥有）；已有 Thread 的 Continue/Preview 不再需要 owner：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
- * - NEW_THREAD{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
+ * - NEW_THREAD{sessionId,startEntryId,threadId,threadName,yoloEnabled}：在既有 Session 的合法 fork 边界
+ *   （ROOT 或已闭合 TURN_END）下开新 Thread；threadName 是必填的分支显示名，创建前按 Names 规则规范化并进入创建请求身份
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
  * commands 必须是固定顺序 SET_AGENT,SET_MODEL,SET_ENVIRONMENT 前缀 +
  * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION、SET_CONTRIBUTOR_STATE 在产品 HTTP 面被拒绝。
@@ -53,6 +54,21 @@ function nonNegativeDecimal(value, field) {
   const raw = String(value ?? '')
   assert(/^(0|[1-9]\d*)$/.test(raw), `expected non-negative decimal ${field}: ${JSON.stringify(value)}`)
   return raw
+}
+
+/**
+ * 分支显示名的规范化与校验，镜像后端 {@code Names.normalize}：把任意 Unicode 空白折叠为单个空格、去掉首尾，
+ * 结果必须非空且至多 256 个码点（超长是调用方错误，绝不截断）。返回规范化后的名称。
+ */
+export function normalizeThreadName(value) {
+  assert(typeof value === 'string', `threadName must be a string: ${JSON.stringify(value)}`)
+  const collapsed = value.replace(/\s+/gu, ' ').trim()
+  assert(collapsed.length > 0, 'threadName must not be blank')
+  assert(
+    [...collapsed].length <= 256,
+    `threadName must not exceed 256 code points: ${JSON.stringify(value)}`,
+  )
+  return collapsed
 }
 
 /**
@@ -220,13 +236,20 @@ export function newSessionTarget({ sessionId, threadId, rootSettings, yoloEnable
   return { type: 'NEW_SESSION', sessionId, threadId, rootSettings, yoloEnabled }
 }
 
-/** NEW_THREAD target：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
-export function newThreadTarget({ sessionId, startEntryId, threadId, yoloEnabled = false }) {
+/** NEW_THREAD target：在既有 Session 的合法 fork 边界（ROOT 或已闭合 TURN_END）下开新 Thread（不复制 Entry）。 */
+export function newThreadTarget({ sessionId, startEntryId, threadId, threadName, yoloEnabled = false }) {
   canonicalUuid(sessionId, 'target.sessionId')
   canonicalUuid(startEntryId, 'target.startEntryId')
   canonicalUuid(threadId, 'target.threadId')
   assert(typeof yoloEnabled === 'boolean', 'target.yoloEnabled must be boolean')
-  return { type: 'NEW_THREAD', sessionId, startEntryId, threadId, yoloEnabled }
+  return {
+    type: 'NEW_THREAD',
+    sessionId,
+    startEntryId,
+    threadId,
+    threadName: normalizeThreadName(threadName),
+    yoloEnabled,
+  }
 }
 
 /**
@@ -275,8 +298,8 @@ function assertAcceptedCommands(accepted) {
  * - 返回 threadId 必须等于 target.threadId；
  * - NEW_SESSION/NEW_THREAD 的 sessionId 必须等于 target.sessionId；
  * - NEW_THREAD 且 accepted.replayed=false 时（真正首次创建）：accepted.thread.name 必须等于
- *   服务端派生的默认名 branch-<threadId 前 8 位>；replayed=true 的 exact replay 可能发生在该
- *   Thread 已被控制面重命名之后，服务端返回当前权威 name，helper 不做默认名断言；
+ *   target.threadName 经 Names 规则规范化后的名称（名称进入创建请求身份）；replayed=true 的 exact replay
+ *   可能发生在该 Thread 已被控制面重命名之后，服务端返回当前权威 name，helper 不做默认名断言；
  * - rootEntry.sessionId/thread.sessionId 必须等于 response session.sessionId；
  * - acceptedCommands 的 count/type/idempotencyKey/order 必须与请求 commands 一致，
  *   且每项 threadId、positive sequence、canonical idempotencyKey 均校验。
@@ -348,11 +371,11 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     )
   }
   if (target.type === 'NEW_THREAD' && accepted.replayed === false) {
-    // 真正首次创建：NEW_THREAD 不接受 name 输入，服务端派生默认名 branch-<threadId 前 8 位>。
+    // 真正首次创建：分支名由调用方显式给出并规范化，是创建请求身份的一部分。
     // （replayed=true 的 exact replay 可能命中已重命名的 Thread，返回当前权威 name，不在此断言。）
     assert(
-      accepted.thread?.name === `branch-${String(target.threadId).slice(0, 8)}`,
-      `NEW_THREAD first-creation thread name ${accepted.thread?.name} != branch-<threadId 前 8 位> for ${target.threadId}: ${JSON.stringify(
+      accepted.thread?.name === normalizeThreadName(target.threadName),
+      `NEW_THREAD first-creation thread name ${accepted.thread?.name} != normalized target.threadName for ${target.threadId}: ${JSON.stringify(
         accepted.thread,
       )}`,
     )
@@ -410,16 +433,89 @@ export async function createNewSession(
   })
 }
 
-/** NEW_THREAD 原子创建：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
+/** NEW_THREAD 原子创建：在既有 Session 的合法 fork 边界下开新 Thread（不复制 Entry）。 */
 export async function createNewThread(
   ctx,
-  { owner, sessionId, startEntryId, threadId, yoloEnabled = false, commands },
+  { owner, sessionId, startEntryId, threadId, threadName, yoloEnabled = false, commands },
 ) {
   return acceptCommandBatch(ctx, {
     owner,
-    target: newThreadTarget({ sessionId, startEntryId, threadId, yoloEnabled }),
+    target: newThreadTarget({ sessionId, startEntryId, threadId, threadName, yoloEnabled }),
     commands,
   })
+}
+
+/**
+ * 预览响应 DTO 的精确 wire 字段集：两种 kind 共用同一形状，null 字段由全局 NON_NULL 省略。
+ *
+ * <p>{@code notice} 是固定能力声明而非噪声；历史预览必须声明它按当前 catalog 与 Provider 配置重建，不是当时的原始字节。
+ */
+const PREVIEW_FIELDS = [
+  'kind',
+  'generatedAt',
+  'providerType',
+  'modelName',
+  'bodyByteSize',
+  'bodyJson',
+  'sourceHeadEntryId',
+  'notice',
+]
+
+/** 草稿预览的固定能力声明（镜像 {@code HarnessProviderRequestPreviewDTO.DRAFT_NOTICE}）。 */
+export const DRAFT_PREVIEW_NOTICE =
+  'Preview is a click-time snapshot of the request that would be sent now. It does not '
+  + 'consume uploads or write anything, so a later send may observe different history, '
+  + 'attachments or provider configuration.'
+
+/** 历史预览的固定能力声明（镜像 {@code HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE}）。 */
+export const HISTORICAL_PREVIEW_NOTICE =
+  'Preview is reconstructed from the current catalog, provider configuration and model '
+  + 'selection against the recorded history before this output. It is not the original '
+  + 'request that was sent, and it does not consume uploads or write anything.'
+
+/** 严格校验一份预览响应：精确字段、kind、固定 notice、来源 head 与请求体自洽。 */
+export function assertProviderPreview(preview, expectedKind) {
+  assert(preview && typeof preview === 'object' && !Array.isArray(preview), JSON.stringify(preview))
+  const actual = Object.keys(preview).sort()
+  assert(
+    actual.length === PREVIEW_FIELDS.length
+      && actual.every((field, index) => field === [...PREVIEW_FIELDS].sort()[index]),
+    `preview fields must be ${[...PREVIEW_FIELDS].sort().join(',')}, got ${actual.join(',')}`,
+  )
+  assert(preview.kind === expectedKind, `preview kind ${preview.kind} != ${expectedKind}: ${JSON.stringify(preview)}`)
+  assert(
+    (typeof preview.generatedAt === 'number' && Number.isFinite(preview.generatedAt))
+      || (typeof preview.generatedAt === 'string' && Number.isFinite(Date.parse(preview.generatedAt))),
+    `preview generatedAt invalid: ${JSON.stringify(preview.generatedAt)}`,
+  )
+  assert(
+    typeof preview.providerType === 'string' && preview.providerType.trim().length > 0
+      && typeof preview.modelName === 'string' && preview.modelName.trim().length > 0,
+    `preview must identify the provider/model it was planned for: ${JSON.stringify(preview)}`,
+  )
+  assert(
+    Number.isSafeInteger(preview.bodyByteSize) && preview.bodyByteSize >= 0,
+    `preview bodyByteSize must be a non-negative integer: ${JSON.stringify(preview)}`,
+  )
+  assert(
+    typeof preview.bodyJson === 'string' && preview.bodyJson.length > 0,
+    `preview bodyJson must be a non-empty string: ${JSON.stringify(preview)}`,
+  )
+  assert(
+    Buffer.byteLength(preview.bodyJson, 'utf8') === preview.bodyByteSize,
+    `preview bodyByteSize must be the UTF-8 byte length of the untruncated bodyJson: ${JSON.stringify({
+      bodyByteSize: preview.bodyByteSize,
+      actual: Buffer.byteLength(preview.bodyJson, 'utf8'),
+    })}`,
+  )
+  canonicalUuid(preview.sourceHeadEntryId, 'preview.sourceHeadEntryId')
+  const expectedNotice =
+    expectedKind === 'DRAFT_REQUEST_PREVIEW' ? DRAFT_PREVIEW_NOTICE : HISTORICAL_PREVIEW_NOTICE
+  assert(
+    preview.notice === expectedNotice,
+    `preview notice must be the fixed ${expectedKind} capability statement: ${JSON.stringify(preview.notice)}`,
+  )
+  return preview
 }
 
 /**
@@ -449,14 +545,40 @@ export async function previewProviderRequest(
     },
   )
   assert(status === 200, `provider request preview status ${status}: ${JSON.stringify(json)}`)
-  const preview = envelopeData(json)
-  assert(
-    preview?.kind === 'DRAFT_REQUEST_PREVIEW'
-      && typeof preview.bodyJson === 'string'
-      && typeof preview.snapshotNotice === 'string',
-    `invalid provider request preview: ${JSON.stringify(preview)}`,
+  return assertProviderPreview(envelopeData(json), 'DRAFT_REQUEST_PREVIEW')
+}
+
+/**
+ * 本地分支草稿预览：POST /api/harness/sessions/{sessionId}/provider-request-preview，body 只有
+ * {@code {startEntryId, commands}}。草稿尚未落库，因此不携带任何 cursor；同样不写 durable 状态、不消费 upload。
+ */
+export async function previewSessionDraftRequest(ctx, sessionId, { startEntryId, commands }) {
+  const id = canonicalUuid(sessionId, 'sessionId')
+  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
+  const { status, json } = await ctx.call(
+    'POST',
+    `/api/harness/sessions/${encodeURIComponent(id)}/provider-request-preview`,
+    { startEntryId: canonicalUuid(startEntryId, 'startEntryId'), commands },
   )
-  return preview
+  assert(status === 200, `session draft preview status ${status}: ${JSON.stringify(json)}`)
+  return assertProviderPreview(envelopeData(json), 'DRAFT_REQUEST_PREVIEW')
+}
+
+/**
+ * 历史请求预览：GET /api/harness/sessions/{sessionId}/entries/{entryId}/provider-request-preview。
+ *
+ * <p>按当前 catalog 与 Provider 配置重建该模型输出之前的请求前缀；响应 MUST 是 HISTORICAL_REQUEST_PREVIEW，
+ * 不得冒充当时的原始发送字节。
+ */
+export async function previewHistoricalRequest(ctx, sessionId, entryId) {
+  const id = canonicalUuid(sessionId, 'sessionId')
+  const entry = canonicalUuid(entryId, 'entryId')
+  const { status, json } = await ctx.call(
+    'GET',
+    `/api/harness/sessions/${encodeURIComponent(id)}/entries/${encodeURIComponent(entry)}/provider-request-preview`,
+  )
+  assert(status === 200, `historical preview status ${status}: ${JSON.stringify(json)}`)
+  return assertProviderPreview(envelopeData(json), 'HISTORICAL_REQUEST_PREVIEW')
 }
 
 // ---------- Session / Thread 查询 ----------
@@ -527,6 +649,48 @@ export async function listSessionThreads(ctx, sessionId) {
   return threads
 }
 
+/**
+ * Session Entry 的读取时费用投影：`usageCost` 永远存在（NON_NULL 全局省略只对 null 生效，DTO 声明 ALWAYS），
+ * 未计价/非模型输出时为 null，否则是 {@code {currency, amount}} 且 amount 是精确十进制文本（不做展示舍入）。
+ * 费用只是查询投影，绝不进入 payloadJson —— 这里同时锁住这两条事实。
+ */
+export function assertEntryUsageCost(entry) {
+  assert(Object.hasOwn(entry, 'usageCost'), `entry must expose usageCost: ${JSON.stringify(entry)}`)
+  const cost = entry.usageCost
+  if (cost == null) {
+    return null
+  }
+  assert(cost && typeof cost === 'object' && !Array.isArray(cost), JSON.stringify(cost))
+  assert(Object.keys(cost).sort().join(',') === 'amount,currency', JSON.stringify(cost))
+  assert(typeof cost.currency === 'string' && cost.currency.trim().length > 0, JSON.stringify(cost))
+  assert(
+    typeof cost.amount === 'string' && /^\d+(\.\d+)?$/.test(cost.amount),
+    `usageCost.amount must be a non-negative decimal string (never a number): ${JSON.stringify(cost)}`,
+  )
+  assert(
+    typeof entry.payloadJson === 'string' && !entry.payloadJson.includes('usageCost'),
+    `usageCost must not be persisted inside payloadJson: ${JSON.stringify(entry)}`,
+  )
+  return cost
+}
+
+/** 校验一条 Session Entry 的核心只读形状（同一 DTO 同时用于 entries 列表与 Thread snapshot.entries）。 */
+export function assertSessionEntry(entry, { sessionId } = {}) {
+  canonicalUuid(entry?.entryId, 'entry.entryId')
+  canonicalUuid(entry.sessionId, 'entry.sessionId')
+  if (sessionId != null) {
+    assert(
+      String(entry.sessionId) === String(sessionId),
+      `entry.sessionId ${entry.sessionId} != requested sessionId ${sessionId}: ${JSON.stringify(entry)}`,
+    )
+  }
+  if (entry.parentEntryId != null) canonicalUuid(entry.parentEntryId, 'entry.parentEntryId')
+  assert(typeof entry.entryType === 'string' && entry.entryType, JSON.stringify(entry))
+  assert(typeof entry.payloadJson === 'string', JSON.stringify(entry))
+  assertEntryUsageCost(entry)
+  return entry
+}
+
 /** Session 的完整不可变 Entry Tree（parentEntryId 连接父节点；含非当前 head 历史分支）。 */
 export async function listSessionEntries(ctx, sessionId) {
   const { json } = await ctx.call(
@@ -536,15 +700,7 @@ export async function listSessionEntries(ctx, sessionId) {
   const entries = envelopeData(json)
   assert(Array.isArray(entries), `expected Session Entry array: ${JSON.stringify(json)}`)
   for (const entry of entries) {
-    canonicalUuid(entry?.entryId, 'entry.entryId')
-    canonicalUuid(entry.sessionId, 'entry.sessionId')
-    assert(
-      String(entry.sessionId) === String(sessionId),
-      `entry.sessionId ${entry.sessionId} != requested sessionId ${sessionId}: ${JSON.stringify(entry)}`,
-    )
-    if (entry.parentEntryId != null) canonicalUuid(entry.parentEntryId, 'entry.parentEntryId')
-    assert(typeof entry.entryType === 'string' && entry.entryType, JSON.stringify(entry))
-    assert(typeof entry.payloadJson === 'string', JSON.stringify(entry))
+    assertSessionEntry(entry, { sessionId })
   }
   return entries
 }
@@ -594,11 +750,21 @@ export async function getThread(ctx, threadId) {
   return (await getThreadSnapshot(ctx, threadId)).thread
 }
 
+/** Thread 快照的 root-to-head entries；与 Session Entry Tree 共用同一只读形状（含 usageCost 投影）。 */
 export async function snapshotEntries(ctx, threadId) {
-  return (await getThreadSnapshot(ctx, threadId)).entries || []
+  const entries = (await getThreadSnapshot(ctx, threadId)).entries || []
+  for (const entry of entries) {
+    assertSessionEntry(entry)
+  }
+  return entries
 }
 
-/** 只读 Environment 注册表；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记。 */
+/**
+ * 只读 Environment 注册表；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记。
+ *
+ * <p>{@code statusExpiresAt} 是当前状态的只读时间投影（有效连接取 min(lease, lastSeen+heartbeat)）：offline/失效时由
+ * NON_NULL 省略；它的存在只提示浏览器按权威数据回读一次，绝不能当成固定轮询依据。
+ */
 export async function listEnvironments(ctx) {
   const { json } = await ctx.call('GET', '/api/harness/environments')
   const environments = envelopeData(json)
@@ -611,6 +777,18 @@ export async function listEnvironments(ctx) {
     )
     assert(typeof environment.ready === 'boolean', JSON.stringify(environment))
     assert(typeof environment.status === 'string', JSON.stringify(environment))
+    if (Object.hasOwn(environment, 'statusExpiresAt')) {
+      const expiresAt = environment.statusExpiresAt
+      assert(
+        (typeof expiresAt === 'number' && Number.isFinite(expiresAt))
+          || (typeof expiresAt === 'string' && Number.isFinite(Date.parse(expiresAt))),
+        `statusExpiresAt must be an instant: ${JSON.stringify(environment)}`,
+      )
+      assert(
+        environment.status !== 'OFFLINE',
+        `OFFLINE environment must not advertise a live statusExpiresAt: ${JSON.stringify(environment)}`,
+      )
+    }
   }
   return environments
 }
