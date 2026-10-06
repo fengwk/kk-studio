@@ -15,10 +15,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -33,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -113,7 +110,7 @@ class AnthropicProtocolOptionsTest {
     assertFalse(root.has("tools"));
   }
 
-  /** 测试意图：tools 合并保留 native server tool 并追加 runtime function tool，且合并结果参与冻结前缀哈希。 */
+  /** 测试意图：tools 合并保留 native server tool 并追加 runtime function tool，且合并结果就是最终 wire 事实。 */
   @Test
   void mergesNativeServerToolsBeforeRuntimeFunctionTools() throws IOException {
     ProviderToolDefinition runtimeTool =
@@ -140,13 +137,15 @@ class AnthropicProtocolOptionsTest {
     assertEquals("calc", tools.get(1).path("name").asText());
     assertEquals("object", tools.get(1).path("input_schema").path("type").asText());
 
-    // 合并结果参与 prefix hash：与不含 native tools 的同一请求必须是不同的冻结前缀
+    // 合并结果就是最终 wire 事实：与不含 native tools 的同一请求相比，native server tool 真实进入请求体
     ProviderRequest withoutNativeTools =
         request(
             reasoningModel(), variant(null, "{}"), 1024, List.of(userMsg()), List.of(runtimeTool));
-    assertNotEquals(
-        encoder.encode(withoutNativeTools, descriptor).sourcePrefixHash(),
-        encoded.sourcePrefixHash());
+    JsonNode toolsWithoutNative =
+        wire(encoder.encode(withoutNativeTools, descriptor)).path("tools");
+    assertEquals(1, toolsWithoutNative.size());
+    assertEquals("calc", toolsWithoutNative.get(0).path("name").asText());
+    assertNotEquals(tools, toolsWithoutNative);
   }
 
   /** 测试意图：只声明 native server tools 时不得被 runtime 空工具列表抹掉。 */
@@ -229,8 +228,7 @@ class AnthropicProtocolOptionsTest {
             1024,
             List.of(userMsg()),
             List.of(runtimeTool),
-            new ProviderCacheControl(
-                PromptCacheRetention.SHORT, "aff", Set.of(PromptCacheBreakpoint.TOOLS)));
+            new ProviderCacheControl(PromptCacheRetention.SHORT, "aff"));
 
     JsonNode tools = wire(encoder.encode(request, descriptor)).path("tools");
 
@@ -402,26 +400,10 @@ class AnthropicProtocolOptionsTest {
         "claude-3-5-sonnet",
         Set.of(ModelInputModality.TEXT),
         true,
-        true,
-        pricing());
+        true);
   }
 
   private static ProviderMessage userMsg() {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")));
-  }
-
-  private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 }

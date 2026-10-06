@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -42,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -455,24 +453,7 @@ class AnthropicErrorHandlingTest {
   private static ProviderRequest createTestRequest(String providerName, String modelName) {
     ModelDescriptor model =
         new ModelDescriptor(
-            providerName,
-            modelName,
-            modelName,
-            Set.of(ModelInputModality.TEXT),
-            true,
-            false,
-            new ModelPricing(
-                "USD",
-                "tier-1",
-                "default",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO));
+            providerName, modelName, modelName, Set.of(ModelInputModality.TEXT), true, false);
 
     return new ProviderRequest(
         model,

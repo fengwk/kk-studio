@@ -16,9 +16,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -43,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -172,8 +169,7 @@ class AnthropicModelProviderIntegrationTest {
                 "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
-                false,
-                pricing()),
+                false),
             new ModelVariant("default"),
             1024,
             "Test system instruction.",
@@ -255,8 +251,7 @@ class AnthropicModelProviderIntegrationTest {
                 "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
-                false,
-                pricing()),
+                false),
             new ModelVariant("default"),
             1024,
             "Test system instruction.",
@@ -345,8 +340,7 @@ class AnthropicModelProviderIntegrationTest {
                 "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
-                false,
-                pricing()),
+                false),
             new ModelVariant("default"),
             1024,
             "Test system instruction.",
@@ -409,8 +403,7 @@ class AnthropicModelProviderIntegrationTest {
                 "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
-                false,
-                pricing()),
+                false),
             badVariant,
             1024,
             "Test system instruction.",
@@ -476,8 +469,7 @@ class AnthropicModelProviderIntegrationTest {
                 "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
-                false,
-                pricing()),
+                false),
             new ModelVariant("default"),
             1024,
             "Test system instruction.",
@@ -549,16 +541,8 @@ class AnthropicModelProviderIntegrationTest {
             "claude-test",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            pricing());
-    ProviderCacheControl cache =
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "cache",
-            Set.of(
-                PromptCacheBreakpoint.SYSTEM,
-                PromptCacheBreakpoint.TOOLS,
-                PromptCacheBreakpoint.CONVERSATION));
+            false);
+    ProviderCacheControl cache = ProviderCacheControl.session(PromptCacheRetention.SHORT, "cache");
     List<ProviderMessage> history = new ArrayList<>();
     history.add(
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("first"))));
@@ -661,20 +645,5 @@ class AnthropicModelProviderIntegrationTest {
       count += markerCount(child);
     }
     return count;
-  }
-
-  private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 }

@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
@@ -43,24 +42,24 @@ import java.util.Set;
 /**
  * Anthropic Messages 协议的请求编码器。
  *
- * <p>负责将运行时 {@link ProviderRequest} 转换为符合 Anthropic 规范的 UTF-8 请求 JSON 字节数组， 并提取冻结的
- * sourcePrefixHash。
+ * <p>负责将运行时 {@link ProviderRequest} 转换为符合 Anthropic 规范的 UTF-8 请求 JSON 字节数组。
  *
  * <p>请求体以 variant 的 native {@link ProviderProtocolOptionsJson protocolOptions} 为合并起点：运行时所有权字段
  * （{@code model}/{@code max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code
- * cache_control}） 冲突显式失败，{@code tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；prefix hash、cache
- * marker 与请求体大小均基于最终合并结果。
+ * cache_control}） 冲突显式失败，{@code tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker
+ * 与请求体大小均基于最终合并结果。
  *
  * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前，BUDGET
  * 思考实际启用时追加 {@code interleaved-thinking-2025-05-14}，并集为空则不发送该头。
  *
- * <p>assistant replay 的已知 block 只校验 durable 语义所必需的字段，其余官方字段（如 text block 的 {@code
- * citations}）原样原位回放；只有能用 durable 语义等价重建的 payload（恰好 {@code type+text} 的 text block、恰好 {@code
- * type+id+name+input} 且与 durable 工具调用一致的 tool_use，以及后者与 text 的组合）才允许在 affinity/prefix hash
- * 失配时退回语义编码。 {@code thinking}（signature/顺序语义）、{@code redacted_thinking}、{@code
- * compaction}、未知/server/fallback block 以及任何额外成员都无法用 durable 语义表达，因此 affinity/prefix hash 失配时 fail
- * closed 而不是降级丢弃。 payload 以 {@code compaction} block 开头时代表历史已被摘要，编码器先按原 durable
- * 前缀完成校验，再清空已编码消息使该消息成为首条消息。
+ * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/历史边界写入固定的原生 {@code
+ * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
+ * 原生选项，因此不下发。
+ *
+ * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider/连接世代/wire 模型）绑定。affinity
+ * 不匹配时按 durable 语义回退投影，绝不因为存在 replay 而拒绝；affinity 匹配时先校验真实 payload 形状与 durable 一致性，再原位回放全部原生事实（含
+ * {@code thinking} 的 signature、{@code redacted_thinking}、未知 block 与官方附加字段）。 payload 以 {@code
+ * compaction} block 开头时代表历史已被摘要，校验通过后清空已编码消息使该消息成为首条消息。
  */
 final class AnthropicRequestEncoder {
 
@@ -110,8 +109,6 @@ final class AnthropicRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
     Objects.requireNonNull(config, "config");
 
-    validateCacheControl(request.cacheControl());
-
     // native protocolOptions 是合并起点：运行时所有权字段由本编码器写入，其余官方顶层字段原样保留
     ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
     rejectRuntimeOwnedOptions(root);
@@ -130,14 +127,14 @@ final class AnthropicRequestEncoder {
 
     ArrayNode toolsArray = mergeTools(root, request.tools());
 
-    // 系统指令是请求唯一的顶层 system；编码为单块数组以便 SYSTEM breakpoint 仍可打标。
+    // 系统指令是请求唯一的顶层 system；编码为单块数组以便在 SYSTEM 边界打缓存标记。
     ArrayNode unmarkedSystemArray = NODES.arrayNode();
     ObjectNode systemBlock = NODES.objectNode();
     systemBlock.put("type", "text");
     systemBlock.put("text", request.systemInstruction());
     unmarkedSystemArray.add(systemBlock);
 
-    // 从左到右构建 wire messages 并维护 prefix hash
+    // 从左到右构建 wire messages，并记录可用于缓存标记的消息端点
     ArrayNode wireMessagesArray = NODES.arrayNode();
     List<ObjectNode> cacheEndpoints = new ArrayList<>();
     ObjectNode lastEligible = null;
@@ -145,12 +142,10 @@ final class AnthropicRequestEncoder {
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
         // assistant 之前的完整前缀就是上次模型请求的端点，不受本轮新增块数量影响。
         addCacheEndpoint(cacheEndpoints, lastEligible);
-        String currentPrefixHash =
-            AnthropicPrefixHasher.calculateHash(unmarkedSystemArray, toolsArray, wireMessagesArray);
         EncodedAssistantMessage assistant =
-            encodeAssistantMessage(msg, descriptor, request.model().modelId(), currentPrefixHash);
-        // compaction 回放代表已经摘要完成的历史：前缀校验必须基于「原 durable 前缀」完成，
-        // 校验通过后再清空已编码消息，使 compaction assistant message 成为首条消息、被摘要历史整体省略。
+            encodeAssistantMessage(msg, descriptor, request.model().modelId());
+        // compaction 回放代表已经摘要完成的历史：durable 校验完成后清空已编码消息，
+        // 使 compaction assistant message 成为首条消息、被摘要历史整体省略。
         if (assistant.resetsHistory()) {
           wireMessagesArray.removeAll();
           cacheEndpoints.clear();
@@ -173,11 +168,7 @@ final class AnthropicRequestEncoder {
     }
     addCacheEndpoint(cacheEndpoints, lastEligible);
 
-    // 冻结当前请求新 assistant 生成前的 sourcePrefixHash
-    String frozenSourcePrefixHash =
-        AnthropicPrefixHasher.calculateHash(unmarkedSystemArray, toolsArray, wireMessagesArray);
-
-    // 注入 cache marker（排它于 prefix hash）
+    // 注入 cache marker
     applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints);
 
     if (!toolsArray.isEmpty()) {
@@ -200,7 +191,7 @@ final class AnthropicRequestEncoder {
           "request body exceeds " + MAX_REQUEST_BODY_BYTES + " bytes limit");
     }
 
-    return new AnthropicEncodedRequest(utf8Bytes, frozenSourcePrefixHash, betaFeatures);
+    return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
   }
 
   /** 求出本条请求实际发送的有序 beta 能力标识：配置列表原样在前，运行时强制的 interleaved thinking 仅在 BUDGET 思考实际启用时追加在后，已配置则不重复。 */
@@ -214,17 +205,6 @@ final class AnthropicRequestEncoder {
     List<String> union = new ArrayList<>(configured);
     union.add(AnthropicConfiguration.INTERLEAVED_THINKING_BETA);
     return List.copyOf(union);
-  }
-
-  private static void validateCacheControl(ProviderCacheControl cacheControl) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE) {
-      return;
-    }
-    if (cacheControl.breakpoints().isEmpty()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "Anthropic prompt cache control requires at least one breakpoint (SYSTEM, TOOLS, CONVERSATION)");
-    }
   }
 
   /**
@@ -528,20 +508,12 @@ final class AnthropicRequestEncoder {
   }
 
   private static EncodedAssistantMessage encodeAssistantMessage(
-      ProviderMessage message,
-      ProviderDescriptor descriptor,
-      String requestedModel,
-      String currentPrefixHash) {
+      ProviderMessage message, ProviderDescriptor descriptor, String requestedModel) {
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "assistant");
 
     ReplayDecision replay =
-        evaluateReplay(
-            message.replayState(),
-            descriptor,
-            requestedModel,
-            currentPrefixHash,
-            message.contents());
+        evaluateReplay(message.replayState(), descriptor, requestedModel, message.contents());
     if (replay.replayable()) {
       ArrayNode replayedBlocks = NODES.arrayNode();
       for (JsonNode blockNode : replay.content()) {
@@ -563,14 +535,19 @@ final class AnthropicRequestEncoder {
       ProviderReplayState replayState,
       ProviderDescriptor descriptor,
       String requestedModel,
-      String currentPrefixHash,
       List<ProviderContentBlock> durableContents) {
     if (replayState == null || replayState.format() != ProviderReplayFormat.ANTHROPIC_MESSAGES) {
       return ReplayDecision.FALLBACK;
     }
 
-    // 1. 同 format replay 无论 affinity/hash 是否匹配，必须先严格校验 shape/已知 block/durable 一致性；未知合法 block opaque
-    // 透传
+    // 1. 源兼容性只由 affinity（Provider/连接世代/wire 模型）决定，与 system/时间前缀无关；不兼容时按 durable
+    // 语义投影，绝不因为存在 replay 而拒绝请求。
+    if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
+      return ReplayDecision.FALLBACK;
+    }
+
+    // 2. 兼容的 native replay 必须通过真实 payload 形状与 durable 一致性校验，再原位回放全部原生事实
+    // （thinking signature、redacted thinking、未知 block 与官方附加字段均 opaque 保留）。
     JsonNode payload = replayState.payload();
     if (payload == null
         || !payload.isObject()
@@ -584,30 +561,21 @@ final class AnthropicRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload");
     }
     ArrayNode contentArray = (ArrayNode) payload.get("content");
-    ReplayPayloadFacts facts = validatePayloadAgainstDurable(contentArray, durableContents);
-
-    // 2. 校验通过后，再判断 affinity 与 prefix hash；已知语义可无损降级时 fallback
-    boolean affinityMatches = replayState.affinity().equals(descriptor.affinity(requestedModel));
-    boolean prefixHashMatches = replayState.sourcePrefixHash().equals(currentPrefixHash);
-    if (!affinityMatches || !prefixHashMatches) {
-      if (facts.nativeOnly()) {
-        // native-only block 无法用 durable 语义表达：失配时只能 fail closed，绝不静默丢弃这些 block
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "native replay blocks require matching affinity and source prefix hash");
-      }
-      return ReplayDecision.FALLBACK;
-    }
-    return new ReplayDecision(true, contentArray, facts.startsHistory());
+    boolean startsHistory = validatePayloadAgainstDurable(contentArray, durableContents);
+    return new ReplayDecision(true, contentArray, startsHistory);
   }
 
-  private static ReplayPayloadFacts validatePayloadAgainstDurable(
+  /**
+   * 校验 native replay payload 的真实 block 形状与 durable 语义一致性，返回 payload 是否代表已摘要历史。
+   *
+   * <p>未知但合法的 provider block 与官方附加字段 opaque 透传；已知 block 只校验 durable 语义所必需的字段。
+   */
+  private static boolean validatePayloadAgainstDurable(
       ArrayNode contentArray, List<ProviderContentBlock> durableContents) {
     StringBuilder payloadText = new StringBuilder();
     StringBuilder payloadThinking = new StringBuilder();
     List<ProviderToolCall> payloadCalls = new ArrayList<>();
 
-    boolean nativeOnly = false;
     int compactionIndex = -1;
     int blockIndex = 0;
 
@@ -628,11 +596,6 @@ final class AnthropicRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
           }
           validateCitations(item.get("citations"));
-          // 只有恰好 type+text 的纯文本块能用 durable 文本等价重建；citations 或任何额外成员都携带 durable
-          // 无法表达的原生事实
-          if (item.size() != 2) {
-            nativeOnly = true;
-          }
           payloadText.append(item.get("text").textValue());
         }
         case "thinking" -> {
@@ -644,8 +607,6 @@ final class AnthropicRequestEncoder {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid thinking block in replay payload");
           }
-          // signature 与块顺序语义无法用 durable thinking 文本重建：只允许原位回放，失配时 fail closed
-          nativeOnly = true;
           payloadThinking.append(item.get("thinking").textValue());
         }
         case "redacted_thinking" -> {
@@ -656,8 +617,6 @@ final class AnthropicRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid redacted_thinking block in replay payload");
           }
-          // 密文无法用 durable 语义表达：只允许原位回放，失配时必须 fail closed
-          nativeOnly = true;
         }
         case "tool_use" -> {
           if (!item.has("id")
@@ -670,10 +629,6 @@ final class AnthropicRequestEncoder {
               || !item.get("input").isObject()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid tool_use block in replay payload");
-          }
-          // 只有恰好 type+id+name+input 的 tool_use 能用 durable 工具调用等价重建；额外成员无法重建
-          if (item.size() != 4) {
-            nativeOnly = true;
           }
           payloadCalls.add(
               new ProviderToolCall(
@@ -688,11 +643,9 @@ final class AnthropicRequestEncoder {
           }
           // 摘要块必须整体位于消息首部，代表此前历史已被压缩
           compactionIndex = blockIndex;
-          nativeOnly = true;
         }
         default -> {
           // 未知但合法的 provider block：opaque 透传，不参与 durable 一致性比对，也绝不伪装成已知 type
-          nativeOnly = true;
         }
       }
       blockIndex++;
@@ -758,7 +711,7 @@ final class AnthropicRequestEncoder {
       }
     }
 
-    return new ReplayPayloadFacts(nativeOnly, compactionIndex == 0);
+    return compactionIndex == 0;
   }
 
   /** citations 是官方可扩展结构：只校验容器与元素形状，不做字段白名单。 */
@@ -829,6 +782,10 @@ final class AnthropicRequestEncoder {
     }
   }
 
+  /**
+   * 按 Anthropic 原生协议在固定边界写入 {@code cache_control} ephemeral 标记：最后一个 tools 条目、最后一个合格 system
+   * block，以及最近历史请求端点；总标记数不超过 {@link #MAX_CACHE_BREAKPOINTS}。会话 {@code key} 不是 Anthropic 原生选项，因此不下发。
+   */
   private static void applyCacheMarkers(
       ProviderCacheControl cacheControl,
       ArrayNode toolsArray,
@@ -847,28 +804,22 @@ final class AnthropicRequestEncoder {
     int markersPlaced = 0;
 
     // 1. TOOLS: 最后一个合格 tool
-    if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.TOOLS) && !toolsArray.isEmpty()) {
+    if (!toolsArray.isEmpty()) {
       ((ObjectNode) toolsArray.get(toolsArray.size() - 1)).set("cache_control", marker);
       markersPlaced++;
     }
 
     // 2. SYSTEM: 最后一个合格 system block
-    if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.SYSTEM)) {
-      ObjectNode lastSystemBlock = latestEligibleBlock(systemArray);
-      if (lastSystemBlock != null) {
-        lastSystemBlock.set("cache_control", marker);
-        markersPlaced++;
-      }
+    ObjectNode lastSystemBlock = latestEligibleBlock(systemArray);
+    if (lastSystemBlock != null) {
+      lastSystemBlock.set("cache_control", marker);
+      markersPlaced++;
     }
 
-    // 3. CONVERSATION: 剩余预算用于最近历史请求端点与当前尾部；仅在全部 hash 验证/冻结后写 marker。
-    if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)) {
-      for (int i = cacheEndpoints.size() - 1;
-          i >= 0 && markersPlaced < MAX_CACHE_BREAKPOINTS;
-          i--) {
-        cacheEndpoints.get(i).set("cache_control", marker);
-        markersPlaced++;
-      }
+    // 3. CONVERSATION: 剩余预算用于最近历史请求端点与当前尾部；最近端点优先。
+    for (int i = cacheEndpoints.size() - 1; i >= 0 && markersPlaced < MAX_CACHE_BREAKPOINTS; i--) {
+      cacheEndpoints.get(i).set("cache_control", marker);
+      markersPlaced++;
     }
   }
 
@@ -946,7 +897,4 @@ final class AnthropicRequestEncoder {
 
     static final ReplayDecision FALLBACK = new ReplayDecision(false, null, false);
   }
-
-  /** payload 语义事实：是否为 durable 无法表达的 native-only block，以及是否以 compaction block 开头。 */
-  private record ReplayPayloadFacts(boolean nativeOnly, boolean startsHistory) {}
 }

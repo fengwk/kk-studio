@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -14,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -38,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -50,7 +50,7 @@ import java.util.UUID;
  * <ul>
  *   <li>未知合法 block（如 server tool use）的 raw 形态与 {@code input_json_delta} 累积结果原样进入下一轮 wire；
  *   <li>已知 block 的官方附加字段（citations 等）不被字段白名单剥离；
- *   <li>native-only block 无法用 durable 语义表达，affinity/hash 失配时 fail closed 而不是静默丢弃。
+ *   <li>affinity 失配时按 durable 语义回退，native-only block 随 payload 一并丢弃，绝不因为存在 replay 而拒绝请求。
  * </ul>
  */
 class AnthropicOpaqueReplayTest {
@@ -58,8 +58,6 @@ class AnthropicOpaqueReplayTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final String SYSTEM_INSTRUCTION = "Test system instruction.";
-  private static final String FORGED_PREFIX_HASH =
-      "0000000000000000000000000000000000000000000000000000000000000000";
 
   private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
   private final ProviderDescriptor descriptor =
@@ -78,9 +76,8 @@ class AnthropicOpaqueReplayTest {
   @Test
   void assemblesNativeToolInputFromJsonDeltaAndReplaysExactly() throws IOException {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
 
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start",
         "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}");
@@ -108,7 +105,6 @@ class AnthropicOpaqueReplayTest {
     ProviderReplayState replayState = completion.replayState();
     assertNotNull(replayState);
     assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
-    assertEquals(frozenHash, replayState.sourcePrefixHash());
 
     JsonNode content = replayState.payload().path("content");
     assertEquals(2, content.size());
@@ -138,9 +134,8 @@ class AnthropicOpaqueReplayTest {
   @Test
   void keepsCompleteNativeBlockWithoutDeltaExactly() {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
 
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start",
         "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}");
@@ -163,41 +158,32 @@ class AnthropicOpaqueReplayTest {
   }
 
   /**
-   * 测试意图：已知 block 的官方附加字段（citations 等）与 tool_use 的额外成员都无法用 durable 语义等价重建，因此 affinity 或 prefix hash
-   * 失配时必须 fail closed；恰好 {@code type+text} 的 text block 与恰好 {@code type+id+name+input} 的 tool_use
-   * 则仍回退语义编码。
+   * 测试意图：亲和性失配时不再 fail closed，而是按 durable 语义回退：citations 等官方附加字段与 tool_use 的额外成员都随 payload
+   * 一并丢弃，wire 完全由 durable 内容重建，绝不因为存在 replay 而拒绝请求。
    */
   @Test
-  void failsClosedForKnownBlocksWithNativeOnlyMembersOnMismatch() throws IOException {
-    // 1. 带 citations 与额外官方字段的 text block：hash 失配时 fail closed，绝不剥离这些字段
+  void fallsBackToDurableBlocksWhenAffinityMismatches() throws IOException {
+    ProviderReplayAffinity mismatchedAffinity = descriptor.affinity("another-model");
+
+    // 1. 带 citations 与额外官方字段的 text block：失配时回退语义编码，附加字段不进入 wire
     ObjectNode citedPayload = NODES.objectNode();
     citedPayload.put("role", "assistant");
     ObjectNode citedBlock = citedPayload.putArray("content").addObject();
     citedBlock.put("type", "text");
     citedBlock.put("text", "cited answer");
     citedBlock.putArray("citations").addObject().put("type", "web_search_result_location");
-    ProviderException citedHashMismatch =
-        assertReplayRejected(
-            replayState(citedPayload, FORGED_PREFIX_HASH),
+    citedBlock.putObject("future_official_field").put("k", "v");
+    JsonNode citedContent =
+        fallbackContent(
+            replayState(mismatchedAffinity, citedPayload),
             List.of(new ProviderTextBlock("cited answer")));
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        citedHashMismatch.getMessage());
+    assertEquals(1, citedContent.size());
+    assertEquals("text", citedContent.get(0).path("type").asText());
+    assertEquals("cited answer", citedContent.get(0).path("text").asText());
+    assertFalse(citedContent.get(0).has("citations"));
+    assertFalse(citedContent.get(0).has("future_official_field"));
 
-    // 2. 同一 payload 的 affinity 失配同样 fail closed
-    ProviderException citedAffinityMismatch =
-        assertReplayRejected(
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                descriptor.affinity("another-model"),
-                FORGED_PREFIX_HASH,
-                citedPayload),
-            List.of(new ProviderTextBlock("cited answer")));
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        citedAffinityMismatch.getMessage());
-
-    // 3. 带额外成员的 tool_use：prefix hash 失配时 fail closed，绝不丢弃额外成员
+    // 2. 带额外成员的 tool_use：失配时由 durable tool call 重建 wire，额外成员不进入 wire
     ObjectNode extraMemberToolPayload = NODES.objectNode();
     extraMemberToolPayload.put("role", "assistant");
     ObjectNode extraMemberTool = extraMemberToolPayload.putArray("content").addObject();
@@ -206,41 +192,25 @@ class AnthropicOpaqueReplayTest {
     extraMemberTool.put("caller", "server");
     List<ProviderContentBlock> durableToolCall =
         List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"x\":1}")));
-    ProviderException toolHashMismatch =
-        assertReplayRejected(
-            replayState(extraMemberToolPayload, FORGED_PREFIX_HASH), durableToolCall);
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        toolHashMismatch.getMessage());
-
-    // 4. 恰好 type+id+name+input 的 tool_use 失配时仍回退语义编码（由 durable 重建 wire）
-    ObjectNode minimalToolPayload = NODES.objectNode();
-    minimalToolPayload.put("role", "assistant");
-    ObjectNode minimalTool = minimalToolPayload.putArray("content").addObject();
-    minimalTool.put("type", "tool_use").put("id", "c1").put("name", "calc");
-    minimalTool.putObject("input").put("x", 1);
-    ProviderRequest fallbackRequest =
-        request(
-            List.of(
-                userMsg(),
-                assistantMsg(
-                    durableToolCall, replayState(minimalToolPayload, FORGED_PREFIX_HASH))));
-    JsonNode fallbackContent =
-        wire(encoder.encode(fallbackRequest, descriptor)).path("messages").get(1).path("content");
-    assertEquals(1, fallbackContent.size());
-    assertEquals("tool_use", fallbackContent.get(0).path("type").asText());
-    assertEquals("c1", fallbackContent.get(0).path("id").asText());
-    assertEquals("calc", fallbackContent.get(0).path("name").asText());
-    assertEquals(1, fallbackContent.get(0).path("input").path("x").asInt());
+    JsonNode toolContent =
+        fallbackContent(replayState(mismatchedAffinity, extraMemberToolPayload), durableToolCall);
+    assertEquals(1, toolContent.size());
+    assertEquals("tool_use", toolContent.get(0).path("type").asText());
+    assertEquals("c1", toolContent.get(0).path("id").asText());
+    assertEquals("calc", toolContent.get(0).path("name").asText());
+    assertEquals(1, toolContent.get(0).path("input").path("x").asInt());
+    assertFalse(toolContent.get(0).has("caller"));
   }
 
   /**
-   * 测试意图：native-only block 无法用 durable 语义表达，affinity/hash 失配时必须 fail closed；而纯已知 text payload 仍保留既有
-   * semantic fallback 行为。
+   * 测试意图：native-only block（server_tool_use、redacted_thinking）无法用 durable 语义表达，亲和性失配时直接按 durable
+   * 回退并丢弃这些 opaque block，绝不静默保留半成品，也不需要 fail closed。
    */
   @Test
-  void failsClosedForNativeOnlyReplayOnAffinityOrHashMismatch() throws IOException {
-    // 1. 含 native-only block 的 payload + 伪造 hash -> 显式失败，绝不静默丢弃该 block
+  void dropsOpaqueOnlyBlocksWhenAffinityMismatches() throws IOException {
+    ProviderReplayAffinity mismatchedAffinity = descriptor.affinity("another-model");
+
+    // 1. server_tool_use 与已知 text 混合：失配时 opaque block 被丢弃，只回退 durable text
     ObjectNode nativePayload = NODES.objectNode();
     nativePayload.put("role", "assistant");
     ArrayNode nativeContent = nativePayload.putArray("content");
@@ -250,57 +220,39 @@ class AnthropicOpaqueReplayTest {
         .put("id", "srv_1")
         .put("name", "web_search");
     nativeContent.addObject().put("type", "text").put("text", "answer");
-    ProviderException hashMismatch =
-        assertReplayRejected(
-            replayState(nativePayload, FORGED_PREFIX_HASH),
+    JsonNode serverToolFallback =
+        fallbackContent(
+            replayState(mismatchedAffinity, nativePayload),
             List.of(new ProviderTextBlock("answer")));
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        hashMismatch.getMessage());
+    assertEquals(1, serverToolFallback.size());
+    assertEquals("text", serverToolFallback.get(0).path("type").asText());
+    assertEquals("answer", serverToolFallback.get(0).path("text").asText());
 
-    // 2. 含 native-only block 的 payload + affinity 失配 -> 同样显式失败
-    ProviderException affinityMismatch =
-        assertReplayRejected(
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                descriptor.affinity("another-model"),
-                FORGED_PREFIX_HASH,
-                nativePayload),
-            List.of(new ProviderTextBlock("answer")));
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        affinityMismatch.getMessage());
-
-    // 3. redacted_thinking 同样无法用 durable 语义表达 -> 失配时 fail closed
+    // 2. redacted_thinking 同样无法用 durable 语义表达：失配时被丢弃
     ObjectNode redactedPayload = NODES.objectNode();
     redactedPayload.put("role", "assistant");
     ArrayNode redactedContent = redactedPayload.putArray("content");
     redactedContent.addObject().put("type", "redacted_thinking").put("data", "abc==");
     redactedContent.addObject().put("type", "text").put("text", "answer");
-    ProviderException redactedMismatch =
-        assertReplayRejected(
-            replayState(redactedPayload, FORGED_PREFIX_HASH),
+    JsonNode redactedFallback =
+        fallbackContent(
+            replayState(mismatchedAffinity, redactedPayload),
             List.of(new ProviderTextBlock("answer")));
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        redactedMismatch.getMessage());
+    assertEquals(1, redactedFallback.size());
+    assertEquals("text", redactedFallback.get(0).path("type").asText());
+    assertEquals("answer", redactedFallback.get(0).path("text").asText());
 
-    // 4. 纯已知 text payload 失配时仍静默回退语义编码
+    // 3. 纯已知 text payload 在失配时同样回退语义编码
     ObjectNode knownPayload = NODES.objectNode();
     knownPayload.put("role", "assistant");
     knownPayload.putArray("content").addObject().put("type", "text").put("text", "answer");
-    ProviderRequest nextRequest =
-        request(
-            List.of(
-                userMsg(),
-                assistantMsg(
-                    List.of(new ProviderTextBlock("answer")),
-                    replayState(knownPayload, FORGED_PREFIX_HASH))));
-    JsonNode assistantContent =
-        wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
-    assertEquals(1, assistantContent.size());
-    assertEquals("text", assistantContent.get(0).path("type").asText());
-    assertEquals("answer", assistantContent.get(0).path("text").asText());
+    JsonNode knownFallback =
+        fallbackContent(
+            replayState(mismatchedAffinity, knownPayload),
+            List.of(new ProviderTextBlock("answer")));
+    assertEquals(1, knownFallback.size());
+    assertEquals("text", knownFallback.get(0).path("type").asText());
+    assertEquals("answer", knownFallback.get(0).path("text").asText());
   }
 
   /**
@@ -309,9 +261,6 @@ class AnthropicOpaqueReplayTest {
    */
   @Test
   void preservesExtraOfficialFieldsOnKnownReplayBlocks() throws IOException {
-    ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
-
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
     ObjectNode textBlock = payload.putArray("content").addObject();
@@ -330,8 +279,7 @@ class AnthropicOpaqueReplayTest {
             List.of(
                 userMsg(),
                 assistantMsg(
-                    List.of(new ProviderTextBlock("cited answer")),
-                    replayState(payload, frozenHash))));
+                    List.of(new ProviderTextBlock("cited answer")), replayState(payload))));
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(1, assistantContent.size());
@@ -341,9 +289,6 @@ class AnthropicOpaqueReplayTest {
   /** 测试意图：citations 只做形状校验，不做字段白名单；形状非法时必须显式失败而不是回放损坏结构。 */
   @Test
   void rejectsInvalidCitationShapesInReplayPayload() {
-    ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
-
     ObjectNode scalarCitations = NODES.objectNode();
     scalarCitations.put("role", "assistant");
     ObjectNode textBlock = scalarCitations.putArray("content").addObject();
@@ -352,7 +297,7 @@ class AnthropicOpaqueReplayTest {
     textBlock.put("citations", "not-an-array");
     ProviderException notArray =
         assertReplayRejected(
-            replayState(scalarCitations, frozenHash), List.of(new ProviderTextBlock("answer")));
+            replayState(scalarCitations), List.of(new ProviderTextBlock("answer")));
     assertEquals("invalid text block in replay payload", notArray.getMessage());
 
     ObjectNode nonObjectCitation = NODES.objectNode();
@@ -363,7 +308,7 @@ class AnthropicOpaqueReplayTest {
     textBlock2.putArray("citations").add("not-an-object");
     ProviderException notObject =
         assertReplayRejected(
-            replayState(nonObjectCitation, frozenHash), List.of(new ProviderTextBlock("answer")));
+            replayState(nonObjectCitation), List.of(new ProviderTextBlock("answer")));
     assertEquals("invalid text block in replay payload", notObject.getMessage());
   }
 
@@ -371,9 +316,8 @@ class AnthropicOpaqueReplayTest {
   @Test
   void rejectsUnparsableNativeInputJsonInsteadOfFabricatingReplay() {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
 
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
     accumulator.handleEvent(
@@ -398,9 +342,8 @@ class AnthropicOpaqueReplayTest {
   @Test
   void rejectsNativeInputJsonDeltaWhenStartAlreadyDeclaresInput() {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
 
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
     accumulator.handleEvent(
@@ -423,9 +366,6 @@ class AnthropicOpaqueReplayTest {
   /** 测试意图：opaque 透传不放宽已知 block 的 shape 与 durable 一致性校验，空 type 也不算合法未知 block。 */
   @Test
   void keepsStrictDurableAndShapeValidationForKnownBlocks() {
-    ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
-
     // 1. opaque block 存在也不能掩盖已知 durable text 不一致
     ObjectNode mismatchedText = NODES.objectNode();
     mismatchedText.put("role", "assistant");
@@ -433,8 +373,7 @@ class AnthropicOpaqueReplayTest {
     content1.addObject().put("type", "future_block").put("label", "opaque");
     content1.addObject().put("type", "text").put("text", "different");
     ProviderException textError =
-        assertReplayRejected(
-            replayState(mismatchedText, frozenHash), List.of(new ProviderTextBlock("answer")));
+        assertReplayRejected(replayState(mismatchedText), List.of(new ProviderTextBlock("answer")));
     assertEquals("replay payload text does not match durable content", textError.getMessage());
 
     // 2. 未知 block 透传不放宽已知 type 的 shape 校验（text block 缺少 text 字段）
@@ -444,8 +383,7 @@ class AnthropicOpaqueReplayTest {
     content2.addObject().put("type", "future_block").put("label", "opaque");
     content2.addObject().put("type", "text");
     ProviderException shapeError =
-        assertReplayRejected(
-            replayState(missingTextField, frozenHash), List.of(new ProviderTextBlock("")));
+        assertReplayRejected(replayState(missingTextField), List.of(new ProviderTextBlock("")));
     assertEquals("invalid text block in replay payload", shapeError.getMessage());
 
     // 3. 空 type 不是合法未知 block
@@ -455,8 +393,7 @@ class AnthropicOpaqueReplayTest {
     content3.addObject().put("type", "");
     content3.addObject().put("type", "text").put("text", "answer");
     ProviderException blankTypeError =
-        assertReplayRejected(
-            replayState(blankType, frozenHash), List.of(new ProviderTextBlock("answer")));
+        assertReplayRejected(replayState(blankType), List.of(new ProviderTextBlock("answer")));
     assertEquals("invalid Anthropic replay payload block", blankTypeError.getMessage());
 
     // 4. 已知 thinking block 的 signature 仍必须存在且非空白
@@ -467,17 +404,25 @@ class AnthropicOpaqueReplayTest {
     thinkingBlock.put("thinking", "t");
     thinkingBlock.put("signature", " ");
     ProviderException signatureError =
-        assertReplayRejected(
-            replayState(blankSignature, frozenHash), List.of(new ProviderThinkingBlock("t")));
+        assertReplayRejected(replayState(blankSignature), List.of(new ProviderThinkingBlock("t")));
     assertEquals("invalid thinking block in replay payload", signatureError.getMessage());
   }
 
-  private ProviderReplayState replayState(ObjectNode payload, String sourcePrefixHash) {
-    return new ProviderReplayState(
-        ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        descriptor.affinity("claude-3-5-sonnet"),
-        sourcePrefixHash,
-        payload);
+  private ProviderReplayState replayState(ObjectNode payload) {
+    return replayState(descriptor.affinity("claude-3-5-sonnet"), payload);
+  }
+
+  private static ProviderReplayState replayState(
+      ProviderReplayAffinity affinity, ObjectNode payload) {
+    return new ProviderReplayState(ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, payload);
+  }
+
+  private JsonNode fallbackContent(
+      ProviderReplayState replayState, List<ProviderContentBlock> durableContents)
+      throws IOException {
+    ProviderRequest request =
+        request(List.of(userMsg(), assistantMsg(durableContents, replayState)));
+    return wire(encoder.encode(request, descriptor)).path("messages").get(1).path("content");
   }
 
   private ProviderException assertReplayRejected(
@@ -490,10 +435,9 @@ class AnthropicOpaqueReplayTest {
     return error;
   }
 
-  private AnthropicStreamAccumulator accumulator(
-      ProviderRequest request, String frozenSourcePrefixHash) {
+  private AnthropicStreamAccumulator accumulator(ProviderRequest request) {
     return new AnthropicStreamAccumulator(
-        request, descriptor, frozenSourcePrefixHash, new ProviderStreamBridge(new NoopHandler()));
+        request, descriptor, new ProviderStreamBridge(new NoopHandler()));
   }
 
   private static JsonNode wire(AnthropicEncodedRequest encoded) throws IOException {
@@ -527,19 +471,7 @@ class AnthropicOpaqueReplayTest {
         "claude-3-5-sonnet",
         Set.of(ModelInputModality.TEXT),
         true,
-        false,
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        false);
   }
 
   private static final class NoopHandler implements ProviderStreamHandler {

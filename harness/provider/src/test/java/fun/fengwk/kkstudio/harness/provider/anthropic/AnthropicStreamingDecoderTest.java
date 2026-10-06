@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -42,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -76,8 +74,6 @@ import java.util.concurrent.atomic.AtomicReference;
 class AnthropicStreamingDecoderTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  private static final String VALID_PREFIX_HASH =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private HttpServer server;
   private int port;
@@ -133,7 +129,7 @@ class AnthropicStreamingDecoderTest {
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // 1. message_start
     accumulator.handleEvent(
@@ -203,7 +199,7 @@ class AnthropicStreamingDecoderTest {
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -235,7 +231,7 @@ class AnthropicStreamingDecoderTest {
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // message_start 携带细分 cache creation
     accumulator.handleEvent(
@@ -369,7 +365,8 @@ class AnthropicStreamingDecoderTest {
     // 校验 replayState 包含完整的原生 payload
     assertNotNull(completion.replayState());
     assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, completion.replayState().format());
-    assertEquals(VALID_PREFIX_HASH, completion.replayState().sourcePrefixHash());
+    // affinity 由 Provider/连接世代/wire 模型决定，与历史前缀无关
+    assertEquals(descriptor.affinity("claude-3-5-sonnet"), completion.replayState().affinity());
 
     JsonNode replayContent = completion.replayState().payload().path("content");
     assertEquals(4, replayContent.size());
@@ -399,7 +396,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
 
     accumulator.handleEvent(
         "message_start",
@@ -441,7 +438,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
 
     accumulator.handleEvent(
         "message_start",
@@ -475,7 +472,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
 
     accumulator.handleEvent(
         "message_start",
@@ -505,7 +502,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator validAccumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
 
     validAccumulator.handleEvent(
         "message_start",
@@ -554,7 +551,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator invalidAccumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
 
     invalidAccumulator.handleEvent(
         "message_start",
@@ -590,7 +587,7 @@ class AnthropicStreamingDecoderTest {
     // 1. 未知 reason 不进入 rawUsageJson
     AnthropicStreamAccumulator unknownReasonAccumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
     unknownReasonAccumulator.handleEvent(
         "message_start",
         """
@@ -617,7 +614,7 @@ class AnthropicStreamingDecoderTest {
     // 2. diagnostics 节点不是 object -> INVALID_RESPONSE
     AnthropicStreamAccumulator nonObjDiag =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
     assertThrows(
         ProviderException.class,
         () ->
@@ -628,7 +625,7 @@ class AnthropicStreamingDecoderTest {
     // 3. cache_missed_input_tokens 为负数 -> INVALID_RESPONSE
     AnthropicStreamAccumulator negTokens =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
+            request, descriptor, new ProviderStreamBridge(new NoopHandler()));
     assertThrows(
         ProviderException.class,
         () ->
@@ -792,7 +789,7 @@ class AnthropicStreamingDecoderTest {
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // 1. 注释帧与未知 ping 事件
     accumulator.handleEvent("ping", "{\"type\":\"ping\"}");
@@ -839,7 +836,7 @@ class AnthropicStreamingDecoderTest {
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // 0. message_start
     accumulator.handleEvent(
@@ -967,19 +964,7 @@ class AnthropicStreamingDecoderTest {
             "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            new ModelPricing(
-                "USD",
-                "tier-1",
-                "default",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.valueOf(3.0),
-                BigDecimal.valueOf(15.0),
-                BigDecimal.valueOf(0.3),
-                BigDecimal.valueOf(3.75),
-                BigDecimal.valueOf(6.0),
-                BigDecimal.ZERO));
+            false);
     ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
         model,
