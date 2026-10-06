@@ -1294,7 +1294,8 @@ async function main(argv) {
         const footer = page.getByLabel('会话状态')
         await footer.waitFor({ state: 'visible', timeout: 15_000 })
         const environmentText = await footer
-          .locator('.thread-status-environment .thread-status-seg')
+          .locator('.thread-status-line span')
+          .first()
           .innerText()
         assert(
           environmentText === '未选择环境',

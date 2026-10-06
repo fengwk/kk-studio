@@ -22,6 +22,7 @@ const threadDto = (threadId, { status = 'IDLE', executionControl = 'RUNNABLE', h
   status,
   processing: status !== 'IDLE' && status !== 'STOPPED',
   executionControl,
+  yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
 })
 
 const acceptedDto = (threadId, command) => ({
