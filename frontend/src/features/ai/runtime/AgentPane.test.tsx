@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -14,7 +14,7 @@ import {
   type UseRootThreadControlOptions,
 } from '@/features/ai/runtime/useRootThreadControl'
 import { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
-import { isBoundTarget } from '@/features/ai/runtime/agent-pane'
+import { isBoundTarget, type PaneTarget } from '@/features/ai/runtime/agent-pane'
 import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
@@ -3304,6 +3304,105 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       // 草稿未被清除，说明拦截来自设置变化而不是输入变化。
       expect(composer).toHaveTextContent('settings moved in branch draft')
+    })
+
+    /** 目标可切换的根控制探针：绑定目标由同一个受控 state 提供，用于验证换绑时的身份隔离。 */
+    function useSwitchablePaneControl(initialTarget: PaneTarget) {
+      const [target, setTarget] = useState<PaneTarget>(initialTarget)
+      const projection = useThreadProjection(isBoundTarget(target) ? target.threadId : '')
+      return {
+        setTarget,
+        control: useRootThreadControl({
+          owner: { type: 'CHAT', chatId: CHAT_ID },
+          paneId: 'probe',
+          target,
+          setTarget,
+          projection,
+          agents,
+          environments: [],
+          defaults: {},
+          focused: true,
+        }),
+      }
+    }
+
+    function renderSwitchablePane(initialTarget: PaneTarget) {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
+      return renderHook(() => useSwitchablePaneControl(initialTarget), {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      })
+    }
+
+    it('clears the draft Debug view and preview inspector when the target is rebound', async () => {
+      // 测试意图：草稿 A 的 Debug 模式、滚动与预览检查器都属于 A 的目标身份；预览成功后
+      // 换绑到另一份草稿或新建 Session，必须整体回到会话视图（composer 可见），
+      // 绝不残留 A 的预览，也不让不支持 Debug 的新建 Session 保持隐藏 composer。
+      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
+      const { result } = renderSwitchablePane({
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId: 'session-1',
+        startEntryId: BRANCH_START_ENTRY_ID,
+        threadName: 'branch-1',
+      })
+      await waitFor(() => expect(result.current.control.activeDraft).not.toBeNull())
+
+      act(() => result.current.control.boundViews.switchMode('debug'))
+      act(() => result.current.control.boundViews.selectDebugInspector({
+        type: 'preview',
+        preview: previewResponse(),
+      }))
+      expect(result.current.control.boundViews.mode).toBe('debug')
+      expect(result.current.control.boundViews.debugSelection).not.toBeNull()
+
+      act(() => result.current.setTarget({ kind: 'NEW_SESSION_DRAFT' }))
+      expect(result.current.control.target).toEqual({ kind: 'NEW_SESSION_DRAFT' })
+      expect(result.current.control.boundViews.mode).toBe('conversation')
+      expect(result.current.control.boundViews.debugSelection).toBeNull()
+      expect(result.current.control.boundViews.mainView.debug).toBeUndefined()
+
+      // 再回到 Debug 并切到同一 Session 的另一份分支草稿：身份不同，同样必须重置。
+      act(() => result.current.control.boundViews.switchMode('debug'))
+      act(() => result.current.control.boundViews.selectDebugInspector({
+        type: 'preview',
+        preview: previewResponse(),
+      }))
+      act(() => result.current.setTarget({
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId: 'session-1',
+        startEntryId: 'entry-other',
+        threadName: 'branch-2',
+      }))
+      expect(result.current.control.boundViews.mode).toBe('conversation')
+      expect(result.current.control.boundViews.debugSelection).toBeNull()
+    })
+
+    it('keeps the Debug view while the target identity is unchanged', async () => {
+      // 测试意图：同身份的重复上报（例如分支草稿设置变化引起的重渲染）不能把 Debug
+      // 视图和预览检查器清掉，否则刚生成的预览会被自己的重渲染抹掉。
+      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
+      const target = {
+        kind: 'NEW_THREAD_DRAFT' as const,
+        sessionId: 'session-1',
+        startEntryId: BRANCH_START_ENTRY_ID,
+        threadName: 'branch-1',
+      }
+      const { result } = renderSwitchablePane(target)
+      await waitFor(() => expect(result.current.control.activeDraft).not.toBeNull())
+
+      act(() => result.current.control.boundViews.switchMode('debug'))
+      act(() => result.current.control.boundViews.selectDebugInspector({
+        type: 'preview',
+        preview: previewResponse(),
+      }))
+      act(() => result.current.setTarget({ ...target }))
+      act(() => result.current.control.selectSession('session-1'))
+
+      expect(result.current.control.boundViews.mode).toBe('debug')
+      expect(result.current.control.boundViews.debugSelection).not.toBeNull()
     })
   })
 
