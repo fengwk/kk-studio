@@ -71,14 +71,11 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterial
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -302,7 +299,7 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             false);
     assertEquals(
         "provider factory not found for provider (OPENAI)",
@@ -803,7 +800,7 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true,
             HarnessCatalog.from(List.of()));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
@@ -822,7 +819,7 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
@@ -929,7 +926,7 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true,
             HarnessCatalog.from(List.of()));
     fixture.agentConfig.setSubagents(List.of("reviewer"));
@@ -1073,7 +1070,7 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true,
             catalogWithProjector,
             composite,
@@ -1140,7 +1137,7 @@ class DatabaseTurnResolverTest {
                 Set.of(),
                 ProviderType.OPENAI,
                 ProviderType.OPENAI,
-                PromptCacheCapability.unsupported(),
+                PromptCacheRetention.NONE,
                 true,
                 staticCatalog,
                 composite,
@@ -1179,7 +1176,7 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true,
             staticCatalog,
             emptyComposite,
@@ -1451,9 +1448,12 @@ class DatabaseTurnResolverTest {
     assertThrows(IllegalStateException.class, () -> down.planLive(down.path(settings("default"))));
   }
 
+  /**
+   * 意图：cache control 由 provider factory 的留存档位与 session key 冻结：NONE → none()，非 NONE → session key。
+   */
   @Test
-  void finalizesPromptCacheControlFromProviderFactoryCapability() {
-    Fixture fixture =
+  void freezesSessionCacheControlFromProviderFactoryRetention() {
+    Fixture disabled =
         new Fixture(
             List.of(),
             List.of(),
@@ -1461,27 +1461,12 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true);
-    assertEquals(
-        PromptCacheRetention.NONE,
-        fixture.resolved(fixture.path(settings("default"))).cacheControl().retention());
+    EntryPath disabledPath = disabled.path(settings("default"));
+    assertEquals(ProviderCacheControl.none(), disabled.resolved(disabledPath).cacheControl());
 
-    fixture =
-        new Fixture(
-            List.of(),
-            List.of(),
-            List.of(),
-            Set.of(),
-            ProviderType.OPENAI,
-            ProviderType.OPENAI,
-            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-            true);
-    ModelRequestSpec affinity = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(PromptCacheRetention.SHORT, affinity.cacheControl().retention());
-    assertTrue(affinity.cacheControl().affinityKey().startsWith("pc2-"));
-
-    fixture =
+    Fixture enabled =
         new Fixture(
             List.of("update_goal"),
             List.of(),
@@ -1489,23 +1474,17 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.breakpoints(
-                Set.of(PromptCacheRetention.SHORT),
-                Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
+            PromptCacheRetention.SHORT,
             true);
-    ModelRequestSpec breakpoints = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(PromptCacheRetention.SHORT, breakpoints.cacheControl().retention());
-    assertEquals(
-        Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
-        breakpoints.cacheControl().breakpoints());
+    EntryPath enabledPath = enabled.path(settings("default"));
+    ModelRequestSpec spec = enabled.resolved(enabledPath);
+    assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
+    assertEquals(enabledPath.root().sessionId().toString(), spec.cacheControl().key());
   }
 
-  /**
-   * 意图：Responses 缺省为 AUTOMATIC，planner 规划产出 ProviderCacheControl.none()； 而显式 LEGACY 模式下必须冻结稳定
-   * affinity key（同 session 同前缀稳定、跨 session 不同）。
-   */
+  /** 意图：key 直接使用 session UUID 字符串，同 session 跨轮稳定、跨 session 不同。 */
   @Test
-  void defaultResponsesConfigResolvesAutomaticAndLegacyFreezesStableAffinityCacheKey() {
+  void sessionCacheKeyIsSessionIdAndStableAcrossSessions() {
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -1514,29 +1493,18 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI_RESPONSES,
             ProviderType.OPENAI_RESPONSES,
-            // 与生产 OpenAiResponsesProviderFactory 完全一致的能力解析（configJson 为 null 即缺省配置）
-            OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(null),
+            PromptCacheRetention.SHORT,
             true);
     EntryPath path = fixture.path(settings("default"));
 
-    ModelRequestSpec defaultSpec = fixture.resolved(path);
-    assertEquals(PromptCacheRetention.NONE, defaultSpec.cacheControl().retention());
-    assertEquals(ProviderCacheControl.none(), defaultSpec.cacheControl());
-
-    // 显式 LEGACY 配置下：planner 必须冻结稳定 affinity key
-    String legacyConfig = "{\"openAiPromptCacheMode\":\"LEGACY\"}";
-    fixture.provider.setConfigJson(legacyConfig);
-    ProviderFactory factory = fixture.resolverProviderFactory();
-    when(factory.promptCacheCapability(legacyConfig))
-        .thenReturn(OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(legacyConfig));
-
     ModelRequestSpec first = fixture.resolved(path);
-    ModelRequestSpec sameSessionAgain = fixture.resolved(fixture.path(settings("default")));
     assertEquals(PromptCacheRetention.SHORT, first.cacheControl().retention());
-    assertTrue(first.cacheControl().affinityKey().startsWith("pc2-"));
-    assertEquals(first.cacheControl().affinityKey(), sameSessionAgain.cacheControl().affinityKey());
+    assertEquals(path.root().sessionId().toString(), first.cacheControl().key());
 
-    // 同前缀但不同 session 必须派生出不同 key，避免跨会话缓存串扰
+    ModelRequestSpec sameSessionAgain = fixture.resolved(fixture.path(settings("default")));
+    assertEquals(first.cacheControl().key(), sameSessionAgain.cacheControl().key());
+
+    // 不同 session 必须得到不同 key，避免跨会话缓存串扰。
     EntryPath otherSessionPath =
         new EntryPath(
             List.of(
@@ -1544,20 +1512,13 @@ class DatabaseTurnResolverTest {
                     id(996), new UUID(0L, 995L), null, new RootPayload(settings("default")), NOW)));
     ModelRequestSpec otherSession = fixture.resolved(otherSessionPath);
     assertEquals(PromptCacheRetention.SHORT, otherSession.cacheControl().retention());
-    assertNotEquals(first.cacheControl().affinityKey(), otherSession.cacheControl().affinityKey());
-
-    // 同 session 切换 provider 连接代际也必须切 key，避免 endpoint/credential 更新后复用旧身份。
-    fixture.provider.setConnectionGenerationId(new UUID(0L, 997L));
-    ModelRequestSpec otherConnectionGeneration =
-        fixture.resolved(fixture.path(settings("default")));
-    assertNotEquals(
-        first.cacheControl().affinityKey(), otherConnectionGeneration.cacheControl().affinityKey());
+    assertNotEquals(first.cacheControl().key(), otherSession.cacheControl().key());
   }
 
-  /** 真实 USER 历史经规划、物化、公开 resolve 到 wire；跨轮 key 稳定，NONE 不被自动开启。 */
+  /** 真实 USER 历史经规划、物化、公开 resolve 到 wire：session key 稳定透传，被禁用的 NONE 不会恢复。 */
   @Test
-  void responsesExplicitPlanningSurvivesMaterializationAndPublicResolution() throws Exception {
-    String configJson = "{\"openAiPromptCacheMode\":\"GPT_5_6_EXPLICIT\"}";
+  void sessionCacheControlSurvivesMaterializationAndPublicResolution() throws Exception {
+    String configJson = "{\"promptCacheRetention\":\"SHORT\"}";
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -1566,17 +1527,13 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI_RESPONSES,
             ProviderType.OPENAI_RESPONSES,
-            OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(configJson),
+            PromptCacheRetention.SHORT,
             true);
     fixture.provider.setConfigJson(configJson);
     fixture.provider.setBaseUrl("https://example.invalid/v1");
     fixture.models.getByProviderNameAndName("provider", "model").setModelId("gpt-5.6");
     ProviderFactory factory = fixture.resolverProviderFactory();
-    when(factory.promptCacheCapability(any()))
-        .thenAnswer(
-            invocation ->
-                OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(
-                    invocation.getArgument(0)));
+    when(factory.promptCacheRetention(any())).thenReturn(PromptCacheRetention.SHORT);
     JdkHttpSseTransport transport = mock(JdkHttpSseTransport.class);
     when(factory.create(any(), any()))
         .thenAnswer(
@@ -1590,8 +1547,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec spec = fixture.resolved(path);
     assertEquals("gpt-5.6", spec.model().modelId());
     assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
-    assertTrue(spec.cacheControl().affinityKey().startsWith("pc2-"));
-    assertEquals(Set.of(PromptCacheBreakpoint.CONVERSATION), spec.cacheControl().breakpoints());
+    assertEquals(root.sessionId().toString(), spec.cacheControl().key());
     ProviderRequest request = new ModelRequestMaterializer().materialize(path, spec);
     assertEquals(ProviderMessageRole.USER, request.messages().get(0).role());
     assertEquals(new ProviderTextBlock("first user"), request.messages().get(0).contents().get(0));
@@ -1609,20 +1565,8 @@ class DatabaseTurnResolverTest {
     ObjectMapper mapper = new ObjectMapper();
     JsonNode wire = mapper.readTree(execution.encodeRequestBody());
     assertEquals("gpt-5.6", wire.path("model").asText());
-    assertEquals("explicit", wire.path("prompt_cache_options").path("mode").asText());
-    assertEquals("30m", wire.path("prompt_cache_options").path("ttl").asText());
-    assertEquals(spec.cacheControl().affinityKey(), wire.path("prompt_cache_key").asText());
-    assertFalse(wire.has("prompt_cache_retention"));
-    assertEquals(1, wire.findValues("prompt_cache_breakpoint").size());
-    assertEquals(
-        "explicit",
-        wire.path("input")
-            .get(0)
-            .path("content")
-            .get(0)
-            .path("prompt_cache_breakpoint")
-            .path("mode")
-            .asText());
+    // session key 直接映射为 prompt_cache_key，不再派生哈希。
+    assertEquals(spec.cacheControl().key(), wire.path("prompt_cache_key").asText());
     assertEquals(
         "first user", wire.path("input").get(0).path("content").get(0).path("text").asText());
 
@@ -1649,22 +1593,11 @@ class DatabaseTurnResolverTest {
                     nextSpec.providerConnectionGenerationId(),
                     new ModelRequestMaterializer().materialize(nextPath, nextSpec))
                 .encodeRequestBody());
-    assertEquals(spec.cacheControl().affinityKey(), nextWire.path("prompt_cache_key").asText());
-    assertEquals(2, nextWire.findValues("prompt_cache_breakpoint").size());
-    assertEquals(
-        "explicit",
-        nextWire
-            .path("input")
-            .get(2)
-            .path("content")
-            .get(0)
-            .path("prompt_cache_breakpoint")
-            .path("mode")
-            .asText());
+    assertEquals(spec.cacheControl().key(), nextWire.path("prompt_cache_key").asText());
     assertEquals(
         "second user", nextWire.path("input").get(2).path("content").get(0).path("text").asText());
 
-    // 持久 NONE 是禁用控制组，不能根据当前显式 capability 恢复。
+    // 持久 NONE 是禁用控制组，不能根据当前 provider 留存档位恢复。
     ProviderRequest disabled =
         new ProviderRequest(
             request.model(),
@@ -1678,17 +1611,14 @@ class DatabaseTurnResolverTest {
         resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), disabled);
     assertEquals(ProviderCacheControl.none(), disabledExecution.effectiveRequest().cacheControl());
     JsonNode disabledWire = mapper.readTree(disabledExecution.encodeRequestBody());
-    assertEquals("explicit", disabledWire.path("prompt_cache_options").path("mode").asText());
     assertFalse(disabledWire.has("prompt_cache_key"));
-    assertFalse(disabledWire.has("prompt_cache_retention"));
-    assertTrue(disabledWire.findValues("prompt_cache_breakpoint").isEmpty());
     verifyNoInteractions(transport, blobs, content);
-    verify(factory, atLeast(2)).promptCacheCapability(configJson);
+    verify(factory, atLeast(2)).promptCacheRetention(configJson);
   }
 
-  /** 意图：验证 live turn 规划会正确传递当前 provider 的 configJson 解析动态 promptCacheCapability。 */
+  /** 意图：live turn 规划把当前 provider 的 configJson 传给 promptCacheRetention 解析留存档位。 */
   @Test
-  void planningPassesProviderConfigJsonToResolvePromptCacheCapability() {
+  void planningPassesProviderConfigJsonToResolvePromptCacheRetention() {
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -1697,22 +1627,21 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.automatic(),
+            PromptCacheRetention.NONE,
             true);
     String dynamicConfig = "{\"customCache\":true}";
     fixture.provider.setConfigJson(dynamicConfig);
 
-    // 针对指定 configJson 返回带有 SHORT retention 的 affinity 能力
     ProviderFactory factory = fixture.resolverProviderFactory();
-    when(factory.promptCacheCapability(dynamicConfig))
-        .thenReturn(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+    when(factory.promptCacheRetention(dynamicConfig)).thenReturn(PromptCacheRetention.LONG);
 
-    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
-    assertTrue(spec.cacheControl().affinityKey().startsWith("pc2-"));
+    EntryPath path = fixture.path(settings("default"));
+    ModelRequestSpec spec = fixture.resolved(path);
+    assertEquals(PromptCacheRetention.LONG, spec.cacheControl().retention());
+    assertEquals(path.root().sessionId().toString(), spec.cacheControl().key());
   }
 
-  /** 意图：当 provider 配置导致 PromptCacheCapability 解析抛出异常或返回 null 时，Turn planning 确定性拒绝且不泄漏 config。 */
+  /** 意图：provider 配置导致 promptCacheRetention 解析抛出异常时，planning 确定性拒绝且不泄漏 config。 */
   @Test
   void planningRejectsInvalidProviderSpecificConfigDeterministically() {
     Fixture fixture =
@@ -1723,13 +1652,13 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.automatic(),
+            PromptCacheRetention.NONE,
             true);
     String secretConfig = "{\"apiKey\":\"super-secret-token\",\"malformed\":true}";
     fixture.provider.setConfigJson(secretConfig);
 
     ProviderFactory factory = fixture.resolverProviderFactory();
-    when(factory.promptCacheCapability(secretConfig))
+    when(factory.promptCacheRetention(secretConfig))
         .thenThrow(new IllegalArgumentException("syntax error in super-secret-token"));
 
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
@@ -1777,7 +1706,7 @@ class DatabaseTurnResolverTest {
               Set.of(),
               providerType,
               providerType,
-              PromptCacheCapability.unsupported(),
+              PromptCacheRetention.NONE,
               true);
       // 持久 providerType 直接用于选择当前 ProviderFactory，并冻结到 spec。
       ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
@@ -1907,17 +1836,7 @@ class DatabaseTurnResolverTest {
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("reply"))),
                     new AssistantMessageMetadata(
-                        GenerationStopReason.COMPLETE,
-                        new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L),
-                        new ModelCost(
-                            "USD",
-                            BigDecimal.ZERO,
-                            BigDecimal.ZERO,
-                            BigDecimal.ZERO,
-                            BigDecimal.ZERO,
-                            BigDecimal.ZERO,
-                            BigDecimal.ZERO,
-                            BigDecimal.ZERO)),
+                        GenerationStopReason.COMPLETE, new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L)),
                     null),
                 NOW.plusSeconds(3)),
             new Entry(
@@ -2545,7 +2464,7 @@ class DatabaseTurnResolverTest {
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true,
             catalog,
             Clock.fixed(NOW, ZoneOffset.UTC));
@@ -2596,7 +2515,7 @@ class DatabaseTurnResolverTest {
             Set.of("secret-tool"),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             true);
 
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
@@ -2751,17 +2670,7 @@ class DatabaseTurnResolverTest {
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE,
-                new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-                new ModelCost(
-                    "USD",
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO)),
+                GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
             null),
         NOW);
   }
@@ -2819,7 +2728,7 @@ class DatabaseTurnResolverTest {
         Set.of(TaskTool.NAME),
         ProviderType.OPENAI,
         ProviderType.OPENAI,
-        PromptCacheCapability.unsupported(),
+        PromptCacheRetention.NONE,
         true);
   }
 
@@ -2879,7 +2788,7 @@ class DatabaseTurnResolverTest {
           Set.of(),
           ProviderType.OPENAI,
           ProviderType.OPENAI,
-          PromptCacheCapability.unsupported(),
+          PromptCacheRetention.NONE,
           true,
           catalog,
           clock);
@@ -2892,7 +2801,7 @@ class DatabaseTurnResolverTest {
         Set<String> internalHostToolNames,
         ProviderType persistedProviderType,
         ProviderType factoryType,
-        PromptCacheCapability cacheCapability,
+        PromptCacheRetention promptCacheRetention,
         boolean includeProviderFactory) {
       this(
           tools,
@@ -2901,7 +2810,7 @@ class DatabaseTurnResolverTest {
           internalHostToolNames,
           persistedProviderType,
           factoryType,
-          cacheCapability,
+          promptCacheRetention,
           includeProviderFactory,
           (HarnessCatalog) null);
     }
@@ -2913,7 +2822,7 @@ class DatabaseTurnResolverTest {
         Set<String> internalHostToolNames,
         ProviderType persistedProviderType,
         ProviderType factoryType,
-        PromptCacheCapability cacheCapability,
+        PromptCacheRetention promptCacheRetention,
         boolean includeProviderFactory,
         HarnessCatalog catalog) {
       this(
@@ -2923,7 +2832,7 @@ class DatabaseTurnResolverTest {
           internalHostToolNames,
           persistedProviderType,
           factoryType,
-          cacheCapability,
+          promptCacheRetention,
           includeProviderFactory,
           catalog,
           Clock.fixed(NOW, ZoneOffset.UTC));
@@ -2936,7 +2845,7 @@ class DatabaseTurnResolverTest {
         Set<String> internalHostToolNames,
         ProviderType persistedProviderType,
         ProviderType factoryType,
-        PromptCacheCapability cacheCapability,
+        PromptCacheRetention promptCacheRetention,
         boolean includeProviderFactory,
         HarnessCatalog providedCatalog,
         Clock clock) {
@@ -2947,7 +2856,7 @@ class DatabaseTurnResolverTest {
           internalHostToolNames,
           persistedProviderType,
           factoryType,
-          cacheCapability,
+          promptCacheRetention,
           includeProviderFactory,
           providedCatalog,
           null,
@@ -2961,7 +2870,7 @@ class DatabaseTurnResolverTest {
         Set<String> internalHostToolNames,
         ProviderType persistedProviderType,
         ProviderType factoryType,
-        PromptCacheCapability cacheCapability,
+        PromptCacheRetention promptCacheRetention,
         boolean includeProviderFactory,
         HarnessCatalog providedCatalog,
         RuntimeToolCatalog providedToolCatalog,
@@ -3025,8 +2934,8 @@ class DatabaseTurnResolverTest {
       modelSupportsTools(true);
       modelSupportsReasoning(true);
       when(providerFactory.providerType()).thenReturn(factoryType);
-      when(providerFactory.promptCacheCapability()).thenReturn(cacheCapability);
-      when(providerFactory.promptCacheCapability(any())).thenReturn(cacheCapability);
+      when(providerFactory.promptCacheRetention()).thenReturn(promptCacheRetention);
+      when(providerFactory.promptCacheRetention(any())).thenReturn(promptCacheRetention);
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, 50);

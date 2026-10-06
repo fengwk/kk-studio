@@ -21,16 +21,6 @@
       "cacheWriteLongTokens": 0,
       "reasoningTokens": 8,
       "providerTotalTokens": 387
-    },
-    "cost": {
-      "currency": "USD",
-      "input": "0.000001000000",
-      "output": "0.000001000000",
-      "cacheRead": "0.000001000000",
-      "cacheWrite": "0.000001200000",
-      "cacheWriteLong": "0",
-      "reasoning": "0",
-      "total": "0.000004200000"
     }
   }
 }

@@ -49,7 +49,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -975,7 +974,6 @@ class ModelProcessorTest {
             List.of(),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             "req-diag",
             null,
             null,
@@ -1789,7 +1787,6 @@ class ModelProcessorTest {
             List.of(new ProviderToolCall("call_1", "undeclared", "{}")),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             "req-1",
             null,
             null));
@@ -1932,7 +1929,6 @@ class ModelProcessorTest {
             List.of(),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             "req-1",
             null,
             null));
@@ -2029,7 +2025,6 @@ class ModelProcessorTest {
                 new ProviderToolCall("call_1", "bash", "{}")),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             "req-1",
             null,
             null));
@@ -3865,42 +3860,16 @@ class ModelProcessorTest {
 
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
-        "provider",
-        "model",
-        "model",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        new ModelPricing(
-            "USD",
-            "standard",
-            "standard",
-            BigDecimal.ONE,
-            "1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private static ProviderResponse response(String text, GenerationStopReason stopReason) {
-    return new ProviderResponse(
-        text, null, List.of(), stopReason, usage(), cost(), "req-1", null, null);
+    return new ProviderResponse(text, null, List.of(), stopReason, usage(), "req-1", null, null);
   }
 
   private static ProviderResponse toolResponse(String text, ProviderToolCall call) {
     return new ProviderResponse(
-        text,
-        null,
-        List.of(call),
-        GenerationStopReason.COMPLETE,
-        usage(),
-        cost(),
-        "req-1",
-        null,
-        null);
+        text, null, List.of(call), GenerationStopReason.COMPLETE, usage(), "req-1", null, null);
   }
 
   private static ModelUsage usage() {
@@ -3944,7 +3913,6 @@ class ModelProcessorTest {
         ProviderReplayFormat.OPENAI_RESPONSES,
         new ProviderReplayAffinity(
             ProviderType.OPENAI_RESPONSES, "provider-a", UUID.randomUUID(), "model-a"),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         JsonNodeFactory.instance.objectNode().put("token", 42));
   }
 

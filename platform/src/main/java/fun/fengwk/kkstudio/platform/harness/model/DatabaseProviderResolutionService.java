@@ -25,9 +25,8 @@ import java.util.UUID;
  * generation，使既有 invocation 确定性拒绝；不轮换 generation 的 timeout-only 更新保持 attempt-time live，删除后确定性 not
  * found。
  *
- * <p>持久 request 中已有的 {@link ProviderCacheControl} 按当前 {@code provider.configJson} 下 factory 的
- * {@link ProviderFactory#promptCacheCapability(String)} 规范化：当前 capability 无法表达时降级为 {@code
- * none()}，否则按当前 capability 重求形态、retention 与断点。
+ * <p>持久 request 中已有的 cache control（retention 与 session key）在规划期冻结，执行期原样沿用，不再按当前 {@code
+ * provider.configJson} 重新规范化；具体到各协议的 cache 参数映射由 Adapter 完成。
  */
 @Component
 public final class DatabaseProviderResolutionService implements ProviderResolutionService {
@@ -160,5 +159,4 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
           return adapter.encodeRequestBody(bodyRequest, descriptor);
         });
   }
-
 }

@@ -15,16 +15,6 @@
     "reasoningTokens": 5,
     "providerTotalTokens": 175
   },
-  "cost": {
-    "currency": "USD",
-    "input": "0.000450000000",
-    "output": "0.000180000000",
-    "cacheRead": "0",
-    "cacheWrite": "0.000281250000",
-    "cacheWriteLong": "0",
-    "reasoning": "0",
-    "total": "0.000911250000"
-  },
   "requestId": null,
   "serviceTier": null,
   "rawUsageJson": "{\n  \"completion_tokens\":20,\n  \"prompt_tokens\":100\n}",

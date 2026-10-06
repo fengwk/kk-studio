@@ -6,10 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
-import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
 
@@ -17,16 +15,6 @@ import java.util.List;
 class ProviderResponseTest {
 
   private static final ModelUsage USAGE = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
-  private static final ModelCost COST =
-      new ModelCost(
-          "USD",
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO);
 
   @Test
   void acceptsValidCompleteAndDiagnosticOutcomes() {
@@ -41,7 +29,6 @@ class ProviderResponseTest {
             List.of(call),
             GenerationStopReason.LENGTH,
             USAGE,
-            COST,
             "req-1",
             "standard",
             "{}",
@@ -63,7 +50,6 @@ class ProviderResponseTest {
                 List.of(),
                 GenerationStopReason.LENGTH,
                 USAGE,
-                COST,
                 null,
                 null,
                 "{}",
@@ -83,7 +69,6 @@ class ProviderResponseTest {
                 List.of(),
                 GenerationStopReason.FILTERED,
                 USAGE,
-                COST,
                 null,
                 null,
                 "{}",
@@ -102,7 +87,6 @@ class ProviderResponseTest {
                 List.of(new ProviderToolCall("c1", "tool_a", "{}")),
                 GenerationStopReason.CONTINUE,
                 USAGE,
-                COST,
                 null,
                 null,
                 "{}"));
@@ -115,7 +99,6 @@ class ProviderResponseTest {
                 List.of(),
                 GenerationStopReason.CONTINUE,
                 USAGE,
-                COST,
                 null,
                 null,
                 "{}",
@@ -127,7 +110,7 @@ class ProviderResponseTest {
   void continuationCopyWithToolCallsIsRejected() {
     ProviderResponse continuation =
         new ProviderResponse(
-            "paused", "", List.of(), GenerationStopReason.CONTINUE, USAGE, COST, null, null, "{}");
+            "paused", "", List.of(), GenerationStopReason.CONTINUE, USAGE, null, null, "{}");
 
     assertEquals(GenerationStopReason.CONTINUE, continuation.stopReason());
     assertThrows(
@@ -143,15 +126,7 @@ class ProviderResponseTest {
   void validatesOptionalDecodeDuration() {
     ProviderResponse base =
         new ProviderResponse(
-            "text",
-            "thinking",
-            List.of(),
-            GenerationStopReason.COMPLETE,
-            USAGE,
-            COST,
-            null,
-            null,
-            "{}");
+            "text", "thinking", List.of(), GenerationStopReason.COMPLETE, USAGE, null, null, "{}");
 
     assertNull(base.decodeDurationMillis());
     assertEquals(0L, base.withDecodeDurationMillis(0L).decodeDurationMillis());
@@ -161,7 +136,6 @@ class ProviderResponseTest {
     assertEquals(base.text(), timed.text());
     assertEquals(base.thinking(), timed.thinking());
     assertEquals(base.usage(), timed.usage());
-    assertEquals(base.cost(), timed.cost());
     assertEquals(timed, timed.withDecodeDurationMillis(1234L));
     // withToolCalls 是替换副本：必须保留已冻结的计时。
     assertEquals(
@@ -180,7 +154,6 @@ class ProviderResponseTest {
                 List.of(),
                 GenerationStopReason.COMPLETE,
                 USAGE,
-                COST,
                 null,
                 null,
                 "{}",
@@ -204,7 +177,6 @@ class ProviderResponseTest {
                 List.of(call),
                 GenerationStopReason.LENGTH,
                 USAGE,
-                COST,
                 null,
                 null,
                 "{}",
@@ -229,7 +201,6 @@ class ProviderResponseTest {
                 List.of(call),
                 GenerationStopReason.LENGTH,
                 USAGE,
-                COST,
                 null,
                 null,
                 "{}",
@@ -249,7 +220,6 @@ class ProviderResponseTest {
                     List.of(),
                     GenerationStopReason.COMPLETE,
                     USAGE,
-                    COST,
                     null,
                     null,
                     "{\"input_tokens\":10,\"input_tokens\":20}",
@@ -268,7 +238,6 @@ class ProviderResponseTest {
                     List.of(),
                     GenerationStopReason.COMPLETE,
                     USAGE,
-                    COST,
                     null,
                     null,
                     "{\"input_tokens\":10} extra_garbage",

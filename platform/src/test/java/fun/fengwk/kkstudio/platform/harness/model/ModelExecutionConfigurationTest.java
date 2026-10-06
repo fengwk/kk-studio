@@ -20,9 +20,6 @@ import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
@@ -42,9 +39,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -173,12 +168,8 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(ProviderType.OPENAI_RESPONSES, openaiResponsesProviderFactory.providerType());
     assertEquals(ProviderType.ANTHROPIC, anthropicProviderFactory.providerType());
     assertEquals(ProviderType.GOOGLE, googleProviderFactory.providerType());
-    assertEquals(
-        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-        anthropicProviderFactory.promptCacheCapability().supportedRetentions());
-    assertEquals(
-        EnumSet.allOf(PromptCacheBreakpoint.class),
-        anthropicProviderFactory.promptCacheCapability().supportedBreakpoints());
+    assertEquals(PromptCacheRetention.SHORT, anthropicProviderFactory.promptCacheRetention());
+    assertEquals(PromptCacheRetention.NONE, googleProviderFactory.promptCacheRetention());
   }
 
   @Test
@@ -216,90 +207,31 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertNativeModelProvider(
         openaiResponsesProviderFactory,
         ProviderType.OPENAI_RESPONSES,
-        "{\"openAiPromptCacheMode\":\"GPT_5_6_EXPLICIT\"}");
+        "{\"promptCacheRetention\":\"SHORT\"}");
     assertNativeModelProvider(anthropicProviderFactory, ProviderType.ANTHROPIC, "{}");
     assertNativeModelProvider(googleProviderFactory, ProviderType.GOOGLE, "{}");
   }
 
-  /** 意图：验证 OpenAI Chat 工厂基于 configJson 正确解析 AUTOMATIC、LEGACY 与 GPT_5_6_EXPLICIT 三种模式。 */
+  /** 意图：验证 OpenAI 家族工厂基于 configJson 解析留存档位，且任何配置（含 null/空）都返回非空档位。 */
   @Test
-  void openAiChatFactoryResolvesDynamicPromptCacheCapabilities() {
-    // 默认空配置 -> AUTOMATIC
-    assertEquals(PromptCacheMode.AUTOMATIC, openaiProviderFactory.promptCacheCapability().mode());
-    assertEquals(
-        PromptCacheMode.AUTOMATIC, openaiProviderFactory.promptCacheCapability(null).mode());
-    assertEquals(
-        PromptCacheMode.AUTOMATIC, openaiProviderFactory.promptCacheCapability("{}").mode());
-
-    // LEGACY -> AFFINITY (SHORT, LONG)
-    PromptCacheCapability legacy =
-        openaiProviderFactory.promptCacheCapability("{\"openAiPromptCacheMode\":\"LEGACY\"}");
-    assertEquals(PromptCacheMode.AFFINITY, legacy.mode());
-    assertEquals(
-        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-        legacy.supportedRetentions());
-
-    // GPT_5_6_EXPLICIT -> BREAKPOINTS (SHORT + SYSTEM, CONVERSATION)
-    PromptCacheCapability gptExplicit =
-        openaiProviderFactory.promptCacheCapability(
-            "{\"openAiPromptCacheMode\":\"GPT_5_6_EXPLICIT\"}");
-    assertEquals(PromptCacheMode.BREAKPOINTS, gptExplicit.mode());
-    assertEquals(Set.of(PromptCacheRetention.SHORT), gptExplicit.supportedRetentions());
-    assertEquals(
-        Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION),
-        gptExplicit.supportedBreakpoints());
-  }
-
-  /** 意图：验证 OpenAI Responses 工厂基于 configJson 正确解析 AUTOMATIC、LEGACY 与 GPT_5_6_EXPLICIT 三种模式。 */
-  @Test
-  void openAiResponsesFactoryResolvesDynamicPromptCacheCapabilities() {
-    // 默认空配置 -> AUTOMATIC（Provider 自治管理，不发送 cache hint）
-    for (PromptCacheCapability automatic :
-        List.of(
-            openaiResponsesProviderFactory.promptCacheCapability(),
-            openaiResponsesProviderFactory.promptCacheCapability(null),
-            openaiResponsesProviderFactory.promptCacheCapability("{}"))) {
-      assertEquals(PromptCacheMode.AUTOMATIC, automatic.mode());
-      assertEquals(Set.of(), automatic.supportedRetentions());
-      assertEquals(Set.of(), automatic.supportedBreakpoints());
+  void openAiFactoriesExposeConfigAwareRetention() {
+    for (ProviderFactory factory : List.of(openaiProviderFactory, openaiResponsesProviderFactory)) {
+      assertNotNull(factory.promptCacheRetention());
+      assertNotNull(factory.promptCacheRetention(null));
+      assertNotNull(factory.promptCacheRetention("{}"));
+      assertNotNull(factory.promptCacheRetention("{\"promptCacheRetention\":\"SHORT\"}"));
+      assertNotNull(factory.promptCacheRetention("{\"promptCacheRetention\":\"LONG\"}"));
     }
-
-    // LEGACY -> AFFINITY (SHORT, LONG)
-    PromptCacheCapability legacy =
-        openaiResponsesProviderFactory.promptCacheCapability(
-            "{\"openAiPromptCacheMode\":\"LEGACY\"}");
-    assertEquals(PromptCacheMode.AFFINITY, legacy.mode());
-    assertEquals(
-        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-        legacy.supportedRetentions());
-
-    // GPT_5_6_EXPLICIT -> BREAKPOINTS (SHORT + CONVERSATION)
-    // Responses 的 systemInstruction 是顶层 instructions 字符串，input 中没有可打标的 system 内容块，
-    // 因此该协议不声明 SYSTEM 断点。
-    PromptCacheCapability gptExplicit =
-        openaiResponsesProviderFactory.promptCacheCapability(
-            "{\"openAiPromptCacheMode\":\"GPT_5_6_EXPLICIT\"}");
-    assertEquals(PromptCacheMode.BREAKPOINTS, gptExplicit.mode());
-    assertEquals(Set.of(PromptCacheRetention.SHORT), gptExplicit.supportedRetentions());
-    assertEquals(Set.of(PromptCacheBreakpoint.CONVERSATION), gptExplicit.supportedBreakpoints());
   }
 
-  /** 意图：验证 Google 与 Anthropic 工厂暴露固定的标准提示缓存能力。 */
+  /** 意图：验证 Google 与 Anthropic 工厂暴露固定的标准留存档位。 */
   @Test
-  void fixedFactoriesExposeExpectedPromptCacheCapabilities() {
-    assertEquals(PromptCacheMode.AUTOMATIC, googleProviderFactory.promptCacheCapability().mode());
+  void fixedFactoriesExposeExpectedRetention() {
+    assertEquals(PromptCacheRetention.NONE, googleProviderFactory.promptCacheRetention());
     assertEquals(
-        PromptCacheMode.AUTOMATIC,
-        googleProviderFactory.promptCacheCapability("{\"ignored\":true}").mode());
-
-    assertEquals(
-        PromptCacheMode.BREAKPOINTS, anthropicProviderFactory.promptCacheCapability().mode());
-    assertEquals(
-        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-        anthropicProviderFactory.promptCacheCapability().supportedRetentions());
-    assertEquals(
-        EnumSet.allOf(PromptCacheBreakpoint.class),
-        anthropicProviderFactory.promptCacheCapability().supportedBreakpoints());
+        PromptCacheRetention.NONE,
+        googleProviderFactory.promptCacheRetention("{\"ignored\":true}"));
+    assertEquals(PromptCacheRetention.SHORT, anthropicProviderFactory.promptCacheRetention());
   }
 
   /** 意图：验证 Anthropic 工厂将配置中的 anthropicThinkingMode 传递给适配器。 */

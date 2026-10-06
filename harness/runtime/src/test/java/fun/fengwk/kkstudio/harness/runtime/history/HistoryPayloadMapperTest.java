@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -49,7 +48,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -74,7 +72,6 @@ class HistoryPayloadMapperTest {
                 new ProviderToolCall("call-2", "grep", "{}")),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             "req",
             null,
             "{}");
@@ -101,7 +98,6 @@ class HistoryPayloadMapperTest {
     AssistantMessageMetadata metadata = payload.assistantMetadata();
     assertEquals(GenerationStopReason.COMPLETE, metadata.stopReason());
     assertEquals(usage(), metadata.usage());
-    assertEquals(cost(), metadata.cost());
     assertNull(payload.toolResultMetadata());
   }
 
@@ -117,7 +113,6 @@ class HistoryPayloadMapperTest {
             List.of(),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             "req",
             null,
             "{}",
@@ -147,7 +142,6 @@ class HistoryPayloadMapperTest {
             List.of(call1, call3),
             GenerationStopReason.LENGTH,
             usage(),
-            cost(),
             "req",
             null,
             "{}",
@@ -177,7 +171,6 @@ class HistoryPayloadMapperTest {
                 List.of(),
                 GenerationStopReason.COMPLETE,
                 usage(),
-                cost(),
                 null,
                 null,
                 "{}"),
@@ -188,15 +181,7 @@ class HistoryPayloadMapperTest {
     MessagePayload empty =
         MAPPER.assistantPayload(
             new ProviderResponse(
-                "",
-                "",
-                List.of(),
-                GenerationStopReason.COMPLETE,
-                usage(),
-                cost(),
-                null,
-                null,
-                "{}"),
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage(), null, null, "{}"),
             List.of());
     assertEquals(1, empty.message().contents().size());
     assertEquals("", ((TextMessageContent) empty.message().contents().get(0)).text());
@@ -211,7 +196,6 @@ class HistoryPayloadMapperTest {
             List.of(new ProviderToolCall("call-1", "bash", "{}")),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             null,
             null,
             "{}");
@@ -250,7 +234,6 @@ class HistoryPayloadMapperTest {
                 new ProviderToolCall("call-2", "fs_read", "{\"path\":\"b.txt\"}")),
             GenerationStopReason.COMPLETE,
             usage(),
-            cost(),
             null,
             null,
             "{}");
@@ -605,17 +588,5 @@ class HistoryPayloadMapperTest {
 
   private static ModelUsage usage() {
     return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
-  }
-
-  private static ModelCost cost() {
-    return new ModelCost(
-        "USD",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 }

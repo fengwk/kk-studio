@@ -6,10 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -37,7 +35,6 @@ class ProviderStreamHandlerTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
             new ProviderReplayAffinity(ProviderType.OPENAI, "openai", UUID.randomUUID(), "gpt-5"),
-            "0".repeat(64),
             new ObjectMapper().createObjectNode());
     ProviderCompletion completion = new ProviderCompletion(sampleResponse(), replayState);
     AtomicReference<ProviderCompletion> captured = new AtomicReference<>();
@@ -90,15 +87,6 @@ class ProviderStreamHandlerTest {
         List.of(),
         GenerationStopReason.COMPLETE,
         new ModelUsage(1, 1, 0, 0, 0, 0, 2),
-        new ModelCost(
-            "USD",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO),
         "req-1",
         null,
         "{}");

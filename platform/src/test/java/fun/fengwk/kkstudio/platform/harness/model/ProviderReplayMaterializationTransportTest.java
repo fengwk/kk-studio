@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProv
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -68,7 +67,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -417,22 +415,8 @@ class ProviderReplayMaterializationTransportTest {
 
   private static ProviderRequest request(
       List<ProviderMessage> messages, Set<ModelInputModality> modalities) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     ModelDescriptor model =
-        new ModelDescriptor(
-            "test-provider", "test-model", "test-model", modalities, false, true, pricing);
+        new ModelDescriptor("test-provider", "test-model", "test-model", modalities, false, true);
     return new ProviderRequest(
         model,
         new ModelVariant("default"),

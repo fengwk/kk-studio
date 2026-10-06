@@ -9,15 +9,12 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -117,31 +114,13 @@ class LiveTurnPlanTest {
         ProviderType.OPENAI,
         new UUID(0L, 42L),
         new ModelDescriptor(
-            "provider",
-            "model",
-            "wire-model",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            false,
-            new ModelPricing(
-                "USD",
-                "standard",
-                "default",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)),
+            "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         new ModelVariant("default"),
         512,
         "system instruction",
         List.of(),
         List.of(),
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT, "affinity", Set.of(PromptCacheBreakpoint.SYSTEM)));
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity"));
   }
 
   private static LiveTurnPlan.CandidateTool candidate(

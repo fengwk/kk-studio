@@ -5,9 +5,9 @@ import java.util.Objects;
 /**
  * Provider 请求要携带的最终缓存控制指令。
  *
- * <p>只保留两个稳定事实：留存档位 {@link PromptCacheRetention} 与会话级 {@code key}。{@code key} 直接使用 Session
- * UUID 文本，不再派生哈希；{@code retention = NONE} 时 {@code key} 为 {@code null}，表示不启用任何 Provider 端缓存。
- * 具体到各 Provider 协议的 cache 参数映射由 Adapter 完成。
+ * <p>只保留两个稳定事实：留存档位 {@link PromptCacheRetention} 与会话级 {@code key}。{@code key} 直接使用 Session UUID
+ * 文本，不再派生哈希；{@code retention = NONE} 时 {@code key} 为 {@code null}，表示不启用任何 Provider 端缓存。 具体到各
+ * Provider 协议的 cache 参数映射由 Adapter 完成。
  */
 public record ProviderCacheControl(PromptCacheRetention retention, String key) {
 
