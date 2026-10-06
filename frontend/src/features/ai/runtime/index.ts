@@ -24,7 +24,12 @@ export {
   type ThreadPaneLabels,
 } from '@/features/ai/runtime/ThreadPane'
 export { RootThreadControlArea } from '@/features/ai/runtime/RootThreadControlArea'
-export { ChildThreadView } from '@/features/ai/runtime/ChildThreadView'
+export {
+  BoundThreadView,
+  ChildThreadBackBar,
+  ChildThreadRootLink,
+  ChildThreadView,
+} from '@/features/ai/runtime/ChildThreadView'
 export {
   ThreadLink,
   ThreadNavigationContext,
@@ -42,8 +47,11 @@ export {
   useBoundThreadPanelLabels,
 } from '@/features/ai/runtime/useBoundThreadPanelViews'
 export {
-  useAgentPaneController,
+  useRootThreadControl,
   type AgentPaneDefaults,
   type PaneInteraction,
-} from '@/features/ai/runtime/useAgentPaneController'
+} from '@/features/ai/runtime/useRootThreadControl'
+export { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
+export { RootAgentPane } from '@/features/ai/runtime/RootAgentPane'
+export { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
 export * from '@/features/ai/runtime/interactions'

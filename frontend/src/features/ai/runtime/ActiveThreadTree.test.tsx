@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
+import { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
 import { ThreadNavigationContext } from '@/features/ai/runtime/ThreadLink'
 import { harnessService } from '@/shared/api/harness-service'
 import { setLocale } from '@/shared/i18n'
@@ -37,6 +38,12 @@ function treeNode(
   }
 }
 
+/** 查询由根面板单点持有：测试同样只挂一次 useActiveThreadTree，再交给展示组件。 */
+function TreeHarness({ rootId, currentThreadId }: { rootId: string; currentThreadId?: string }) {
+  const tree = useActiveThreadTree(rootId)
+  return <ActiveThreadTree tree={tree} currentThreadId={currentThreadId} />
+}
+
 function renderTree(rootId: string, currentThreadId?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return {
@@ -44,7 +51,7 @@ function renderTree(rootId: string, currentThreadId?: string) {
     ...render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <ActiveThreadTree rootThreadId={rootId} currentThreadId={currentThreadId} />
+          <TreeHarness rootId={rootId} currentThreadId={currentThreadId} />
         </MemoryRouter>
       </QueryClientProvider>,
     ),
@@ -103,7 +110,7 @@ describe('ActiveThreadTree', () => {
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
           <ThreadNavigationContext.Provider value={observe}>
-            <ActiveThreadTree rootThreadId={ROOT_ID} currentThreadId={WORKER_ID} />
+            <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
           </ThreadNavigationContext.Provider>
         </MemoryRouter>
       </QueryClientProvider>,

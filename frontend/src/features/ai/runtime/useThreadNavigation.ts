@@ -1,12 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+/** 一层查看路径：Thread ID 与进入前持焦的触发元素（必要视图状态，不复制执行状态）。 */
+export interface ThreadViewLayer {
+  threadId: string
+  returnFocus: HTMLElement | null
+}
+
+interface ThreadPathState {
+  root: string | null
+  layers: ThreadViewLayer[]
+}
 
 /**
  * Pane 内查看路径：根面板保持挂载，逐层查看子代理，逐层返回。
  *
- * 路径只保存 Thread ID，不复制 Snapshot、执行状态或编辑草稿；根绑定变化（切换
- * Thread 或重绑）时整条路径失效，避免把旧路径套到新的执行根上。进入某层时记录
- * 当时的焦点，返回时恢复，使键盘用户回到触发的链接；恢复目标不可用时回退到
- * pane 容器（由调用方通过 `fallbackFocusRef` 提供）。
+ * 状态转换是纯的：所有层操作都由渲染闭包 + `setState` 完成，不在 updater 内做
+ * 副作用（StrictMode 双调用不会重复记录或丢失层）。根绑定变化在 render 派生为
+ * 空路径，旧层一帧都不会泄漏；返回/截断的焦点恢复在 commit 后的 effect 中执行，
+ * 目标不可用时回退到 pane 容器（`fallbackFocusRef`）。
  */
 export function useThreadNavigation({
   rootThreadId,
@@ -14,65 +25,87 @@ export function useThreadNavigation({
   fallbackFocusRef,
 }: {
   rootThreadId: string | null
-  /** 仅根面板允许同 pane 查看子代理；只读视图或未加载完成时为 false。 */
+  /** 仅根面板允许同 pane 查看子代理；只读视图或身份未确认时为 false。 */
   enabled: boolean
   fallbackFocusRef?: { current: HTMLElement | null }
 }) {
-  const [layers, setLayers] = useState<string[]>([])
-  const returnFocusRef = useRef<(HTMLElement | null)[]>([])
+  const [state, setState] = useState<ThreadPathState>(() => ({ root: rootThreadId, layers: [] }))
+  const pendingFocusRef = useRef<{ element: HTMLElement | null } | null>(null)
 
-  // 根绑定变化即丢弃查看路径与待恢复焦点。
-  useEffect(() => {
-    returnFocusRef.current = []
-    setLayers([])
-  }, [rootThreadId])
+  // render 派生：根绑定与路径所属根不一致时，路径视为空（不渲染陈旧层）。
+  const layers = useMemo(
+    () => (state.root === rootThreadId ? state.layers : []),
+    [rootThreadId, state],
+  )
+  const activeThreadId = layers.length > 0 ? layers[layers.length - 1].threadId : null
+
+  const commit = useCallback(
+    (next: ThreadViewLayer[], focus: HTMLElement | null | undefined) => {
+      if (focus !== undefined) {
+        pendingFocusRef.current = { element: focus }
+      }
+      setState({ root: rootThreadId, layers: next })
+    },
+    [rootThreadId],
+  )
 
   const openThread = useCallback((threadId: string) => {
-    if (!enabled || threadId === rootThreadId || !threadId) {
+    if (!enabled || !threadId) {
+      return
+    }
+    // 指向执行根（或已在路径上）的链接是“返回”而不是新建层：截断到该层，
+    // 并把焦点还给该层进入前的位置。
+    if (threadId === rootThreadId) {
+      if (layers.length > 0) {
+        commit([], layers[0].returnFocus)
+      }
+      return
+    }
+    const existing = layers.findIndex((layer) => layer.threadId === threadId)
+    if (existing >= 0) {
+      commit(layers.slice(0, existing + 1), layers[existing].returnFocus)
       return
     }
     const active = typeof document === 'undefined' ? null : document.activeElement
-    setLayers((current) => {
-      // 已在路径上则截断到该层：重复进入同一子代理不会堆积重复层。
-      const existing = current.indexOf(threadId)
-      if (existing >= 0) {
-        return current.slice(0, existing + 1)
-      }
-      returnFocusRef.current = [...returnFocusRef.current, active instanceof HTMLElement ? active : null]
-      return [...current, threadId]
-    })
-  }, [enabled, rootThreadId])
+    commit([...layers, { threadId, returnFocus: active instanceof HTMLElement ? active : null }], undefined)
+  }, [commit, enabled, layers, rootThreadId])
 
   const goBack = useCallback(() => {
-    setLayers((current) => {
-      if (current.length === 0) {
-        return current
-      }
-      const target = returnFocusRef.current.pop() ?? null
-      // 返回后恢复触发点焦点；触发点已卸载时聚焦 pane 容器，仍留在查看上下文中。
-      queueMicrotask(() => {
-        if (target != null && target.isConnected) {
-          target.focus()
-          return
-        }
-        fallbackFocusRef?.current?.focus()
-      })
-      return current.slice(0, -1)
-    })
-  }, [fallbackFocusRef])
+    if (layers.length === 0) {
+      return
+    }
+    commit(layers.slice(0, -1), layers[layers.length - 1].returnFocus)
+  }, [commit, layers])
 
   const goToRoot = useCallback(() => {
-    returnFocusRef.current = []
-    setLayers([])
-  }, [])
+    if (layers.length === 0) {
+      return
+    }
+    commit([], layers[0].returnFocus)
+  }, [commit, layers])
 
-  return {
-    /** 自根向下的查看层；空数组表示当前显示根面板。 */
-    layers,
-    /** 顶层正在查看的 Thread；未查看子代理时为 null。 */
-    activeThreadId: layers.length > 0 ? layers[layers.length - 1] : null,
-    openThread,
-    goBack,
-    goToRoot,
-  }
+  // 被覆盖的层不得持有焦点：进入/返回后若焦点仍在隐藏子树内，主动释放（浏览器中
+  // display:none 会自然移走焦点，这里保证测试环境与显式 blur 也一致）。
+  useEffect(() => {
+    const active = typeof document === 'undefined' ? null : document.activeElement
+    if (active instanceof HTMLElement && active.closest('[hidden]') != null) {
+      active.blur()
+    }
+  })
+
+  // 返回/截断后的焦点恢复：在 commit 之后执行，保留触发点，不可用时回退到 pane。
+  useEffect(() => {
+    const pending = pendingFocusRef.current
+    if (pending == null) {
+      return
+    }
+    pendingFocusRef.current = null
+    if (pending.element != null && pending.element.isConnected) {
+      pending.element.focus()
+      return
+    }
+    fallbackFocusRef?.current?.focus()
+  })
+
+  return { layers, activeThreadId, openThread, goBack, goToRoot }
 }

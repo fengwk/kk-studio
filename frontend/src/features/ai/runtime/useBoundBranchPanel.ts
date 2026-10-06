@@ -13,6 +13,7 @@ import {
 } from '@/features/ai/chat/command-batch-plan'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import {
   useAgentThreadController,
 } from '@/features/ai/runtime/useAgentThreadController'
@@ -88,9 +89,12 @@ function compareDecimalVersions(a: string, b: string): number {
 export function useBoundBranchPanel({
   threadId,
   initialParts = [],
+  projection,
 }: {
   threadId: string
   initialParts?: ComposerPart[]
+  /** 调用方已持有的只读投影；传入时不重复查询与订阅。 */
+  projection?: ThreadProjection
 }) {
   // buildBatch 依赖 controller 的 snapshot thread；稳定回调通过 ref 转发，
   // 并在提交事件到达前由下方 effect 更新。
@@ -101,6 +105,7 @@ export function useBoundBranchPanel({
     initialParts,
     (parts) => buildBatchRef.current?.(parts) ?? null,
     (goalText) => buildGoalBatchRef.current?.(goalText) ?? null,
+    projection,
   )
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
   const [yoloError, setYoloError] = useState<string | null>(null)
