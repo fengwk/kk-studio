@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -564,6 +566,61 @@ class ModelProcessorTest {
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+  }
+
+  /** 恢复预检后丢失 claim：重试与预算耗尽两条路径的 tentative 写入都必须回滚，不能推进 attempt 或唤醒 THREAD。 */
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1})
+  void recoveryLosingClaimAfterPrecheckRollsBackAllMutations(int maxRetries) {
+    InvocationRetryPolicy policy =
+        new InvocationRetryPolicy(
+            maxRetries,
+            InvocationRetryBackoffStrategy.FIXED,
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5));
+    Fixture fixture = fixture(policy);
+    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
+    transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
+    claim(fixture.store, fixture.invocationId, NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+    ModelInvocation beforeModel = model(fixture.store, fixture.invocationId);
+    ThreadState beforeThread = thread(fixture.store, fixture.baseline.threadId());
+    WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId());
+    Work beforeWake = work(fixture.store, threadTarget);
+    AtomicInteger transactions = new AtomicInteger();
+    HarnessStore interleaved =
+        (HarnessStore)
+            Proxy.newProxyInstance(
+                HarnessStore.class.getClassLoader(),
+                new Class<?>[] {HarnessStore.class},
+                (proxy, method, args) -> {
+                  Object result = invokeUnchecked(fixture.store, method, args);
+                  if ("transaction".equals(method.getName())
+                      && transactions.incrementAndGet() == 1) {
+                    // 确定性交错：claimOwned 已读到有效租约，在真正恢复事务前由另一个事务删除 Work。
+                    deleteModelWork(fixture);
+                  }
+                  return result;
+                });
+    try (ModelProcessor processor =
+        new ModelProcessor(
+            interleaved,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> policy, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            Runnable::run)) {
+      assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(recovered));
+      assertEquals(beforeModel, model(fixture.store, fixture.invocationId));
+      assertEquals(beforeThread, thread(fixture.store, fixture.baseline.threadId()));
+      assertEquals(beforeWake, work(fixture.store, threadTarget));
+      assertNull(work(fixture.store, recovered.target()));
+      assertEquals(0, fixture.gateway.startCalls);
+      assertFalse(processor.hasActiveExecution());
+    }
   }
 
   /** terminal 行且 resultEntryId 仍 null：确保 THREAD wake 后 complete，不重复 bump version。 */
