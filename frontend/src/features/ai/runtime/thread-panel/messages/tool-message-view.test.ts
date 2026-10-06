@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
-import { buildToolMessageView } from '@/features/ai/runtime/thread-panel/messages/tool-message-view'
+import { describe, expect, it } from 'vitest'
+import {
+  buildToolMessageView,
+  shouldShowErrorNotice,
+  toolDefaultExpanded,
+  toolMessageContents,
+} from '@/features/ai/runtime/thread-panel/messages/tool-message-view'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
 function message(
@@ -12,83 +17,72 @@ function message(
     createdAt: null,
     status: 'done',
     phase: 'call',
-    text: '',
+    contents: [],
     toolCallId: 'call-1',
     toolName: 'read',
     rendererKey: 'read',
     arguments: '{"path":"/app"}',
-    attachments: [],
     ...overrides,
   }
 }
 
+function withContents(text: string): Partial<ToolDialogueMessage> {
+  return { contents: [{ type: 'text', text }] }
+}
+
 describe('buildToolMessageView', () => {
-  it('combines call/result facts and keeps fully visible failures static', () => {
+  it('combines call/result facts and exposes contents for the shared shell', () => {
     const view = buildToolMessageView({
       message: message({ status: 'streaming' }),
       result: message({
         id: 'tool-result',
         phase: 'result',
         status: 'error',
-        text: 'read failed',
+        ...withContents('read failed'),
       }),
-      approvalPending: false,
-      requestedExpanded: false,
-      hasCustomRenderer: false,
+      expanded: false,
+      hasCallRecordRenderer: false,
     })
 
     expect(view.visualState).toBe('error')
-    expect(view.context.text).toBe('read failed')
-    expect(view.expandable).toBe(false)
-    expect(view.showResult).toBe(true)
+    expect(view.errorText).toBeUndefined()
+    expect(view.hasError).toBe(true)
+    expect(view.contents).toEqual([{ type: 'text', text: 'read failed' }])
+    // 折叠后正文隐藏，失败摘要由宿主单独渲染，绝不随正文消失。
+    expect(view.showBody).toBe(false)
+    expect(view.hasBody).toBe(true)
   })
 
-  it('makes a quiet successful result expandable only while it is hidden', () => {
-    const input = {
-      message: message(),
-      result: message({
-        id: 'tool-result',
-        phase: 'result' as const,
-        text: 'line one\nline two',
-      }),
-      approvalPending: false,
-      hasCustomRenderer: false,
-    }
-    const collapsed = buildToolMessageView({
-      ...input,
-      requestedExpanded: false,
-    })
-    const expanded = buildToolMessageView({
-      ...input,
-      requestedExpanded: true,
-    })
-
-    expect(collapsed.expandable).toBe(true)
-    expect(collapsed.showResult).toBe(false)
-    expect(expanded.expanded).toBe(true)
-    expect(expanded.showResult).toBe(true)
-  })
-
-  it('delegates custom renderer expandability to its contribution resolver', () => {
-    const isRendererExpandable = vi.fn(() => true)
-    const call = message({
-      toolName: 'task',
-      rendererKey: 'task',
-      arguments: '{"subagent_type":"explorer","prompt":"inspect"}',
-    })
+  it('keeps the ordered contents instead of flattening text and attachments', () => {
     const view = buildToolMessageView({
-      message: call,
-      approvalPending: false,
-      requestedExpanded: false,
-      hasCustomRenderer: true,
-      isRendererExpandable,
+      message: message({
+        phase: 'result',
+        ...withContents(''),
+        contents: [
+          { type: 'text', text: 'before' },
+          {
+            type: 'resource',
+            attachment: {
+              type: 'image',
+              name: 'shot.png',
+              mime: 'image/png',
+              data: 'data:image/png;base64,AAA',
+            },
+          },
+          { type: 'text', text: 'after' },
+          { type: 'json', value: '{"ok":true}' },
+        ],
+      }),
+      expanded: false,
+      hasCallRecordRenderer: false,
     })
 
-    expect(isRendererExpandable).toHaveBeenCalledWith(call, undefined)
-    expect(view.expandable).toBe(true)
+    expect(view.contents.map((content) => content.type))
+      .toEqual(['text', 'resource', 'text', 'json'])
+    expect(view.hasBody).toBe(true)
   })
 
-  it('distinguishes model argument streaming from a durable edit awaiting execution', () => {
+  it('distinguishes model argument streaming from a durable call awaiting execution', () => {
     const argumentsJson = JSON.stringify({
       path: 'App.java',
       old_string: 'one\ntwo\nthree\nfour\nfive\nsix',
@@ -102,9 +96,8 @@ describe('buildToolMessageView', () => {
         status: 'streaming',
         subjectEntryId: null,
       }),
-      approvalPending: false,
-      requestedExpanded: false,
-      hasCustomRenderer: false,
+      expanded: true,
+      hasCallRecordRenderer: false,
     })
     const durable = buildToolMessageView({
       message: message({
@@ -114,31 +107,148 @@ describe('buildToolMessageView', () => {
         status: 'streaming',
         subjectEntryId: 'assistant-1',
       }),
-      approvalPending: false,
-      requestedExpanded: false,
-      hasCustomRenderer: false,
+      expanded: true,
+      hasCallRecordRenderer: false,
     })
 
     // subjectEntryId 只在 durable call 上存在，能稳定区分参数流与执行等待态。
-    expect(streaming.context.argumentsStreaming).toBe(true)
-    expect(streaming.expandable).toBe(true)
-    expect(durable.context.argumentsStreaming).toBe(false)
-    expect(durable.expandable).toBe(false)
+    expect(streaming.argumentsStreaming).toBe(true)
+    expect(durable.argumentsStreaming).toBe(false)
+    expect(streaming.hasCallPreview).toBe(true)
+    expect(durable.hasCallPreview).toBe(true)
+    expect(streaming.preview?.kind).toBe('edit')
+  })
+
+  it('exposes the call body only for tools that move parameters below the header', () => {
+    const write = buildToolMessageView({
+      message: message({
+        toolName: 'write',
+        rendererKey: 'write',
+        arguments: '{"path":"a.txt","content":"hello"}',
+      }),
+      expanded: true,
+      hasCallRecordRenderer: false,
+    })
+    const task = buildToolMessageView({
+      message: message({
+        toolName: 'task',
+        rendererKey: 'task',
+        arguments: '{"subagent_type":"explorer","prompt":"inspect"}',
+      }),
+      expanded: true,
+      hasCallRecordRenderer: true,
+    })
+    const taskWithoutRenderer = buildToolMessageView({
+      message: message({
+        toolName: 'task',
+        rendererKey: 'task',
+        arguments: '{"subagent_type":"explorer","prompt":"inspect"}',
+      }),
+      expanded: true,
+      hasCallRecordRenderer: false,
+    })
+    const read = buildToolMessageView({
+      message: message({ arguments: '{"path":"/app"}' }),
+      expanded: true,
+      hasCallRecordRenderer: false,
+    })
+
+    expect(write.hasCallPreview).toBe(true)
+    expect(write.hasCallRecordBody).toBe(false)
+    expect(task.hasCallRecordBody).toBe(true)
+    expect(task.hasBody).toBe(true)
+    // 没有 renderer 时 task 正文无法渲染，不能伪装成可折叠正文。
+    expect(taskWithoutRenderer.hasCallRecordBody).toBe(false)
+    expect(taskWithoutRenderer.hasBody).toBe(false)
+    // read 的参数留在 Header，正文只承载结果。
+    expect(read.hasCallPreview).toBe(false)
+    expect(read.hasCallRecordBody).toBe(false)
+    expect(read.hasBody).toBe(false)
+  })
+
+  it('treats an empty argument object as no call body', () => {
+    const view = buildToolMessageView({
+      message: message({
+        toolName: 'task',
+        rendererKey: 'task',
+        arguments: ' {} ',
+      }),
+      expanded: true,
+      hasCallRecordRenderer: true,
+    })
+
+    expect(view.hasCallRecordBody).toBe(false)
+    expect(view.hasBody).toBe(false)
+  })
+
+  it('prefers durable result contents over a stale streaming partial', () => {
+    const call = message({
+      status: 'streaming',
+      partialContents: [{ type: 'text', text: 'streaming partial' }],
+    })
+    expect(toolMessageContents(call, undefined)).toEqual([
+      { type: 'text', text: 'streaming partial' },
+    ])
+
+    const result = message({ id: 'r', phase: 'result', ...withContents('final') })
+    expect(toolMessageContents(call, result)).toEqual([{ type: 'text', text: 'final' }])
+    // result 存在但内容为空时也不回退旧 partial（避免旧 partial 盖过终态错误）。
+    const emptyResult = message({ id: 'r2', phase: 'result', contents: [] })
+    expect(toolMessageContents(call, emptyResult)).toEqual([])
+  })
+
+  it('drops the stale partial error once a durable result exists', () => {
+    const call = message({ status: 'streaming' })
+    const view = buildToolMessageView({
+      message: call,
+      result: message({
+        id: 'r',
+        phase: 'result',
+        status: 'streaming',
+        partialErrorText: 'ignored partial error',
+      }),
+      expanded: true,
+      hasCallRecordRenderer: false,
+    })
+
+    expect(view.errorText).toBeUndefined()
+  })
+
+  it('keeps a streaming partial error visible before the durable result arrives', () => {
+    const view = buildToolMessageView({
+      message: message({ status: 'streaming', partialErrorText: 'partial failed' }),
+      expanded: true,
+      hasCallRecordRenderer: false,
+    })
+
+    expect(view.errorText).toBe('partial failed')
+    expect(view.hasError).toBe(true)
   })
 
   describe('toolVisualState', () => {
+    it('treats a failed call without a result as error instead of pending', () => {
+      // durable 调用失败但结果缺失（CANCELLED/UNKNOWN/FAILED）不能继续显示等待态。
+      const view = buildToolMessageView({
+        message: message({ phase: 'call', status: 'error', errorMessage: 'cancelled' }),
+        expanded: false,
+        hasCallRecordRenderer: false,
+      })
+
+      expect(view.visualState).toBe('error')
+      expect(view.hasError).toBe(true)
+      expect(view.errorText).toBe('cancelled')
+    })
+
     it('treats call-only status done or undefined as pending', () => {
       const doneCall = buildToolMessageView({
         message: message({ phase: 'call', status: 'done' }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
       const undefinedCall = buildToolMessageView({
         message: message({ phase: 'call', status: undefined }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
 
       expect(doneCall.visualState).toBe('pending')
@@ -148,9 +258,8 @@ describe('buildToolMessageView', () => {
     it('treats call streaming as pending when no paired result exists', () => {
       const streamingCall = buildToolMessageView({
         message: message({ phase: 'call', status: 'streaming' }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
 
       expect(streamingCall.visualState).toBe('pending')
@@ -163,11 +272,10 @@ describe('buildToolMessageView', () => {
           id: 'tool-result-1',
           phase: 'result',
           status: 'done',
-          text: 'completed successfully',
+          ...withContents('completed successfully'),
         }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
 
       expect(view.visualState).toBe('success')
@@ -180,15 +288,15 @@ describe('buildToolMessageView', () => {
           id: 'tool-result-2',
           phase: 'result',
           status: 'error',
-          text: 'execution failed',
           errorMessage: 'execution failed',
+          ...withContents('execution failed'),
         }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
 
       expect(view.visualState).toBe('error')
+      expect(view.errorText).toBe('execution failed')
     })
 
     it('shows a succeeded invocation result while its waiting sibling stays pending', () => {
@@ -199,12 +307,11 @@ describe('buildToolMessageView', () => {
           id: 'transient-ok',
           phase: 'result',
           status: 'done',
-          text: 'listed files',
           toolCallId: 'call-ok',
+          ...withContents('listed files'),
         }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
       const waiting = buildToolMessageView({
         message: message({
@@ -213,26 +320,116 @@ describe('buildToolMessageView', () => {
           toolCallId: 'call-ask',
           approval: { required: true, decision: null, decisionId: null, reason: null },
         }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
 
       expect(succeeded.visualState).toBe('success')
-      expect(succeeded.context.text).toBe('listed files')
+      expect(succeeded.contents).toEqual([{ type: 'text', text: 'listed files' }])
       expect(waiting.visualState).toBe('pending')
       expect(waiting.resultMessage).toBeUndefined()
     })
 
     it('derives success from a standalone result with missing status', () => {
       const view = buildToolMessageView({
-        message: message({ phase: 'result', status: undefined, text: 'ok' }),
-        approvalPending: false,
-        requestedExpanded: false,
-        hasCustomRenderer: false,
+        message: message({ phase: 'result', status: undefined, ...withContents('ok') }),
+        expanded: false,
+        hasCallRecordRenderer: false,
       })
 
       expect(view.visualState).toBe('success')
     })
+  })
+})
+
+describe('toolDefaultExpanded', () => {
+  it('keeps write/edit/bash/task/ask_user bodies visible by default', () => {
+    for (const toolName of ['write', 'edit', 'bash', 'task', 'ask_user']) {
+      expect(toolDefaultExpanded({ toolName, contents: [], hasError: false })).toBe(true)
+    }
+  })
+
+  it('keeps read/grep/find/LSP/unknown results collapsed by default', () => {
+    for (const toolName of [
+      'read',
+      'grep',
+      'find',
+      'lsp_goto_definition',
+      'mcp__server__tool',
+      'custom',
+    ]) {
+      expect(toolDefaultExpanded({ toolName, contents: [], hasError: false })).toBe(false)
+    }
+    // read 的非图片结果（含未知附件的 resource）保持收起，只有图片预览默认展开。
+    expect(toolDefaultExpanded({
+      toolName: 'read',
+      contents: [{ type: 'text', text: 'file body' }],
+      hasError: false,
+    })).toBe(false)
+    expect(toolDefaultExpanded({
+      toolName: 'read',
+      contents: [{
+        type: 'resource',
+        attachment: { type: 'file', name: 'x.bin', mime: '', data: 'blob:x' },
+      }],
+      hasError: false,
+    })).toBe(false)
+    expect(toolDefaultExpanded({
+      toolName: 'read',
+      contents: [{
+        type: 'resource',
+        attachment: { type: 'image', name: 'shot.png', mime: 'image/png', data: 'blob:x' },
+      }],
+      hasError: false,
+      mediaDefault: true,
+    })).toBe(true)
+  })
+
+  it('expands failing results that would otherwise hide the failure body', () => {
+    expect(toolDefaultExpanded({
+      toolName: 'mcp__server__tool',
+      contents: [{ type: 'text', text: 'boom' }],
+      hasError: true,
+    })).toBe(true)
+    // 没有正文可展示时不需要展开。
+    expect(toolDefaultExpanded({
+      toolName: 'mcp__server__tool',
+      contents: [],
+      hasError: true,
+    })).toBe(false)
+  })
+})
+
+describe('shouldShowErrorNotice', () => {
+  it('always shows the summary when the body is collapsed', () => {
+    expect(shouldShowErrorNotice({
+      showBody: false,
+      bodyTexts: ['boom'],
+      errorNotice: 'boom',
+    })).toBe(true)
+  })
+
+  it('never repeats a failure already present in the visible body', () => {
+    expect(shouldShowErrorNotice({
+      showBody: true,
+      bodyTexts: ['boom'],
+      errorNotice: 'boom',
+    })).toBe(false)
+    expect(shouldShowErrorNotice({
+      showBody: true,
+      bodyTexts: ['Error: boom at line 3'],
+      errorNotice: 'boom',
+    })).toBe(false)
+    // 正文完全是别的内容时仍需摘要。
+    expect(shouldShowErrorNotice({
+      showBody: true,
+      bodyTexts: ['listed 3 files'],
+      errorNotice: 'boom',
+    })).toBe(true)
+    expect(shouldShowErrorNotice({
+      showBody: true,
+      bodyTexts: ['listed 3 files'],
+      errorNotice: '   ',
+    })).toBe(false)
   })
 })

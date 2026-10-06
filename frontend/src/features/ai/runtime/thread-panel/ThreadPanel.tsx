@@ -142,8 +142,6 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
             initialScrollTop={transcript.initialScrollTop}
             resetKey={transcript.resetKey}
             eventCount={transcript.eventCount}
-            onDecideApproval={transcript.onDecideApproval}
-            approvalPending={transcript.approvalPending}
           />
         )}
         <ThreadWidgetStack

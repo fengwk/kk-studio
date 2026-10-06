@@ -12,11 +12,10 @@ function message(overrides: Partial<ToolRendererMessage> = {}): ToolRendererMess
   return {
     rendererKey: 'task',
     phase: 'call',
-    text: '',
     toolCallId: 'call-task',
     toolName: 'task',
     arguments: '{"subagent_type":"explorer","prompt":"inspect the workspace"}',
-    attachments: [],
+    contents: [],
     ...overrides,
   }
 }
@@ -130,12 +129,15 @@ describe('parseTaskReceipt', () => {
 })
 
 describe('TaskToolRenderer call phase', () => {
-  it('returns nothing when call is collapsed', () => {
-    const { container } = render(<TaskToolRenderer message={message({})} />)
-    expect(container.querySelector('.task-tool-renderer')).not.toBeInTheDocument()
+  it('renders the call body regardless of expanded (collapse is owned by the shell)', () => {
+    // 展开/收起由宿主外壳统一负责；renderer 只负责正文部位。
+    const { container, rerender } = render(<TaskToolRenderer message={message({})} />)
+    expect(container.querySelector('.task-tool-renderer')).toBeInTheDocument()
+    rerender(<TaskToolRenderer message={message({})} expanded={false} />)
+    expect(container.querySelector('.task-tool-renderer')).toBeInTheDocument()
   })
 
-  it('renders subagent, threadId, maxTurns, and prompt when expanded', () => {
+  it('renders the prompt and a clickable thread id without repeating header params', () => {
     render(
       <MemoryRouter>
         <TaskToolRenderer
@@ -147,19 +149,16 @@ describe('TaskToolRenderer call phase', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByText('子代理')).toBeInTheDocument()
-    expect(screen.getByText('explorer')).toBeInTheDocument()
-    expect(screen.getByText('Thread ID')).toBeInTheDocument()
     const threadLink = screen.getByRole('link', { name: '00000000-0000-0000-0000-000000000101' })
-    expect(threadLink).toBeInTheDocument()
     expect(threadLink).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000101')
-    expect(screen.getByText('最大轮数')).toBeInTheDocument()
-    expect(screen.getByText('5')).toBeInTheDocument()
-    expect(screen.getByText('任务提示')).toBeInTheDocument()
     expect(screen.getByText('inspect the workspace')).toBeInTheDocument()
-    // 绝不包含已废弃的 TaskLiveStatus 心跳内容
+    // subagent_type / max_turns 已在 Header 展示，正文不重复。
+    expect(screen.queryByText('explorer')).not.toBeInTheDocument()
+    expect(screen.queryByText('最大轮数')).not.toBeInTheDocument()
+    expect(screen.queryByText('5')).not.toBeInTheDocument()
+    // 受理不代表完成：不出现任何完成/后台执行暗示。
+    expect(screen.queryByText(/已接受|后台执行|已完成/)).not.toBeInTheDocument()
     expect(screen.queryByText(/运行中/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/\d+\s*轮/)).not.toBeInTheDocument()
   })
 
   it('does not render fields for legacy session_id or maxTurns aliases', () => {
@@ -172,15 +171,10 @@ describe('TaskToolRenderer call phase', () => {
         })}
       />,
     )
-    expect(screen.getByText('子代理')).toBeInTheDocument()
-    expect(screen.getByText('explorer')).toBeInTheDocument()
-    expect(screen.getByText('任务提示')).toBeInTheDocument()
     expect(screen.getByText('inspect')).toBeInTheDocument()
-    // session_id 与 maxTurns 不识别，不应出现 Thread ID 或 最大轮数
-    expect(screen.queryByText('Thread ID')).not.toBeInTheDocument()
+    // session_id 与 maxTurns 不识别，不应出现 Thread 链接或遗留会话指纹。
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByText('legacy-7')).not.toBeInTheDocument()
-    expect(screen.queryByText('最大轮数')).not.toBeInTheDocument()
-    expect(screen.queryByText('10')).not.toBeInTheDocument()
   })
 
   it('falls back to raw arguments viewport when arguments is not valid JSON', () => {
@@ -195,122 +189,106 @@ describe('TaskToolRenderer call phase', () => {
 })
 
 describe('TaskToolRenderer result phase', () => {
-  it('renders accepted state and Thread ID for valid accepted receipt JSON', () => {
+  it('shows only the thread link for a valid accepted receipt', () => {
     render(
       <MemoryRouter>
         <TaskToolRenderer
           message={message({
             phase: 'result',
             status: 'done',
-            text: '{"thread_id":"00000000-0000-0000-0000-000000000202","status":"accepted"}',
+            contents: [{
+              type: 'text',
+              text: '{"thread_id":"00000000-0000-0000-0000-000000000202","status":"accepted"}',
+            }],
           })}
         />
       </MemoryRouter>,
     )
-    expect(screen.getByText('已接受 / 后台执行')).toBeInTheDocument()
-    expect(screen.getByText('Thread ID')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: '00000000-0000-0000-0000-000000000202' })
-    expect(link).toBeInTheDocument()
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000202')
-    // 绝不显示已完成、报告或伪造的终态
-    expect(screen.queryByText('已完成')).not.toBeInTheDocument()
-    expect(screen.queryByText('报告')).not.toBeInTheDocument()
+    // 受理收据既不重复打印，也不宣称子任务完成。
+    expect(screen.queryByText(/"status":"accepted"/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/已接受|后台执行|已完成|报告/)).not.toBeInTheDocument()
   })
 
-  it('falls back to raw text when thread_id is missing or invalid UUID', () => {
+  it('falls back to the full contents when thread_id is missing or not a canonical UUID', () => {
     render(
       <TaskToolRenderer
         message={message({
           phase: 'result',
           status: 'done',
-          text: '{"status":"accepted"}',
+          contents: [{ type: 'text', text: '{"status":"accepted"}' }],
         })}
       />,
     )
-    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('{"status":"accepted"}')).toBeInTheDocument()
   })
 
-  it('falls back to raw text and does not claim completed when given completed status', () => {
-    // 即使 tool result 给出了 completed 文本（或旧 XML/JSON），也绝不当收据，原样降级展示且绝不伪造已完成
+  it('never claims completion for a completed-status payload', () => {
     render(
       <TaskToolRenderer
         message={message({
           phase: 'result',
           status: 'done',
-          text: '{"thread_id":"child-101","status":"completed","report":"done"}',
+          contents: [{
+            type: 'text',
+            text: '{"thread_id":"child-101","status":"completed","report":"done"}',
+          }],
         })}
       />,
     )
-    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
-    expect(screen.queryByText('已完成')).not.toBeInTheDocument()
+    expect(screen.queryByText(/已接受|后台执行|已完成/)).not.toBeInTheDocument()
     expect(
       screen.getByText('{"thread_id":"child-101","status":"completed","report":"done"}'),
     ).toBeInTheDocument()
   })
 
-  it('falls back to raw text for malformed JSON or unknown status without swallowing', () => {
+  it('shows malformed payloads verbatim without swallowing them', () => {
     render(
       <TaskToolRenderer
         message={message({
           phase: 'result',
           status: 'done',
-          text: '{malformed json content',
+          contents: [{ type: 'text', text: '{malformed json content' }],
         })}
       />,
     )
     expect(screen.getByText('{malformed json content')).toBeInTheDocument()
-    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
   })
 
-  it('renders error message and raw text cleanly on error result', () => {
+  it('shows the raw failure contents and JSON body of an error result', () => {
     render(
       <TaskToolRenderer
         message={message({
           phase: 'result',
           status: 'error',
-          text: 'subagent task rejected',
           errorMessage: 'concurrency limit reached',
+          contents: [
+            { type: 'text', text: 'subagent task rejected' },
+            { type: 'json', value: '{"code":"CONCURRENCY_LIMIT"}' },
+          ],
         })}
       />,
     )
     expect(screen.getByText('subagent task rejected')).toBeInTheDocument()
-    expect(screen.getByText('concurrency limit reached')).toBeInTheDocument()
-    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
+    expect(screen.getByText(/"code": "CONCURRENCY_LIMIT"/)).toBeInTheDocument()
+    expect(screen.queryByText(/已接受|后台执行/)).not.toBeInTheDocument()
   })
 
-  it('omits separate errorMessage when it equals raw text', () => {
-    render(
-      <TaskToolRenderer
-        message={message({
-          phase: 'result',
-          status: 'error',
-          text: 'task failed',
-          errorMessage: 'task failed',
-        })}
-      />,
-    )
-    expect(screen.getByText('task failed')).toBeInTheDocument()
-    expect(screen.queryAllByText('task failed')).toHaveLength(1)
-  })
-
-  it('respects collapsed vs expanded preview for fallback multiline text', () => {
+  it('renders the complete ordered fallback text in the bounded viewport', () => {
     const lines = Array.from({ length: 7 }, (_, i) => `fallback-line-${i + 1}`).join('\n')
     const terminal = message({
       phase: 'result',
       status: 'done',
-      text: lines,
+      contents: [{ type: 'text', text: lines }],
     })
-    const { container, rerender } = render(<TaskToolRenderer message={terminal} />)
+    const { container } = render(<TaskToolRenderer message={terminal} expanded />)
     const output = container.querySelector('.thread-tool-output')
 
-    // 收起时截断前两行，只展示后五行
-    expect(output).not.toHaveTextContent('fallback-line-1')
-    expect(output).toHaveTextContent('fallback-line-7')
-
-    // 展开时完整呈现
-    rerender(<TaskToolRenderer message={terminal} expanded />)
+    // 正文完整可见（折叠由卡片外壳处理），不再按行截断。
     expect(output).toHaveTextContent('fallback-line-1')
     expect(output).toHaveTextContent('fallback-line-7')
+    expect(output?.textContent).not.toMatch(/more line|earlier line/)
   })
 })

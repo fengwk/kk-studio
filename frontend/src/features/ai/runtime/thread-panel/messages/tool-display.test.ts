@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  formatToolCallLinePreview,
-  formatToolCallSummary,
-  formatToolResultPreview,
-} from '@/features/ai/runtime/thread-panel/messages/tool-display'
+import { formatToolCallSummary } from '@/features/ai/runtime/thread-panel/messages/tool-display'
 
 describe('tool display', () => {
   it('formats pi-style summaries for the built-in tool contracts', () => {
@@ -14,7 +10,6 @@ describe('tool display', () => {
       limit: 20,
     }))
     expect(readSummary.text).toBe('read /app/file.ts in /srv/project [offset=2 limit=20]')
-    expect(readSummary.coversArguments).toBe(true)
     expect(formatToolCallSummary('grep', JSON.stringify({
       pattern: 'needle',
       path: 'src',
@@ -30,12 +25,6 @@ describe('tool display', () => {
       workdir: '/srv/project/frontend',
       timeout_seconds: 30,
     })).text).toBe('bash npm test in /srv/project/frontend [timeout_seconds=30]')
-    expect(formatToolCallSummary('task', JSON.stringify({
-      subagent_type: 'explorer',
-      thread_id: 'child-1',
-      max_turns: 12,
-      prompt: 'inspect the repository',
-    })).text).toBe('task explorer [thread_id=child-1 max_turns=12]')
     expect(formatToolCallSummary('lsp_goto_definition', JSON.stringify({
       path: 'src/App.java',
       workdir: '/srv/project',
@@ -46,81 +35,70 @@ describe('tool display', () => {
     )
   })
 
-  it('falls back to a compact name + JSON summary without hiding long header content', () => {
+  it('keeps task thread_id and prompt out of the header (small params only)', () => {
+    // thread_id 与 prompt 在正文出现，Header 只保留 subagent_type / max_turns。
+    expect(formatToolCallSummary('task', JSON.stringify({
+      subagent_type: 'explorer',
+      thread_id: 'child-1',
+      max_turns: 12,
+      prompt: 'inspect the repository',
+    })).text).toBe('task explorer [max_turns=12]')
+  })
+
+  it('keeps the ask_user question out of the header', () => {
+    // 问题/选项/答案整体下移到只读记录，Header 不重复问题文本。
+    expect(formatToolCallSummary('ask_user', JSON.stringify({
+      questions: [{ question: 'Which environment?', options: ['dev', 'prod'] }],
+    }))).toEqual({
+      name: 'ask_user',
+      detail: '',
+      text: 'ask_user',
+    })
+  })
+
+  it('falls back to compact JSON for unknown tools without altering string content', () => {
     const customSummary = formatToolCallSummary('custom', '{\n  "value": true\n}')
     expect(customSummary.text).toBe('custom {"value":true}')
-    expect(customSummary.coversArguments).toBe(false)
     const summary = formatToolCallSummary('custom', JSON.stringify({ value: 'x'.repeat(3_000) }))
+    // 超长值完整保留在 Header 参数区（由换行承载），不做省略。
     expect(summary.detail).toBe(JSON.stringify({ value: 'x'.repeat(3_000) }))
     expect(summary.detail.endsWith('…')).toBe(false)
+    // 字符串内容原样保留：不折叠内部空白、不转义换行、不改动引号与反斜杠。
+    const messy = JSON.stringify({
+      script: 'line1\n  line2 "quoted" \\backslash\\',
+      nested: { text: 'a\tb' },
+    })
+    expect(formatToolCallSummary('mcp__server__tool', messy).detail).toBe(messy)
   })
 
-  it('uses a five-line streaming tail, seven settled write lines, and full edit/expanded previews', () => {
-    const lines = Array.from({ length: 9 }, (_, index) => `line-${index + 1}`)
-
-    expect(formatToolCallLinePreview(lines, { expanded: false })).toEqual({
-      lines: [...lines.slice(0, 7), '... (2 more lines, 9 total)'],
-      truncated: true,
-    })
-    expect(formatToolCallLinePreview(lines, {
-      expanded: false,
-      streaming: true,
-    })).toEqual({
-      lines: ['... (5 earlier lines)', ...lines.slice(-4)],
-      truncated: true,
-    })
-    expect(formatToolCallLinePreview(lines, {
-      expanded: false,
-      full: true,
-    })).toEqual({
-      lines,
-      truncated: false,
-    })
-    expect(formatToolCallLinePreview(lines, { expanded: true })).toEqual({
-      lines,
-      truncated: false,
-    })
-  })
-
-  it('applies per-tool collapsed result budgets while preserving failures and expanded output', () => {
-    const output = Array.from({ length: 12 }, (_, index) => `line-${index + 1}`).join('\n')
-
-    expect(formatToolResultPreview('read', output, { expanded: false, error: false }))
-      .toEqual({ text: '', maxLines: 0, truncated: true })
-    expect(formatToolResultPreview('bash', output, { expanded: false, error: false }))
-      .toEqual({
-        text:
-          `... (2 earlier lines)\n`
-          + Array.from({ length: 10 }, (_, index) => `line-${index + 3}`).join('\n'),
-        maxLines: 11,
-        truncated: true,
-      })
-    expect(formatToolResultPreview('task', output, { expanded: false, error: false }))
-      .toEqual({
-        text:
-          `... (7 earlier lines)\n`
-          + Array.from({ length: 5 }, (_, index) => `line-${index + 8}`).join('\n'),
-        maxLines: 6,
-        truncated: true,
-      })
-    expect(formatToolResultPreview('read', output, { expanded: false, error: true }))
-      .toEqual({ text: output, maxLines: null, truncated: false })
-    expect(formatToolResultPreview('read', output, { expanded: true, error: false }))
-      .toEqual({ text: output, maxLines: null, truncated: false })
-  })
-
-  it('caps collapsed result previews at 2500 characters', () => {
-    const preview = formatToolResultPreview(
-      'custom_tool',
-      'x'.repeat(3_000),
-      { expanded: false, error: false },
-    )
-
-    expect(preview.text.length).toBe(2_500)
-    expect(preview.text.startsWith('... (output truncated)\n')).toBe(true)
-    expect(preview.text.endsWith('...')).toBe(true)
-    expect(preview.maxLines).toBe(6)
-    expect(preview.truncated).toBe(true)
+  it('keeps real false/0/empty values and never invents defaults for unknown tools', () => {
+    const detail = formatToolCallSummary('mcp__server__tool', JSON.stringify({
+      flag: false,
+      count: 0,
+      empty: '',
+      nullable: null,
+      list: [],
+      object: {},
+      filled: 1,
+    })).detail
+    expect(detail).toBe(JSON.stringify({
+      flag: false,
+      count: 0,
+      empty: '',
+      nullable: null,
+      list: [],
+      object: {},
+      filled: 1,
+    }))
+    // 未传入的键不会补默认值。
+    expect(detail).not.toContain('timeout_seconds')
+    expect(detail).not.toContain('workdir')
+    // 布尔旗标只在已知工具的上层摘要里折叠为名字，未知工具必须保留 false。
+    expect(formatToolCallSummary('grep', JSON.stringify({
+      pattern: 'x',
+      literal: false,
+      ignore_case: false,
+    })).text).toBe('grep "x" in .')
   })
 
   it('formats write/edit summaries with option flags and workdir suffixes', () => {
@@ -129,7 +107,7 @@ describe('tool display', () => {
       workdir: '/srv/project/src',
       content: 'class App {}',
     })).text).toBe('write App.java in /srv/project/src')
-    // replace_all=true 渲染为旗标；false/缺省不出现。
+    // replace_all=true 渲染为旗标；false/缺省不出现（影响范围参数仍可见）。
     expect(formatToolCallSummary('edit', JSON.stringify({
       path: 'App.java',
       replace_all: true,
@@ -140,12 +118,11 @@ describe('tool display', () => {
       path: 'App.java',
       replace_all: false,
     })).text).toBe('edit App.java')
-    // 缺少 path 时返回空详情（coversArguments 仍为 true，避免回退到原始 JSON）。
+    // 缺少 path 时返回空详情（不回退到原始 JSON，避免重复铺开 old/new）。
     expect(formatToolCallSummary('write', JSON.stringify({ content: 'x' }))).toEqual({
       name: 'write',
       detail: '',
       text: 'write',
-      coversArguments: true,
     })
   })
 
@@ -211,45 +188,5 @@ describe('tool display', () => {
     expect(formatToolCallSummary('  ', '').name).toBe('Tool')
     expect(formatToolCallSummary('custom', '').text).toBe('custom')
     expect(formatToolCallSummary('custom', 'not-json {').text).toBe('custom not-json {')
-  })
-
-  it('uses singular/plural truncation hints and keeps fully visible collapsed output stable', () => {
-    const oneHidden = formatToolCallLinePreview(
-      ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
-      { expanded: false },
-    )
-    // 只有一行被隐藏时提示使用单数 line。
-    expect(oneHidden.lines.at(-1)).toBe('... (1 more line, 8 total)')
-    expect(oneHidden.truncated).toBe(true)
-    expect(formatToolCallLinePreview(['only'], { expanded: false })).toEqual({
-      lines: ['only'],
-      truncated: false,
-    })
-    // 流式预览只有 1-4 行时没有 earlier 提示，也不截断。
-    expect(formatToolCallLinePreview(['a', 'b'], { expanded: false, streaming: true })).toEqual({
-      lines: ['a', 'b'],
-      truncated: false,
-    })
-    // 5 行恰好等于流式窗口，不产生 earlier 提示。
-    expect(formatToolCallLinePreview(
-      ['a', 'b', 'c', 'd', 'e'],
-      { expanded: false, streaming: true },
-    )).toEqual({
-      lines: ['a', 'b', 'c', 'd', 'e'],
-      truncated: false,
-    })
-  })
-
-  it('returns an empty quiet preview when the result text is already empty', () => {
-    expect(formatToolResultPreview('read', '', { expanded: false, error: false })).toEqual({
-      text: '',
-      maxLines: 0,
-      truncated: false,
-    })
-    expect(formatToolResultPreview('read', '  ', { expanded: false, error: false })).toEqual({
-      text: '',
-      maxLines: 0,
-      truncated: false,
-    })
   })
 })

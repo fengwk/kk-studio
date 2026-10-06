@@ -3,8 +3,6 @@ import type {
   ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
-import { toResourceAttachment } from '@/features/ai/runtime/thread-timeline/content-utils'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 
 export interface RealtimeToolCallDraft {
@@ -98,12 +96,6 @@ export interface RealtimeToolStream {
   error: boolean
   /** 在尚无 result Entry 时，从持久 errorJson 投影出的错误消息。 */
   errorText?: string
-  /**
-   * 仅从持久终止态 resultJson 投影 Resource 内容。runtime 禁止
-   * TOOL_PARTIAL 分片携带 Resource 内容，因此 partial 聚合
-   * 永远不会贡献 attachments。
-   */
-  attachments?: ToolAttachment[]
   /** Environment process.output 结构化流状态（mode、offsets、observedBytes、omission）。 */
   processOutput?: ProcessOutputStreamState
   createdAt: string
@@ -547,8 +539,7 @@ function parseModelErrorPayload(json: string): { code: string; message: string }
 /**
  * 从活动 ToolInvocation 中派生瞬态 tool-result overlay（invocation 已消失则返回
  * null）。ToolResult Entry 写入与 invocation 删除在同一事务原子提交：invocation
- * 仍存在说明持久结果尚未物化，此时终止态 resultJson/errorJson 会完整投影
- * （text/json contents + resource attachments；error message）；Entry 落地后
+ * 仍存在说明持久结果尚未物化，此时先给出已持久化的 text 与 error 摘要；Entry 落地后
  * invocation 随即从 snapshot 消失。
  */
 export function snapshotToolStream(
@@ -573,7 +564,6 @@ export function snapshotToolStream(
       ...base,
       text: result.text,
       error: result.error,
-      attachments: result.attachments,
     }
   }
   const errorText = parseToolErrorText(invocation.errorJson)
@@ -583,11 +573,10 @@ export function snapshotToolStream(
   return base
 }
 
-/** 将规范的 ToolResult JSON 解析为 text + error 标记 + resource attachments。 */
+/** 将规范的 ToolResult JSON 解析为 text + error 标记。 */
 function parseToolResultPayload(json: string | null): {
   text: string
   error: boolean
-  attachments: ToolAttachment[]
 } | null {
   if (json == null || !json.trim()) {
     return null
@@ -597,18 +586,7 @@ function parseToolResultPayload(json: string | null): {
     if (!isRecord(value)) {
       return null
     }
-    const contents = Array.isArray(value[TOOL_RESULT_CONTENTS_KEY])
-      ? (value[TOOL_RESULT_CONTENTS_KEY] as unknown[])
-      : []
-    const text = partialText(value)
-    const attachments: ToolAttachment[] = []
-    for (const item of contents) {
-      if (!isRecord(item)) {
-        continue
-      }
-      attachments.push(...toResourceAttachment(item))
-    }
-    return { text, error: value[TOOL_RESULT_ERROR_KEY] === true, attachments }
+    return { text: partialText(value), error: value[TOOL_RESULT_ERROR_KEY] === true }
   } catch {
     return null
   }

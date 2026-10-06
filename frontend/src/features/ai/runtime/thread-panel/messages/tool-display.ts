@@ -3,44 +3,19 @@ import {
   type ParsedToolArguments,
 } from '@/features/ai/runtime/thread-panel/messages/tool-previews'
 
+/** 工具卡片 Header 的单行摘要；detail 为已知工具的紧凑参数或未知工具的紧凑 JSON。 */
 export interface ToolCallSummary {
   name: string
   detail: string
   text: string
-  coversArguments: boolean
 }
 
-export interface ToolTextPreview {
-  text: string
-  maxLines: number | null
-  truncated: boolean
-}
-
-export interface ToolLinePreview {
-  lines: string[]
-  truncated: boolean
-}
-
-const COLLAPSED_CALL_PREVIEW_LINES = 7
-const STREAMING_CALL_PREVIEW_LINES = 5
-const COLLAPSED_TEXT_MAX_CHARS = 2_500
-const COLLAPSED_RESULT_LINES: Record<string, number> = {
-  bash: 10,
-  task: 5,
-}
-const QUIET_RESULT_TOOLS = new Set([
-  'read',
-  'grep',
-  'find',
-  'edit',
-  'write',
-  'lsp_goto_definition',
-  'lsp_workspace_symbols',
-  'lsp_java_decompile',
-])
-const DEFAULT_COLLAPSED_RESULT_LINES = 5
-
-/** 将工具参数压缩成 pi 风格的单行标题；未知工具回退为 `name + JSON`。 */
+/**
+ * 将工具参数压缩成 pi 风格的单行标题；未知工具/MCP 回退为紧凑 JSON。
+ *
+ * 紧凑 JSON 由规范值直接序列化：不改变字符串内容，不丢弃 false/0/空值，
+ * 也不补充未传入的默认值。超长值由 Header 的换行与 overflow-wrap 承载。
+ */
 export function formatToolCallSummary(
   toolName: string,
   rawArguments: string,
@@ -48,151 +23,13 @@ export function formatToolCallSummary(
   const name = toolName.trim() || 'Tool'
   const normalizedName = name.toLowerCase()
   const parsed = parseToolArguments(rawArguments)
-  const knownDetail = formatKnownToolDetail(normalizedName, parsed.values)
-  const detail = formatInline(knownDetail ?? formatRawArguments(parsed, rawArguments))
+  const detail = formatKnownToolDetail(normalizedName, parsed.values)
+    ?? formatRawArguments(parsed, rawArguments)
   return {
     name,
     detail,
     text: detail ? `${name} ${detail}` : name,
-    coversArguments: knownDetail != null,
   }
-}
-
-/**
- * write/edit 参数流式生成时固定为五行尾随窗口；稳定 write 收起为头七行；
- * 完整 edit 与主动展开态不截断。
- */
-export function formatToolCallLinePreview(
-  lines: string[],
-  options: {
-    expanded: boolean
-    streaming?: boolean
-    full?: boolean
-  },
-): ToolLinePreview {
-  if (options.expanded || options.full) {
-    return { lines, truncated: false }
-  }
-  if (options.streaming) {
-    const bodyLineCount =
-      lines.length > STREAMING_CALL_PREVIEW_LINES
-        ? STREAMING_CALL_PREVIEW_LINES - 1
-        : STREAMING_CALL_PREVIEW_LINES
-    const selected = lines.slice(-bodyLineCount)
-    const hiddenLineCount = Math.max(0, lines.length - selected.length)
-    const formatted = formatBoundedPreview(
-      selected.join('\n'),
-      hiddenLineCount > 0
-        ? [`${hiddenLineCount} earlier ${lineWord(hiddenLineCount)}`]
-        : [],
-      'before',
-    )
-    return {
-      lines: formatted.text ? formatted.text.split('\n') : [],
-      truncated: hiddenLineCount > 0 || formatted.charTruncated,
-    }
-  }
-  const selected = lines.slice(0, COLLAPSED_CALL_PREVIEW_LINES)
-  const remaining = Math.max(0, lines.length - selected.length)
-  const formatted = formatBoundedPreview(
-    selected.join('\n'),
-    remaining > 0
-      ? [`${remaining} more ${lineWord(remaining)}, ${lines.length} total`]
-      : [],
-    'after',
-  )
-  return {
-    lines: formatted.text ? formatted.text.split('\n') : [],
-    truncated: remaining > 0 || formatted.charTruncated,
-  }
-}
-
-/**
- * 收起态按工具控制结果预算：静默工具不展示，bash 取末十行，task 取末五行。
- * 失败与展开态始终保留完整结果。
- */
-export function formatToolResultPreview(
-  toolName: string,
-  text: string,
-  options: { expanded: boolean; error: boolean },
-): ToolTextPreview {
-  if (options.expanded || options.error) {
-    return { text, maxLines: null, truncated: false }
-  }
-  const normalizedName = toolName.trim().toLowerCase()
-  const maxLines = QUIET_RESULT_TOOLS.has(normalizedName)
-    ? 0
-    : (COLLAPSED_RESULT_LINES[normalizedName] ?? DEFAULT_COLLAPSED_RESULT_LINES)
-  if (maxLines <= 0) {
-    return { text: '', maxLines: 0, truncated: text.trim().length > 0 }
-  }
-  const lines = splitContentLines(text)
-  const selected = lines.slice(-maxLines)
-  const hiddenLineCount = Math.max(0, lines.length - selected.length)
-  const formatted = formatBoundedPreview(
-    selected.join('\n'),
-    hiddenLineCount > 0
-      ? [`${hiddenLineCount} earlier ${lineWord(hiddenLineCount)}`]
-      : [],
-    'before',
-  )
-  return {
-    text: formatted.text,
-    maxLines: maxLines + (formatted.hasHint ? 1 : 0),
-    truncated: hiddenLineCount > 0 || formatted.charTruncated,
-  }
-}
-
-function formatBoundedPreview(
-  body: string,
-  details: string[],
-  hintPosition: 'before' | 'after',
-): {
-  text: string
-  charTruncated: boolean
-  hasHint: boolean
-} {
-  const initialHint = formatTruncationHint(details)
-  const initialSeparatorChars = body && initialHint ? 1 : 0
-  const charTruncated =
-    body.length + initialHint.length + initialSeparatorChars > COLLAPSED_TEXT_MAX_CHARS
-  const hint = formatTruncationHint(
-    charTruncated ? [...details, 'output truncated'] : details,
-  )
-  const separatorChars = body && hint ? 1 : 0
-  const bodyBudget = Math.max(
-    0,
-    COLLAPSED_TEXT_MAX_CHARS - hint.length - separatorChars,
-  )
-  const visibleBody = charTruncated
-    ? truncateWithDots(body, bodyBudget)
-    : body
-  const parts = hintPosition === 'before'
-    ? [hint, visibleBody]
-    : [visibleBody, hint]
-  return {
-    text: parts.filter(Boolean).join('\n'),
-    charTruncated,
-    hasHint: hint.length > 0,
-  }
-}
-
-function formatTruncationHint(details: string[]): string {
-  return details.length > 0 ? `... (${details.join(', ')})` : ''
-}
-
-function truncateWithDots(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value
-  }
-  if (maxChars <= 3) {
-    return value.slice(0, maxChars)
-  }
-  return `${value.slice(0, maxChars - 3)}...`
-}
-
-function lineWord(count: number): 'line' | 'lines' {
-  return count === 1 ? 'line' : 'lines'
 }
 
 function formatKnownToolDetail(
@@ -216,10 +53,9 @@ function formatKnownToolDetail(
       if (!command) {
         return null
       }
-      return withOptions(
-        `${command}${workdirSuffix(values)}`,
-        [['timeout_seconds', values.timeout_seconds]],
-      )
+      return withOptions(`${command}${workdirSuffix(values)}`, [
+        ['timeout_seconds', values.timeout_seconds],
+      ])
     }
     case 'grep': {
       const pattern = stringField(values.pattern)
@@ -268,15 +104,16 @@ function formatKnownToolDetail(
       const target = stringField(values.target)
       return `${base}${target ? ` ${JSON.stringify(target)}` : ''}`.trim()
     }
+    case 'ask_user':
+      // 问题/选项/答案整体下移到只读记录，Header 只保留工具名。
+      return ''
     case 'task': {
       const subagentType = stringField(values.subagent_type)
       if (!subagentType) {
         return null
       }
-      return withOptions(subagentType, [
-        ['thread_id', values.thread_id],
-        ['max_turns', values.max_turns],
-      ])
+      // thread_id 在正文以可点击 Thread 链接出现，Header 不重复。
+      return withOptions(subagentType, [['max_turns', values.max_turns]])
     }
     default:
       return null
@@ -324,21 +161,6 @@ function withOptions(
   return `${base} [${visible.join(' ')}]`.trim()
 }
 
-function formatInline(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
-}
-
 function stringField(value: unknown): string {
   return typeof value === 'string' ? value : ''
-}
-
-function splitContentLines(content: string): string[] {
-  if (!content) {
-    return []
-  }
-  const lines = content.split('\n')
-  if (content.endsWith('\n') && lines[lines.length - 1] === '') {
-    lines.pop()
-  }
-  return lines
 }
