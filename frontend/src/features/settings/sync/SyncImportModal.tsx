@@ -255,9 +255,9 @@ function ImportResult({
       {settingsDirty ? (
         <div className="settings-sync-result-dirty" role="status">
           <span>{t('settings.sync.import.dirtyHint')}</span>
-          <button type="button" className="settings-button" onClick={onReloadSettings}>
+          <Button variant="ghost" onClick={onReloadSettings}>
             {t('settings.sync.import.reloadSettings')}
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

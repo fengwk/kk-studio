@@ -275,24 +275,24 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
     generalTab.focus()
     await user.keyboard('{ArrowRight}')
     expect(selectedTab()).toBe(await tabByName('插件'))
-    expect(document.activeElement?.id).toBe('settings-tab-plugins')
+    expect(document.activeElement).toBe(await tabByName('插件'))
 
     await user.keyboard('{ArrowRight}')
     expect(selectedTab()).toBe(await tabByName('AI 运行时'))
-    expect(document.activeElement?.id).toBe('settings-tab-aiRuntime')
+    expect(document.activeElement).toBe(await tabByName('AI 运行时'))
 
     await user.keyboard('{End}')
     expect(selectedTab()).toBe(await tabByName('同步'))
-    expect(document.activeElement?.id).toBe('settings-tab-sync')
+    expect(document.activeElement).toBe(await tabByName('同步'))
 
     await user.keyboard('{Home}')
     expect(selectedTab()).toBe(await tabByName('常规'))
-    expect(document.activeElement?.id).toBe('settings-tab-general')
+    expect(document.activeElement).toBe(await tabByName('常规'))
 
     // Arrow 环绕：从首项向左回到末项。
     await user.keyboard('{ArrowLeft}')
     expect(selectedTab()).toBe(await tabByName('同步'))
-    expect(document.activeElement?.id).toBe('settings-tab-sync')
+    expect(document.activeElement).toBe(await tabByName('同步'))
   })
 
   it('keeps click selection working with focus on the clicked tab', async () => {
@@ -300,7 +300,7 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
     renderSettings()
     await user.click(await tabByName('高级'))
     expect(selectedTab()).toBe(await tabByName('高级'))
-    expect(document.activeElement?.id).toBe('settings-tab-advanced')
+    expect(document.activeElement).toBe(await tabByName('高级'))
   })
 })
 

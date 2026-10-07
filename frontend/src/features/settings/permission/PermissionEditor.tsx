@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { ArrowDown, ArrowUp, X } from 'lucide-react'
 import { buildPermissionToolCandidates } from '@/features/ai/catalog/agent-capability-candidates'
 import {
   addRule,
@@ -14,7 +15,11 @@ import { agentService } from '@/shared/api/agent-service'
 import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { Button } from '@/shared/ui/controls/Button'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Select } from '@/shared/ui/controls/Select'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 
 /**
  * 保序 permission 规则编辑器（模型可见 tool name + 该 tool 下有序规则数组）。
@@ -44,7 +49,7 @@ export function PermissionEditor({
   return (
     <div className="permission-editor" data-permission-editor>
       {groups.length === 0 ? (
-        <p className="settings-hint">{t('settings.permission.empty')}</p>
+        <StateBlock title={t('settings.permission.empty')} />
       ) : null}
 
       {groups.map((group, groupIndex) => {
@@ -90,14 +95,16 @@ export function PermissionEditor({
                   </span>
                 ) : null}
               </div>
-              <button
-                type="button"
-                className="settings-button danger permission-remove-tool"
+              <Button
+                variant="ghost"
+                danger
+                size="compact"
+                className="permission-remove-tool"
                 aria-label={t('settings.permission.removeTool', { tool: group.tool || '…' })}
                 onClick={() => onChange(removeTool(groups, groupIndex))}
               >
                 {t('settings.permission.removeToolShort')}
-              </button>
+              </Button>
             </div>
 
             {group.rules.length === 0 ? (
@@ -111,12 +118,11 @@ export function PermissionEditor({
                 return (
                   <div className="permission-rule" key={ruleIndex} data-permission-rule>
                     <div className="permission-rule-pattern">
-                      <input
-                        className="settings-input permission-pattern-input"
+                      <TextInput
+                        className="permission-pattern-input"
                         value={rule.pattern}
                         placeholder={t('settings.permission.patternPlaceholder')}
-                        data-invalid={patternBlank || undefined}
-                        aria-invalid={patternBlank}
+                        invalid={patternBlank}
                         aria-label={t('settings.permission.patternAriaLabel', { index: ruleIndex + 1 })}
                         onChange={(event) =>
                           onChange(
@@ -150,52 +156,49 @@ export function PermissionEditor({
                       }
                     />
                     <div className="permission-rule-actions">
-                      <button
-                        type="button"
-                        className="settings-icon-button"
-                        aria-label={t('settings.permission.moveUp')}
+                      <IconButton
+                        label={t('settings.permission.moveUp')}
+                        size="compact"
                         disabled={ruleIndex === 0}
                         onClick={() => onChange(moveRule(groups, groupIndex, ruleIndex, -1))}
                       >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        className="settings-icon-button"
-                        aria-label={t('settings.permission.moveDown')}
+                        <ArrowUp aria-hidden="true" />
+                      </IconButton>
+                      <IconButton
+                        label={t('settings.permission.moveDown')}
+                        size="compact"
                         disabled={lastRule}
                         onClick={() => onChange(moveRule(groups, groupIndex, ruleIndex, 1))}
                       >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        className="settings-icon-button danger"
-                        aria-label={t('settings.permission.removeRule', { index: ruleIndex + 1 })}
+                        <ArrowDown aria-hidden="true" />
+                      </IconButton>
+                      <IconButton
+                        label={t('settings.permission.removeRule', { index: ruleIndex + 1 })}
+                        danger
+                        size="compact"
                         onClick={() => onChange(removeRule(groups, groupIndex, ruleIndex))}
                       >
-                        ✕
-                      </button>
+                        <X aria-hidden="true" />
+                      </IconButton>
                     </div>
                   </div>
                 )
               })}
             </div>
 
-            <button
-              type="button"
-              className="settings-button"
+            <Button
+              variant="ghost"
               onClick={() => onChange(addRule(groups, groupIndex))}
             >
               {t('settings.permission.addRule')}
-            </button>
+            </Button>
           </section>
         )
       })}
 
-      <button type="button" className="settings-button" onClick={() => onChange(addTool(groups))}>
+      <Button variant="ghost" onClick={() => onChange(addTool(groups))}>
         {t('settings.permission.addTool')}
-      </button>
+      </Button>
     </div>
   )
 }

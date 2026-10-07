@@ -1,38 +1,44 @@
-import { AlertTriangle, Key, LogIn, LogOut, Plug } from 'lucide-react'
-import { useI18n } from '@/shared/i18n'
+import { Key, LogIn, LogOut, Plug } from 'lucide-react'
+import { useI18n, type AppLocale } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
+import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import type { PluginDTO, PluginStatus } from '@/shared/api/contracts/ai-plugin'
 
-function formatDateTime(value: string | null | undefined): string {
+function formatDateTime(value: string | null | undefined, locale: AppLocale): string {
   if (!value) {
     return '—'
   }
-  try {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) {
-      return value
-    }
-    return date.toLocaleString()
-  } catch {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
     return value
   }
+  return date.toLocaleString(locale)
 }
 
+/**
+ * 状态 pill 只用设计系统已定义的变体：ok=is-ready、warning=is-pending、error=is-failed。
+ * 不在卡片里发明新的皮肤类，颜色语义由 .status-pill 变体统一决定。
+ */
 function statusPillClass(status: PluginStatus): string {
   switch (status) {
     case 'CONNECTED':
       return 'status-pill is-ready'
     case 'REFRESH_FAILED':
     case 'REFRESH_UNCERTAIN':
-      return 'status-pill is-warning'
+      return 'status-pill is-pending'
     case 'REAUTH_REQUIRED':
     case 'KEY_UNAVAILABLE':
-      return 'status-pill is-error'
+      return 'status-pill is-failed'
     case 'NOT_CONNECTED':
     default:
       return 'status-pill is-offline'
   }
 }
 
+/**
+ * 插件资源卡：外观全部来自共享 ResourceCard；安装/连接状态、版本与错误诊断由本 feature 提供，
+ * 连接/断开是卡片动作区里的独立操作，不嵌套按钮。
+ */
 export function PluginCard({
   plugin,
   onConnect,
@@ -42,118 +48,78 @@ export function PluginCard({
   onConnect: () => void
   onDisconnect: () => void
 }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const isConnected = plugin.status === 'CONNECTED'
   const isKeyUnavailable = plugin.status === 'KEY_UNAVAILABLE'
   const isNotConnected = plugin.status === 'NOT_CONNECTED'
 
+  const rows: ResourceCardMetaRow[] = [
+    [t('plugins.region'), plugin.region || '—'],
+    [t('plugins.tokenExpiresAt'), formatDateTime(plugin.expiresAt, locale)],
+    [t('plugins.nextRefreshAt'), formatDateTime(plugin.nextRefreshAt, locale)],
+    [t('plugins.lastRefreshedAt'), formatDateTime(plugin.lastRefreshedAt, locale)],
+  ]
+  if (plugin.lastRefreshError) {
+    rows.push({
+      label: t('plugins.lastRefreshError'),
+      value: (
+        <span className="inline-hint danger" role="alert">
+          {plugin.lastRefreshError}
+        </span>
+      ),
+      wrap: true,
+    })
+  }
+
   return (
-    <article
-      className="info-card plugin-card"
-      data-testid={`plugin-card-${plugin.pluginId}`}
-    >
-      <div className="chat-card-head">
-        <div className="lead">
-          <span className="card-glyph" aria-hidden="true">
-            <Plug />
-          </span>
-          <div className="text-content">
-            <h3 title={plugin.name}>{plugin.name}</h3>
-            <p title={plugin.pluginId}>
-              <code>{plugin.pluginId}</code>
-            </p>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <span className="status-pill" style={{ opacity: 0.8 }}>
-            v{plugin.version}
-          </span>
+    <ResourceCard
+      className="plugin-card"
+      icon={<Plug aria-hidden="true" />}
+      title={plugin.name}
+      subtitle={plugin.pluginId}
+      badge={
+        <>
+          <span className="status-pill is-neutral">v{plugin.version}</span>
           <span
             className={statusPillClass(plugin.status)}
             data-testid={`plugin-status-${plugin.pluginId}`}
           >
             {t(`plugins.status.${plugin.status}`) || plugin.status}
           </span>
-        </div>
-      </div>
-
-      <div className="meta-block">
-        <div className="meta-row">
-          <span className="lbl">{t('plugins.region')}</span>
-          <span className="val">{plugin.region || '—'}</span>
-        </div>
-        <div className="meta-row">
-          <span className="lbl">{t('plugins.tokenExpiresAt')}</span>
-          <span className="val">{formatDateTime(plugin.expiresAt)}</span>
-        </div>
-        <div className="meta-row">
-          <span className="lbl">{t('plugins.nextRefreshAt')}</span>
-          <span className="val">{formatDateTime(plugin.nextRefreshAt)}</span>
-        </div>
-        <div className="meta-row">
-          <span className="lbl">{t('plugins.lastRefreshedAt')}</span>
-          <span className="val">{formatDateTime(plugin.lastRefreshedAt)}</span>
-        </div>
-        {plugin.lastRefreshError ? (
-          <div className="meta-row" role="alert">
-            <span className="lbl" style={{ color: 'var(--color-danger, #ef4444)' }}>
-              {t('plugins.lastRefreshError')}
-            </span>
-            <span className="val" style={{ color: 'var(--color-danger, #ef4444)' }}>
-              {plugin.lastRefreshError}
-            </span>
-          </div>
-        ) : null}
-
-        {plugin.status === 'REFRESH_UNCERTAIN' ? (
-          <div
-            className="inline-hint"
-            role="status"
-            style={{ color: 'var(--color-warning, #f59e0b)', marginTop: '6px' }}
-          >
-            <AlertTriangle size={14} style={{ display: 'inline', marginRight: '4px' }} />
-            {t('plugins.status.REFRESH_UNCERTAIN')}
-          </div>
-        ) : null}
-
-        {isKeyUnavailable ? (
-          <div
-            className="inline-hint"
-            role="status"
-            style={{ color: 'var(--color-danger, #ef4444)', marginTop: '6px' }}
-          >
-            <Key size={14} style={{ display: 'inline', marginRight: '4px' }} />
-            {t('plugins.connectDialog.keyUnavailableHint')}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="chat-card-foot" style={{ justifyContent: 'flex-end' }}>
-        {isConnected ? (
-          <button
-            type="button"
-            className="action-enter-btn danger"
+        </>
+      }
+      meta={rows}
+      actions={
+        isConnected ? (
+          <Button
+            variant="ghost"
+            size="compact"
+            danger
             aria-label={`${t('plugins.disconnect')} ${plugin.name}`}
             disabled={isKeyUnavailable}
             onClick={onDisconnect}
           >
             <LogOut aria-hidden="true" />
             {t('plugins.disconnect')}
-          </button>
+          </Button>
         ) : (
-          <button
-            type="button"
-            className="action-enter-btn"
-            style={{ color: 'var(--color-primary, #3b82f6)' }}
+          <Button
+            size="compact"
             aria-label={`${isNotConnected ? t('plugins.connect') : t('plugins.reconnect')} ${plugin.name}`}
             disabled={isKeyUnavailable}
             onClick={onConnect}
           >
             <LogIn aria-hidden="true" />
             {isNotConnected ? t('plugins.connect') : t('plugins.reconnect')}
-          </button>
-        )}
-      </div>
-    </article>
+          </Button>
+        )
+      }
+    >
+      {isKeyUnavailable ? (
+        <p className="inline-hint danger" role="status">
+          <Key aria-hidden="true" size={14} /> {t('plugins.connectDialog.keyUnavailableHint')}
+        </p>
+      ) : null}
+    </ResourceCard>
   )
 }

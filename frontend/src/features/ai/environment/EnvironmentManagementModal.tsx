@@ -10,6 +10,7 @@ import {
   formatTimestamp,
 } from '@/features/ai/environment/environment-utils'
 import { EnvironmentHostSection } from '@/features/ai/environment/EnvironmentHostSection'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 
 export interface EnvironmentManagementModalProps {
   environment: EnvironmentCardDTO
@@ -53,9 +54,7 @@ export function EnvironmentManagementModal({
             </div>
 
             {orderedEvents.length === 0 ? (
-              <div className="env-events-empty">
-                <p>{t('ai.environment.events.empty')}</p>
-              </div>
+              <StateBlock title={t('ai.environment.events.empty')} />
             ) : (
               <div className="env-events-list">
                 {orderedEvents.map((evt, idx) => {

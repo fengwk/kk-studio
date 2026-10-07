@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { ChatCard } from '@/features/ai/chat/ChatCard'
+import { ChatCardsPanel } from '@/features/ai/chat/ChatCardsPanel'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
 describe('ChatCard', () => {
@@ -93,6 +94,72 @@ describe('ChatCard', () => {
     expect(screen.getByText('assistant')).toBeInTheDocument()
     expect(screen.queryByText('（已删除/缺失）')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('assistant （已删除/缺失）')).not.toBeInTheDocument()
+  })
+
+  // 验证 ChatCard 符合共享 ResourceCard 规范：非交互外壳、包含标题属性与动作槽按钮
+  it('conforms to shared ResourceCard contract with non-interactive shell and explicit action buttons', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ChatCard
+          chat={chat()}
+          agents={[]}
+          onEdit={() => undefined}
+          onDelete={() => undefined}
+        />
+      </MemoryRouter>,
+    )
+
+    const card = container.querySelector('article.resource-card')
+    expect(card).toBeInTheDocument()
+    expect(card).not.toHaveClass('info-card')
+
+    const heading = screen.getByRole('heading', { level: 3 })
+    expect(heading).toHaveTextContent('Draft')
+    expect(heading).toHaveAttribute('title', 'Draft')
+
+    const buttons = screen.getAllByRole('button')
+    expect(buttons).toHaveLength(3)
+    buttons.forEach((btn) => {
+      expect(btn.tagName).toBe('BUTTON')
+    })
+  })
+})
+
+describe('ChatCardsPanel', () => {
+  // 验证 ChatCardsPanel 使用共享 ResourceGrid 栅格布局，并正确组织 CreateCard 与列表项
+  it('renders in a shared ResourceGrid layout with CreateCard and chat items', async () => {
+    const user = userEvent.setup()
+    const onCreate = vi.fn()
+    const onEdit = vi.fn()
+    const onDelete = vi.fn()
+    const testChat = chat()
+
+    const { container } = render(
+      <MemoryRouter>
+        <ChatCardsPanel
+          chats={[testChat]}
+          agents={[]}
+          onCreate={onCreate}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          deletePending={false}
+        />
+      </MemoryRouter>,
+    )
+
+    const grid = container.querySelector('.resource-grid')
+    expect(grid).toBeInTheDocument()
+    expect(container.querySelector('.cards-grid')).not.toBeInTheDocument()
+
+    const createBtn = screen.getByRole('button', { name: '新建 Chat' })
+    await user.click(createBtn)
+    expect(onCreate).toHaveBeenCalledOnce()
+
+    await user.click(screen.getByRole('button', { name: '编辑 Draft' }))
+    expect(onEdit).toHaveBeenCalledWith(testChat)
+
+    await user.click(screen.getByRole('button', { name: '删除 Draft' }))
+    expect(onDelete).toHaveBeenCalledWith(testChat)
   })
 })
 

@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
@@ -33,33 +35,30 @@ export function PluginsTab() {
   })
 
   if (pluginsQuery.isLoading) {
-    return (
-      <div className="state-block" role="status">
-        {t('settings.loading')}
-      </div>
-    )
+    return <StateBlock title={t('settings.loading')} />
   }
 
   if (pluginsQuery.isError) {
     return (
-      <div className="state-block is-error" role="alert">
-        {pluginsQuery.error instanceof Error
-          ? pluginsQuery.error.message
-          : String(pluginsQuery.error)}
-      </div>
+      <StateBlock
+        title={
+          pluginsQuery.error instanceof Error
+            ? pluginsQuery.error.message
+            : String(pluginsQuery.error)
+        }
+        tone="danger"
+      />
     )
   }
 
   const plugins = pluginsQuery.data ?? []
 
   return (
-    <div className="plugins-tab-container" style={{ padding: '8px 0' }}>
+    <>
       {plugins.length === 0 ? (
-        <div className="state-block" role="status">
-          {t('plugins.empty')}
-        </div>
+        <StateBlock title={t('plugins.empty')} />
       ) : (
-        <div className="cards-grid">
+        <ResourceGrid>
           {plugins.map((plugin) => (
             <PluginCard
               key={plugin.pluginId}
@@ -71,7 +70,7 @@ export function PluginsTab() {
               }}
             />
           ))}
-        </div>
+        </ResourceGrid>
       )}
 
       {connectTarget && (
@@ -104,6 +103,6 @@ export function PluginsTab() {
           }}
         />
       )}
-    </div>
+    </>
   )
 }

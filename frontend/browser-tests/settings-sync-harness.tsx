@@ -9,6 +9,7 @@ import type {
   ConfigSyncItem,
 } from '@/shared/api/contracts/config-sync'
 import { SyncTab } from '@/features/settings/sync/SyncTab'
+import { Button } from '@/shared/ui/controls/Button'
 
 declare global {
   interface Window {
@@ -110,25 +111,22 @@ export function HarnessApp() {
     <QueryClientProvider client={queryClient}>
       <div style={{ padding: '24px', maxWidth: '760px', margin: '0 auto' }}>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
+          <Button
             id="toggle-locale-btn"
-            className="settings-button"
+            variant="ghost"
             onClick={() => switchLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
           >
             Locale: {locale}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             id="toggle-dirty-btn"
-            className="settings-button"
+            variant="ghost"
             onClick={() => setDirty((prev) => !prev)}
           >
             Dirty draft: {String(dirty)}
-          </button>
+          </Button>
           <select
             id="preview-mode"
-            className="settings-button"
             defaultValue={previewMode}
             onChange={(event) => {
               previewMode = event.target.value as PreviewMode

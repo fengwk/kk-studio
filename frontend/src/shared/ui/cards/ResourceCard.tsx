@@ -24,6 +24,8 @@ export interface ResourceCardProps {
   icon: ReactNode
   title: string
   subtitle?: string
+  /** 标题行右侧的状态标记槽（状态 pill、版本等）；共享卡不解释其语义。 */
+  badge?: ReactNode
   meta?: ResourceCardMetaRow[]
   /** 元信息之上的业务内容槽（正文、进度、附件等）。 */
   children?: ReactNode
@@ -107,6 +109,7 @@ export function ResourceCard({
   icon,
   title,
   subtitle,
+  badge,
   meta,
   children,
   actions,
@@ -128,6 +131,9 @@ export function ResourceCard({
             </p>
           ) : null}
         </div>
+        {badge !== undefined && badge !== null ? (
+          <div className="resource-card-badge">{badge}</div>
+        ) : null}
       </div>
       {children !== undefined && children !== null ? (
         <div className="resource-card-content">{children}</div>

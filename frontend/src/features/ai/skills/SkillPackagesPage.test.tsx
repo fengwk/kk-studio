@@ -302,11 +302,11 @@ describe('SkillPackagesPage', () => {
 
     const pill3 = within(cards[2]!).getByTestId('check-status-pill')
     expect(pill3).toHaveTextContent('有更新可用')
-    expect(pill3).toHaveClass('status-pill is-warning')
+    expect(pill3).toHaveClass('status-pill is-pending')
 
     const pill4 = within(cards[3]!).getByTestId('check-status-pill')
     expect(pill4).toHaveTextContent('检查失败')
-    expect(pill4).toHaveClass('status-pill is-error')
+    expect(pill4).toHaveClass('status-pill is-failed')
 
     // 2. 实时切 en-US
     act(() => {

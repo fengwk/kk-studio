@@ -7,6 +7,8 @@ import type { ConfigSyncImportCheckDTO } from '@/shared/api/contracts/config-syn
 import { configSyncErrorMessage } from '@/features/settings/sync/config-sync-utils'
 import { SyncExportModal } from '@/features/settings/sync/SyncExportModal'
 import { SyncImportModal } from '@/features/settings/sync/SyncImportModal'
+import { Button } from '@/shared/ui/controls/Button'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 
 interface SyncTabProps {
   reloadSettings: () => void
@@ -125,17 +127,16 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
       ) : null}
 
       <div className="settings-sync-actions">
-        <button type="button" className="settings-button" onClick={openFilePicker} disabled={busy}>
+        <Button variant="ghost" onClick={openFilePicker} disabled={busy}>
           {t('settings.sync.import')}
-        </button>
-        <button
-          type="button"
-          className="settings-button primary"
+        </Button>
+        <Button
+          variant="primary"
           onClick={() => setExportOpen(true)}
           disabled={!canExport}
         >
           {t('settings.sync.export')}
-        </button>
+        </Button>
         <input
           ref={fileInputRef}
           className="settings-sync-file-input"
@@ -149,22 +150,19 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
       </div>
 
       {inventoryQuery.isLoading ? (
-        <div className="state-block" role="status">
-          {t('settings.sync.loading')}
-        </div>
+        <StateBlock title={t('settings.sync.loading')} />
       ) : null}
       {inventoryQuery.isError ? (
-        <div className="state-block danger" role="alert">
-          <p>{t('settings.sync.loadFailed')}</p>
-          <button
-            type="button"
-            className="settings-button"
+        <div className="settings-error-state" role="alert">
+          <StateBlock title={t('settings.sync.loadFailed')} tone="danger" />
+          <Button
+            variant="ghost"
             onClick={() => {
               void inventoryQuery.refetch()
             }}
           >
             {t('settings.sync.retry')}
-          </button>
+          </Button>
         </div>
       ) : null}
 

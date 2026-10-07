@@ -56,7 +56,6 @@ function isInsideOpenMenuTarget(target: EventTarget | null): boolean {
 interface ResolvedLayout {
   activeGroupId: string
   immersive: boolean
-  immersiveClass?: string
 }
 
 function resolveRouteLayout(
@@ -87,12 +86,9 @@ function resolveRouteLayout(
           ? page.workspace(params)
           : Boolean(page.workspace)
 
-      if (isWorkspace) {
-        const immersiveClass = activeGroupId === 'canvas' ? 'canvas-immersive' : 'chat-immersive'
-        return { activeGroupId, immersive: true, immersiveClass }
-      }
-
-      return { activeGroupId, immersive: false }
+      // 所有工作区共用同一沉浸壳：隐藏全局顶栏并让 stage 占满可见区。
+      // 各业务（对话/画布）的专属几何由各自 feature 局部样式表达，不在这里分叉皮肤。
+      return { activeGroupId, immersive: isWorkspace }
     }
   }
 
@@ -119,7 +115,7 @@ export function AppShell({
   const { t } = useI18n()
   const pendingInteractionsCount = usePendingInteractionsCount()
 
-  const { activeGroupId, immersive, immersiveClass } = useMemo(() => {
+  const { activeGroupId, immersive } = useMemo(() => {
     const pages = explicitPages ?? host?.pages.list() ?? []
     return resolveRouteLayout(pages, navItems, location)
   }, [explicitPages, host, navItems, location])
@@ -167,7 +163,7 @@ export function AppShell({
 
   return (
     <div
-      className={`app-frame${immersiveClass ? ` ${immersiveClass}` : ''}`}
+      className={`app-frame${immersive ? ' workspace-immersive' : ''}`}
       data-nav-open={navOpen ? 'true' : 'false'}
     >
       {!immersive ? (

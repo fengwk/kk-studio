@@ -3,6 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUpCircle, Edit2, Package, RefreshCw, Trash2 } from 'lucide-react'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
 import { Button } from '@/shared/ui/controls/Button'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
+import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
@@ -24,14 +28,18 @@ function formatCommit(commit: string | null | undefined): string {
   return commit.length > 10 ? commit.slice(0, 10) : commit
 }
 
+/**
+ * 状态 pill 只用设计系统已定义的变体：ok=is-ready、warning=is-pending、error=is-failed。
+ * 不在列表里发明新的皮肤类，颜色语义由 .status-pill 变体统一决定。
+ */
 function checkStatusPillClass(status: SkillPackageCheckStatus): string {
   switch (status) {
     case 'UP_TO_DATE':
       return 'status-pill is-ready'
     case 'UPDATE_AVAILABLE':
-      return 'status-pill is-warning'
+      return 'status-pill is-pending'
     case 'CHECK_FAILED':
-      return 'status-pill is-error'
+      return 'status-pill is-failed'
     case 'UNCHECKED':
     default:
       return 'status-pill is-offline'
@@ -130,7 +138,7 @@ export function SkillPackagesPage() {
   }, [packagesQuery.data, search])
 
   const content = (
-    <div className="cards-grid skill-packages-list">
+    <ResourceGrid className="skill-packages-list">
       <CreateCard
         title={t('ai.skillPackages.create')}
         subtitle={t('ai.skillPackages.description')}
@@ -142,86 +150,61 @@ export function SkillPackagesPage() {
         const hasUpdate =
           Boolean(pkg.observedHeadCommit) && pkg.observedHeadCommit !== pkg.currentCommit
 
+        // 元信息按“标识/引用 → 检查诊断 → 技能清单”组织；错误与技能清单只在有数据时出现。
+        const rows: ResourceCardMetaRow[] = [
+          [t('ai.skillPackages.repositoryUrl'), pkg.repositoryUrl],
+          [t('ai.skillPackages.branch'), pkg.branch],
+          [
+            t('ai.skillPackages.currentCommit'),
+            <code title={pkg.currentCommit ?? undefined}>{formatCommit(pkg.currentCommit)}</code>,
+          ],
+          [
+            t('ai.skillPackages.observedHeadCommit'),
+            <code title={pkg.observedHeadCommit ?? undefined}>
+              {formatCommit(pkg.observedHeadCommit)}
+            </code>,
+          ],
+          [t('ai.skillPackages.skillsCount'), String(pkg.skills.length)],
+        ]
+        if (pkg.headCheckError) {
+          rows.push({
+            label: t('shared.error'),
+            value: (
+              <span className="inline-hint danger" role="alert">
+                {pkg.headCheckError}
+              </span>
+            ),
+            wrap: true,
+          })
+        }
+        if (pkg.skills.length > 0) {
+          rows.push({
+            label: t('ai.skillPackages.skills'),
+            tags: pkg.skills.map((skill) => skill.name),
+            limit: 3,
+          })
+        }
+
         return (
-          <article
+          <ResourceCard
             key={pkg.packageName}
-            className="info-card skill-package-card"
-            data-testid={`skill-package-card-${pkg.packageName}`}
-          >
-            <div className="chat-card-head">
-              <div className="lead">
-                <span className="card-glyph" aria-hidden="true">
-                  <Package />
-                </span>
-                <div className="text-content">
-                  <h3 title={pkg.packageName}>{pkg.packageName}</h3>
-                  <p title={pkg.description || ''}>{pkg.description || '—'}</p>
-                </div>
-              </div>
+            className="skill-package-card"
+            icon={<Package aria-hidden="true" />}
+            title={pkg.packageName}
+            subtitle={pkg.description || '—'}
+            badge={
               <span
                 className={checkStatusPillClass(pkg.checkStatus)}
                 data-testid="check-status-pill"
               >
                 {t(`ai.skillPackages.status.${pkg.checkStatus}`)}
               </span>
-            </div>
-
-            <div className="meta-block">
-              <div className="meta-row">
-                <span className="lbl">{t('ai.skillPackages.repositoryUrl')}</span>
-                <span className="val" title={pkg.repositoryUrl}>
-                  {pkg.repositoryUrl}
-                </span>
-              </div>
-              <div className="meta-row">
-                <span className="lbl">{t('ai.skillPackages.branch')}</span>
-                <span className="val">{pkg.branch}</span>
-              </div>
-              <div className="meta-row">
-                <span className="lbl">{t('ai.skillPackages.currentCommit')}</span>
-                <span className="val" title={pkg.currentCommit}>
-                  <code>{formatCommit(pkg.currentCommit)}</code>
-                </span>
-              </div>
-              <div className="meta-row">
-                <span className="lbl">{t('ai.skillPackages.observedHeadCommit')}</span>
-                <span className="val" title={pkg.observedHeadCommit || undefined}>
-                  <code>{formatCommit(pkg.observedHeadCommit)}</code>
-                </span>
-              </div>
-              {pkg.headCheckError ? (
-                <div className="meta-row" role="alert">
-                  <span className="lbl" style={{ color: 'var(--color-danger, #ef4444)' }}>
-                    {t('shared.error')}
-                  </span>
-                  <span className="val" style={{ color: 'var(--color-danger, #ef4444)' }}>
-                    {pkg.headCheckError}
-                  </span>
-                </div>
-              ) : null}
-              <div className="meta-row">
-                <span className="lbl">{t('ai.skillPackages.skillsCount')}</span>
-                <span className="val">{pkg.skills.length}</span>
-              </div>
-              {pkg.skills.length > 0 ? (
-                <div className="meta-row">
-                  <span className="lbl">{t('ai.skillPackages.skills')}</span>
-                  <span className="val" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                    {pkg.skills.map((s) => (
-                      <code key={s.name} title={s.description}>
-                        {s.name}
-                      </code>
-                    ))}
-                  </span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="chat-card-foot split">
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  className="action-enter-btn"
+            }
+            meta={rows}
+            actions={
+              <>
+                <Button
+                  size="compact"
                   aria-label={`${t('ai.skillPackages.check')} ${pkg.packageName}`}
                   disabled={isChecking || isUpdating}
                   onClick={() =>
@@ -236,12 +219,11 @@ export function SkillPackagesPage() {
                     className={isChecking ? 'animate-spin' : undefined}
                   />
                   {t('ai.skillPackages.check')}
-                </button>
+                </Button>
                 {hasUpdate ? (
-                  <button
-                    type="button"
-                    className="action-enter-btn"
-                    style={{ color: 'var(--color-primary, #3b82f6)' }}
+                  <Button
+                    variant="ghost"
+                    size="compact"
                     aria-label={`${t('ai.skillPackages.update')} ${pkg.packageName}`}
                     disabled={isChecking || isUpdating}
                     onClick={() =>
@@ -254,23 +236,22 @@ export function SkillPackagesPage() {
                   >
                     <ArrowUpCircle aria-hidden="true" />
                     {t('ai.skillPackages.update')}
-                  </button>
+                  </Button>
                 ) : null}
-              </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  className="action-enter-btn"
+                <Button
+                  variant="ghost"
+                  size="compact"
                   aria-label={`${t('ai.skillPackages.edit')} ${pkg.packageName}`}
                   disabled={isChecking || isUpdating}
                   onClick={() => setEditTarget(pkg)}
                 >
                   <Edit2 aria-hidden="true" />
                   {t('ai.skillPackages.edit')}
-                </button>
-                <button
-                  type="button"
-                  className="action-enter-btn danger"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  danger
                   aria-label={`${t('ai.skillPackages.delete')} ${pkg.packageName}`}
                   disabled={isChecking || isUpdating}
                   onClick={() => {
@@ -280,13 +261,13 @@ export function SkillPackagesPage() {
                 >
                   <Trash2 aria-hidden="true" />
                   {t('ai.skillPackages.delete')}
-                </button>
-              </div>
-            </div>
-          </article>
+                </Button>
+              </>
+            }
+          />
         )
       })}
-    </div>
+    </ResourceGrid>
   )
 
   return (
@@ -417,8 +398,7 @@ function CreatePackageModal({
 
             <label className="form-group">
               <FieldLabel required>{t('ai.skillPackages.name')}</FieldLabel>
-              <input
-                type="text"
+              <TextInput
                 value={packageName}
                 placeholder="my-skills"
                 onChange={(event) => setPackageName(event.target.value)}
@@ -428,7 +408,7 @@ function CreatePackageModal({
 
             <label className="form-group">
               <FieldLabel>{t('ai.skillPackages.descriptionLabel')}</FieldLabel>
-              <textarea
+              <TextArea
                 value={description}
                 placeholder={t('ai.catalog.form.descriptionPlaceholder')}
                 rows={2}
@@ -438,8 +418,7 @@ function CreatePackageModal({
 
             <label className="form-group">
               <FieldLabel required>{t('ai.skillPackages.repositoryUrl')}</FieldLabel>
-              <input
-                type="text"
+              <TextInput
                 value={repositoryUrl}
                 placeholder="https://github.com/org/repo.git"
                 onChange={(event) => setRepositoryUrl(event.target.value)}
@@ -449,8 +428,7 @@ function CreatePackageModal({
 
             <label className="form-group">
               <FieldLabel required>{t('ai.skillPackages.branch')}</FieldLabel>
-              <input
-                type="text"
+              <TextInput
                 value={branch}
                 placeholder="main"
                 onChange={(event) => setBranch(event.target.value)}
@@ -534,18 +512,17 @@ function EditPackageModal({
 
             <label className="form-group">
               <FieldLabel>{t('ai.skillPackages.name')}</FieldLabel>
-              <input type="text" value={target.packageName} disabled readOnly />
+              <TextInput value={target.packageName} disabled readOnly />
             </label>
 
             <label className="form-group">
               <FieldLabel>{t('ai.skillPackages.repositoryUrl')}</FieldLabel>
-              <input type="text" value={target.repositoryUrl} disabled readOnly />
+              <TextInput value={target.repositoryUrl} disabled readOnly />
             </label>
 
             <label className="form-group">
               <FieldLabel required>{t('ai.skillPackages.branch')}</FieldLabel>
-              <input
-                type="text"
+              <TextInput
                 value={branch}
                 onChange={(event) => setBranch(event.target.value)}
                 required
@@ -554,7 +531,7 @@ function EditPackageModal({
 
             <label className="form-group">
               <FieldLabel>{t('ai.skillPackages.descriptionLabel')}</FieldLabel>
-              <textarea
+              <TextArea
                 value={description}
                 rows={2}
                 onChange={(event) => setDescription(event.target.value)}

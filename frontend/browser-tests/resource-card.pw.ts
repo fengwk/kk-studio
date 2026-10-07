@@ -83,6 +83,21 @@ test.describe('Shared resource card foundation', () => {
     expect(new Set(xs).size).toBeGreaterThanOrEqual(2)
   })
 
+  test('keeps the head badge right-aligned inside the title row', async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 900 })
+    await page.goto(HARNESS_URL)
+
+    const head = standardCard(page).locator('.resource-card-head')
+    const badge = page.locator('#standard-badge')
+    await expect(badge).toBeVisible()
+    const headBox = (await head.boundingBox())!
+    const badgeBox = (await badge.boundingBox())!
+
+    // 标记落在标题行右端，且不越出卡片内边距。
+    expect(badgeBox.x).toBeGreaterThan(headBox.x + headBox.width / 2)
+    expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(headBox.x + headBox.width + 0.5)
+  })
+
   test('grows with content instead of reserving a fixed card height', async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 900 })
     await page.goto(HARNESS_URL)
