@@ -1,5 +1,4 @@
 import type { HarnessThreadTreeNodeDTO } from '@/shared/api/contracts/ai-runtime'
-import type { BackendDateTime } from '@/shared/api/contracts/base'
 
 const THREAD_OUTCOMES = ['COMPLETED', 'FAILED', 'STOPPED', 'CANCELLED'] as const
 export type ThreadTreeOutcome = (typeof THREAD_OUTCOMES)[number]
@@ -107,13 +106,10 @@ function signature(node: ActiveThreadTreeNode): string {
   ])
 }
 
-function timeValue(value: BackendDateTime): number {
-  if (value == null) {
-    return 0
-  }
-  const time = typeof value === 'string' ? Date.parse(value)
-    : Date.UTC(value[0]!, (value[1] ?? 1) - 1, value[2] ?? 1,
-      value[3] ?? 0, value[4] ?? 0, value[5] ?? 0, (value[6] ?? 0) / 1_000_000)
+function timeValue(value: unknown): number {
+  // Jackson 的 Instant 数字是 Unix 秒，不是 LocalDateTime 数组或毫秒。
+  const time = typeof value === 'number' ? value * 1000
+    : typeof value === 'string' ? Date.parse(value) : NaN
   if (!Number.isFinite(time)) {
     throw new Error('invalid thread updateTime')
   }

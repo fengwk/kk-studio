@@ -11,7 +11,7 @@ import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation
 setLocale('zh-CN')
 const node = (threadId: string, parentThreadId: string | null, agentName: string, processing = false, outcome: string | null = null): ActiveThreadTreeNode => ({
   threadId, parentThreadId, agentName, name: 'main', processing, outcome,
-  updateTime: '2026-10-01T00:00:00Z', status: processing ? 'MODEL_RUNNING' : 'IDLE',
+  updateTime: 1774958400, status: processing ? 'MODEL_RUNNING' : 'IDLE',
   model: { providerName: 'provider', modelName: 'Known-model', variant: 'default' },
   turnCount: 7, toolCallCount: 12,
 })
