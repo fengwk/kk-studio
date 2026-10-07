@@ -5,12 +5,15 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -22,6 +25,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * 基于 PostgreSQL 路由租约表 {@code environment_connection} 的多节点 Environment 连接注册表：Environment server core
@@ -35,6 +39,10 @@ import java.util.UUID;
  *
  * <p>连接生命周期事件（CONNECTING/READY/DISCONNECTED）在推进状态的同一条围栏语句里原子追加到 {@code recent_events}， 数组始终是 200
  * 条以内的按时间正序窗口；READY 同时把 {@code skill_state} 清空，随后由 Skill 同步编排器全量重建。
+ *
+ * <p>六组连接写（tryAcquire/markReady/heartbeat/disconnect/recordSkillEvent/replaceSkillState）各自在一个真实短事务内执行
+ * 「围栏 SQL + environment_changed 发布」：只有实际写入成功才发布，0 行围栏与拒绝结果静默；发布失败连同围栏写一起回滚，
+ * 绝不出现「租约已提交、通知未发出」的窗口。自然到期没有数据库写事件，仍由读取时判定与重连单次对账处理。
  */
 @Component
 public class EnvironmentRegistry implements DaemonLeaseStore {
@@ -244,14 +252,41 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private final JdbcTemplate jdbcTemplate;
   private final UUID ownerNodeId;
   private final Clock clock;
+  private final TransactionTemplate transactionTemplate;
+  private final PostgresqlEnvironmentChangeNotifier notifier;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final EnvironmentStateCodec stateCodec = new EnvironmentStateCodec();
 
   public EnvironmentRegistry(
-      JdbcTemplate jdbcTemplate, @Qualifier("nodeInstanceId") UUID ownerNodeId, Clock clock) {
+      JdbcTemplate jdbcTemplate,
+      @Qualifier("nodeInstanceId") UUID ownerNodeId,
+      Clock clock,
+      PlatformTransactionManager transactionManager,
+      PostgresqlEnvironmentChangeNotifier notifier) {
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.transactionTemplate =
+        new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
+    this.notifier = Objects.requireNonNull(notifier, "notifier");
+  }
+
+  /**
+   * 在真实短事务内执行围栏写，只有实际写入（受影响行数 > 0）才在同一事务连接上发布 {@code environment_changed}。
+   *
+   * <p>围栏失效（0 行）静默；发布抛出的数据库异常会回滚整条事务并向上传播，调用方无法看到「围栏已提交但通知失败」的中间态。
+   */
+  private boolean fencedWrite(EnvironmentId environmentId, Supplier<Integer> fence) {
+    Integer updated =
+        transactionTemplate.execute(
+            status -> {
+              int rows = fence.get();
+              if (rows > 0) {
+                notifier.environmentChanged(environmentId.value());
+              }
+              return rows;
+            });
+    return updated != null && updated > 0;
   }
 
   public UUID ownerNodeId() {
@@ -285,31 +320,43 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                 EnvironmentEvent.LEVEL_INFO,
                 EnvironmentEvent.TYPE_CONNECTING,
                 "daemon connection accepted"));
-    List<AcquireRow> rows =
-        jdbcTemplate.query(
-            TRY_ACQUIRE_SQL,
-            (rs, rowNum) ->
-                new AcquireRow(
-                    (UUID) rs.getObject("lease_token"),
-                    rs.getBoolean("acquired"),
-                    rs.getString("result_type")),
-            registrationToken,
-            environmentId.value(),
-            ownerNodeId,
-            newLeaseToken,
-            connectingEvent,
-            millis,
-            EnvironmentConnection.MAX_RECENT_EVENTS,
-            millis);
+    // 只有真实 upsert 成功（Acquired）才在提交前发布；认证拒绝与活跃租约抢占失败都不写行，保持静默。
+    AcquireRow row =
+        transactionTemplate.execute(
+            status -> {
+              List<AcquireRow> rows =
+                  jdbcTemplate.query(
+                      TRY_ACQUIRE_SQL,
+                      (rs, rowNum) ->
+                          new AcquireRow(
+                              (UUID) rs.getObject("lease_token"),
+                              rs.getBoolean("acquired"),
+                              rs.getString("result_type")),
+                      registrationToken,
+                      environmentId.value(),
+                      ownerNodeId,
+                      newLeaseToken,
+                      connectingEvent,
+                      millis,
+                      EnvironmentConnection.MAX_RECENT_EVENTS,
+                      millis);
+              if (rows.isEmpty()) {
+                return null;
+              }
+              AcquireRow acquired = rows.get(0);
+              if (acquired.acquired() && acquired.leaseToken() != null) {
+                notifier.environmentChanged(environmentId.value());
+              }
+              return acquired;
+            });
 
-    if (rows.isEmpty()) {
+    if (row == null) {
       return new LeaseBindResult.RetryLater("route acquisition returned no row: " + environmentId);
     }
-    AcquireRow row = rows.get(0);
-    if (row.acquired && row.leaseToken != null) {
-      return new LeaseBindResult.Acquired(row.leaseToken);
+    if (row.acquired() && row.leaseToken() != null) {
+      return new LeaseBindResult.Acquired(row.leaseToken());
     }
-    return switch (row.resultType) {
+    return switch (row.resultType()) {
       case "NOT_FOUND" -> new LeaseBindResult.Rejected("environment not found: " + environmentId);
       case "INVALID_TOKEN" -> new LeaseBindResult.Rejected(
           "invalid registration token for environment: " + environmentId);
@@ -340,18 +387,19 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
         stateCodec.encodeEvent(
             lifecycleEvent(
                 EnvironmentEvent.LEVEL_INFO, EnvironmentEvent.TYPE_READY, "environment ready"));
-    int updated =
-        jdbcTemplate.update(
-            MARK_READY_SQL,
-            runtimeInfoJson,
-            EnvironmentConnection.MAX_RECENT_EVENTS,
-            readyEvent,
-            readyEvent,
-            leaseDuration.toMillis(),
-            environmentId.value(),
-            ownerNodeId,
-            leaseToken);
-    return updated > 0;
+    return fencedWrite(
+        environmentId,
+        () ->
+            jdbcTemplate.update(
+                MARK_READY_SQL,
+                runtimeInfoJson,
+                EnvironmentConnection.MAX_RECENT_EVENTS,
+                readyEvent,
+                readyEvent,
+                leaseDuration.toMillis(),
+                environmentId.value(),
+                ownerNodeId,
+                leaseToken));
   }
 
   /**
@@ -364,14 +412,15 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(leaseDuration, "leaseDuration");
-    int updated =
-        jdbcTemplate.update(
-            HEARTBEAT_SQL,
-            leaseDuration.toMillis(),
-            environmentId.value(),
-            ownerNodeId,
-            leaseToken);
-    return updated > 0;
+    return fencedWrite(
+        environmentId,
+        () ->
+            jdbcTemplate.update(
+                HEARTBEAT_SQL,
+                leaseDuration.toMillis(),
+                environmentId.value(),
+                ownerNodeId,
+                leaseToken));
   }
 
   /**
@@ -393,18 +442,20 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                 EnvironmentEvent.TYPE_DISCONNECTED,
                 "daemon connection lost"));
     try {
-      int updated =
-          jdbcTemplate.update(
-              DISCONNECT_SQL,
-              EnvironmentConnection.MAX_RECENT_EVENTS,
-              disconnectedEvent,
-              disconnectedEvent,
-              graceDuration.toMillis(),
-              environmentId.value(),
-              ownerNodeId,
-              leaseToken);
-      return updated > 0;
+      return fencedWrite(
+          environmentId,
+          () ->
+              jdbcTemplate.update(
+                  DISCONNECT_SQL,
+                  EnvironmentConnection.MAX_RECENT_EVENTS,
+                  disconnectedEvent,
+                  disconnectedEvent,
+                  graceDuration.toMillis(),
+                  environmentId.value(),
+                  ownerNodeId,
+                  leaseToken));
     } catch (DataAccessException ignored) {
+      // 捕获在事务边界之外：失败时围栏写已随短事务回滚，绝不留下「租约已提交、通知失败」的中间态。
       return false;
     }
   }
@@ -446,16 +497,17 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(event, "event");
     String eventJson = stateCodec.encodeEvent(event);
-    int updated =
-        jdbcTemplate.update(
-            APPEND_EVENT_SQL,
-            EnvironmentConnection.MAX_RECENT_EVENTS,
-            eventJson,
-            eventJson,
-            environmentId.value(),
-            ownerNodeId,
-            leaseToken);
-    return updated > 0;
+    return fencedWrite(
+        environmentId,
+        () ->
+            jdbcTemplate.update(
+                APPEND_EVENT_SQL,
+                EnvironmentConnection.MAX_RECENT_EVENTS,
+                eventJson,
+                eventJson,
+                environmentId.value(),
+                ownerNodeId,
+                leaseToken));
   }
 
   /**
@@ -474,17 +526,18 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     Objects.requireNonNull(event, "event");
     String skillStateJson = stateCodec.encodeSkillState(skillState);
     String eventJson = stateCodec.encodeEvent(event);
-    int updated =
-        jdbcTemplate.update(
-            REPLACE_SKILL_STATE_SQL,
-            skillStateJson,
-            EnvironmentConnection.MAX_RECENT_EVENTS,
-            eventJson,
-            eventJson,
-            environmentId.value(),
-            ownerNodeId,
-            leaseToken);
-    return updated > 0;
+    return fencedWrite(
+        environmentId,
+        () ->
+            jdbcTemplate.update(
+                REPLACE_SKILL_STATE_SQL,
+                skillStateJson,
+                EnvironmentConnection.MAX_RECENT_EVENTS,
+                eventJson,
+                eventJson,
+                environmentId.value(),
+                ownerNodeId,
+                leaseToken));
   }
 
   /** 数据库现在时判定指定环境是否有任意活跃租约（用于 delete 在锁行下的安全准入）。 */
