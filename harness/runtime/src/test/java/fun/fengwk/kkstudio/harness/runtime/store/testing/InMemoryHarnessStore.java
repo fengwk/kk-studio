@@ -24,8 +24,10 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -41,6 +43,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -103,11 +106,23 @@ public final class InMemoryHarnessStore implements HarnessStore {
   private State committed;
   private boolean inTransaction;
   private volatile RouteReadyPredicate routeReadyPredicate;
+  private volatile EnvironmentReadyLeasePredicate environmentReadyLeasePredicate;
 
   /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
   @FunctionalInterface
   public interface RouteReadyPredicate {
     boolean isRouteReady(UUID nodeInstanceId, EnvironmentId environmentId, Instant now);
+  }
+
+  /**
+   * 环境 READY 租约判定谓词：任意节点是否持有该环境的有效 READY 连接租约（权威时间域为 {@code now}）。
+   *
+   * <p>与 {@link RouteReadyPredicate} 分层：后者判定「本节点 + 本 leaseToken」能否承接路由，本谓词判定环境在读取投影中是否已上线（无有效 READY
+   * 租约即为等待环境）。未注入时视为环境没有有效 READY 租约。
+   */
+  @FunctionalInterface
+  public interface EnvironmentReadyLeasePredicate {
+    boolean hasReadyLease(EnvironmentId environmentId, Instant now);
   }
 
   public InMemoryHarnessStore() {
@@ -134,6 +149,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
   public void setRouteReadyPredicate(RouteReadyPredicate routeReadyPredicate) {
     this.routeReadyPredicate = routeReadyPredicate;
+  }
+
+  public void setEnvironmentReadyLeasePredicate(
+      EnvironmentReadyLeasePredicate environmentReadyLeasePredicate) {
+    this.environmentReadyLeasePredicate = environmentReadyLeasePredicate;
+  }
+
+  private boolean hasReadyEnvironmentLease(EnvironmentId environmentId, Instant now) {
+    EnvironmentReadyLeasePredicate predicate = environmentReadyLeasePredicate;
+    return predicate != null && predicate.hasReadyLease(environmentId, now);
   }
 
   private static void requireMillisecondPrecision(Instant instant) {
@@ -292,6 +317,45 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
   /** 回执本体与其所属 Stop 根范围。 */
   private record StoredStopReceipt(StoppedThreadReceipt receipt, StopRootKey root) {}
+
+  /** 环境等待分组键：{@code (真实执行根, 冻结的所需环境)}。 */
+  private record EnvironmentWaitGroupKey(UUID rootThreadId, EnvironmentId environmentId) {}
+
+  /** 组内累积：最早的 {@code (createdAt, id)} 代表与调用数。 */
+  private static final class EnvironmentWaitAccumulator {
+    private Instant representativeCreatedAt;
+    private UUID representativeInvocationId;
+    private int count;
+
+    void add(Instant createdAt, UUID invocationId) {
+      count++;
+      if (representativeCreatedAt == null
+          || createdAt.isBefore(representativeCreatedAt)
+          || (createdAt.equals(representativeCreatedAt)
+              && UuidOrder.COMPARATOR.compare(invocationId, representativeInvocationId) < 0)) {
+        representativeCreatedAt = createdAt;
+        representativeInvocationId = invocationId;
+      }
+    }
+
+    PendingEnvironmentWaitRow toRow(EnvironmentWaitGroupKey key) {
+      return new PendingEnvironmentWaitRow(
+          key.rootThreadId(),
+          key.environmentId(),
+          representativeCreatedAt,
+          representativeInvocationId,
+          count);
+    }
+  }
+
+  private static boolean isAfterRepresentativeCursor(
+      PendingEnvironmentWaitRow row, Instant afterCreatedAt, UUID afterId) {
+    int timeComparison = row.representativeCreatedAt().compareTo(afterCreatedAt);
+    if (timeComparison != 0) {
+      return timeComparison > 0;
+    }
+    return UuidOrder.COMPARATOR.compare(row.representativeInvocationId(), afterId) > 0;
+  }
 
   /** 行锁 key，用于每个 transaction 的 update tracking。 */
   private enum LockRank {
@@ -1750,6 +1814,148 @@ public final class InMemoryHarnessStore implements HarnessStore {
         return timeComparison > 0;
       }
       return UuidOrder.COMPARATOR.compare(invocation.id(), afterId) > 0;
+    }
+
+    @Override
+    public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
+        Instant now,
+        Instant afterRepresentativeCreatedAt,
+        UUID afterRepresentativeInvocationId,
+        int limit) {
+      checkOpen();
+      Objects.requireNonNull(now, "now");
+      Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
+      Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
+      requireMillisecondPrecision(now);
+      if (limit <= 0) {
+        throw new IllegalArgumentException("limit must be positive");
+      }
+      Map<EnvironmentWaitGroupKey, EnvironmentWaitAccumulator> groups = new HashMap<>();
+      for (ToolInvocation invocation : state.toolInvocations.values()) {
+        if (invocation.status() != ToolInvocationStatus.READY) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocation.id()));
+        if (work == null) {
+          continue;
+        }
+        EnvironmentId environmentId = work.requiredEnvironmentId();
+        if (environmentId == null || work.availableAt().isAfter(now)) {
+          continue;
+        }
+        if (work.leaseToken() != null && work.leaseUntil().isAfter(now)) {
+          continue;
+        }
+        if (hasReadyEnvironmentLease(environmentId, now)) {
+          continue;
+        }
+        ModelInvocation model = state.modelInvocations.get(invocation.modelInvocationId());
+        ThreadState thread = model == null ? null : state.threads.get(model.threadId());
+        if (thread == null) {
+          throw new IllegalStateException(
+              "pending environment tool invocation " + invocation.id() + " lost its owning thread");
+        }
+        List<UUID> chain = findAncestorChain(thread.id());
+        if (chain.isEmpty()) {
+          throw new IllegalStateException(
+              "tool invocation thread is not persisted: " + thread.id());
+        }
+        UUID rootThreadId = chain.get(chain.size() - 1);
+        groups
+            .computeIfAbsent(
+                new EnvironmentWaitGroupKey(rootThreadId, environmentId),
+                key -> new EnvironmentWaitAccumulator())
+            .add(invocation.createdAt(), invocation.id());
+      }
+      List<PendingEnvironmentWaitRow> rows = new ArrayList<>(groups.size());
+      for (Map.Entry<EnvironmentWaitGroupKey, EnvironmentWaitAccumulator> group :
+          groups.entrySet()) {
+        PendingEnvironmentWaitRow row = group.getValue().toRow(group.getKey());
+        if (isAfterRepresentativeCursor(
+            row, afterRepresentativeCreatedAt, afterRepresentativeInvocationId)) {
+          rows.add(row);
+        }
+      }
+      rows.sort(
+          Comparator.comparing(PendingEnvironmentWaitRow::representativeCreatedAt)
+              .thenComparing(
+                  PendingEnvironmentWaitRow::representativeInvocationId, UuidOrder.COMPARATOR));
+      return List.copyOf(rows.size() > limit ? rows.subList(0, limit) : rows);
+    }
+
+    @Override
+    public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
+        Instant now, Collection<UUID> invocationIds) {
+      checkOpen();
+      Objects.requireNonNull(now, "now");
+      Objects.requireNonNull(invocationIds, "invocationIds");
+      requireMillisecondPrecision(now);
+      if (invocationIds.isEmpty()) {
+        return List.of();
+      }
+      List<EnvironmentToolWaitRow> rows = new ArrayList<>(invocationIds.size());
+      for (UUID invocationId : invocationIds) {
+        Objects.requireNonNull(invocationId, "invocationId");
+        ToolInvocation invocation = state.toolInvocations.get(invocationId);
+        if (invocation == null) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocationId));
+        EnvironmentId environmentId = work == null ? null : work.requiredEnvironmentId();
+        rows.add(
+            new EnvironmentToolWaitRow(
+                invocationId, environmentId, isWaitingForEnvironment(invocation, work, now)));
+      }
+      return List.copyOf(rows);
+    }
+
+    @Override
+    public Optional<Instant> findNextEnvironmentWaitChange(Instant now) {
+      checkOpen();
+      Objects.requireNonNull(now, "now");
+      requireMillisecondPrecision(now);
+      Instant earliest = null;
+      for (ToolInvocation invocation : state.toolInvocations.values()) {
+        if (invocation.status() != ToolInvocationStatus.READY) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocation.id()));
+        if (work == null || work.requiredEnvironmentId() == null) {
+          continue;
+        }
+        earliest = earliestOf(earliest, laterThan(work.availableAt(), now));
+        earliest =
+            earliestOf(
+                earliest, laterThan(work.leaseToken() != null ? work.leaseUntil() : null, now));
+      }
+      // 内存实现的 READY 环境租约只是布尔谓词，没有 deadline，因此无法在这里表达「环境租约自然到期」这一类变更；
+      // 生产实现（数据库）用 environment_connection.lease_until 覆盖它。
+      return Optional.ofNullable(earliest);
+    }
+
+    private boolean isWaitingForEnvironment(ToolInvocation invocation, Work work, Instant now) {
+      if (invocation.status() != ToolInvocationStatus.READY || work == null) {
+        return false;
+      }
+      EnvironmentId environmentId = work.requiredEnvironmentId();
+      if (environmentId == null || work.availableAt().isAfter(now)) {
+        return false;
+      }
+      if (work.leaseToken() != null && work.leaseUntil().isAfter(now)) {
+        return false;
+      }
+      return !hasReadyEnvironmentLease(environmentId, now);
+    }
+
+    private static Instant laterThan(Instant candidate, Instant now) {
+      return candidate != null && candidate.isAfter(now) ? candidate : null;
+    }
+
+    private static Instant earliestOf(Instant current, Instant candidate) {
+      if (candidate == null) {
+        return current;
+      }
+      return current == null || candidate.isBefore(current) ? candidate : current;
     }
 
     @Override

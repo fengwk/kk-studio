@@ -7,6 +7,7 @@ import type { ThreadPanelComposerInput } from '@/features/ai/runtime/thread-pane
 import { InteractionCardBody } from '@/features/ai/runtime/interactions/InteractionCardBody'
 import { useInteractionsController } from '@/features/ai/runtime/interactions/useInteractionsController'
 import { useI18n } from '@/shared/i18n'
+import { interactionIdentity, manualInteractions } from '@/shared/lib/interactions'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -106,9 +107,13 @@ export function RootThreadControlArea({
 }
 
 /**
- * 根交互列表：来源标识来自执行树（Thread 名称 + 代理），写回始终使用原始
- * `threadId`/`interactionId`；完整分页保留，刷新失败即使已有旧数据也照常显示，
+ * 根交互列表：只渲染可操作的人工等待（问卷/审批），来源标识来自执行树（Thread 名称 + 代理），
+ * 写回始终使用原始 `threadId`/`interactionId`；完整分页保留，刷新失败即使已有旧数据也照常显示，
  * 不把失败伪装成“已无待决交互”。
+ *
+ * <p>环境等待不在这里重复呈现第二张提醒卡：它是 `(真实执行根, 所需环境)` 聚合，没有可回写的调用，
+ * 只在全局待处理页与工具状态行（W3 切片）呈现。过滤后仍保留 `loadMore`，避免首页只有环境等待时
+ * 把后续页的人工等待一并藏起来。
  */
 function RootInteractionList({
   rootThreadId,
@@ -129,7 +134,8 @@ function RootInteractionList({
     removeItem,
   } = useInteractionsController(rootThreadId)
 
-  if (items.length === 0 && !isError) {
+  const manualItems = manualInteractions(items)
+  if (manualItems.length === 0 && !isError && !hasMore) {
     return null
   }
   return (
@@ -147,18 +153,16 @@ function RootInteractionList({
           </button>
         </div>
       ) : null}
-      {items.map((item) => {
+      {manualItems.map((item) => {
         const source = tree?.nodesById.get(item.threadId) ?? null
         return (
-          <div key={item.interactionId} className="interaction-feed-item">
+          <div key={interactionIdentity(item)} className="interaction-feed-item">
             <header className="interaction-item-header">
               <div className="interaction-item-meta">
-                <span className={`interaction-status-tag ${item.status.toLowerCase()}`}>
-                  {item.status === 'WAITING_INPUT'
+                <span className={`interaction-status-tag ${item.type.toLowerCase()}`}>
+                  {item.type === 'INPUT'
                     ? t('ai.interaction.waitingInput')
-                    : item.status === 'WAITING_APPROVAL'
-                      ? t('ai.interaction.waitingApproval')
-                      : item.status}
+                    : t('ai.interaction.waitingApproval')}
                 </span>
                 <ThreadLink
                   threadId={item.threadId}
@@ -166,7 +170,9 @@ function RootInteractionList({
                   title={item.threadId}
                 >
                   <GitBranch size={14} aria-hidden="true" />
-                  <span className="interaction-source-name">{source?.name ?? item.threadId}</span>
+                  <span className="interaction-source-name">
+                    {source?.name ?? item.owner.rootThreadName ?? item.threadId}
+                  </span>
                 </ThreadLink>
                 {source ? (
                   <span className="interaction-agent-badge">{source.agentName}</span>
@@ -174,10 +180,7 @@ function RootInteractionList({
               </div>
             </header>
             <div className="interaction-item-body">
-              <InteractionCardBody
-                item={item}
-                onSuccess={() => removeItem(item.interactionId)}
-              />
+              <InteractionCardBody item={item} onSuccess={() => removeItem(item.interactionId)} />
             </div>
           </div>
         )

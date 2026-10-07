@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.platform.interaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -17,11 +19,14 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -50,6 +55,7 @@ class InteractionRootAttributionConsistencyTest {
 
   private ChatSessionRepository chatSessionRepository;
   private IssueAgentThreadRepository issueAgentThreadRepository;
+  private EnvironmentRepository environmentRepository;
   private IssueRepository issueRepository;
   private ProjectRepository projectRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
@@ -62,14 +68,23 @@ class InteractionRootAttributionConsistencyTest {
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
     issueAgentThreadRepository = mock(IssueAgentThreadRepository.class);
+    environmentRepository = mock(EnvironmentRepository.class);
     issueRepository = mock(IssueRepository.class);
     projectRepository = mock(ProjectRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
+    when(runtime.listPendingEnvironmentWaits(any(), any(), anyInt()))
+        .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
     queryService =
-        new InteractionQueryService(chatSessionRepository, issueAgentThreadRepository, runtimes);
+        new InteractionQueryService(
+            chatSessionRepository,
+            mock(ChatRepository.class),
+            issueAgentThreadRepository,
+            issueRepository,
+            environmentRepository,
+            runtimes);
     interactionService =
         new InteractionService(
             issueAgentThreadRepository, issueRepository, projectRepository, runtimes);
@@ -132,11 +147,12 @@ class InteractionRootAttributionConsistencyTest {
     when(runtime.submitToolInput(any(ToolInputSubmissionCommand.class)))
         .thenReturn(mock(ToolInputAcceptance.class));
 
+    clearInvocations(issueRepository, projectRepository);
     interactionService.submitInput(command);
 
     // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加产品锁。
     verify(runtime, times(2)).findAncestorChain(childThreadId);
-    InOrder lockOrder = inOrder(issueRepository, projectRepository);
+    InOrder lockOrder = inOrder(projectRepository, issueRepository);
     lockOrder.verify(issueRepository).getById(issueId);
     lockOrder.verify(projectRepository).lockForKeyShare(projectId);
     lockOrder.verify(issueRepository).lockById(issueId);

@@ -52,6 +52,13 @@ public class ToolInvocationDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentId;
 
+  /** 当前 Work 冻结的环境亲和性；没有环境亲和 Work 时为 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String requiredEnvironmentId;
+
+  /** 读取时是否因所需环境不可领取而等待；不属于 durable Invocation 状态。 */
+  private boolean waitingForEnvironment;
+
   /** Provider 提供的 JSON 参数原文（tool call arguments）。 */
   private String argumentsJson;
 

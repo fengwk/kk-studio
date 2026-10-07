@@ -135,11 +135,17 @@ public class ApplicationEventConfiguration {
                 InteractionChangeHub.CHANNEL,
                 interactionChangeHub::onNotification,
                 interactionChangeHub::broadcastResync),
-            // 13. Environment 连接行失效；租约到期由读取投影与浏览器单次回读处理
+            // 13. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
             new PostgresqlNotificationHandler(
                 EnvironmentChangeHub.CHANNEL,
-                environmentChangeHub::onNotification,
-                environmentChangeHub::broadcastResync)),
+                payload -> {
+                  environmentChangeHub.onNotification(payload);
+                  interactionChangeHub.broadcastResync();
+                },
+                () -> {
+                  environmentChangeHub.broadcastResync();
+                  interactionChangeHub.broadcastResync();
+                })),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }

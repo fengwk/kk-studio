@@ -274,6 +274,8 @@ describe('ThreadWorkspacePage', () => {
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
       items: [],
       nextCursor: null,
+      total: 0,
+      freshnessAt: null,
     })
   })
 
@@ -340,19 +342,33 @@ describe('ThreadWorkspacePage', () => {
     })
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
       items: [{
+        type: 'APPROVAL',
         interactionId: 'inv-bash-1',
         status: 'WAITING_APPROVAL',
         threadId: CHILD_THREAD_ID,
         rootThreadId: rootId,
         sessionId: 'session-child',
-        owner: { type: 'CHAT', chatId: 'chat-1', issueId: null, agentName: null },
+        owner: {
+          type: 'CHAT',
+          chatId: 'chat-1',
+          chatTitle: null,
+          issueId: null,
+          issueTitle: null,
+          agentName: null,
+          rootThreadName: null,
+        },
         toolCallId: 'call-bash-1',
         toolName: 'bash',
         argumentsJson: '{"command":"rm -rf /tmp/test"}',
         approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
+        environmentId: null,
+        environmentName: null,
+        waitingCount: null,
         createTime: '2026-07-28T10:00:01Z',
       }],
       nextCursor: null,
+      total: 1,
+      freshnessAt: null,
     })
 
     renderPage(`/threads/${rootId}`)

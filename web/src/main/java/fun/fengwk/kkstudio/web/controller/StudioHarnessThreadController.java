@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.security.Principal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -110,7 +111,19 @@ public class StudioHarnessThreadController {
               ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
               Map<UUID, HarnessUsageCostDTO> usageCosts =
                   usageCostProjectionService.project(snapshot.entryPath().entries());
-              return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability, usageCosts);
+              HarnessThreadSnapshotDTO dto =
+                  HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability, usageCosts);
+              Map<UUID, ToolInvocationDTO> tools = new HashMap<>();
+              for (ToolInvocationDTO tool : dto.getToolInvocations()) {
+                tools.put(UUID.fromString(tool.getId()), tool);
+              }
+              for (var wait : runtime.listEnvironmentToolWaits(tools.keySet())) {
+                ToolInvocationDTO tool = tools.get(wait.invocationId());
+                tool.setRequiredEnvironmentId(
+                    wait.environmentId() == null ? null : wait.environmentId().toString());
+                tool.setWaitingForEnvironment(wait.waitingForEnvironment());
+              }
+              return dto;
             }));
   }
 
