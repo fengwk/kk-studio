@@ -50,6 +50,7 @@ function buildItems() {
       interactionId: APPROVAL_INTERACTION_ID,
       status: 'WAITING_APPROVAL',
       threadId: 'thread-approval',
+      rootThreadId: 'thread-approval',
       sessionId: 'session-approval',
       owner: { type: 'CHAT', chatId: 'chat-pending', issueId: null, agentName: null },
       toolCallId: 'call-approval',
@@ -62,6 +63,7 @@ function buildItems() {
       interactionId: QUESTIONNAIRE_INTERACTION_ID,
       status: 'WAITING_INPUT',
       threadId: 'thread-questionnaire',
+      rootThreadId: 'thread-questionnaire',
       sessionId: 'session-questionnaire',
       owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'issue-42', agentName: 'architect' },
       toolCallId: 'call-questionnaire',
@@ -97,6 +99,7 @@ function buildItems() {
       interactionId: 'int-unknown',
       status: 'COMPLETED',
       threadId: 'thread-unknown',
+      rootThreadId: 'thread-unknown',
       sessionId: 'session-unknown',
       owner: { type: 'UNKNOWN', chatId: null, issueId: null, agentName: null },
       toolCallId: 'call-unknown',
@@ -139,7 +142,10 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         const items = buildItems().filter((item) =>
           !state.decidedApprovals.has(item.interactionId)
           && !state.answeredQuestionnaires.has(item.interactionId))
-        await route.fulfill({ json: { status: 200, data: { items, nextCursor: null } } })
+        // total 是同一过滤条件下的真实可见待处理总数，与游标分页位置无关。
+        await route.fulfill({
+          json: { status: 200, data: { items, nextCursor: null, total: items.length } },
+        })
         return
       }
 
