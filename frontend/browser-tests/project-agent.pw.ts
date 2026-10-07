@@ -324,7 +324,10 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     const dock = page.locator('[data-testid="project-agent-dock"]')
     await expect(dock).toBeVisible()
     await expect(dock.locator('.badge-agent')).toHaveText('architect')
-    await expect(dock.getByRole('heading', { name: 'Architecture Thread' })).toBeVisible()
+    // 容器标题只承载 Issue 身份；Thread 名不再在 pane 内重复（会话身份由设置入口承载）。
+    await expect(dock.locator('.project-agent-dock-title')).toHaveText('Design DB schema')
+    await expect(dock.getByRole('button', { name: 'Model 与 Variant' }))
+      .toHaveText('minimax/MiniMax-M2.7 · default')
     await expect(dock.getByText('梳理鉴权模块的现有边界')).toBeVisible()
     // ROOT 必须解析成会话开始的配置事实，而不是「配置快照不可解析」兜底。
     await expect(dock.getByText(
