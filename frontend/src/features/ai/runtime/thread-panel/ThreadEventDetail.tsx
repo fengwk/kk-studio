@@ -53,10 +53,18 @@ export function ThreadEventDetail({
   }
 
   const entryId = record.entryId
+  // 历史入口以模型输出来源（assistantMetadata）判定，与后端准入一致：普通与含 tool_call 的
+  // ASSISTANT、带 metadata 的压缩输出同样可读取；错误/中止/失败重试不可，但绝不因此断言从未调用。
   const canPreviewHistoricalRequest =
-    (record.kind === 'ASSISTANT_MESSAGE' || record.historicalPreviewEligible === true) &&
+    record.historicalPreviewEligible === true &&
     entryId != null &&
     onRequestHistoricalPreview != null
+  const historicalPreviewUnsupported =
+    !canPreviewHistoricalRequest &&
+    record.entryId != null &&
+    (record.kind === 'ASSISTANT_ERROR' ||
+      record.kind === 'ASSISTANT_ABORTED' ||
+      record.kind === 'MODEL_ATTEMPT_FAILURE')
 
   return (
     <section
@@ -94,6 +102,8 @@ export function ThreadEventDetail({
             type="button"
             className="ghost-inline-btn"
             data-testid="historical-request-preview"
+            title={t('ai.runtime.debug.historicalRequestHint')}
+            aria-label={t('ai.runtime.debug.historicalRequestHint')}
             disabled={historicalPreviewLoading}
             onClick={() => onRequestHistoricalPreview(entryId)}
           >
@@ -104,6 +114,13 @@ export function ThreadEventDetail({
             )}
             <span>{t('ai.runtime.debug.historicalRequest')}</span>
           </button>
+        </div>
+      ) : null}
+      {historicalPreviewUnsupported ? (
+        <div className="thread-event-detail-actions">
+          <span className="thread-debug-empty-text">
+            {t('ai.runtime.debug.historicalUnavailable')}
+          </span>
         </div>
       ) : null}
       <pre className="thread-event-detail-payload">{record.rawJson ?? record.summary}</pre>

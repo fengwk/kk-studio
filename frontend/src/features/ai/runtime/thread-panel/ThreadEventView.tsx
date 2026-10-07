@@ -48,6 +48,9 @@ export interface ThreadEventViewProps {
   initialScrollTop?: number | null
   bodyRef?: RefObject<HTMLDivElement | null>
   debug?: ThreadModelRequestDebugData | null
+  /** Debug 请求投影的独立读取状态：loading/error 不被吞成「暂无请求预览数据」空态。 */
+  debugLoading?: boolean
+  debugError?: string | null
   debugSelection?: DebugInspectorSelection | null
   onSelectInspector?: (selection: DebugInspectorSelection | null) => void
   onPreview?: () => void
@@ -78,6 +81,8 @@ export function ThreadEventView({
   initialScrollTop = null,
   bodyRef: bodyRefProp,
   debug,
+  debugLoading = false,
+  debugError = null,
   debugSelection = null,
   onSelectInspector,
   onPreview,
@@ -390,6 +395,19 @@ export function ThreadEventView({
               previewDisabledReason={previewDisabledReason}
               previewError={previewError}
             />
+          ) : debugLoading ? (
+            <div className="thread-debug-placeholder" data-testid="thread-debug-preview-loading">
+              <p>{t('ai.runtime.debug.previewLoading')}</p>
+            </div>
+          ) : debugError ? (
+            <div
+              role="alert"
+              className="thread-debug-placeholder thread-debug-preview-load-error"
+              data-testid="thread-debug-preview-error"
+            >
+              <AlertCircle size={14} aria-hidden="true" />
+              <p>{debugError}</p>
+            </div>
           ) : (
             <div className="thread-debug-placeholder">
               <p>{t('ai.runtime.debug.noPreview')}</p>

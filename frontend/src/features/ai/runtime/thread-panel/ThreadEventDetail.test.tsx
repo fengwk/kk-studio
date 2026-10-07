@@ -137,7 +137,8 @@ describe('ThreadEventDetail', () => {
       source: 'entry',
       entryId: 'assistant-entry-1',
       kind: 'ASSISTANT_MESSAGE',
-      title: 'ASSISTANT_MESSAGE',
+      title: 'ASSISTANT',
+      historicalPreviewEligible: true,
     })
 
     render(
@@ -149,6 +150,8 @@ describe('ThreadEventDetail', () => {
     )
 
     const button = screen.getByTestId('historical-request-preview')
+    expect(button).toHaveTextContent('历史请求预览')
+    expect(button).toHaveAttribute('title', '历史请求预览：按当前目录与 Provider 定义重建，非当时发送原文')
     fireEvent.click(button)
     expect(onRequestHistoricalPreview).toHaveBeenCalledWith('assistant-entry-1')
   })
@@ -175,6 +178,31 @@ describe('ThreadEventDetail', () => {
     const button = screen.getByTestId('historical-request-preview')
     fireEvent.click(button)
     expect(onRequestHistoricalPreview).toHaveBeenCalledWith('compaction-entry-1')
+  })
+
+  // 意图：带 tool_call 的 ASSISTANT 输出携带 metadata 同样提供历史请求预览入口。
+  it('offers the historical request preview for an assistant tool_call entry with metadata', () => {
+    const onRequestHistoricalPreview = vi.fn()
+    const record = createRecord({
+      source: 'entry',
+      entryId: 'tool-call-entry-1',
+      kind: 'TOOL_CALL',
+      title: 'ASSISTANT',
+      historicalPreviewEligible: true,
+    })
+
+    render(
+      <ThreadEventDetail
+        record={record}
+        onClose={vi.fn()}
+        onRequestHistoricalPreview={onRequestHistoricalPreview}
+      />,
+    )
+
+    const button = screen.getByTestId('historical-request-preview')
+    expect(button).toHaveTextContent('历史请求预览')
+    fireEvent.click(button)
+    expect(onRequestHistoricalPreview).toHaveBeenCalledWith('tool-call-entry-1')
   })
 
   // 意图：纯摘要（无真实模型输出 metadata）没有可重建的请求，不提供入口。
@@ -213,5 +241,51 @@ describe('ThreadEventDetail', () => {
       />,
     )
     expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+  })
+
+  // 意图：nonmodel 条目既无历史请求预览按钮，也不显示错误边界不支持提示；
+  // 而模型错误/中止/重试边界（ASSISTANT_ERROR, ASSISTANT_ABORTED, MODEL_ATTEMPT_FAILURE）明确呈现 historicalUnavailable 提示。
+  it('renders historicalUnavailable notice for error/aborted/failure boundaries and keeps nonmodel entries clean', () => {
+    const errorRecord = createRecord({
+      source: 'entry',
+      entryId: 'err-entry-1',
+      kind: 'ASSISTANT_ERROR',
+      title: 'ASSISTANT_ERROR',
+    })
+    const { rerender } = render(
+      <ThreadEventDetail record={errorRecord} onClose={vi.fn()} onRequestHistoricalPreview={vi.fn()} />,
+    )
+    expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+    expect(screen.getByText('当前记录不支持历史请求预览')).toBeInTheDocument()
+
+    const abortedRecord = createRecord({
+      source: 'entry',
+      entryId: 'aborted-entry-1',
+      kind: 'ASSISTANT_ABORTED',
+      title: 'ASSISTANT_ABORTED',
+    })
+    rerender(<ThreadEventDetail record={abortedRecord} onClose={vi.fn()} onRequestHistoricalPreview={vi.fn()} />)
+    expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+    expect(screen.getByText('当前记录不支持历史请求预览')).toBeInTheDocument()
+
+    const attemptFailureRecord = createRecord({
+      source: 'entry',
+      entryId: 'failure-entry-1',
+      kind: 'MODEL_ATTEMPT_FAILURE',
+      title: 'MODEL_ATTEMPT_FAILURE',
+    })
+    rerender(<ThreadEventDetail record={attemptFailureRecord} onClose={vi.fn()} onRequestHistoricalPreview={vi.fn()} />)
+    expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+    expect(screen.getByText('当前记录不支持历史请求预览')).toBeInTheDocument()
+
+    const nonmodelRecord = createRecord({
+      source: 'entry',
+      entryId: 'user-entry-1',
+      kind: 'USER_MESSAGE',
+      title: 'USER',
+    })
+    rerender(<ThreadEventDetail record={nonmodelRecord} onClose={vi.fn()} onRequestHistoricalPreview={vi.fn()} />)
+    expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+    expect(screen.queryByText('当前记录不支持历史请求预览')).toBeNull()
   })
 })

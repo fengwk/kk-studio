@@ -205,15 +205,15 @@ describe('buildThreadEventTimeline', () => {
     expect(events.map((event) => event.title)).toEqual([
       'ROOT',
       'TURN_START',
-      'MESSAGE',
-      'CUSTOM_MESSAGE',
+      'USER',
+      'USER',
       'MODEL_ATTEMPT_FAILURE',
       'ASSISTANT_ERROR',
       'ASSISTANT_ABORTED',
       'COMPACTION',
       'TURN_END',
       'CUSTOM',
-      'UNKNOWN_TYPE',
+      '未知条目：UNKNOWN_TYPE',
     ])
     expect(events[2]!.summary).toBe(JSON.stringify(messagePayload('USER', [{ type: 'text', text: 'hi' }])))
     expect(JSON.parse(events[2]!.rawJson!)).toEqual(messagePayload('USER', [{ type: 'text', text: 'hi' }]))
@@ -249,12 +249,12 @@ describe('buildThreadEventTimeline', () => {
     ])
     expect(events.map((event) => event.title)).toEqual([
       'TURN_START',
-      'MESSAGE',
-      'MESSAGE',
-      'MESSAGE',
-      'MESSAGE',
-      'MESSAGE',
-      'MESSAGE',
+      'USER',
+      'ASSISTANT',
+      'ASSISTANT',
+      'TOOL',
+      'SYSTEM',
+      'SOMETHING',
     ])
     expect(events[3]!.summary).toContain('"tool_call"')
     expect(events[3]!.summary).toContain('bash')
@@ -1014,6 +1014,58 @@ describe('buildThreadEventTimeline', () => {
     expect(rawParsed.modelInvocationId).toBe('model-fail-1')
     expect(rawParsed.errorCode).toBe('CONTEXT_LENGTH_EXCEEDED')
     expect(rawParsed.text).toBe('partial stream output text')
+  })
+
+  it('flags historical preview eligibility strictly for model outputs with assistantMetadata', () => {
+    // 测试意图：验证普通 ASSISTANT 与带 tool_call 的 ASSISTANT 只有在携带 assistantMetadata 时才具备历史请求预览资格；
+    // 无 metadata 的 ASSISTANT 以及 USER/TOOL_RESULT/NOTIFICATION 均不具备该资格。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'hi' }])),
+      entry('asst-with-meta', 'MESSAGE', messagePayload(
+        'ASSISTANT',
+        [{ type: 'text', text: 'hello' }],
+        { usage: { inputTokens: 10, outputTokens: 20 } },
+      )),
+      entry('asst-no-meta', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'no meta' }])),
+      entry('tool-call-with-meta', 'MESSAGE', messagePayload(
+        'ASSISTANT',
+        [{ type: 'tool_call', toolCallId: 'c1', toolName: 'bash', argumentsJson: '{}' }],
+        { usage: { inputTokens: 15, outputTokens: 5 } },
+      )),
+      entry('tool-call-no-meta', 'MESSAGE', messagePayload(
+        'ASSISTANT',
+        [{ type: 'tool_call', toolCallId: 'c2', toolName: 'bash', argumentsJson: '{}' }],
+      )),
+      entry('tool-result-1', 'MESSAGE', messagePayload(
+        'TOOL',
+        [{ type: 'tool_result', toolCallId: 'c1', toolName: 'bash', contents: [{ type: 'text', text: 'ok' }] }],
+      )),
+      entry('notification-1', 'NOTIFICATION', { kind: 'SUBAGENT_RESULT', sourceThreadId: 'sub-1' }),
+    ]
+
+    const events = build(entries)
+    const asstWithMeta = events.find((e) => e.id === 'entry:asst-with-meta')!
+    expect(asstWithMeta.historicalPreviewEligible).toBe(true)
+
+    const asstNoMeta = events.find((e) => e.id === 'entry:asst-no-meta')!
+    expect(asstNoMeta.historicalPreviewEligible).toBeUndefined()
+
+    const toolCallWithMeta = events.find((e) => e.id === 'entry:tool-call-with-meta')!
+    expect(toolCallWithMeta.historicalPreviewEligible).toBe(true)
+    expect(toolCallWithMeta.kind).toBe('TOOL_CALL')
+    expect(toolCallWithMeta.title).toBe('ASSISTANT')
+
+    const toolCallNoMeta = events.find((e) => e.id === 'entry:tool-call-no-meta')!
+    expect(toolCallNoMeta.historicalPreviewEligible).toBeUndefined()
+
+    const toolResult = events.find((e) => e.id === 'entry:tool-result-1')!
+    expect(toolResult.historicalPreviewEligible).toBeUndefined()
+
+    const notification = events.find((e) => e.id === 'entry:notification-1')!
+    expect(notification.kind).toBe('NOTIFICATION')
+    expect(notification.title).toBe('SUBAGENT_RESULT')
+    expect(notification.historicalPreviewEligible).toBeUndefined()
   })
 })
 
