@@ -111,8 +111,9 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     expect(await composerInput.inputValue()).toBe('测试任务指令')
 
     // 8. 验证快照按钮和复制按钮存在
-    const snapshotBtn = page.getByRole('button', { name: /查看当前调用规范化请求快照|View normalized request snapshot/ })
+    const snapshotBtn = page.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）', exact: true })
     await expect(snapshotBtn).toBeVisible()
+    await expect(snapshotBtn).toHaveText('冻结调用输入')
     const copyBtn = page.getByRole('button', { name: /复制系统提示词|Copy system prompt/ })
     await expect(copyBtn).toBeVisible()
 

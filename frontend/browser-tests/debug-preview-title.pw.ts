@@ -292,6 +292,12 @@ async function installPreviewApiMock(
         })
         return
       }
+      if (path === '/api/interactions' && method === 'GET') {
+        await route.fulfill({
+          json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } },
+        })
+        return
+      }
       await route.fulfill({ json: { status: 200, data: {} } })
     },
   )
@@ -362,7 +368,7 @@ async function selectAgent(page: Page, optionName: string) {
 test('owner-free bound thread renders a NOTIFICATION entry as a system card', async ({ page }) => {
   // 测试意图：系统结果通知在真实浏览器里使用独立系统样式，绝不渲染成 user/assistant
   // 对话块，也不进入可编辑队列或草稿（草稿只承载人类输入）；回执只展示来源、Thread 链接
-  // 与 result，历史 task prompt 不在会话卡片中复现。
+  // 与折叠任务摘要，展开后保留完整历史 task 与 result，且不成为新输入。
   const sourceThreadId = 'f0000000-0000-0000-0000-00000000f002'
   const receipt = [
     `<subagent_result thread_id="${sourceThreadId}" agent="coder" state="completed">`,
@@ -389,20 +395,35 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
     }),
     createTime: '2026-10-01T00:00:05Z',
   }
-  await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, entries: [notificationEntry] })
+  const recorded = await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, entries: [notificationEntry] })
+  const writes: string[] = []
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/') && request.method() !== 'GET') {
+      writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
+    }
+  })
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/browser-tests/debug-preview-harness.html')
 
   const card = page.locator('[data-entry-kind="notification"]')
   await expect(card).toBeVisible()
   await expect(card).toHaveClass(/thread-notification/)
-  await expect(card).toContainText('子 Thread 结果')
+  await expect(card).toHaveClass(/thread-subagent-receipt/)
+  await expect(card).toHaveAttribute('data-subagent-state', 'completed')
+  await expect(card).toContainText('已返回')
   // 来源与可点击 Thread 链接来自固定 XML 信封，而不是原始 JSON 转储。
   await expect(card).toContainText('coder')
   await expect(card.locator(`a[href="/threads/${sourceThreadId}"]`)).toBeVisible()
-  await expect(card).toContainText('数据迁移完成')
-  // 历史 task prompt 不重复铺开，非法解析错误也不应出现。
-  await expect(card).not.toContainText('迁移用户数据')
+  // 默认只有摘要；完整任务和报告在显式展开后可读。
+  await expect(card).toContainText('迁移用户数据（历史任务原文）')
+  await expect(card.locator('.thread-subagent-receipt-detail')).toHaveCount(0)
+  await expect(card).not.toContainText('数据迁移完成')
+  await card.getByRole('button', { expanded: false }).click()
+  const detail = card.locator('.thread-subagent-receipt-detail')
+  await expect(detail).toBeVisible()
+  await expect(detail).toContainText('迁移用户数据（历史任务原文）')
+  await expect(detail).toContainText('数据迁移完成')
+  await expect(card.getByRole('button', { expanded: true })).toHaveCount(1)
   await expect(card).not.toContainText('不是合法的 XML 信封')
   // 系统通知不是对话块，也不进入可编辑草稿
   await expect(card.locator('.thread-block-user')).toHaveCount(0)
@@ -413,6 +434,9 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
   // 仅有执行根时不展示活跃树；mock 的完整 tree 投影不能产生虚假的加载错误。
   await expect(page.getByText('活跃子代理', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Agent 关系加载失败', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('待处理交互加载失败', { exact: true })).toHaveCount(0)
+  expect(recorded.every((request) => request.kind === 'snapshot')).toBe(true)
+  expect(writes).toEqual([])
   await page.screenshot({ path: resolve(reportsDir, 'notification-system-card.png') })
 })
 
@@ -469,7 +493,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
   test('title click previews with a fresh cursor in both layouts, auto-selects the detail tab, and returns to the title without losing the draft', async ({
     page,
   }) => {
-    // 测试意图：真实浏览器中 Debug「下一次请求预览」标题是唯一预览入口。
+    // 测试意图：真实浏览器中 Debug「预览当前草稿」标题是唯一预览入口。
     // 宽布局证明标题点击先取 fresh 快照再预览；随后在窄布局单列 Tab 下从已 mount 的 Debug
     // 真正点击同一个标题，必须独立走一遍 fresh GET -> preview POST -> 自动切到详情 Tab，
     // 再由关闭详情安全回到 preview Tab 并把可见焦点还给标题按钮，草稿全程不变。
@@ -518,7 +542,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     const previewTitleBtn = page.locator('.thread-debug-preview-title-btn')
     await expect(previewTitleBtn).toBeVisible()
     await expect(previewTitleBtn).toBeEnabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '下一次请求预览')
+    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿')
     await expect(editor).toHaveText(DRAFT)
     await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
@@ -530,7 +554,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(editor).toHaveText('')
     await enterDebugView(page)
     await expect(previewTitleBtn).toBeDisabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '下一次请求预览 (草稿为空)')
+    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿 (草稿为空)')
 
     // 6. 按钮布局不溢出：header 与预览列均无横向滚动，按钮不越出 header
     const headerMetrics = await page.evaluate(() => {
@@ -561,7 +585,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(editor).toHaveText(DRAFT)
     await enterDebugView(page)
     await expect(previewTitleBtn).toBeEnabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '下一次请求预览')
+    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿')
     await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
 
@@ -761,7 +785,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(page.locator('.thread-debug-preview-error')).toBeVisible()
     await expect(page.locator('.thread-debug-preview-error')).toContainText('会话游标已过期')
     await expect(previewTitleBtn).toBeEnabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '下一次请求预览')
+    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿')
     await expect(previewTab).toHaveAttribute('aria-selected', 'true')
     await expect(detailTab).toHaveAttribute('aria-selected', 'false')
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)

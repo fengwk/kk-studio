@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
-import { expect, test, type Page, type Route } from './fixture'
+import type { Route } from '@playwright/test'
+import { expect, test, type Page } from './fixture'
 
 const reportsDir = resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 const THREAD_ID = 'f0000000-0000-0000-0000-00000000f001'
@@ -146,7 +147,9 @@ async function installAgentTreeMock(page: Page) {
       return
     }
     if (path === '/api/interactions') {
-      await route.fulfill({ json: { status: 200, data: { items: [], nextCursor: null } } })
+      await route.fulfill({
+        json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } },
+      })
       return
     }
     if (path === '/api/ai/catalog/agents' || path === '/api/ai/catalog/models') {
@@ -168,7 +171,7 @@ async function installAgentTreeMock(page: Page) {
 async function expectNoHorizontalOverflow(widget: ReturnType<Page['getByRole']>) {
   const metrics = await widget.evaluate((element) => ({
     widget: element.scrollWidth <= element.clientWidth + 1,
-    list: Array.from(element.querySelectorAll('.active-thread-tree-list'))
+    list: Array.from(element.querySelectorAll('.thread-tree-list'))
       .every((list) => list.scrollWidth <= list.clientWidth + 1),
   }))
   expect(metrics).toEqual({ widget: true, list: true })
@@ -200,10 +203,13 @@ test('the active subagent tree renders automatically inside the bound pane and o
   await expect.poll(() => mock.treeCalls.length).toBeGreaterThan(0)
   const widget = page.locator('.active-thread-tree')
   await expect(widget).toBeVisible()
+  await expect(widget.locator('.thread-tree-list')).toHaveCount(1)
 
   // 2. 只有处理中的后代 + 其祖先层级；根自己与已停止的空闲兄弟都不出现。
-  const rows = widget.locator('.active-thread-tree-row')
+  const rows = widget.locator('.thread-tree-row')
   await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toHaveAttribute('data-depth', '0')
+  await expect(rows.nth(1)).toHaveAttribute('data-depth', '1')
   await expect(rows.nth(0)).toContainText('Child Planner')
   await expect(rows.nth(0)).toContainText('等待审批')
   await expect(rows.nth(1)).toContainText('Grand Worker')
@@ -211,6 +217,7 @@ test('the active subagent tree renders automatically inside the bound pane and o
   await expect(widget).not.toContainText('Preview Thread')
   await expect(widget).not.toContainText('Stopped Sibling')
   await expect(widget).toContainText('2 个活跃')
+  await expect(page.getByText('待处理交互加载失败', { exact: true })).toHaveCount(0)
   await expectNoHorizontalOverflow(widget)
   await page.screenshot({ path: resolve(reportsDir, 'active-thread-tree-wide.png') })
 
