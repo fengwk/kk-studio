@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
 public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
   private final EnvironmentMapper environmentMapper;
+  private final PostgresqlEnvironmentChangeNotifier notifier;
 
   @Override
   public List<Environment> listNewestFirst() {
@@ -64,17 +65,30 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
   @Override
   public boolean create(Environment environment) {
-    return environmentMapper.insert(toDO(environment)) == 1;
+    boolean created = environmentMapper.insert(toDO(environment)) == 1;
+    if (created) {
+      notifier.environmentChanged(environment.getId());
+    }
+    return created;
   }
 
   @Override
   public boolean updateById(Environment environment, long expectedVersion) {
-    return environmentMapper.updateById(toDO(environment), expectedVersion) == 1;
+    boolean updated = environmentMapper.updateById(toDO(environment), expectedVersion) == 1;
+    if (updated) {
+      notifier.environmentChanged(environment.getId());
+    }
+    return updated;
   }
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
-    return environmentMapper.deleteById(id, expectedVersion) == 1;
+    boolean deleted = environmentMapper.deleteById(id, expectedVersion) == 1;
+    if (deleted) {
+      // 连接行随 environment 级联删除，同一 environment 的通知已覆盖级联，不另造连接级来源。
+      notifier.environmentChanged(id);
+    }
+    return deleted;
   }
 
   private EnvironmentDO toDO(Environment model) {
