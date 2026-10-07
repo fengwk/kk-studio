@@ -13,7 +13,7 @@ const initialConfig: EnvironmentInstallConfigDTO = {
 
 async function api(page: Page) {
   let card: EnvironmentCardDTO = { id: 'env-1', name: 'host-one', version: '7', status: 'OFFLINE', ready: false,
-    lastSeen: null, capabilities: [], createTime: '', updateTime: '', installConfig: initialConfig }
+    statusExpiresAt: null, lastSeen: null, capabilities: [], createTime: '', updateTime: '', installConfig: initialConfig }
   let conflict = false
   const calls: string[] = []
   await page.route('**/api/harness/environments**', async route => {
