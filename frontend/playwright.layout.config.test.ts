@@ -4,32 +4,60 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import layoutConfig from './playwright.layout.config'
 
-/** 用给定端口加载布局配置，验证 KK_LAYOUT_PORT 同时驱动 preview 与 baseURL/webServer。 */
-async function loadLayoutConfigsWithPort(port: string) {
+/** 设置/清除 KK_LAYOUT_PORT；port 为 undefined 表示变量缺失。 */
+function applyLayoutPort(port: string | undefined) {
+  if (port === undefined) {
+    delete process.env.KK_LAYOUT_PORT
+  } else {
+    process.env.KK_LAYOUT_PORT = port
+  }
+}
+
+/** 子进程环境：显式区分“变量缺失”与“变量为空/非法”。 */
+function childEnv(port: string | undefined) {
+  const env = { ...process.env }
+  applyLayoutPortOn(env, port)
+  return env
+}
+
+function applyLayoutPortOn(env: NodeJS.ProcessEnv, port: string | undefined) {
+  if (port === undefined) {
+    delete env.KK_LAYOUT_PORT
+  } else {
+    env.KK_LAYOUT_PORT = port
+  }
+}
+
+/** 在 Node 子进程通过 loadConfigFromFile 读取 vite.layout.config 的 preview 配置。 */
+function loadVitePreviewConfig(port: string | undefined) {
+  const script = `
+    import { loadConfigFromFile } from 'vite';
+    import path from 'node:path';
+    const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' }, path.resolve('vite.layout.config.ts'));
+    console.log(JSON.stringify(loaded?.config?.preview ?? null));
+  `
+  const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: __dirname,
+    encoding: 'utf8',
+    timeout: 10000,
+    env: childEnv(port),
+  })
+  return JSON.parse(stdout)
+}
+
+/**
+ * 用给定 KK_LAYOUT_PORT 加载布局配置，验证该变量同时驱动 preview 与 baseURL/webServer。
+ * 非法端口会让两个配置一起抛错，断言由调用方负责。
+ */
+async function loadLayoutConfigsWithPort(port: string | undefined) {
   const previous = process.env.KK_LAYOUT_PORT
-  process.env.KK_LAYOUT_PORT = port
+  applyLayoutPort(port)
   try {
     vi.resetModules()
     const playwright = (await import('./playwright.layout.config')).default
-    const script = `
-      import { loadConfigFromFile } from 'vite';
-      import path from 'node:path';
-      const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' }, path.resolve('vite.layout.config.ts'));
-      console.log(JSON.stringify(loaded?.config?.preview ?? null));
-    `
-    const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
-      cwd: __dirname,
-      encoding: 'utf8',
-      timeout: 10000,
-      env: { ...process.env, KK_LAYOUT_PORT: port },
-    })
-    return { playwright, preview: JSON.parse(stdout) }
+    return { playwright, preview: loadVitePreviewConfig(port) }
   } finally {
-    if (previous === undefined) {
-      delete process.env.KK_LAYOUT_PORT
-    } else {
-      process.env.KK_LAYOUT_PORT = previous
-    }
+    applyLayoutPort(previous)
     vi.resetModules()
   }
 }
@@ -77,10 +105,24 @@ describe('playwright layout config', () => {
       timeout: 15000,
     })
     expect(preview).toEqual({ host: '127.0.0.1', port: 5185, strictPort: true })
+  })
 
-    // 未设置变量时保持默认 5174，默认命令不变。
-    const fallback = await loadLayoutConfigsWithPort('')
-    expect(fallback.playwright.use?.baseURL).toBe('http://127.0.0.1:5174')
+  // 变量缺失时才用默认 5174，默认命令不变。
+  it('falls back to the default port only when KK_LAYOUT_PORT is absent', async () => {
+    const { playwright, preview } = await loadLayoutConfigsWithPort(undefined)
+
+    expect(playwright.use?.baseURL).toBe('http://127.0.0.1:5174')
+    expect(preview).toEqual({ host: '127.0.0.1', port: 5174, strictPort: true })
+  })
+
+  // 显式配置的非法端口必须明确失败，不得静默退回默认端口。
+  it('rejects invalid KK_LAYOUT_PORT values instead of silently using the default', async () => {
+    for (const invalid of ['', 'http-5185', '5185 ', '0', '70000']) {
+      await expect(loadLayoutConfigsWithPort(invalid)).rejects.toThrow(/KK_LAYOUT_PORT/)
+    }
+
+    expect(() => loadVitePreviewConfig('0')).toThrow(/KK_LAYOUT_PORT/)
+    expect(() => loadVitePreviewConfig('abc')).toThrow(/KK_LAYOUT_PORT/)
   })
 
   it('builds fresh assets before starting the browser server readiness budget', () => {
@@ -110,6 +152,7 @@ describe('playwright layout config', () => {
       cwd: __dirname,
       encoding: 'utf8',
       timeout: 10000,
+      env: childEnv(undefined),
     })
     const effective = JSON.parse(stdout)
 

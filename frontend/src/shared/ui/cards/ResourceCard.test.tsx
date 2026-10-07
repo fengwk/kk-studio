@@ -84,7 +84,7 @@ describe('ResourceCard', () => {
     expect(screen.queryByText('—')).not.toBeInTheDocument()
   })
 
-  it('renders boolean and ReactNode facts without disguising them as empty', () => {
+  it('follows React node semantics for conditional and zero values, keeping ReactNode aria', () => {
     render(
       <ResourceCard
         icon={<Bot />}
@@ -97,9 +97,13 @@ describe('ResourceCard', () => {
       />,
     )
 
-    // false / 0 是真实事实：必须显式渲染，且不能标记为空值占位。
-    const disabledFact = screen.getByText('false')
-    expect(disabledFact).not.toHaveClass('is-empty')
+    // 条件节点 false 按 React 语义不产生文本，也不被伪装成“空值占位”；
+    // 真正需要“启用/停用”文案时由 feature 本地化后传入。
+    const conditional = screen.getByText('已启用').nextElementSibling as HTMLElement
+    expect(conditional).toHaveTextContent('')
+    expect(conditional).not.toHaveClass('is-empty')
+
+    // 0 是真实数值，原样显示。
     expect(screen.getByText('0')).toBeInTheDocument()
 
     // ReactNode 值保留自身无障碍语义，不再叠加 title 提示。

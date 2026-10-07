@@ -6,7 +6,7 @@ import type { ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 /**
  * Durable acceptance/control/settings conflicts share this presenter. Callers retain their own
  * refresh and optional exact-retry callbacks, while reason and detail are never discarded.
- * 弹层复用共享 Dialog 的 portal/焦点陷阱/关闭后焦点归还/顶层 Escape，不再是裸 alertdialog。
+ * 弹层复用共享 Dialog 的 portal/焦点陷阱/关闭后焦点归还与顶层 Escape。
  */
 export function ConflictPresenter({
   conflict,
