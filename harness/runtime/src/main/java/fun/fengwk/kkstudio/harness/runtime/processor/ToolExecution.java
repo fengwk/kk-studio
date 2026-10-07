@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -543,7 +544,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              lockTreeForThread(tx, threadId);
+              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -568,7 +569,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              lockTreeForThread(tx, threadId);
+              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -593,7 +594,7 @@ final class ToolExecution implements ToolGateway.Listener {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
-                lockTreeForThread(tx, threadId);
+                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -625,7 +626,7 @@ final class ToolExecution implements ToolGateway.Listener {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
-                lockTreeForThread(tx, threadId);
+                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -767,16 +768,5 @@ final class ToolExecution implements ToolGateway.Listener {
 
     /** 收敛为结果不确定的终态。 */
     UNKNOWN
-  }
-
-  private static void lockTreeForThread(HarnessStore.Transaction tx, UUID threadId) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(threadId, "threadId");
-    List<UUID> chain = tx.findAncestorChain(threadId);
-    UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
-    tx.lockTree(root);
-    if (!chain.equals(tx.findAncestorChain(threadId))) {
-      throw new IllegalStateException("execution tree changed while acquiring its lock");
-    }
   }
 }
