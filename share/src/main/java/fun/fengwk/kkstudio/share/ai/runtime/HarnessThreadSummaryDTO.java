@@ -13,6 +13,10 @@ public class HarnessThreadSummaryDTO {
   /** Thread 主键：canonical UUID string。 */
   private String threadId;
 
+  /** 执行父 Thread 的 canonical UUID string；根 Thread 显式为 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String parentThreadId;
+
   /** Thread 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
   private String name;
 

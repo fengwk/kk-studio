@@ -483,6 +483,8 @@ export interface RuntimeSessionSummaryDTO {
 
 export interface RuntimeThreadSummaryDTO {
   threadId: string
+  /** 执行父 Thread 的 canonical UUID string；根 Thread 显式为 null。 */
+  parentThreadId: string | null
   /** Thread 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
   name: string
   createdAt: BackendDateTime

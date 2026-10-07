@@ -205,6 +205,28 @@ class HarnessRuntimeDtoContractTest {
     assertEquals(JsonInclude.Include.ALWAYS, include.value());
   }
 
+  /** 摘要父身份是必填可空 String：全局 NON_NULL 下根仍有 null 键，子身份可往返读取。 */
+  @Test
+  void threadSummaryParentIdentityIsRequiredNullable() throws Exception {
+    assertEquals(
+        String.class, HarnessThreadSummaryDTO.class.getDeclaredField("parentThreadId").getType());
+    assertRequiredNullable(HarnessThreadSummaryDTO.class, "parentThreadId");
+    ObjectMapper mapper =
+        new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    HarnessThreadSummaryDTO summary = new HarnessThreadSummaryDTO();
+    var root = mapper.readTree(mapper.writeValueAsString(summary));
+    assertTrue(root.has("parentThreadId"));
+    assertTrue(root.get("parentThreadId").isNull());
+    assertFalse(root.has("name"), "确认 mapper 确实省略其他 null 字段");
+
+    String parentId = "00000000-0000-0000-0000-000000000001";
+    summary.setParentThreadId(parentId);
+    String childJson = mapper.writeValueAsString(summary);
+    assertEquals(parentId, mapper.readTree(childJson).get("parentThreadId").asText());
+    assertEquals(
+        parentId, mapper.readValue(childJson, HarnessThreadSummaryDTO.class).getParentThreadId());
+  }
+
   /**
    * 测试意图：执行树节点按 HarnessThreadDTO 现有日期契约暴露 updateTime（Instant），且 parentThreadId 与 outcome 必须显式序列化
    * null，避免根节点和未结束节点在全局省略 null 的 HTTP 序列化下被误判为字段缺失。

@@ -54,6 +54,8 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/harness/environments` | Card、注册令牌查询/轮换、安装设置保存、运维 events |
 
+Session 的 `GET /api/harness/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
+
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
 `/api/harness/command-batches` 只服务创建型 `CHAT` owner（`NEW_SESSION` / `NEW_THREAD`；
 `ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/harness/threads/{threadId}/command-batches`
