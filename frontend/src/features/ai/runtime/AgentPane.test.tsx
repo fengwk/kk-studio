@@ -768,6 +768,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID,
       name: 'Thread Name',
+      parentThreadId: null,
       createdAt: null,
       updatedAt: null,
       status: 'IDLE',
@@ -946,6 +947,7 @@ describe('AgentPane orchestration', () => {
     const threadB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
     const summary = (threadId: string, name: string) => ({
       threadId,
+      parentThreadId: null,
       name,
       createdAt: null,
       updatedAt: null,
@@ -1183,6 +1185,7 @@ describe('AgentPane orchestration', () => {
     })
     expect(threadSelectionItem({
       threadId: THREAD_ID,
+      parentThreadId: null,
       name: 'Named Thread',
       createdAt: null,
       updatedAt: null,
@@ -1397,6 +1400,7 @@ describe('AgentPane orchestration', () => {
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: threadB,
+      parentThreadId: null,
       name: 'thread B',
       status: 'IDLE',
       processing: false,
@@ -1667,6 +1671,7 @@ describe('AgentPane orchestration', () => {
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID,
+      parentThreadId: null,
       name: 'thread one',
       createdAt: null,
       updatedAt: null,
@@ -3547,9 +3552,11 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       act(() => {
         result.current.selectThread({
           threadId: 't-2',
-          sessionId: 's-1',
+          parentThreadId: null,
           name: 'Thread 2',
           status: 'IDLE',
+          processing: false,
+          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
           createdAt: null,
           updatedAt: null,
           headMessagePreview: null,

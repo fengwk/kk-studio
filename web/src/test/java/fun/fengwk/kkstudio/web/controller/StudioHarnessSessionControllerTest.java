@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.hamcrest.Matchers.hasKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
@@ -177,12 +178,27 @@ class StudioHarnessSessionControllerTest {
     model.setVariant("default");
     thread.setModel(model);
     thread.setHeadMessagePreview("hello");
-    when(harnessQueryService.listThreadSummaries(SESSION_ID)).thenReturn(List.of(thread));
+    // 真实 Session HTTP 出口必须保留同名根/子及显式的根 null 父身份。
+    HarnessThreadSummaryDTO child = new HarnessThreadSummaryDTO();
+    child.setThreadId(new UUID(0L, 5L).toString());
+    child.setParentThreadId(thread.getThreadId());
+    child.setName(thread.getName());
+    child.setCreatedAt(thread.getCreatedAt());
+    child.setUpdatedAt(thread.getUpdatedAt());
+    child.setStatus(thread.getStatus());
+    child.setModel(model);
+    when(harnessQueryService.listThreadSummaries(SESSION_ID)).thenReturn(List.of(thread, child));
 
     mockMvc
         .perform(get("/api/harness/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(2))
         .andExpect(jsonPath("$.data[0].threadId").value(thread.getThreadId()))
+        .andExpect(jsonPath("$.data[0]").value(hasKey("parentThreadId")))
+        .andExpect(jsonPath("$.data[0].parentThreadId").value((Object) null))
+        .andExpect(jsonPath("$.data[1].threadId").value(child.getThreadId()))
+        .andExpect(jsonPath("$.data[1].parentThreadId").value(thread.getThreadId()))
+        .andExpect(jsonPath("$.data[1].name").value("thread"))
         .andExpect(jsonPath("$.data[0].name").value("thread"))
         .andExpect(jsonPath("$.data[0].status").value("IDLE"))
         .andExpect(jsonPath("$.data[0].model.providerName").value("openai"))

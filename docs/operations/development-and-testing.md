@@ -382,6 +382,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
+矩阵的 Session Thread 摘要读取统一检查必填可空的 `parentThreadId`：根为 null，子为 canonical UUID；列表仍包含全部 Thread。根/子同名保留与快照父身份映射由 OwnerQueryService 单测及 Session HTTP 契约测试覆盖。
+
 免费 L1 覆盖的部分产品契约面：
 
 - `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /

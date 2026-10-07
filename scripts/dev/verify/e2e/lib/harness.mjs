@@ -626,6 +626,10 @@ export async function listSessionThreads(ctx, sessionId) {
   assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
   for (const item of threads) {
     canonicalUuid(item?.threadId, 'thread.threadId')
+    assert(Object.hasOwn(item, 'parentThreadId'), 'Thread summary parentThreadId is required')
+    if (item.parentThreadId !== null) {
+      canonicalUuid(item.parentThreadId, 'thread.parentThreadId')
+    }
     // name 是 Thread 的必需非空展示名称（主展示文本，绝不回退为 id）。
     assert(
       typeof item.name === 'string' && item.name.trim().length > 0,

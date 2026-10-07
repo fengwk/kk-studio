@@ -9,6 +9,7 @@ import {
   canonicalUuid,
   chatOwner,
   listEnvironments,
+  listSessionThreads,
   newSessionTarget,
   newThreadTarget,
   threadParentIdOf,
@@ -152,6 +153,42 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
   for (const invalid of [undefined, 'not-uuid', '33333333333343338333333333333333', '']) {
     assert.throws(() => threadParentIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
     assert.throws(() => threadIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
+  }
+})
+
+test('Session summaries preserve same-named root and child parent identities', async () => {
+  // 摘要 helper 不按名称去重，也不过滤子节点；根 null 和子 canonical UUID 均可通过契约检查。
+  const root = {
+    threadId: sampleId(),
+    parentThreadId: null,
+    name: 'same name',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    status: 'IDLE',
+    processing: false,
+    model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+    headMessagePreview: null,
+  }
+  const child = { ...root, threadId: cid(), parentThreadId: root.threadId }
+  const ctx = {
+    call: async (method, path) => {
+      assert.equal(method, 'GET')
+      assert.equal(path, `/api/harness/sessions/${sampleId()}/threads`)
+      return { json: { data: [root, child] } }
+    },
+  }
+  assert.deepEqual(await listSessionThreads(ctx, sampleId()), [root, child])
+
+  const missingParent = { ...root }
+  delete missingParent.parentThreadId
+  const invalidParents = [missingParent, ...[
+    undefined, 42, '', 'not-uuid', 'ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF',
+  ].map((parentThreadId) => ({ ...child, parentThreadId }))]
+  for (const invalid of invalidParents) {
+    await assert.rejects(
+      () => listSessionThreads({ call: async () => ({ json: { data: [invalid] } }) }, sampleId()),
+      /parentThreadId/,
+    )
   }
 })
 
