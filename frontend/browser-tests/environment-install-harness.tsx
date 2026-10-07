@@ -4,6 +4,7 @@ import { Select } from '@/shared/ui/controls/Select'
 import { BrowserRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { EnvironmentsPage } from '@/features/ai/environment/EnvironmentsPage'
+import { ApplicationEventProvider } from '@/shared/app-events'
 import { setLocale } from '@/shared/i18n'
 import '@/styles.css'
 
@@ -37,8 +38,15 @@ export function Controls() {
   )
 }
 
+/**
+ * 真实生产 Provider 栈：EnvironmentsPage 依赖应用生命周期事件（环境状态由服务端推送驱动），
+ * 因此必须挂载真实的 ApplicationEventProvider（单例 WebSocket），不能 mock 成 no-op context。
+ * 连接失败只走真实退避，不影响页面由 Playwright 拦截的 /api 数据。
+ */
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <BrowserRouter>{new URLSearchParams(location.search).has('controls') ? <Controls /> : <EnvironmentsPage />}</BrowserRouter>
+    <ApplicationEventProvider>
+      <BrowserRouter>{new URLSearchParams(location.search).has('controls') ? <Controls /> : <EnvironmentsPage />}</BrowserRouter>
+    </ApplicationEventProvider>
   </QueryClientProvider>,
 )

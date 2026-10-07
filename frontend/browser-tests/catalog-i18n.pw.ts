@@ -13,6 +13,10 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
 
     // 新建时默认 reasoning 为 false，Reasoning Effort 1 输入框始终渲染且为 disabled
     const reasoningCheckbox = page.getByRole('checkbox', { name: 'Reasoning' })
+    // 共享 Checkbox 的原生 input 只承载可访问性与键盘语义（视觉隐藏），
+    // 指针点击必须落在可见的 label 上，与真实用户操作一致。
+    const reasoningToggle = page.locator('label.ui-checkbox', { hasText: 'Reasoning' })
+    await expect(reasoningToggle).toBeVisible()
     await expect(reasoningCheckbox).not.toBeChecked()
 
     const effortInput = page.getByLabel('Reasoning Effort 1')
@@ -42,8 +46,8 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     // 恢复桌面端视口继续验证草稿保留
     await page.setViewportSize({ width: 1280, height: 800 })
 
-    // 勾选开启 Reasoning
-    await reasoningCheckbox.click()
+    // 勾选开启 Reasoning（点击可见 label）
+    await reasoningToggle.click()
     await expect(reasoningCheckbox).toBeChecked()
     await expect(effortInput).toBeEnabled()
     await expect(effortInput).not.toHaveAttribute('aria-describedby')
@@ -53,13 +57,13 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await expect(effortInput).toHaveValue('high')
 
     // 再次关闭 Reasoning：输入框置灰但保留已填写内容
-    await reasoningCheckbox.click()
+    await reasoningToggle.click()
     await expect(reasoningCheckbox).not.toBeChecked()
     await expect(effortInput).toBeDisabled()
     await expect(effortInput).toHaveValue('high')
 
     // 再次开启 Reasoning：输入框恢复可用，草稿值 'high' 完整恢复
-    await reasoningCheckbox.click()
+    await reasoningToggle.click()
     await expect(reasoningCheckbox).toBeChecked()
     await expect(effortInput).toBeEnabled()
     await expect(effortInput).toHaveValue('high')
