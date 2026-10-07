@@ -206,10 +206,16 @@ registerCase({
         intervalMs: 100,
       })
       assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+      assert(
+        mock.requests.length === 2,
+        `exactly two model requests must be issued for the whole snapshot: ${JSON.stringify(
+          mock.requests.map((request) => request.state),
+        )}`,
+      )
       finalSnapshot = await getThreadSnapshot(ctx, threadId)
 
       // 严格断言 request#2 同时携带两条排队标记且历史顺序 first -> second：证明冻结 cutoff 内的完整快照被一次性消费。
-      // 若收割在第一条后截断（旧 sequential 行为）或吞掉后追加命令，mock 会对第 3 个请求确定性 400。
+      // 首条后截断、顺序错误或多余请求，均由 mock 拒绝。
       const secondMessagesText = JSON.stringify(mock.requests[1].body.messages)
       assert(
         secondMessagesText.includes(firstMarker) && secondMessagesText.includes(secondMarker),

@@ -414,7 +414,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `thread.provider_request_preview_readonly`、`model.attempt_failure_visibility` 依赖 case 内自建的宿主
-`127.0.0.1` mock Provider（后者是只读预览的计数 trap），因此属于 `requires=host-mock`：它们不读取真实凭据，
+`127.0.0.1` mock Provider（预览用例只使用仅计数 trap），因此属于 `requires=host-mock`：它们不读取真实凭据，
 但在 distributed 容器拓扑下不可用。
 `canvas.storage_upload_contract` 需要 S3，`canvas.function_fake_runtime` 还需要
 `--with-canvas-function` 打开 fake adapter。
