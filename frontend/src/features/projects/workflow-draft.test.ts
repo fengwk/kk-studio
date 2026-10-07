@@ -102,6 +102,23 @@ describe('validateWorkflowDraft', () => {
     expect(validateWorkflowDraft(validDraft())).toBeNull()
   })
 
+  it('accepts null manual stages without Agent-only fields', () => {
+    // 仅 null 表示人工；人工指令仍合法且 DTO 不携带 Agent/环境/额度。
+    const states = validDraft().map((state) =>
+      state.state === 'WORK' ? { ...state, agent: null, environment: null, maxRuns: '' } : state,
+    )
+    expect(validateWorkflowDraft(states)).toBeNull()
+    expect(buildWorkflowDTO(states).states[1]).not.toHaveProperty('agent')
+  })
+
+  it.each(['', '   '])('rejects incomplete Agent names %j instead of treating them as manual', (agent) => {
+    const states = validDraft().map((state) =>
+      state.state === 'WORK' ? { ...state, agent, environment: null, maxRuns: '' } : state,
+    )
+    expect(validateWorkflowDraft(states)).toEqual({ code: 'agentRequired', state: 'WORK' })
+    expect(buildWorkflowDTO(states).states[1].agent).toBe(agent)
+  })
+
   it('reports empty workflows, empty codes, invalid codes and duplicate codes', () => {
     expect(validateWorkflowDraft([])).toEqual({ code: 'empty' })
     expect(validateWorkflowDraft([draft({ state: '   ', name: 'x' })])).toEqual({
@@ -138,6 +155,9 @@ describe('validateWorkflowDraft', () => {
       code: 'reservedBusinessFields',
       state: 'DONE',
     })
+    expect(validateWorkflowDraft(validDraft().map((state) =>
+      state.state === 'DONE' ? { ...state, agent: '' } : state,
+    ))).toEqual({ code: 'reservedBusinessFields', state: 'DONE' })
 
     const reservedDisabled = validDraft().map((state) =>
       state.state === 'BLOCKED' ? { ...state, enabled: false } : state,
@@ -302,6 +322,7 @@ describe('workflow validation error messages', () => {
     reservedDisabled: true,
     reservedEdge: true,
     manualFields: true,
+    agentRequired: true,
     agentMaxRuns: true,
     edgeToBlocked: true,
     selfEdge: true,
@@ -323,6 +344,7 @@ describe('workflow validation error messages', () => {
     { code: 'reservedDisabled', state: 'BLOCKED' },
     { code: 'reservedEdge', state: 'DONE' },
     { code: 'manualFields', state: 'REVIEW' },
+    { code: 'agentRequired', state: 'WORK' },
     { code: 'agentMaxRuns', state: 'WORK', max: MAX_RUNS },
     { code: 'edgeToBlocked', state: 'WORK' },
     { code: 'selfEdge', state: 'WORK' },

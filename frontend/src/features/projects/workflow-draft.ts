@@ -37,7 +37,7 @@ export interface WorkflowDraftState {
   key: string
   state: string
   name: string
-  /** null 表示人工阶段。 */
+  /** 仅 null 表示人工阶段；空串表示已选择 Agent 模式但尚未配置 Agent。 */
   agent: string | null
   environment: string | null
   instructions: string
@@ -100,7 +100,7 @@ export function buildWorkflowDTO(states: WorkflowDraftState[]): ProjectWorkflowD
         enabled: state.enabled,
         next: state.next.map((target) => target.trim()),
       }
-      if (agent) {
+      if (agent !== null) {
         dto.agent = agent
         if (state.environment) {
           dto.environment = state.environment
@@ -134,6 +134,7 @@ export type WorkflowValidationError =
   | { code: 'reservedDisabled'; state: string }
   | { code: 'reservedEdge'; state: string }
   | { code: 'manualFields'; state: string }
+  | { code: 'agentRequired'; state: string }
   | { code: 'agentMaxRuns'; state: string; max: number }
   | { code: 'edgeToBlocked'; state: string }
   | { code: 'selfEdge'; state: string }
@@ -217,7 +218,7 @@ export function validateWorkflowDraft(
   for (const state of states) {
     const code = state.state.trim()
     if (isReservedStateCode(code)) {
-      if (state.agent || state.environment || state.instructions.trim() || state.maxRuns.trim()) {
+      if (state.agent !== null || state.environment || state.instructions.trim() || state.maxRuns.trim()) {
         return { code: 'reservedBusinessFields', state: code }
       }
       if (!state.enabled) {
@@ -228,11 +229,14 @@ export function validateWorkflowDraft(
       }
       continue
     }
-    if (!state.agent) {
+    if (state.agent === null) {
       if (state.environment || state.maxRuns.trim()) {
         return { code: 'manualFields', state: code }
       }
       continue
+    }
+    if (!state.agent.trim()) {
+      return { code: 'agentRequired', state: code }
     }
     if (parseMaxRuns(state.maxRuns) === null) {
       return { code: 'agentMaxRuns', state: code, max: MAX_RUNS }

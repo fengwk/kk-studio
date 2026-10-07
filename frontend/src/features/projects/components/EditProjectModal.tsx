@@ -607,7 +607,7 @@ function EditProjectModalContent({
                   <span className="badge badge-state">{state.state || '—'}</span>
                   {reserved ? (
                     <span className="badge badge-archived">{t('projects.edit.badgeReserved')}</span>
-                  ) : state.agent ? (
+                  ) : state.agent !== null ? (
                     <span className="badge badge-agent">{t('projects.edit.badgeAgent')}</span>
                   ) : (
                     <span className="badge">{t('projects.edit.badgeManual')}</span>
@@ -703,7 +703,7 @@ function EditProjectModalContent({
                       <div className="edit-project-field">
                         <FieldLabel>{t('projects.edit.mode')}</FieldLabel>
                         <Select
-                          value={state.agent ? 'agent' : 'manual'}
+                          value={state.agent !== null ? 'agent' : 'manual'}
                           disabled={isPending}
                           aria-label={t('projects.edit.mode')}
                           options={[
@@ -721,7 +721,7 @@ function EditProjectModalContent({
                         />
                       </div>
 
-                      {state.agent ? (
+                      {state.agent !== null ? (
                         <>
                           <div className="edit-project-field">
                             <FieldLabel required>{t('projects.edit.agent')}</FieldLabel>
@@ -729,6 +729,8 @@ function EditProjectModalContent({
                               value={state.agent}
                               disabled={isPending || agentsLoading}
                               aria-label={t('projects.edit.agent')}
+                              required
+                              aria-invalid={!state.agent.trim()}
                               options={agentOptions.map((name) => ({ value: name, label: name }))}
                               onChange={(value) => updateState(state.key, { agent: value })}
                             />
