@@ -363,6 +363,7 @@ function treeNode(
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
+    updateTime: '2026-03-31T12:00:00.000Z',
   }
 }
 
@@ -1283,6 +1284,7 @@ describe('AgentPane orchestration', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
+        updateTime: '2026-03-31T12:00:00.000Z',
       },
       {
         threadId: workerId,
@@ -1295,6 +1297,7 @@ describe('AgentPane orchestration', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
+        updateTime: '2026-03-31T12:00:00.000Z',
       },
     ])
     const bound = renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -1317,6 +1320,7 @@ describe('AgentPane orchestration', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
+        updateTime: '2026-03-31T12:00:00.000Z',
       },
     ])
     const idle = renderPane({ type: 'CHAT', chatId: 'chat-idle' })
@@ -1351,6 +1355,7 @@ describe('AgentPane orchestration', () => {
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
+      updateTime: '2026-03-31T12:00:00.000Z',
     }, {
       threadId: threadId === THREAD_ID ? childA : childB,
       parentThreadId: threadId,
@@ -1362,6 +1367,7 @@ describe('AgentPane orchestration', () => {
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
+      updateTime: '2026-03-31T12:00:00.000Z',
     }])
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
       snapshot(thread({ threadId, name: threadId === THREAD_ID ? 'thread A' : 'thread B' })),

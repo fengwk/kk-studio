@@ -1,108 +1,130 @@
-/** 仅 IDLE 且回合已结束时由后端给出的终态；未知字符串不视为成功。 */
+import type { HarnessThreadTreeNodeDTO } from '@/shared/api/contracts/ai-runtime'
+import type { BackendDateTime } from '@/shared/api/contracts/base'
+
 const THREAD_OUTCOMES = ['COMPLETED', 'FAILED', 'STOPPED', 'CANCELLED'] as const
-
 export type ThreadTreeOutcome = (typeof THREAD_OUTCOMES)[number]
-
-/** 活跃树排序所需的节点形状；不依赖 Harness DTO，便于展示层保持无 API 依赖。 */
-export interface ActiveThreadTreeNode {
-  threadId: string
-  parentThreadId: string | null
-  name: string
-  agentName: string
-  model: { providerName: string; modelName: string; variant: string }
-  status: string
-  processing: boolean
-  turnCount: number
-  toolCallCount: number
-  outcome: string | null
-}
+export type ActiveThreadTreeNode = HarnessThreadTreeNodeDTO
 
 export interface ActiveThreadTreeRow {
   node: ActiveThreadTreeNode
-  /** 相对执行根子节点的缩进层级；根自身不出行，故其子节点为 0。 */
+  /** 执行根不出行，根子节点深度为 0。 */
   depth: number
+  ancestorContinues: boolean[]
+  isLast: boolean
 }
 
-/**
- * 自动活跃树投影：基于完整执行树筛选 processing 节点，并保留连接它们所需的祖先。
- *
- * - 根自身不重复出一行（根面板已在展示根）；
- * - 祖先即使空闲也保留为层级，但 `processing` 保持如实，调用方据此统计活跃数量；
- * - 兄弟按 threadId 稳定排序，深层祖先逐层保留；
- * - 非法树（重复 id、缺失父、缺少唯一根、成环）抛出，调用方不把它伪装成最新数据；
- * - 没有 processing 节点时返回空数组（无活跃后代不留空壳）。
- */
-export function projectActiveThreadTree(
-  nodes: readonly ActiveThreadTreeNode[],
-): ActiveThreadTreeRow[] {
-  if (nodes.length === 0) {
-    return []
-  }
-  const byId = new Map<string, ActiveThreadTreeNode>()
+/** 完整执行树是唯一事实源；非法父链与冲突快照不得伪造成有效树。 */
+export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
+  const nodesById = new Map<string, ActiveThreadTreeNode>()
   for (const node of nodes) {
-    if (byId.has(node.threadId)) {
-      throw new Error('duplicate thread in active tree')
+    const previous = nodesById.get(node.threadId)
+    if (previous != null) {
+      if (signature(previous) !== signature(node)) {
+        throw new Error('conflicting duplicate thread in tree')
+      }
+      continue
     }
-    byId.set(node.threadId, node)
+    timeValue(node.updateTime)
+    nodesById.set(node.threadId, node)
   }
-  const roots = nodes.filter((node) => node.parentThreadId == null)
+  const unique = [...nodesById.values()]
+  if (unique.length === 0) {
+    return { root: null, nodesById, rows: [], historyRows: [] }
+  }
+  const roots = unique.filter((node) => node.parentThreadId == null)
   if (roots.length !== 1) {
-    throw new Error('active tree must contain exactly one root')
+    throw new Error('thread tree must contain exactly one root')
   }
-  for (const node of nodes) {
-    if (node.parentThreadId != null && !byId.has(node.parentThreadId)) {
-      throw new Error('active tree parent is missing')
+  for (const node of unique) {
+    if (node.parentThreadId != null && !nodesById.has(node.parentThreadId)) {
+      throw new Error('thread tree parent is missing')
     }
   }
   const root = roots[0]!
+  const connected = new Set([root.threadId])
   const children = new Map<string, ActiveThreadTreeNode[]>()
-  for (const node of nodes) {
-    if (node.parentThreadId == null) {
-      continue
+  for (const node of unique) {
+    const chain = new Set<string>()
+    let cursor = node
+    while (!connected.has(cursor.threadId)) {
+      if (chain.has(cursor.threadId)) {
+        throw new Error('thread tree parent cycle')
+      }
+      chain.add(cursor.threadId)
+      cursor = nodesById.get(cursor.parentThreadId!)!
     }
-    const siblings = children.get(node.parentThreadId) ?? []
-    siblings.push(node)
-    children.set(node.parentThreadId, siblings)
+    for (const id of chain) {
+      connected.add(id)
+    }
+    if (node.parentThreadId != null) {
+      const siblings = children.get(node.parentThreadId) ?? []
+      siblings.push(node)
+      children.set(node.parentThreadId, siblings)
+    }
   }
   for (const siblings of children.values()) {
-    siblings.sort((left, right) => left.threadId.localeCompare(right.threadId))
+    siblings.sort((a, b) => Number(b.processing) - Number(a.processing)
+      || timeValue(b.updateTime) - timeValue(a.updateTime)
+      || a.threadId.localeCompare(b.threadId))
   }
-
-  // 需要显示的时刻：processing 节点本身 + 其到根的完整祖先链。
   const visible = new Set<string>()
-  const markChain = (node: ActiveThreadTreeNode) => {
+  for (const node of unique) {
+    if (!node.processing) {
+      continue
+    }
     let cursor: ActiveThreadTreeNode | undefined = node
     while (cursor != null && !visible.has(cursor.threadId)) {
       visible.add(cursor.threadId)
-      cursor = cursor.parentThreadId == null ? undefined : byId.get(cursor.parentThreadId)
+      cursor = cursor.parentThreadId == null ? undefined : nodesById.get(cursor.parentThreadId)
     }
   }
-  for (const node of nodes) {
-    if (node.processing) {
-      markChain(node)
-    }
-  }
-
-  const rows: ActiveThreadTreeRow[] = []
-  const visit = (parentId: string, depth: number) => {
-    for (const child of children.get(parentId) ?? []) {
-      if (!visible.has(child.threadId)) {
-        continue
+  const flatten = (filter?: Set<string>): ActiveThreadTreeRow[] => {
+    const rows: ActiveThreadTreeRow[] = []
+    const visit = (parentId: string, ancestorContinues: boolean[]) => {
+      const siblings = (children.get(parentId) ?? [])
+        .filter((child) => filter == null || filter.has(child.threadId))
+      for (const [index, child] of siblings.entries()) {
+        const isLast = index === siblings.length - 1
+        rows.push({ node: child, depth: ancestorContinues.length, ancestorContinues, isLast })
+        visit(child.threadId, [...ancestorContinues, !isLast])
       }
-      rows.push({ node: child, depth })
-      visit(child.threadId, depth + 1)
     }
+    visit(root.threadId, [])
+    return rows
   }
-  visit(root.threadId, 0)
-  return rows
+  return { root, nodesById, rows: flatten(visible), historyRows: flatten() }
 }
 
-/** IDLE 且回合已结束才展示终态；其余 outcome 保持运行状态，不伪造成功。 */
+export function projectActiveThreadTree(nodes: readonly ActiveThreadTreeNode[]): ActiveThreadTreeRow[] {
+  return projectThreadTree(nodes).rows
+}
+
+function signature(node: ActiveThreadTreeNode): string {
+  return JSON.stringify([
+    node.threadId, node.parentThreadId, node.updateTime, node.name, node.agentName,
+    node.model.providerName, node.model.modelName, node.model.variant,
+    node.status, node.processing, node.turnCount, node.toolCallCount, node.outcome,
+  ])
+}
+
+function timeValue(value: BackendDateTime): number {
+  if (value == null) {
+    return 0
+  }
+  const time = typeof value === 'string' ? Date.parse(value)
+    : Date.UTC(value[0]!, (value[1] ?? 1) - 1, value[2] ?? 1,
+      value[3] ?? 0, value[4] ?? 0, value[5] ?? 0, (value[6] ?? 0) / 1_000_000)
+  if (!Number.isFinite(time)) {
+    throw new Error('invalid thread updateTime')
+  }
+  return time
+}
+
+/** 未知 outcome 或非 IDLE 不伪造终态。 */
 export function threadTreeOutcome(node: ActiveThreadTreeNode): ThreadTreeOutcome | null {
   if (node.status !== 'IDLE' || node.outcome == null) {
     return null
   }
   return THREAD_OUTCOMES.includes(node.outcome as ThreadTreeOutcome)
-    ? node.outcome as ThreadTreeOutcome
-    : null
+    ? node.outcome as ThreadTreeOutcome : null
 }

@@ -1487,6 +1487,18 @@ export const aiCatalog = {
     'en-US': 'Retry',
     'zh-CN': '重试',
   },
+  'ai.runtime.agentTree.historyTitle': {
+    'en-US': 'Subagent execution',
+    'zh-CN': 'subagent 执行',
+  },
+  'ai.runtime.agentTree.emptyHistory': {
+    'en-US': 'No subagent executions yet',
+    'zh-CN': '暂无 subagent 执行',
+  },
+  'ai.runtime.agentTree.counts': {
+    'en-US': 'turns: {{turns}} · tools: {{tools}}',
+    'zh-CN': 'turns: {{turns}} · tools: {{tools}}',
+  },
   'ai.runtime.agentTree.outcome.COMPLETED': {
     'en-US': 'Completed',
     'zh-CN': '已完成',

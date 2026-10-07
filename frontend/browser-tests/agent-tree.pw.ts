@@ -21,6 +21,7 @@ function treeNodes(turnCount = 3) {
       turnCount: 1,
       toolCallCount: 0,
       outcome: 'STOPPED',
+      updateTime: '2026-03-31T12:00:00.000Z',
     },
     {
       threadId: GRAND_ID,
@@ -33,6 +34,7 @@ function treeNodes(turnCount = 3) {
       turnCount: 4,
       toolCallCount: 5,
       outcome: null,
+      updateTime: '2026-03-31T12:00:00.000Z',
     },
     {
       threadId: CHILD_ID,
@@ -45,6 +47,7 @@ function treeNodes(turnCount = 3) {
       turnCount,
       toolCallCount: 2,
       outcome: null,
+      updateTime: '2026-03-31T12:00:00.000Z',
     },
     {
       threadId: THREAD_ID,
@@ -58,6 +61,7 @@ function treeNodes(turnCount = 3) {
       turnCount: 6,
       toolCallCount: 3,
       outcome: null,
+      updateTime: '2026-03-31T12:00:00.000Z',
     },
   ]
 }
