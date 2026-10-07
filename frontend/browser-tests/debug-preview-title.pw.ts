@@ -250,7 +250,7 @@ async function installPreviewApiMock(
               turnCount: 0,
               toolCallCount: 0,
               outcome: null,
-              updateTime: '2026-03-31T12:00:00.000Z',
+              updateTime: 1774958400,
             }],
           },
         })

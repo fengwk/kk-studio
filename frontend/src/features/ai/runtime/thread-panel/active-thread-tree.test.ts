@@ -22,7 +22,7 @@ function node(
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
-    updateTime: '2026-03-31T12:00:00.000Z',
+    updateTime: 1774958400,
     ...overrides,
   }
 }
@@ -39,11 +39,11 @@ describe('projectActiveThreadTree', () => {
 
   it('sorts each sibling group by processing, time and ID, retaining real connectors', () => {
     const tree = projectThreadTree([
-      node('root', null), node('old', 'root', { updateTime: null }),
-      node('z', 'root', { updateTime: [2026, 4, 1] }),
+      node('root', null), node('old', 'root', { updateTime: 0 }),
+      node('z', 'root', { updateTime: 1775001600 }),
       node('a', 'root', { updateTime: '2026-04-01T00:00:00Z' }),
       node('active', 'root', { processing: true }),
-      node('grand', 'active', { updateTime: [2026] }),
+      node('grand', 'active', { updateTime: 1767225600 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['active', 'grand', 'a', 'z', 'old'])
     expect(tree.historyRows[1]).toMatchObject({ depth: 1, ancestorContinues: [true], isLast: true })
@@ -52,6 +52,22 @@ describe('projectActiveThreadTree', () => {
     expect(() => projectThreadTree([node('root', null), node('x', 'y'), node('y', 'x')])).toThrow(/cycle/)
     expect(() => projectThreadTree([node('root', null), node('other', null)])).toThrow(/root/)
   })
+
+  it('compares epoch seconds against ISO milliseconds, including fractional seconds', () => {
+    const tree = projectThreadTree([
+      node('root', null), node('a-older', 'root', { updateTime: '2026-03-31T12:00:00.000Z' }),
+      node('z-newer', 'root', { updateTime: 1774958400.125 }),
+    ])
+    expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['z-newer', 'a-older'])
+  })
+
+  it.each([undefined, null, NaN, Infinity, -Infinity, [2026, 4, 1], '', 'invalid'])(
+    'rejects missing or invalid Instant updateTime %j', (updateTime) => {
+      // 模拟未经 TypeScript 校验的 HTTP 响应。
+      const invalid = { ...node('root', null), updateTime } as unknown as ActiveThreadTreeNode
+      expect(() => projectThreadTree([invalid])).toThrow(/updateTime/)
+    },
+  )
   it('keeps processing nodes with their idle ancestors, rooted at the execution root children', () => {
     const rows = projectActiveThreadTree([
       node('root', null),

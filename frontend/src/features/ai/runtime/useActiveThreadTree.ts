@@ -15,27 +15,30 @@ import { projectThreadTree } from '@/features/ai/runtime/thread-panel/active-thr
  * 执行树变化由服务端按真实执行根聚合后推送（子代理写入也会聚合到 root），因此这里没有固定轮询：
  * subscribed（首订与每次重连重订阅）与 resync 都回读，changed 只回读本根。
  */
-export function useActiveThreadTree(rootThreadId: string | null) {
+export function useActiveThreadTree(boundThreadId: string | null) {
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
   const treeQuery = useQuery({
-    queryKey: queryKeys.threads.tree(rootThreadId ?? ''),
+    queryKey: queryKeys.threads.tree(boundThreadId ?? ''),
     queryFn: async () => {
-      const nodes = await harnessService.getThreadTree(rootThreadId ?? '')
+      const nodes = await harnessService.getThreadTree(boundThreadId ?? '')
       // 非法树不进入缓存：React Query 保留上一次成功结果，并单独暴露失败。
-      projectThreadTree(nodes)
+      const tree = projectThreadTree(nodes)
+      if (!tree.nodesById.has(boundThreadId ?? '')) {
+        throw new Error('thread tree does not contain requested bound thread')
+      }
       return nodes
     },
-    enabled: Boolean(rootThreadId),
+    enabled: Boolean(boundThreadId),
   })
   const projection = useMemo(() => projectThreadTree(treeQuery.data ?? []), [treeQuery.data])
   const actualRootThreadId = projection.root?.threadId ?? null
   const invalidateTree = useCallback(() => {
-    if (rootThreadId == null) {
+    if (boundThreadId == null) {
       return
     }
-    void queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(rootThreadId) })
-  }, [queryClient, rootThreadId])
+    void queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(boundThreadId) })
+  }, [queryClient, boundThreadId])
   useEffect(() => {
     if (actualRootThreadId == null) {
       return

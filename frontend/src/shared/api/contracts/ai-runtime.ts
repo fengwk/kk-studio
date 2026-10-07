@@ -158,7 +158,8 @@ export interface HarnessSessionEntryDTO {
 export interface HarnessThreadTreeNodeDTO {
   threadId: string
   parentThreadId: string | null
-  updateTime: BackendDateTime
+  /** Java Instant：HTTP 数字为 Unix 秒（可带小数），也接受 ISO 字符串。 */
+  updateTime: Exclude<InstantTimestamp, null>
   name: string
   agentName: string
   model: HarnessModelSelectionDTO
