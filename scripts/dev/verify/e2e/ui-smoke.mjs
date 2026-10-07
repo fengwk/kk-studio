@@ -200,9 +200,9 @@ function assertBoxesDoNotOverlap(left, right, label) {
   assert(!overlaps, `${label} bounding boxes overlap`)
 }
 
-async function assertLeadingCreateCard(page, action, label, gridSelector = '.cards-grid') {
+async function assertLeadingCreateCard(page, action, label, gridSelector = '.resource-grid') {
   // Resource creation belongs to the first card in the content grid, not the subbar.
-  // 内容网格的容器类按页面不同（资源页 .cards-grid、Canvas 库 .project-grid），因此由调用方给出真实容器。
+  // 创建入口与资源卡共用同一网格，必须是网格中的首个可交互卡片。
   const layout = await action.evaluate((element, selector) => {
     const grid = element.closest(selector)
     const bounds = element.getBoundingClientRect()
@@ -609,13 +609,40 @@ async function main(argv) {
       name: /^(Create a new canvas|Create new canvas|创建新画布)$/,
     })
     await createButton.waitFor({ state: 'visible' })
-    await assertLeadingCreateCard(page, createButton, 'Create Canvas', '.project-grid')
+    await assertLeadingCreateCard(page, createButton, 'Create Canvas', '.resource-grid')
     await shot(caseArt, 'canvas-library')
-    const existingCanvas = page.locator('.project-card:not(.create-card)').first()
-    if (await existingCanvas.count() > 0) {
-      await existingCanvas.click()
-    } else {
+    let createRequests = 0
+    const countCreate = (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/canvases') {
+        createRequests += 1
+      }
+    }
+    page.on('request', countCreate)
+    try {
+      // 新建入口只打开表单；取消不得创建或导航。
       await createButton.click()
+      const dialog = page.getByRole('dialog', { name: /^(Create new canvas|创建新画布)$/ })
+      await dialog.waitFor({ state: 'visible' })
+      await dialog.getByRole('button', { name: /^(Cancel|取消)$/ }).click()
+      await dialog.waitFor({ state: 'hidden' })
+      assert(createRequests === 0, 'cancelling canvas creation must not POST')
+      assert(new URL(page.url()).pathname === '/canvas', 'cancel must stay in the library')
+      await page.locator('#libraryView [role="status"]').waitFor({ state: 'hidden' })
+      assert(await page.locator('#libraryView [role="alert"]').count() === 0, 'canvas list must load successfully')
+      const existingCanvas = page.locator('#libraryView .resource-card-actions button').first()
+      if (await existingCanvas.count() > 0) {
+        await existingCanvas.click()
+        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+        assert(createRequests === 0, 'opening an existing canvas must not create another')
+      } else {
+        await createButton.click()
+        await dialog.getByRole('textbox', { name: /^(Canvas name|画布名称)$/ }).fill('E2E canvas')
+        await dialog.getByRole('button', { name: /^(Create and open|创建并进入)$/ }).click()
+        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+        assert(createRequests === 1, 'confirmed canvas creation must POST exactly once')
+      }
+    } finally {
+      page.off('request', countCreate)
     }
     // 创建路径在 mutation 成功后导航，因此先等编辑器挂载再断言 URL。
     await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })

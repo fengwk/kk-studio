@@ -230,7 +230,7 @@ npm --prefix frontend run coverage
 | 命令 | 行为 | 结果 |
 | --- | --- | --- |
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
-| `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、Chat 1–9 pane 布局、Agent 执行树、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 生成布局与耐用性、Catalog i18n、Project Agent、Settings 同步与 Environment 安装；不依赖 Backend，产物在 `reports/layout/` |
+| `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、共享资源卡/控件、Chat 1–9 pane 布局、Agent 执行树与回执、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 创建确认/生成布局/耐用性、Catalog i18n、Project 工作流与 Agent、Settings 同步与 Environment 安装；不依赖 Backend，产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
 | `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
 | `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |
@@ -243,12 +243,13 @@ scrollIntoView 和 React Flow layout 提供确定性 stub。
 布局回归需要先在 `frontend/` 执行 `npx playwright install chromium` 安装浏览器。
 用例位于 `frontend/browser-tests/*.pw.ts`，与 Vitest 的组件测试分开运行。
 布局基座采用独立静态构建与预览机制（[`vite.layout.config.ts`](../../frontend/vite.layout.config.ts)），
-通过 Rollup 多页（MPA）模式将真实 React 组件与 8 个测试 harness 预编译至 `reports/layout-site/`。
+通过 Rollup 多页（MPA）模式将真实 React 组件与测试 harness 预编译至 `reports/layout-site/`。
 `npm run test:layout` 先执行 `build:layout`，成功后启动 Playwright；编译不占用服务器的启动预算。
 Playwright 通过 `preview:layout` 在 loopback 5174 端口启动静态预览
 （`strictPort: true` 且 `reuseExistingServer: false`，以真实 harness URL 进行 HTTP readiness 探测），
 消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:layout`
 和 `npm run preview:layout`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
+并行验证用 `KK_LAYOUT_PORT` 指定独占端口，构建和 Playwright 使用同一值。
 首轮失败时，`reports/layout/` 下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
 在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
 网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。
@@ -274,6 +275,9 @@ IME、Pill 与隐藏根失活。
 
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
 case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
+
+Canvas 的 UI 页面用例同时检查创建取消零写入、已有卡零创建与空库确认后单次创建；
+离线 `canvas-library` harness 进一步覆盖提交中围栏、失败保留输入和窄屏布局。
 
 Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创建、读取、更新中的文本保真，
 包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。

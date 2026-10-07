@@ -106,7 +106,7 @@ export interface HarnessModelRequestDebugFrozenInvocationDTO {
  */
 export interface HarnessModelRequestDebugDTO {
   kind: 'NEXT_REQUEST_PREVIEW'
-  generatedAt: string
+  generatedAt: Exclude<InstantTimestamp, null>
   model: HarnessModelSelectionDTO
   environmentName: string | null
   systemInstruction: string
@@ -128,7 +128,7 @@ export interface ProviderRequestPreviewDTO {
   bodyByteSize: number
   bodyJson: string
   sourceHeadEntryId: string | null
-  generatedAt: string
+  generatedAt: Exclude<InstantTimestamp, null>
   notice?: string | null
 }
 

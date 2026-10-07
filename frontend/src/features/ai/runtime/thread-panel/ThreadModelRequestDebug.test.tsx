@@ -914,7 +914,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           messages: [{ role: 'user', content: 'hello preview' }],
         }),
         sourceHeadEntryId: 'entry-head-123',
-        generatedAt: '2026-09-27T05:00:00Z',
+        generatedAt: 1790504400,
         notice: 'Snapshot for draft preview',
       }
 
@@ -935,7 +935,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('OPENAI')).toBeInTheDocument()
       expect(screen.getByText('gpt-4o')).toBeInTheDocument()
       expect(screen.getByText(/1.3 KB/)).toBeInTheDocument()
-      expect(screen.getByText('2026-09-27T05:00:00Z')).toBeInTheDocument()
+      expect(screen.getByText('1790504400')).toBeInTheDocument()
       expect(screen.getByText('entry-head-123')).toBeInTheDocument()
       expect(screen.getByText('Snapshot for draft preview')).toBeInTheDocument()
 

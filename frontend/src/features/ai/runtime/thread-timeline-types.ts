@@ -252,7 +252,7 @@ export interface ThreadTimeline {
 /** Portable Thread Panel 消费的结构化模型请求 Debug 投影；不依赖 API DTO。 */
 export interface ThreadModelRequestDebugData {
   kind: 'NEXT_REQUEST_PREVIEW'
-  generatedAt: string
+  generatedAt: string | number
   model: {
     providerName: string
     modelName: string
@@ -317,6 +317,6 @@ export interface ThreadProviderRequestPreviewData {
   bodyByteSize: number
   bodyJson: string
   sourceHeadEntryId: string | null
-  generatedAt: string
+  generatedAt: string | number
   notice?: string | null
 }
