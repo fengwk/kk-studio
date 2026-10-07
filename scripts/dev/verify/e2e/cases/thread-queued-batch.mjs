@@ -1,11 +1,11 @@
 /**
- * thread.queued_command_batch：免费确定性 L1（sequential harvest）。
+ * thread.queued_command_batch：免费确定性 L1（whole-snapshot harvest）。
  *
- * 本地受控 OpenAI chat-completions SSE hold mock 验证运行中连续两批 USER 按 sequence 逐 Turn 收割：
- * 首请求保持 open 期间连续接受两条 THREAD batch 并验证同时 QUEUED、sequence 连续；releaseFirst 后
- * 等 request count=3 + quiescent，统一断言 request#2 只新增 firstMarker、request#3 新增
- * firstMarker+secondMarker（顺序正确）；最终三个 assistant 文本分别精确等于 initialReply /
- * firstQueuedReply / secondQueuedReply，queuedCommands 清空。不调用真实 Provider；finally 完整清理。
+ * 本地受控 OpenAI chat-completions SSE hold mock 验证运行中连续两批 USER 由同一个 INPUT 快照按 sequence 一次性收割：
+ * 首请求保持 open 期间连续接受两条 THREAD batch 并验证同时 QUEUED、sequence 连续；releaseFirst 后等 request count=2 +
+ * quiescent，统一断言 request#2 同时携带 firstMarker 与 secondMarker（顺序正确，证明冻结 cutoff 内的完整快照被一次性
+ * 消费）；最终两个 assistant 文本分别精确等于 initialReply / batchedReply，两条 USER 落位同一 TURN_START，
+ * queuedCommands 清空。不调用真实 Provider；finally 完整清理。
  */
 import { createServer } from 'node:http'
 
@@ -28,11 +28,11 @@ import { registerCase } from '../lib/registry.mjs'
 registerCase({
   id: 'thread.queued_command_batch',
   level: 'L1',
-  title: '运行中连续两批 USER 按 sequence 逐 Turn 收割',
+  title: '运行中连续两批 USER 由同一 INPUT 快照按 sequence 收割',
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；App 在
   // distributed 容器内无法回连宿主 loopback，因此必须排除 host-mock capability。
   requires: ['host-mock'],
-  docs: '本地受控 OpenAI chat-completions SSE hold mock（免费确定性，不调用真实 Provider）：首个 USER 启动后 mock 保持响应 open；确认 model active 后连续接受两条 THREAD batch，轮询确认两条命令同时 QUEUED 且 sequence 连续；release 首响应后 request#2 只新增 firstMarker（不得有 secondMarker），request#3 新增 secondMarker 且历史顺序 first->second；最终 entry 顺序 initial USER->assistant->first USER->assistant->second USER->assistant、queuedCommands 清空',
+  docs: '本地受控 OpenAI chat-completions SSE hold mock（免费确定性，不调用真实 Provider）：首个 USER 启动后 mock 保持响应 open；确认 model active 后连续接受两条 THREAD batch，轮询确认两条命令同时 QUEUED 且 sequence 连续；release 首响应后 INPUT 一次性消费冻结 cutoff 内的完整排队快照，request#2 同时携带 first 与 second 且历史顺序 first->second，全程只产生两个模型请求；最终 entry 顺序 initial USER->assistant->first USER->second USER->assistant，两条 USER 同属一个 TURN_START、head 收敛到闭合 TURN_END、queuedCommands 清空',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const initialMarker = `QUEUE-INITIAL-${suffix}`
@@ -42,15 +42,13 @@ registerCase({
     const firstPrompt = `${firstMarker}\n这是排队批次的第一条消息。`
     const secondPrompt = `${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`
     const initialReply = `E2E_QUEUE_INITIAL_REPLY ${suffix}`
-    const firstQueuedReply = `E2E_QUEUE_FIRST_REPLY ${suffix}`
-    const secondQueuedReply = `E2E_QUEUE_SECOND_REPLY ${suffix}`
+    const batchedReply = `E2E_QUEUE_BATCHED_REPLY ${suffix}`
     const mock = new ControlledCompletionsMock({
       initialMarker,
       firstMarker,
       secondMarker,
       initialReply,
-      firstQueuedReply,
-      secondQueuedReply,
+      batchedReply,
     })
     let provider = null
     let model = null
@@ -200,43 +198,39 @@ registerCase({
         `no turn may end while commands are queued: ${JSON.stringify(queuedSnapshot.entries)}`,
       )
 
-      // release 首响应：request#2/#3 由 mock 自动 SSE success（逐 Turn 收割）。等全部三个请求到达并 quiescent。
+      // release 首响应：request#2 由 mock 在同一 INPUT 快照上自动 SSE success（whole-snapshot harvest）。等两个请求到达并 quiescent。
       mock.releaseFirst()
-      await mock.waitForRequests(3, { timeoutMs: 30_000 })
+      await mock.waitForRequests(2, { timeoutMs: 30_000 })
       const finalThread = await waitForQuiescentThread(ctx, threadId, {
         timeoutMs: 60_000,
         intervalMs: 100,
       })
       assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+      assert(
+        mock.requests.length === 2,
+        `exactly two model requests must be issued for the whole snapshot: ${JSON.stringify(
+          mock.requests.map((request) => request.state),
+        )}`,
+      )
       finalSnapshot = await getThreadSnapshot(ctx, threadId)
 
-      // 统一检查 request#2 只新增 firstMarker、request#3 新增 firstMarker+secondMarker（顺序正确）。
+      // 严格断言 request#2 同时携带两条排队标记且历史顺序 first -> second：证明冻结 cutoff 内的完整快照被一次性消费。
+      // 首条后截断、顺序错误或多余请求，均由 mock 拒绝。
       const secondMessagesText = JSON.stringify(mock.requests[1].body.messages)
       assert(
-        secondMessagesText.includes(firstMarker),
-        `request#2 must include firstMarker: ${JSON.stringify(mock.requests[1].body.messages)}`,
-      )
-      assert(
-        !secondMessagesText.includes(secondMarker),
-        `request#2 must not include secondMarker (sequential harvest): ${JSON.stringify(
+        secondMessagesText.includes(firstMarker) && secondMessagesText.includes(secondMarker),
+        `request#2 must include both queued markers (whole-snapshot harvest): ${JSON.stringify(
           mock.requests[1].body.messages,
         )}`,
       )
-      const thirdMessagesText = JSON.stringify(mock.requests[2].body.messages)
-      assert(
-        thirdMessagesText.includes(firstMarker) && thirdMessagesText.includes(secondMarker),
-        `request#3 must include firstMarker and secondMarker: ${JSON.stringify(
-          mock.requests[2].body.messages,
-        )}`,
-      )
-      const firstIndex = thirdMessagesText.indexOf(firstMarker)
-      const secondIndex = thirdMessagesText.indexOf(secondMarker)
+      const firstIndex = secondMessagesText.indexOf(firstMarker)
+      const secondIndex = secondMessagesText.indexOf(secondMarker)
       assert(
         firstIndex !== -1 && secondIndex !== -1 && firstIndex < secondIndex,
-        `history order must be first -> second: ${JSON.stringify(mock.requests[2].body.messages)}`,
+        `history order must be first -> second: ${JSON.stringify(mock.requests[1].body.messages)}`,
       )
 
-      // 最终严格断言 entry 顺序与逐 Turn assistant 文本。
+      // 最终严格断言 entry 顺序与每个 Turn 的 assistant 文本。
       const entries = finalSnapshot.entries || []
       assert(
         (finalSnapshot.queuedCommands || []).length === 0,
@@ -255,8 +249,8 @@ registerCase({
         `USER entries must be ordered initial -> first -> second: ${JSON.stringify(entries)}`,
       )
       assert(
-        assistants.length === 3,
-        `three turns must produce three assistants: ${JSON.stringify(entries)}`,
+        assistants.length === 2,
+        `two INPUT turns must produce two assistants: ${JSON.stringify(entries)}`,
       )
       const assistantIndices = assistants.map((entry) =>
         entries.findIndex((e) => String(e.entryId) === String(entry.entryId)),
@@ -264,19 +258,37 @@ registerCase({
       assert(
         initialUserIndex < assistantIndices[0]
           && assistantIndices[0] < firstUserIndex
-          && firstUserIndex < assistantIndices[1]
-          && assistantIndices[1] < secondUserIndex
-          && secondUserIndex < assistantIndices[2],
-        `expected initial USER -> assistant -> first USER -> assistant -> second USER -> assistant: ${JSON.stringify(
+          && firstUserIndex < secondUserIndex
+          && secondUserIndex < assistantIndices[1],
+        `expected initial USER -> assistant -> first USER -> second USER -> assistant: ${JSON.stringify(
           entries,
         )}`,
       )
       const assistantTexts = assistants.map((entry) => messageText(entry))
       assert(
-        assistantTexts[0] === initialReply
-          && assistantTexts[1] === firstQueuedReply
-          && assistantTexts[2] === secondQueuedReply,
+        assistantTexts[0] === initialReply && assistantTexts[1] === batchedReply,
         `assistant replies must match per-turn mock replies: ${JSON.stringify(assistantTexts)}`,
+      )
+      // 两条排队 USER 必须由同一个 INPUT 快照消费：各自最近的 TURN_START 祖先都是第二个 TURN_START，且 head 收敛到闭合 TURN_END。
+      const turnStarts = entries.filter((entry) => entryType(entry) === 'TURN_START')
+      assert(
+        turnStarts.length === 2,
+        `two INPUT turns must produce two TURN_START entries: ${JSON.stringify(entries)}`,
+      )
+      const secondTurnStartId = String(turnStarts[1].entryId)
+      assert(
+        nearestTurnStartEntryId(entries, entries[firstUserIndex]) === secondTurnStartId
+          && nearestTurnStartEntryId(entries, entries[secondUserIndex]) === secondTurnStartId,
+        `both queued USER entries must be harvested under the same TURN_START: ${JSON.stringify(
+          entries,
+        )}`,
+      )
+      const finalHead = entries.find(
+        (entry) => String(entry.entryId) === String(finalSnapshot.thread.headEntryId),
+      )
+      assert(
+        finalHead && entryType(finalHead) === 'TURN_END',
+        `closed turn must converge the head to TURN_END: ${JSON.stringify(finalSnapshot.thread)}`,
       )
       ctx.writeArtifact(
         'queued-command-batch.json',
@@ -444,20 +456,18 @@ function sendCompletionsSuccess(response, body, text, requestIndex) {
 }
 
 /**
- * 本地受控 OpenAI chat-completions SSE hold mock（sequential harvest）：
+ * 本地受控 OpenAI chat-completions SSE hold mock（whole-snapshot harvest）：
  * - request#1（含 initialMarker）到达后保存 response 并保持 open，releaseFirst 后返回 initialReply；
- * - request#2（含 firstMarker、不含 secondMarker）到达后自动返回 firstQueuedReply；
- * - request#3（含 firstMarker+secondMarker）到达后自动返回 secondQueuedReply；
- * - 第 4 个及后续请求确定性 400。
+ * - request#2（含 firstMarker 与 secondMarker，且顺序 first -> second）到达后自动返回 batchedReply；
+ * - 其它请求（含第一条后截断、顺序颠倒或第 3 个请求）确定性 400，用来暴露错误收割语义。
  */
-class ControlledCompletionsMock {
-  constructor({ initialMarker, firstMarker, secondMarker, initialReply, firstQueuedReply, secondQueuedReply }) {
+export class ControlledCompletionsMock {
+  constructor({ initialMarker, firstMarker, secondMarker, initialReply, batchedReply }) {
     this.initialMarker = initialMarker
     this.firstMarker = firstMarker
     this.secondMarker = secondMarker
     this.initialReply = initialReply
-    this.firstQueuedReply = firstQueuedReply
-    this.secondQueuedReply = secondQueuedReply
+    this.batchedReply = batchedReply
     this.requests = []
     this.firstHeld = null
     this.server = createServer((request, response) => {
@@ -513,24 +523,22 @@ class ControlledCompletionsMock {
       this.firstHeld = response
       return
     }
-    if (this.requests.length === 2 && messagesText.includes(this.firstMarker) && !messagesText.includes(this.secondMarker)) {
-      // request#2：只含 firstMarker（sequential harvest），自动成功。
-      record.state = 'completed'
-      sendCompletionsSuccess(response, body, this.firstQueuedReply, record.index)
-      return
-    }
-    if (this.requests.length === 3 && messagesText.includes(this.firstMarker) && messagesText.includes(this.secondMarker)) {
-      // request#3：历史顺序 first -> second，自动成功。
-      record.state = 'completed'
-      sendCompletionsSuccess(response, body, this.secondQueuedReply, record.index)
-      return
+    if (this.requests.length === 2 && messagesText.includes(this.firstMarker) && messagesText.includes(this.secondMarker)) {
+      // request#2：同一 INPUT 快照携带两条排队标记，历史顺序 first -> second。
+      const firstIndex = messagesText.indexOf(this.firstMarker)
+      const secondIndex = messagesText.indexOf(this.secondMarker)
+      if (firstIndex < secondIndex) {
+        record.state = 'completed'
+        sendCompletionsSuccess(response, body, this.batchedReply, record.index)
+        return
+      }
     }
     record.state = 'rejected'
     response.writeHead(400, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ error: { message: 'unexpected mock request' } }))
   }
 
-  /** 返回 request#1 的 SSE success（initialReply），触发后续逐 Turn 收割。 */
+  /** 返回 request#1 的 SSE success（initialReply），触发对排队快照的收割。 */
   releaseFirst() {
     const response = this.firstHeld
     assert(response, 'releaseFirst called before the first request was held')
@@ -591,6 +599,18 @@ function findUserEntryIndex(entries, marker) {
       (content) => content?.type === 'text' && String(content.text || '').includes(marker),
     )
   })
+}
+
+/** 沿 parentEntryId 链回溯，返回该 Entry 最近的 TURN_START 祖先 id；无则 null。 */
+function nearestTurnStartEntryId(entries, entry) {
+  const byId = new Map(entries.map((candidate) => [String(candidate.entryId), candidate]))
+  let current = entry
+  while (current) {
+    if (entryType(current) === 'TURN_START') return String(current.entryId)
+    const parentId = current.parentEntryId
+    current = parentId == null ? null : byId.get(String(parentId)) ?? null
+  }
+  return null
 }
 
 function messageText(entry) {
