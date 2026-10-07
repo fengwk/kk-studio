@@ -335,12 +335,10 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     // 超宽被省略的信息必须仍能通过 hover 完整读取，且不含内部口径说明
     const pane1Title = (await pane1Lines.nth(0).getAttribute('title')) ?? ''
     expect(pane1Title).toContain('环境：production')
-    expect(pane1Title).toContain('上次请求上下文：约 16000 / 128000 tokens')
-    expect(pane1Title).toContain('累计用量')
-    expect(pane1Title).toContain('未缓存输入：12000 tokens；输出：800 tokens')
-    expect(pane1Title).toContain('缓存读取：4000 tokens；写入：0 tokens')
-    expect(pane1Title).toContain('费用：$0.042；缓存命中：25%')
-    expect(pane1Title).toContain('平均生成速度：475 tok/s')
+    expect(pane1Title).toContain('上下文占用（最近一次模型调用估算）：约 16000 / 128000 tokens')
+    expect(pane1Title).toContain('未缓存输入：12000 tokens；输出：800 tokens；推理：150 tokens')
+    expect(pane1Title).toContain('缓存读取：4000 tokens；缓存写入：0 tokens')
+    expect(pane1Title).toContain('估算费用：$0.042；缓存命中率：25%；生成速度：475 tok/s')
     expect(pane1Title).not.toContain('含首次请求')
     expect(pane1Title).not.toContain('非待发请求精确值')
 
@@ -377,8 +375,8 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     // 无环境且无闭合回合用量时，零事实与占位符仍稳定落在唯一一行
     const pane3Line = page.locator('[data-testid="pane-3-footer"] .thread-status-line')
     await expect(pane3Line).toHaveCount(1)
-    await expect(pane3Line).toHaveText('未选择环境 ∣ ↑0 · ↓0 · $0.000 · cache — · — tok/s')
-    expect((await pane3Line.getAttribute('title')) ?? '').toContain('平均生成速度：暂无数据')
+    await expect(pane3Line).toHaveText('未选择环境 ∣ ↑0 · ↓0 · — · cache — · — tok/s')
+    expect((await pane3Line.getAttribute('title')) ?? '').toContain('生成速度：暂无数据')
 
     // 桌面分屏截图
     await page.screenshot({
@@ -417,8 +415,8 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(metaUsageStyle.overflow).toBe('hidden')
     expect(metaUsageStyle.scrollWidth).toBeGreaterThan(metaUsageStyle.clientWidth)
     expect(metaUsageStyle.clientHeight).toBeLessThanOrEqual(24)
-    expect(metaUsageStyle.title).toContain('↑12k')
-    expect(metaUsageStyle.title).toContain('tok/s 生成速度')
+    expect(metaUsageStyle.title).toContain('未缓存输入：12400 tokens')
+    expect(metaUsageStyle.title).toContain('生成速度：900 tok/s')
     // 图例只保留短对照，不再夹带内部实现说明。
     expect(metaUsageStyle.title).not.toContain('注：')
 

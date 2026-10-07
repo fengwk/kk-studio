@@ -58,19 +58,25 @@ const SAMPLE_USER_MESSAGE: TextDialogueMessage = {
   ],
 }
 
+/** 已关闭回合的真实 usage 事实：费用是读取投影（currency + 精确十进制 amount），不是数字。 */
+const SAMPLE_TURN_USAGE: TurnUsage = {
+  input: 12400,
+  output: 1800,
+  cacheRead: 4100,
+  cacheWrite: 2300,
+  reasoning: 0,
+  providerTotal: 20600,
+  cost: { currency: 'USD', amount: '0.045' },
+  decodeTokens: 1800,
+  decodeDurationMillis: 2000,
+}
+
 const SAMPLE_TURN_USAGE_MESSAGE: MetaDialogueMessage = {
   id: 'msg-turn-usage-1',
   role: 'meta',
   kind: 'turn_usage',
-  text: formatTurnUsageText({
-    input: 12400,
-    output: 1800,
-    cacheRead: 4100,
-    cacheWrite: 2300,
-    cost: 0.045,
-    decodeTokens: 1800,
-    decodeDurationMillis: 2000,
-  }),
+  text: formatTurnUsageText(SAMPLE_TURN_USAGE),
+  turnUsage: SAMPLE_TURN_USAGE,
   createdAt: 1001,
 }
 
@@ -94,7 +100,7 @@ const SAMPLE_BRANCH_USAGE: TurnUsage = {
   cacheWrite: 0,
   reasoning: 150,
   providerTotal: 16950,
-  cost: 0.042,
+  cost: { currency: 'USD', amount: '0.042' },
   decodeTokens: 950,
   decodeDurationMillis: 2000,
   contextInputTokens: 16000,
@@ -107,7 +113,7 @@ const SAMPLE_LONG_BRANCH_USAGE: TurnUsage = {
   cacheWrite: 345678,
   reasoning: 42000,
   providerTotal: 1357900,
-  cost: 123456.789,
+  cost: { currency: 'USD', amount: '123456.789' },
   decodeTokens: 987654321,
   decodeDurationMillis: 10000,
   contextInputTokens: 890123,

@@ -171,6 +171,16 @@ async function expectNoHorizontalOverflow(widget: ReturnType<Page['getByRole']>)
 }
 
 /**
+ * 绑定执行根已加载完成的真实身份事实：pane 不再重复展示 Thread 名（顶栏面包屑承载身份），
+ * 当前身份由 composer 的设置入口承载——模型/变体与环境都必须来自该 Thread 的 branchSettings。
+ */
+async function expectBoundRootIdentity(page: Page) {
+  await expect(page.getByRole('button', { name: 'Model 与 Variant' }))
+    .toHaveText('minimax/minimax-m2.7 · default')
+  await expect(page.getByRole('button', { name: '环境' })).toHaveText('dev-node')
+}
+
+/**
  * 活跃子代理树不需要任何开关：执行根面板自动展示正在处理的后代（含其祖先层级），
  * 根自身不出一行，点进后代是同一 pane 内观察而不是新开窗口。
  */
@@ -180,7 +190,7 @@ test('the active subagent tree renders automatically inside the bound pane and o
   const mock = await installAgentTreeMock(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/browser-tests/debug-preview-harness.html')
-  await expect(page.getByRole('heading', { name: 'Preview Thread' })).toBeVisible()
+  await expectBoundRootIdentity(page)
 
   // 1. 自动出现：没有任何「Agent 关系」开关，也没有手动刷新按钮。
   await expect(page.getByRole('button', { name: 'Agent 关系' })).toHaveCount(0)
@@ -219,6 +229,6 @@ test('the active subagent tree renders automatically inside the bound pane and o
   expect(popupOpened.value).toBe(false)
 
   await page.getByRole('button', { name: '返回上一层' }).click()
-  await expect(page.getByRole('heading', { name: 'Preview Thread' })).toBeVisible()
+  await expectBoundRootIdentity(page)
   await expect(widget).toBeVisible()
 })
