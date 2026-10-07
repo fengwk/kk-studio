@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,8 +8,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -75,15 +77,10 @@ class ToolExecutionGatewayPreflightTest {
   }
 
   @Test
-  void askWhenRulesAskWithBoundedPreviewReason() {
+  void askWhenRulesAskWithFixedReason() {
     ToolGateway.PreflightResult result = preflight(PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    assertTrue(
-        ask.reason().startsWith(PREFLIGHT_DESCRIPTOR.name() + " requires approval"), ask.reason());
-    assertTrue(ask.reason().contains(PREFLIGHT_DESCRIPTOR.name()), ask.reason());
-    assertTrue(ask.reason().contains("\"path\":\"/tmp/x\""), ask.reason());
-    assertEquals(ask.reason(), ask.reason().strip());
-    assertTrue(ask.reason().length() <= 1024);
+    assertEquals("Permission rules require approval", ask.reason());
   }
 
   @Test
@@ -109,7 +106,7 @@ class ToolExecutionGatewayPreflightTest {
             "{\"path\":\"/tmp/x\",\"workdir\":\"/tmp\"}",
             settings);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    assertTrue(ask.reason().startsWith(PREFLIGHT_DESCRIPTOR.name()), ask.reason());
+    assertEquals("Permission rules require approval", ask.reason());
   }
 
   @Test
@@ -212,16 +209,41 @@ class ToolExecutionGatewayPreflightTest {
   }
 
   @Test
-  void askReasonLongerThan1024IsTruncatedAtCodePointBoundary() {
-    // preview 的 workdir 只来自该次 arguments；超长 workdir 用于压出截断路径。
-    String hugeWorkdir = "/w/" + "\uD83D\uDE00".repeat(520) + "/deep";
-    ToolGateway.PreflightResult result =
-        preflightTruncation(
-            PermissionAction.ASK, "{\"path\":\"/tmp/x\",\"workdir\":\"" + hugeWorkdir + "\"}");
+  void askWithLongUnicodeArgumentsKeepsOriginalParameters() {
+    // 超长目录与 Unicode 参数不进入 reason，审批所用原始参数必须完整保留。
+    String hugeWorkdir = "/w/" + "目录\uD83D\uDE00".repeat(520) + "/deep";
+    ObjectNode arguments = JsonNodeFactory.instance.objectNode();
+    arguments.put("path", hugeWorkdir + "/文件\uD83D\uDE00.txt");
+    arguments.put("workdir", hugeWorkdir);
+    ObjectNode original = arguments.deepCopy();
+    String argumentsJson = JsonValues.write(arguments);
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
+            new ToolBinding(
+                hostDefinition(PREFLIGHT_DESCRIPTOR),
+                new ContributorBinding("test", "host-tool", List.of()),
+                EnvironmentSupport.NONE,
+                null,
+                null));
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(
+                new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
+            ToolGatewayTestSupport.settings(PermissionAction.ASK));
+
+    ToolGateway.PreflightResult result = gateway.preflight(request);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    assertTrue(ask.reason().length() <= 1024, ask.reason());
-    assertTrue(ask.reason().endsWith("..."), ask.reason());
-    assertFalse(hasLoneSurrogate(ask.reason()), ask.reason());
+    assertEquals("Permission rules require approval", ask.reason());
+    assertEquals(original, arguments);
+    assertEquals(argumentsJson, JsonValues.write(arguments));
+    assertEquals(argumentsJson, request.call().argumentsJson());
+    assertEquals(original, JsonValues.readTree(request.call().argumentsJson()));
+    assertEquals(
+        hugeWorkdir, JsonValues.readTree(request.call().argumentsJson()).get("workdir").asText());
   }
 
   @Test
@@ -256,9 +278,9 @@ class ToolExecutionGatewayPreflightTest {
     }
   }
 
-  /** 环境工具只绑定 canonical EnvironmentId；permission 坐标只来自该次 arguments 的 workdir。 */
+  /** 环境工具的审批理由同样固定，目录仅保留在调用参数中。 */
   @Test
-  void environmentToolAskPreviewShowsCallWorkdirInsteadOfAnyDefault() {
+  void environmentToolAskUsesFixedReason() {
     EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     ToolGateway.PreflightResult result =
         environmentPreflight(
@@ -266,8 +288,7 @@ class ToolExecutionGatewayPreflightTest {
             "{\"path\":\"src/Main.java\",\"workdir\":\"/repo/sub\"}",
             PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    assertTrue(ask.reason().contains(" in /repo/sub"), ask.reason());
-    assertFalse(ask.reason().contains("(default)"), ask.reason());
+    assertEquals("Permission rules require approval", ask.reason());
   }
 
   /** 没有 workdir 语义的调用不显示任何虚构默认目录。 */
@@ -284,8 +305,7 @@ class ToolExecutionGatewayPreflightTest {
     ToolGateway.PreflightResult result =
         gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR));
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    assertFalse(ask.reason().contains("(default)"), ask.reason());
-    assertFalse(ask.reason().contains(" in "), ask.reason());
+    assertEquals("Permission rules require approval", ask.reason());
   }
 
   /** path 规则坐标系是该次调用 explicit workdir：绝对 target 词法 relativize，与 Environment root 无关。 */
@@ -377,42 +397,6 @@ class ToolExecutionGatewayPreflightTest {
     return gateway.preflight(request);
   }
 
-  private static ToolDescriptor truncationDescriptor() {
-    return new ToolDescriptor(
-        "x",
-        "description of x",
-        "x",
-        new InputSchema(
-            "arguments",
-            Map.of("path", new StringSchema("Target path"), "workdir", new StringSchema("Workdir")),
-            Set.of("path", "workdir"),
-            false),
-        ToolSideEffect.READ_ONLY,
-        Duration.ofMinutes(1));
-  }
-
-  private static ToolGateway.PreflightResult preflightTruncation(
-      PermissionAction action, String argumentsJson) {
-    ToolDescriptor descriptor = truncationDescriptor();
-    ToolExecutionGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(descriptor)),
-            new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
-            ToolGatewayTestSupport.settings(action));
-    ToolInvocationRequest request =
-        new ToolInvocationRequest(
-            new ToolCall("call-1", "x", argumentsJson),
-            new ToolBinding(
-                hostDefinition(descriptor),
-                new ContributorBinding("test", "host-tool", List.of()),
-                EnvironmentSupport.NONE,
-                null,
-                null));
-    return gateway.preflight(request);
-  }
-
   @Test
   void preflightAcceptsDynamicMcpTool() {
     // 意图：验证动态 MCP 工具在通过 RuntimeToolCatalog 聚合后能够顺利通过 Gateway preflight
@@ -477,20 +461,5 @@ class ToolExecutionGatewayPreflightTest {
 
   private static AgentToolDefinition hostDefinition(ToolDescriptor descriptor) {
     return new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
-  }
-
-  private static boolean hasLoneSurrogate(String value) {
-    for (int i = 0; i < value.length(); i++) {
-      char current = value.charAt(i);
-      if (Character.isHighSurrogate(current)) {
-        if (i + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(i + 1))) {
-          return true;
-        }
-        i++;
-      } else if (Character.isLowSurrogate(current)) {
-        return true;
-      }
-    }
-    return false;
   }
 }
