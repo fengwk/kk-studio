@@ -1,0 +1,26 @@
+import { test, expect } from '@playwright/test'
+
+for (const width of [900, 360]) {
+  test(`shared readonly rows and full history at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 })
+    await page.goto('/browser-tests/subagent-tree-harness.html')
+    const history = page.getByRole('region', { name: 'subagent 执行' })
+    // section with accessible name has implicit region semantics.
+    await expect(history.locator('li')).toHaveCount(5)
+    await expect(history.locator('[data-thread-id="deep"]')).toHaveAttribute('data-depth', '2')
+    await expect(history.locator('[data-thread-id="failed"]')).toContainText('失败')
+    const deep = history.locator('[data-thread-id="deep"] a')
+    await expect(deep).toContainText('turns: 7 · tools: 12')
+    await expect(history.locator('[data-thread-id="deep"] .thread-tree-connectors > span')).toHaveCount(3)
+    await history.locator('[data-thread-id="failed"] a').click()
+    await expect(page.getByLabel('selected')).toHaveText('failed')
+    await expect(history.locator('[data-thread-id="failed"]')).toHaveAttribute('aria-current', 'true')
+    const sizes = await history.evaluate((el) => ({ client: el.clientWidth, scroll: el.scrollWidth }))
+    expect(sizes.scroll).toBeLessThanOrEqual(sizes.client)
+    await page.screenshot({ path: `../reports/subagent-tree/tree-${width}.png`, fullPage: true })
+    await page.getByRole('button', { name: 'finish', exact: true }).click()
+    await expect(page.getByRole('region', { name: '活跃子代理' })).toHaveCount(0)
+    await expect(history.locator('li')).toHaveCount(5)
+    await expect(deep).toContainText('完成')
+  })
+}

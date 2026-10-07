@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
+import java.time.Instant;
+
 /**
  * 一条执行树节点的最小投影。
  *
@@ -42,4 +44,7 @@ public class HarnessThreadTreeNodeDTO {
   /** 仅 IDLE 且当前 head 为 TURN_END 时的 outcome；其它为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String outcome;
+
+  /** Thread 最后更新时间（UTC Instant）。 */
+  private Instant updateTime;
 }
