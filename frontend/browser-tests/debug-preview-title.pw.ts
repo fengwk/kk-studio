@@ -326,20 +326,36 @@ function expectFreshPreviewWindow(
   expect(userMessage?.contents?.[0]).toEqual({ type: 'TEXT', text: expected.draft })
 }
 
-/** 打开 Debug 视图（Composer 斜杠命令），与用例中的宽度无关。 */
-async function openDebugView(page: Page) {
-  const composer = page.locator('.thread-composer')
-  const editor = composer.locator('.composer-editor')
-  await expect(editor).toBeVisible()
-  await editor.click()
-  await editor.fill('/debug')
-  const palette = composer.locator('.thread-command-palette')
+/**
+ * 打开 + 命令表（plus 模式）：与斜杠命令不同，plus 模式**不消费**编辑器里的草稿，
+ * 因此可以带着已写好的草稿进入 Debug；Debug 激活时整个控制区是 display:none + inert。
+ */
+async function openCommandPalette(page: Page) {
+  await page.locator('.thread-composer .thread-dock-add').click()
+  const palette = page.locator('.thread-composer .thread-command-palette')
   await expect(palette).toBeVisible()
-  await palette.locator('button', { hasText: 'debug' }).click()
-  await expect(editor).toHaveText('')
-  await editor.click()
-  await editor.fill(DRAFT)
-  return { composer, editor }
+  return palette
+}
+
+/** 进入 Debug 视图：只切换主视图，草稿与 Agent/Model 选择原地保留。 */
+async function enterDebugView(page: Page) {
+  const palette = await openCommandPalette(page)
+  await palette.locator('button', { hasText: /^debug/ }).click()
+  await expect(page.locator('.thread-debug-toolbar')).toBeVisible()
+}
+
+/** 退出 Debug 回到会话：唯一稳定入口是 Debug 工具条的「返回会话」，退出不修改草稿。 */
+async function exitDebugView(page: Page) {
+  await page.locator('.thread-debug-toolbar .thread-debug-back').click()
+  await expect(page.locator('.thread-debug-toolbar')).toHaveCount(0)
+  await expect(page.locator('.thread-composer .composer-editor')).toBeVisible()
+}
+
+/** 会话视图内打开 Agent 选择面板（不消费草稿），并选中所给 Agent。 */
+async function selectAgent(page: Page, optionName: string) {
+  const palette = await openCommandPalette(page)
+  await palette.locator('button', { hasText: /^agent/ }).click()
+  await page.getByRole('option', { name: optionName, exact: true }).click()
 }
 
 test('owner-free bound thread renders a NOTIFICATION entry as a system card', async ({ page }) => {
@@ -408,14 +424,20 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     })
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/browser-tests/debug-preview-harness.html')
-    const { composer, editor } = await openDebugView(page)
-    await editor.fill('/agent')
-    await composer.locator('.thread-command-palette button', { hasText: 'agent' }).click()
-    await page.getByRole('option', { name: 'coder coder', exact: true }).click()
+    const composer = page.locator('.thread-composer')
+    const editor = composer.locator('.composer-editor')
+    await expect(editor).toBeVisible()
+
+    // 1. 会话里先选 Agent 并写好草稿：Debug 全屏时控制区不可见，草稿只能在此编辑。
+    await selectAgent(page, 'coder coder')
+    await editor.click()
     await editor.fill(DRAFT)
     await expect(editor).toHaveText(DRAFT)
     await expect(composer).toContainText('Claude')
     await expect(composer).toContainText('fast')
+
+    // 2. + 命令表进入 Debug（不消费草稿），草稿与 Agent/Model 选择随之进入预览
+    await enterDebugView(page)
     await page.locator('.thread-debug-preview-title-btn').click()
     await expect.poll(() => recorded.filter((item) => item.kind === 'preview').length).toBe(1)
     const request = recorded.find((item) => item.kind === 'preview') as PreviewRequest
@@ -429,9 +451,10 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     ])
     await expect(page.getByTestId('preview-request-body')).toContainText('"model": "Claude"')
 
-    await composer.locator('.thread-dock-add').click()
-    await composer.locator('.thread-command-palette button', { hasText: 'agent' }).click()
-    await page.getByRole('option', { name: 'broken-agent broken-agent', exact: true }).click()
+    // 3. 退出 Debug 才能重选 Agent；退出只切视图，草稿与既有选择原地保留。
+    await exitDebugView(page)
+    await expect(editor).toHaveText(DRAFT)
+    await selectAgent(page, 'broken-agent broken-agent')
     await expect(editor).toHaveText(DRAFT)
     await expect(composer).toContainText('Claude')
     await expect(page.getByRole('option', { name: 'broken-agent broken-agent', exact: true })).toBeVisible()
@@ -467,22 +490,48 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(composer.locator('.thread-dock-add')).toBeVisible()
     await expect(composer.locator('.thread-dock-send')).toBeVisible()
 
-    // 2. 切到 Debug 视图：预览标题是唯一入口，空草稿时禁用并给出原因
+    // 2. 会话里先输入草稿：Debug 激活后控制区是 display:none + inert，草稿只能在此编辑。
     await editor.click()
-    await editor.fill('/debug')
-    const palette = composer.locator('.thread-command-palette')
-    await expect(palette).toBeVisible()
-    await palette.locator('button', { hasText: 'debug' }).click()
-    await expect(editor).toHaveText('')
+    await editor.fill(DRAFT)
+    await expect(editor).toHaveText(DRAFT)
+
+    // 3. Composer 底栏在会话视图下不横向溢出（Debug 激活后控制区不可见，此断言必须在可见态测量）
+    const dockMetrics = await page.evaluate(() => {
+      const dock = document.querySelector('.thread-dock') as HTMLElement
+      const composerEl = document.querySelector('.thread-composer') as HTMLElement
+      return {
+        dockScrollWidth: dock.scrollWidth,
+        dockClientWidth: dock.clientWidth,
+        composerScrollWidth: composerEl.scrollWidth,
+        composerClientWidth: composerEl.clientWidth,
+      }
+    })
+    expect(dockMetrics.dockScrollWidth).toBeLessThanOrEqual(dockMetrics.dockClientWidth + 1)
+    expect(dockMetrics.composerScrollWidth).toBeLessThanOrEqual(dockMetrics.composerClientWidth + 1)
+
+    // 4. 带草稿进入 Debug：预览标题是唯一入口，入口立即可用
+    await enterDebugView(page)
 
     const shell = page.locator('.thread-events-shell')
     await expect(shell).toHaveAttribute('data-layout', 'wide')
     const previewTitleBtn = page.locator('.thread-debug-preview-title-btn')
     await expect(previewTitleBtn).toBeVisible()
+    await expect(previewTitleBtn).toBeEnabled()
+    await expect(previewTitleBtn).toHaveAttribute('aria-label', '下一次请求预览')
+    await expect(editor).toHaveText(DRAFT)
+    await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
+    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
+
+    // 5. 空草稿的禁用契约：退出 Debug 清空草稿，再进来必须禁用并给出原因
+    await exitDebugView(page)
+    await editor.click()
+    await editor.fill('')
+    await expect(editor).toHaveText('')
+    await enterDebugView(page)
     await expect(previewTitleBtn).toBeDisabled()
     await expect(previewTitleBtn).toHaveAttribute('aria-label', '下一次请求预览 (草稿为空)')
 
-    // 3. 按钮布局不溢出：header 与预览列均无横向滚动，按钮不越出 header
+    // 6. 按钮布局不溢出：header 与预览列均无横向滚动，按钮不越出 header
     const headerMetrics = await page.evaluate(() => {
       const header = document.querySelector('.thread-debug-preview-header') as HTMLElement
       const btn = document.querySelector('.thread-debug-preview-title-btn') as HTMLElement
@@ -504,15 +553,18 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     expect(headerMetrics.columnScrollWidth).toBeLessThanOrEqual(headerMetrics.columnClientWidth + 1)
     expect(headerMetrics.btnRight).toBeLessThanOrEqual(headerMetrics.headerRight + 1)
 
-    // 4. 输入草稿后入口解禁
+    // 7. 退出 Debug 在会话里重新输入草稿，再重进 Debug：入口解禁
+    await exitDebugView(page)
     await editor.click()
     await editor.fill(DRAFT)
+    await expect(editor).toHaveText(DRAFT)
+    await enterDebugView(page)
     await expect(previewTitleBtn).toBeEnabled()
     await expect(previewTitleBtn).toHaveAttribute('aria-label', '下一次请求预览')
     await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
 
-    // 5. 宽布局点击标题：先 fresh GET 快照，再用 fresh 游标 POST 预览
+    // 8. 宽布局点击标题：先 fresh GET 快照，再用 fresh 游标 POST 预览
     const wideMark = recorded.length
     cursor = WIDE_CLICK_CURSOR
     await previewTitleBtn.click()
@@ -521,7 +573,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
       .toBe(1)
     expectFreshPreviewWindow(recorded.slice(wideMark), { cursor: WIDE_CLICK_CURSOR, draft: DRAFT })
 
-    // 6. 结果落在既有 inspector（复用详情列，无新弹层）
+    // 9. 结果落在既有 inspector（复用详情列，无新弹层）
     const inspector = page.locator('[data-testid="thread-debug-inspector"]')
     await expect(inspector).toHaveCount(1)
     await expect(inspector).toHaveAttribute('aria-label', '请求预览')
@@ -536,19 +588,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(previewTitleBtn).toBeEnabled()
     await expect(page.locator('.thread-debug-preview-error')).toHaveCount(0)
 
-    // 8. Composer 底栏同样不横向溢出
-    const dockMetrics = await page.evaluate(() => {
-      const dock = document.querySelector('.thread-dock') as HTMLElement
-      const composerEl = document.querySelector('.thread-composer') as HTMLElement
-      return {
-        dockScrollWidth: dock.scrollWidth,
-        dockClientWidth: dock.clientWidth,
-        composerScrollWidth: composerEl.scrollWidth,
-        composerClientWidth: composerEl.clientWidth,
-      }
-    })
-    expect(dockMetrics.dockScrollWidth).toBeLessThanOrEqual(dockMetrics.dockClientWidth + 1)
-    expect(dockMetrics.composerScrollWidth).toBeLessThanOrEqual(dockMetrics.composerClientWidth + 1)
+    // Composer 底栏的溢出契约已在会话可见态（步骤 3）测量；Debug 激活后控制区不可见。
 
     await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-wide.png') })
 
@@ -670,7 +710,15 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await page.setViewportSize(NARROW_VIEWPORT)
     await page.goto('/browser-tests/debug-preview-harness.html')
 
-    const { editor } = await openDebugView(page)
+    // 会话里先写草稿（Debug 激活后控制区 display:none + inert），再带草稿进入 Debug。
+    const composer = page.locator('.thread-composer')
+    const editor = composer.locator('.composer-editor')
+    await expect(editor).toBeVisible()
+    await editor.click()
+    await editor.fill(DRAFT)
+    await expect(editor).toHaveText(DRAFT)
+    await enterDebugView(page)
+
     const shell = page.locator('.thread-events-shell')
     await expect(shell).toHaveAttribute('data-layout', 'narrow')
     const tabs = page.locator('.thread-debug-tabs')
@@ -700,7 +748,9 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(previewTab).toHaveAttribute('aria-selected', 'true')
     await expect(detailTab).toHaveAttribute('aria-selected', 'false')
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-    await previewTitleBtn.click({ force: true })
+    // 加载期用户再点一次：真实指针点击落在禁用按钮上，浏览器不派发事件，绝不产生第二次预览
+    const loadingBox = (await previewTitleBtn.boundingBox())!
+    await page.mouse.click(loadingBox.x + loadingBox.width / 2, loadingBox.y + loadingBox.height / 2)
     expect(recorded.slice(mark).filter((item) => item.kind === 'preview')).toHaveLength(1)
 
     await page.screenshot({ path: resolve(reportsDir, 'narrow-preview-loading.png') })
