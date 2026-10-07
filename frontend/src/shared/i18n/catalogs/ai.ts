@@ -1757,7 +1757,7 @@ export const aiCatalog = {
   },
   'ai.runtime.notification.entry.SUBAGENT_RESULTTitle': {
     'en-US': 'Subagent result',
-    'zh-CN': '子 Thread 结果',
+    'zh-CN': 'subagent 结果',
   },
   'ai.runtime.notification.entry.TASK_BUDGETTitle': {
     'en-US': 'Task budget reminder',
@@ -1783,9 +1783,21 @@ export const aiCatalog = {
     'en-US': 'Partial result',
     'zh-CN': '部分结果',
   },
+  'ai.runtime.notification.entry.subagentTask': {
+    'en-US': 'Task',
+    'zh-CN': '任务',
+  },
+  'ai.runtime.notification.entry.subagentState.completed': {
+    'en-US': 'Returned',
+    'zh-CN': '已返回',
+  },
+  'ai.runtime.notification.entry.viewSubagentExecution': {
+    'en-US': 'View subagent execution',
+    'zh-CN': '查看 subagent 执行',
+  },
   'ai.runtime.notification.entry.invalidReceipt': {
     'en-US': 'The subagent receipt is not a valid XML envelope and cannot be displayed.',
-    'zh-CN': '子 Thread 回执不是合法的 XML 信封，无法展示。',
+    'zh-CN': 'subagent 回执不是合法的 XML 信封，无法展示。',
   },
   'ai.runtime.notification.entry.emptyText': {
     'en-US': 'No text content was delivered with this notification.',
@@ -3298,5 +3310,13 @@ export const aiCatalog = {
   'ai.interaction.waitingApproval': {
     'en-US': 'Waiting for Approval',
     'zh-CN': '等待审批',
+  },
+  'ai.interaction.waitingEnvironment': {
+    'en-US': 'Waiting for environment',
+    'zh-CN': '等待环境上线',
+  },
+  'ai.interaction.environmentWaitingCount': {
+    'en-US': '{{count}} tool calls waiting for {{environmentName}}',
+    'zh-CN': '{{count}} 个工具调用等待 {{environmentName}} 上线',
   },
 } satisfies LocaleCatalog
