@@ -326,9 +326,62 @@ describe('projects codecs', () => {
             currentOrLatestRun: null,
           },
         ],
+        referencedStateCodes: ['INIT'],
       })
       expect(snap.project.id).toBe(validProject.id)
       expect(snap.issues).toHaveLength(1)
+    })
+
+    it('decodeProjectSnapshot should reject missing referencedStateCodes', () => {
+      // 测试意图：验证 ProjectSnapshot 缺失 required 字段 referencedStateCodes 时拒绝并抛出 ApiError
+      const baseRaw = {
+        project: validProject,
+        issues: [
+          {
+            issue: validIssue,
+            currentOrLatestRun: null,
+          },
+        ],
+      }
+      expect(() => decodeProjectSnapshot(baseRaw)).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: null })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: undefined })).toThrow(ApiError)
+    })
+
+    it('decodeProjectSnapshot should reject non-array referencedStateCodes', () => {
+      // 测试意图：验证 ProjectSnapshot 中 referencedStateCodes 字段非数组类型时拒绝并抛出 ApiError
+      const baseRaw = {
+        project: validProject,
+        issues: [
+          {
+            issue: validIssue,
+            currentOrLatestRun: null,
+          },
+        ],
+      }
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: 'INIT' })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: 123 })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: {} })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: true })).toThrow(ApiError)
+    })
+
+    it('decodeProjectSnapshot should reject invalid state code in referencedStateCodes', () => {
+      // 测试意图：验证 referencedStateCodes 数组中包含非法命名规范的状态编码时拒绝并抛出 ApiError
+      const baseRaw = {
+        project: validProject,
+        issues: [
+          {
+            issue: validIssue,
+            currentOrLatestRun: null,
+          },
+        ],
+      }
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: ['invalid-state'] })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: ['lower_case'] })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: ['123_STATE'] })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: [''] })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: [null] })).toThrow(ApiError)
+      expect(() => decodeProjectSnapshot({ ...baseRaw, referencedStateCodes: [123] })).toThrow(ApiError)
     })
   })
 })

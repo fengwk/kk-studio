@@ -21,6 +21,7 @@ export const projectsExtension: TrustedReactExtension = {
       component: ProjectDetailRoute,
       navGroup: 'projects',
       priority: 80,
+      workspace: true,
     },
   ],
   overlays: [{ id: 'projects.invalidation', component: ProjectsInvalidationBridge }],

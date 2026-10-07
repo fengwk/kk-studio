@@ -4,7 +4,7 @@ import type { ProjectsChangedEventPayload } from './types'
 
 /**
  * 失效 Project 相关的 TanStack Query 缓存。
- * - 当携带 projectId 时：精准失效项目列表、该项目的 detail 与 snapshot、以及该项目下的所有 issue。
+ * - 当携带 projectId 时：精准失效项目列表、该项目的 detail 与 snapshot、以及该项目下的所有 issue（issue 前缀同时覆盖其下的 evidence）。
  * - 当未携带 projectId 时（如 subscribed / resync / error）：失效 projects 全量查询族。
  */
 export async function invalidateProjectQueries(

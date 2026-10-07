@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
-import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { useMemo } from 'react'
+import { useI18n } from '@/shared/i18n'
 import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '../types'
 import { IssueCard } from './IssueCard'
 
 export interface IssueBoardProps {
   workflow?: ProjectWorkflowDTO
   issues: ProjectIssueSnapshotDTO[]
+  /** 搜索与归档筛选由页面头部持有；看板只按结果渲染列与卡片。 */
+  searchQuery: string
+  includeArchived: boolean
   onSelectIssue: (issueId: string) => void
-  onCreateIssue: () => void
   onTransitionIssue: (issueId: string, expectedVersion: string, toState: string) => void
   onBlockIssue: (issueId: string, expectedVersion: string) => void
   onRecoverIssue: (issueId: string, expectedVersion: string) => void
@@ -19,22 +20,25 @@ export interface IssueBoardProps {
 export function IssueBoard({
   workflow,
   issues,
+  searchQuery,
+  includeArchived,
   onSelectIssue,
-  onCreateIssue,
   onTransitionIssue,
   onBlockIssue,
   onRecoverIssue,
   onReopenIssue,
   onResolveUnknownIssue,
 }: IssueBoardProps) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [includeArchived, setIncludeArchived] = useState(false)
-
-  const states = useMemo(() => workflow?.states ?? [
-    { state: 'INIT', name: '待开始', next: ['DONE'] },
-    { state: 'BLOCKED', name: '业务阻塞' },
-    { state: 'DONE', name: '完成' },
-  ], [workflow])
+  const { t } = useI18n()
+  const states = useMemo(
+    () =>
+      workflow?.states ?? [
+        { state: 'INIT', name: t('projects.state.init'), next: ['DONE'] },
+        { state: 'BLOCKED', name: t('projects.state.blocked') },
+        { state: 'DONE', name: t('projects.state.done') },
+      ],
+    [workflow, t],
+  )
 
   // 状态与允许转移的映射表
   const stateNextMap = useMemo(() => {
@@ -84,43 +88,6 @@ export function IssueBoard({
 
   return (
     <div className="project-board-section">
-      <div className="project-board-toolbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <Search
-              size={14}
-              style={{ position: 'absolute', left: '10px', color: 'var(--fg-muted)' }}
-              aria-hidden="true"
-            />
-            <input
-              type="text"
-              className="projects-search-input"
-              style={{ paddingLeft: '32px' }}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索 Issue 标题 / 编号 / 状态..."
-              aria-label="搜索 Issue"
-            />
-          </div>
-
-          <Checkbox
-            checked={includeArchived}
-            onChange={setIncludeArchived}
-            label="显示已归档"
-          />
-        </div>
-
-        <button
-          type="button"
-          className="btn-primary"
-          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          onClick={onCreateIssue}
-        >
-          <Plus size={14} aria-hidden="true" />
-          <span>新建 Issue</span>
-        </button>
-      </div>
-
       {/* 状态自然 token 动态看板列 */}
       <div className="project-board-columns">
         {states.map((st) => {
@@ -138,7 +105,7 @@ export function IssueBoard({
               <div className="column-body">
                 {colIssues.length === 0 ? (
                   <div className="column-empty">
-                    <span>暂无 Issue</span>
+                    <span>{t('projects.board.emptyColumn')}</span>
                   </div>
                 ) : (
                   colIssues.map((item) => (
@@ -169,7 +136,7 @@ export function IssueBoard({
           <div className="project-board-column other-states-column">
             <div className="column-header">
               <div className="column-header-left">
-                <h3 className="column-title">其他状态</h3>
+                <h3 className="column-title">{t('projects.board.otherStates')}</h3>
               </div>
               <span className="column-count">
                 {issuesByState.unknownStateIssues.length}

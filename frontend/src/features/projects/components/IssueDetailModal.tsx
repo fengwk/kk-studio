@@ -11,7 +11,6 @@ import {
   Eye,
   FileText,
   ListOrdered,
-  MessageSquare,
   Paperclip,
   Pencil,
   RefreshCw,
@@ -25,9 +24,16 @@ import {
   X,
 } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
+import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
+import { Select } from '@/shared/ui/controls/Select'
+import { Tabs } from '@/shared/ui/controls/Tabs'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import {
   storageService as defaultStorageService,
@@ -39,6 +45,7 @@ import {
   type HashFile,
 } from '@/features/ai/composer'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { MAX_RUNS, parseMaxRuns } from '../workflow-draft'
 import { createUuid } from '@/shared/lib/uuid'
 import {
   clearPendingAction,
@@ -100,6 +107,7 @@ interface EvidenceRowProps {
 }
 
 function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
+  const { t } = useI18n()
   const { data: presignedUrl, isLoading } = useQuery({
     queryKey: ['storage', 'blob', 'download-url', evidence.blobId],
     queryFn: async () => {
@@ -154,10 +162,10 @@ function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
           rel="noreferrer"
           className="ghost-btn"
           onClick={handleClick}
-          title="预览或下载"
+          title={t('projects.issue.previewOrDownload')}
         >
           <Download size={14} className={isLoading || isOpening ? 'animate-spin' : ''} aria-hidden="true" />
-          <span>{isLoading || isOpening ? '获取中...' : '下载/查看'}</span>
+          <span>{isLoading || isOpening ? t('projects.issue.fetching') : t('projects.issue.downloadOrView')}</span>
         </a>
       </div>
     </div>
@@ -191,6 +199,7 @@ export function IssueDetailModal({
   hashFile,
   onOpenThread,
 }: IssueDetailModalProps) {
+  const { t } = useI18n()
   const notifyUpdated = () => {
     onUpdated?.()
     onIssueUpdated?.()
@@ -209,7 +218,7 @@ export function IssueDetailModal({
     enabled: isOpen && Boolean(issueId),
   })
 
-  const evidenceQueryKey = queryKeys.projects.evidence(issueId ?? '')
+  const evidenceQueryKey = queryKeys.projects.evidence(projectId, issueId ?? '')
   const { data: serverEvidences = [] } = useQuery({
     queryKey: evidenceQueryKey,
     queryFn: () => (api.listIssueEvidence ? api.listIssueEvidence(issueId!) : Promise.resolve([])),
@@ -353,7 +362,7 @@ export function IssueDetailModal({
   // 草稿修改检测：输入变更时旧 unknown 不能丢，修改 draft 时换用全新 requestKey 防同 key 换 payload
   const handleActivityBodyChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
-      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先重试原操作或明确放弃。')
+      setActionError(t('projects.issue.pendingActivityModifyBlocked'))
       return
     }
     setActivityBody(value)
@@ -365,7 +374,7 @@ export function IssueDetailModal({
 
   const handleActivityKindChange = (kind: 'COMMENT' | 'INSTRUCTION') => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
-      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先重试原操作或明确放弃。')
+      setActionError(t('projects.issue.pendingActivityModifyBlocked'))
       return
     }
     setActivityKind(kind)
@@ -377,7 +386,7 @@ export function IssueDetailModal({
 
   const handleBlockReasonChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'BLOCK') {
-      setActionError('存在未确认结果的阻塞请求，不能直接修改输入。请先重试原操作或明确放弃。')
+      setActionError(t('projects.issue.pendingBlockModifyBlocked'))
       return
     }
     setBlockReason(value)
@@ -389,7 +398,7 @@ export function IssueDetailModal({
 
   const handleVerificationInputChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'RESOLVE_UNKNOWN') {
-      setActionError('存在未确认结果的人工核查请求，不能直接修改输入。请先重试原操作或明确放弃。')
+      setActionError(t('projects.issue.pendingResolveUnknownModifyBlocked'))
       return
     }
     setVerificationInput(value)
@@ -401,7 +410,7 @@ export function IssueDetailModal({
 
   const handleStopDetailChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'STOP') {
-      setActionError('存在未确认结果的终止请求，不能直接修改输入。请先重试原操作或明确放弃。')
+      setActionError(t('projects.issue.pendingStopModifyBlocked'))
       return
     }
     setStopDetail(value)
@@ -413,7 +422,7 @@ export function IssueDetailModal({
 
   const handleBudgetStateChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
-      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先重试原操作或明确放弃。')
+      setActionError(t('projects.issue.pendingResetBudgetModifyBlocked'))
       return
     }
     setResetBudgetState(value)
@@ -425,7 +434,7 @@ export function IssueDetailModal({
 
   const handleBudgetMaxRunsChange = (value: number) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
-      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先重试原操作或明确放弃。')
+      setActionError(t('projects.issue.pendingResetBudgetModifyBlocked'))
       return
     }
     setResetBudgetMaxRuns(value)
@@ -469,7 +478,10 @@ export function IssueDetailModal({
         // 正在编辑且远端已出现新版本：绝不静默覆写 specVersion！
         // 保留原 version 直到用户显式确认或取消编辑，避免无提示 rebasing 导致并发覆盖
         setConflictDetail(
-          `服务端版本已更新为 v${freshIssue.version}（当前草稿基于 v${specVersion}）。已保留草稿；如确认使用最新版本覆盖，请显式确认，或取消编辑重新载入。`,
+          t('projects.issue.versionConflictNotice', {
+            freshVersion: freshIssue.version,
+            specVersion,
+          }),
         )
       }
     }
@@ -486,7 +498,7 @@ export function IssueDetailModal({
   ) => {
     if (!issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的操作记录，暂不能继续；请先处理或放弃')
+      setActionError(t('projects.issue.pendingWriteBlockedNotice'))
       return
     }
 
@@ -504,7 +516,9 @@ export function IssueDetailModal({
     try {
       storePendingAction(issue.id, pending)
     } catch (err) {
-      setActionError(`无法保存操作记录，未发送请求: ${err instanceof Error ? err.message : String(err)}`)
+      setActionError(t('projects.detail.storePendingFailed', {
+          reason: err instanceof Error ? err.message : String(err),
+        }))
       return
     }
 
@@ -526,16 +540,16 @@ export function IssueDetailModal({
         // 409 确定被服务端拒绝，清理侧车并保留草稿
         clearPendingAction(issue.id, requestKey)
         setPendingActionResult({ type: 'NONE' })
-        setConflictDetail('操作遇到版本冲突 (409)。已为您保留编辑草稿，请刷新版本后重试。')
+        setConflictDetail(t('projects.issue.actionConflictNotice'))
       } else if (!isNetworkUnknownError(err)) {
         // 其余明确 4xx 业务错误，服务端未接受
         clearPendingAction(issue.id, requestKey)
         setPendingActionResult({ type: 'NONE' })
-        setActionError(err instanceof Error ? err.message : '操作失败')
+        setActionError(err instanceof Error ? err.message : t('projects.issue.actionFailed'))
       } else {
         // 未知网络错误（408, 429, 5xx, 网络中断）：侧车保留并在 UI 标记 unknown！
         setPendingActionResult({ type: 'VALID', action: pending })
-        setActionError(err instanceof Error ? err.message : '网络请求未收到确定响应，结果未知')
+        setActionError(err instanceof Error ? err.message : t('projects.issue.networkUnknownError'))
       }
     } finally {
       isActionPendingRef.current = false
@@ -548,12 +562,12 @@ export function IssueDetailModal({
     e.preventDefault()
     if (!issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的操作记录，暂不能修改需求；请先处理或放弃')
+      setActionError(t('projects.issue.modifyDraftBlockedByPending'))
       return
     }
     const trimmedTitle = draftTitle.trim()
     if (!trimmedTitle) {
-      setActionError('标题不能为空')
+      setActionError(t('projects.issue.titleEmpty'))
       return
     }
 
@@ -572,9 +586,9 @@ export function IssueDetailModal({
       notifyUpdated()
     } catch (err) {
       if (isConflictError(err)) {
-        setConflictDetail('Issue 已被其他操作更新 (409 冲突)。已保留编辑草稿，请刷新版本后重试。')
+        setConflictDetail(t('projects.issue.specConflictNotice'))
       } else {
-        setActionError(err instanceof Error ? err.message : '更新 Issue 失败')
+        setActionError(err instanceof Error ? err.message : t('projects.issue.updateFailed'))
       }
     } finally {
       isActionPendingRef.current = false
@@ -678,13 +692,13 @@ export function IssueDetailModal({
       if (isConflictError(err)) {
         clearPendingAction(issue.id, requestKey)
         setPendingActionResult({ type: 'NONE' })
-        setConflictDetail('重试操作遇到版本冲突 (409)，请刷新数据后重试。')
+        setConflictDetail(t('projects.issue.retryConflictNotice'))
       } else if (!isNetworkUnknownError(err)) {
         clearPendingAction(issue.id, requestKey)
         setPendingActionResult({ type: 'NONE' })
-        setActionError(err instanceof Error ? err.message : '操作失败')
+        setActionError(err instanceof Error ? err.message : t('projects.issue.actionFailed'))
       } else {
-        setActionError(err instanceof Error ? err.message : '重试依然未收到响应，结果未知')
+        setActionError(err instanceof Error ? err.message : t('projects.issue.retryStillUnknownError'))
       }
     } finally {
       isActionPendingRef.current = false
@@ -748,7 +762,7 @@ export function IssueDetailModal({
     if (!issue) return
     const trimmed = blockReason.trim()
     if (!trimmed) {
-      setActionError('阻塞原因不能为空')
+      setActionError(t('projects.issue.blockReasonRequired'))
       return
     }
     blockPayloadRef.current = { reason: trimmed }
@@ -773,7 +787,7 @@ export function IssueDetailModal({
     if (!issue) return
     const trimmed = verificationInput.trim()
     if (!trimmed) {
-      setActionError('人工核查说明不能为空')
+      setActionError(t('projects.issue.verificationRequired'))
       return
     }
     resolveUnknownPayloadRef.current = { verification: trimmed }
@@ -818,20 +832,21 @@ export function IssueDetailModal({
     e.preventDefault()
     if (!issue) return
     if (!resetBudgetState) {
-      setActionError('请选择要重置预算的工作阶段')
+      setActionError(t('projects.issue.resetBudgetStateRequired'))
       return
     }
-    if (resetBudgetMaxRuns <= 0) {
-      setActionError('最大额度必须大于 0')
+    const parsedMaxRuns = parseMaxRuns(String(resetBudgetMaxRuns))
+    if (parsedMaxRuns === null) {
+      setActionError(t('projects.edit.maxRunsInvalid', { max: MAX_RUNS }))
       return
     }
-    budgetPayloadRef.current = { state: resetBudgetState, maxRuns: resetBudgetMaxRuns }
+    budgetPayloadRef.current = { state: resetBudgetState, maxRuns: parsedMaxRuns }
     await executeIssueAction(
       'RESET_BUDGET',
       budgetRequestKey,
       issue.version,
-      { state: resetBudgetState, maxRuns: resetBudgetMaxRuns },
-      () => api.resetStageBudget(issue.id, { expectedVersion: issue.version, requestKey: budgetRequestKey, state: resetBudgetState, maxRuns: resetBudgetMaxRuns }),
+      { state: resetBudgetState, maxRuns: parsedMaxRuns },
+      () => api.resetStageBudget(issue.id, { expectedVersion: issue.version, requestKey: budgetRequestKey, state: resetBudgetState, maxRuns: parsedMaxRuns }),
       () => {
         setIsResetBudgetOpen(false)
         budgetPayloadRef.current = null
@@ -846,7 +861,7 @@ export function IssueDetailModal({
     if (!issue) return
     const trimmedBody = activityBody.trim()
     if (!trimmedBody) {
-      setActionError('内容不能为空')
+      setActionError(t('projects.issue.contentEmpty'))
       return
     }
     activityPayloadRef.current = { kind: activityKind, body: trimmedBody }
@@ -868,7 +883,7 @@ export function IssueDetailModal({
   const handleDeleteIssue = async () => {
     if (!issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的操作记录，暂不能删除 Issue；请先处理或放弃')
+      setActionError(t('projects.issue.deleteBlockedByPending'))
       return
     }
     isActionPendingRef.current = true
@@ -880,7 +895,7 @@ export function IssueDetailModal({
       onClose()
       notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '删除 Issue 失败')
+      setActionError(err instanceof Error ? err.message : t('projects.issue.deleteFailed'))
     } finally {
       isActionPendingRef.current = false
       setIsActionPending(false)
@@ -892,13 +907,13 @@ export function IssueDetailModal({
     const file = e.target.files?.[0]
     if (!file || !issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的操作记录，暂不能上传证据')
+      setActionError(t('projects.issue.uploadEvidenceBlockedByPending'))
       return
     }
     try {
       validateUploadFile(file)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '文件校验不通过')
+      setActionError(err instanceof Error ? err.message : t('projects.issue.fileValidationFailed'))
       return
     }
 
@@ -925,7 +940,7 @@ export function IssueDetailModal({
       await queryClient.invalidateQueries({ queryKey: evidenceQueryKey })
       await queryClient.invalidateQueries({ queryKey: issueQueryKey })
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '上传证据失败')
+      setActionError(err instanceof Error ? err.message : t('projects.issue.uploadEvidenceFailed'))
     } finally {
       isActionPendingRef.current = false
       setIsUploadingEvidence(false)
@@ -938,7 +953,7 @@ export function IssueDetailModal({
   return (
     <Dialog
       className="issue-detail-modal-card"
-      ariaLabel={`Issue #${issue?.number || ''} 详情`}
+      ariaLabel={t('projects.issue.modalAriaLabel', { number: issue?.number || '' })}
       onClose={onClose}
       header={
         <div className="modal-header">
@@ -949,13 +964,13 @@ export function IssueDetailModal({
             <span className="badge badge-state">{issue?.state || 'INIT'}</span>
 
             {isBlocked && (
-              <span className="badge badge-blocked" title={issue?.blockReason || '业务阻塞'}>
+              <span className="badge badge-blocked" title={issue?.blockReason || t('projects.state.blocked')}>
                 <AlertCircle size={12} aria-hidden="true" />
                 BLOCKED
               </span>
             )}
             {isUnknown && (
-              <span className="badge badge-unknown" title="待人工核查外部副作用">
+              <span className="badge badge-unknown" title={t('projects.issue.pendingVerifyExternalSideEffects')}>
                 <ShieldAlert size={12} aria-hidden="true" />
                 UNKNOWN
               </span>
@@ -971,23 +986,15 @@ export function IssueDetailModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Button
               variant="ghost"
-              onClick={() => void handleReloadFreshData()}
-              disabled={isLoading || isActionPending}
-              title="刷新数据"
-            >
-              <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
-            </Button>
-            <Button
-              variant="ghost"
               danger
               onClick={() => setIsDeleteModalOpen(true)}
               disabled={isWriteBlocked}
-              title="删除 Issue"
-              aria-label="删除 Issue"
+              title={t('projects.issue.delete')}
+              aria-label={t('projects.issue.delete')}
             >
               <Trash2 size={14} aria-hidden="true" />
             </Button>
-            <IconButton label="关闭" onClick={onClose}>
+            <IconButton label={t('projects.close')} onClick={onClose}>
               <X size={16} aria-hidden="true" />
             </IconButton>
           </div>
@@ -1000,84 +1007,82 @@ export function IssueDetailModal({
           <div className="issue-actions-left">
             {/* 流转目标按钮 */}
             {!isBlocked && availableNextStates.map((toState) => (
-              <button
+              <Button
                 key={toState}
-                type="button"
-                className="btn-action primary"
+                size="compact"
                 disabled={isWriteBlocked}
                 onClick={() => handleTransition(toState)}
-                title={`流转状态至 ${toState}`}
+                title={t('projects.issue.transitionStateTo', { state: toState })}
               >
-                <span>流转至 {toState}</span>
+                <span>{t('projects.issue.transitionToState', { state: toState })}</span>
                 <ArrowRight size={12} aria-hidden="true" />
-              </button>
+              </Button>
             ))}
 
             {/* UNKNOWN 人工核查 */}
             {isUnknown && (
-              <button
-                type="button"
-                className="btn-action danger"
+              <Button
+                size="compact"
+                variant="ghost"
+                danger
                 disabled={isWriteBlocked}
                 onClick={() => setIsResolveUnknownOpen(true)}
-                title="核查外部副作用并解除 UNKNOWN"
+                title={t('projects.issue.resolveUnknownActionTitle')}
               >
                 <ShieldAlert size={13} aria-hidden="true" />
-                <span>人工核查</span>
-              </button>
+                <span>{t('projects.issue.actionVerify')}</span>
+              </Button>
             )}
 
             {/* 阻塞与恢复 */}
             {isBlocked ? (
-              <button
-                type="button"
-                className="btn-action primary"
+              <Button
+                size="compact"
                 disabled={isWriteBlocked}
                 onClick={() => handleRecover()}
-                title="解除阻塞并恢复至原工作阶段"
+                title={t('projects.issue.recoverActionTitle')}
               >
                 <RotateCcw size={13} aria-hidden="true" />
-                <span>恢复执行</span>
-              </button>
+                <span>{t('projects.issue.recoverExecution')}</span>
+              </Button>
             ) : !isDone && (
-              <button
-                type="button"
-                className="btn-action"
+              <Button
+                size="compact"
+                variant="ghost"
                 disabled={isWriteBlocked}
                 onClick={() => setIsBlockModalOpen(true)}
-                title="记录原因并标记业务阻塞"
+                title={t('projects.issue.blockActionTitle')}
               >
                 <AlertCircle size={13} aria-hidden="true" />
-                <span>业务阻塞</span>
-              </button>
+                <span>{t('projects.state.blocked')}</span>
+              </Button>
             )}
 
             {/* 停止 (Stop) */}
             {!isDone && (
-              <button
-                type="button"
-                className="btn-action"
+              <Button
+                size="compact"
+                variant="ghost"
                 disabled={isWriteBlocked}
                 onClick={() => setIsStopModalOpen(true)}
-                title="终止当前活动 Run 并置为暂停"
+                title={t('projects.issue.stopActionTitle')}
               >
                 <Square size={13} aria-hidden="true" />
-                <span>终止 (Stop)</span>
-              </button>
+                <span>{t('projects.issue.stopAction')}</span>
+              </Button>
             )}
 
             {/* 重开 (Reopen) */}
             {isDone && (
-              <button
-                type="button"
-                className="btn-action primary"
+              <Button
+                size="compact"
                 disabled={isWriteBlocked}
                 onClick={() => handleReopen()}
-                title="重新打开已完成的 Issue 回到 INIT"
+                title={t('projects.issue.actionReopenTitle')}
               >
                 <RotateCcw size={13} aria-hidden="true" />
-                <span>重新打开</span>
-              </button>
+                <span>{t('projects.issue.reopen')}</span>
+              </Button>
             )}
           </div>
         </div>
@@ -1098,7 +1103,7 @@ export function IssueDetailModal({
             }}
           >
             <AlertTriangle size={16} color="#ef4444" aria-hidden="true" />
-            <span>本地存储异常，已锁定该 Issue 的写操作: {storageLoadError}</span>
+            <span>{t('projects.issue.storageLoadError', { error: storageLoadError })}</span>
           </div>
         )}
 
@@ -1119,10 +1124,10 @@ export function IssueDetailModal({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <AlertTriangle size={16} color="#eab308" aria-hidden="true" />
-              <strong style={{ color: '#eab308' }}>检测到损坏的本地未决操作记录（可能包含未确认副作用）</strong>
+              <strong style={{ color: '#eab308' }}>{t('projects.issue.corruptActionTitle')}</strong>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-              解析错误: {corruptActionInfo.error}。为避免覆盖外部在途操作，写操作已锁定。
+              {t('projects.issue.corruptActionDetail', { error: corruptActionInfo.error })}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
               <Button
@@ -1131,7 +1136,7 @@ export function IssueDetailModal({
                 disabled={isActionPending}
                 style={{ fontSize: '12px', padding: '4px 12px' }}
               >
-                放弃损坏记录并解锁
+                {t('projects.issue.discardCorruptAction')}
               </Button>
             </div>
           </div>
@@ -1154,10 +1159,12 @@ export function IssueDetailModal({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <AlertTriangle size={16} color="#eab308" aria-hidden="true" />
-              <strong style={{ color: '#eab308' }}>检测到未确认结果的写操作（可能已在服务端生效）</strong>
+              <strong style={{ color: '#eab308' }}>{t('projects.issue.unknownPending')}</strong>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-              操作类型: <code>{pendingUnknownAction.kind}</code> | 请求标识: <code>{pendingUnknownAction.requestKey}</code> | 基准版本: <code>{pendingUnknownAction.expectedVersion}</code>
+              {t('projects.issue.pendingActionKind')} <code>{pendingUnknownAction.kind}</code> |
+              {t('projects.issue.pendingRequestKey')} <code>{pendingUnknownAction.requestKey}</code> |
+              {t('projects.issue.pendingExpectedVersion')} <code>{pendingUnknownAction.expectedVersion}</code>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
               <Button
@@ -1165,7 +1172,7 @@ export function IssueDetailModal({
                 disabled={isActionPending}
                 style={{ fontSize: '12px', padding: '4px 12px' }}
               >
-                {isActionPending ? '重试中...' : '重试原操作'}
+                {isActionPending ? t('projects.issue.retrying') : t('projects.issue.retryOriginalAction')}
               </Button>
               {!isDiscardConfirmOpen ? (
                 <Button
@@ -1175,12 +1182,12 @@ export function IssueDetailModal({
                   disabled={isActionPending}
                   style={{ fontSize: '12px', padding: '4px 12px' }}
                 >
-                  放弃未决操作
+                  {t('projects.issue.discardPending')}
                 </Button>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '12px', color: 'var(--danger)' }}>
-                    【警告】此操作可能已在服务端执行。放弃后将不再跟踪原请求，确定放弃吗？
+                    {t('projects.issue.discardWarning')}
                   </span>
                   <Button
                     danger
@@ -1188,14 +1195,14 @@ export function IssueDetailModal({
                     disabled={isActionPending}
                     style={{ fontSize: '12px', padding: '2px 8px' }}
                   >
-                    确认放弃
+                    {t('projects.issue.confirmDiscard')}
                   </Button>
                   <Button
                     variant="ghost"
                     onClick={() => setIsDiscardConfirmOpen(false)}
                     style={{ fontSize: '12px', padding: '2px 8px' }}
                   >
-                    取消
+                    {t('projects.cancel')}
                   </Button>
                 </div>
               )}
@@ -1225,9 +1232,9 @@ export function IssueDetailModal({
                   }}
                   disabled={isWriteBlocked}
                   style={{ fontSize: '12px', whiteSpace: 'nowrap', padding: '2px 8px' }}
-                  title="确认风险：可能覆盖远端最新修改，确认用最新版本重试保留的草稿"
+                  title={t('projects.issue.confirmOverwriteRiskTitle')}
                 >
-                  可能覆盖远端最新修改，确认用最新版本重试保留的草稿
+                  {t('projects.issue.confirmOverwriteRisk')}
                 </Button>
               )}
               <Button
@@ -1236,7 +1243,7 @@ export function IssueDetailModal({
                 style={{ fontSize: '12px', whiteSpace: 'nowrap' }}
               >
                 <RefreshCw size={12} aria-hidden="true" />
-                <span>刷新并保留草稿</span>
+                <span>{t('projects.issue.refreshAndKeepDraft')}</span>
               </Button>
             </div>
           </div>
@@ -1249,68 +1256,75 @@ export function IssueDetailModal({
           </div>
         )}
 
-        {/* Tab 导航 */}
-        <div className="tab-nav" style={{ padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'spec' ? 'active' : ''}`}
-            onClick={() => setActiveTab('spec')}
-          >
-            <FileText size={14} aria-hidden="true" />
-            <span>需求事实</span>
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'activities' ? 'active' : ''}`}
-            onClick={() => setActiveTab('activities')}
-          >
-            <Activity size={14} aria-hidden="true" />
-            <span>活动时间线 ({detail?.activities?.length || 0})</span>
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'runs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('runs')}
-          >
-            <ListOrdered size={14} aria-hidden="true" />
-            <span>Run 报告 ({detail?.runs?.length || 0})</span>
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'stageBudgets' ? 'active' : ''}`}
-            onClick={() => setActiveTab('stageBudgets')}
-          >
-            <Coins size={14} aria-hidden="true" />
-            <span>阶段预算 ({detail?.stageBudgets?.length || 0})</span>
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'agentThreads' ? 'active' : ''}`}
-            onClick={() => setActiveTab('agentThreads')}
-          >
-            <Bot size={14} aria-hidden="true" />
-            <span>Agent 线程 ({detail?.agentThreads?.length || 0})</span>
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'evidence' ? 'active' : ''}`}
-            onClick={() => setActiveTab('evidence')}
-          >
-            <Paperclip size={14} aria-hidden="true" />
-            <span>公开证据 ({allEvidences.length})</span>
-          </button>
-        </div>
-
+        {/* Tab 导航与内容：共享 Tabs 统一 tablist/tabpanel 语义、roving tabindex 与方向键导航 */}
+        <Tabs
+          className="issue-detail-tabs"
+          ariaLabel={t('projects.issue.tabsAriaLabel')}
+          activeId={activeTab}
+          onChange={(id) => setActiveTab(id as TabKey)}
+          tabs={[
+            {
+              id: 'spec',
+              label: (
+                <>
+                  <FileText size={14} aria-hidden="true" />
+                  <span>{t('projects.issue.tabSpec')}</span>
+                </>
+              ),
+            },
+            {
+              id: 'activities',
+              label: (
+                <>
+                  <Activity size={14} aria-hidden="true" />
+                  <span>{t('projects.issue.tabActivities', { count: detail?.activities?.length || 0 })}</span>
+                </>
+              ),
+            },
+            {
+              id: 'runs',
+              label: (
+                <>
+                  <ListOrdered size={14} aria-hidden="true" />
+                  <span>{t('projects.issue.tabRuns', { count: detail?.runs?.length || 0 })}</span>
+                </>
+              ),
+            },
+            {
+              id: 'stageBudgets',
+              label: (
+                <>
+                  <Coins size={14} aria-hidden="true" />
+                  <span>{t('projects.issue.tabStageBudgets', { count: detail?.stageBudgets?.length || 0 })}</span>
+                </>
+              ),
+            },
+            {
+              id: 'agentThreads',
+              label: (
+                <>
+                  <Bot size={14} aria-hidden="true" />
+                  <span>{t('projects.issue.tabAgentThreads', { count: detail?.agentThreads?.length || 0 })}</span>
+                </>
+              ),
+            },
+            {
+              id: 'evidence',
+              label: (
+                <>
+                  <Paperclip size={14} aria-hidden="true" />
+                  <span>{t('projects.issue.tabEvidence', { count: allEvidences.length })}</span>
+                </>
+              ),
+            },
+          ]}
+        >
         {/* Tab 内容区 */}
         <div className="modal-body issue-detail-body">
           {isLoading && !detail ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-muted)' }}>
-              加载 Issue 详情中...
-            </div>
+            <StateBlock title={t('projects.issue.loadingDetail')} />
           ) : !issue ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-muted)' }}>
-              未找到该 Issue 详情
-            </div>
+            <StateBlock title={t('projects.issue.notFoundDetail')} tone="danger" />
           ) : (
             <>
               {/* TAB 1: 需求事实 (Spec) */}
@@ -1318,27 +1332,27 @@ export function IssueDetailModal({
                 <div className="tab-pane">
                   {isEditingSpec ? (
                     <form onSubmit={handleSaveSpec} className="spec-edit-form">
-                      <div className="form-group">
-                        <label className="form-label required">需求标题</label>
-                        <input
-                          type="text"
-                          className="form-input"
+                      <label className="edit-project-field" htmlFor="issue-spec-title">
+                        <FieldLabel required>{t('projects.issue.specTitleLabel')}</FieldLabel>
+                        <TextInput
+                          id="issue-spec-title"
                           value={draftTitle}
+                          invalid={!draftTitle.trim()}
                           onChange={(e) => setDraftTitle(e.target.value)}
                           disabled={isWriteBlocked}
                           autoFocus
                         />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">需求描述与验收标准</label>
-                        <textarea
-                          className="form-textarea"
+                      </label>
+                      <label className="edit-project-field" htmlFor="issue-spec-desc">
+                        <FieldLabel>{t('projects.issue.specDescLabel')}</FieldLabel>
+                        <TextArea
+                          id="issue-spec-desc"
                           rows={8}
                           value={draftDescription}
                           onChange={(e) => setDraftDescription(e.target.value)}
                           disabled={isWriteBlocked}
                         />
-                      </div>
+                      </label>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                         <Button
                           variant="ghost"
@@ -1351,13 +1365,13 @@ export function IssueDetailModal({
                           }}
                           disabled={isActionPending}
                         >
-                          取消
+                          {t('projects.cancel')}
                         </Button>
                         <Button
                           type="submit"
                           disabled={isWriteBlocked}
                         >
-                          {isActionPending ? '保存中...' : '保存更改'}
+                          {isActionPending ? t('projects.issue.saving') : t('projects.issue.saveChanges')}
                         </Button>
                       </div>
                     </form>
@@ -1369,10 +1383,10 @@ export function IssueDetailModal({
                           variant="ghost"
                           onClick={() => setIsEditingSpec(true)}
                           disabled={isWriteBlocked}
-                          title="编辑需求标题与描述"
+                          title={t('projects.issue.editSpecTitle')}
                         >
                           <Pencil size={14} aria-hidden="true" />
-                          <span>编辑需求</span>
+                          <span>{t('projects.issue.editSpec')}</span>
                         </Button>
                       </div>
 
@@ -1380,34 +1394,34 @@ export function IssueDetailModal({
                         {issue.description ? (
                           <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{issue.description}</div>
                         ) : (
-                          <span style={{ color: 'var(--fg-dim)' }}>（暂无需求描述）</span>
+                          <span style={{ color: 'var(--fg-dim)' }}>{t('projects.issue.noSpecDesc')}</span>
                         )}
                       </div>
 
                       <div className="spec-meta-grid">
                         <div className="meta-item">
-                          <span className="meta-label">当前阶段:</span>
+                          <span className="meta-label">{t('projects.issue.currentStageLabel')}</span>
                           <span className="meta-value"><code>{issue.state}</code></span>
                         </div>
                         <div className="meta-item">
-                          <span className="meta-label">期望版本号:</span>
+                          <span className="meta-label">{t('projects.issue.expectedVersionLabel')}</span>
                           <span className="meta-value"><code>{issue.version}</code></span>
                         </div>
                         {issue.blockedFromState && (
                           <div className="meta-item">
-                            <span className="meta-label">阻塞前阶段:</span>
+                            <span className="meta-label">{t('projects.issue.blockedFromStageLabel')}</span>
                             <span className="meta-value">{issue.blockedFromState}</span>
                           </div>
                         )}
                         {issue.blockReason && (
                           <div className="meta-item" style={{ gridColumn: 'span 2' }}>
-                            <span className="meta-label">阻塞原因:</span>
+                            <span className="meta-label">{t('projects.issue.blockReasonLabel')}</span>
                             <span className="meta-value" style={{ color: 'var(--danger)' }}>{issue.blockReason}</span>
                           </div>
                         )}
                         {issue.pauseDetail && (
                           <div className="meta-item" style={{ gridColumn: 'span 2' }}>
-                            <span className="meta-label">暂停详情:</span>
+                            <span className="meta-label">{t('projects.issue.pauseDetailLabel')}</span>
                             <span className="meta-value">{issue.pauseDetail}</span>
                           </div>
                         )}
@@ -1422,35 +1436,33 @@ export function IssueDetailModal({
                 <div className="tab-pane">
                   {/* 发布活动表单 */}
                   <form onSubmit={handleAppendActivity} className="activity-input-card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <div className="segmented-control">
-                        <button
-                          type="button"
-                          className={`segmented-item ${activityKind === 'COMMENT' ? 'active' : ''}`}
-                          onClick={() => handleActivityKindChange('COMMENT')}
-                        >
-                          <MessageSquare size={13} aria-hidden="true" />
-                          <span>普通评论 (Comment)</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`segmented-item ${activityKind === 'INSTRUCTION' ? 'active' : ''}`}
-                          onClick={() => handleActivityKindChange('INSTRUCTION')}
-                        >
-                          <Send size={13} aria-hidden="true" />
-                          <span>下达指令 (Instruction)</span>
-                        </button>
-                      </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '12px' }}>
+                      <Select
+                        compact
+                        value={activityKind}
+                        disabled={isActionPending}
+                        aria-label={t('projects.issue.activityTypeAriaLabel')}
+                        options={[
+                          { value: 'COMMENT', label: t('projects.issue.activityCommentOption') },
+                          { value: 'INSTRUCTION', label: t('projects.issue.activityInstructionOption') },
+                        ]}
+                        onChange={(value) => handleActivityKindChange(value as 'COMMENT' | 'INSTRUCTION')}
+                      />
 
                       <span style={{ fontSize: '11px', color: 'var(--fg-dim)' }}>
-                        {activityKind === 'INSTRUCTION' ? '投递给当前活动 Run' : '仅在时间线记录，不自动唤醒 Agent'}
+                        {activityKind === 'INSTRUCTION'
+                          ? t('projects.issue.deliverToActiveRun')
+                          : t('projects.issue.timelineOnlyNoWakeup')}
                       </span>
                     </div>
 
-                    <textarea
-                      className="form-textarea"
+                    <TextArea
                       rows={3}
-                      placeholder={activityKind === 'INSTRUCTION' ? '输入指令内容要求当前 Agent 遵循...' : '添加一条讨论或事实备注...'}
+                      placeholder={
+                        activityKind === 'INSTRUCTION'
+                          ? t('projects.issue.instructionPlaceholder')
+                          : t('projects.issue.commentPlaceholder')
+                      }
                       value={activityBody}
                       onChange={(e) => handleActivityBodyChange(e.target.value)}
                       disabled={isActionPending}
@@ -1463,7 +1475,11 @@ export function IssueDetailModal({
                         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                       >
                         <Send size={12} aria-hidden="true" />
-                        <span>{activityKind === 'INSTRUCTION' ? '派发指令' : '发表评论'}</span>
+                        <span>
+                          {activityKind === 'INSTRUCTION'
+                            ? t('projects.issue.dispatchInstruction')
+                            : t('projects.issue.comment')}
+                        </span>
                       </Button>
                     </div>
                   </form>
@@ -1471,7 +1487,7 @@ export function IssueDetailModal({
                   {/* 历史活动事实流 */}
                   <div className="activity-timeline">
                     {(detail.activities ?? []).length === 0 ? (
-                      <div className="empty-tip">暂无活动记录</div>
+                      <div className="empty-tip">{t('projects.issue.emptyActivities')}</div>
                     ) : (
                       (detail.activities ?? []).map((act) => (
                         <div key={act.sequence} className={`activity-item kind-${act.kind.toLowerCase()}`}>
@@ -1486,10 +1502,10 @@ export function IssueDetailModal({
                               ) : act.actorType === 'HUMAN' ? (
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                   <User size={12} aria-hidden="true" />
-                                  <span>人类</span>
+                                  <span>{t('projects.issue.actorHuman')}</span>
                                 </span>
                               ) : (
-                                <span>系统</span>
+                                <span>{t('projects.issue.actorSystem')}</span>
                               )}
                             </span>
                             <span className="activity-time">{act.createdAt}</span>
@@ -1510,7 +1526,7 @@ export function IssueDetailModal({
               {activeTab === 'runs' && (
                 <div className="tab-pane">
                   {(detail.runs ?? []).length === 0 ? (
-                    <div className="empty-tip">暂无 Run 记录</div>
+                    <div className="empty-tip">{t('projects.issue.emptyRuns')}</div>
                   ) : (
                     <div className="runs-list">
                       {(detail.runs ?? []).map((r) => (
@@ -1530,30 +1546,30 @@ export function IssueDetailModal({
                               </span>
                             </div>
                             <span style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
-                              耗时/余量: {r.remainingExecutionMs}ms
+                              {t('projects.issue.durationRemaining', { ms: r.remainingExecutionMs })}
                             </span>
                           </div>
 
                           <div className="run-card-details">
                             <div className="run-detail-row">
-                              <span>Entry 区间:</span>
-                              <code>{r.startEntryId} → {r.endEntryId || '执行中'}</code>
+                              <span>{t('projects.issue.entryRangeLabel')}</span>
+                              <code>{r.startEntryId} → {r.endEntryId || t('projects.issue.running')}</code>
                             </div>
                             {r.finalAnswerEntryId && (
                               <div className="run-detail-row">
-                                <span>最终报告条目:</span>
+                                <span>{t('projects.issue.finalAnswerEntryLabel')}</span>
                                 <code>{r.finalAnswerEntryId}</code>
                               </div>
                             )}
                             {r.nextState && (
                               <div className="run-detail-row">
-                                <span>交接目标:</span>
+                                <span>{t('projects.issue.handoverTargetLabel')}</span>
                                 <strong style={{ color: 'var(--primary)' }}>{r.nextState}</strong>
                               </div>
                             )}
                             {r.error && (
                               <div className="run-detail-row" style={{ color: 'var(--danger)' }}>
-                                <span>错误信息:</span>
+                                <span>{t('projects.issue.errorMessageLabel')}</span>
                                 <span>{r.error}</span>
                               </div>
                             )}
@@ -1579,33 +1595,33 @@ export function IssueDetailModal({
                       style={{ fontSize: '13px' }}
                     >
                       <Coins size={14} aria-hidden="true" />
-                      <span>重置阶段预算</span>
+                      <span>{t('projects.issue.resetStageBudgetAction')}</span>
                     </Button>
                   </div>
 
                   {(detail.stageBudgets ?? []).length === 0 ? (
-                    <div className="empty-tip">阶段预算尚未授权或暂无工作阶段预算</div>
+                    <div className="empty-tip">{t('projects.issue.emptyBudgets')}</div>
                   ) : (
                     <div className="budget-grid">
                       {(detail.stageBudgets ?? []).map((b) => (
                         <div key={b.state} className="budget-card">
                           <div className="budget-card-title">
                             <span className="badge badge-state">{b.state}</span>
-                            <span>最大额度: {b.maxRuns} 次</span>
+                            <span>{t('projects.issue.maxRunsBudget', { max: b.maxRuns })}</span>
                           </div>
                           <div className="budget-stats">
                             <div>
-                              <span>已用次数:</span>
+                              <span>{t('projects.issue.usedRunsLabel')}</span>
                               <strong>{b.usedRuns}</strong>
                             </div>
                             <div>
-                              <span>剩余可用:</span>
+                              <span>{t('projects.issue.remainingRunsLabel')}</span>
                               <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--success)' : 'var(--danger)' }}>
                                 {b.remainingRuns}
                               </strong>
                             </div>
                             <div>
-                              <span>额度从此序号后起算:</span>
+                              <span>{t('projects.issue.budgetAfterOrdinalLabel')}</span>
                               <code>#{b.budgetAfterOrdinal}</code>
                             </div>
                           </div>
@@ -1620,25 +1636,25 @@ export function IssueDetailModal({
               {activeTab === 'agentThreads' && (
                 <div className="tab-pane">
                   {(detail.agentThreads ?? []).length === 0 ? (
-                    <div className="empty-tip">暂无 Agent Thread</div>
+                    <div className="empty-tip">{t('projects.issue.emptyAgentThreads')}</div>
                   ) : (
                     <div className="thread-list">
-                      {(detail.agentThreads ?? []).map((t) => (
-                        <div key={t.threadId} className="thread-item">
+                      {(detail.agentThreads ?? []).map((thread) => (
+                        <div key={thread.threadId} className="thread-item">
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <Bot size={16} aria-hidden="true" />
-                            <strong>{t.agentName}</strong>
+                            <strong>{thread.agentName}</strong>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <code>{t.threadId}</code>
+                            <code>{thread.threadId}</code>
                             {onOpenThread && (
                               <Button
                                 variant="ghost"
-                                onClick={() => onOpenThread(t.threadId)}
-                                title="打开此 Agent 线程视图"
+                                onClick={() => onOpenThread(thread.threadId)}
+                                title={t('projects.issue.openAgentThreadTitle')}
                               >
                                 <Eye size={14} aria-hidden="true" />
-                                <span>打开</span>
+                                <span>{t('projects.issue.openAction')}</span>
                               </Button>
                             )}
                           </div>
@@ -1666,12 +1682,12 @@ export function IssueDetailModal({
                       style={{ fontSize: '13px' }}
                     >
                       <Upload size={14} aria-hidden="true" />
-                      <span>{isUploadingEvidence ? '正在上传...' : '上传证据文件'}</span>
+                      <span>{isUploadingEvidence ? t('projects.issue.uploading') : t('projects.issue.uploadEvidenceAction')}</span>
                     </Button>
                   </div>
 
                   {allEvidences.length === 0 ? (
-                    <div className="empty-tip">暂无公开证据交付物</div>
+                    <div className="empty-tip">{t('projects.issue.emptyEvidence')}</div>
                   ) : (
                     <div className="evidence-list">
                       {allEvidences.map((ev) => (
@@ -1688,11 +1704,12 @@ export function IssueDetailModal({
             </>
           )}
         </div>
+        </Tabs>
 
         {/* 弹窗底部 */}
         <div className="modal-footer">
           <Button variant="ghost" onClick={onClose}>
-            关闭
+            {t('projects.close')}
           </Button>
         </div>
 
@@ -1702,34 +1719,34 @@ export function IssueDetailModal({
         {isBlockModalOpen && (
           <Dialog
             className="sub-card"
-            title="标记业务阻塞 (BLOCKED)"
+            title={t('projects.issue.blockDialogTitle')}
             pending={isWriteBlocked}
             onClose={() => setIsBlockModalOpen(false)}
           >
               <form className="modal-card-form" onSubmit={handleBlockSubmit}>
                 <div className="modal-body">
-                  <div className="form-group">
-                    <label className="form-label required">阻塞原因</label>
-                    <textarea
-                      className="form-textarea"
+                  <label className="edit-project-field" htmlFor="issue-block-reason">
+                    <FieldLabel required>{t('projects.issue.blockReasonFieldLabel')}</FieldLabel>
+                    <TextArea
+                      id="issue-block-reason"
                       rows={3}
                       value={blockReason}
                       onChange={(e) => handleBlockReasonChange(e.target.value)}
-                      placeholder="说明导致 Issue 无法继续执行的外部原因..."
+                      placeholder={t('projects.issue.blockReasonPlaceholder')}
                       autoFocus
                     />
-                  </div>
+                  </label>
                 </div>
                 <div className="modal-footer">
                   <Button variant="ghost" onClick={() => setIsBlockModalOpen(false)}>
-                    取消
+                    {t('projects.cancel')}
                     </Button>
                   <Button
                     type="submit"
                     danger
                     disabled={isWriteBlocked}
                     >
-                    {isActionPending ? '提交中...' : '确认阻塞'}
+                    {isActionPending ? t('projects.issue.submitting') : t('projects.issue.confirmBlock')}
                   </Button>
                 </div>
               </form>
@@ -1740,7 +1757,7 @@ export function IssueDetailModal({
         {isResolveUnknownOpen && (
           <Dialog
             className="sub-card"
-            title="解除 UNKNOWN（人工核查）"
+            title={t('projects.issue.resolveUnknownDialogTitle')}
             headerIcon={<ShieldAlert size={16} className="text-danger" aria-hidden="true" />}
             pending={isWriteBlocked}
             onClose={() => setIsResolveUnknownOpen(false)}
@@ -1748,29 +1765,29 @@ export function IssueDetailModal({
               <form className="modal-card-form" onSubmit={handleResolveUnknownSubmit}>
                 <div className="modal-body">
                   <p style={{ fontSize: '13px', color: 'var(--fg-dim)', margin: '0 0 12px 0' }}>
-                    * 运行因崩溃或超时导致在途副作用不明。人工核对残留模型/工具调用与外部副作用后，填写处理依据以解除 UNKNOWN 暂停。
+                    {t('projects.issue.resolveUnknownDesc')}
                   </p>
-                  <div className="form-group">
-                    <label className="form-label required">核查结论与说明</label>
-                    <textarea
-                      className="form-textarea"
+                  <label className="edit-project-field" htmlFor="issue-verification">
+                    <FieldLabel required>{t('projects.issue.verificationFieldLabel')}</FieldLabel>
+                    <TextArea
+                      id="issue-verification"
                       rows={4}
                       value={verificationInput}
                       onChange={(e) => handleVerificationInputChange(e.target.value)}
-                      placeholder="说明已核实的内容与外部状态一致性保证..."
+                      placeholder={t('projects.issue.verificationPlaceholder')}
                       autoFocus
                     />
-                  </div>
+                  </label>
                 </div>
                 <div className="modal-footer">
                   <Button variant="ghost" onClick={() => setIsResolveUnknownOpen(false)}>
-                    取消
+                    {t('projects.cancel')}
                     </Button>
                   <Button
                     type="submit"
                     disabled={isWriteBlocked}
                     >
-                    {isActionPending ? '解除中...' : '确认解除 UNKNOWN'}
+                    {isActionPending ? t('projects.issue.resolving') : t('projects.issue.confirmResolveUnknown')}
                   </Button>
                 </div>
               </form>
@@ -1781,34 +1798,34 @@ export function IssueDetailModal({
         {isStopModalOpen && (
           <Dialog
             className="sub-card"
-            title="终止当前运行 (Stop)"
+            title={t('projects.issue.stopDialogTitle')}
             pending={isWriteBlocked}
             onClose={() => setIsStopModalOpen(false)}
           >
               <form className="modal-card-form" onSubmit={handleStopSubmit}>
                 <div className="modal-body">
-                  <div className="form-group">
-                    <label className="form-label">终止原因 (可选)</label>
-                    <textarea
-                      className="form-textarea"
+                  <label className="edit-project-field" htmlFor="issue-stop-detail">
+                    <FieldLabel>{t('projects.issue.stopDetailFieldLabel')}</FieldLabel>
+                    <TextArea
+                      id="issue-stop-detail"
                       rows={3}
                       value={stopDetail}
                       onChange={(e) => handleStopDetailChange(e.target.value)}
-                      placeholder="说明人工中止执行的原因..."
+                      placeholder={t('projects.issue.stopDetailPlaceholder')}
                       autoFocus
                     />
-                  </div>
+                  </label>
                 </div>
                 <div className="modal-footer">
                   <Button variant="ghost" onClick={() => setIsStopModalOpen(false)}>
-                    取消
+                    {t('projects.cancel')}
                     </Button>
                   <Button
                     type="submit"
                     danger
                     disabled={isWriteBlocked}
                     >
-                    {isActionPending ? '终止中...' : '确认终止'}
+                    {isActionPending ? t('projects.issue.stopping') : t('projects.issue.confirmStop')}
                   </Button>
                 </div>
               </form>
@@ -1819,42 +1836,41 @@ export function IssueDetailModal({
         {isResetBudgetOpen && (
           <Dialog
             className="sub-card"
-            title="重置阶段预算"
+            title={t('projects.issue.resetStageBudgetAction')}
             pending={isWriteBlocked}
             onClose={() => setIsResetBudgetOpen(false)}
           >
               <form className="modal-card-form" onSubmit={handleResetBudgetSubmit}>
                 <div className="modal-body">
-                  <div className="form-group">
-                    <label htmlFor="reset-budget-state" className="form-label required">工作阶段</label>
-                    <input
+                  <label className="edit-project-field" htmlFor="reset-budget-state">
+                    <FieldLabel required>{t('projects.issue.budgetStageFieldLabel')}</FieldLabel>
+                    <TextInput
                       id="reset-budget-state"
-                      type="text"
-                      className="form-input"
                       value={resetBudgetState}
                       onChange={(e) => handleBudgetStateChange(e.target.value)}
-                      placeholder="例如：DESIGN"
+                      placeholder={t('projects.issue.budgetStagePlaceholder')}
                     />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="reset-budget-max-runs" className="form-label required">最大 Run 额度</label>
+                  </label>
+                  <label className="edit-project-field" htmlFor="reset-budget-max-runs">
+                    <FieldLabel required>{t('projects.issue.budgetMaxRunsFieldLabel')}</FieldLabel>
                     <NumberInput
                       id="reset-budget-max-runs"
                       min={1}
+                      max={MAX_RUNS}
                       value={String(resetBudgetMaxRuns)}
                       onChange={(next) => handleBudgetMaxRunsChange(next === '' ? 0 : Number(next))}
                     />
-                  </div>
+                  </label>
                 </div>
                 <div className="modal-footer">
                   <Button variant="ghost" onClick={() => setIsResetBudgetOpen(false)}>
-                    取消
+                    {t('projects.cancel')}
                     </Button>
                   <Button
                     type="submit"
                     disabled={isWriteBlocked}
                     >
-                    {isActionPending ? '重置中...' : '确认重置'}
+                    {isActionPending ? t('projects.issue.resettingBudget') : t('projects.issue.confirmResetBudget')}
                   </Button>
                 </div>
               </form>
@@ -1865,25 +1881,25 @@ export function IssueDetailModal({
         {isDeleteModalOpen && (
           <Dialog
             className="sub-card"
-            title={`删除 Issue #${issue?.number}`}
+            title={t('projects.issue.deleteDialogTitle', { number: issue?.number ?? '' })}
             pending={isWriteBlocked}
             onClose={() => setIsDeleteModalOpen(false)}
           >
               <div className="modal-body">
                 <p style={{ margin: 0, color: 'var(--fg)' }}>
-                  确定要彻底删除该 Issue 吗？此操作将清理该 Issue 的执行记录、活动、证据和关联会话，无法恢复。
+                  {t('projects.issue.deleteConfirmDesc')}
                 </p>
               </div>
               <div className="modal-footer">
                 <Button variant="ghost" onClick={() => setIsDeleteModalOpen(false)}>
-                  取消
+                  {t('projects.cancel')}
                   </Button>
                 <Button
                   danger
                   disabled={isWriteBlocked}
                   onClick={handleDeleteIssue}
                   >
-                  {isActionPending ? '删除中...' : '确认删除'}
+                  {isActionPending ? t('projects.issue.deleting') : t('projects.delete.confirm')}
                 </Button>
               </div>
             </Dialog>

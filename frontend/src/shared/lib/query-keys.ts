@@ -82,7 +82,8 @@ export const queryKeys = {
     snapshot: (projectId: string) => ['projects', 'snapshot', projectId] as const,
     issues: (projectId: string) => ['projects', 'issue', projectId] as const,
     issue: (projectId: string, issueId: string) => ['projects', 'issue', projectId, issueId] as const,
-    evidence: (issueId: string) => ['projects', 'evidence', issueId] as const,
+    evidence: (projectId: string, issueId: string) =>
+      ['projects', 'issue', projectId, issueId, 'evidence'] as const,
   },
   interactions: {
     all: ['interactions'] as const,

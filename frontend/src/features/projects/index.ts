@@ -22,10 +22,6 @@ export {
   type CreateIssueModalProps,
 } from './components/CreateIssueModal'
 export {
-  EditIssueModal,
-  type EditIssueModalProps,
-} from './components/EditIssueModal'
-export {
   IssueDetailModal,
   type IssueDetailModalProps,
 } from './components/IssueDetailModal'

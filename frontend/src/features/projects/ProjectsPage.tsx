@@ -1,24 +1,21 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  AlertTriangle,
-  Archive,
-  ArrowRight,
-  Calendar,
-  Layers,
-  Pencil,
-  RefreshCw,
-  Search,
-  Trash2,
-} from 'lucide-react'
+import { Archive, ArrowRight, FolderKanban, Pencil, Trash2 } from 'lucide-react'
+import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
+import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { SearchField } from '@/shared/ui/controls/SearchField'
 import { CreateProjectModal } from './components/CreateProjectModal'
 import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import type { ProjectDTO } from './types'
+import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import './projects.css'
 
@@ -31,6 +28,7 @@ export function ProjectsPage({
   onSelectProject,
   api = projectsApi,
 }: ProjectsPageProps) {
+  const { t } = useI18n()
   const queryClient = useQueryClient()
   const [includeArchived, setIncludeArchived] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -39,7 +37,6 @@ export function ProjectsPage({
   const {
     data: projects = [],
     isLoading,
-    isFetching,
     error: queryError,
     refetch,
   } = useQuery({
@@ -74,11 +71,11 @@ export function ProjectsPage({
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.projects.lists() })
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '归档操作失败')
+      setActionError(err instanceof Error ? err.message : t('projects.archiveFailed'))
     }
   }
 
-  const refreshProjects = async () => {
+  const retryLoad = async () => {
     setActionError(null)
     await refetch()
   }
@@ -93,185 +90,102 @@ export function ProjectsPage({
   return (
     <main className="projects-container">
       <header className="projects-header">
-        <div className="projects-header-left">
-          <h1 className="projects-title">项目管理 (Projects)</h1>
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => void refreshProjects()}
-            disabled={isFetching}
-            title="刷新列表"
-            aria-label="刷新项目列表"
-          >
-            <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} aria-hidden="true" />
-          </button>
-        </div>
-
+        <h1 className="projects-title">{t('projects.pageTitle')}</h1>
         <div className="projects-controls">
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <Search
-              size={14}
-              style={{ position: 'absolute', left: '10px', color: 'var(--fg-muted)' }}
-              aria-hidden="true"
-            />
-            <input
-              type="text"
-              className="projects-search-input"
-              style={{ paddingLeft: '32px' }}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索项目名称或描述..."
-              aria-label="搜索项目"
-            />
-          </div>
-
+          <SearchField
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder={t('projects.searchPlaceholder')}
+            aria-label={t('projects.searchLabel')}
+          />
           <Checkbox
             checked={includeArchived}
             onChange={setIncludeArchived}
-            label="显示已归档"
+            label={t('projects.includeArchived')}
           />
         </div>
       </header>
 
       {errorMessage && (
-        <div className="form-error-banner" role="alert" style={{ marginBottom: '16px' }}>
-          <AlertTriangle size={16} aria-hidden="true" />
-          <span>{errorMessage}</span>
+        <div className="projects-status">
+          <StateBlock tone="danger" title={errorMessage} />
+          <Button onClick={() => void retryLoad()}>{t('projects.retry')}</Button>
         </div>
       )}
 
-      {isLoading && projects.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '48px', color: 'var(--fg-muted)' }}>
-          加载项目中...
-        </div>
-      )}
+      {isLoading && projects.length === 0 && <StateBlock title={t('projects.loading')} />}
 
       {Boolean(searchQuery.trim()) && filteredProjects.length === 0 && !isLoading && (
-        <div className="state-block" style={{ marginBottom: '20px' }}>
-          <div>
-            <strong>暂无匹配项目</strong>
-            <p style={{ margin: '4px 0 0 0', color: 'var(--fg-dim)', fontSize: '13px' }}>
-              没有找到符合搜索条件的项目
-            </p>
-          </div>
-        </div>
+        <StateBlock title={t('projects.empty.noMatch')} />
       )}
 
-      <div className="cards-grid">
+      <ResourceGrid>
         <CreateCard
-          title="新建项目"
-          subtitle="自定义工作流、Issue 看板与 Agent 执行"
+          title={t('projects.create')}
+          subtitle={t('projects.createCardSubtitle')}
           onClick={() => setIsCreateOpen(true)}
         />
 
         {filteredProjects.map((project) => (
-          <article
+          <ResourceCard
             key={project.id}
-            className={`info-card project-card ${project.archivedAt ? 'is-archived' : ''}`}
-          >
-            <div>
-              <div className="project-card-head">
-                <div className="project-card-title-wrap">
-                  <h2
-                    className="project-card-title"
-                    style={{ cursor: onSelectProject ? 'pointer' : 'default' }}
-                    onClick={() => onSelectProject?.(project.id)}
-                  >
-                    {project.title}
-                  </h2>
-                </div>
-                {project.archivedAt && (
-                  <span className="badge badge-archived">已归档</span>
+            className={project.archivedAt ? 'is-archived' : undefined}
+            icon={<FolderKanban size={20} aria-hidden="true" />}
+            title={project.title}
+            subtitle={project.description || t('projects.noDescription')}
+            meta={[
+              [
+                'YOLO',
+                project.yoloEnabled ? t('projects.yoloEnabled') : t('projects.yoloDisabled'),
+              ],
+              [
+                t('projects.meta.stages'),
+                t('projects.meta.stagesValue', { count: project.workflow?.states?.length ?? 0 }),
+              ],
+              [t('projects.meta.updatedAt'), project.updatedAt],
+              [t('projects.meta.nextIssueNumber'), `#${project.nextIssueNumber}`],
+            ]}
+            actions={
+              <>
+                {onSelectProject && (
+                  <Button onClick={() => onSelectProject(project.id)}>
+                    <span>{t('projects.enter')}</span>
+                    <ArrowRight size={14} aria-hidden="true" />
+                  </Button>
                 )}
-              </div>
-
-              <p className="project-card-desc">
-                {project.description || '（无项目描述）'}
-              </p>
-
-              <div className="project-meta-list">
-                <div className="project-meta-row">
-                  <span>YOLO 模式:</span>
-                  <strong style={{ color: 'var(--fg)' }}>
-                    {project.yoloEnabled ? '开启' : '关闭'}
-                  </strong>
+                <div className="project-card-actions-right">
+                  <IconButton
+                    label={t('projects.card.edit', { title: project.title })}
+                    size="compact"
+                    onClick={() => setEditingProject(project)}
+                  >
+                    <Pencil aria-hidden="true" />
+                  </IconButton>
+                  <IconButton
+                    label={
+                      project.archivedAt
+                        ? t('projects.card.unarchive', { title: project.title })
+                        : t('projects.card.archive', { title: project.title })
+                    }
+                    size="compact"
+                    onClick={() => void handleArchiveToggle(project)}
+                  >
+                    <Archive aria-hidden="true" />
+                  </IconButton>
+                  <IconButton
+                    label={t('projects.card.delete', { title: project.title })}
+                    size="compact"
+                    danger
+                    onClick={() => setDeletingProject(project)}
+                  >
+                    <Trash2 aria-hidden="true" />
+                  </IconButton>
                 </div>
-
-                <div className="project-meta-row">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Layers size={14} aria-hidden="true" />
-                    <span>工作流阶段:</span>
-                  </span>
-                  <strong style={{ color: 'var(--fg)' }}>
-                    {project.workflow?.states?.length ?? 0} 个阶段
-                  </strong>
-                </div>
-
-                <div className="project-meta-row">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Calendar size={14} aria-hidden="true" />
-                    <span>更新时间:</span>
-                  </span>
-                  <span>{project.updatedAt}</span>
-                </div>
-
-                <div className="project-meta-row">
-                  <span>下一个 Issue 编号:</span>
-                  <code>#{project.nextIssueNumber}</code>
-                </div>
-              </div>
-            </div>
-
-            <div className="project-card-actions">
-              {onSelectProject ? (
-                <button
-                  type="button"
-                  className="btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                  onClick={() => onSelectProject(project.id)}
-                >
-                  <span>进入看板</span>
-                  <ArrowRight size={14} aria-hidden="true" />
-                </button>
-              ) : (
-                <span />
-              )}
-
-              <div className="project-card-actions-right">
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={() => setEditingProject(project)}
-                  title="编辑项目配置与工作流"
-                  aria-label={`编辑项目 ${project.title}`}
-                >
-                  <Pencil size={14} aria-hidden="true" />
-                </button>
-
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={() => void handleArchiveToggle(project)}
-                  title={project.archivedAt ? '取消归档' : '归档项目'}
-                  aria-label={`${project.archivedAt ? '取消归档' : '归档'}项目 ${project.title}`}
-                >
-                  <Archive size={14} aria-hidden="true" />
-                </button>
-
-                <button
-                  type="button"
-                  className="ghost-btn danger"
-                  onClick={() => setDeletingProject(project)}
-                  title="删除项目"
-                  aria-label={`删除项目 ${project.title}`}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          </article>
+              </>
+            }
+          />
         ))}
-      </div>
+      </ResourceGrid>
 
       {/* Modals */}
       <CreateProjectModal

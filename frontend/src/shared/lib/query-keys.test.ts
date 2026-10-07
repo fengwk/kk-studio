@@ -45,5 +45,13 @@ describe('queryKeys', () => {
     expect(queryKeys.projects.snapshot('proj-1')).toEqual(['projects', 'snapshot', 'proj-1'])
     expect(queryKeys.projects.issues('proj-1')).toEqual(['projects', 'issue', 'proj-1'])
     expect(queryKeys.projects.issue('proj-1', 'issue-1')).toEqual(['projects', 'issue', 'proj-1', 'issue-1'])
+    // 测试意图：证据查询键落在 issue 层级下，由项目定向失效通过前缀一并覆盖，不需要单独的失效分支或全量兜底。
+    expect(queryKeys.projects.evidence('proj-1', 'issue-1')).toEqual([
+      'projects',
+      'issue',
+      'proj-1',
+      'issue-1',
+      'evidence',
+    ])
   })
 })
