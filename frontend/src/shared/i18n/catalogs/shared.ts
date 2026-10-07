@@ -41,6 +41,10 @@ export const sharedCatalog = {
     'en-US': 'Copy code',
     'zh-CN': '复制代码',
   },
+  'shared.copyTable': {
+    'en-US': 'Copy table',
+    'zh-CN': '复制表格',
+  },
   'shared.copied': {
     'en-US': 'Copied',
     'zh-CN': '已复制',

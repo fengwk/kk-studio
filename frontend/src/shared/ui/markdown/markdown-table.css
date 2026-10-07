@@ -1,0 +1,34 @@
+/*
+ * GFM 表格复制外壳。
+ * 外壳在表头上方预留 28px 紧凑复制位；
+ * 表格自身继续做横向滚动容器，因此横滚时按钮不会被一起推出可视区。
+ */
+.md-table-shell {
+  position: relative;
+  margin: 0.6em 0;
+  padding-top: 28px;
+}
+
+/* 间距由外壳统一提供，避免与 .md-root table 的纵向 margin 叠加 */
+.md-root .md-table-shell > table {
+  margin: 0;
+}
+
+.md-table-shell > .md-table-copy {
+  top: 0;
+  right: 0;
+  z-index: 2;
+}
+
+.md-table-shell:hover > .md-table-copy,
+.md-table-shell:focus-within > .md-table-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 与代码块同理：进入表格复制时隐藏外层「复制全文」，避免叠两枚按钮 */
+.thread-assistant-shell:has(.md-table-shell:hover) > .thread-assistant-copy,
+.thread-assistant-shell:has(.md-table-shell:focus-within) > .thread-assistant-copy {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
