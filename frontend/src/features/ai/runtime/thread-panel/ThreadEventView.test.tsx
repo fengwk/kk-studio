@@ -104,7 +104,7 @@ describe('ThreadEventView', () => {
         }}
       />,
     )
-    const preview = screen.getByRole('region', { name: /预览当前草稿|Preview current draft/ })
+    const preview = screen.getByRole('region', { name: /当前规划|Current planning/ })
     expect(preview).toHaveTextContent('line1')
     expect(preview).toHaveTextContent('line11')
     expect(preview.querySelector('.thread-system-prompt-body')).not.toBeNull()
@@ -472,6 +472,26 @@ describe('ThreadEventView', () => {
       expect(detailTab).toHaveAttribute('aria-selected', 'false')
     })
 
+    it('focuses an asynchronous initial selection once without stealing roving tab focus', async () => {
+      // 初选由父级 hook 异步传入，不能先聚焦隐藏列或被挂载 listbox 覆盖。
+      const user = userEvent.setup()
+      const view = (selectedEventId: string | null) => (
+        <ThreadEventView
+          events={[record('initial')]}
+          selectedEventId={selectedEventId}
+          onSelectedEventIdChange={vi.fn()}
+        />
+      )
+      const { rerender } = render(view(null))
+      triggerResize(800)
+      rerender(view('initial'))
+      expect(screen.getByRole('tab', { name: '详情' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('button', { name: '关闭事件详情' })).toHaveFocus()
+      await user.click(screen.getByRole('tab', { name: '事件' }))
+      await user.keyboard('{ArrowRight}')
+      expect(screen.getByRole('tab', { name: '详情' })).toHaveFocus()
+    })
+
     it('automatically activates detail tab on tool click and returns to preview on close', async () => {
       const user = userEvent.setup()
       render(<ResponsiveHarness />)
@@ -505,9 +525,8 @@ describe('ThreadEventView', () => {
       expect(detailTab).toHaveAttribute('aria-selected', 'false')
     })
 
-    it('waits for an external preview selection and returns to the title entry after closing', async () => {
-      // 测试意图：已挂载 Debug 的标题异步预览记录来源/焦点，但加载或失败不提前切详情；
-      // 上级传入响应 selection 后自动进入详情，关闭回预览并恢复标题焦点。
+    it('waits for an external preview selection and returns to the inspect action after closing', async () => {
+      // 异步检查记录来源/焦点，但加载或失败不提前切详情；关闭恢复操作按钮焦点。
       const user = userEvent.setup()
       const onPreview = vi.fn()
       const onSelectInspector = vi.fn()

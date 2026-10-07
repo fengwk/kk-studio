@@ -44,6 +44,7 @@ describe('ThreadEventDetail', () => {
 
     const payloadPre = document.querySelector('.thread-event-detail-payload')
     expect(payloadPre).not.toBeNull()
+    expect(payloadPre).toHaveAttribute('tabindex', '0')
     expect(payloadPre?.textContent).toContain('"id": "inv-123"')
     expect(payloadPre?.textContent).toContain('"status": "COMPLETED"')
   })
