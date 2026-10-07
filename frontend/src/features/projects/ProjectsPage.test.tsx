@@ -205,6 +205,11 @@ describe('ProjectsPage', () => {
     const editBtn = screen.getByLabelText('编辑项目 Alpha Project')
     fireEvent.click(editBtn)
 
+    // 列表编辑继续默认进入基础信息，不提前读取工作流约束。
+    expect(screen.getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '工作流' })).toHaveAttribute('aria-selected', 'false')
+    expect(api.getProjectSnapshot).not.toHaveBeenCalled()
+
     // Edit title
     const titleInput = screen.getByLabelText(/项目名称/i)
     fireEvent.change(titleInput, { target: { value: 'My Custom Draft' } })

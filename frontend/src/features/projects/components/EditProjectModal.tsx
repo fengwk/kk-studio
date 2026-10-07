@@ -47,6 +47,7 @@ import {
 export interface EditProjectModalProps {
   isOpen: boolean
   project: ProjectDTO | null
+  initialTab?: TabKey
   /** 看板快照；列表入口在工作流打开时复用既有 snapshot 查询。 */
   snapshot?: ProjectSnapshotDTO
   snapshotError?: unknown
@@ -61,6 +62,7 @@ type ActiveSubmission = 'basic' | 'yolo' | 'workflow' | 'reload' | null
 export function EditProjectModal({
   isOpen,
   project,
+  initialTab = 'basic',
   snapshot,
   snapshotError,
   onClose,
@@ -75,6 +77,7 @@ export function EditProjectModal({
     <EditProjectModalContent
       key={project.id}
       project={project}
+      initialTab={initialTab}
       snapshot={snapshot}
       snapshotError={snapshotError}
       onClose={onClose}
@@ -86,6 +89,7 @@ export function EditProjectModal({
 
 interface EditProjectModalContentProps {
   project: ProjectDTO
+  initialTab: TabKey
   snapshot?: ProjectSnapshotDTO
   snapshotError?: unknown
   onClose: () => void
@@ -95,6 +99,7 @@ interface EditProjectModalContentProps {
 
 function EditProjectModalContent({
   project,
+  initialTab,
   snapshot,
   snapshotError,
   onClose,
@@ -102,7 +107,7 @@ function EditProjectModalContent({
   api,
 }: EditProjectModalContentProps) {
   const { t } = useI18n()
-  const [activeTab, setActiveTab] = useState<TabKey>('basic')
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab)
 
   // 打开时冻结的权威快照：推送只更新背景数据，不改写这里的草稿与 CAS 基线。
   const [frozenVersion, setFrozenVersion] = useState(project.version)

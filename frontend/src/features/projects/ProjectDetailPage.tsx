@@ -527,6 +527,7 @@ export function ProjectDetailPage({
       {/* Modals */}
       <EditProjectModal
         isOpen={isEditProjectOpen}
+        initialTab="workflow"
         project={project}
         snapshot={snapshot}
         snapshotError={queryError}

@@ -82,7 +82,7 @@ test('structured multi-edge editing, real Tabs styling and archived-only referen
   await page.getByRole('button', { name: '编辑 / 工作流' }).click()
   const dialog = page.getByRole('dialog')
   const workflow = dialog.getByRole('tab', { name: '工作流', exact: true })
-  await workflow.click()
+  await expect(workflow).toHaveAttribute('aria-selected', 'true')
   await expect(workflow).toHaveCSS('font-weight', '600')
   await expect(dialog.getByRole('tab', { name: '基础信息' })).toHaveCSS('font-weight', '500')
   const color = await workflow.evaluate((el) => getComputedStyle(el).borderBottomColor)
@@ -109,6 +109,7 @@ test('single WS push updates constraints, not draft or frozen CAS; list entry re
   await page.getByRole('button', { name: '返回项目列表' }).click()
   await page.getByRole('button', { name: '编辑项目 Workflow Project' }).click()
   const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'true')
   await dialog.getByRole('tab', { name: '工作流', exact: true }).click()
   await expect.poll(() => state.snapshotReads).toBeGreaterThan(0)
   await dialog.getByLabel('显示名称').fill('Local Init')
@@ -129,7 +130,7 @@ test('narrow screen stacks the stage form without page or dialog horizontal over
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(URL)
   await page.getByRole('button', { name: '编辑 / 工作流' }).click()
-  await page.getByRole('tab', { name: '工作流', exact: true }).click()
+  await expect(page.getByRole('tab', { name: '工作流', exact: true })).toHaveAttribute('aria-selected', 'true')
   const dialog = page.getByRole('dialog')
   const dimensions = await dialog.evaluate((el) => ({
     width: el.getBoundingClientRect().width, scroll: el.scrollWidth, client: el.clientWidth,
