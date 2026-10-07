@@ -7,6 +7,7 @@ import type { IssueDetailDTO } from '../types'
 import type { StorageService } from '@/shared/api/storage-service'
 import type { StorageUploadDTO, StorageUploadResultDTO } from '@/shared/api/contracts/storage'
 import { ApiError } from '@/shared/api/client'
+import { LOCALE_STORAGE_KEY, setLocale } from '@/shared/i18n'
 import {
   loadPendingAction,
   pendingActionStorageKey,
@@ -28,6 +29,8 @@ function renderModal(ui: React.ReactElement, client?: QueryClient) {
 describe('IssueDetailModal', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    // 清空存储后必须显式恢复语言，否则 i18n 会回落到默认 en-US 导致中文断言失效。
+    setLocale('zh-CN')
     vi.clearAllMocks()
   })
 
@@ -194,7 +197,7 @@ describe('IssueDetailModal', () => {
 
     await screen.findByLabelText('Issue #12 详情')
     // 切换到活动时间线
-    fireEvent.click(screen.getByRole('button', { name: /活动时间线/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /活动时间线/i }))
 
     const textarea = screen.getByPlaceholderText(/添加一条讨论或事实备注/i)
     fireEvent.change(textarea, { target: { value: 'This looks solid.' } })
@@ -230,10 +233,11 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    fireEvent.click(screen.getByRole('button', { name: /活动时间线/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /活动时间线/i }))
 
-    // 切换为 下达指令
-    fireEvent.click(screen.getByRole('button', { name: /下达指令/i }))
+    // 通过共享 Select 切换为「下达指令」（真实用户操作：打开下拉并选择选项）
+    fireEvent.click(screen.getByRole('button', { name: '活动类型' }))
+    fireEvent.click(await screen.findByRole('option', { name: /下达指令/ }))
 
     const textarea = screen.getByPlaceholderText(/输入指令内容要求当前 Agent 遵循/i)
     fireEvent.change(textarea, { target: { value: 'Please switch to JWT.' } })
@@ -269,7 +273,7 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    fireEvent.click(screen.getByRole('button', { name: /阶段预算/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /阶段预算/i }))
 
     // budgetAfterOrdinal 是排除边界，不是已用次数；新额度只计入此序号之后的 Run。
     expect(screen.getByText('额度从此序号后起算:').parentElement).toHaveTextContent('#0')
@@ -757,7 +761,15 @@ describe('IssueDetailModal', () => {
 
   it('safely catches storage read exceptions on load and blocks write UI without crashing', async () => {
     // 测试意图：读取本地存储抛出异常时不发生 render crash，呈现受控 blocked UI，且按钮被禁用
-    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    const originalGetItem = Storage.prototype.getItem
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+    ) {
+      // 仅模拟业务侧存储读取失败；语言键是 UI 基建，读取它不应改变本用例断言所用的语言。
+      if (key === LOCALE_STORAGE_KEY) {
+        return originalGetItem.call(this, key)
+      }
       throw new Error('Storage Access Denied (SecurityError)')
     })
 
@@ -848,7 +860,7 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    fireEvent.click(screen.getByRole('button', { name: /活动时间线/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /活动时间线/i }))
 
     const textarea = screen.getByPlaceholderText(/添加一条讨论或事实备注/i) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'Temporary unsubmitted draft' } })
@@ -885,7 +897,7 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    fireEvent.click(screen.getByRole('button', { name: /活动时间线/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /活动时间线/i }))
     const reopenedTextarea = screen.getByPlaceholderText(/添加一条讨论或事实备注/i) as HTMLTextAreaElement
     expect(reopenedTextarea.value).toBe('')
   })
@@ -933,10 +945,9 @@ describe('IssueDetailModal', () => {
     expect(api.deleteIssue).toHaveBeenCalledTimes(0)
   })
 
-  it('when editing spec, manual reload does not silently update specVersion, and subsequent save retains original expectedVersion', async () => {
-    // 测试意图：验证用户在编辑 Spec 期间，普通刷新（handleReloadFreshData）绝对不能自动静默推进 specVersion（绝不自动无提示 rebase），
-    // 再次保存时仍严格保留原有 expectedVersion 发送 CAS（或由冲突拦截）；
-    // 只有用户显式点击“可能覆盖远端最新修改，确认用最新版本重试保留的草稿”确认按钮后，才推进 version 并保存。
+  it('when editing spec, the explicit reload keeps the draft on the original specVersion until the user confirms', async () => {
+    // 测试意图：编辑 Spec 期间刷新最新数据（handleReloadFreshData）绝不静默推进 specVersion，也绝不无提示 rebase；
+    // 冲突后的重试仍严格使用打开草稿时的 expectedVersion，只有用户显式确认「可能覆盖远端最新修改」才推进版本并保存成功。
     const api = createMockApi()
     let currentVersion = '3'
     api.getIssue = vi.fn().mockImplementation(async () => ({
@@ -980,19 +991,11 @@ describe('IssueDetailModal', () => {
     // 2. 此时服务端版本更新推进至 '4'（模拟并发写入或其他端修改）
     currentVersion = '4'
 
-    // 3. 用户点击右上角“刷新数据”按钮（普通刷新）
-    fireEvent.click(screen.getByRole('button', { name: '刷新数据' }))
-
-    // 4. 验证出现冲突/风险提示横幅，提示可能覆盖远端修改
-    await screen.findByText(/服务端版本已更新为 v4/i)
-
-    // 5. 用户此时直接点击“保存更改”表单提交
+    // 3. 用户提交保存：服务端以 409 明确拒绝，草稿保留、版本基线不推进
     fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
-
     await waitFor(() => {
       expect(api.updateIssue).toHaveBeenCalledTimes(1)
     })
-    // 核心断言：调用的 expectedVersion 依然是原有的 '3'，绝不被普通刷新静默替换成 '4'！
     expect(api.updateIssue).toHaveBeenLastCalledWith(
       issueId,
       expect.objectContaining({
@@ -1001,13 +1004,19 @@ describe('IssueDetailModal', () => {
       }),
     )
 
-    // 6. 由于服务端已是 '4'，第 1 次 updateIssue 409 拦截，草稿保留，用户显式点击确认按钮
+    // 4. 用户显式点击「刷新并保留草稿」拉取最新数据
+    fireEvent.click(await screen.findByRole('button', { name: '刷新并保留草稿' }))
+
+    // 5. 刷新只呈现风险提示，绝不静默覆写基于 v3 的草稿基线
+    await screen.findByText(/服务端版本已更新为 v4/i)
+
+    // 6. 用户显式确认使用最新版本重试保留的草稿
     const explicitConfirmBtn = await screen.findByRole('button', {
       name: /可能覆盖远端最新修改，确认用最新版本重试保留的草稿/i,
     })
     fireEvent.click(explicitConfirmBtn)
 
-    // 7. 用户再次点击“保存更改”
+    // 7. 用户再次点击“保存更改”，此时才使用最新版本 '4' 提交
     fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
 
     await waitFor(() => {

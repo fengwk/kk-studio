@@ -143,7 +143,8 @@ describe('ProjectDetailPage', () => {
         },
       },
     ],
-  }
+    referencedStateCodes: ['INIT', 'IN_PROGRESS'],
+  } as ProjectSnapshotDTO
 
   const mockIssueDetail: IssueDetailDTO = {
     issue: mockSnapshot.issues[0].issue,
@@ -208,6 +209,37 @@ describe('ProjectDetailPage', () => {
     expect(screen.getByText('Implement REST API')).toBeInTheDocument()
   })
 
+  it('opens workflow immediately, preserves tab drafts and resets the initial tab on reopen', async () => {
+    // 看板入口直达工作流；切换页签保留草稿，关闭重开则恢复入口页签与项目数据。
+    const api = createMockApi()
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+    await screen.findByText('Awesome Platform')
+
+    const openWorkflow = () => {
+      fireEvent.click(screen.getByRole('button', { name: '编辑 / 工作流' }))
+      const dialog = within(screen.getByRole('dialog', { name: '编辑项目配置' }))
+      expect(dialog.getByRole('tab', { name: '工作流' })).toHaveAttribute('aria-selected', 'true')
+      expect(dialog.getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'false')
+      return dialog
+    }
+
+    const dialog = openWorkflow()
+    fireEvent.change(dialog.getByLabelText(/显示名称/), { target: { value: 'Local Init' } })
+    fireEvent.click(dialog.getByRole('tab', { name: '基础信息' }))
+    fireEvent.change(dialog.getByLabelText(/项目名称/), { target: { value: 'Local Project' } })
+    fireEvent.click(dialog.getByRole('tab', { name: '工作流' }))
+    expect(dialog.getByLabelText(/显示名称/)).toHaveValue('Local Init')
+    fireEvent.click(dialog.getByRole('tab', { name: '基础信息' }))
+    expect(dialog.getByLabelText(/项目名称/)).toHaveValue('Local Project')
+    fireEvent.click(dialog.getByLabelText('关闭'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    const reopened = openWorkflow()
+    expect(reopened.getByLabelText(/显示名称/)).toHaveValue('待开始')
+    fireEvent.click(reopened.getByRole('tab', { name: '基础信息' }))
+    expect(reopened.getByLabelText(/项目名称/)).toHaveValue('Awesome Platform')
+  })
+
   it('filters issues by search query in IssueBoard', async () => {
     // 测试意图：验证看板搜索栏输入关键字能够即时过滤卡片
     const api = createMockApi()
@@ -254,24 +286,19 @@ describe('ProjectDetailPage', () => {
     expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
   })
 
-  it('handles reload on refresh button click and on invalidation broadcast', async () => {
-    // 测试意图：验证手动点击刷新按钮和接收 SSE invalidation 触发重新获取快照
+  it('reloads the snapshot when a project change is broadcast', async () => {
+    // 测试意图：接收 SSE invalidation 时重新获取快照（不再提供手工刷新按钮）
     const api = createMockApi()
     const { queryClient } = renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
     await screen.findByText('Awesome Platform')
-    const refreshBtn = screen.getByLabelText('刷新项目数据')
-    fireEvent.click(refreshBtn)
-
-    await waitFor(() => {
-      expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2)
-    })
+    expect(api.getProjectSnapshot).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       await invalidateProjectQueries(queryClient)
     })
     await waitFor(() => {
-      expect(api.getProjectSnapshot).toHaveBeenCalledTimes(3)
+      expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -599,8 +626,8 @@ describe('ProjectDetailPage', () => {
     // 等待弹窗打开
     expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
 
-    // 切换到 Agent 线程 Tab
-    fireEvent.click(screen.getByRole('button', { name: /Agent 线程/ }))
+    // 切换到 Agent 线程 Tab（共享 Tabs 的语义是 tab，而非 button）
+    fireEvent.click(screen.getByRole('tab', { name: /Agent 线程/ }))
     const openThreadBtn = await screen.findByTitle('打开此 Agent 线程视图')
     fireEvent.click(openThreadBtn)
 
@@ -690,8 +717,8 @@ describe('ProjectDetailPage', () => {
     })
   })
 
-  it('handles reload snapshot, create issue modal cancellation, and archive failure', async () => {
-    // 测试意图：验证刷新 Snapshot、新建 Issue 弹窗取消以及归档异常分支
+  it('handles create issue modal cancellation and archive failure', async () => {
+    // 测试意图：验证新建 Issue 弹窗取消以及归档异常分支
     const api = createMockApi({
       archiveProject: vi.fn().mockRejectedValue(new Error('Archive failed')),
     })
@@ -699,17 +726,11 @@ describe('ProjectDetailPage', () => {
     renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
     await screen.findByText('Awesome Platform')
 
-    // 1. 刷新项目数据
-    fireEvent.click(screen.getByRole('button', { name: '刷新项目数据' }))
-    await waitFor(() => {
-      expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2)
-    })
-
-    // 2. 归档异常分支
+    // 1. 归档异常分支
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
     expect(await screen.findByText('Archive failed')).toBeInTheDocument()
 
-    // 3. 点击新建 Issue 弹窗并关闭
+    // 2. 点击新建 Issue 弹窗并关闭
     const createBtn = screen.getByRole('button', { name: '新建 Issue' })
     fireEvent.click(createBtn)
     expect(await screen.findByRole('dialog', { name: '新建 Issue' })).toBeInTheDocument()
@@ -749,7 +770,8 @@ describe('ProjectDetailPage', () => {
           },
         },
       ],
-    }
+      referencedStateCodes: ['INIT', 'IN_PROGRESS'],
+    } as ProjectSnapshotDTO
 
     const api = createMockApi({
       getProjectSnapshot: vi.fn().mockResolvedValue(customSnapshot),
@@ -759,7 +781,8 @@ describe('ProjectDetailPage', () => {
     await screen.findByText('Awesome Platform')
 
     const issue = action === '人工核查' ? unknownRunIssue : inProgressIssue
-    const card = screen.getByRole('button', { name: `Issue #${issue.number} ${issue.title}` })
+    // 快捷操作与标题导航是同一张卡内的平级按钮：按卡片容器定位，动作只能打开自身详情
+    const card = screen.getByTestId(`issue-card-${issue.id}`)
     fireEvent.click(within(card).getByRole('button', { name: action }))
     await waitFor(() => {
       expect(new URLSearchParams(getNav().location.search).get('issue')).toBe(issue.id)
@@ -820,7 +843,8 @@ describe('ProjectDetailPage', () => {
         { issue: blockedIssue, currentOrLatestRun: null },
         { issue: doneIssue, currentOrLatestRun: null },
       ],
-    }
+      referencedStateCodes: ['BLOCKED', 'DONE'],
+    } as ProjectSnapshotDTO
 
     const api = createMockApi({
       getProjectSnapshot: vi.fn().mockResolvedValue(customSnapshot),

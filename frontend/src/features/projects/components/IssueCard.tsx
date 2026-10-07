@@ -1,4 +1,6 @@
 import { AlertCircle, Clock, RotateCcw, ShieldAlert, XCircle } from 'lucide-react'
+import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
 import type { ProjectIssueSnapshotDTO } from '../types'
 
 export interface IssueCardProps {
@@ -12,6 +14,10 @@ export interface IssueCardProps {
   onResolveUnknown?: () => void
 }
 
+/**
+ * 看板 Issue 卡：非交互外壳 + 显式标题导航按钮，快捷动作是彼此平级的共享 Button，
+ * 不在卡片级 button 里嵌套动作，也不使用 feature 私有按钮皮肤。
+ */
 export function IssueCard({
   item,
   availableNextStates = [],
@@ -22,6 +28,7 @@ export function IssueCard({
   onReopen,
   onResolveUnknown,
 }: IssueCardProps) {
+  const { t } = useI18n()
   const { issue, currentOrLatestRun } = item
   const isBlocked = issue.state === 'BLOCKED' || Boolean(issue.blockedFromState)
   const isUnknown = issue.pauseReason === 'UNKNOWN' || currentOrLatestRun?.status === 'UNKNOWN'
@@ -30,67 +37,71 @@ export function IssueCard({
   const isDone = issue.state === 'DONE'
 
   return (
-    <div
+    <article
       className={`issue-card ${isBlocked ? 'is-blocked' : ''} ${isUnknown ? 'is-unknown' : ''}`}
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onClick()
-        }
-      }}
-      aria-label={`Issue #${issue.number} ${issue.title}`}
+      data-testid={`issue-card-${issue.id}`}
     >
       <div className="issue-card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div className="issue-card-heading">
           <span className="issue-number">#{issue.number}</span>
           <span className="badge badge-state">{issue.state}</span>
         </div>
 
         <div className="issue-badges-row">
           {isBlocked && (
-            <span className="badge badge-blocked" title={`阻塞原因: ${issue.blockReason || '未说明'}`}>
+            <span
+              className="badge badge-blocked"
+              title={t('projects.issue.blockedBadgeTitle', {
+                reason: issue.blockReason || t('projects.issue.reasonUnspecified'),
+              })}
+            >
               <AlertCircle size={12} aria-hidden="true" />
               BLOCKED
             </span>
           )}
           {isUnknown && (
-            <span className="badge badge-unknown" title="需人工核查，暂不能继续">
+            <span className="badge badge-unknown" title={t('projects.issue.unknownBadgeTitle')}>
               <ShieldAlert size={12} aria-hidden="true" />
               UNKNOWN
             </span>
           )}
           {issue.pauseReason === 'USER' && (
-            <span className="badge badge-paused" title="已人工暂停">
+            <span className="badge badge-paused" title={t('projects.issue.pausedBadgeTitle')}>
               PAUSED
             </span>
           )}
           {issue.pauseReason === 'ERROR' && (
-            <span className="badge badge-failed" title="发生错误已暂停">
+            <span className="badge badge-failed" title={t('projects.issue.errorBadgeTitle')}>
               ERROR
             </span>
           )}
           {isWaiting && (
-            <span className="badge badge-waiting" title="等待处理">
+            <span className="badge badge-waiting" title={t('projects.issue.waitingBadgeTitle')}>
               <Clock size={12} aria-hidden="true" />
               WAITING
             </span>
           )}
           {isFailed && (
-            <span className="badge badge-failed" title="执行失败">
+            <span className="badge badge-failed" title={t('projects.issue.failedBadgeTitle')}>
               <XCircle size={12} aria-hidden="true" />
               FAILED
             </span>
           )}
           {issue.archivedAt && (
-            <span className="badge badge-archived">已归档</span>
+            <span className="badge badge-archived">{t('projects.archived')}</span>
           )}
         </div>
       </div>
 
-      <h4 className="issue-title">{issue.title}</h4>
+      <button
+        type="button"
+        className="issue-card-title-btn"
+        onClick={onClick}
+        title={issue.title}
+        aria-label={`Issue #${issue.number} ${issue.title}`}
+      >
+        <span className="issue-title">{issue.title}</span>
+      </button>
 
       {currentOrLatestRun && (
         <div className="issue-card-meta-row">
@@ -104,80 +115,78 @@ export function IssueCard({
 
       {issue.blockReason && isBlocked && (
         <p className="issue-block-reason" title={issue.blockReason}>
-          原因: {issue.blockReason}
+          {t('projects.issue.blockReasonPrefix', { reason: issue.blockReason })}
         </p>
       )}
 
-      {/* 快捷操作区 */}
-      <div
-        className="issue-card-quick-actions"
-        onClick={(e) => e.stopPropagation()}
-      >
+      {/* 快捷操作区：与标题导航平级的共享按钮，不冒泡成卡片导航 */}
+      <div className="issue-card-quick-actions">
         {isUnknown && onResolveUnknown && (
-          <button
-            type="button"
-            className="action-pill danger"
+          <Button
+            size="compact"
+            variant="ghost"
+            danger
             onClick={onResolveUnknown}
-            title="核查外部副作用，解除 UNKNOWN"
+            title={t('projects.issue.actionVerifyTitle')}
           >
             <ShieldAlert size={12} aria-hidden="true" />
-            <span>人工核查</span>
-          </button>
+            <span>{t('projects.issue.actionVerify')}</span>
+          </Button>
         )}
 
         {isBlocked && onRecover && (
-          <button
-            type="button"
-            className="action-pill primary"
+          <Button
+            size="compact"
             onClick={onRecover}
-            title={`恢复至 ${issue.blockedFromState || '原阶段'}`}
+            title={t('projects.issue.actionRecoverTitle', {
+              state: issue.blockedFromState || t('projects.issue.originalStage'),
+            })}
           >
             <RotateCcw size={12} aria-hidden="true" />
-            <span>恢复</span>
-          </button>
+            <span>{t('projects.issue.actionRecover')}</span>
+          </Button>
         )}
 
         {isDone && onReopen && (
-          <button
-            type="button"
-            className="action-pill"
+          <Button
+            size="compact"
+            variant="ghost"
             onClick={onReopen}
-            title="重新打开已完成的 Issue 回到 INIT"
+            title={t('projects.issue.actionReopenTitle')}
           >
             <RotateCcw size={12} aria-hidden="true" />
-            <span>重开</span>
-          </button>
+            <span>{t('projects.issue.actionReopen')}</span>
+          </Button>
         )}
 
         {!isBlocked && !isDone && onBlock && (
-          <button
-            type="button"
-            className="action-pill"
+          <Button
+            size="compact"
+            variant="ghost"
             onClick={onBlock}
-            title="设置业务阻塞原因"
+            title={t('projects.issue.actionBlockTitle')}
           >
             <AlertCircle size={12} aria-hidden="true" />
-            <span>阻塞</span>
-          </button>
+            <span>{t('projects.issue.actionBlock')}</span>
+          </Button>
         )}
 
         {/* 根据工作流 next 转移白名单提供的快捷流转 */}
         {!isBlocked && availableNextStates.length > 0 && onTransition && (
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          <div className="issue-card-transitions">
             {availableNextStates.map((nextState) => (
-              <button
+              <Button
                 key={nextState}
-                type="button"
-                className="action-pill primary"
+                size="compact"
                 onClick={() => onTransition(nextState)}
-                title={`流转到 ${nextState}`}
+                title={t('projects.issue.transitionTo', { state: nextState })}
               >
                 <span>→ {nextState}</span>
-              </button>
+              </Button>
             ))}
           </div>
         )}
       </div>
-    </div>
+    </article>
   )
 }

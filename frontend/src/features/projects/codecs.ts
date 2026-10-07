@@ -258,6 +258,16 @@ export function decodeProjectSnapshot(
   return {
     project: decodeProject(obj.project, `${path}.project`),
     issues: requireArray(obj.issues, `${path}.issues`, decodeProjectIssueSnapshot),
+    referencedStateCodes: requireArray(
+      obj.referencedStateCodes,
+      `${path}.referencedStateCodes`,
+      (value, itemPath) => {
+        if (!isValidStateCode(value)) {
+          throw invalidPayload(`${itemPath} must be a valid state code`)
+        }
+        return value
+      },
+    ),
   }
 }
 

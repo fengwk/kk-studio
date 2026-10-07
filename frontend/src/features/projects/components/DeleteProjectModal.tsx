@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Trash2 } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { useI18n } from '@/shared/i18n'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO } from '../types'
@@ -21,6 +22,7 @@ export function DeleteProjectModal({
   onSuccess,
   api = projectsApi,
 }: DeleteProjectModalProps) {
+  const { t } = useI18n()
   const [isDeleting, setIsDeleting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -42,7 +44,7 @@ export function DeleteProjectModal({
       onSuccess(project.id)
       onClose()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '删除项目失败')
+      setErrorMessage(err instanceof Error ? err.message : t('projects.delete.failed'))
     } finally {
       setIsDeleting(false)
     }
@@ -51,7 +53,7 @@ export function DeleteProjectModal({
   return (
     <Dialog
       className="confirm-modal-card"
-      title="确认删除项目"
+      title={t('projects.delete.title')}
       headerIcon={<Trash2 size={18} color="var(--danger)" aria-hidden="true" />}
       pending={isDeleting}
       onClose={onClose}
@@ -65,20 +67,19 @@ export function DeleteProjectModal({
           )}
 
           <p className="confirm-modal-description">
-            确定要删除项目 <strong>{project.title}</strong> 吗？
+            {t('projects.delete.question', { title: project.title })}
           </p>
           <p style={{ fontSize: '0.8125rem', color: 'var(--fg-muted)', margin: 0 }}>
-            此操作将彻底级联清理该项目及其所属 Issue、依赖和历史会话。若有活跃或未收敛的
-            Run，删除将被拒绝。
+            {t('projects.delete.cascade')}
           </p>
         </div>
 
         <div className="modal-footer">
           <Button variant="ghost" onClick={onClose} disabled={isDeleting}>
-            取消
+            {t('projects.cancel')}
           </Button>
           <Button danger onClick={handleDelete} disabled={isDeleting}>
-            {isDeleting ? '删除中...' : '确认删除'}
+            {isDeleting ? t('projects.delete.deleting') : t('projects.delete.confirm')}
           </Button>
         </div>
     </Dialog>
