@@ -185,8 +185,8 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 - `MODEL_TERMINAL_PENDING`：原子写入 Assistant / Error / Compaction 终态结果；关闭 turn 时物理删除 ModelInvocation，进入 Tool phase 时保留父行并挂接 Assistant Entry；
 - `TOOL_TERMINAL_PENDING`：按 `callIndex` 写入副作用与 Tool Result，追加 `TURN_END(continueModel=true)`，删除 children 与父 ModelInvocation；
 - `MODEL_ACTIVE` / `TOOL_ACTIVE`：下游长执行仍在进行，完成本次 claim 即归还；
-- `CONTINUATION_DUE`：先处理适用的自动压缩；压缩判断完成后，若队列含 user-like 消息，则按 FIFO 消费到第一条消息并启动 INPUT，否则启动 continuation 投机规划（HISTORY 段缺口则以 `continueModel` 义务机械启动 TURN_PREFIX）；
-- `IDLE_OR_HISTORICAL`：先处理适用的压缩义务；普通 soft threshold 只在有真实用户需求时触发。有需求且无需压缩则启动 INPUT，否则传播 Idle 并完成 claim。
+- `CONTINUATION_DUE`：先处理适用的自动压缩；压缩判断完成后，若队列含消息或系统通知需求，则启动 INPUT 并在冻结 cutoff 内按 sequence 一次性消费完整 queued 快照，否则启动 continuation 投机规划（HISTORY 段缺口则以 `continueModel` 义务机械启动 TURN_PREFIX）；
+- `IDLE_OR_HISTORICAL`：先处理适用的压缩义务；普通 soft threshold 只在有真实用户需求时触发。有需求且无需压缩则启动 INPUT，无需求则直接完成 claim。
 
 需要外部解析器的回合走投机规划：第一短事务锁 Session `KEY SHARE` -> Thread、捕获命令快照与 cutoff、校验并对临近过期租约补齐余量、分配 candidate Entry ID 构造完整合法的 candidate `EntryPath`（不写任何持久化状态）；事务外调用 `TurnResolver`，期间由本地 `WorkHeartbeat` 续租；第二短事务以 source head、cutoff 内命令精确快照与 claim ownership 作 CAS，一次性提交 `TURN_START` + Message + 命令标记 + Thread 更新 + ModelInvocation/MODEL Work。Resolved 请求在提交前还要经机械一致性校验（route / model / variant / tools / compaction 必须与 candidate 分支事实一致，不一致即抛错且零写入）；任何 CAS 或 claim 损失都会整体回滚并映射为 `LOST_OWNERSHIP`，Resolver 异常、返回 null 或心跳调度失败则按统一的失败延迟 reschedule，绝不静默丢失 Work。重复或陈旧的 THREAD claim 是 no-op。
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import '../cases/seed-and-harness.mjs'
+import { ProviderPreviewTrap } from '../cases/seed-and-harness.mjs'
 import { getCase } from '../lib/registry.mjs'
 import { HttpError } from '../lib/http.mjs'
 
@@ -80,4 +80,43 @@ test('free preview case rejects missing or mismatched reasons even when detail c
       /preview (stale cursor|planning) reason missing or mismatched/,
     )
   }
+})
+
+test('readonly preview case is a free L1 host-mock case covering provider unavailability', () => {
+  // 测试意图：readonly case 依赖宿主 127.0.0.1 trap，必须登记 host-mock；docs 必须锁住 409 契约。
+  const caseDef = getCase('thread.provider_request_preview_readonly')
+  assert.ok(caseDef)
+  assert.equal(caseDef.level, 'L1')
+  assert.deepEqual([...caseDef.requires], ['host-mock'])
+  assert.match(caseDef.docs, /PREVIEW_PROVIDER_UNAVAILABLE/)
+})
+
+test('preview trap only counts calls, retains no request material, and closes cleanly', async () => {
+  // 测试意图：证明 trap 只累计调用次数、不保留 header/token/body，且 close 后监听真正释放。
+  const trap = new ProviderPreviewTrap()
+  const secret = 'sk-preview-secret-must-not-be-retained'
+  await trap.start()
+  const url = `${trap.baseUrl('/v1')}/chat/completions`
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: secret }),
+    })
+    assert.equal(response.status, 500)
+    await response.text()
+    assert.equal(trap.requests, 1)
+    // 只暴露计数：任何自有字符串属性都不携带提交的凭据。
+    assert.ok(
+      !Object.values(trap).some((value) => typeof value === 'string' && value.includes(secret)),
+      'trap must not retain request material',
+    )
+  } finally {
+    await trap.close()
+  }
+  assert.equal(trap.listening, false)
+  await assert.rejects(
+    fetch(url, { signal: AbortSignal.timeout(3000) }),
+    'closed trap must release its listener',
+  )
 })
