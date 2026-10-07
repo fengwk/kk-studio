@@ -355,6 +355,9 @@ class HarnessRuntimeResponseMapperTest {
             List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
             List.of(failure));
 
+    HarnessUsageCostDTO usageCost = new HarnessUsageCostDTO();
+    usageCost.setCurrency("USD");
+    usageCost.setAmount("0.010000000000");
     Map<UUID, HarnessUsageCostDTO> usageCosts = Map.of(id(3), usageCost);
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeResponseMapper.toSnapshotDto(
