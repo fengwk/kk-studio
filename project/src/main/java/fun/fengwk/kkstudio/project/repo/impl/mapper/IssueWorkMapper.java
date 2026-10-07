@@ -116,6 +116,10 @@ public interface IssueWorkMapper extends BaseMapper {
       @Param("leaseToken") String leaseToken,
       @Param("leaseDuration") Duration leaseDuration);
 
+  /**
+   * 单条 CTE 内完成或释放：版本与租约匹配则删除，版本被新 wake 推进则释放租约并把 due 提前到当前时刻，围栏不匹配则不写。返回实际发生的写入结果，使
+   * 调用方能在同一事务内区分「released 成功」与「完全未写」。
+   */
   @Select(
       value =
           """
@@ -137,11 +141,15 @@ public interface IssueWorkMapper extends BaseMapper {
             and wake_version != #{claimedWakeVersion}
           returning issue_id
       )
-      select exists(select 1 from deleted)
+      select case
+          when exists(select 1 from deleted) then 'DELETED'
+          when exists(select 1 from released) then 'RELEASED'
+          else 'NONE'
+      end
       """,
       affectData = true)
   @Options(flushCache = FlushCachePolicy.TRUE, useCache = false)
-  boolean completeWork(
+  IssueWorkCompletion completeWork(
       @Param("issueId") UUID issueId,
       @Param("leaseToken") String leaseToken,
       @Param("claimedWakeVersion") long claimedWakeVersion);
