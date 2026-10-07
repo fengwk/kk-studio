@@ -37,6 +37,7 @@ const moduleDocuments = [
   'builtin-tools-design.md',
   'canvas-core.md',
   'canvas-infra.md',
+  'frontend-design-language.md',
   'frontend.md',
   'harness-builtin.md',
   'harness-common.md',

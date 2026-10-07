@@ -5,6 +5,7 @@ REST Snapshot 提供权威业务事实，WebSocket 提供对账提示和短暂�
 Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 开发代理和发布打包分别见 [`vite.config.ts`](../../frontend/vite.config.ts)、
 [`package.json`](../../frontend/package.json) 与 [Web](web.md)。
+页面密度、卡片、控件、状态与文案遵循[前端视觉与交互语言](frontend-design-language.md)。
 
 ## 组装与路由
 

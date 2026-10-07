@@ -10,6 +10,7 @@
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
+| 修改页面或共享 UI，保持紧凑与一致 | [前端视觉与交互语言](modules/frontend-design-language.md) |
 | 核对内置工具与异步委派的行为及测试覆盖 | [文件读取](operations/builtin-read-tests.md)、[文件变更](operations/builtin-mutation-tests.md)、[搜索](operations/builtin-search-tests.md)、[命令](operations/builtin-bash-tests.md)、[LSP](operations/builtin-lsp-tests.md)、[委派](operations/builtin-task-tests.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
