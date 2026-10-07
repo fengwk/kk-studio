@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
@@ -41,6 +42,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -1850,6 +1852,81 @@ public final class InMemoryHarnessStore implements HarnessStore {
               .thenComparing(
                   PendingEnvironmentWaitRow::representativeInvocationId, UuidOrder.COMPARATOR));
       return List.copyOf(rows.size() > limit ? rows.subList(0, limit) : rows);
+    }
+
+    @Override
+    public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
+        Instant now, Collection<UUID> invocationIds) {
+      checkOpen();
+      Objects.requireNonNull(now, "now");
+      Objects.requireNonNull(invocationIds, "invocationIds");
+      requireMillisecondPrecision(now);
+      if (invocationIds.isEmpty()) {
+        return List.of();
+      }
+      List<EnvironmentToolWaitRow> rows = new ArrayList<>(invocationIds.size());
+      for (UUID invocationId : invocationIds) {
+        Objects.requireNonNull(invocationId, "invocationId");
+        ToolInvocation invocation = state.toolInvocations.get(invocationId);
+        if (invocation == null) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocationId));
+        EnvironmentId environmentId = work == null ? null : work.requiredEnvironmentId();
+        rows.add(
+            new EnvironmentToolWaitRow(
+                invocationId, environmentId, isWaitingForEnvironment(invocation, work, now)));
+      }
+      return List.copyOf(rows);
+    }
+
+    @Override
+    public Optional<Instant> findNextEnvironmentWaitChange(Instant now) {
+      checkOpen();
+      Objects.requireNonNull(now, "now");
+      requireMillisecondPrecision(now);
+      Instant earliest = null;
+      for (ToolInvocation invocation : state.toolInvocations.values()) {
+        if (invocation.status() != ToolInvocationStatus.READY) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocation.id()));
+        if (work == null || work.requiredEnvironmentId() == null) {
+          continue;
+        }
+        earliest = earliestOf(earliest, laterThan(work.availableAt(), now));
+        earliest =
+            earliestOf(
+                earliest, laterThan(work.leaseToken() != null ? work.leaseUntil() : null, now));
+      }
+      // 内存实现的 READY 环境租约只是布尔谓词，没有 deadline，因此无法在这里表达「环境租约自然到期」这一类变更；
+      // 生产实现（数据库）用 environment_connection.lease_until 覆盖它。
+      return Optional.ofNullable(earliest);
+    }
+
+    private boolean isWaitingForEnvironment(ToolInvocation invocation, Work work, Instant now) {
+      if (invocation.status() != ToolInvocationStatus.READY || work == null) {
+        return false;
+      }
+      EnvironmentId environmentId = work.requiredEnvironmentId();
+      if (environmentId == null || work.availableAt().isAfter(now)) {
+        return false;
+      }
+      if (work.leaseToken() != null && work.leaseUntil().isAfter(now)) {
+        return false;
+      }
+      return !hasReadyEnvironmentLease(environmentId, now);
+    }
+
+    private static Instant laterThan(Instant candidate, Instant now) {
+      return candidate != null && candidate.isAfter(now) ? candidate : null;
+    }
+
+    private static Instant earliestOf(Instant current, Instant candidate) {
+      if (candidate == null) {
+        return current;
+      }
+      return current == null || candidate.isBefore(current) ? candidate : current;
     }
 
     @Override

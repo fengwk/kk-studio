@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
@@ -1134,5 +1135,36 @@ public abstract class HarnessStoreWorkContract {
                     cursor.representativeInvocationId(),
                     2));
     assertEquals(List.of(all.get(2)), secondPage);
+  }
+
+  /** 单调用投影保留冻结环境，不能从根聚合反推；未 due、上线和 server-side 均不标等待。 */
+  @Test
+  void toolEnvironmentSnapshotAndTimeHorizonUseWorkFacts() {
+    SeededTools seeded = seedTools(store, 3);
+    UUID waiting = seeded.toolIds().get(0);
+    UUID future = seeded.toolIds().get(1);
+    UUID server = seeded.toolIds().get(2);
+    WorkTarget futureTarget = new WorkTarget(WorkTargetType.TOOL, future);
+    requestWork(new WorkTarget(WorkTargetType.TOOL, waiting), WAITING_ENVIRONMENT);
+    requestWork(futureTarget, WAITING_ENVIRONMENT);
+    requestWork(new WorkTarget(WorkTargetType.TOOL, server));
+    forceWorkAvailableAfter(futureTarget, Duration.ofMinutes(5));
+    List<EnvironmentToolWaitRow> rows =
+        store.transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), seeded.toolIds()));
+    assertTrue(rows.contains(new EnvironmentToolWaitRow(waiting, WAITING_ENVIRONMENT, true)));
+    assertTrue(rows.contains(new EnvironmentToolWaitRow(future, WAITING_ENVIRONMENT, false)));
+    assertTrue(rows.contains(new EnvironmentToolWaitRow(server, null, false)));
+    Instant horizon =
+        store.transaction(tx -> tx.findNextEnvironmentWaitChange(authorityNow())).orElseThrow();
+    assertTrue(horizon.isAfter(authorityNow()));
+    assertTrue(horizon.isBefore(authorityNow().plus(Duration.ofMinutes(6))));
+    seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
+    assertFalse(
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(waiting)))
+            .get(0)
+            .waitingForEnvironment());
+    assertEquals(
+        List.of(), store.transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of())));
   }
 }

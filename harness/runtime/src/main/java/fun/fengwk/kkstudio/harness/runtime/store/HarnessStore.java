@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -411,6 +412,25 @@ public interface HarnessStore {
         Instant afterRepresentativeCreatedAt,
         UUID afterRepresentativeInvocationId,
         int limit);
+
+    /**
+     * 按工具调用读取「环境等待」只读快照（工具行投影）：每个调用给出其 TOOL Work 冻结的 {@code requiredEnvironmentId}（server-side 工具为
+     * null），以及它此刻是否在等待该环境上线（{@code READY} 调用 + Work 已到期 + 无有效执行 lease + 环境无有效 READY 连接租约）。
+     *
+     * <p>它与 {@link #listPendingEnvironmentWaits} 判定同一事实、同一权威时间域，只是不做 <em>根+环境</em>
+     * 聚合，因此工具行不需要从分组反推具体 调用。{@code invocationIds} 为空返回空列表；不存在的 id 不产出行；不产生锁；返回不可变列表。
+     */
+    List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
+        Instant now, Collection<UUID> invocationIds);
+
+    /**
+     * 返回待处理读模型仅因时间推移（没有任何数据库写事件、因此不会有通知）最早可能改变的权威时刻。
+     *
+     * <p>候选只有两类：当前被有效环境连接租约抑制、即将到期的候选环境（取最早 {@code lease_until}），以及尚未到期、即将变为 due 的候选 TOOL Work（取最早
+     * {@code available_at}）。读取方据此安排一次回读，不需要轮询，也不新增通知来源。没有任何此类时刻时返回 {@link Optional#empty()}。时间语义与
+     * {@link #listPendingEnvironmentWaits} 完全一致。
+     */
+    Optional<Instant> findNextEnvironmentWaitChange(Instant now);
 
     /**
      * 在指定 Session 的不可变 Entry 历史中，按原 ToolInvocation ID 查找已物化的 ToolResult MESSAGE Entry。
