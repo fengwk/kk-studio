@@ -12,12 +12,18 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import java.util.List;
 import java.util.Objects;
 
-/** 基于 PostgreSQL 的 Platform 全局 Skill Package 权威行仓库。 */
+/**
+ * 基于 PostgreSQL 的 Platform 全局 Skill Package 权威行仓库。
+ *
+ * <p>写路径要求调用方已开启事务：成功写与 {@code skill_package_changed} 通知共用同一事务 Connection，因此只有真正提交的 insert/delete
+ * 或推进 version 的 update 才会在提交后投递；CAS 影响 0 行与未开启事务都静默/拒绝。
+ */
 @AllArgsConstructor
 @Repository
 public class PostgresqlSkillPackageRepository implements SkillPackageRepository {
 
   private final SkillPackageMapper skillPackageMapper;
+  private final PostgresqlSkillPackageChangeNotifier notifier;
 
   @Override
   public List<SkillPackage> listPackages() {
@@ -41,17 +47,30 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
 
   @Override
   public boolean insertPackage(SkillPackage skillPackage) {
-    return skillPackageMapper.insertPackage(toPackageDO(skillPackage)) == 1;
+    if (skillPackageMapper.insertPackage(toPackageDO(skillPackage)) != 1) {
+      return false;
+    }
+    notifier.packageChanged(skillPackage.getPackageName());
+    return true;
   }
 
   @Override
   public boolean updatePackage(SkillPackage skillPackage, long expectedVersion) {
-    return skillPackageMapper.updatePackage(toPackageDO(skillPackage), expectedVersion) == 1;
+    if (skillPackageMapper.updatePackage(toPackageDO(skillPackage), expectedVersion) != 1) {
+      return false;
+    }
+    // UPDATE 命中即 version = version + 1，因此成功写的 version 必然真变化，与通知条件一致。
+    notifier.packageChanged(skillPackage.getPackageName());
+    return true;
   }
 
   @Override
   public boolean deletePackage(String packageName, long expectedVersion) {
-    return skillPackageMapper.deletePackage(packageName, expectedVersion) == 1;
+    if (skillPackageMapper.deletePackage(packageName, expectedVersion) != 1) {
+      return false;
+    }
+    notifier.packageChanged(packageName);
+    return true;
   }
 
   private SkillPackage toPackage(SkillPackageDO row) {
