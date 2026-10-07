@@ -1,65 +1,26 @@
 import { Bot, ChevronRight, Cpu, Pencil, Server, ServerCog, Trash2 } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
+import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
+import { Button } from '@/shared/ui/controls/Button'
 
 type ResourceIcon = 'agent' | 'model' | 'provider' | 'server'
 
-export type ResourceCardRow =
-  | {
-      label: string
-      value: string
-      wrap?: boolean
-    }
-  | {
-      label: string
-      tags: string[]
-      limit?: number
-    }
-  | {
-      pairs: Array<{ label: string; value: string }>
-    }
-  | [string, string]
-
-function isTagsRow(
-  row: ResourceCardRow,
-): row is { label: string; tags: string[]; limit?: number } {
-  return !Array.isArray(row) && 'tags' in row
+/** AI 目录的业务图标选择；共享 ResourceCard 只接收图标元素，不认识任何业务枚举。 */
+const RESOURCE_ICONS: Record<ResourceIcon, typeof Bot> = {
+  agent: Bot,
+  model: Cpu,
+  provider: ServerCog,
+  server: Server,
 }
 
-function isPairsRow(row: ResourceCardRow): row is { pairs: Array<{ label: string; value: string }> } {
-  return !Array.isArray(row) && 'pairs' in row
-}
+/** AI 资源卡的元信息行；行契约与共享卡一致。 */
+export type ResourceCardRow = ResourceCardMetaRow
 
-function normalizeTextRow(
-  row: Exclude<
-    ResourceCardRow,
-    { label: string; tags: string[]; limit?: number } | { pairs: Array<{ label: string; value: string }> }
-  >,
-): { label: string; value: string; wrap?: boolean } {
-  if (Array.isArray(row)) {
-    return { label: row[0], value: row[1] }
-  }
-  return row
-}
-
-function TagList({ tags, limit = 3 }: { tags: string[]; limit?: number }) {
-  const clean = tags.map((item) => item.trim()).filter(Boolean)
-  if (clean.length === 0) {
-    return <span className="val val-empty" />
-  }
-  const visible = clean.slice(0, limit)
-  const rest = clean.length - visible.length
-  return (
-    <div className="meta-chips meta-chips-single" title={clean.join(', ')}>
-      {visible.map((name) => (
-        <span key={name} className="meta-chip">
-          {name}
-        </span>
-      ))}
-      {rest > 0 ? <span className="meta-chip is-more">+{rest}</span> : null}
-    </div>
-  )
-}
-
+/**
+ * AI 目录资源卡：仅做工业务组合——把共享 ResourceCard 的表面/图标区/元信息/动作区
+ * 与 AI 的“创建会话/编辑/删除”动作、本地化文案拼起来。
+ * 旧实现里手写的卡片 DOM 与样式已完全由 shared/ui/cards 承担。
+ */
 export function ResourceCardLayout({
   icon,
   title,
@@ -84,95 +45,48 @@ export function ResourceCardLayout({
   deleteAriaLabel?: string
 }) {
   const { t } = useI18n()
-  const Icon = icon === 'agent' ? Bot : icon === 'model' ? Cpu : icon === 'provider' ? ServerCog : Server
+  const Icon = RESOURCE_ICONS[icon]
 
   return (
-    <article className="info-card">
-      <div className="head">
-        <div className="head-content">
-          <div className="icon-box">
-            <Icon aria-hidden="true" />
-          </div>
-          <div className="text-content">
-            <h3 title={title}>{title}</h3>
-            <p title={subtitle}>{subtitle}</p>
-          </div>
-        </div>
-      </div>
-      <div className="meta-block">
-        {rows.map((row, index) => {
-          if (isTagsRow(row)) {
-            const tags = (row.tags ?? []).map((item) => item.trim()).filter(Boolean)
-            // 空标签行仍保留 label，右侧留空（不显示 —）
-            return (
-              <div className="meta-row meta-row-tags" key={row.label}>
-                <span className="lbl">{row.label}</span>
-                <TagList tags={tags} limit={row.limit} />
-              </div>
-            )
-          }
-          if (isPairsRow(row)) {
-            return (
-              <div className="meta-pair-row" key={`pairs-${index}`}>
-                {row.pairs.map((item) => (
-                  <div className="meta-pair-item" key={item.label}>
-                    <span className="lbl">{item.label}</span>
-                    <span className="val" title={item.value}>
-                      {item.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )
-          }
-          const item = normalizeTextRow(row)
-          return <MetaRow key={item.label} label={item.label} value={item.value} wrap={item.wrap} />
-        })}
-      </div>
-      <div className="chat-card-foot split">
-        {onStart && (
-          <button
-            className="action-enter-btn green"
-            type="button"
-            aria-label={`${t('ai.catalog.action.createSession')} ${title}`}
-            onClick={onStart}
+    <ResourceCard
+      icon={<Icon aria-hidden="true" />}
+      title={title}
+      subtitle={subtitle}
+      meta={rows}
+      actions={
+        <>
+          {onStart ? (
+            <Button
+              size="compact"
+              aria-label={`${t('ai.catalog.action.createSession')} ${title}`}
+              onClick={onStart}
+            >
+              <ChevronRight aria-hidden="true" />
+              {t('ai.catalog.action.createSession')}
+            </Button>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="compact"
+            aria-label={editAriaLabel ?? `${t('ai.catalog.action.edit')} ${title}`}
+            onClick={onEdit}
           >
-            <ChevronRight aria-hidden="true" />
-            {t('ai.catalog.action.createSession')}
-          </button>
-        )}
-        <button
-          className="action-enter-btn"
-          type="button"
-          aria-label={editAriaLabel ?? `${t('ai.catalog.action.edit')} ${title}`}
-          onClick={onEdit}
-        >
-          <Pencil aria-hidden="true" />
-          {t('ai.catalog.action.edit')}
-        </button>
-        <button
-          className="action-enter-btn danger"
-          type="button"
-          aria-label={deleteAriaLabel ?? `${t('ai.catalog.action.delete')} ${title}`}
-          onClick={onDelete}
-          disabled={deletePending}
-        >
-          <Trash2 aria-hidden="true" />
-          {t('ai.catalog.action.delete')}
-        </button>
-      </div>
-    </article>
-  )
-}
-
-function MetaRow({ label, value, wrap }: { label: string; value: string; wrap?: boolean }) {
-  const empty = !value?.trim()
-  return (
-    <div className="meta-row">
-      <span className="lbl">{label}</span>
-      <span className={`val${wrap ? ' is-wrap' : ''}${empty ? ' val-empty' : ''}`} title={empty ? undefined : value}>
-        {empty ? '' : value}
-      </span>
-    </div>
+            <Pencil aria-hidden="true" />
+            {t('ai.catalog.action.edit')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="compact"
+            danger
+            aria-label={deleteAriaLabel ?? `${t('ai.catalog.action.delete')} ${title}`}
+            onClick={onDelete}
+            disabled={deletePending}
+          >
+            <Trash2 aria-hidden="true" />
+            {t('ai.catalog.action.delete')}
+          </Button>
+        </>
+      }
+    />
   )
 }

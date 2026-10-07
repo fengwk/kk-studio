@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react'
 
-/** 共享“新建”卡片：以信息卡形态提供列表页的创建入口。 */
+/** 共享“新建”卡片：与资源卡同一尺寸语言的虚线入口，样式见 styles.css 的 .create-card。 */
 export function CreateCard({
   title,
   subtitle,
@@ -11,11 +11,11 @@ export function CreateCard({
   onClick: () => void
 }) {
   return (
-    <button className="info-card create-card" type="button" onClick={onClick} aria-label={title}>
-      <span className="plus-icon">
-        <Plus aria-hidden="true" />
+    <button className="create-card" type="button" onClick={onClick} aria-label={title}>
+      <span className="create-card-icon" aria-hidden="true">
+        <Plus />
       </span>
-      <span>
+      <span className="create-card-text">
         <strong>{title}</strong>
         <small>{subtitle}</small>
       </span>

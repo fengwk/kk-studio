@@ -1,10 +1,10 @@
-/* 共享控件样式：图标按钮、搜索框、Select、NumberInput、Checkbox。
+/* 共享控件样式：图标按钮、搜索框、Select、NumberInput、Checkbox、文本输入与 Tabs。
    设计 token 仍由 src/styles.css 的 :root 唯一定义。 */
 
 .icon-button {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -15,9 +15,30 @@
   cursor: pointer;
 }
 
+.icon-button.is-compact {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+}
+
 .icon-button:hover:not(:disabled) {
   background: var(--stage-dot);
   color: var(--fg);
+}
+
+.icon-button:focus-visible {
+  outline: none;
+  color: var(--fg);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.icon-button.danger {
+  color: var(--danger);
+}
+
+.icon-button.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .icon-button:disabled {
@@ -105,7 +126,7 @@
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 36px;
+  min-height: 32px;
   max-width: 100%;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -122,7 +143,7 @@
 .ui-select.is-compact .ui-select-trigger {
   display: inline-flex;
   width: auto;
-  min-height: 30px;
+  min-height: 28px;
   padding: 0 9px;
   background: var(--surface);
   font-size: 12px;
@@ -153,7 +174,6 @@
 .ui-select.is-disabled .ui-select-trigger {
   color: var(--fg-dim);
   cursor: not-allowed;
-  opacity: 0.78;
 }
 
 .ui-select-value {
@@ -266,7 +286,7 @@
 .number-input-field {
   width: 100%;
   min-width: 0;
-  height: 36px;
+  height: 32px;
   padding: 0 32px 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -280,6 +300,10 @@
 .number-input-field:focus {
   border-color: var(--green-primary);
   box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.number-input[data-invalid='true'] .number-input-field {
+  border-color: var(--danger);
 }
 
 .number-input-steppers {
@@ -336,6 +360,7 @@
 .ui-checkbox {
   display: inline-flex;
   align-items: center;
+  min-height: 32px;
   gap: 8px;
   font-size: 0.875rem;
   color: var(--fg-muted);
@@ -380,7 +405,11 @@
 
 .ui-checkbox-input:focus-visible + .ui-checkbox-box {
   border-color: var(--green-primary);
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.ui-checkbox.is-invalid .ui-checkbox-box {
+  border-color: var(--danger);
 }
 
 .ui-checkbox.is-indeterminate .ui-checkbox-box {
@@ -414,3 +443,105 @@
 .ui-checkbox:hover:not(.is-disabled) .ui-checkbox-label {
   color: var(--fg);
 }
+
+/* 文本输入与多行文本：普通控件 32px；实际表单复用同一焦点/错误/禁用语义。 */
+.ui-text-input,
+.ui-textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: 0;
+}
+
+.ui-text-input {
+  height: 32px;
+  padding: 0 10px;
+}
+
+.ui-textarea {
+  min-height: 76px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.ui-text-input:focus,
+.ui-textarea:focus {
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.ui-text-input[data-invalid='true'],
+.ui-textarea[data-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.ui-text-input:disabled,
+.ui-textarea:disabled {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+}
+
+.ui-text-input::placeholder,
+.ui-textarea::placeholder {
+  color: var(--fg-dim);
+}
+
+/* 无障碍 Tabs：roving tabindex + aria-selected/aria-controls；面板由 Tabs 统一包裹。 */
+.ui-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.ui-tab {
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ui-tab:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.ui-tab[aria-selected='true'] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.ui-tab:focus-visible {
+  outline: none;
+  border-bottom-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.ui-tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-tab-panel {
+  min-width: 0;
+  padding-top: 16px;
+}
+

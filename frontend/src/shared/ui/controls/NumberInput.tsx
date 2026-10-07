@@ -16,6 +16,7 @@ export function NumberInput({
   max,
   step = 1,
   disabled = false,
+  invalid = false,
   placeholder,
   className,
   'aria-label': ariaLabel,
@@ -28,6 +29,8 @@ export function NumberInput({
   max?: number
   step?: number
   disabled?: boolean
+  /** 校验失败：给出 aria-invalid 与 danger 边框，与其它共享表单控件一致。 */
+  invalid?: boolean
   placeholder?: string
   className?: string
   'aria-label'?: string
@@ -51,7 +54,10 @@ export function NumberInput({
   }
 
   return (
-    <div className={`number-input${disabled ? ' is-disabled' : ''}`}>
+    <div
+      className={`number-input${disabled ? ' is-disabled' : ''}`}
+      data-invalid={invalid || undefined}
+    >
       <input
         id={fieldId}
         className={className ?? 'number-input-field'}
@@ -64,6 +70,7 @@ export function NumberInput({
         placeholder={placeholder}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
+        aria-invalid={invalid || undefined}
         onChange={(event) => onChange(sanitizeIntegerInput(event.target.value))}
         onKeyDown={(event) => {
           if (event.key === 'ArrowUp') {

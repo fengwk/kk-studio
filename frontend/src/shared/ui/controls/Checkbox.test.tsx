@@ -56,4 +56,18 @@ describe('Checkbox', () => {
     expect(checkbox).toBeInTheDocument()
     expect(checkbox).toBeChecked()
   })
+
+  // 测试意图：校验失败时与其它共享表单控件给出同一 aria-invalid 语义与 danger 边框类
+  it('reports invalid state without breaking toggle behavior', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<Checkbox checked={false} onChange={onChange} invalid label="必选项" />)
+
+    const checkbox = screen.getByRole('checkbox', { name: '必选项' })
+    expect(checkbox).toHaveAttribute('aria-invalid', 'true')
+    expect(checkbox.closest('.ui-checkbox')).toHaveClass('is-invalid')
+
+    await user.click(checkbox)
+    expect(onChange).toHaveBeenCalledWith(true)
+  })
 })
