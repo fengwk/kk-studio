@@ -1634,10 +1634,6 @@
 }
 
 @media (max-width: 900px) {
-  .canvas-feature .project-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .canvas-feature .generation-panel,
   .canvas-feature .generation-panel.expanded {
     width: calc(100% - 24px);
@@ -1660,15 +1656,11 @@
 
 @media (max-width: 700px) {
   .canvas-feature .library-content {
-    padding: 38px 18px;
+    padding: 20px 16px;
   }
 
   .canvas-feature .library-heading h1 {
-    font-size: 38px;
-  }
-
-  .canvas-feature .project-grid {
-    grid-template-columns: 1fr;
+    font-size: 20px;
   }
 
   .canvas-feature .canvas-zoom-controls button {

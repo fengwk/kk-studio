@@ -77,6 +77,10 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 
 Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 按字符串展示，secret 与 Base64 正文在输出边界去除。
 
+`ProjectSnapshotDTO.referencedStateCodes` 是非 null 的去重、有序阶段集合，
+包含活动及归档 Issue 的 `state` 与非 null `blockedFromState`。引用集合不改变正常 Issue 列表，
+供工作流编辑保护删除与改码；保存仍由领域约束和版本 CAS 最终裁决。
+
 严格程度按用途区分：请求体与对外投影显式拒绝未知字段，纯响应投影（如 `CanvasSnapshotDTO`）与内部嵌套结构不需要重复声明。领域身份使用 sealed interface / record 表达封闭集合（命令、patch 项、资源输入、冲突载荷），普通数据用 Lombok `@Data`。
 
 ## 不变量

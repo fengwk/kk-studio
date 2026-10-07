@@ -201,6 +201,8 @@ INIT 可达，INIT 须存在到 DONE 的正常路径。
 
 workflow 整体保存时锁定 Project、检查版本，并要求项目无活动 Run。保存校验编码、
 合法边、可达性与引用；包含已归档 Issue 在内的当前阶段及阻塞恢复点都须保留。
+工作流编辑读取 Project Snapshot 的 `referencedStateCodes` 实施相同引用保护，
+不依赖仅包含未归档 Issue 的可见看板列表。后台推送刷新约束而不覆盖打开中的草稿。
 Agent 与阶段 Environment 由 Project 在执行接受时以显式命令提交并冻结，缺失引用明确拒绝；
 live turn 不再按 workflow 反查。
 合法动作由当前状态、workflow、Run 与门禁共同决定，见 [Project](modules/project.md)。

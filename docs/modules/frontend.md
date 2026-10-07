@@ -160,6 +160,10 @@ Snapshot、Debug 和 usage，并在顶部提供返回执行根入口；身份未
 
 ## Canvas 编辑与上传
 
+画布库与其他资源列表共用紧凑资源卡。点击“创建新画布”后填写名称并确认才创建；
+取消不会写入。创建期间不能重复提交，失败保留表单供修改重试。
+已有画布的“进入”仅打开该画布，不创建新对象。
+
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
 冲突由每条命令的语义前置条件裁决。patch 连续且较新时应用，
 空回执或 revision 缺口回读 Snapshot；语义 409 结算操作并保留草稿供人工恢复，
@@ -209,6 +213,11 @@ ProjectsInvalidationBridge 经 ExtensionHost overlay 失效 Query，重连全量
 Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
 Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；保存与显式 reload
 共用单一提交互斥。版本基线仅在成功写入或显式 reload 后推进，409 保留草稿与原版本。
+看板的编辑入口直接打开工作流页签，列表编辑默认打开基础信息。工作流用阶段列表与表单配置，
+支持重排、转移边及人工/Agent 执行；缺失 Agent 或非法额度不能保存。
+快照的 `referencedStateCodes` 汇总所有 Issue（含归档）的阶段与阻塞恢复点，
+因此可见列表为空也不能删除或改码这些阶段。项目级推送同时失效该项目下的 Issue 与 Evidence，
+订阅与重连共用既有 WebSocket。
 
 Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动，
 完整聚合携 expectedVersion 提交。权限与 apply timing 按封闭类型渲染。
@@ -240,8 +249,9 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 全局 token 在 [`styles.css`](../../frontend/src/styles.css)，Canvas 样式由 feature 拥有。
 [`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
-Select、NumberInput、SearchField、FieldLabel）、overlays（Dialog、ConfirmActionModal）、
-feedback（Toast、StateBlock、CreateCard），以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
+Select、NumberInput、SearchField、TextInput、TextArea、FieldLabel、Tabs）、cards（ResourceCard、
+ResourceGrid）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、CreateCard），
+以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
 生产代码禁用原生 `<select>`，下拉统一走自研 listbox。
 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后
 焦点归还、栈顶 Escape（含 IME 与 defaultPrevented 守卫）与遮罩点击关闭，pending 时禁止 Escape、

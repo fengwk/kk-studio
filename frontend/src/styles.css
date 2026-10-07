@@ -497,39 +497,6 @@ textarea::placeholder {
   padding: 32px 32px 60px;
 }
 
-/* 通用信息卡片基座：.cards-grid 栅格与 .info-card 表面（Projects 仍使用）。
-   资源列表的统一表面/元信息/动作已收口到 shared/ui/cards 的 .resource-card。 */
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
-  gap: 20px;
-}
-
-.info-card {
-  min-height: 220px;
-  min-width: 0;
-  background:
-    radial-gradient(120% 80% at 0% 0%, rgba(113, 231, 154, 0.06), transparent 55%),
-    linear-gradient(180deg, var(--white-02) 0%, transparent 100%),
-    var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 20px 22px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-  text-align: left;
-  overflow: hidden;
-}
-
-.info-card:hover {
-  border-color: var(--border-hover);
-  background: var(--surface-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-}
-
 /* 新建入口卡：与资源卡同一尺寸语言的虚线边框卡片，整卡即创建动作。
    内部元素各自控制间距，不依赖父级 gap。 */
 .create-card {
@@ -4953,10 +4920,6 @@ select.settings-input option {
     padding: 20px 16px;
   }
 
-  .cards-grid {
-    gap: 16px;
-  }
-
   .editor-grid,
   .editor-grid-2,
   .editor-row,
@@ -4967,15 +4930,6 @@ select.settings-input option {
 
   .editor-row.single {
     grid-template-columns: 1fr 32px;
-  }
-
-  .info-card {
-    min-height: 200px;
-    padding: 18px 16px;
-  }
-
-  .cards-grid {
-    grid-template-columns: 1fr;
   }
 
   .chat-shell {

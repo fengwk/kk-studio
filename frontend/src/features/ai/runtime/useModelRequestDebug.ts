@@ -31,7 +31,7 @@ export function useModelRequestDebug(
     return client.getQueryCache().subscribe((event) => {
       if (event.type !== 'updated') return
       const root = event.query.queryKey[0]
-      if (!['agents', 'models', 'providers', 'tools', 'skills', 'mcp-servers'].includes(String(root))) return
+      if (!['agents', 'models', 'providers', 'tools', 'skills', 'mcp-servers', 'environments'].includes(String(root))) return
       if (event.action.type === 'invalidate' || event.action.type === 'success') {
         setCatalogRevision((value) => value + 1)
       }

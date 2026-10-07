@@ -19,7 +19,7 @@ vi.mock('@/shared/api/harness-service', () => ({
 function sampleDebug(): HarnessModelRequestDebugDTO {
   return {
     kind: 'NEXT_REQUEST_PREVIEW',
-    generatedAt: '2026-09-21T00:00:00.000Z',
+    generatedAt: 1790504400,
     model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
     environmentName: null,
     systemInstruction: 'You are an assistant.',
@@ -182,7 +182,7 @@ describe('request source fences', () => {
     expect(result.current.debug).toBeNull()
   })
 
-  it.each(['agents', 'models', 'providers', 'tools', 'skills', 'mcp-servers'])('refreshes %s only while enabled', async (root) => {
+  it.each(['agents', 'models', 'providers', 'tools', 'skills', 'mcp-servers', 'environments'])('refreshes %s only while enabled', async (root) => {
     const { client, wrapper } = setup()
     client.setQueryDefaults([root], { gcTime: Infinity })
     client.setQueryData([root, 'list'], {})
