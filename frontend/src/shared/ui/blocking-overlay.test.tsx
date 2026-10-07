@@ -18,7 +18,7 @@ describe('keyboard priority guards', () => {
     document.body.innerHTML = '<div aria-modal="true"></div>'
     expect(hasBlockingModal()).toBe(true)
 
-    // 图片/视频 Lightbox 现在复用 Dialog：同样以 modal-backdrop + aria-modal 生效。
+    // 图片/视频 Lightbox 同样基于共享 Dialog：以 modal-backdrop + aria-modal 生效。
     document.body.innerHTML =
       '<div class="modal-backdrop"><div role="dialog" aria-modal="true" class="modal-card media-lightbox-card"></div></div>'
     expect(hasBlockingModal()).toBe(true)

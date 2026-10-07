@@ -17,9 +17,8 @@ const RESOURCE_ICONS: Record<ResourceIcon, typeof Bot> = {
 export type ResourceCardRow = ResourceCardMetaRow
 
 /**
- * AI 目录资源卡：仅做工业务组合——把共享 ResourceCard 的表面/图标区/元信息/动作区
- * 与 AI 的“创建会话/编辑/删除”动作、本地化文案拼起来。
- * 旧实现里手写的卡片 DOM 与样式已完全由 shared/ui/cards 承担。
+ * AI 目录资源卡：只做业务组合——把共享 ResourceCard 的图标/标题/元信息/动作区
+ * 与 AI 的“创建会话/编辑/删除”动作、本地化文案拼起来；卡片外观全部来自 shared/ui/cards。
  */
 export function ResourceCardLayout({
   icon,

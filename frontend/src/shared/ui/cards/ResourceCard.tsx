@@ -63,17 +63,12 @@ function TagList({ tags, limit = 3 }: { tags: string[]; limit?: number }) {
   )
 }
 
-/** 只有 null/undefined/空白字符串是空值；`false`、`0` 都是真实事实。 */
+/** 只有 null/undefined/空白字符串算空值；`0` 与节点型值都由 React 原样呈现。 */
 function isBlankMetaValue(value: ReactNode): boolean {
   if (value == null) {
     return true
   }
   return typeof value === 'string' && value.trim().length === 0
-}
-
-/** React 会把 `false` 渲染成空；共享卡必须把布尔/数字事实显式呈现，不能伪装成空值。 */
-function renderMetaValue(value: ReactNode): ReactNode {
-  return typeof value === 'boolean' ? String(value) : value
 }
 
 function TextValue({ value, wrap }: { value: ReactNode; wrap?: boolean }) {
@@ -90,7 +85,7 @@ function TextValue({ value, wrap }: { value: ReactNode; wrap?: boolean }) {
       // title 只对纯文本值有意义，ReactNode 值由调用方自带无障碍语义。
       title={!empty && typeof value === 'string' ? value : undefined}
     >
-      {empty ? '' : renderMetaValue(value)}
+      {empty ? '' : value}
     </span>
   )
 }

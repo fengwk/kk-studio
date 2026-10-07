@@ -60,7 +60,7 @@ export function NumberInput({
     >
       <input
         id={fieldId}
-        className={className ?? 'number-input-field'}
+        className={['number-input-field', className].filter(Boolean).join(' ')}
         type="text"
         inputMode="numeric"
         autoComplete="off"

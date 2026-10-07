@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -58,6 +58,74 @@ describe('Tabs', () => {
     expect(onChange).toHaveBeenCalledWith('workflow')
     expect(screen.getByRole('tab', { name: '工作流' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tabpanel')).toHaveTextContent('面板：workflow')
+  })
+
+  it('never pretends another pane when activeId is disabled or unknown', () => {
+    render(
+      <Tabs tabs={TABS} activeId="archived" ariaLabel="项目配置" onChange={() => undefined}>
+        <p>真实内容</p>
+      </Tabs>,
+    )
+
+    const tabs = within(screen.getByRole('tablist')).getAllByRole('tab')
+    // 没有任何 tab 冒充选中。
+    expect(tabs.every((tab) => tab.getAttribute('aria-selected') === 'false')).toBe(true)
+    // 内容不伪装成某个 tab 的面板。
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument()
+    const region = screen.getByText('真实内容').parentElement as HTMLElement
+    expect(region).toHaveAttribute('data-tab-state', 'no-active-tab')
+    expect(region).not.toHaveAttribute('aria-labelledby')
+    // roving tabindex 仍落在第一个可用 tab，键盘可达。
+    expect(screen.getByRole('tab', { name: '基础信息' })).toHaveAttribute('tabindex', '0')
+    expect(screen.getByRole('tab', { name: '已归档' })).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('renders no tablist for empty tabs and keeps content visible without pane claims', () => {
+    render(
+      <Tabs tabs={[]} activeId="" ariaLabel="项目配置" onChange={() => undefined}>
+        <p>仅内容</p>
+      </Tabs>,
+    )
+
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument()
+    expect(screen.getByText('仅内容')).toBeInTheDocument()
+  })
+
+  it('ignores navigation keys when prevented or composing, and never swallows unrelated keys', () => {
+    const onChange = vi.fn()
+    render(
+      <div
+        onKeyDownCapture={(event) => {
+          if (event.key === 'ArrowLeft') {
+            event.preventDefault()
+          }
+        }}
+      >
+        <Harness onChange={onChange} />
+      </div>,
+    )
+
+    const basic = screen.getByRole('tab', { name: '基础信息' })
+    basic.focus()
+
+    // 无关按键既不触发选择也不被吞掉。
+    expect(fireEvent.keyDown(basic, { key: 'a' })).toBe(true)
+    expect(onChange).not.toHaveBeenCalled()
+
+    // 上游已 preventDefault 的方向键不得改变选中。
+    fireEvent.keyDown(basic, { key: 'ArrowLeft' })
+    expect(onChange).not.toHaveBeenCalled()
+    expect(basic).toHaveAttribute('aria-selected', 'true')
+
+    // 输入法组合中的方向键同样不处理。
+    fireEvent.keyDown(basic, { key: 'ArrowRight', isComposing: true })
+    fireEvent.keyDown(basic, { key: 'ArrowRight', keyCode: 229 })
+    expect(onChange).not.toHaveBeenCalled()
+
+    // 正常方向键仍然生效。
+    fireEvent.keyDown(basic, { key: 'ArrowRight' })
+    expect(onChange).toHaveBeenCalledWith('workflow')
   })
 
   it('navigates with Arrow/Home/End while skipping disabled tabs and moving focus', async () => {

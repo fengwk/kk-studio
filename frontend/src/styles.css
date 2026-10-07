@@ -497,9 +497,8 @@ textarea::placeholder {
   padding: 32px 32px 60px;
 }
 
-/* 旧资源列表基座（.cards-grid/.info-card/.head/.meta-*/.chat-card-foot/.action-enter-btn）。
-   迁移期仍需支撑 Chat/Environment/Plugin/Skill/Projects/Canvas 未迁移调用方；
-   全部改用 shared/ui/cards 的 .resource-card/.resource-grid 后删除本段。 */
+/* 通用信息卡片基座：.cards-grid 栅格、.info-card 表面、.head 标题图标区、
+   .meta-block/.meta-row/.meta-chip 元信息、.chat-card-foot 与 .action-enter-btn 动作。 */
 .cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
@@ -531,10 +530,8 @@ textarea::placeholder {
   box-shadow: var(--shadow-md);
 }
 
-/* 共享“新建”卡的唯一实现（shared/ui/feedback/CreateCard）。
-   与资源卡同一尺寸语言；内部间距用 margin 而不是父级 gap，避免 Canvas 库尚未迁移的
-   自带 create-card 结构被顺带改变间距。放在全局样式表是因为 Canvas 是独立懒加载 chunk，
-   其 create-card 调用方不在 cards.css 的加载范围内。 */
+/* 新建入口卡：与资源卡同一尺寸语言的虚线边框卡片，整卡即创建动作。
+   内部元素各自控制间距，不依赖父级 gap。 */
 .create-card {
   display: flex;
   flex-direction: column;
@@ -900,18 +897,18 @@ textarea::placeholder {
   color: var(--danger, #ff7b7b);
 }
 
-.form-group.is-error input:not([type='checkbox']):not([type='radio']),
+.form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input),
 .form-group.is-error select,
-.form-group.is-error textarea,
+.form-group.is-error textarea:not(.ui-textarea),
 .form-group.is-error .form-select .form-select-control,
 .form-group.is-error .price-input {
   border-color: var(--danger, #ff7b7b) !important;
   box-shadow: 0 0 0 1px rgba(255, 96, 96, 0.35);
 }
 
-.form-group.is-error input:not([type='checkbox']):not([type='radio']):focus,
+.form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):focus,
 .form-group.is-error select:focus,
-.form-group.is-error textarea:focus,
+.form-group.is-error textarea:not(.ui-textarea):focus,
 .form-group.is-error .price-input:focus-within {
   border-color: var(--danger, #ff7b7b) !important;
   box-shadow: 0 0 0 3px rgba(255, 96, 96, 0.22);
@@ -966,13 +963,13 @@ div.is-error {
   font-weight: 600;
 }
 
-/* 旧表单模式（.form-group 后代控件）。迁移中的表单改用共享 TextInput/TextArea 后，
-   共享控件接管自身高度/表面/焦点，故显式排除 .ui-text-input/.ui-textarea。
-   全部调用方迁移到共享控件后删除本段。 */
-.form-group input:not([type="checkbox"]):not([type="radio"]):not(.ui-text-input),
+/* 表单控件基座（.form-group 后代控件）：普通控件统一 32px 高度、表面与聚焦。
+   共享控件自带高度/表面/焦点语义，故显式排除 .ui-text-input/.ui-textarea/
+   .number-input-field/.ui-search-input。 */
+.form-group input:not([type="checkbox"]):not([type="radio"]):not(.ui-text-input):not(.number-input-field):not(.ui-search-input),
 .form-group select,
 .form-group textarea:not(.ui-textarea) {
-  height: 38px;
+  height: 32px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1047,7 +1044,7 @@ div.is-error {
   font: inherit;
 }
 
-.form-group input:not(.ui-text-input):focus,
+.form-group input:not(.ui-text-input):not(.number-input-field):not(.ui-search-input):focus,
 .form-group select:focus,
 .form-group textarea:not(.ui-textarea):focus {
   border-color: var(--green-primary);
@@ -5474,8 +5471,7 @@ select.settings-input option {
   text-overflow: ellipsis;
 }
 
-/* U1：根布局规则只作用于 .ui-select 根；portal 菜单保持自身 display:grid。
-   原先的裸 .chat-layout-selector{display:inline-flex} 会命中 portal 菜单，已删除。 */
+/* 紧凑布局下拉：尺寸只作用于 .ui-select 根，portal 菜单保持自身 display:grid。 */
 .ui-select.chat-layout-selector .ui-select-trigger {
   height: 28px;
   min-height: 28px;
