@@ -293,6 +293,12 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           })
           return
         }
+        if (path === '/api/interactions' && method === 'GET') {
+          await route.fulfill({
+            json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } },
+          })
+          return
+        }
 
         await route.fulfill({ json: { status: 200, data: {} } })
       },
@@ -335,6 +341,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
       '会话开始 · Agent: architect · 模型: minimax/MiniMax-M2.7 (default) · 环境: 无',
     )).toBeVisible()
     await expect(dock.getByText('配置快照不可解析')).toHaveCount(0)
+    await expect(dock.getByText('待处理交互加载失败', { exact: true })).toHaveCount(0)
 
     // 6. 通用输入：消息走 per-thread 命令批次，不再变成 Issue INSTRUCTION
     const composer = dock.getByLabel('给 AI 发送消息')
@@ -368,7 +375,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await palette.locator('button', { hasText: 'goal' }).click()
     const goalPanel = dock.getByRole('region', { name: '目标' })
     await expect(goalPanel).toBeVisible()
-    await goalPanel.locator('#goal-input').fill('交付可回滚的迁移方案')
+    await goalPanel.getByRole('textbox', { name: '设置新目标', exact: true }).fill('交付可回滚的迁移方案')
     await goalPanel.getByRole('button', { name: '设置目标' }).click()
 
     await expect.poll(() => commandBatches.length).toBe(2)

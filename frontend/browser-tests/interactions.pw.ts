@@ -3,6 +3,7 @@ import { expect, test, type Page } from './fixture'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { InteractionDTO } from '../src/shared/api/contracts/ai-interaction'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -11,6 +12,12 @@ const HARNESS_URL = '/browser-tests/interactions-harness.html'
 
 const APPROVAL_INTERACTION_ID = 'int-approval'
 const QUESTIONNAIRE_INTERACTION_ID = 'int-questionnaire'
+const APPROVAL_ROOT_ID = 'f0000000-0000-0000-0000-00000000f001'
+const QUESTIONNAIRE_ROOT_ID = 'f0000000-0000-0000-0000-00000000f002'
+const ENVIRONMENT_ROOT_ID = 'f0000000-0000-0000-0000-00000000f003'
+const ISSUE_ID = 'b0000000-0000-0000-0000-000000000042'
+const PROJECT_ID = 'a0000000-0000-0000-0000-000000000001'
+const targetWritesByPage = new WeakMap<Page, string[]>()
 const LONG_OPTION_LABEL = '先备份再迁移并在完成后立即校验一致性'
 const LONG_REASON =
   'bash requires approval in /srv/kk-studio/frontend/browser-tests/'
@@ -44,15 +51,20 @@ interface PendingApiState {
   answeredQuestionnaires: Set<string>
 }
 
-function buildItems() {
+function buildItems(): InteractionDTO[] {
   return [
     {
       interactionId: APPROVAL_INTERACTION_ID,
+      type: 'APPROVAL',
       status: 'WAITING_APPROVAL',
       threadId: 'thread-approval',
-      rootThreadId: 'thread-approval',
+      rootThreadId: APPROVAL_ROOT_ID,
       sessionId: 'session-approval',
-      owner: { type: 'CHAT', chatId: 'chat-pending', issueId: null, agentName: null },
+      owner: { type: 'CHAT', chatId: 'chat-pending', chatTitle: '迁移审批',
+        issueId: null, issueTitle: null, agentName: null, rootThreadName: '审批执行根' },
+      environmentId: null,
+      environmentName: null,
+      waitingCount: null,
       toolCallId: 'call-approval',
       toolName: 'bash',
       argumentsJson: LONG_ARGUMENTS,
@@ -61,11 +73,16 @@ function buildItems() {
     },
     {
       interactionId: QUESTIONNAIRE_INTERACTION_ID,
+      type: 'INPUT',
       status: 'WAITING_INPUT',
       threadId: 'thread-questionnaire',
-      rootThreadId: 'thread-questionnaire',
+      rootThreadId: QUESTIONNAIRE_ROOT_ID,
       sessionId: 'session-questionnaire',
-      owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'issue-42', agentName: 'architect' },
+      owner: { type: 'ISSUE_AGENT', chatId: null, chatTitle: null,
+        issueId: ISSUE_ID, issueTitle: '迁移策略', agentName: 'architect', rootThreadName: '问卷执行根' },
+      environmentId: null,
+      environmentName: null,
+      waitingCount: null,
       toolCallId: 'call-questionnaire',
       toolName: 'ask_user',
       argumentsJson: JSON.stringify({
@@ -96,16 +113,21 @@ function buildItems() {
       createTime: '2026-10-05T09:58:00Z',
     },
     {
-      interactionId: 'int-unknown',
-      status: 'COMPLETED',
-      threadId: 'thread-unknown',
-      rootThreadId: 'thread-unknown',
-      sessionId: 'session-unknown',
-      owner: { type: 'UNKNOWN', chatId: null, issueId: null, agentName: null },
-      toolCallId: 'call-unknown',
-      toolName: 'archive',
-      argumentsJson: JSON.stringify({ archiveId: 'archive-2026-10-05' }),
+      type: 'ENVIRONMENT_WAIT',
+      interactionId: null,
+      status: null,
+      threadId: null,
+      rootThreadId: ENVIRONMENT_ROOT_ID,
+      sessionId: null,
+      owner: { type: 'CHAT', chatId: 'chat-environment', chatTitle: '等待迁移环境',
+        issueId: null, issueTitle: null, agentName: null, rootThreadName: '环境执行根' },
+      toolCallId: null,
+      toolName: null,
+      argumentsJson: null,
       approvalJson: null,
+      environmentId: 'a0000000-0000-0000-0000-00000000a001',
+      environmentName: 'migration-node',
+      waitingCount: 2,
       createTime: '2026-10-05T09:59:00Z',
     },
   ]
@@ -116,6 +138,9 @@ function buildItems() {
  * 避免因失效重取而把已完成的卡片重新渲染出来。
  */
 async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Promise<void> {
+  const targetWrites: string[] = []
+  targetWritesByPage.set(page, targetWrites)
+  await page.routeWebSocket(/\/api\/events\/v1$/, () => {})
   const state: PendingApiState = {
     listCalls: 0,
     decidedApprovals: new Set(),
@@ -129,6 +154,12 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
       const request = route.request()
       const requestPath = new URL(request.url()).pathname
       const method = request.method()
+      // 决策只写原始调用；任何容器/目标 Thread 写入（包括未 mock 的请求）都必须失败。
+      if (method !== 'GET'
+        && !(method === 'PUT' && requestPath === '/api/harness/threads/thread-approval/tool-invocations/int-approval/approval')
+        && !(method === 'POST' && requestPath === '/api/interactions/int-questionnaire/input')) {
+        targetWrites.push(`${method} ${requestPath}`)
+      }
 
       if (requestPath === '/api/interactions' && method === 'GET') {
         state.listCalls += 1
@@ -139,12 +170,13 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
           })
           return
         }
-        const items = buildItems().filter((item) =>
-          !state.decidedApprovals.has(item.interactionId)
-          && !state.answeredQuestionnaires.has(item.interactionId))
+        const items = buildItems().filter((item) => item.type === 'ENVIRONMENT_WAIT'
+          || (!state.decidedApprovals.has(item.interactionId)
+          && !state.answeredQuestionnaires.has(item.interactionId)))
         // total 是同一过滤条件下的真实可见待处理总数，与游标分页位置无关。
         await route.fulfill({
-          json: { status: 200, data: { items, nextCursor: null, total: items.length } },
+          json: { status: 200, data: { items, nextCursor: null, total: items.length,
+            freshnessAt: '2026-10-05T10:00:00Z' } },
         })
         return
       }
@@ -202,19 +234,30 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         return
       }
 
-      if (requestPath.startsWith('/api/issues/') && method === 'GET') {
+      if (requestPath === `/api/issues/${ISSUE_ID}` && method === 'GET') {
         await route.fulfill({
           json: {
             status: 200,
             data: {
               issue: {
-                id: 'issue-42',
-                projectId: 'proj-1',
+                id: ISSUE_ID,
+                projectId: PROJECT_ID,
+                number: '42',
                 title: 'Pending interactions',
                 description: '',
                 state: 'IN_PROGRESS',
                 version: '1',
+                archivedAt: null,
+                createdAt: '2026-10-05T09:58:00Z',
+                updatedAt: '2026-10-05T09:58:00Z',
               },
+              activities: [],
+              nextActivityCursor: null,
+              runs: [],
+              currentRun: null,
+              latestRun: null,
+              stageBudgets: [],
+              agentThreads: [],
             },
           },
         })
@@ -286,11 +329,16 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 }
 
 test.describe('Pending Interactions real browser appearance and decisions', () => {
+  test.afterEach(({ page }) => {
+    expect(targetWritesByPage.get(page)).toEqual([])
+  })
+
   test('approval and questionnaire cards use the current dark tokens with readable text at 1280/390/320', async ({
     page,
   }) => {
     fs.mkdirSync(REPORTS_DIR, { recursive: true })
     await mockPendingApi(page)
+    const statusTagStyles: Array<{ color: string; background: string; warning: string; warningSoft: string }> = []
 
     for (const viewport of [
       { width: 1280, height: 900, name: 'desktop-1280' },
@@ -302,6 +350,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
       const card = page.locator('.interaction-feed-item').first()
       await expect(card).toBeVisible()
+      await expect(card.locator('.interaction-status-tag')).toHaveClass(/approval/)
       await expect(card.locator('.interaction-approval-reason-text')).toContainText('bash requires approval')
       await expect(card.locator('.interaction-raw-pre')).toContainText('npm --prefix frontend run test')
 
@@ -345,8 +394,9 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(cardStyle.reasonColor).toBe(fgMuted)
       expect(cardStyle.preColor).toBe(fg)
       expect(cardStyle.preBackground).toBe(bg)
-      expect(cardStyle.tagColor).toBe(warning)
-      expect(cardStyle.tagBackground).toBe(warningSoft)
+      statusTagStyles.push({
+        color: cardStyle.tagColor, background: cardStyle.tagBackground, warning, warningSoft,
+      })
 
       // 正文对比度必须达到可读水平，这正是截图里失效的部分。
       expect(contrastRatio(cardStyle.preColor, cardStyle.preBackground)).toBeGreaterThanOrEqual(4.5)
@@ -391,6 +441,70 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         fullPage: false,
       })
     }
+    // 在所有宽度完成正文、可操作性和溢出校验后，仍严格验证审批语义色。
+    for (const style of statusTagStyles) {
+      expect(style.color).toBe(style.warning)
+      expect(style.background).toBe(style.warningSoft)
+    }
+  })
+
+  test('environment wait is read-only and refresh never submits a decision', async ({ page }) => {
+    const approvals: RecordedRequest[] = []
+    const submissions: RecordedRequest[] = []
+    await mockPendingApi(page, { approvals, submissions })
+    await page.setViewportSize({ width: 320, height: 800 })
+    await page.goto(HARNESS_URL)
+
+    const card = page.locator('.interaction-feed-item').filter({ has: page.getByRole('status') })
+    await expect(card).toHaveCount(1)
+    await expect(card.getByRole('status')).toContainText('migration-node')
+    await expect(card.getByRole('status')).toContainText('2')
+    await expect(card.locator('.interaction-status-tag')).toHaveClass(/environment_wait/)
+    await expect(card.locator('.interaction-allow-btn, .interaction-deny-btn, .interaction-submit-btn')).toHaveCount(0)
+    await expect(card.getByRole('textbox')).toHaveCount(0)
+    await expect(card.locator('.interaction-source-link')).toContainText('环境执行根')
+    const refresh = page.getByRole('button', { name: '刷新', exact: true })
+    const refreshed = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === '/api/interactions'
+      && response.request().method() === 'GET')
+    await refresh.click()
+    await refreshed
+    await expect(refresh).toBeEnabled()
+    await expect(card.getByRole('status')).toBeVisible()
+    expect(approvals).toEqual([])
+    expect(submissions).toEqual([])
+    await expectNoHorizontalOverflow(page)
+  })
+
+  test('chat source opens its execution root without changing the original approval identity', async ({ page }) => {
+    const approvals: RecordedRequest[] = []
+    const submissions: RecordedRequest[] = []
+    await mockPendingApi(page, { approvals, submissions })
+    await page.goto(HARNESS_URL)
+
+    const source = page.locator('.interaction-feed-item').first().locator('.interaction-source-link')
+    await expect(source).toContainText('迁移审批')
+    await expect(source).toContainText('审批执行根')
+    await source.click()
+    await expect(page).toHaveURL(new RegExp(`/chats/chat-pending\\?thread=${APPROVAL_ROOT_ID}$`))
+    expect(approvals).toEqual([])
+    expect(submissions).toEqual([])
+  })
+
+  test('issue source opens its execution root without submitting questionnaire input', async ({ page }) => {
+    const approvals: RecordedRequest[] = []
+    const submissions: RecordedRequest[] = []
+    await mockPendingApi(page, { approvals, submissions })
+    await page.goto(HARNESS_URL)
+
+    const source = page.locator('.interaction-feed-item').nth(1).locator('.interaction-source-link')
+    await expect(source).toContainText('迁移策略')
+    await expect(source).toContainText('问卷执行根')
+    await expect(source).toContainText('architect')
+    await source.click()
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}\\?issue=${ISSUE_ID}&thread=${QUESTIONNAIRE_ROOT_ID}$`))
+    expect(approvals).toEqual([])
+    expect(submissions).toEqual([])
   })
 
   test('allow is submitted once and never rewrites the target thread', async ({ page }) => {
@@ -437,6 +551,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       '/api/harness/threads/thread-approval/tool-invocations/int-approval/approval',
     )
     expect(approvals[0].body).toMatchObject({ decision: 'DENY', reason: null })
+    expect(String(approvals[0].body.decisionId)).not.toHaveLength(0)
   })
 
   test('retrying an approval reuses one decision id and never rewrites the target thread', async ({
