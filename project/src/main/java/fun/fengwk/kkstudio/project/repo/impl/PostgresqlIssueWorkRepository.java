@@ -5,6 +5,7 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.IssueWork;
 import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
+import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueWorkCompletion;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueWorkMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueWorkDO;
 
@@ -16,6 +17,7 @@ import java.util.UUID;
 public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   private final IssueWorkMapper mapper;
+  private final PostgresqlIssueWorkNotifier notifier;
 
   @Override
   public IssueWork getById(UUID issueId) {
@@ -29,7 +31,11 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public IssueWork requestWork(UUID issueId, Duration delay) {
-    return toModel(mapper.upsertRequest(issueId, delay));
+    IssueWorkDO row = mapper.upsertRequest(issueId, delay);
+    if (row != null) {
+      notifier.notifyIfDue(issueId);
+    }
+    return toModel(row);
   }
 
   @Override
@@ -44,13 +50,22 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion) {
-    return mapper.completeWork(issueId, leaseToken, claimedWakeVersion);
+    IssueWorkCompletion completion = mapper.completeWork(issueId, leaseToken, claimedWakeVersion);
+    if (completion == IssueWorkCompletion.RELEASED) {
+      // released 是真实写入：新 wake 已释放租约并把 due 提前到当前时刻，必须提示后续调度。
+      notifier.notifyIfDue(issueId);
+    }
+    return completion == IssueWorkCompletion.DELETED;
   }
 
   @Override
   public boolean rescheduleWork(
       UUID issueId, String leaseToken, long claimedWakeVersion, Duration delay) {
-    return mapper.rescheduleWork(issueId, leaseToken, claimedWakeVersion, delay) == 1;
+    boolean written = mapper.rescheduleWork(issueId, leaseToken, claimedWakeVersion, delay) == 1;
+    if (written) {
+      notifier.notifyIfDue(issueId);
+    }
+    return written;
   }
 
   @Override
