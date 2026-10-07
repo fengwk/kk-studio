@@ -107,9 +107,11 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(0, node.getTurnCount());
     assertEquals(0, node.getToolCallCount());
     assertNull(node.getOutcome());
+    assertEquals(parent.thread().updatedAt(), node.getUpdateTime());
     assertEquals("CONTINUATION_DUE", nodes.get(1).getStatus());
     assertEquals(1, nodes.get(1).getTurnCount());
     assertNull(nodes.get(1).getOutcome());
+    assertEquals(continuing.thread().updatedAt(), nodes.get(1).getUpdateTime());
   }
 
   @Test

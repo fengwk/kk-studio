@@ -481,6 +481,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 2,
         toolCallCount: 1,
         outcome: null,
+        updateTime: 1774958400,
       },
       {
         threadId: CHILD_THREAD_ID,
@@ -493,6 +494,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 1,
         toolCallCount: 1,
         outcome: null,
+        updateTime: 1774958400,
       },
       {
         threadId: OTHER_CHILD_THREAD_ID,
@@ -505,6 +507,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: 'FAILED',
+        updateTime: 1774958400,
       },
     ])
 

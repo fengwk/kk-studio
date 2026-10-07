@@ -84,6 +84,7 @@ function treeNodes() {
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
+      updateTime: 1774958400,
     },
     {
       threadId: CHILD_ID,
@@ -96,6 +97,7 @@ function treeNodes() {
       turnCount: 2,
       toolCallCount: 1,
       outcome: null,
+      updateTime: 1774958400,
     },
   ]
 }

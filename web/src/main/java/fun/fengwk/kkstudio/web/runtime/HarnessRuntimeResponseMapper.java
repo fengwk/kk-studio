@@ -105,6 +105,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setTurnCount(snapshot.turnCount());
     dto.setToolCallCount(snapshot.toolCallCount());
     dto.setOutcome(snapshot.outcome() == null ? null : snapshot.outcome().name());
+    dto.setUpdateTime(snapshot.thread().updatedAt());
     return dto;
   }
 

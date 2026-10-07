@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -177,6 +178,48 @@ class HarnessRuntimeDtoContractTest {
     JsonInclude include = parentThreadId.getAnnotation(JsonInclude.class);
     assertNotNull(include);
     assertEquals(JsonInclude.Include.ALWAYS, include.value());
+  }
+
+  /**
+   * 测试意图：执行树节点按 HarnessThreadDTO 现有日期契约暴露 updateTime（Instant），且 parentThreadId 与 outcome 必须显式序列化
+   * null，避免根节点和未结束节点在全局省略 null 的 HTTP 序列化下被误判为字段缺失。
+   */
+  @Test
+  void threadTreeNodeDtoFollowsThreadDateContractAndSerializesRequiredNullableFields()
+      throws Exception {
+    assertEquals(
+        HarnessThreadDTO.class.getDeclaredField("updateTime").getType(),
+        HarnessThreadTreeNodeDTO.class.getDeclaredField("updateTime").getType());
+    assertEquals(
+        Instant.class, HarnessThreadTreeNodeDTO.class.getDeclaredField("updateTime").getType());
+
+    assertRequiredNullable(HarnessThreadTreeNodeDTO.class, "parentThreadId");
+    assertRequiredNullable(HarnessThreadTreeNodeDTO.class, "outcome");
+
+    HarnessThreadTreeNodeDTO node = new HarnessThreadTreeNodeDTO();
+    node.setThreadId("00000000-0000-0000-0000-000000000001");
+    node.setParentThreadId(null);
+    node.setName("root-thread");
+    node.setAgentName("default-assistant");
+    HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
+    model.setProviderName("openai");
+    model.setModelName("gpt-5");
+    model.setVariant("default");
+    node.setModel(model);
+    node.setStatus("IDLE");
+    node.setProcessing(false);
+    node.setTurnCount(2);
+    node.setToolCallCount(1);
+    node.setOutcome(null);
+    Instant updateTime = Instant.parse("2026-03-31T12:00:00Z");
+    node.setUpdateTime(updateTime);
+
+    ObjectMapper lenient =
+        new ObjectMapper().disable(MapperFeature.REQUIRE_HANDLERS_FOR_JAVA8_TIMES);
+    String jsonWithInstant = lenient.writeValueAsString(node);
+    assertTrue(jsonWithInstant.contains("\"parentThreadId\":null"), jsonWithInstant);
+    assertTrue(jsonWithInstant.contains("\"outcome\":null"), jsonWithInstant);
+    assertTrue(jsonWithInstant.contains("\"updateTime\":"), jsonWithInstant);
   }
 
   @Test
