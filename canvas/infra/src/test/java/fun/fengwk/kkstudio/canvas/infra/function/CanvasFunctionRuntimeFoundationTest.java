@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -49,6 +50,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSupport;
 
+import java.sql.Connection;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
@@ -184,6 +186,20 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     CanvasFunctionRun replacement = runtimeTransactions.start(canvasId, nodeId, REQUEST_2).run();
     assertNotEquals(first.requestId(), replacement.requestId());
     assertEquals(3L, version(canvasId));
+  }
+
+  /** start 经 bumpVersion 前进 revision，必须在提交时发布 canvas_revision 失效提示；测试 fixture 已删除旧 Schema 触发器。 */
+  @Test
+  void startNotifiesRevisionThroughBumpVersion() throws Exception {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    try (Connection listener = listenOn("canvas_revision")) {
+      runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+      PGNotification[] notifications = pollNotifications(listener, 5_000);
+      assertEquals(1, notifications.length);
+      assertEquals("canvas_revision", notifications[0].getName());
+      assertEquals(canvasId + ":1", notifications[0].getParameter());
+    }
   }
 
   /** 冻结 manifest 必须来自同画布已连线 Resource 的 Blob facts；成功终态原子挂接预分配目标。 */

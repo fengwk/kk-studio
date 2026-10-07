@@ -1,8 +1,12 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
+import org.postgresql.PGConnection;
+import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,6 +33,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.UUID;
 
 /**
@@ -53,6 +58,7 @@ public abstract class PostgresCanvasInfraTestSupport {
     try (Connection connection = newConnection()) {
       resetDatabase(connection);
       migrateDatabase(connection);
+      dropLegacyCanvasNotificationTriggers(connection);
     } catch (SQLException error) {
       throw new ExceptionInInitializerError(error);
     }
@@ -78,6 +84,7 @@ public abstract class PostgresCanvasInfraTestSupport {
     try (Connection connection = newConnection()) {
       resetDatabase(connection);
       migrateDatabase(connection);
+      dropLegacyCanvasNotificationTriggers(connection);
     }
   }
 
@@ -136,6 +143,30 @@ public abstract class PostgresCanvasInfraTestSupport {
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
   }
 
+  /** 建立独立的 autocommit LISTEN 连接，用于断言事务提交时投递的通知。 */
+  protected static Connection listenOn(String channel) throws SQLException {
+    Connection listener = newConnection();
+    listener.setAutoCommit(true);
+    try (Statement statement = listener.createStatement()) {
+      statement.execute("listen " + channel);
+    }
+    return listener;
+  }
+
+  /** 轮询该 LISTEN 连接上已投递的通知；超时返回 null 或空数组。 */
+  protected static PGNotification[] pollNotifications(Connection listener, int timeoutMillis)
+      throws SQLException {
+    return listener.unwrap(PGConnection.class).getNotifications(timeoutMillis);
+  }
+
+  /** 断言当前没有任何已投递通知；用短超时覆盖本不应发生的投递。 */
+  protected static void assertNoNotification(Connection listener) throws SQLException {
+    PGNotification[] notifications = pollNotifications(listener, 300);
+    assertTrue(
+        notifications == null || notifications.length == 0,
+        () -> "unexpected notifications: " + Arrays.toString(notifications));
+  }
+
   private static void resetDatabase(Connection connection) throws SQLException {
     try (Statement statement = connection.createStatement()) {
       statement.execute("drop schema if exists public cascade");
@@ -150,6 +181,22 @@ public abstract class PostgresCanvasInfraTestSupport {
         .validateMigrationNaming(true)
         .load()
         .migrate();
+  }
+
+  /**
+   * 删除 V1 baseline 中的 Canvas 通知触发器。
+   *
+   * <p>通知迁移由 Java 生产写入口负责，触发器会在 N6 从 Schema 移除。测试fixture 必须在应用 baseline 后显式 drop，否则本模块的
+   * 通知断言会由旧触发器而非 Java 写路径满足，无法证明迁移正确。
+   */
+  private static void dropLegacyCanvasNotificationTriggers(Connection connection)
+      throws SQLException {
+    try (Statement statement = connection.createStatement()) {
+      statement.execute(
+          "drop trigger if exists trg_canvas_document_revision_notify on canvas_document");
+      statement.execute(
+          "drop trigger if exists trg_canvas_function_work_notify on canvas_function_run");
+    }
   }
 
   /** 节点夹具：保持节点行、资源行与领域投影一致，便于测试直接表达目标模型。 */
