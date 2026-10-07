@@ -57,6 +57,16 @@
 
 .resource-card-head-text {
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* 标题行右侧状态标记：版本、状态 pill 等由调用方提供，卡片只负责右对齐与不压缩。 */
+.resource-card-badge {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
 }
 
 .resource-card-title {
@@ -101,11 +111,12 @@
   min-width: 0;
 }
 
+/* 标签列固定 72px：长标签（中英混排、多词英文）必须换行而不是溢出到值列。 */
 .resource-card-meta-label {
   color: var(--fg-dim);
   font-size: 12px;
   line-height: 1.5;
-  white-space: nowrap;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 

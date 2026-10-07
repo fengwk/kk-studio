@@ -21,6 +21,25 @@ describe('ResourceCard', () => {
     expect(screen.getByTestId('card-icon')).toBeInTheDocument()
   })
 
+  it('renders a head badge on the right without disturbing title/subtitle semantics', () => {
+    render(
+      <ResourceCard
+        icon={<Bot />}
+        title="resource"
+        subtitle="desc"
+        badge={<span data-testid="card-badge">Ready</span>}
+      />,
+    )
+
+    const badge = screen.getByTestId('card-badge')
+    expect(badge).toBeInTheDocument()
+    // 标记属于标题行的独立槽位，不与标题文本混在一起。
+    expect(badge.closest('.resource-card-head')).not.toBeNull()
+    expect(badge.closest('.resource-card-badge')).not.toBeNull()
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('resource')
+    expect(document.querySelector('.resource-card')?.children[0]).toHaveClass('resource-card-head')
+  })
+
   it('renders metadata rows independently of the action slot', () => {
     const { rerender } = render(
       <ResourceCard

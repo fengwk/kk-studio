@@ -2,6 +2,7 @@ import { useId, type ReactNode } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 
 /** 配置生效时机：下次调用、新建对话或进程重启。 */
 export type ApplyTiming = 'nextInvocation' | 'nextChat' | 'restart'
@@ -126,7 +127,7 @@ export function SettingsTextField({
         {label}
       </label>
       {text ? <span className="settings-field-description">{text}</span> : null}
-      <input
+      <TextInput
         id={fieldId}
         className="settings-input"
         type={type}
