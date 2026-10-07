@@ -31,6 +31,12 @@ export function useThreadPanelViewState(
   )
   const [initialDebugScrollTop, setInitialDebugScrollTop] = useState<number | null>(null)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  // 空历史等待异步初选；显式选择/关闭后不再随后台刷新自动选中。
+  const initialSelectionPendingRef = useRef(true)
+  const selectEvent = useCallback((eventId: string | null) => {
+    initialSelectionPendingRef.current = false
+    setSelectedEventId(eventId)
+  }, [])
   const debugBodyRef = useRef<HTMLDivElement>(null)
 
   const switchMode = useCallback(function switchMode(next: ThreadPanelMainMode) {
@@ -47,9 +53,6 @@ export function useThreadPanelViewState(
     modeRef.current = next
     setInitialConversationScrollTop(next === 'conversation' ? positions.conversation : null)
     setInitialDebugScrollTop(next === 'debug' ? positions.debug : null)
-    if (next === 'conversation') {
-      setSelectedEventId(null)
-    }
     setModeState(next)
   }, [transcriptBodyRef])
 
@@ -63,6 +66,7 @@ export function useThreadPanelViewState(
     setInitialConversationScrollTop(null)
     setInitialDebugScrollTop(null)
     setSelectedEventId(null)
+    initialSelectionPendingRef.current = true
     modeRef.current = 'conversation'
     setModeState('conversation')
   }, [viewKey])
@@ -71,13 +75,23 @@ export function useThreadPanelViewState(
     setSelectedEventId((current) =>
       current != null && !events.some((event) => event.id === current) ? null : current,
     )
-  }, [events])
+    if (modeRef.current !== 'debug' || !initialSelectionPendingRef.current) {
+      return
+    }
+    const history = events.filter((event) => event.source === 'entry' && event.entryId != null)
+    const initial =
+      [...history].reverse().find((event) => event.historicalPreviewEligible) ?? history.at(-1)
+    if (initial) {
+      initialSelectionPendingRef.current = false
+      setSelectedEventId(initial.id)
+    }
+  }, [events, mode, viewKey])
 
   return {
     mode,
     switchMode,
     selectedEventId,
-    selectEvent: setSelectedEventId,
+    selectEvent,
     eventsBodyRef: debugBodyRef,
     initialConversationScrollTop,
     initialEventsScrollTop: initialDebugScrollTop,

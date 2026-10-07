@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Check, Copy, Eye, LoaderCircle } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { AlertCircle, Eye, LoaderCircle } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
   ThreadModelRequestDebugTool,
 } from '@/features/ai/runtime/thread-timeline-types'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import { useI18n } from '@/shared/i18n'
+import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 
 function envBadge(support: 'NONE' | 'OPTIONAL' | 'REQUIRED'): string {
   switch (support) {
@@ -65,8 +66,6 @@ function formatCacheRetention(
   }
 }
 
-type CopyStatus = 'idle' | 'copying' | 'copied' | 'error'
-
 export function ThreadModelRequestDebug({
   debug,
   onSelectInspector,
@@ -85,24 +84,7 @@ export function ThreadModelRequestDebug({
   previewError?: string | null
 }) {
   const { t } = useI18n()
-  const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle')
-  const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isMountedRef = useRef(true)
-
-  const clearCopyTimeout = () => {
-    if (copyResetTimeoutRef.current !== null) {
-      clearTimeout(copyResetTimeoutRef.current)
-      copyResetTimeoutRef.current = null
-    }
-  }
-
-  useEffect(() => {
-    isMountedRef.current = true
-    return () => {
-      isMountedRef.current = false
-      clearCopyTimeout()
-    }
-  }, [])
+  const [copyFailed, setCopyFailed] = useState(false)
 
   const { sentTools, filteredTools } = useMemo(() => {
     const sent: ThreadModelRequestDebugTool[] = []
@@ -128,49 +110,22 @@ export function ThreadModelRequestDebug({
     return retentionText
   }, [debug.cacheControl, t])
 
-  async function handleCopyPrompt() {
-    if (!debug.systemInstruction || copyStatus === 'copying') {
-      return
-    }
-    clearCopyTimeout()
-    setCopyStatus('copying')
-    try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error('Clipboard API unavailable')
-      }
-      await navigator.clipboard.writeText(debug.systemInstruction)
-      if (!isMountedRef.current) {
-        return
-      }
-      setCopyStatus('copied')
-      copyResetTimeoutRef.current = setTimeout(() => {
-        if (isMountedRef.current) {
-          setCopyStatus('idle')
-        }
-      }, 2000)
-    } catch {
-      if (!isMountedRef.current) {
-        return
-      }
-      setCopyStatus('error')
-      copyResetTimeoutRef.current = setTimeout(() => {
-        if (isMountedRef.current) {
-          setCopyStatus('idle')
-        }
-      }, 3000)
-    }
-  }
-
   const previewTitle = t('ai.runtime.debug.previewTitle')
+  const planningTitle = t('ai.runtime.debug.currentPlanningTitle')
 
   return (
-    <section className="thread-system-prompt thread-model-request-debug" aria-label={previewTitle}>
-      {/* 头部条：下一次请求预览 与操作按钮 */}
+    <section className="thread-system-prompt thread-model-request-debug" aria-label={planningTitle}>
       <header className="thread-debug-preview-header">
-        <div className="thread-debug-preview-title-group">
+        <h3 className="thread-debug-preview-title">{planningTitle}</h3>
+      </header>
+      <div className="thread-debug-section">
+        <div className="thread-debug-section-header">
+          <span>{t('ai.runtime.debug.inspectActions')}</span>
+        </div>
+        <div className="thread-debug-preview-actions">
           <button
             type="button"
-            className="thread-debug-preview-title-btn"
+            className="ghost-inline-btn thread-debug-preview-action"
             disabled={previewDisabled || previewLoading || onPreview == null}
             aria-label={
               previewLoading
@@ -191,21 +146,8 @@ export function ThreadModelRequestDebug({
             {previewLoading ? (
               <LoaderCircle size={12} className="preview-icon spin" aria-hidden="true" />
             ) : null}
-            <span className="thread-debug-preview-title">
-              {previewTitle}
-            </span>
+            {previewTitle}
           </button>
-          {debug.environmentName ? (
-            <span className="status-pill is-ready">
-              {t('ai.runtime.debug.envPrefix')}{debug.environmentName}
-            </span>
-          ) : (
-            <span className="status-pill is-neutral">
-              {t('ai.runtime.debug.noEnvironmentSelected')}
-            </span>
-          )}
-        </div>
-        <div className="thread-debug-preview-actions">
           {debug.frozenInvocation ? (
             <button
               type="button"
@@ -219,7 +161,7 @@ export function ThreadModelRequestDebug({
             </button>
           ) : null}
         </div>
-      </header>
+      </div>
 
       {/* PREVIEW ERROR */}
       {previewError ? (
@@ -240,23 +182,19 @@ export function ThreadModelRequestDebug({
       <div className="thread-debug-section">
         <div className="thread-debug-section-header">
           <span>{t('ai.runtime.debug.systemPromptTitle')}</span>
-          <div className="thread-debug-section-actions">
-            {copyStatus === 'error' ? (
+          <div className="thread-debug-section-actions" onClickCapture={() => setCopyFailed(false)}>
+            {copyFailed ? (
               <span role="alert" className="thread-debug-copy-feedback is-error">
                 {t('ai.runtime.debug.copyFailed')}
               </span>
             ) : null}
-            <button
-              type="button"
-              className="ghost-inline-btn"
-              title={t('ai.runtime.debug.copyPromptTitle')}
-              aria-label={t('ai.runtime.debug.copyPromptTitle')}
-              onClick={handleCopyPrompt}
-              disabled={!debug.systemInstruction || copyStatus === 'copying'}
-            >
-              {copyStatus === 'copied' ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
-              {copyStatus === 'copied' ? t('ai.runtime.debug.copied') : t('ai.runtime.debug.copyPrompt')}
-            </button>
+            <CopyButton
+              source={debug.systemInstruction || ''}
+              className="thread-debug-prompt-copy"
+              label={t('ai.runtime.debug.copyPromptTitle')}
+              disabled={!debug.systemInstruction}
+              onError={() => setCopyFailed(true)}
+            />
           </div>
         </div>
         <pre className="thread-system-prompt-body" tabIndex={0}>
@@ -379,6 +317,14 @@ export function ThreadModelRequestDebug({
           </button>
         </div>
       </div>
+      <footer className="thread-debug-section thread-debug-environment">
+        <div className="thread-debug-section-header">
+          <span>{t('ai.runtime.debug.plannedToolEnvironment')}</span>
+        </div>
+        <span className="status-pill is-neutral">
+          {debug.environmentName || t('ai.runtime.debug.noEnvironmentSelected')}
+        </span>
+      </footer>
     </section>
   )
 }

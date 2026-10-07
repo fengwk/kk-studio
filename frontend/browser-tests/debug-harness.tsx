@@ -1,9 +1,10 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ThreadEventView } from '@/features/ai/runtime/thread-panel/ThreadEventView'
+import { useThreadPanelViewState } from '@/features/ai/runtime/thread-panel/useThreadPanelViewState'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
@@ -31,7 +32,7 @@ Additional section instructions:
 - Provide comprehensive diff reviews before final delivery.
 - Maintain responsive container query adaptation across all viewports.
 - Keep individual scroll owners isolated without nested overflows.
-- Render json payloads with word-break and wrapped formatting.
+- Render complete JSON payloads with contained horizontal scrolling.
 - Guard against regression in conversation and debug panel switches.
 
 Extended Operational Rules:
@@ -149,10 +150,11 @@ function createEvents(): ThreadEventRecord[] {
     entryId: `entry-${i + 1}`,
     turnStartEntryId: null,
     turnNumber: Math.floor(i / 4) + 1,
-    kind: 'ENTRY' as const,
+    kind: (['TOOL_CALL', 'ASSISTANT_MESSAGE', 'TOOL_RESULT', 'TURN_START'] as const)[i % 4]!,
+    historicalPreviewEligible: i % 4 === 1,
     createdAt: new Date(Date.now() - (48 - i) * 1000).toISOString(),
     status: (i === 2 ? 'running' : i === 7 ? 'failed' : 'completed') as ThreadEventRecord['status'],
-    title: i % 4 === 0 ? `TOOL_CALL · Step ${i + 1}` : i % 4 === 1 ? `MESSAGE · Turn ${i + 1}` : i % 4 === 2 ? `TOOL_RESULT · Step ${i + 1}` : `TURN_START · Turn ${i + 1}`,
+    title: i % 4 === 0 ? `TOOL_CALL · Step ${i + 1}` : i % 4 === 1 ? `ASSISTANT · Turn ${i + 1}` : i % 4 === 2 ? `TOOL_RESULT · Step ${i + 1}` : `TURN_START · Turn ${i + 1}`,
     summary: `Detailed summary for event step ${i + 1} processing runtime prompt context and status update verification with token usage details.`,
     details: [
       { label: 'Entry ID', value: `id-${i + 1}-bcc4af8f-8515-4471-ba56` },
@@ -194,9 +196,17 @@ function SinglePaneHarness({
   paneId?: string
   style?: React.CSSProperties
 }) {
-  const [events] = useState<ThreadEventRecord[]>(createEvents)
+  const [events, setEvents] = useState<ThreadEventRecord[]>(createEvents)
   const [debug] = useState<ThreadModelRequestDebugData>(createDebugData)
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const view = useThreadPanelViewState(paneId, transcriptRef, events)
+  const exerciseViewState = new URLSearchParams(window.location.search).get('viewState') === '1'
+  const { switchMode } = view
+  useEffect(() => {
+    if (exerciseViewState) {
+      switchMode('debug')
+    }
+  }, [exerciseViewState, switchMode])
   const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
   const [composerText, setComposerText] = useState('')
 
@@ -228,17 +238,28 @@ function SinglePaneHarness({
             <h2 className="agent-pane-thread-title" style={{ margin: 0, fontSize: '14px' }}>
               Thread ({paneId})
             </h2>
+            {exerciseViewState ? (
+              <>
+                <button onClick={() => switchMode('conversation')}>Conversation</button>
+                <button onClick={() => switchMode('debug')}>Debug</button>
+                <button onClick={() => setEvents((current) => [...current])}>Refresh history</button>
+              </>
+            ) : null}
           </header>
 
           {/* 核心生产 React 组件：ThreadEventView */}
-          <ThreadEventView
-            events={events}
-            selectedEventId={selectedEventId}
-            onSelectedEventIdChange={setSelectedEventId}
-            debug={debug}
-            debugSelection={debugSelection}
-            onSelectInspector={setDebugSelection}
-          />
+          {(!exerciseViewState || view.mode === 'debug') ? (
+            <ThreadEventView
+              events={events}
+              selectedEventId={view.selectedEventId}
+              onSelectedEventIdChange={view.selectEvent}
+              bodyRef={view.eventsBodyRef}
+              initialScrollTop={view.initialEventsScrollTop}
+              debug={debug}
+              debugSelection={debugSelection}
+              onSelectInspector={setDebugSelection}
+            />
+          ) : <div ref={transcriptRef}>Conversation fixture</div>}
 
           {/* 底部 Composer */}
           <div

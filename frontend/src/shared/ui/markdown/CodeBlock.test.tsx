@@ -126,6 +126,56 @@ describe('CodeBlock copy behavior', () => {
     expect(screen.getByText('answer')).toHaveClass('language-ts')
     expect(screen.getByText('answer').parentElement?.tagName).toBe('PRE')
   })
+
+  it('honors disabled and locks pending copies without showing premature success', async () => {
+    let resolve!: () => void
+    const writeText = vi.fn(() => new Promise<void>((done) => { resolve = done }))
+    setClipboard({ writeText })
+    const view = render(<CopyButton source="pending" disabled />)
+    fireEvent.click(screen.getByRole('button'))
+    expect(writeText).not.toHaveBeenCalled()
+    view.rerender(<CopyButton source="pending" />)
+    fireEvent.click(screen.getByRole('button'))
+    fireEvent.click(screen.getByRole('button'))
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '复制' })).toBeDisabled()
+    await act(async () => resolve())
+    expect(screen.getByRole('button', { name: '已复制' })).toBeEnabled()
+  })
+
+  it('reports complete failure, clears stale success on retry and leaves no fallback DOM', async () => {
+    const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(new Error('denied'))
+    const onError = vi.fn()
+    setClipboard({ writeText })
+    setExecCommand(vi.fn().mockReturnValue(false))
+    render(<CopyButton source="retry" onError={onError} />)
+    fireEvent.click(screen.getByRole('button'))
+    await flushPromises()
+    expect(screen.getByRole('button')).toHaveAccessibleName('已复制')
+    fireEvent.click(screen.getByRole('button'))
+    expect(screen.getByRole('button')).toHaveAccessibleName('复制')
+    await flushPromises()
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button')).toHaveAccessibleName('复制')
+    expect(document.body.querySelector('textarea')).toBeNull()
+  })
+
+  it.each([true, false])('does not notify or schedule timers after pending copy unmount (success=%s)', async (success) => {
+    vi.useFakeTimers()
+    let complete!: () => void
+    setClipboard({ writeText: () => new Promise<void>((resolve, reject) => {
+      complete = success ? resolve : () => reject(new Error('denied'))
+    }) })
+    setExecCommand(vi.fn().mockReturnValue(false))
+    const onError = vi.fn()
+    const view = render(<CopyButton source="unmounted" onError={onError} />)
+    fireEvent.click(screen.getByRole('button'))
+    view.unmount()
+    await act(async () => complete())
+    expect(onError).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    expect(document.body.querySelector('textarea')).toBeNull()
+  })
 })
 
 function setClipboard(value: { writeText: (text: string) => Promise<void> } | undefined) {
