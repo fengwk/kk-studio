@@ -20,12 +20,15 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
  * Project Snapshot 权威聚合器。
  *
- * <p>读取 Project、未归档 Issues 与每 Issue 的当前/最近 Run 概要（含解析自稳定 Thread 的 Agent 名称）。
+ * <p>读取 Project、未归档 Issues 与每 Issue 的当前/最近 Run 概要（含解析自稳定 Thread 的 Agent 名称）。 所有未归档及归档 Issue
+ * 仅共同贡献状态引用集合，归档 Issue 的内容与 Run/Thread 不进入快照。
  *
  * <p>整个组装在同一个只读 {@code REPEATABLE_READ} 事务内完成（声明式，由 Spring 代理生效）：否则多个独立查询之间可能有其它事务提交， 从而拼出旧 Project
  * + 新 Issue/Run 的撕裂响应。
@@ -64,12 +67,12 @@ public class ProjectSnapshotAssembler {
     }
 
     List<Issue> issues = issueService.listIssues(projectId, false);
+    Set<String> referencedStateCodes = new TreeSet<>();
+    collectReferencedStates(projectId, issues, referencedStateCodes);
+    collectReferencedStates(
+        projectId, issueService.listIssues(projectId, true), referencedStateCodes);
     List<ProjectIssueSnapshotDTO> issueSnapshots = new ArrayList<>(issues.size());
     for (Issue issue : issues) {
-      if (!issue.getProjectId().equals(projectId)) {
-        throw new IllegalStateException("Foreign issue returned for project snapshot");
-      }
-
       List<IssueRun> runs = issueRunService.listRuns(issue.getId());
       for (IssueRun run : runs) {
         if (!run.getIssueId().equals(issue.getId())) {
@@ -110,7 +113,21 @@ public class ProjectSnapshotAssembler {
     return ProjectSnapshotDTO.builder()
         .project(mapper.toDto(project))
         .issues(sortByNumber(issueSnapshots))
+        .referencedStateCodes(List.copyOf(referencedStateCodes))
         .build();
+  }
+
+  private void collectReferencedStates(
+      UUID projectId, List<Issue> issues, Set<String> referencedStateCodes) {
+    for (Issue issue : issues) {
+      if (!issue.getProjectId().equals(projectId)) {
+        throw new IllegalStateException("Foreign issue returned for project snapshot");
+      }
+      referencedStateCodes.add(issue.getState());
+      if (issue.getBlockedFromState() != null) {
+        referencedStateCodes.add(issue.getBlockedFromState());
+      }
+    }
   }
 
   private List<ProjectIssueSnapshotDTO> sortByNumber(List<ProjectIssueSnapshotDTO> snapshots) {
