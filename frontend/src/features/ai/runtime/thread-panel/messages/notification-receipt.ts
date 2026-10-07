@@ -10,6 +10,8 @@ export interface SubagentReceipt {
   threadId: string | null
   agent: string | null
   state: SubagentReceiptState
+  /** 本次委派的原始任务指令；默认折叠时只用它做前端短预览，不请求模型生成摘要。 */
+  task: string | null
   result: string | null
   error: string | null
   partial: string | null
@@ -73,6 +75,7 @@ export function parseSubagentReceipt(
       threadId,
       agent: root.getAttribute('agent'),
       state: state as SubagentReceiptState,
+      task: sections.get('task') ?? null,
       result: sections.get('result') ?? null,
       error: sections.get('error') ?? null,
       partial: sections.get('partial_result') ?? null,
