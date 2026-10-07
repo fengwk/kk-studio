@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
@@ -27,6 +29,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
   @Autowired private SystemSettingsRepository systemSettingsRepository;
   @Autowired private SystemSettingsMapper systemSettingsMapper;
   @Autowired private SystemSettingsCodec systemSettingsCodec;
+  @Autowired private PlatformTransactionManager transactionManager;
 
   @Test
   public void baselineRowDecodesToDefaultsWithVersionZero() {
@@ -55,15 +58,20 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
   @Test
   public void casUpdatePersistsCanonicalConfigAndBumpsVersion() {
     SystemSettings modified = withYolo(true);
+    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
-    assertTrue(systemSettingsRepository.update(modified, 0L));
+    Boolean firstCas = transaction.execute(status -> systemSettingsRepository.update(modified, 0L));
+    assertTrue(firstCas);
     SystemSettingsRepository.SystemSettingsRecord updated = systemSettingsRepository.get();
     assertEquals(1L, updated.version());
     assertEquals(modified, updated.settings());
     assertTrue(updated.settings().tool().defaultYolo(), "yolo flag must be persisted");
 
-    assertFalse(systemSettingsRepository.update(modified, 0L), "stale version must lose CAS");
-    assertTrue(systemSettingsRepository.update(modified, 1L));
+    Boolean staleCas = transaction.execute(status -> systemSettingsRepository.update(modified, 0L));
+    assertFalse(staleCas, "stale version must lose CAS");
+    Boolean secondCas =
+        transaction.execute(status -> systemSettingsRepository.update(modified, 1L));
+    assertTrue(secondCas);
     assertEquals(2L, systemSettingsRepository.get().version());
   }
 
@@ -76,20 +84,21 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);
     ExecutorService executor = Executors.newFixedThreadPool(2);
+    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
     try {
       Future<Boolean> firstResult =
           executor.submit(
               () -> {
                 ready.countDown();
                 start.await();
-                return systemSettingsRepository.update(first, 0L);
+                return transaction.execute(status -> systemSettingsRepository.update(first, 0L));
               });
       Future<Boolean> secondResult =
           executor.submit(
               () -> {
                 ready.countDown();
                 start.await();
-                return systemSettingsRepository.update(second, 0L);
+                return transaction.execute(status -> systemSettingsRepository.update(second, 0L));
               });
       assertTrue(ready.await(5, TimeUnit.SECONDS));
       start.countDown();
