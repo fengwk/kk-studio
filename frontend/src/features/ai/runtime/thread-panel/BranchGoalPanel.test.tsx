@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { BranchGoalPanel, type BranchGoalSetting } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
 import type { BranchGoalProgressResult } from '@/features/ai/runtime/goal-progress'
 
@@ -42,7 +43,7 @@ describe('BranchGoalPanel', () => {
     expect(onSubmitGoal).toHaveBeenCalledWith('Write documentation')
   })
 
-  it('renders current goal text, ID badge, and allows clearing the goal', () => {
+  it('renders current goal text without exposing the raw goal id, and allows clearing', () => {
     const onSubmitGoal = vi.fn()
     const onClearGoal = vi.fn()
     const onClose = vi.fn()
@@ -58,7 +59,9 @@ describe('BranchGoalPanel', () => {
     )
 
     expect(screen.getByText(mockGoal.text)).toBeInTheDocument()
-    expect(screen.getByText('ID: goal-uui')).toBeInTheDocument()
+    // 轻量面板不再把原始 goal ID 当作主信息展示。
+    expect(screen.queryByText(/ID:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(mockGoal.id)).not.toBeInTheDocument()
 
     const clearBtn = screen.getByRole('button', { name: /清除目标/ })
     expect(clearBtn).toBeInTheDocument()
@@ -168,5 +171,108 @@ describe('BranchGoalPanel', () => {
     expect(screen.getByText(/只读模式/)).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /清除目标/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('BranchGoalPanel Escape close policy (U3)', () => {
+  it('closes from inside the goal textarea without submitting or clearing', async () => {
+    const user = userEvent.setup()
+    const onSubmitGoal = vi.fn()
+    const onClearGoal = vi.fn()
+    const onClose = vi.fn()
+
+    render(
+      <BranchGoalPanel
+        goal={mockGoal}
+        progress={emptyProgress}
+        onSubmitGoal={onSubmitGoal}
+        onClearGoal={onClearGoal}
+        onClose={onClose}
+      />,
+    )
+
+    const textarea = screen.getByRole('textbox')
+    // 打开即聚焦输入框，使面板自身能捕获 Esc。
+    expect(document.activeElement).toBe(textarea)
+    await user.type(textarea, 'draft in progress')
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    // Esc 不等于 Stop：不提交、不清除 Goal。
+    expect(onSubmitGoal).not.toHaveBeenCalled()
+    expect(onClearGoal).not.toHaveBeenCalled()
+  })
+
+  it('closes from a focused action button', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+
+    render(
+      <BranchGoalPanel
+        goal={mockGoal}
+        progress={emptyProgress}
+        onSubmitGoal={vi.fn()}
+        onClearGoal={vi.fn()}
+        onClose={onClose}
+      />,
+    )
+
+    const clearBtn = screen.getByRole('button', { name: /清除目标/ })
+    clearBtn.focus()
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes from the read-only panel itself when there is no focusable input', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+
+    render(
+      <BranchGoalPanel
+        goal={mockGoal}
+        progress={emptyProgress}
+        readOnly
+        onSubmitGoal={vi.fn()}
+        onClearGoal={vi.fn()}
+        onClose={onClose}
+      />,
+    )
+
+    const region = screen.getByRole('region', { name: 'thread 目标' })
+    expect(document.activeElement).toBe(region)
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores IME composition and already-consumed Escape, then closes on a plain Escape', () => {
+    const onClose = vi.fn()
+
+    render(
+      <BranchGoalPanel
+        goal={null}
+        progress={emptyProgress}
+        onSubmitGoal={vi.fn()}
+        onClearGoal={vi.fn()}
+        onClose={onClose}
+      />,
+    )
+
+    const region = screen.getByRole('region', { name: 'thread 目标' })
+
+    // IME 组合中（keyCode 229 / isComposing）不得关闭面板。
+    fireEvent.keyDown(region, { key: 'Escape', keyCode: 229 })
+    fireEvent.keyDown(region, { key: 'Escape', isComposing: true })
+    expect(onClose).not.toHaveBeenCalled()
+
+    // 已在更内层被消费（defaultPrevented）的 Escape 不得重复关闭父面板。
+    const consumed = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    consumed.preventDefault()
+    fireEvent(region, consumed)
+    expect(onClose).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(region, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

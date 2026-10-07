@@ -14,7 +14,7 @@ export type ThreadCommandId =
   | 'agent'
   | 'yolo'
   | 'models'
-  | 'tree'
+  | 'history'
   | 'stop'
   | 'new'
   | 'upload'
@@ -46,7 +46,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('agent', ['set', 'switch', 'definition']),
   command('yolo', ['auto', 'approve', 'tool']),
   command('models', ['model', 'variant', 'provider', 'switch']),
-  command('tree', ['history', 'branch', 'entry']),
+  command('history', ['history', 'branch', 'entry']),
   command('stop', ['cancel', 'interrupt', 'thread']),
   command('new', ['blank', 'fresh', 'create', 'session']),
   command('upload', ['attach', 'file', 'image', 'video', 'audio', 'paste']),
@@ -76,7 +76,7 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'agent',
     'yolo',
     'models',
-    'tree',
+    'history',
     'new',
     'upload',
     'debug',
@@ -130,7 +130,7 @@ export function threadCommandsForTarget(
     const readOnlyDisabled =
       Boolean(options.readOnly)
       && item.id !== 'shortcuts'
-      && item.id !== 'tree'
+      && item.id !== 'history'
       && item.id !== 'debug'
 
     const newDisabled =
@@ -144,7 +144,7 @@ export function threadCommandsForTarget(
 
     const branchingDisabled =
       options.allowBranching === false
-      && (item.id === 'thread' || item.id === 'tree' || item.id === 'new')
+      && (item.id === 'thread' || item.id === 'history' || item.id === 'new')
 
     const disabled = !targetEnabled || compactDisabled || readOnlyDisabled || newDisabled || agentDisabled || branchingDisabled
     let disabledReason: string | undefined

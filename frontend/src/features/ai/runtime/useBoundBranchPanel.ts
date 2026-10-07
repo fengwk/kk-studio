@@ -83,7 +83,7 @@ function compareDecimalVersions(a: string, b: string): number {
  * 全部为 null（调用方的 composer disabled 门控生效），旧 Thread 的 draft 绝不
  * 会被发送到新 Thread。
  *
- * 场景差异（命令、交互面板、通知、focus、thread/tree/new/rebind 门控）只保留
+ * 场景差异（命令、交互面板、通知、focus、thread/history/new/rebind 门控）只保留
  * 在调用组件中。
  */
 export function useBoundBranchPanel({
