@@ -52,6 +52,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -704,6 +705,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         thread.version(),
         PostgresqlHarnessRows.timestamp(thread.createdAt()),
         PostgresqlHarnessRows.timestamp(thread.updatedAt()));
+    // 原 harness_thread_version / harness_thread_tree 触发器语义：插入即视为 version 变化，同一位置发布两条失效信号。
+    notifyThreadVersion(thread.id(), thread.version());
+    notifyExecutionTree(executionRootOfThread(thread.id()));
     if (joinedChild) {
       // A newly created child has no pre-existing row to lock in UUID order. Its parent is
       // already locked inside the same tree transaction; no other tree writer can race it.
@@ -832,6 +836,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             PostgresqlHarnessRows.timestamp(thread.updatedAt()),
             thread.id());
     requireSingleUpdate(updated, "thread", thread.id());
+    if (stored.version() != thread.version()) {
+      // 仅以写前事实（stored）与成功写后事实（thread）比较：同 version 写入（exact replay）保持静默。
+      notifyThreadVersion(thread.id(), thread.version());
+      notifyExecutionTree(executionRootOfThread(thread.id()));
+    }
   }
 
   @Override
@@ -1787,6 +1796,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     requireCanLockTools(copied);
     for (ToolInvocation invocation : copied) {
+      // 原 harness_tool_interaction_notify 触发器的 INSERT 分支仅在等待态触发；本原语按上方不变量只创建
+      // READY/FAILED，因此插入永不产生人工交互失效，无需在此发布提示。
       update(
           """
           insert into harness_tool_invocation (
@@ -1822,6 +1833,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     List<ToolInvocation> copied =
         List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
     Set<UUID> ids = new HashSet<>();
+    Set<UUID> interactionIds = new LinkedHashSet<>();
     for (ToolInvocation invocation : copied) {
       PostgresqlHarnessRows.requireMillisecondPrecision(invocation.createdAt());
       PostgresqlHarnessRows.requireMillisecondPrecision(invocation.updatedAt());
@@ -1836,6 +1848,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                       new IllegalArgumentException(
                           "tool invocation " + invocation.id() + " does not exist"));
       ToolInvocation.validateTransition(stored, invocation);
+      // 原 harness_tool_interaction_notify 触发器的 UPDATE 分支：写前或写后任一状态为等待态即失效。
+      if (isWaitingInteraction(stored.status()) || isWaitingInteraction(invocation.status())) {
+        interactionIds.add(invocation.id());
+      }
     }
     for (ToolInvocation invocation : copied) {
       int updated =
@@ -1862,6 +1878,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               encodeToolInputReceipt(invocation),
               invocation.id());
       requireSingleUpdate(updated, "tool invocation", invocation.id());
+    }
+    for (UUID interactionId : interactionIds) {
+      notifyToolInteraction(executionRootOfToolInvocation(interactionId));
     }
   }
 
@@ -1942,7 +1961,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       return false;
     }
     requireWorkOwnerLocked(target);
-    if (lockWork(target).isEmpty()) {
+    Optional<Work> locked = lockWork(target);
+    if (locked.isEmpty()) {
       return false;
     }
     int deleted =
@@ -1951,6 +1971,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             target.type().name(),
             target.id());
     requireSingleUpdate(deleted, "work", target.id());
+    // Work 行删除同样改变「待领取环境等待」集合；属主实体仍在该事务内（调用方保证删除顺序），可解析真实执行根。
+    notifyEnvironmentWorkChanged(locked.get());
     return true;
   }
 
@@ -2087,6 +2109,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       }
     }
 
+    // 删除前沿不可变祖先链取得受影响执行根：行一旦删除，parent 链已不存在，无法再解析根身份。
+    // 原 Schema 没有 Thread 删除触发器，这里按 plan N1 在原 tree channel 补同事务定点失效；绝不合成不存在的 Thread version。
+    List<UUID> deletedThreadRoots = new ArrayList<>();
+    for (UUID threadId : copied) {
+      UUID root = executionRootOfThread(threadId);
+      if (!deletedThreadRoots.contains(root)) {
+        deletedThreadRoots.add(root);
+      }
+    }
+
     for (WorkTarget target : lockedWorkTargets) {
       if (!deleteWork(target)) {
         throw new IllegalStateException(
@@ -2117,6 +2149,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (deletedThreads != copied.size()) {
       throw new IllegalStateException(
           "expected to delete " + copied.size() + " threads but deleted " + deletedThreads);
+    }
+    for (UUID root : deletedThreadRoots) {
+      notifyExecutionTree(root);
     }
     return copied.size();
   }
@@ -2170,12 +2205,19 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             "duplicate tool invocation id " + copied.get(i) + " must not be deleted twice");
       }
     }
+    // 删除等待调用前先沿不可变祖先链取得真实执行根：事实一旦删除便无法再解析根身份（不做删除后回寻）。
+    List<UUID> interactionRoots = new ArrayList<>();
     for (UUID toolInvocationId : copied) {
-      if (findToolInvocation(toolInvocationId).isEmpty()) {
-        throw new IllegalArgumentException(
-            "tool invocation " + toolInvocationId + " does not exist");
-      }
+      ToolInvocation stored =
+          findToolInvocation(toolInvocationId)
+              .orElseThrow(
+                  () ->
+                      new IllegalArgumentException(
+                          "tool invocation " + toolInvocationId + " does not exist"));
       requireLocked(LockKey.tool(toolInvocationId));
+      if (isWaitingInteraction(stored.status())) {
+        interactionRoots.add(executionRootOfToolInvocation(toolInvocationId));
+      }
     }
     if (copied.isEmpty()) {
       return 0;
@@ -2183,6 +2225,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     for (UUID toolInvocationId : copied) {
       int deleted = update("delete from harness_tool_invocation where id = ?", toolInvocationId);
       requireSingleUpdate(deleted, "tool invocation", toolInvocationId);
+    }
+    for (UUID interactionRoot : interactionRoots) {
+      notifyToolInteraction(interactionRoot);
     }
     return copied.size();
   }
@@ -2250,6 +2295,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                         "conflicting requiredEnvironmentId for work target " + target));
     recordWorkLock(work.target());
     notifyWorkAvailable();
+    // 新建/重置冻结了环境亲和性的 TOOL Work：新增或提前了「待领取环境等待」事实，需失效待处理读模型。
+    notifyEnvironmentWorkChanged(work);
   }
 
   @Override
@@ -2301,6 +2348,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     Work work = claimed.get();
     requireTargetExists(work.target());
     recordWorkLock(work.target());
+    // 领取冻结了环境亲和性的 TOOL Work：签发执行租约使「待领取环境等待」条目消失，需失效待处理读模型。
+    notifyEnvironmentWorkChanged(work);
     return Optional.of(
         new ClaimedWork(
             work.target(),
@@ -2361,6 +2410,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       updateWork(next.get());
       notifyWorkAvailable();
     }
+    // Work 终态变更（删除或清租约保留）都会改变「待领取环境等待」集合，需失效待处理读模型。
+    notifyEnvironmentWorkChanged(work);
     return next;
   }
 
@@ -2384,6 +2435,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             claim.leaseToken(), claim.claimedWakeVersion(), databaseNow, databaseNow.plus(delay));
     updateWork(next);
     notifyWorkAvailable();
+    // 清租约重排使 Work 可能重新进入「待领取环境等待」，需失效待处理读模型。
+    notifyEnvironmentWorkChanged(work);
   }
 
   @Override
@@ -2888,15 +2941,84 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private void notifyWorkAvailable() {
+    notifyChannel(PostgresqlWorkChannel.NAME, "");
+  }
+
+  /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
+  private void notifyThreadVersion(UUID threadId, long version) {
+    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_VERSION, threadId + ":" + version);
+  }
+
+  /** 执行树失效：payload 为真实执行根 id；绝不伪造根 Thread 的 version。 */
+  private void notifyExecutionTree(UUID rootThreadId) {
+    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_TREE, rootThreadId.toString());
+  }
+
+  /** 待处理交互失效：payload 为真实执行根 id；来源事实在写事务内已不存在时为空串，由 listener 全量 resync。 */
+  private void notifyToolInteraction(UUID rootThreadId) {
+    notifyChannel(
+        PostgresqlHarnessNotificationChannel.TOOL_INTERACTION,
+        rootThreadId == null ? "" : rootThreadId.toString());
+  }
+
+  /**
+   * 在同一自管理事务连接上执行内建 {@code pg_notify}；PostgreSQL 仅在提交时投递，回滚不投递。
+   *
+   * <p>底层故障经 {@link #queryOne} 记录为事务首个故障并原样抛出（poisoning），绝不吞掉发布失败后继续提交。
+   */
+  private void notifyChannel(String channel, String payload) {
     boolean sent =
         queryOne(
                 "select pg_notify(?, ?) as ignored, true as sent",
                 (resultSet, rowNumber) -> resultSet.getBoolean("sent"),
-                PostgresqlWorkChannel.NAME,
-                "")
+                channel,
+                payload)
             .orElseThrow(() -> new IllegalStateException("pg_notify returned no row"));
     if (!sent) {
       throw new IllegalStateException("pg_notify did not confirm execution");
+    }
+  }
+
+  /** 沿不可变祖先链解析 Thread 的真实执行根。链完整性由 {@link #findAncestorChain} 校验：环路或链不完整直接抛出， 绝不静默降级成全量失效。 */
+  private UUID executionRootOfThread(UUID threadId) {
+    List<UUID> chain = findAncestorChain(threadId);
+    return chain.get(chain.size() - 1);
+  }
+
+  /**
+   * 沿 {@code harness_tool_invocation -> harness_model_invocation -> harness_thread} 定位来源
+   * Thread，再解析真实执行根。
+   *
+   * <p>仅用于来源事实仍在写事务内的边界；来源行已不存在时返回 {@code null}，由调用方以空 payload 触发 listener 全量 resync（与原触发器 {@code
+   * coalesce(root_thread::text, '')} 一致）。祖先链不完整属于数据损坏，不在此吞成空 payload。
+   */
+  private UUID executionRootOfToolInvocation(UUID toolInvocationId) {
+    Optional<UUID> sourceThreadId =
+        queryOne(
+            """
+            select m.thread_id
+            from harness_tool_invocation i
+            join harness_model_invocation m on m.id = i.model_invocation_id
+            where i.id = ?
+            """,
+            (resultSet, rowNumber) -> resultSet.getObject("thread_id", UUID.class),
+            toolInvocationId);
+    return sourceThreadId.map(this::executionRootOfThread).orElse(null);
+  }
+
+  /** 原触发器判据：仅等待审批/等待输入两种状态属于人工交互等待态。 */
+  private static boolean isWaitingInteraction(ToolInvocationStatus status) {
+    return status == ToolInvocationStatus.WAITING_APPROVAL
+        || status == ToolInvocationStatus.WAITING_INPUT;
+  }
+
+  /**
+   * 环境等待待处理失效：仅对冻结了 {@code required_environment_id} 的 TOOL Work 发布，沿用原 interaction channel
+   * 的真实执行根协议。使用 Work 行冻结的环境事实，而非当前 composer/settings；只提示待处理查询刷新，不创建审批事实。
+   */
+  private void notifyEnvironmentWorkChanged(Work work) {
+    if (work.requiredEnvironmentId() != null) {
+      notifyToolInteraction(executionRootOfToolInvocation(work.target().id()));
     }
   }
 
