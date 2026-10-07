@@ -459,10 +459,9 @@ registerCase({
       await trap.start()
       const providerUpdate = await ctx.call(
         'PUT',
-        `/api/ai/catalog/providers/${encodeURIComponent(
-          provider.name,
-        )}?expectedVersion=${encodeURIComponent(provider.version)}`,
+        `/api/ai/catalog/providers/${encodeURIComponent(provider.name)}`,
         {
+          expectedVersion: provider.version,
           providerType: 'openai',
           baseUrl: trap.baseUrl('/v1'),
         },
