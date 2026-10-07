@@ -851,6 +851,10 @@ export const aiCatalog = {
     'en-US': 'Back to Chat list',
     'zh-CN': '返回 Chat 列表',
   },
+  'ai.chat.backToConversation': {
+    'en-US': 'Back to conversation',
+    'zh-CN': '回到对话',
+  },
   'ai.chat.layout': {
     'en-US': 'Layout',
     'zh-CN': '布局',
@@ -1024,28 +1028,28 @@ export const aiCatalog = {
     'zh-CN': '通知',
   },
   'ai.chat.branch.newBranch': {
-    'en-US': 'New branch',
-    'zh-CN': '新建分支',
+    'en-US': 'New thread branch',
+    'zh-CN': '新的 thread 分支',
   },
   'ai.chat.branch.name': {
-    'en-US': 'Branch name',
-    'zh-CN': '分支名称',
+    'en-US': 'Thread name',
+    'zh-CN': 'thread 名称',
   },
   'ai.chat.branch.nameRequired': {
-    'en-US': 'Enter a branch name.',
-    'zh-CN': '请输入分支名称。',
+    'en-US': 'Enter a thread name.',
+    'zh-CN': '请输入 thread 名称。',
   },
   'ai.chat.branch.nameTooLong': {
-    'en-US': 'Branch name must be at most 256 characters.',
-    'zh-CN': '分支名称最多 256 个字符。',
+    'en-US': 'Thread name must be at most 256 characters.',
+    'zh-CN': 'thread 名称最多 256 个字符。',
   },
   'ai.chat.branch.destination': {
     'en-US': 'Open in',
     'zh-CN': '打开位置',
   },
   'ai.chat.branch.openDraft': {
-    'en-US': 'Open branch draft',
-    'zh-CN': '打开分支草稿',
+    'en-US': 'Open thread draft',
+    'zh-CN': '打开 thread 草稿',
   },
   'ai.chat.branch.confirmOverwrite': {
     'en-US': 'Overwrite unsent draft',
@@ -1235,7 +1239,7 @@ export const aiCatalog = {
     'en-US': 'Toggle automatic approval of Tool calls',
     'zh-CN': '切换 YOLO 自动批准工具调用',
   },
-  'ai.runtime.command.tree': {
+  'ai.runtime.command.history': {
     'en-US': 'View history and pick where to continue',
     'zh-CN': '查看历史并选择续接位置',
   },
@@ -1283,9 +1287,9 @@ export const aiCatalog = {
     'en-US': 'models',
     'zh-CN': 'models',
   },
-  'ai.runtime.command.treeLabel': {
-    'en-US': 'tree',
-    'zh-CN': 'tree',
+  'ai.runtime.command.historyLabel': {
+    'en-US': 'history',
+    'zh-CN': 'history',
   },
   'ai.runtime.command.stopLabel': {
     'en-US': 'stop',
@@ -1324,24 +1328,24 @@ export const aiCatalog = {
     'zh-CN': 'rename-thread',
   },
   'ai.runtime.command.goal': {
-    'en-US': 'View, edit, or clear branch goal',
-    'zh-CN': '查看、编辑或清除分支目标',
+    'en-US': 'View, edit, or clear the thread goal',
+    'zh-CN': '查看、编辑或清除 thread 目标',
   },
   'ai.runtime.command.goalLabel': {
     'en-US': 'goal',
     'zh-CN': 'goal',
   },
   'ai.runtime.goal.title': {
-    'en-US': 'Branch Goal',
-    'zh-CN': '分支目标',
+    'en-US': 'Thread goal',
+    'zh-CN': 'thread 目标',
   },
   'ai.runtime.goal.currentGoal': {
     'en-US': 'Current Goal',
     'zh-CN': '当前目标',
   },
   'ai.runtime.goal.emptyGoal': {
-    'en-US': 'No goal set for this branch',
-    'zh-CN': '当前分支暂无设定目标',
+    'en-US': 'No goal set for this thread',
+    'zh-CN': '当前 thread 暂无设定目标',
   },
   'ai.runtime.goal.agentReportTitle': {
     'en-US': 'Agent Progress Report',
@@ -1372,8 +1376,8 @@ export const aiCatalog = {
     'zh-CN': '更新目标',
   },
   'ai.runtime.goal.inputPlaceholder': {
-    'en-US': 'Enter branch goal (max 2,000 characters)...',
-    'zh-CN': '输入分支目标（最多 2000 字符）...',
+    'en-US': 'Enter thread goal (max 2,000 characters)...',
+    'zh-CN': '输入 thread 目标（最多 2000 字符）...',
   },
   'ai.runtime.goal.setGoalBtn': {
     'en-US': 'Set Goal',
@@ -1392,8 +1396,8 @@ export const aiCatalog = {
     'zh-CN': '只读模式，不可修改目标。',
   },
   'ai.runtime.goal.notAllowed': {
-    'en-US': 'Goal is not supported on this branch',
-    'zh-CN': '当前分支不支持设置目标',
+    'en-US': 'Goal is not supported on this thread',
+    'zh-CN': '当前 thread 不支持设置目标',
   },
   'ai.runtime.goal.errorEmpty': {
     'en-US': 'Goal text cannot be empty',
@@ -1412,8 +1416,8 @@ export const aiCatalog = {
     'zh-CN': '重命名 Session',
   },
   'ai.runtime.rename.threadTitle': {
-    'en-US': 'Rename Thread',
-    'zh-CN': '重命名 Thread',
+    'en-US': 'Rename thread',
+    'zh-CN': '重命名 thread',
   },
   'ai.runtime.rename.nameLabel': {
     'en-US': 'Name',
@@ -1456,8 +1460,8 @@ export const aiCatalog = {
     'zh-CN': '只读查看',
   },
   'ai.runtime.childThread.back': {
-    'en-US': 'Back to previous agent',
-    'zh-CN': '返回上一层',
+    'en-US': 'Back to parent agent',
+    'zh-CN': '返回父 agent',
   },
   'ai.runtime.childThread.backToRoot': {
     'en-US': 'Back to execution root',
@@ -1549,7 +1553,7 @@ export const aiCatalog = {
   },
   'ai.runtime.thread.working': {
     'en-US': 'Working...',
-    'zh-CN': 'Working...',
+    'zh-CN': '执行中',
   },
   'ai.runtime.thread.status.STOPPED': {
     'en-US': 'Stopped',

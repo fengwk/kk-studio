@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { useEffect, useId, useState } from 'react'
+import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select } from '@/shared/ui/controls/Select'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { normalizeThreadName } from '@/features/ai/chat/thread-name'
 import { useI18n } from '@/shared/i18n'
 import '@/features/ai/chat/new-branch-dialog.css'
@@ -12,7 +14,7 @@ export interface BranchDestinationOption {
 }
 
 /**
- * 新建分支对话框：/tree 历史树与回合 footer 的 GitBranch 图标共用的唯一命名与目标流程。
+ * 新建 thread 分支对话框：/history 历史树与回合 footer 的 GitBranch 图标共用的唯一命名与目标流程。
  *
  * 名称是创建 target 的必需事实（进入 creationRequestHash），提交前按后端 Names 规则
  * 规范化；目标位置（打开位置）选择 1..9 中的任一 pane，隐藏 pane 由 workspace 负责显露。
@@ -38,6 +40,7 @@ export function NewBranchDialog({
   onClose: () => void
 }) {
   const { t } = useI18n()
+  const nameId = useId()
   const [name, setName] = useState('')
   const [paneId, setPaneId] = useState(
     () => destinations.find((option) => option.value === defaultDestination)?.value
@@ -76,50 +79,54 @@ export function NewBranchDialog({
       onClose={onClose}
     >
       <form
-        className="new-branch-form"
+        className="modal-card-form"
         noValidate
         onSubmit={(event) => {
           event.preventDefault()
           submit()
         }}
       >
-        {formError ? (
-          <div className="form-error-banner" role="alert">{formError}</div>
-        ) : null}
-        <label className={`form-group${nameError ? ' is-error' : ''}`}>
-          <FieldLabel required>{t('ai.chat.branch.name')}</FieldLabel>
-          <input
-            className="new-branch-name"
-            value={name}
-            autoFocus
-            aria-label={t('ai.chat.branch.name')}
-            aria-invalid={nameError != null}
-            onChange={(event) => {
-              setName(event.target.value)
-              setNameError(null)
-            }}
-          />
-          {nameError ? <span className="field-error">{nameError}</span> : null}
-        </label>
-        <label className="form-group">
-          <FieldLabel required>{t('ai.chat.branch.destination')}</FieldLabel>
-          <Select
-            aria-label={t('ai.chat.branch.destination')}
-            value={paneId}
-            options={destinations}
-            onChange={setPaneId}
-          />
-        </label>
-        {overwriteWarning ? (
-          <div className="new-branch-overwrite" role="alert">{overwriteWarning}</div>
-        ) : null}
-        <div className="new-branch-actions">
-          <button type="button" className="ghost-btn" onClick={onClose} disabled={pending}>
+        <div className="modal-body">
+          {formError ? (
+            <div className="form-error-banner" role="alert">{formError}</div>
+          ) : null}
+          <label className={`form-group${nameError ? ' is-error' : ''}`} htmlFor={nameId}>
+            <FieldLabel required>{t('ai.chat.branch.name')}</FieldLabel>
+            <TextInput
+              id={nameId}
+              className="new-branch-name"
+              value={name}
+              autoFocus
+              aria-label={t('ai.chat.branch.name')}
+              invalid={nameError != null}
+              disabled={pending}
+              onChange={(event) => {
+                setName(event.target.value)
+                setNameError(null)
+              }}
+            />
+            {nameError ? <span className="field-error">{nameError}</span> : null}
+          </label>
+          <label className="form-group">
+            <FieldLabel required>{t('ai.chat.branch.destination')}</FieldLabel>
+            <Select
+              aria-label={t('ai.chat.branch.destination')}
+              value={paneId}
+              options={destinations}
+              onChange={setPaneId}
+            />
+          </label>
+          {overwriteWarning ? (
+            <div className="new-branch-overwrite" role="alert">{overwriteWarning}</div>
+          ) : null}
+        </div>
+        <div className="modal-footer">
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
             {t('shared.cancel')}
-          </button>
-          <button type="submit" className="btn-primary" disabled={pending || paneId === ''}>
+          </Button>
+          <Button type="submit" disabled={pending || paneId === ''}>
             {overwriteWarning ? t('ai.chat.branch.confirmOverwrite') : t('ai.chat.branch.openDraft')}
-          </button>
+          </Button>
         </div>
       </form>
     </Dialog>

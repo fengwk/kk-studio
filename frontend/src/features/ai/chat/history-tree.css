@@ -1,8 +1,5 @@
 /*
- * 历史树（/tree 面板）的独立样式。
- *
- * 该文件替代原先 styles.css 中的 .history-branch-* 全局规则（由 ui-owner 在迁移
- * Select 时删除）；面板只依赖既有的 --border/--fg 等设计变量与 .sr-only 工具类。
+ * /history 面板的历史节点、路径与分叉操作布局。
  */
 .history-tree-panel {
   min-height: 0;

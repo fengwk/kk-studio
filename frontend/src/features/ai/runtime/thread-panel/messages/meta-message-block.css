@@ -1,0 +1,15 @@
+/*
+ * 回合分叉入口与统计文本同一行垂直居中。
+ */
+.thread-meta-row .thread-meta-branch-btn {
+  align-self: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  color: var(--fg-dim);
+}
+
+.thread-meta-row .thread-meta-branch-btn svg {
+  width: 14px;
+  height: 14px;
+}

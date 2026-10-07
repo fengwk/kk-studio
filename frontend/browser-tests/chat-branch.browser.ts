@@ -389,7 +389,7 @@ test('the turn footer hover readout uses full usage facts instead of the compact
 })
 
 test.describe('新建分支命名与目标路由（真实浏览器）', () => {
-  test('routes the /tree fork into a hidden pane, reveals it in the real grid and never pre-creates a Thread', async ({
+  test('routes the /history fork into a hidden pane, reveals it in the real grid and never pre-creates a Thread', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
@@ -399,7 +399,7 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
 
     const composer = page.getByLabel('给 AI 发送消息').first()
     await composer.click()
-    await composer.pressSequentially('/tree')
+    await composer.pressSequentially('/history')
     await page.keyboard.press('Enter')
 
     const panel = page.locator('.history-tree-panel')
@@ -416,11 +416,18 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     const dialog = page.locator('.new-branch-dialog')
     await expect(dialog).toBeVisible()
     await dialog.locator('.new-branch-name').fill('browser-branch')
+    // B1：正文/操作区使用共享 Dialog 留白，输入与按钮不贴边（真实几何）。
+    const dialogBox = (await dialog.boundingBox())!
+    const nameBox = (await dialog.locator('.new-branch-name').boundingBox())!
+    expect(nameBox.x - dialogBox.x).toBeGreaterThanOrEqual(20)
+    const footerBox = (await dialog.locator('.modal-footer').boundingBox())!
+    const submitBox = (await dialog.locator('.modal-footer button[type="submit"]').boundingBox())!
+    expect(footerBox.x + footerBox.width - (submitBox.x + submitBox.width)).toBeGreaterThanOrEqual(16)
     await dialog.locator('.ui-select-trigger').click()
     const listbox = page.getByRole('listbox')
     await expect(listbox).toBeVisible()
     await listbox.getByRole('option').nth(2).click()
-    await dialog.locator('.new-branch-actions button[type="submit"]').click()
+    await dialog.locator('.modal-footer button[type="submit"]').click()
 
     // 隐藏的 pane-3 被真实布局显露：三个 Composer 都可见且 pane-3 落在视口内。
     await expect(page.locator('.chat-pane-grid.layout-split-3')).toBeVisible()

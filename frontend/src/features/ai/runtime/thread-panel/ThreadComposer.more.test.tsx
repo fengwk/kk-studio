@@ -600,11 +600,11 @@ describe('ThreadWidgetStack', () => {
         ]}
       />,
     )
-    expect(screen.getByText('Working...')).toBeInTheDocument()
+    expect(screen.getByText('执行中')).toBeInTheDocument()
     expect(screen.getByText('稍后处理这条')).toBeInTheDocument()
     const zone = screen.getByLabelText('会话活动')
     const zoneText = zone.textContent ?? ''
-    expect(zoneText.indexOf('Working...')).toBeLessThan(zoneText.indexOf('稍后处理这条'))
+    expect(zoneText.indexOf('执行中')).toBeLessThan(zoneText.indexOf('稍后处理这条'))
 
     rerender(<ThreadWidgetStack working={false} />)
     expect(container.querySelector('.thread-widget-zone')?.childNodes.length ?? 0).toBe(0)
