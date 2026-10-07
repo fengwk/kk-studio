@@ -51,4 +51,29 @@ describe('ConflictPresenter', () => {
     )
     expect(container).toBeEmptyDOMElement()
   })
+
+  it('uses the shared modal layer with Escape close and focus restoration', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const opener = document.createElement('button')
+    opener.textContent = '外部触发按钮'
+    document.body.append(opener)
+    opener.focus()
+
+    const { unmount } = render(
+      <ConflictPresenter conflict={conflict} onRefresh={vi.fn()} onClose={onClose} />,
+    )
+
+    const dialog = screen.getByRole('alertdialog', { name: '数据已发生变化' })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    // portal 到 body 的共享弹层，而不是原地的裸 alertdialog。
+    expect(dialog.closest('.modal-backdrop')?.parentElement).toBe(document.body)
+
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledOnce()
+
+    unmount()
+    expect(opener).toHaveFocus()
+    opener.remove()
+  })
 })

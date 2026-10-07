@@ -25,6 +25,7 @@ export function SearchField({
     <label className="searchbox">
       <Search aria-hidden="true" />
       <input
+        className="ui-search-input"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder ?? t('shared.searchResources')}
