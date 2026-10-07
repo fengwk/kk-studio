@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
@@ -22,11 +23,15 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
 
   private final CanvasFunctionRunMapper runMapper;
   private final CanvasFunctionRunStateCodecPort stateCodec;
+  private final PostgresqlCanvasChangeNotifier notifier;
 
   public PostgresqlCanvasFunctionRunRepository(
-      CanvasFunctionRunMapper runMapper, CanvasFunctionRunStateCodecPort stateCodec) {
+      CanvasFunctionRunMapper runMapper,
+      CanvasFunctionRunStateCodecPort stateCodec,
+      PostgresqlCanvasChangeNotifier notifier) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
+    this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
 
   @Override
@@ -54,17 +59,24 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   }
 
   @Override
+  @Transactional
   public void insertReady(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.READY);
     if (runMapper.insert(toData(run)) != 1) {
       throw new IllegalStateException("insert canvas function run failed: " + run.nodeId());
     }
+    notifier.functionWorkChanged(run.nodeId());
   }
 
   @Override
+  @Transactional
   public boolean replaceTerminalWithReady(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.READY);
-    return runMapper.replaceTerminalWithReady(toData(run)) == 1;
+    if (runMapper.replaceTerminalWithReady(toData(run)) != 1) {
+      return false;
+    }
+    notifier.functionWorkChanged(run.nodeId());
+    return true;
   }
 
   @Override
@@ -103,18 +115,23 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   }
 
   @Override
+  @Transactional
   public boolean resumeUnknown(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.READY);
     if (run.availableAt() == null) {
       throw new IllegalArgumentException("resumed FunctionRun must declare availableAt");
     }
-    return runMapper.resumeUnknown(
+    if (runMapper.resumeUnknown(
             run.nodeId(),
             run.requestId(),
             run.stateJson(),
             toOffsetDateTime(run.availableAt()),
             toOffsetDateTime(run.updatedAt()))
-        == 1;
+        != 1) {
+      return false;
+    }
+    notifier.functionWorkChanged(run.nodeId());
+    return true;
   }
 
   @Override
