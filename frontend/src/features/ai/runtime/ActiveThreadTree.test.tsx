@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
+import { SubagentTreePanel } from '@/features/ai/runtime/SubagentTreePanel'
 import { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
 import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 import { harnessService } from '@/shared/api/harness-service'
@@ -38,16 +39,19 @@ function treeNode(
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
+    updateTime: '2026-03-31T12:00:00.000Z',
   }
 }
 
 /** 查询由根面板单点持有：测试同样只挂一次 useActiveThreadTree，再交给展示组件。 */
-function TreeHarness({ rootId, currentThreadId }: { rootId: string; currentThreadId?: string }) {
+function TreeHarness({ rootId, currentThreadId, history = false }: { rootId: string; currentThreadId?: string; history?: boolean }) {
   const tree = useActiveThreadTree(rootId)
-  return <ActiveThreadTree tree={tree} currentThreadId={currentThreadId} />
+  return history
+    ? <SubagentTreePanel tree={tree} currentThreadId={currentThreadId} />
+    : <ActiveThreadTree tree={tree} currentThreadId={currentThreadId} />
 }
 
-function renderTree(rootId: string, currentThreadId?: string) {
+function renderTree(rootId: string, currentThreadId?: string, history = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const sockets = new FakeWebSocketHarness()
   return {
@@ -57,7 +61,7 @@ function renderTree(rootId: string, currentThreadId?: string) {
       <QueryClientProvider client={queryClient}>
         <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
           <MemoryRouter>
-            <TreeHarness rootId={rootId} currentThreadId={currentThreadId} />
+            <TreeHarness rootId={rootId} currentThreadId={currentThreadId} history={history} />
           </MemoryRouter>
         </ApplicationEventProvider>
       </QueryClientProvider>,
@@ -92,6 +96,58 @@ function containerTextAbsent(): boolean {
 }
 
 describe('ActiveThreadTree', () => {
+  it('does not claim empty history while loading or failed, and retries to a genuine empty tree', async () => {
+    let rejectTree: (reason: Error) => void = () => {}
+    vi.mocked(harnessService.getThreadTree).mockReturnValue(new Promise((_, reject) => { rejectTree = reject }))
+    renderTree(ROOT_ID, undefined, true)
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByText('暂无 subagent 执行')).not.toBeInTheDocument()
+    await act(async () => { rejectTree(new Error('offline')) })
+    expect(await screen.findByRole('alert')).toHaveTextContent('加载失败')
+    expect(screen.queryByText('暂无 subagent 执行')).not.toBeInTheDocument()
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([treeNode(ROOT_ID, null, false, 'root')])
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('暂无 subagent 执行')).toBeInTheDocument()
+  })
+
+  it('subscribes to the response root from a bound child and reads back its own cached key', async () => {
+    const worker = { ...treeNode(WORKER_ID, ROOT_ID, true, 'main'), agentName: 'Explorer', turnCount: 7, toolCallCount: 12 }
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'), worker,
+      { ...treeNode(IDLE_ID, WORKER_ID, false, 'main'), agentName: 'Reviewer', outcome: 'FAILED' },
+    ])
+    const { sockets, queryClient } = renderTree(WORKER_ID, WORKER_ID, true)
+    const link = await screen.findByRole('link', { name: /Explorer/ })
+    expect(link).toHaveTextContent('turns: 7 · tools: 12')
+    expect(screen.getByRole('link', { name: /Reviewer/ })).toHaveTextContent('失败')
+    expect(link.closest('li')).toHaveAttribute('aria-current', 'true')
+    const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+    ]))
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'), { ...worker, processing: false, status: 'IDLE', outcome: 'STOPPED' },
+    ])
+    act(() => socket.emitServer({ type: 'event', resource: { kind: 'tree', id: ROOT_ID }, name: 'changed', data: {} }))
+    await waitFor(() => expect(screen.getByRole('link', { name: /Explorer/ })).toHaveTextContent('停止'))
+    expect(harnessService.getThreadTree).toHaveBeenLastCalledWith(WORKER_ID)
+    expect(queryClient.getQueryData(['threads', 'tree', WORKER_ID])).toBeDefined()
+    expect(queryClient.getQueryData(['threads', 'tree', ROOT_ID])).toBeUndefined()
+  })
+
+  it('retains history on malformed refresh instead of accepting conflicting snapshots', async () => {
+    const worker = treeNode(WORKER_ID, ROOT_ID, false, 'worker')
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([treeNode(ROOT_ID, null, false, 'root'), worker])
+    const { queryClient } = renderTree(ROOT_ID, undefined, true)
+    await screen.findByRole('link', { name: /worker/ })
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'), worker, { ...worker, turnCount: 99 },
+    ])
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['threads', 'tree', ROOT_ID] }) })
+    expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败')
+    expect(screen.getByRole('link', { name: /worker/ })).toHaveTextContent('turns: 1')
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     setLocale('zh-CN')
@@ -131,6 +187,9 @@ describe('ActiveThreadTree', () => {
     })
     expect(container.querySelector('.thread-widget-panel')).toBeNull()
     const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+    ]))
 
     // 子代理写入由服务端聚合到真实执行根后推送：changed 只提示回读该根，不需要固定轮询。
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([

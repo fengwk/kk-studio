@@ -158,6 +158,7 @@ export interface HarnessSessionEntryDTO {
 export interface HarnessThreadTreeNodeDTO {
   threadId: string
   parentThreadId: string | null
+  updateTime: BackendDateTime
   name: string
   agentName: string
   model: HarnessModelSelectionDTO
