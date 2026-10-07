@@ -1,8 +1,38 @@
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import layoutConfig from './playwright.layout.config'
+
+/** 用给定端口加载布局配置，验证 KK_LAYOUT_PORT 同时驱动 preview 与 baseURL/webServer。 */
+async function loadLayoutConfigsWithPort(port: string) {
+  const previous = process.env.KK_LAYOUT_PORT
+  process.env.KK_LAYOUT_PORT = port
+  try {
+    vi.resetModules()
+    const playwright = (await import('./playwright.layout.config')).default
+    const script = `
+      import { loadConfigFromFile } from 'vite';
+      import path from 'node:path';
+      const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' }, path.resolve('vite.layout.config.ts'));
+      console.log(JSON.stringify(loaded?.config?.preview ?? null));
+    `
+    const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: __dirname,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: { ...process.env, KK_LAYOUT_PORT: port },
+    })
+    return { playwright, preview: JSON.parse(stdout) }
+  } finally {
+    if (previous === undefined) {
+      delete process.env.KK_LAYOUT_PORT
+    } else {
+      process.env.KK_LAYOUT_PORT = previous
+    }
+    vi.resetModules()
+  }
+}
 
 describe('playwright layout config', () => {
   // 零重试保留首轮失败 trace，避免无现场
@@ -33,6 +63,24 @@ describe('playwright layout config', () => {
       reuseExistingServer: false,
       timeout: 15000,
     })
+  })
+
+  // 并行切片隔离：单一 KK_LAYOUT_PORT 必须同时驱动 webServer、baseURL 与 vite preview。
+  it('routes layout port through the single KK_LAYOUT_PORT override', async () => {
+    const { playwright, preview } = await loadLayoutConfigsWithPort('5185')
+
+    expect(playwright.use?.baseURL).toBe('http://127.0.0.1:5185')
+    expect(playwright.webServer).toEqual({
+      command: 'npm run preview:layout',
+      url: 'http://127.0.0.1:5185/browser-tests/chat-layout-harness.html',
+      reuseExistingServer: false,
+      timeout: 15000,
+    })
+    expect(preview).toEqual({ host: '127.0.0.1', port: 5185, strictPort: true })
+
+    // 未设置变量时保持默认 5174，默认命令不变。
+    const fallback = await loadLayoutConfigsWithPort('')
+    expect(fallback.playwright.use?.baseURL).toBe('http://127.0.0.1:5174')
   })
 
   it('builds fresh assets before starting the browser server readiness budget', () => {

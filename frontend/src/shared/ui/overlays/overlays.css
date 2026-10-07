@@ -130,6 +130,15 @@
   line-height: 1.6;
 }
 
+/* 弹窗正文段落：去掉浏览器默认 margin，长诊断串可自然换行。 */
+.modal-body-text {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .modal-footer {
   justify-content: flex-end;
   border-top: 1px solid var(--border);

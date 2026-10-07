@@ -1,9 +1,12 @@
+import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { translate } from '@/shared/i18n'
 import type { ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 
 /**
  * Durable acceptance/control/settings conflicts share this presenter. Callers retain their own
  * refresh and optional exact-retry callbacks, while reason and detail are never discarded.
+ * 弹层复用共享 Dialog 的 portal/焦点陷阱/关闭后焦点归还/顶层 Escape，不再是裸 alertdialog。
  */
 export function ConflictPresenter({
   conflict,
@@ -20,28 +23,26 @@ export function ConflictPresenter({
     return null
   }
   return (
-    <div
-      className="thread-conflict-modal"
+    <Dialog
       role="alertdialog"
-      aria-modal="true"
-      aria-label={translate('shared.conflict.title')}
+      title={translate('shared.conflict.title')}
+      onClose={onClose}
     >
-      <strong>{translate('shared.conflict.title')}</strong>
-      <p>{translate('shared.conflict.reason', { reason: conflict.reason })}</p>
-      <p>{conflict.detail}</p>
-      <div className="thread-conflict-actions">
-        <button type="button" className="ghost-btn" onClick={onClose}>
-          {translate('shared.cancel')}
-        </button>
-        <button type="button" className="ghost-btn" onClick={onRefresh}>
-          {translate('shared.conflict.refresh')}
-        </button>
-        {onRetry ? (
-          <button type="button" className="btn-primary" onClick={onRetry}>
-            {translate('shared.conflict.retry')}
-          </button>
-        ) : null}
+      <div className="modal-body">
+        <p className="modal-body-text">
+          {translate('shared.conflict.reason', { reason: conflict.reason })}
+        </p>
+        <p className="modal-body-text">{conflict.detail}</p>
       </div>
-    </div>
+      <div className="modal-footer">
+        <Button variant="ghost" onClick={onClose}>
+          {translate('shared.cancel')}
+        </Button>
+        <Button variant="ghost" onClick={onRefresh}>
+          {translate('shared.conflict.refresh')}
+        </Button>
+        {onRetry ? <Button onClick={onRetry}>{translate('shared.conflict.retry')}</Button> : null}
+      </div>
+    </Dialog>
   )
 }

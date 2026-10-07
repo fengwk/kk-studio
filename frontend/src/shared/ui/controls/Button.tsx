@@ -2,6 +2,8 @@ import type { ButtonHTMLAttributes } from 'react'
 
 /** 设计系统按钮变体：对应既有的三类按钮视觉。 */
 export type ButtonVariant = 'primary' | 'ghost' | 'inline'
+/** 普通控件 32px；紧凑控件 28px（卡片动作、工具条等）。 */
+export type ButtonSize = 'normal' | 'compact'
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   primary: 'btn-primary',
@@ -13,6 +15,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   /** danger 用于破坏性动作（配合主题的 danger 色）。 */
   danger?: boolean
+  size?: ButtonSize
 }
 
 /**
@@ -22,12 +25,18 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 export function Button({
   variant = 'primary',
   danger = false,
+  size = 'normal',
   className,
   type = 'button',
   children,
   ...rest
 }: ButtonProps) {
-  const classes = [VARIANT_CLASS[variant], danger ? 'danger' : '', className]
+  const classes = [
+    VARIANT_CLASS[variant],
+    danger ? 'danger' : '',
+    size === 'compact' ? 'is-compact' : '',
+    className,
+  ]
     .filter(Boolean)
     .join(' ')
   return (

@@ -1,0 +1,101 @@
+/* 媒体 Lightbox：只描述媒体面板自身布局；弹层层级/遮罩/焦点由共享 Dialog 提供。
+   设计 token 仍由 src/styles.css 的 :root 唯一定义。 */
+
+.modal-card.media-lightbox-card {
+  width: min(1180px, 100%);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-color: rgb(255 255 255 / 12%);
+  border-radius: 16px;
+  background: var(--overlay-surface-strong);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 48%);
+}
+
+.media-lightbox-body {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+/* 关闭按钮叠在媒体右上角；点击区域保持 34px，不占用媒体尺寸。 */
+.modal-card.media-lightbox-card .media-lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  color: white;
+  background: rgb(0 0 0 / 58%);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card.media-lightbox-card .media-lightbox-close:hover:not(:disabled) {
+  color: white;
+  background: rgb(0 0 0 / 74%);
+}
+
+.modal-card.media-lightbox-card .media-lightbox-close svg {
+  width: 17px;
+  height: 17px;
+}
+
+.media-lightbox-content {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+  overflow: auto;
+  background: rgb(0 0 0 / 54%);
+}
+
+.media-lightbox-content img,
+.media-lightbox-content video {
+  display: block;
+  max-width: 100%;
+  max-height: calc(94vh - 58px);
+  object-fit: contain;
+}
+
+.media-lightbox-footer {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.media-lightbox-footer span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-lightbox-footer a {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--fg-muted);
+}
+
+.media-lightbox-footer a:hover {
+  color: var(--fg);
+  background: var(--stage-dot);
+}
+
+.media-lightbox-footer svg {
+  width: 15px;
+  height: 15px;
+}

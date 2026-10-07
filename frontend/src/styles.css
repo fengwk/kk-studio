@@ -497,6 +497,9 @@ textarea::placeholder {
   padding: 32px 32px 60px;
 }
 
+/* 旧资源列表基座（.cards-grid/.info-card/.head/.meta-*/.chat-card-foot/.action-enter-btn）。
+   迁移期仍需支撑 Chat/Environment/Plugin/Skill/Projects/Canvas 未迁移调用方；
+   全部改用 shared/ui/cards 的 .resource-card/.resource-grid 后删除本段。 */
 .cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
@@ -528,51 +531,79 @@ textarea::placeholder {
   box-shadow: var(--shadow-md);
 }
 
+/* 共享“新建”卡的唯一实现（shared/ui/feedback/CreateCard）。
+   与资源卡同一尺寸语言；内部间距用 margin 而不是父级 gap，避免 Canvas 库尚未迁移的
+   自带 create-card 结构被顺带改变间距。放在全局样式表是因为 Canvas 是独立懒加载 chunk，
+   其 create-card 调用方不在 cards.css 的加载范围内。 */
 .create-card {
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: center;
+  padding: 16px;
   text-align: center;
   border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-lg);
   background: transparent;
+  color: inherit;
   cursor: pointer;
   box-shadow: none;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 
-.create-card:hover {
+.create-card:hover:not(:disabled) {
   border-color: var(--green-border);
   background: var(--white-02);
 }
 
-.create-card strong,
-.create-card small {
+.create-card:focus-visible {
+  outline: none;
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.create-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.create-card-icon {
+  align-self: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+}
+
+.create-card-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.create-card-text {
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.create-card-text strong,
+.create-card-text small {
   display: block;
 }
 
-.create-card strong {
+.create-card-text strong {
   font-size: 15px;
   font-weight: 600;
 }
 
-.create-card small {
+.create-card-text small {
   margin-top: 4px;
   color: var(--fg-dim);
   font-size: 12px;
-}
-
-.plus-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--surface-active);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-muted);
-}
-
-.plus-icon svg {
-  width: 20px;
-  height: 20px;
 }
 
 .head {
@@ -935,9 +966,12 @@ div.is-error {
   font-weight: 600;
 }
 
-.form-group input:not([type="checkbox"]):not([type="radio"]),
+/* 旧表单模式（.form-group 后代控件）。迁移中的表单改用共享 TextInput/TextArea 后，
+   共享控件接管自身高度/表面/焦点，故显式排除 .ui-text-input/.ui-textarea。
+   全部调用方迁移到共享控件后删除本段。 */
+.form-group input:not([type="checkbox"]):not([type="radio"]):not(.ui-text-input),
 .form-group select,
-.form-group textarea {
+.form-group textarea:not(.ui-textarea) {
   height: 38px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1006,16 +1040,16 @@ div.is-error {
   opacity: 0.78;
 }
 
-.form-group textarea {
+.form-group textarea:not(.ui-textarea) {
   min-height: 96px;
   resize: vertical;
   padding: 10px 12px;
   font: inherit;
 }
 
-.form-group input:focus,
+.form-group input:not(.ui-text-input):focus,
 .form-group select:focus,
-.form-group textarea:focus {
+.form-group textarea:not(.ui-textarea):focus {
   border-color: var(--green-primary);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
@@ -1338,10 +1372,30 @@ div.is-error {
 
 .btn-primary:focus-visible,
 .btn-secondary:focus-visible,
-.ghost-btn:focus-visible {
+.ghost-btn:focus-visible,
+.ghost-inline-btn:focus-visible {
   outline: none;
   border-color: var(--green-primary);
   box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+/* 紧凑尺寸：普通控件 32px，紧凑控件 28px；由共享 Button 的 size="compact" 选择。 */
+.btn-primary.is-compact,
+.btn-secondary.is-compact,
+.ghost-btn.is-compact,
+.ghost-inline-btn.is-compact {
+  height: 28px;
+  padding: 0 10px;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.btn-primary.is-compact svg,
+.btn-secondary.is-compact svg,
+.ghost-btn.is-compact svg,
+.ghost-inline-btn.is-compact svg {
+  width: 14px;
+  height: 14px;
 }
 
 .btn-sm {
@@ -3492,107 +3546,6 @@ div.is-error {
   transform: translateY(0);
 }
 
-.resource-media-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(0 0 0 / 78%);
-  backdrop-filter: blur(14px);
-}
-
-.resource-media-lightbox-panel {
-  position: relative;
-  display: flex;
-  width: min(1180px, 96vw);
-  max-height: 94vh;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 16px;
-  background: var(--overlay-surface-strong);
-  box-shadow: 0 28px 90px rgb(0 0 0 / 48%);
-}
-
-.resource-media-lightbox-content {
-  display: grid;
-  min-height: 0;
-  flex: 1;
-  place-items: center;
-  overflow: auto;
-  background: rgb(0 0 0 / 54%);
-}
-
-.resource-media-lightbox-content img,
-.resource-media-lightbox-content video {
-  display: block;
-  max-width: 100%;
-  max-height: calc(94vh - 58px);
-  object-fit: contain;
-}
-
-.resource-media-lightbox-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 1;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  color: white;
-  background: rgb(0 0 0 / 58%);
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-}
-
-.resource-media-lightbox-close svg {
-  width: 17px;
-  height: 17px;
-}
-
-.resource-media-lightbox-footer {
-  display: flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  color: var(--fg);
-  font-size: 13px;
-}
-
-.resource-media-lightbox-footer span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-media-lightbox-footer a {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--fg-muted);
-}
-
-.resource-media-lightbox-footer a:hover {
-  color: var(--fg);
-  background: var(--stage-dot);
-}
-
-.resource-media-lightbox-footer svg {
-  width: 15px;
-  height: 15px;
-}
-
 @keyframes thread-pulse {
   0% { transform: scale(0.85); opacity: 0.95; }
   70% { transform: scale(1.4); opacity: 0; }
@@ -5521,11 +5474,9 @@ select.settings-input option {
   text-overflow: ellipsis;
 }
 
-.chat-layout-selector {
-  display: inline-flex;
-}
-
-.chat-layout-selector .ui-select-trigger {
+/* U1：根布局规则只作用于 .ui-select 根；portal 菜单保持自身 display:grid。
+   原先的裸 .chat-layout-selector{display:inline-flex} 会命中 portal 菜单，已删除。 */
+.ui-select.chat-layout-selector .ui-select-trigger {
   height: 28px;
   min-height: 28px;
   min-width: 52px;

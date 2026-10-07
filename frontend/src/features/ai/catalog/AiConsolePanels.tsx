@@ -2,6 +2,7 @@ import { AgentResourceCard } from '@/features/ai/catalog/AiAgentResourceCard'
 import { ModelResourceCard } from '@/features/ai/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/ai/catalog/AiProviderResourceCard'
 import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import type {
   AgentDefinitionDTO,
@@ -26,7 +27,7 @@ export function AgentsPanel({
 }) {
   const { t } = useI18n()
   return (
-    <div className="cards-grid">
+    <ResourceGrid>
       <CreateCard
         title={t('ai.catalog.createAgent')}
         subtitle={t('ai.catalog.createAgentDescription')}
@@ -42,7 +43,7 @@ export function AgentsPanel({
           deletePending={deletePending}
         />
       ))}
-    </div>
+    </ResourceGrid>
   )
 }
 
@@ -61,7 +62,7 @@ export function ModelsPanel({
 }) {
   const { t } = useI18n()
   return (
-    <div className="cards-grid">
+    <ResourceGrid>
       <CreateCard
         title={t('ai.catalog.createModel')}
         subtitle={t('ai.catalog.createModelDescription')}
@@ -76,7 +77,7 @@ export function ModelsPanel({
           deletePending={deletePending}
         />
       ))}
-    </div>
+    </ResourceGrid>
   )
 }
 
@@ -95,7 +96,7 @@ export function ProvidersPanel({
 }) {
   const { t } = useI18n()
   return (
-    <div className="cards-grid">
+    <ResourceGrid>
       <CreateCard
         title={t('ai.catalog.createProvider')}
         subtitle={t('ai.catalog.createProviderDescription')}
@@ -110,6 +111,6 @@ export function ProvidersPanel({
           deletePending={deletePending}
         />
       ))}
-    </div>
+    </ResourceGrid>
   )
 }

@@ -13,7 +13,7 @@
  *   中的按键交给输入自身，全局快捷键一律不拦截。
  */
 const BLOCKING_MODAL_SELECTOR =
-  '.modal-backdrop, [aria-modal="true"], [role="alertdialog"], .resource-media-lightbox'
+  '.modal-backdrop, [aria-modal="true"], [role="alertdialog"]'
 
 export function hasBlockingModal(root: ParentNode = document): boolean {
   return root.querySelector(BLOCKING_MODAL_SELECTOR) != null
