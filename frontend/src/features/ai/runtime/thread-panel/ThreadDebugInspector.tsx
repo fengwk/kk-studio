@@ -160,7 +160,7 @@ export function ThreadDebugInspector({
             <div className="thread-event-detail-row">
               <dt>{t('ai.runtime.debug.inspector.status')}</dt>
               <dd>
-                <span className={selection.tool.state === 'SENT' ? 'status-pill is-ready' : 'status-pill is-offline'}>
+                <span className={selection.tool.state === 'SENT' ? 'status-pill is-neutral' : 'status-pill is-offline'}>
                   {selection.tool.state === 'SENT'
                     ? t('ai.runtime.debug.inspector.toolState.sent')
                     : t('ai.runtime.debug.inspector.toolState.filtered')}
@@ -301,7 +301,7 @@ export function ThreadDebugInspector({
           {debug?.frozenInvocation ? (
             <div>
               <div className="thread-debug-frozen-badge">
-                <span className="status-pill is-ready">
+                <span className="status-pill is-neutral">
                   {debug.frozenInvocation.kind}
                 </span>
               </div>
@@ -312,6 +312,8 @@ export function ThreadDebugInspector({
               >
                 {formatJson(debug.frozenInvocation.requestJson)}
               </pre>
+              <p className="inline-hint">{t('ai.runtime.debug.frozenNotice')}</p>
+              <p className="inline-hint">{t('ai.runtime.debug.httpOriginalUnavailable')}</p>
             </div>
           ) : (
             <div className="inline-hint thread-debug-empty-hint">
@@ -324,7 +326,7 @@ export function ThreadDebugInspector({
       {selection.type === 'preview' && (
         <div className="thread-debug-inspector-body">
           <div className="thread-debug-frozen-badge">
-            <span className="status-pill is-ready">
+            <span className="status-pill is-neutral">
               {selection.preview.kind}
             </span>
           </div>
@@ -342,7 +344,9 @@ export function ThreadDebugInspector({
               <dd><code>{formatFileSize(selection.preview.bodyByteSize)} ({selection.preview.bodyByteSize} B)</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>{t('ai.runtime.debug.inspector.generatedAt')}</dt>
+              <dt>{t(selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
+                ? 'ai.runtime.debug.inspector.recordedAt'
+                : 'ai.runtime.debug.inspector.generatedAt')}</dt>
               <dd><code>{selection.preview.generatedAt}</code></dd>
             </div>
             <div className="thread-event-detail-row">
@@ -356,6 +360,10 @@ export function ThreadDebugInspector({
               </div>
             ) : null}
           </dl>
+          <p className="inline-hint">{t(selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
+            ? 'ai.runtime.debug.historicalNotice'
+            : 'ai.runtime.debug.draftNotice')}</p>
+          <p className="inline-hint">{t('ai.runtime.debug.httpOriginalUnavailable')}</p>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">
               {t('ai.runtime.debug.inspector.requestBodyJson')}
