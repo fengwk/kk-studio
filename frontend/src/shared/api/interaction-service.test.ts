@@ -5,7 +5,7 @@ import { InteractionService } from '@/shared/api/interaction-service'
 describe('InteractionService', () => {
   it('calls GET /interactions with root, cursor and limit params', async () => {
     const mockClient: HttpClient = {
-      get: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+      get: vi.fn().mockResolvedValue({ items: [], nextCursor: null, total: 0, freshnessAt: null }),
       post: vi.fn(),
       put: vi.fn(),
       delete: vi.fn(),
@@ -17,12 +17,12 @@ describe('InteractionService', () => {
     expect(mockClient.get).toHaveBeenCalledWith('/interactions', {
       params: { rootThreadId: 'root-1', cursor: 'cursor-1', limit: 20 },
     })
-    expect(result).toEqual({ items: [], nextCursor: null })
+    expect(result).toEqual({ items: [], nextCursor: null, total: 0, freshnessAt: null })
   })
 
   it('omits every unset param when listing without a root filter', async () => {
     const mockClient: HttpClient = {
-      get: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+      get: vi.fn().mockResolvedValue({ items: [], nextCursor: null, total: 0, freshnessAt: null }),
       post: vi.fn(),
       put: vi.fn(),
       delete: vi.fn(),

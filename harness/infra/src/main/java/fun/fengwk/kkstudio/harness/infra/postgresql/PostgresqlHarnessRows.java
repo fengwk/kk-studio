@@ -31,7 +31,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -262,6 +264,22 @@ final class PostgresqlHarnessRows {
               resultSet.getString("lease_token"),
               nullableInstant(resultSet, "lease_until"),
               nullableEnvironmentId(resultSet.getObject("required_environment_id")));
+
+  static final RowMapper<PendingEnvironmentWaitRow> PENDING_ENVIRONMENT_WAIT =
+      (resultSet, rowNumber) ->
+          new PendingEnvironmentWaitRow(
+              uuid(resultSet, "root_thread_id"),
+              EnvironmentId.of(uuid(resultSet, "environment_id")),
+              instant(resultSet, "representative_created_at"),
+              uuid(resultSet, "representative_invocation_id"),
+              resultSet.getInt("waiting_count"));
+
+  static final RowMapper<EnvironmentToolWaitRow> ENVIRONMENT_TOOL_WAIT =
+      (resultSet, rowNumber) ->
+          new EnvironmentToolWaitRow(
+              uuid(resultSet, "invocation_id"),
+              nullableEnvironmentId(resultSet.getObject("required_environment_id")),
+              resultSet.getBoolean("waiting_for_environment"));
 
   private PostgresqlHarnessRows() {}
 

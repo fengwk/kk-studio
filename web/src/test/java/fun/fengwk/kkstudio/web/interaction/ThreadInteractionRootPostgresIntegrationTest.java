@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
@@ -69,6 +71,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -76,11 +79,14 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -104,6 +110,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 
 /**
  * 真实 PostgreSQL + 真实 Runtime + 真实 Tool Processor 上的三级执行树人工交互（approval / ask_user）集成测试。
@@ -445,7 +452,285 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(ToolInvocationStatus.WAITING_INPUT.name(), item.getStatus());
   }
 
+  /**
+   * 环境等待投影（聚合 / 分页 / total / 恢复）：同一执行根下两个带环境亲和性的 READY TOOL 调用只呈现一个分组并计数 2；另一根、另一环境的待领取调用各自独立 分组；按
+   * keyset 游标跨页不重不漏，{@code total} 恒为全部可见分组（而非首页长度）；环境获得有效 READY 连接租约后分组立即消失，租约自然过期后重新出现，
+   * 全程不依赖任何写事件或新的持久等待状态。
+   */
+  @Test
+  void environmentWaitAggregatesOfflineInvocationsAndRecoversWhenEnvironmentBecomesReady() {
+    UUID firstEnvironmentId = bindEnvironment("wa-env-a-" + UUID.randomUUID());
+    UUID secondEnvironmentId = bindEnvironment("wa-env-b-" + UUID.randomUUID());
+    UUID emptyEnvironmentId = bindEnvironment("wa-env-empty-" + UUID.randomUUID());
+
+    // 执行根 R1：Chat 归属，两个不同深度的 READY TOOL 调用冻结同一环境 -> 一个分组计数 2。
+    Tree tree = buildTree();
+    UUID chatId = bindChat(tree.rootSessionId());
+    UUID firstInvocationId = attachEnvironmentWait(tree.c(), EnvironmentId.of(firstEnvironmentId));
+    UUID secondInvocationId = attachEnvironmentWait(tree.b(), EnvironmentId.of(firstEnvironmentId));
+    Instant firstRepresentativeCreatedAt = toolInvocation(firstInvocationId).createdAt();
+    assertTrue(
+        firstRepresentativeCreatedAt.isBefore(toolInvocation(secondInvocationId).createdAt()),
+        "the group representative is the earliest invocation of the group");
+
+    // 执行根 R2：独立根，同一环境 -> 另一个分组计数 1。
+    Seed second =
+        seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(firstEnvironmentId));
+    bindChat(second.sessionId());
+
+    StudioHarnessThreadController threadController =
+        new StudioHarnessThreadController(
+            runtime,
+            mock(ModelRequestDebugService.class),
+            interactionService,
+            mock(UsageCostProjectionService.class));
+    var waitingTool =
+        threadController
+            .getSnapshot(second.threadId().toString())
+            .getData()
+            .getToolInvocations()
+            .getFirst();
+    assertEquals(firstEnvironmentId.toString(), waitingTool.getRequiredEnvironmentId());
+    assertTrue(waitingTool.isWaitingForEnvironment());
+
+    // 执行根 R3：独立根，另一环境 -> 第三个分组。
+    Seed third =
+        seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(secondEnvironmentId));
+    bindChat(third.sessionId());
+
+    // 执行根 R4：无产品归属的独立根，拥有同环境待领取调用但任何 owner 都无法解析 -> 永不暴露、也不计入 total。
+    Seed ownerless =
+        seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(secondEnvironmentId));
+
+    // 在线环境（无任何待领取调用）不得凭空产生分组。
+    markEnvironmentReady(emptyEnvironmentId, UUID.randomUUID());
+
+    List<InteractionDTO> all = drain(null, 2);
+    assertEquals(3, all.size(), "only owner-bound (root, environment) groups are visible");
+    assertEnvironmentWait(
+        all.get(0),
+        tree.root(),
+        firstEnvironmentId,
+        2,
+        firstRepresentativeCreatedAt,
+        "CHAT",
+        chatId.toString());
+    assertEnvironmentWait(all.get(1), second.threadId(), firstEnvironmentId, 1, null, "CHAT", null);
+    assertEnvironmentWait(all.get(2), third.threadId(), secondEnvironmentId, 1, null, "CHAT", null);
+    assertEquals(
+        Set.of(tree.root().toString(), second.threadId().toString(), third.threadId().toString()),
+        all.stream().map(InteractionDTO::getRootThreadId).collect(Collectors.toSet()));
+    assertFalse(
+        all.stream()
+            .anyMatch(item -> ownerless.threadId().toString().equals(item.getRootThreadId())));
+
+    // total 是同过滤条件下的真实可见分组数，而不是首页长度。
+    InteractionPageDTO firstPage = queryService.listInteractions(null, null, 2);
+    assertEquals(2, firstPage.getItems().size());
+    assertEquals(3, firstPage.getTotal());
+    assertNotNull(firstPage.getNextCursor());
+    InteractionPageDTO secondPage =
+        queryService.listInteractions(null, firstPage.getNextCursor(), 2);
+    assertEquals(1, secondPage.getItems().size());
+    assertEquals(3, secondPage.getTotal());
+    assertNull(secondPage.getNextCursor());
+
+    // 环境上线：R1/R2 的待领取事实立即消失（无写事件），只剩另一环境的分组。
+    markEnvironmentReady(firstEnvironmentId, UUID.randomUUID());
+    assertFalse(
+        threadController
+            .getSnapshot(second.threadId().toString())
+            .getData()
+            .getToolInvocations()
+            .getFirst()
+            .isWaitingForEnvironment());
+    List<InteractionDTO> afterReady = drain(null, 10);
+    assertEquals(1, afterReady.size());
+    assertEnvironmentWait(
+        afterReady.get(0), third.threadId(), secondEnvironmentId, 1, null, "CHAT", null);
+    assertEquals(
+        jdbc.queryForObject(
+            "select lease_until from environment_connection where environment_id = ?",
+            (rs, row) -> rs.getTimestamp(1).toInstant(),
+            firstEnvironmentId),
+        queryService.listInteractions(null, null, 10).getFreshnessAt());
+    assertFalse(
+        runtime
+            .listEnvironmentToolWaits(List.of(firstInvocationId))
+            .getFirst()
+            .waitingForEnvironment());
+
+    // 模拟已过期的租约：不写任何等待行，分组按原始事实重新出现。
+    markEnvironmentOffline(firstEnvironmentId);
+    assertEquals(3, drain(null, 10).size());
+  }
+
+  /**
+   * 环境等待只反映「待领取」事实：未到期的 Work、已签发执行租约的 Work、无环境亲和性的 server-side TOOL 都不进入投影；人工等待与环境等待按共享 {@code
+   * (createdAt, id)} 归并，环境等待不冒充可操作 interaction。
+   */
+  @Test
+  void environmentWaitExcludesNonWaitingFactsAndMergesWithManualInteractions() {
+    UUID environmentId = bindEnvironment("wa-env-due-" + UUID.randomUUID());
+    UUID leasedEnvironmentId = bindEnvironment("wa-env-leased-" + UUID.randomUUID());
+
+    // 到期待领取：唯一真正进入投影的环境等待分组。
+    Seed due = seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(environmentId));
+    bindChat(due.sessionId());
+
+    // 未到期：同一环境的 READY TOOL 调用已被安排到未来，不属于「现在可领取」。
+    Seed future =
+        seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(environmentId));
+    bindChat(future.sessionId());
+    forceFutureAvailable(future.invocationId());
+
+    // 已签发执行租约：节点在环境在线时领取了该 Work；随后环境离线，但有效执行租约仍阻止二次投递（也不呈现环境等待）。
+    Seed leased =
+        seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(leasedEnvironmentId));
+    bindChat(leased.sessionId());
+    UUID ownerNodeId = UUID.randomUUID();
+    markEnvironmentReady(leasedEnvironmentId, ownerNodeId);
+    claimToolWork(leased.invocationId(), ownerNodeId);
+    markEnvironmentOffline(leasedEnvironmentId);
+
+    // server-side TOOL：没有冻结环境亲和性，不进入环境等待。
+    Seed serverSide = seedStandaloneRoot(false, "{}", false, false, true);
+    bindChat(serverSide.sessionId());
+
+    // 人工等待与环境等待共享同一键域：环境等待用组内最早调用坐标参与排序。
+    Seed manual = seedStandaloneRoot(true, QUESTIONNAIRE, true, false, false);
+    UUID manualChatId = bindChat(manual.sessionId());
+
+    List<InteractionDTO> items = drain(null, 1);
+
+    assertEquals(
+        2, items.size(), "future-due, leased and server-side facts must not enter the projection");
+    InteractionDTO environmentItem = items.get(0);
+    assertEnvironmentWait(
+        environmentItem,
+        due.threadId(),
+        environmentId,
+        1,
+        toolInvocation(due.invocationId()).createdAt(),
+        "CHAT",
+        null);
+    assertEquals(
+        manual.invocationId().toString(),
+        items.get(1).getInteractionId(),
+        "the manual input keeps its operable interaction id");
+    assertEquals("INPUT", items.get(1).getType());
+    assertEquals("CHAT", items.get(1).getOwner().getType());
+    assertEquals(manualChatId.toString(), items.get(1).getOwner().getChatId());
+  }
+
+  /** 环境等待分组的公共断言：聚合身份、展示名、计数、排序代表、归属，且绝不冒充可操作 interaction。 */
+  private void assertEnvironmentWait(
+      InteractionDTO item,
+      UUID expectedRootThreadId,
+      UUID expectedEnvironmentId,
+      int expectedWaitingCount,
+      Instant expectedCreatedAt,
+      String expectedOwnerType,
+      String expectedChatId) {
+    assertEquals("ENVIRONMENT_WAIT", item.getType());
+    assertEquals(expectedEnvironmentId.toString(), item.getEnvironmentId());
+    assertEquals(expectedWaitingCount, item.getWaitingCount().intValue());
+    assertEquals(expectedRootThreadId.toString(), item.getRootThreadId());
+    assertEquals(expectedOwnerType, item.getOwner().getType());
+    if (expectedChatId != null) {
+      assertEquals(expectedChatId, item.getOwner().getChatId());
+    }
+    if (expectedCreatedAt != null) {
+      assertEquals(expectedCreatedAt, item.getCreateTime());
+    }
+    assertNull(item.getInteractionId());
+    assertNull(item.getStatus());
+    assertNull(item.getThreadId());
+    assertNull(item.getSessionId());
+    assertNotNull(item.getEnvironmentName());
+  }
+
   // ------------------------------------------------------------------ fixture
+
+  /** 在一个既有 Thread 上挂一个 READY TOOL 调用并冻结环境亲和性（环境等待投影的原始事实）。 */
+  private UUID attachEnvironmentWait(UUID threadId, EnvironmentId environmentId) {
+    return store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          return attachWaiting(tx, thread, false, "{}", false, true, nextTime(), environmentId);
+        });
+  }
+
+  /** 注册一个稳定 Environment 并返回其 id（环境等待投影按 id 从注册表补齐展示名）。 */
+  private UUID bindEnvironment(String name) {
+    UUID environmentId = UUID.randomUUID();
+    jdbc.update(
+        "insert into environment (id, name, registration_token) values (?, ?, ?)",
+        environmentId,
+        name,
+        "token-" + environmentId);
+    return environmentId;
+  }
+
+  /** 让环境处于在线：READY 且租约未过期，承接节点为 {@code ownerNodeId}。 */
+  private void markEnvironmentReady(UUID environmentId, UUID ownerNodeId) {
+    jdbc.update(
+        """
+        insert into environment_connection (
+            environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until
+        ) values (?, ?, ?, 'READY', '{}'::jsonb, statement_timestamp(),
+            statement_timestamp() + interval '1 hour')
+        on conflict (environment_id) do update
+        set owner_node_id = excluded.owner_node_id,
+            lease_token = excluded.lease_token,
+            status = excluded.status,
+            runtime_info = excluded.runtime_info,
+            last_seen_at = excluded.last_seen_at,
+            lease_until = excluded.lease_until
+        """,
+        environmentId,
+        ownerNodeId,
+        UUID.randomUUID());
+  }
+
+  /** 让环境的 READY 连接租约自然过期（只改租约，不产生任何等待行写事件）。 */
+  private void markEnvironmentOffline(UUID environmentId) {
+    jdbc.update(
+        """
+        update environment_connection
+        set lease_until = statement_timestamp() - interval '1 second',
+            last_seen_at = statement_timestamp() - interval '2 seconds'
+        where environment_id = ?
+        """,
+        environmentId);
+  }
+
+  /** 把 TOOL Work 的 due 时间推进到未来，构造「尚未到期」事实。 */
+  private void forceFutureAvailable(UUID invocationId) {
+    jdbc.update(
+        """
+        update harness_work
+        set available_at = statement_timestamp() + interval '1 hour'
+        where target_type = 'TOOL' and target_id = ?
+        """,
+        invocationId);
+  }
+
+  /** 由持有该环境 READY 连接租约的节点领取 TOOL Work，签发有效期远长于测试跨度的执行租约。 */
+  private void claimToolWork(UUID invocationId, UUID ownerNodeId) {
+    ClaimedWork claimed =
+        store
+            .transaction(
+                tx ->
+                    tx.claimNextWork(
+                        WorkTargetType.TOOL,
+                        nextTime(),
+                        "lease-" + invocationId,
+                        Duration.ofMinutes(30),
+                        ownerNodeId))
+            .orElseThrow();
+    assertEquals(invocationId, claimed.target().id());
+  }
 
   /** 用真实 Runtime 接受 R -> {A,B} 且 A -> C 的可执行树；children 携带真实 join（parent/child 订阅关系）。 */
   private Tree buildTree() {
@@ -567,6 +852,18 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
       boolean freeze,
       boolean yoloEnabled,
       boolean requestToolWork) {
+    return seedStandaloneRoot(
+        humanInput, argumentsJson, freeze, yoloEnabled, requestToolWork, null);
+  }
+
+  /** 同上，但可冻结 TOOL Work 的环境亲和性：用于构造「环境等待」原始事实。 */
+  private Seed seedStandaloneRoot(
+      boolean humanInput,
+      String argumentsJson,
+      boolean freeze,
+      boolean yoloEnabled,
+      boolean requestToolWork,
+      EnvironmentId requiredEnvironmentId) {
     return store.transaction(
         tx -> {
           Instant now = nextTime();
@@ -592,7 +889,15 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                   now);
           tx.insertThread(thread);
           UUID invocationId =
-              attachWaiting(tx, thread, humanInput, argumentsJson, freeze, requestToolWork, now);
+              attachWaiting(
+                  tx,
+                  thread,
+                  humanInput,
+                  argumentsJson,
+                  freeze,
+                  requestToolWork,
+                  now,
+                  requiredEnvironmentId);
           return new Seed(threadId, sessionId, invocationId);
         });
   }
@@ -614,6 +919,18 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
       boolean freeze,
       boolean requestToolWork,
       Instant now) {
+    return attachWaiting(tx, thread, humanInput, argumentsJson, freeze, requestToolWork, now, null);
+  }
+
+  private UUID attachWaiting(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      boolean humanInput,
+      String argumentsJson,
+      boolean freeze,
+      boolean requestToolWork,
+      Instant now,
+      EnvironmentId requiredEnvironmentId) {
     UUID threadId = thread.id();
     UUID sessionId = thread.sessionId();
     UUID turnStartEntryId = tx.nextId();
@@ -698,7 +1015,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     }
     tx.updateThread(afterTurnStart.advanceHead(assistantEntryId, now));
     if (requestToolWork) {
-      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), now);
+      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), now, requiredEnvironmentId);
     }
     return toolId;
   }

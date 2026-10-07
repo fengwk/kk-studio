@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -19,15 +20,25 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 
 class InMemoryWorkTest extends HarnessStoreWorkContract {
 
   /** 内存实现的权威时间域：调用方传入的 now 同时就是它的时钟；契约测试统一用这个固定「此刻」。 */
   private static final Instant CLOCK = Instant.ofEpochMilli(1_700_000_000_000L);
 
+  /** 当前持有有效 READY 连接租约的环境；由契约 hook 改写，供读取投影判定环境是否上线。 */
+  private final Set<UUID> readyEnvironments = new HashSet<>();
+
   @Override
   HarnessStore createStore() {
-    return new InMemoryHarnessStore();
+    readyEnvironments.clear();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    store.setEnvironmentReadyLeasePredicate(
+        (environmentId, now) -> readyEnvironments.contains(environmentId.value()));
+    return store;
   }
 
   @Override
@@ -44,6 +55,21 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
   @Override
   protected void forceWorkAvailable(WorkTarget target) {
     ((InMemoryHarnessStore) store).forceAvailableAt(target, Instant.EPOCH);
+  }
+
+  @Override
+  protected void forceWorkAvailableAfter(WorkTarget target, Duration delay) {
+    ((InMemoryHarnessStore) store).forceAvailableAt(target, CLOCK.plus(delay));
+  }
+
+  @Override
+  protected void seedReadyEnvironmentLease(EnvironmentId environmentId) {
+    readyEnvironments.add(environmentId.value());
+  }
+
+  @Override
+  protected void expireReadyEnvironmentLease(EnvironmentId environmentId) {
+    readyEnvironments.remove(environmentId.value());
   }
 
   /**

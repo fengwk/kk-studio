@@ -4,17 +4,29 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
+import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -24,18 +36,18 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 统一待处理交互查询用例。
+ * 统一待处理交互查询用例：把 Harness 的三种只读等待事实投影为同一稳定 keyset 分页列表。
  *
- * <p>事实源只有 Harness 两种等待状态：{@code WAITING_INPUT} 与 {@code WAITING_APPROVAL} 的
- * Invocation，不复制待办、不按状态拆成两次查询。产品 owner 与根由服务端沿来源 Thread 的不可变祖先链解析：先用 {@link
- * HarnessRuntime#findAncestorChain} 定位真实执行根，再读取根的 Session（Chat）或根 Thread 绑定（Issue+Agent），因此没有直接
- * 产品绑定的后代任务照常可见。两者都无法解析的 Thread（内部委派且无根归属）不对外暴露。当前沿用单用户认证边界，不伪造用户表，也不再接受客户端传入 owner/身份。
+ * <p>事实源只有 Harness：{@code WAITING_INPUT} / {@code WAITING_APPROVAL} 的 ToolInvocation（人工等待），以及
+ * {@link HarnessRuntime#listPendingEnvironmentWaits} 提供的「READY 调用 + 到期且无有效执行 lease 的 TOOL Work +
+ * 所需环境无有效 READY 连接租约」聚合（环境等待）。两者都不复制待办台账、不落地持久等待状态。
  *
- * <p>分页按 {@code (createdAt, id)} keyset 稳定升序。因为待处理行需要先按归属解析、可选按根过滤再对外暴露，本用例必须持续向后扫描：每轮按剩余额度取原始行，用
- * 本页最后一行推进游标，直到凑满 {@code limit} 条可见项或源已耗尽，绝不因为被过滤项而提前截断返回。
+ * <p>产品 owner 与根由服务端沿来源 Thread 的不可变祖先链解析：人工等待先用 {@link HarnessRuntime#findAncestorChain}
+ * 定位真实执行根，环境等待的根 已由 storage 递归解析；随后读取根的 Session（Chat）或根 Thread
+ * 绑定（Issue+Agent）。两者都无法解析的根不对外暴露，绝不信任客户端传入归属。
  *
- * <p>{@code total} 是同一过滤条件下真实可见的待处理总数：复用同一 keyset 查询与同一归属/根过滤，按 {@link #COUNT_PAGE_SIZE}
- * 分页扫描源行后计数，既不把首页长度当成总数，也不把待办复制成第二份台账，更不一次性读回全部 Invocation。
+ * <p>两种来源共享同一 {@code (createdAt, id)} 排序键域：人工等待用调用自身坐标，环境等待用组内最早调用的坐标。本用例对两条升序流做 k 路归并，因此可以跨来源、
+ * 跨页稳定分页且不重复分组，{@code limit} 只截断可见项；{@code total} 在同过滤条件下分类计数两条流，绝不把首页长度当总数。
  */
 @Service
 public class InteractionQueryService {
@@ -43,18 +55,32 @@ public class InteractionQueryService {
   /** 计数扫描的分页大小：total 只多付出一次有界扫描，绝不使用无界 limit 读回全部源行。 */
   static final int COUNT_PAGE_SIZE = 200;
 
+  private static final String TYPE_INPUT = "INPUT";
+  private static final String TYPE_APPROVAL = "APPROVAL";
+  private static final String TYPE_ENVIRONMENT_WAIT = "ENVIRONMENT_WAIT";
+
   private final ChatSessionRepository chatSessionRepository;
+  private final ChatRepository chatRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final IssueRepository issueRepository;
+  private final EnvironmentRepository environmentRepository;
   private final InteractionRootResolver rootResolver;
 
   public InteractionQueryService(
       ChatSessionRepository chatSessionRepository,
+      ChatRepository chatRepository,
       IssueAgentThreadRepository issueAgentThreadRepository,
+      IssueRepository issueRepository,
+      EnvironmentRepository environmentRepository,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
+    this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.issueAgentThreadRepository =
         Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
+    this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.rootResolver = new InteractionRootResolver(runtimes);
   }
 
@@ -62,8 +88,8 @@ public class InteractionQueryService {
    * 返回一页待处理 Interaction；{@code rootThreadId} 为 null 时不按根过滤，非 null 时必须是已存在的执行根（不存在为 404、非根为
    * 400）。{@code cursor} 为空表示首屏，{@code limit} 必须为正（调用方已在边界校验上限）。
    *
-   * <p>{@code nextCursor} 只定位本页最后一条「已消费的原始行」，因此即使整页都被归属过滤/根过滤后为空，客户端回传同一游标也能继续向前翻页而不 漏项、不空转；源耗尽时返回
-   * {@code null}。
+   * <p>{@code nextCursor} 只定位本页最后一条「已消费的原始行/分组代表」，因此即使整页都被归属过滤/根过滤后为空，客户端回传同一游标也能继续向前翻页而不 漏项、不空转；
+   * 两条流都耗尽时返回 {@code null}。
    */
   public InteractionPageDTO listInteractions(UUID rootThreadId, String cursor, int limit) {
     if (limit <= 0) {
@@ -74,81 +100,140 @@ public class InteractionQueryService {
       requireCanonicalRoot(rootThreadId);
     }
     InteractionCursor decoded = InteractionCursor.parse(cursor);
-    Instant afterCreatedAt = decoded.createdAt();
-    UUID afterId = decoded.id();
+    QueryContext context = new QueryContext(runtime, rootThreadId);
     List<InteractionDTO> items = new ArrayList<>(limit);
-    // 同一执行树可能贡献多行、跨多轮扫描：按来源 Thread 缓存根、按根缓存 owner，避免重复解析与重复快照。
-    Map<UUID, UUID> rootBySourceThread = new HashMap<>();
-    Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
-    boolean exhausted = false;
+    Instant consumedCreatedAt = decoded.createdAt();
+    UUID consumedId = decoded.id();
+    ArrayDeque<PendingInteraction> manualQueue = new ArrayDeque<>();
+    ArrayDeque<PendingEnvironmentWait> environmentQueue = new ArrayDeque<>();
+    Instant manualCursorCreatedAt = decoded.createdAt();
+    UUID manualCursorId = decoded.id();
+    Instant environmentCursorCreatedAt = decoded.createdAt();
+    UUID environmentCursorId = decoded.id();
+    boolean manualHasMore = true;
+    boolean environmentHasMore = true;
     while (items.size() < limit) {
-      PendingInteractionPage page =
-          runtime.listPendingInteractions(afterCreatedAt, afterId, limit - items.size());
-      List<PendingInteraction> rows = page.interactions();
-      if (rows.isEmpty()) {
-        exhausted = true;
-        break;
-      }
-      PendingInteraction lastConsumed = rows.get(rows.size() - 1);
-      afterCreatedAt = lastConsumed.createdAt();
-      afterId = lastConsumed.invocationId();
-      for (PendingInteraction row : rows) {
-        ResolvedRoot resolved =
-            resolveRoot(runtime, row, rootThreadId, rootBySourceThread, ownerByRootThread);
-        if (resolved == null) {
-          continue;
+      int remaining = limit - items.size();
+      if (manualQueue.isEmpty() && manualHasMore) {
+        PendingInteractionPage page =
+            runtime.listPendingInteractions(manualCursorCreatedAt, manualCursorId, remaining);
+        manualHasMore = page.hasMore();
+        if (!page.interactions().isEmpty()) {
+          manualQueue.addAll(page.interactions());
+          PendingInteraction last = page.interactions().get(page.interactions().size() - 1);
+          manualCursorCreatedAt = last.createdAt();
+          manualCursorId = last.invocationId();
         }
-        items.add(toDto(row, resolved));
       }
-      if (!page.hasMore()) {
-        exhausted = true;
+      if (environmentQueue.isEmpty() && environmentHasMore) {
+        PendingEnvironmentWaitPage page =
+            runtime.listPendingEnvironmentWaits(
+                environmentCursorCreatedAt, environmentCursorId, remaining);
+        environmentHasMore = page.hasMore();
+        if (!page.waits().isEmpty()) {
+          environmentQueue.addAll(page.waits());
+          PendingEnvironmentWait last = page.waits().get(page.waits().size() - 1);
+          environmentCursorCreatedAt = last.representativeCreatedAt();
+          environmentCursorId = last.representativeInvocationId();
+        }
+      }
+      PendingInteraction manual = manualQueue.peek();
+      PendingEnvironmentWait environment = environmentQueue.peek();
+      if (manual == null && environment == null) {
         break;
+      }
+      if (environment == null
+          || (manual != null
+              && compare(
+                      manual.createdAt(),
+                      manual.invocationId(),
+                      environment.representativeCreatedAt(),
+                      environment.representativeInvocationId())
+                  <= 0)) {
+        manualQueue.poll();
+        consumedCreatedAt = manual.createdAt();
+        consumedId = manual.invocationId();
+        ResolvedRoot resolved = context.resolveManual(manual);
+        if (resolved != null) {
+          items.add(toManualDto(manual, resolved));
+        }
+      } else {
+        environmentQueue.poll();
+        consumedCreatedAt = environment.representativeCreatedAt();
+        consumedId = environment.representativeInvocationId();
+        ResolvedRoot resolved = context.resolveEnvironment(environment);
+        if (resolved != null) {
+          items.add(toEnvironmentDto(environment, resolved, context));
+        }
       }
     }
+    boolean moreRemaining =
+        !manualQueue.isEmpty()
+            || !environmentQueue.isEmpty()
+            || manualHasMore
+            || environmentHasMore;
     InteractionPageDTO dto = new InteractionPageDTO();
     dto.setItems(items);
-    dto.setNextCursor(exhausted ? null : InteractionCursor.encode(afterCreatedAt, afterId));
-    dto.setTotal(
-        countVisibleInteractions(runtime, rootThreadId, rootBySourceThread, ownerByRootThread));
+    dto.setNextCursor(
+        moreRemaining ? InteractionCursor.encode(consumedCreatedAt, consumedId) : null);
+    dto.setTotal(countVisibleInteractions(context));
+    dto.setFreshnessAt(context.runtime().findNextEnvironmentWaitChange().orElse(null));
     return dto;
   }
 
   /**
-   * 同一过滤条件下真实可见的待处理总数。
-   *
-   * <p>复用列表的 keyset 查询、同一份根/owner 解析过滤与同一份请求级解析缓存，从首屏游标按 {@link #COUNT_PAGE_SIZE}
-   * 逐页推进到源耗尽后计数；因此既不需要客户端台账，也不会重复解析根或退化成 N+1 回读。
+   * 同一过滤条件下真实可见的待处理总数：对人工等待与环境等待两条流复用同一归属/根过滤与同一份请求级解析缓存，从首屏游标各分页扫描到耗尽后计数。因此既不把首页长度当总数，
+   * 也不把待办复制成第二份台账，更不一次性读回全部源行。
    */
-  private int countVisibleInteractions(
-      HarnessRuntime runtime,
-      UUID filterRootThreadId,
-      Map<UUID, UUID> rootBySourceThread,
-      Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread) {
-    InteractionCursor start = InteractionCursor.start();
-    Instant afterCreatedAt = start.createdAt();
-    UUID afterId = start.id();
+  private int countVisibleInteractions(QueryContext context) {
     int total = 0;
+    InteractionCursor start = InteractionCursor.start();
+    Instant manualCursorCreatedAt = start.createdAt();
+    UUID manualCursorId = start.id();
     while (true) {
       PendingInteractionPage page =
-          runtime.listPendingInteractions(afterCreatedAt, afterId, COUNT_PAGE_SIZE);
-      List<PendingInteraction> rows = page.interactions();
-      if (rows.isEmpty()) {
-        return total;
+          context
+              .runtime()
+              .listPendingInteractions(manualCursorCreatedAt, manualCursorId, COUNT_PAGE_SIZE);
+      if (page.interactions().isEmpty()) {
+        break;
       }
-      PendingInteraction lastConsumed = rows.get(rows.size() - 1);
-      afterCreatedAt = lastConsumed.createdAt();
-      afterId = lastConsumed.invocationId();
-      for (PendingInteraction row : rows) {
-        ResolvedRoot resolved =
-            resolveRoot(runtime, row, filterRootThreadId, rootBySourceThread, ownerByRootThread);
-        if (resolved != null) {
+      for (PendingInteraction row : page.interactions()) {
+        if (context.resolveManual(row) != null) {
           total++;
         }
       }
+      PendingInteraction last = page.interactions().get(page.interactions().size() - 1);
+      manualCursorCreatedAt = last.createdAt();
+      manualCursorId = last.invocationId();
       if (!page.hasMore()) {
-        return total;
+        break;
       }
     }
+    Instant environmentCursorCreatedAt = start.createdAt();
+    UUID environmentCursorId = start.id();
+    while (true) {
+      PendingEnvironmentWaitPage page =
+          context
+              .runtime()
+              .listPendingEnvironmentWaits(
+                  environmentCursorCreatedAt, environmentCursorId, COUNT_PAGE_SIZE);
+      if (page.waits().isEmpty()) {
+        break;
+      }
+      for (PendingEnvironmentWait row : page.waits()) {
+        if (context.resolveEnvironment(row) != null) {
+          total++;
+        }
+      }
+      PendingEnvironmentWait last = page.waits().get(page.waits().size() - 1);
+      environmentCursorCreatedAt = last.representativeCreatedAt();
+      environmentCursorId = last.representativeInvocationId();
+      if (!page.hasMore()) {
+        break;
+      }
+    }
+    return total;
   }
 
   /** 显式根过滤值必须是 canonical 执行根：共用根解析对不存在的 Thread 抛 404，对子 Thread（自身不是链末位根）判为非法参数。 */
@@ -158,58 +243,19 @@ public class InteractionQueryService {
     }
   }
 
-  /** 沿来源不可变祖先链解析真实根、可选根过滤与产品 owner；根无产品归属时返回 null，调用方据此跳过不可暴露的行。 */
-  private ResolvedRoot resolveRoot(
-      HarnessRuntime runtime,
-      PendingInteraction row,
-      UUID filterRootThreadId,
-      Map<UUID, UUID> rootBySourceThread,
-      Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread) {
-    UUID rootThreadId =
-        rootBySourceThread.computeIfAbsent(row.threadId(), rootResolver::requireRootId);
-    if (filterRootThreadId != null && !filterRootThreadId.equals(rootThreadId)) {
-      return null;
+  private static int compare(
+      Instant leftCreatedAt, UUID leftId, Instant rightCreatedAt, UUID rightId) {
+    int timeComparison = leftCreatedAt.compareTo(rightCreatedAt);
+    if (timeComparison != 0) {
+      return timeComparison;
     }
-    Optional<InteractionOwnerDTO> owner =
-        ownerByRootThread.computeIfAbsent(rootThreadId, id -> resolveOwner(runtime, id, row));
-    if (owner.isEmpty()) {
-      return null;
-    }
-    return new ResolvedRoot(rootThreadId, owner.get());
+    return UuidOrder.COMPARATOR.compare(leftId, rightId);
   }
 
-  /**
-   * 产品 owner 只按根解析：根 Session 命中 {@code chat_session} 即为 Chat；根 Thread 命中 {@code
-   * project_issue_agent_thread} 即为 Issue+Agent。来源自身即根时直接复用行内 Session，后代来源才回读根快照取得根 Session。
-   */
-  private Optional<InteractionOwnerDTO> resolveOwner(
-      HarnessRuntime runtime, UUID rootThreadId, PendingInteraction row) {
-    UUID rootSessionId;
-    if (rootThreadId.equals(row.threadId())) {
-      rootSessionId = row.sessionId();
-    } else {
-      rootSessionId = runtime.getThreadSnapshot(rootThreadId).thread().sessionId();
-    }
-    ChatSession chatSession = chatSessionRepository.findBySessionId(rootSessionId);
-    if (chatSession != null) {
-      InteractionOwnerDTO owner = new InteractionOwnerDTO();
-      owner.setType("CHAT");
-      owner.setChatId(chatSession.chatId().toString());
-      return Optional.of(owner);
-    }
-    IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(rootThreadId);
-    if (binding != null) {
-      InteractionOwnerDTO owner = new InteractionOwnerDTO();
-      owner.setType("ISSUE_AGENT");
-      owner.setIssueId(binding.issueId().toString());
-      owner.setAgentName(binding.agentName());
-      return Optional.of(owner);
-    }
-    return Optional.empty();
-  }
-
-  private static InteractionDTO toDto(PendingInteraction interaction, ResolvedRoot resolved) {
+  private static InteractionDTO toManualDto(PendingInteraction interaction, ResolvedRoot resolved) {
     InteractionDTO dto = new InteractionDTO();
+    dto.setType(
+        interaction.status() == ToolInvocationStatus.WAITING_APPROVAL ? TYPE_APPROVAL : TYPE_INPUT);
     dto.setInteractionId(interaction.invocationId().toString());
     dto.setStatus(interaction.status().name());
     dto.setThreadId(interaction.threadId().toString());
@@ -222,6 +268,159 @@ public class InteractionQueryService {
     dto.setApprovalJson(interaction.approvalJson());
     dto.setCreateTime(interaction.createdAt());
     return dto;
+  }
+
+  private InteractionDTO toEnvironmentDto(
+      PendingEnvironmentWait environmentWait, ResolvedRoot resolved, QueryContext context) {
+    InteractionDTO dto = new InteractionDTO();
+    dto.setType(TYPE_ENVIRONMENT_WAIT);
+    dto.setRootThreadId(resolved.rootThreadId().toString());
+    dto.setOwner(resolved.owner());
+    String environmentId = environmentWait.environmentId().value().toString();
+    dto.setEnvironmentId(environmentId);
+    dto.setEnvironmentName(context.resolveEnvironmentName(environmentId));
+    dto.setWaitingCount(environmentWait.waitingCount());
+    dto.setCreateTime(environmentWait.representativeCreatedAt());
+    return dto;
+  }
+
+  /** 请求级解析上下文：按来源 Thread 缓存根、按根缓存 owner、按环境缓存展示名，避免跨来源重复解析与重复快照。 */
+  private final class QueryContext {
+
+    private final HarnessRuntime runtime;
+    private final UUID filterRootThreadId;
+    private final Map<UUID, UUID> rootBySourceThread = new HashMap<>();
+    private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
+    private final Map<UUID, ThreadSnapshot> rootSnapshotByRootThread = new HashMap<>();
+    private final Map<UUID, String> chatTitleById = new HashMap<>();
+    private final Map<UUID, String> issueTitleById = new HashMap<>();
+    private final Map<String, String> environmentNameById = new HashMap<>();
+
+    private QueryContext(HarnessRuntime runtime, UUID filterRootThreadId) {
+      this.runtime = runtime;
+      this.filterRootThreadId = filterRootThreadId;
+    }
+
+    HarnessRuntime runtime() {
+      return runtime;
+    }
+
+    /** 人工等待：沿来源不可变祖先链解析真实根、可选根过滤与产品 owner；根无产品归属时返回 null。 */
+    ResolvedRoot resolveManual(PendingInteraction row) {
+      UUID rootThreadId =
+          rootBySourceThread.computeIfAbsent(row.threadId(), rootResolver::requireRootId);
+      if (filterRootThreadId != null && !filterRootThreadId.equals(rootThreadId)) {
+        return null;
+      }
+      Optional<InteractionOwnerDTO> owner =
+          ownerByRootThread.computeIfAbsent(rootThreadId, id -> resolveOwnerForManual(id, row));
+      return owner.map(value -> new ResolvedRoot(rootThreadId, value)).orElse(null);
+    }
+
+    /** 环境等待：根已由 storage 递归解析，这里只做根过滤与 owner 解析。 */
+    ResolvedRoot resolveEnvironment(PendingEnvironmentWait row) {
+      UUID rootThreadId = row.rootThreadId();
+      if (filterRootThreadId != null && !filterRootThreadId.equals(rootThreadId)) {
+        return null;
+      }
+      Optional<InteractionOwnerDTO> owner =
+          ownerByRootThread.computeIfAbsent(rootThreadId, this::resolveOwnerForRoot);
+      return owner.map(value -> new ResolvedRoot(rootThreadId, value)).orElse(null);
+    }
+
+    /**
+     * 产品 owner 只按根解析：根 Session 命中 {@code chat_session} 即为 Chat；根 Thread 命中 {@code
+     * project_issue_agent_thread} 即为 Issue+Agent。来源自身即根时直接复用行内 Session，后代来源才回读根快照取得根 Session。
+     */
+    private Optional<InteractionOwnerDTO> resolveOwnerForManual(
+        UUID rootThreadId, PendingInteraction row) {
+      UUID rootSessionId =
+          rootThreadId.equals(row.threadId()) ? row.sessionId() : rootSessionId(rootThreadId);
+      return ownerForRootSession(rootThreadId, rootSessionId);
+    }
+
+    /** 环境等待的来源可能位于任意深度，这里统一回读根快照取得根 Session 再解析 owner。 */
+    private Optional<InteractionOwnerDTO> resolveOwnerForRoot(UUID rootThreadId) {
+      return ownerForRootSession(rootThreadId, rootSessionId(rootThreadId));
+    }
+
+    /** 每个根只回读一次快照：根 Session 用于归属解析，根名称用于展示；后续条目直接命中缓存。 */
+    private UUID rootSessionId(UUID rootThreadId) {
+      return rootSnapshot(rootThreadId).thread().sessionId();
+    }
+
+    private ThreadSnapshot rootSnapshot(UUID rootThreadId) {
+      return rootSnapshotByRootThread.computeIfAbsent(rootThreadId, runtime::getThreadSnapshot);
+    }
+
+    private String rootThreadName(UUID rootThreadId) {
+      return rootSnapshot(rootThreadId).thread().name();
+    }
+
+    private Optional<InteractionOwnerDTO> ownerForRootSession(
+        UUID rootThreadId, UUID rootSessionId) {
+      ChatSession chatSession = chatSessionRepository.findBySessionId(rootSessionId);
+      if (chatSession != null) {
+        InteractionOwnerDTO owner = new InteractionOwnerDTO();
+        owner.setType("CHAT");
+        owner.setChatId(chatSession.chatId().toString());
+        owner.setChatTitle(chatTitle(chatSession.chatId()));
+        owner.setRootThreadName(rootThreadName(rootThreadId));
+        return Optional.of(owner);
+      }
+      IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(rootThreadId);
+      if (binding != null) {
+        InteractionOwnerDTO owner = new InteractionOwnerDTO();
+        owner.setType("ISSUE_AGENT");
+        owner.setIssueId(binding.issueId().toString());
+        owner.setIssueTitle(issueTitle(binding.issueId()));
+        owner.setAgentName(binding.agentName());
+        owner.setRootThreadName(rootThreadName(rootThreadId));
+        return Optional.of(owner);
+      }
+      return Optional.empty();
+    }
+
+    /** 展示名只按产品身份从原仓储补齐一次（按请求缓存），绝不逐卡回读。 */
+    private String chatTitle(UUID chatId) {
+      String cached = chatTitleById.get(chatId);
+      if (cached != null) {
+        return cached;
+      }
+      Chat chat = chatRepository.getById(chatId);
+      String title = chat == null ? null : chat.getTitle();
+      if (title != null) {
+        chatTitleById.put(chatId, title);
+      }
+      return title;
+    }
+
+    private String issueTitle(UUID issueId) {
+      String cached = issueTitleById.get(issueId);
+      if (cached != null) {
+        return cached;
+      }
+      Issue issue = issueRepository.getById(issueId);
+      String title = issue == null ? null : issue.getTitle();
+      if (title != null) {
+        issueTitleById.put(issueId, title);
+      }
+      return title;
+    }
+
+    /** 环境展示名只按环境 id 从注册表补齐一次（按页去重），绝不按当前 composer 环境猜测，也不逐卡快照。 */
+    private String resolveEnvironmentName(String environmentId) {
+      return environmentNameById.computeIfAbsent(
+          environmentId,
+          id -> {
+            Environment environment = environmentRepository.getById(UUID.fromString(id));
+            if (environment == null) {
+              throw new IllegalStateException(
+                  "waiting environment registry entry does not exist: " + id);
+            }
+            return environment.getName();
+          });
+    }
   }
 
   /** 已解析的来源投影：真实根与其产品 owner。 */

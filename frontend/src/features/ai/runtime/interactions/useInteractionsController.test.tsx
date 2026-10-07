@@ -30,12 +30,15 @@ describe('useInteractionsController', () => {
   })
 
   const mockItem1: InteractionDTO = {
+    type: 'INPUT',
+    environmentId: null, environmentName: null, waitingCount: null,
     interactionId: 'int-1',
     status: 'WAITING_INPUT',
     threadId: 'th-1',
     rootThreadId: 'th-1',
     sessionId: 'sess-1',
-    owner: { type: 'CHAT', chatId: 'chat-1', issueId: null, agentName: null },
+    owner: { type: 'CHAT', chatId: 'chat-1', chatTitle: 'Chat',
+      issueId: null, issueTitle: null, agentName: null, rootThreadName: 'Root' },
     toolCallId: 'call-1',
     toolName: 'ask_user',
     argumentsJson: '{"questions":[]}',
@@ -44,12 +47,15 @@ describe('useInteractionsController', () => {
   }
 
   const mockItem2: InteractionDTO = {
+    type: 'APPROVAL',
+    environmentId: null, environmentName: null, waitingCount: null,
     interactionId: 'int-2',
     status: 'WAITING_APPROVAL',
     threadId: 'th-2',
     rootThreadId: 'th-2',
     sessionId: 'sess-2',
-    owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'iss-1', agentName: 'developer' },
+    owner: { type: 'ISSUE_AGENT', chatId: null, chatTitle: null,
+      issueId: 'iss-1', issueTitle: 'Issue', agentName: 'developer', rootThreadName: 'Root' },
     toolCallId: 'call-2',
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
@@ -616,6 +622,106 @@ describe('useInteractionsController', () => {
         })
       }
       expect(listSpy).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 环境等待只带 (真实执行根, 冻结环境) 聚合身份，跨页必须按该身份去重；distinct 环境仍是独立条目。
+  const environmentWait = (environmentId: string, waitingCount = 1): InteractionDTO => ({
+    type: 'ENVIRONMENT_WAIT',
+    rootThreadId: 'th-1',
+    owner: {
+      type: 'CHAT',
+      chatId: 'chat-1',
+      chatTitle: 'Chat',
+      issueId: null,
+      issueTitle: null,
+      agentName: null,
+      rootThreadName: 'Root',
+    },
+    createTime: '2026-09-27T00:00:00Z',
+    interactionId: null,
+    status: null,
+    threadId: null,
+    sessionId: null,
+    toolCallId: null,
+    toolName: null,
+    argumentsJson: null,
+    approvalJson: null,
+    environmentId,
+    environmentName: `env-${environmentId}`,
+    waitingCount,
+  })
+
+  it('环境等待跨页按 (根, 环境) 去重，不同环境仍各自成项，且不影响人工等待', async () => {
+    // 测试意图：环境等待的 interactionId 恒为 null，若按 interactionId 去重会把所有环境等待并成一项；
+    // 只有按聚合身份去重才既剔除跨页重叠、又保留不同环境。
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce({ items: [mockItem1, environmentWait('env-a', 2)], nextCursor: 'c2' })
+      .mockResolvedValueOnce({
+        items: [environmentWait('env-a', 3), environmentWait('env-b'), mockItem2],
+        nextCursor: null,
+      })
+
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    await act(async () => {
+      await result.current.loadMore()
+    })
+
+    // 人工等待各按 interactionId 保留；env-a 只保留先到的条目，env-b 独立成项。
+    expect(result.current.items).toHaveLength(4)
+    expect(result.current.items.map((item) => item.type)).toEqual([
+      'INPUT',
+      'ENVIRONMENT_WAIT',
+      'ENVIRONMENT_WAIT',
+      'APPROVAL',
+    ])
+    const environmentWaits = result.current.items.filter(
+      (item) => item.type === 'ENVIRONMENT_WAIT',
+    )
+    expect(environmentWaits.map((item) => item.environmentId)).toEqual(['env-a', 'env-b'])
+    expect(
+      environmentWaits.find((item) => item.environmentId === 'env-a')?.waitingCount,
+    ).toBe(2)
+    expect(result.current.hasMore).toBe(false)
+  })
+
+  it('按服务端 freshnessAt 只做一次时效对账，不轮询', async () => {
+    // 测试意图：环境租约到期没有写事件；控制器必须恰好在服务端给出的时效边界后回读一次，
+    // 且同一已消费截止点不再产生第二次回读（无浏览器轮询）。
+    vi.useFakeTimers()
+    try {
+      const base = Date.now()
+      const listSpy = vi
+        .spyOn(interactionService, 'listInteractions')
+        .mockResolvedValue({ items: [mockItem1], nextCursor: null, total: 1,
+          freshnessAt: base / 1000 + 5 })
+
+      const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(result.current.isLoading).toBe(false)
+      expect(listSpy).toHaveBeenCalledTimes(1)
+
+      // 截止点 + 250ms 宽限之前不回读。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000)
+      })
+      expect(listSpy).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250)
+      })
+      expect(listSpy).toHaveBeenCalledTimes(2)
+
+      // 权威数据未给出新截止点 -> 不再排任务。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000)
+      })
+      expect(listSpy).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }
