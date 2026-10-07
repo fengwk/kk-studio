@@ -81,6 +81,41 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
+  void nameConflictFromCreationIsHttp409WithTypedReason() throws Exception {
+    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, "name already used"));
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(batch(newThreadTarget())))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.errors.reason").value("THREAD_NAME_CONFLICT"));
+  }
+
+  /** Runtime 的精确重放结果仍按 202 返回，而不是把已有名称的身份误译为冲突。 */
+  @Test
+  void exactCreationReplayRemainsAcceptedAtHttpBoundary() throws Exception {
+    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
+        .thenReturn(
+            new AcceptedCommands(
+                HarnessRuntimeTestFixtures.session(),
+                HarnessRuntimeTestFixtures.rootEntry(),
+                HarnessRuntimeTestFixtures.thread(UUID.fromString(THREAD_ID)),
+                List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
+                true));
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(batch(newThreadTarget())))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.replayed").value(true));
+  }
+
+  @Test
   void acceptsNewSessionAndNewThreadCreationTargetsAndMapsCurrentSnapshotResponse()
       throws Exception {
     // 两个创建型 target 都经过同一 owner-aware service。

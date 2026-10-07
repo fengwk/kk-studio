@@ -1483,7 +1483,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
               ThreadProcessorTestSupport.threadState(threadId, sessionId, secondUserEntryId, NOW));
           tx.insertThread(
               ThreadProcessorTestSupport.threadState(
-                  otherThreadId, sessionId, secondUserEntryId, NOW));
+                  otherThreadId, sessionId, secondUserEntryId, "other-thread", NOW));
           tx.insertEntry(
               new Entry(
                   secondAssistantEntryId,

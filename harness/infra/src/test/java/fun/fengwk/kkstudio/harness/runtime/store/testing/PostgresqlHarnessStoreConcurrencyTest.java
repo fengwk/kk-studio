@@ -11,7 +11,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
@@ -24,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -55,6 +55,48 @@ class PostgresqlHarnessStoreConcurrencyTest {
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
+  }
+
+  /** 两事务在插入前同时就绪；数据库唯一索引必须裁决恰好一个赢家，败方不留行。 */
+  @Test
+  void concurrentSameRootNamesHaveExactlyOneWinner() throws Exception {
+    Baseline baseline = seedThreadBaseline(store);
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<Boolean> first = executor.submit(() -> insertSameName(baseline, ready, start));
+      Future<Boolean> second = executor.submit(() -> insertSameName(baseline, ready, start));
+      assertTrue(ready.await(10, TimeUnit.SECONDS));
+      start.countDown();
+      assertEquals(
+          1,
+          (first.get(10, TimeUnit.SECONDS) ? 1 : 0) + (second.get(10, TimeUnit.SECONDS) ? 1 : 0));
+    }
+    assertEquals(2, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+    assertEquals(
+        1L,
+        store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).stream()
+            .filter(t -> t.name().equals("contended"))
+            .count());
+  }
+
+  private boolean insertSameName(Baseline baseline, CountDownLatch ready, CountDownLatch start) {
+    try {
+      return store.transaction(
+          tx -> {
+            tx.lockSessionForKeyShare(baseline.sessionId()).orElseThrow();
+            UUID threadId = tx.nextId();
+            ready.countDown();
+            await(start);
+            tx.insertThread(
+                StoreTestSupport.siblingRoot(
+                    threadId, baseline.sessionId(), baseline.rootEntryId(), "contended"));
+            return true;
+          });
+    } catch (HarnessRuntimeConflictException conflict) {
+      assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, conflict.reason());
+      return false;
+    }
   }
 
   @Test
@@ -93,7 +135,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
     WorkTarget firstTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
@@ -150,7 +194,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
     CountDownLatch firstLocksAcquired = new CountDownLatch(2);
@@ -180,7 +226,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
 
@@ -254,7 +302,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
           // NEW_THREAD 路径：KEY SHARE Session（不 FOR UPDATE），新 Thread 直接指向既有 Entry（不复制 Entry）。
           tx.lockSessionForKeyShare(sessionId).orElseThrow();
           UUID threadId = tx.nextId();
-          tx.insertThread(thread(threadId, sessionId, rootEntryId));
+          tx.insertThread(
+              StoreTestSupport.siblingRoot(threadId, sessionId, rootEntryId, "new-" + threadId));
           bothAcquired.countDown();
           await(releaseBoth);
           // 收尾：阻塞式取回自己的 Thread 行锁（与接受路径的锁持有语义一致）。

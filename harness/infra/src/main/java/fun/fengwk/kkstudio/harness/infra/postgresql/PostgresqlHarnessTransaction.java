@@ -1,11 +1,14 @@
 package fun.fengwk.kkstudio.harness.infra.postgresql;
 
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -301,6 +304,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static final int JOIN_ADMISSION_LOCK_NAMESPACE = 0x6B6B5354;
 
   private static final int JOIN_ADMISSION_LOCK_KEY = 0x6A6F696E;
+
+  /** 同一 Session 内执行根（parent 为 null）名称唯一的部分唯一索引名：唯一命中它才映射为名称冲突。 */
+  private static final String ROOT_THREAD_NAME_INDEX = "uk_harness_thread_root_name";
 
   /** 底层 Spring JdbcTemplate，绑定当前事务的数据库连接。 */
   private final JdbcTemplate jdbc;
@@ -683,28 +689,32 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (!joinedChild) {
       requireCanLockThread(thread.id());
     }
-    update(
-        """
-        insert into harness_thread (
-            id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode,
-            yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence,
-            version, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        thread.id(),
-        thread.sessionId(),
-        thread.parentThreadId(),
-        thread.headEntryId(),
-        thread.creationRequestHash(),
-        thread.name(),
-        thread.yoloPolicy().mode().name(),
-        thread.yoloPolicy().rootThreadId(),
-        thread.executionControl().name(),
-        thread.inputThroughSequence(),
-        thread.nextCommandSequence(),
-        thread.version(),
-        PostgresqlHarnessRows.timestamp(thread.createdAt()),
-        PostgresqlHarnessRows.timestamp(thread.updatedAt()));
+    try {
+      update(
+          """
+          insert into harness_thread (
+              id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode,
+              yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence,
+              version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          """,
+          thread.id(),
+          thread.sessionId(),
+          thread.parentThreadId(),
+          thread.headEntryId(),
+          thread.creationRequestHash(),
+          thread.name(),
+          thread.yoloPolicy().mode().name(),
+          thread.yoloPolicy().rootThreadId(),
+          thread.executionControl().name(),
+          thread.inputThroughSequence(),
+          thread.nextCommandSequence(),
+          thread.version(),
+          PostgresqlHarnessRows.timestamp(thread.createdAt()),
+          PostgresqlHarnessRows.timestamp(thread.updatedAt()));
+    } catch (IllegalArgumentException error) {
+      throw translateThreadNameConflict(thread, error);
+    }
     // 插入即视为 version 变化：同一位置发布 Thread version 与真实执行根 tree 两条失效信号。
     notifyThreadVersion(thread.id(), thread.version());
     notifyExecutionTree(executionRootOfThread(thread.id()));
@@ -810,31 +820,36 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 () -> new IllegalArgumentException("thread " + thread.id() + " does not exist"));
     ThreadState.validateTransition(stored, thread);
     requireThreadHeadInSession(thread);
-    int updated =
-        update(
-            """
-            update harness_thread
-            set head_entry_id = ?,
-                name = ?,
-                yolo_mode = ?,
-                yolo_root_thread_id = ?,
-                execution_control = ?,
-                input_through_sequence = ?,
-                next_command_sequence = ?,
-                version = ?,
-                updated_at = ?
-            where id = ?
-            """,
-            thread.headEntryId(),
-            thread.name(),
-            thread.yoloPolicy().mode().name(),
-            thread.yoloPolicy().rootThreadId(),
-            thread.executionControl().name(),
-            thread.inputThroughSequence(),
-            thread.nextCommandSequence(),
-            thread.version(),
-            PostgresqlHarnessRows.timestamp(thread.updatedAt()),
-            thread.id());
+    int updated;
+    try {
+      updated =
+          update(
+              """
+              update harness_thread
+              set head_entry_id = ?,
+                  name = ?,
+                  yolo_mode = ?,
+                  yolo_root_thread_id = ?,
+                  execution_control = ?,
+                  input_through_sequence = ?,
+                  next_command_sequence = ?,
+                  version = ?,
+                  updated_at = ?
+              where id = ?
+              """,
+              thread.headEntryId(),
+              thread.name(),
+              thread.yoloPolicy().mode().name(),
+              thread.yoloPolicy().rootThreadId(),
+              thread.executionControl().name(),
+              thread.inputThroughSequence(),
+              thread.nextCommandSequence(),
+              thread.version(),
+              PostgresqlHarnessRows.timestamp(thread.updatedAt()),
+              thread.id());
+    } catch (IllegalArgumentException error) {
+      throw translateThreadNameConflict(thread, error);
+    }
     requireSingleUpdate(updated, "thread", thread.id());
     if (stored.version() != thread.version()) {
       // 仅以写前事实（stored）与成功写后事实（thread）比较：同 version 写入（exact replay）保持静默。
@@ -3092,6 +3107,31 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static IllegalArgumentException integrityViolation(
       DataIntegrityViolationException error) {
     return new IllegalArgumentException("PostgreSQL integrity constraint violation", error);
+  }
+
+  /**
+   * 仅当完整性冲突确由 root-name 部分唯一索引（{@link #ROOT_THREAD_NAME_INDEX}）触发时，才映射为类型化 {@link
+   * HarnessRuntimeConflictException}（{@code THREAD_NAME_CONFLICT}）；其它完整性错误原样返回，保持既有 {@link
+   * IllegalArgumentException} 语义，不吞掉、不误分类。事务已由 {@link #remember(RuntimeException)} 标记 poisoned，
+   * 因此该冲突不会提交任何脏状态。
+   */
+  private RuntimeException translateThreadNameConflict(ThreadState thread, RuntimeException error) {
+    for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
+      if (cause instanceof PSQLException psqlException) {
+        ServerErrorMessage serverMessage = psqlException.getServerErrorMessage();
+        if (serverMessage != null && ROOT_THREAD_NAME_INDEX.equals(serverMessage.getConstraint())) {
+          return new HarnessRuntimeConflictException(
+              HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT,
+              "thread name "
+                  + thread.name()
+                  + " is already used by an execution root in session "
+                  + thread.sessionId(),
+              error);
+        }
+        return error;
+      }
+    }
+    return error;
   }
 
   /** 严格校验单线程约束与事务活跃状态：只有创建该 handle 的线程才可调用，且已关闭后拒绝执行。 */

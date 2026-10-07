@@ -334,6 +334,14 @@ final class StoreTestSupport {
     return threadState(id, sessionId, headEntryId, 1, 0, T0, T0);
   }
 
+  /**
+   * 同一 Session 内的额外执行根 Thread（sibling / 多 Thread 场景）：名称由调用方显式给出，必须与同 Session 其他根不同， 否则违反 {@code
+   * uk_harness_thread_root_name} 部分唯一索引。
+   */
+  static ThreadState siblingRoot(UUID id, UUID sessionId, UUID headEntryId, String name) {
+    return threadState(id, sessionId, headEntryId, name, false, 1, 0, T0, T0);
+  }
+
   /** 允许显式指定 next sequence / version 与时间的 ThreadState 构造（契约测试模拟已推进的 Thread）。 */
   static ThreadState threadState(
       UUID id,

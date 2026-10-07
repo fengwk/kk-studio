@@ -135,13 +135,19 @@ final class ThreadProcessorTestSupport {
 
   /** 构造有合法 creationRequestHash 的 ThreadState：name 固定 root 名、version 0 / nextCommandSequence 1。 */
   static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
+    return threadState(threadId, sessionId, headEntryId, "main", now);
+  }
+
+  /** 指定名称的 root ThreadState：同一 Session 内的额外根必须使用不同名称。 */
+  static ThreadState threadState(
+      UUID threadId, UUID sessionId, UUID headEntryId, String name, Instant now) {
     return new ThreadState(
         threadId,
         sessionId,
         null,
         headEntryId,
         CREATION_REQUEST_HASH,
-        "main",
+        name,
         ThreadYoloPolicy.root(false),
         ThreadExecutionControl.RUNNABLE,
         0L,
@@ -323,7 +329,7 @@ final class ThreadProcessorTestSupport {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
-          tx.insertThread(threadState(threadId, sessionId, assistantEntryId, NOW));
+          tx.insertThread(threadState(threadId, sessionId, assistantEntryId, "second", NOW));
           return new HistoricalBaseline(
               sessionId,
               TestIds.id(1_000_000L),

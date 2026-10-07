@@ -441,6 +441,7 @@ index	harness_session	harness_session_pkey	CREATE UNIQUE INDEX harness_session_p
 index	harness_thread	harness_thread_pkey	CREATE UNIQUE INDEX harness_thread_pkey ON public.harness_thread USING btree (id)
 index	harness_thread	idx_harness_thread_parent	CREATE INDEX idx_harness_thread_parent ON public.harness_thread USING btree (parent_thread_id)
 index	harness_thread	idx_harness_thread_session	CREATE INDEX idx_harness_thread_session ON public.harness_thread USING btree (session_id, created_at, id)
+index	harness_thread	uk_harness_thread_root_name	CREATE UNIQUE INDEX uk_harness_thread_root_name ON public.harness_thread USING btree (session_id, name) WHERE (parent_thread_id IS NULL)
 index	harness_thread	uk_harness_thread_session	CREATE UNIQUE INDEX uk_harness_thread_session ON public.harness_thread USING btree (session_id, id)
 index	harness_thread_command	harness_thread_command_pkey	CREATE UNIQUE INDEX harness_thread_command_pkey ON public.harness_thread_command USING btree (thread_id, sequence)
 index	harness_thread_command	idx_harness_thread_command_queued	CREATE INDEX idx_harness_thread_command_queued ON public.harness_thread_command USING btree (thread_id, sequence) WHERE ((applied_entry_id IS NULL) AND (cancelled_at IS NULL))
