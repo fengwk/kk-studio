@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -49,10 +50,18 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
     doAnswer(
             invocation -> {
               Project resolved = (Project) invocation.callRealMethod();
-              // 第一次读取 Project 时快照已经建立，此刻由独立事务提交一条新 Issue。
+              // 第一次读取已建立快照；独立事务提交活动及归档 Issue，两个查询都不得提前看到。
               if (injected.compareAndSet(false, true)) {
                 commitInNewTransaction(
-                    () -> issueService.createIssue(project.getId(), "Concurrent Issue", "Desc"));
+                    () -> {
+                      issueService.createIssue(project.getId(), "Concurrent Issue", "Desc");
+                      Issue archived =
+                          issueService.createIssue(project.getId(), "Archived Issue", "Desc");
+                      archived =
+                          issueService.blockIssue(
+                              archived.getId(), archived.getVersion(), "rr-block", "Blocked");
+                      issueService.archiveIssue(archived.getId(), archived.getVersion());
+                    });
               }
               return resolved;
             })
@@ -63,12 +72,14 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
         projectSnapshotAssembler.assemble(project.getId());
     assertTrue(
         snapshotTakenBeforeCommit.getIssues().isEmpty(), "REPEATABLE_READ 快照不得看到建立之后才提交的 Issue");
+    assertEquals(List.of(), snapshotTakenBeforeCommit.getReferencedStateCodes());
 
     ProjectSnapshotDTO snapshotTakenAfterCommit =
         projectSnapshotAssembler.assemble(project.getId());
     assertEquals(1, snapshotTakenAfterCommit.getIssues().size(), "新事务必须看到已提交事实");
     assertEquals(
         "Concurrent Issue", snapshotTakenAfterCommit.getIssues().get(0).getIssue().getTitle());
+    assertEquals(List.of("BLOCKED", "INIT"), snapshotTakenAfterCommit.getReferencedStateCodes());
   }
 
   /** 意图：Issue 详情读取期间并发提交的评论不得出现在同一次聚合里。 */
