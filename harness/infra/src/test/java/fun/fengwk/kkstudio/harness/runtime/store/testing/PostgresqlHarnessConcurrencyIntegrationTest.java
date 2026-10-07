@@ -29,9 +29,9 @@ import java.util.function.Function;
 
 /**
  * 真实 PostgreSQL 并发回归：持根树锁的合法深删除在另一事务的「首次 ancestor 读取」与「取得树 advisory 锁」之间提交时， 树锁 helper
- * 与线程生命周期协调器必须把目标线程当作合法缺失（空链 / null），而不是按执行树结构漂移 fail-closed、吞异常或重试。
+ * 与线程生命周期协调器把目标线程当作合法缺失（空链 / null），而不是按结构漂移 fail-closed。
  *
- * <p>时序由有界 latch 精确控制，不依赖 sleep；删除失败时在 finally 释放等待方，线程与连接在事务边界内关闭。
+ * <p>时序由有界 latch 精确控制，不依赖 sleep；删除失败时在 finally 释放等待方。
  */
 class PostgresqlHarnessConcurrencyIntegrationTest {
 
@@ -67,10 +67,14 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
     }
 
     assertTrue(confirmed.isEmpty(), "concurrently deleted thread must be a legal missing chain");
+    // 完整操作序列：首次读取 -> 树锁 -> 加锁后确认读取；全程无任何业务行锁，故不出现 lock 秩乱。
     assertEquals(
-        List.of("findAncestorChain:" + baseline.threadId(), "lockTree:" + baseline.threadId()),
-        distinctOperations(pausing),
-        "helper must re-read after the tree lock and must not take any business row lock");
+        List.of(
+            "findAncestorChain:" + baseline.threadId(),
+            "lockTree:" + baseline.threadId(),
+            "findAncestorChain:" + baseline.threadId()),
+        pausing.operations(),
+        "helper must re-read after the tree lock without taking any business row lock");
     assertTrue(
         store.transaction(tx -> tx.findThread(baseline.threadId())).isEmpty(),
         "fixture must have deleted the thread");
@@ -104,8 +108,11 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
 
     assertNull(locked, "concurrently deleted thread must yield null, not a drift failure");
     assertEquals(
-        List.of("findAncestorChain:" + baseline.threadId(), "lockTree:" + baseline.threadId()),
-        distinctOperations(pausing),
+        List.of(
+            "findAncestorChain:" + baseline.threadId(),
+            "lockTree:" + baseline.threadId(),
+            "findAncestorChain:" + baseline.threadId()),
+        pausing.operations(),
         "coordinator must return before taking any Session/Thread row lock");
   }
 
@@ -114,17 +121,13 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
     store.transaction(
         tx -> {
           tx.lockTree(baseline.threadId());
+          tx.lockSessionForUpdate(baseline.sessionId()).orElseThrow();
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.deleteThreads(List.of(baseline.threadId()));
           tx.deleteEntries(baseline.sessionId());
           tx.deleteSession(baseline.sessionId());
           return null;
         });
-  }
-
-  /** 记录的事务原语按首次出现去重，用于断言锁序与「未获取任何业务行锁」。 */
-  private static List<String> distinctOperations(PausingStore store) {
-    return store.operations().stream().distinct().toList();
   }
 
   /**
@@ -176,9 +179,12 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
                           new Class<?>[] {Transaction.class},
                           (proxy, method, args) -> {
                             String name = method.getName();
+                            // 记录全部 lock* 与每次 ancestor 读取：任何业务行锁都会出现在完整操作序列里。
+                            if (name.startsWith("lock") || name.equals("findAncestorChain")) {
+                              operations.add(name + ":" + args[0]);
+                            }
                             if (name.equals("findAncestorChain")
                                 && pausedThreadId.equals(args[0])) {
-                              operations.add(name + ":" + args[0]);
                               @SuppressWarnings("unchecked")
                               List<UUID> chain = (List<UUID>) invoke(tx, method, args);
                               if (paused.compareAndSet(false, true)) {
@@ -186,9 +192,6 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
                                 await(deletionCommitted);
                               }
                               return chain;
-                            }
-                            if (name.equals("lockTree")) {
-                              operations.add(name + ":" + args[0]);
                             }
                             return invoke(tx, method, args);
                           })));
