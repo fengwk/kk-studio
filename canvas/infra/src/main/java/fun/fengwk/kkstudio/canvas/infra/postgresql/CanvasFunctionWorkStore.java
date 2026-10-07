@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
@@ -21,11 +22,15 @@ public class CanvasFunctionWorkStore {
 
   private final CanvasFunctionWorkMapper mapper;
   private final CanvasFunctionRunStateCodecPort stateCodec;
+  private final PostgresqlCanvasChangeNotifier notifier;
 
   public CanvasFunctionWorkStore(
-      CanvasFunctionWorkMapper mapper, CanvasFunctionRunStateCodecPort stateCodec) {
+      CanvasFunctionWorkMapper mapper,
+      CanvasFunctionRunStateCodecPort stateCodec,
+      PostgresqlCanvasChangeNotifier notifier) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
+    this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
 
   public Optional<ClaimedRun> claimNext(Instant now, Duration leaseDuration, String ownerToken) {
@@ -50,17 +55,27 @@ public class CanvasFunctionWorkStore {
         == 1;
   }
 
+  /**
+   * 归还正在处理的 claim：以真实短事务把 RUNNING 重排为 READY，并在提交前按数据库时间判断是否需要唤醒。
+   *
+   * <p>dispatcher 线程不持有事务；围栏 SQL 与 {@code pg_notify} 必须落在同一事务，否则会出现「事实已提交、通知尚未发送」的额外失败窗口。
+   */
+  @Transactional
   public boolean reschedule(ClaimedRun claim, Instant now, Duration delay) {
     Objects.requireNonNull(claim, "claim");
     now = normalize(now);
     Instant availableAt = now.plus(requirePositiveMillis(delay));
-    return mapper.reschedule(
+    if (mapper.reschedule(
             claim.nodeId(),
             claim.requestId(),
             claim.leaseToken(),
             toOffsetDateTime(now),
             toOffsetDateTime(availableAt))
-        == 1;
+        != 1) {
+      return false;
+    }
+    notifier.functionWorkChanged(claim.nodeId());
+    return true;
   }
 
   public boolean isOwned(ClaimedRun claim, Instant now) {

@@ -14,7 +14,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,7 +40,6 @@ import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 
 import java.sql.Connection;
-import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -327,18 +325,15 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     assertFalse(workStore.isOwned(claimed, T0.plusSeconds(1)));
   }
 
-  /** READY insert 提交后 trigger 必须立即发送空 payload；claim 更新为 RUNNING 不产生伪通知。 */
+  /** READY insert 提交后 Java 写入口必须立即发送空 payload；测试 fixture 已删除旧 Schema 触发器。 */
   @Test
   void readyCommitSendsAnImmediateEmptyNotification() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      listener.setAutoCommit(true);
-      statement.execute("listen canvas_function_work");
+    try (Connection listener = listenOn("canvas_function_work")) {
       runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
 
-      PGNotification[] notifications = listener.unwrap(PGConnection.class).getNotifications(5_000);
+      PGNotification[] notifications = pollNotifications(listener, 5_000);
       assertEquals(1, notifications.length);
       assertEquals("canvas_function_work", notifications[0].getName());
       assertEquals("", notifications[0].getParameter());
@@ -350,10 +345,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   void rolledBackReadyInsertDoesNotNotify() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      listener.setAutoCommit(true);
-      statement.execute("listen canvas_function_work");
+    try (Connection listener = listenOn("canvas_function_work")) {
       assertThrows(
           IllegalStateException.class,
           () ->
@@ -363,10 +355,126 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
                     throw new IllegalStateException("rollback");
                   }));
 
-      PGNotification[] notifications = listener.unwrap(PGConnection.class).getNotifications(200);
-      assertTrue(notifications == null || notifications.length == 0);
+      assertNoNotification(listener);
       assertTrue(runs.findByNodeId(node.id()).isEmpty());
     }
+  }
+
+  /** 未来 available_at 的 READY 写入不误发立即可领取通知，由既有 poll 恢复。 */
+  @Test
+  void futureReadyInsertStaysSilent() throws Exception {
+    UUID canvasId = addDocument();
+    NodeRecord node = addNode(canvasId, true);
+    try (Connection listener = listenOn("canvas_function_work")) {
+      runs.insertReady(
+          ready(node.id(), UUID.randomUUID(), Instant.now().plus(Duration.ofHours(1))));
+
+      assertNoNotification(listener);
+    }
+  }
+
+  /** claim 转 RUNNING 与终态收敛都不是可立即领取的 READY，不得产生通知。 */
+  @Test
+  void runningAndTerminalWritesStaySilent() throws Exception {
+    UUID canvasId = addDocument();
+    NodeRecord node = addNode(canvasId, true);
+    runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
+    ClaimedRun claim = workStore.claimNext(T0, LEASE, "owner").orElseThrow();
+
+    try (Connection listener = listenOn("canvas_function_work")) {
+      assertTrue(
+          runs.transitionTerminal(
+              terminal(claim.run(), CanvasFunctionRunStatus.SUCCEEDED, "SUCCEEDED"),
+              claim.leaseToken()));
+
+      assertNoNotification(listener);
+    }
+  }
+
+  /** 归还只在重排后的最终事实可立即领取时唤醒；延迟到未来 available_at 时保持静默。 */
+  @Test
+  void rescheduleNotifiesOnlyWhenImmediatelyClaimable() throws Exception {
+    UUID canvasId = addDocument();
+    NodeRecord immediateNode = addNode(canvasId, true);
+    NodeRecord futureNode = addNode(canvasId, true);
+    Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+    runs.insertReady(ready(immediateNode.id(), UUID.randomUUID(), now));
+    runs.insertReady(ready(futureNode.id(), UUID.randomUUID(), now));
+    ClaimedRun immediate = workStore.claimNext(now, LEASE, "owner-immediate").orElseThrow();
+    ClaimedRun future = workStore.claimNext(now, LEASE, "owner-future").orElseThrow();
+
+    try (Connection listener = listenOn("canvas_function_work")) {
+      // available_at = now - 4s（已到期）→ 立即领取提示
+      assertTrue(workStore.reschedule(immediate, now.minusSeconds(5), Duration.ofSeconds(1)));
+      PGNotification[] notifications = pollNotifications(listener, 5_000);
+      assertEquals(1, notifications.length);
+      assertEquals("", notifications[0].getParameter());
+
+      // available_at = now + 1h（未来）→ 静默
+      assertTrue(workStore.reschedule(future, now, Duration.ofHours(1)));
+      assertNoNotification(listener);
+    }
+  }
+
+  /** 围栏失效的归还（旧 token）不写入任何行，也不得通知。 */
+  @Test
+  void fencedRescheduleStaysSilent() throws Exception {
+    UUID canvasId = addDocument();
+    NodeRecord node = addNode(canvasId, true);
+    runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
+    ClaimedRun stale = workStore.claimNext(T0, LEASE, "owner-old").orElseThrow();
+    workStore.claimNext(T0.plus(LEASE), LEASE, "owner-new").orElseThrow();
+
+    try (Connection listener = listenOn("canvas_function_work")) {
+      assertFalse(
+          workStore.reschedule(stale, T0.plus(LEASE).plusSeconds(1), Duration.ofSeconds(1)));
+
+      assertNoNotification(listener);
+    }
+  }
+
+  /** 终态替换为 READY 也必须在成功写入后立即唤醒。 */
+  @Test
+  void replaceTerminalWithReadyNotifiesImmediately() throws Exception {
+    UUID canvasId = addDocument();
+    NodeRecord node = addNode(canvasId, true);
+    insertRunRow(node.id(), UUID.randomUUID(), "CANCELLED");
+
+    try (Connection listener = listenOn("canvas_function_work")) {
+      assertTrue(runs.replaceTerminalWithReady(ready(node.id(), UUID.randomUUID(), T0)));
+      PGNotification[] notifications = pollNotifications(listener, 5_000);
+      assertEquals(1, notifications.length);
+      assertEquals("", notifications[0].getParameter());
+    }
+  }
+
+  /** UNKNOWN 人工解除为 READY 必须在成功写入后立即唤醒。 */
+  @Test
+  void resumeUnknownNotifiesImmediately() throws Exception {
+    UUID canvasId = addDocument();
+    NodeRecord node = addNode(canvasId, true);
+    UUID requestId = UUID.randomUUID();
+    insertRunRow(node.id(), requestId, "UNKNOWN");
+
+    try (Connection listener = listenOn("canvas_function_work")) {
+      assertTrue(runs.resumeUnknown(ready(node.id(), requestId, T0)));
+      PGNotification[] notifications = pollNotifications(listener, 5_000);
+      assertEquals(1, notifications.length);
+      assertEquals("", notifications[0].getParameter());
+    }
+  }
+
+  /** 直接写入非 READY 行，准备终态替换与 UNKNOWN 解除的既有事实。 */
+  private void insertRunRow(UUID nodeId, UUID requestId, String status) {
+    jdbc.update(
+        "insert into canvas_function_run (node_id, request_id, status, attempt, state_json, error,"
+            + " updated_at, created_at) values (?, ?, ?, 0, cast(? as jsonb), ?, current_timestamp,"
+            + " current_timestamp)",
+        nodeId,
+        requestId,
+        status,
+        minimalRunState(status),
+        "UNKNOWN".equals(status) ? "unknown" : null);
   }
 
   private static CanvasFunctionRun ready(UUID nodeId, UUID requestId, Instant now) {

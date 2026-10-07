@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
@@ -21,19 +22,23 @@ public class PostgresqlCanvasStore implements CanvasStore {
   private final CanvasNodeMapper nodeMapper;
   private final CanvasGroupMapper groupMapper;
   private final CanvasCommandDedupMapper commandDedupMapper;
+  private final PostgresqlCanvasChangeNotifier notifier;
 
   public PostgresqlCanvasStore(
       CanvasDocumentMapper documentMapper,
       CanvasNodeMapper nodeMapper,
       CanvasGroupMapper groupMapper,
-      CanvasCommandDedupMapper commandDedupMapper) {
+      CanvasCommandDedupMapper commandDedupMapper,
+      PostgresqlCanvasChangeNotifier notifier) {
     this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
     this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");
     this.commandDedupMapper = Objects.requireNonNull(commandDedupMapper, "commandDedupMapper");
+    this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
 
   @Override
+  @Transactional
   public CanvasDocument addDocument(UUID canvasId, String title) {
     CanvasDocumentDO document = new CanvasDocumentDO();
     document.setId(canvasId);
@@ -45,6 +50,7 @@ public class PostgresqlCanvasStore implements CanvasStore {
     if (persisted == null) {
       throw new IllegalStateException("canvas document disappeared after insert");
     }
+    notifier.revisionChanged(canvasId, persisted.getRevision());
     return toDomain(persisted);
   }
 
@@ -76,8 +82,16 @@ public class PostgresqlCanvasStore implements CanvasStore {
   }
 
   @Override
+  @Transactional
   public boolean advanceRevision(UUID canvasId, long expectedRevision, long newRevision) {
-    return documentMapper.advanceRevision(canvasId, expectedRevision, newRevision) == 1;
+    if (documentMapper.advanceRevision(canvasId, expectedRevision, newRevision) != 1) {
+      return false;
+    }
+    // revision 未真实变化时与数据库触发器语义一致：不发布 revision 失效提示。
+    if (newRevision != expectedRevision) {
+      notifier.revisionChanged(canvasId, newRevision);
+    }
+    return true;
   }
 
   @Override
