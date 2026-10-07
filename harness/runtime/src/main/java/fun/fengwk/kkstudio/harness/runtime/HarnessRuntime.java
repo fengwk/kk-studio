@@ -209,15 +209,9 @@ public final class HarnessRuntime {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
-          List<UUID> hint = tx.findAncestorChain(threadId);
-          if (hint.isEmpty()) {
+          List<UUID> confirmed = ThreadTreeLocks.lockForThread(tx, threadId);
+          if (confirmed.isEmpty()) {
             throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
-          }
-          UUID rootId = hint.get(hint.size() - 1);
-          tx.lockTree(rootId);
-          List<UUID> confirmed = tx.findAncestorChain(threadId);
-          if (!hint.equals(confirmed) || confirmed.isEmpty()) {
-            throw new IllegalStateException("execution tree changed while acquiring its lock");
           }
           Map<UUID, ThreadState> discovered = new LinkedHashMap<>();
           collectTree(tx, confirmed.get(confirmed.size() - 1), discovered);

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -796,7 +797,7 @@ final class ModelExecution implements ModelGateway.Listener {
           Boolean.TRUE.equals(
               store.transaction(
                   tx -> {
-                    lockTreeForThread(tx, threadId);
+                    ThreadTreeLocks.lockForThread(tx, threadId);
                     ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
                     if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
                       return false;
@@ -987,7 +988,7 @@ final class ModelExecution implements ModelGateway.Listener {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              lockTreeForThread(tx, threadId);
+              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -1017,7 +1018,7 @@ final class ModelExecution implements ModelGateway.Listener {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              lockTreeForThread(tx, threadId);
+              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -1076,7 +1077,7 @@ final class ModelExecution implements ModelGateway.Listener {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
-                lockTreeForThread(tx, threadId);
+                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -1109,7 +1110,7 @@ final class ModelExecution implements ModelGateway.Listener {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
-                lockTreeForThread(tx, threadId);
+                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -1385,17 +1386,6 @@ final class ModelExecution implements ModelGateway.Listener {
   private static final class ClaimLostSignal extends RuntimeException {
     private ClaimLostSignal() {
       super("claimed work lost at final fence", null, false, false);
-    }
-  }
-
-  private static void lockTreeForThread(HarnessStore.Transaction tx, UUID threadId) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(threadId, "threadId");
-    List<UUID> chain = tx.findAncestorChain(threadId);
-    UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
-    tx.lockTree(root);
-    if (!chain.equals(tx.findAncestorChain(threadId))) {
-      throw new IllegalStateException("execution tree changed while acquiring its lock");
     }
   }
 }
