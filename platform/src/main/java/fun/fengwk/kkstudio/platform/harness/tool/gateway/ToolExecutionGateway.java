@@ -46,7 +46,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluationContext;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -100,9 +99,6 @@ public final class ToolExecutionGateway implements ToolGateway {
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
   static final String CONTRIBUTOR_CONTRACT_VIOLATION_KIND = "CONTRIBUTOR_CONTRACT_VIOLATION";
-
-  /** Ask reason 的字符上限（ToolGateway.Ask 契约）。 */
-  private static final int ASK_REASON_MAX_CHARACTERS = 1024;
 
   /** 回调桥缓冲队列的保守上限：gate 打开前的同步回调绝不能无界缓冲。 */
   static final int MAX_BUFFERED_SIGNALS = 256;
@@ -281,7 +277,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     PermissionAction action = evaluation.action();
     return switch (action) {
       case ALLOW -> new ToolGateway.Allow();
-      case ASK -> new ToolGateway.Ask(reason(evaluation.promptPreview()));
+      case ASK -> new ToolGateway.Ask("Permission rules require approval");
       case DENY -> new ToolGateway.Deny(
           new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
     };
@@ -565,21 +561,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       }
       return new ToolResult(toolCallId, result.contents(), result.error(), result.detailsJson());
     }
-  }
-
-  private static String reason(PermissionPromptPreview preview) {
-    // 只在该调用真实携带 workdir 时展示目录；没有 workdir 语义的工具不显示虚构默认目录。
-    String location = preview.workdir() == null ? "" : " in " + preview.workdir();
-    String value = preview.tool() + " requires approval" + location + ": " + preview.arguments();
-    if (value.length() <= ASK_REASON_MAX_CHARACTERS) {
-      return value;
-    }
-    int prefixChars = ASK_REASON_MAX_CHARACTERS - 3;
-    if (Character.isHighSurrogate(value.charAt(prefixChars - 1))
-        && Character.isLowSurrogate(value.charAt(prefixChars))) {
-      prefixChars--;
-    }
-    return value.substring(0, prefixChars) + "...";
   }
 
   private static String failureMessage(Throwable error, String fallback) {
