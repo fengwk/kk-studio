@@ -9,8 +9,8 @@ import java.util.Objects;
 /**
  * 在 system settings 的 CAS 写事务中发送 {@code system_settings_changed} 失效信号。
  *
- * <p>payload 是写后权威 {@code version} 的十进制字符串，只用于唤醒其它节点回读权威记录，不承载可信状态。PostgreSQL 只在提交时投递 {@code
- * pg_notify}：未提交不可见、回滚不刷新任何节点快照。发布必须与成功 CAS 共用同一事务 Connection，不得改到提交后再开连接。
+ * <p>payload 是写后权威 {@code version} 的十进制字符串，只用于唤醒其它节点回读权威记录，不承载可信状态。必须与成功 CAS 共用同一事务
+ * Connection：PostgreSQL 只在提交时投递，未提交不可见、回滚静默。
  */
 @Component
 public class PostgresqlSystemSettingsChangeNotifier {

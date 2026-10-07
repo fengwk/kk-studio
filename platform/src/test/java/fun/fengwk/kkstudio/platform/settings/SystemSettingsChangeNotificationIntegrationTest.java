@@ -30,8 +30,8 @@ import java.util.List;
  * System settings 生产写入口的事务内 {@code system_settings_changed} 通知验证。
  *
  * <p>意图：{@code PostgresqlSystemSettingsRepository} 的成功 CAS 与通知共用同一事务 Connection，提交后投递写后权威 {@code
- * version} 的十进制字符串；未提交不可见、回滚静默、陈旧 CAS 静默。{@code SystemSettingsServiceImpl} 的提交后快照刷新保持不变，但绝不替代事务内
- * NOTIFY。 夹具在隔离的每测试数据库里删除旧的 {@code trg_system_setting_version_notify}，因此观测到的通知只能来自 Java 写入口。
+ * version} 的十进制字符串；未提交不可见、回滚静默、陈旧 CAS 静默、无事务调用在写行前拒绝。{@code SystemSettingsServiceImpl}
+ * 的提交后快照刷新与本通知并存。夹具在每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口。
  */
 class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTestSupport {
 
@@ -46,7 +46,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
 
   @BeforeEach
   void dropLegacyTrigger() {
-    // N6 删除生产触发器前，只在隔离的每测试库移除它，使断言真正证明 Java 写入口的发布行为。
+    // 每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口的发布。
     jdbcTemplate.execute(
         "drop trigger if exists trg_system_setting_version_notify on system_setting");
   }
@@ -148,6 +148,25 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
       assertNoNotification(pg);
       assertEquals(1L, currentVersion());
       assertEquals(changedRetries, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
+    }
+  }
+
+  /** 无事务直接调用仓储 CAS：在执行 SQL 前拒绝，version 与配置原样不变，listener 静默。 */
+  @Test
+  void repositoryCasWithoutTransactionIsRejectedBeforeAnyWrite() throws Exception {
+    long versionBefore = currentVersion();
+    try (Connection listener = newConnection();
+        Statement statement = listener.createStatement()) {
+      statement.execute("listen " + SystemSettingsChangeHandler.CHANNEL);
+      PGConnection pg = listener.unwrap(PGConnection.class);
+
+      assertThrows(
+          IllegalStateException.class,
+          () -> systemSettingsRepository.update(withYolo(true), versionBefore));
+
+      assertEquals(versionBefore, currentVersion());
+      assertFalse(systemSettingsRepository.get().settings().tool().defaultYolo());
+      assertNoNotification(pg);
     }
   }
 
