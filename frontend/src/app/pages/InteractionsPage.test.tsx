@@ -46,6 +46,8 @@ describe('InteractionsPage', () => {
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
       items: [],
       nextCursor: null,
+      total: 0,
+      freshnessAt: null,
     })
 
     render(<InteractionsPage />, { wrapper })
@@ -62,7 +64,7 @@ describe('InteractionsPage', () => {
       if (callCount === 1) {
         throw new Error('Network disconnected')
       }
-      return { items: [], nextCursor: null }
+      return { items: [], nextCursor: null, total: 0, freshnessAt: null }
     })
 
     render(<InteractionsPage />, { wrapper })
@@ -84,35 +86,61 @@ describe('InteractionsPage', () => {
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
       items: [
         {
+          type: 'INPUT',
           interactionId: 'int-1',
           status: 'WAITING_INPUT',
           threadId: 'th-1',
           rootThreadId: 'root-th-1',
           sessionId: 'sess-1',
-          owner: { type: 'CHAT', chatId: 'chat-abc', issueId: null, agentName: null },
+          owner: {
+            type: 'CHAT',
+            chatId: 'chat-abc',
+            chatTitle: '产品对话',
+            issueId: null,
+            issueTitle: null,
+            agentName: null,
+            rootThreadName: '根线程',
+          },
           toolCallId: 'call-1',
           toolName: 'ask_user',
           argumentsJson: JSON.stringify({
             questions: [{ question: '你选择哪个？', options: [{ label: '选项A' }] }],
           }),
           approvalJson: null,
+          environmentId: null,
+          environmentName: null,
+          waitingCount: null,
           createTime: '2026-09-27T10:00:00Z',
         },
         {
+          type: 'APPROVAL',
           interactionId: 'int-2',
           status: 'WAITING_APPROVAL',
           threadId: 'th-2',
           rootThreadId: 'root-th-2',
           sessionId: 'sess-2',
-          owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'issue-101', agentName: 'architect' },
+          owner: {
+            type: 'ISSUE_AGENT',
+            chatId: null,
+            chatTitle: null,
+            issueId: 'issue-101',
+            issueTitle: '修复缺陷',
+            agentName: 'architect',
+            rootThreadName: '根线程',
+          },
           toolCallId: 'call-2',
           toolName: 'write',
           argumentsJson: '{"path":"main.ts"}',
           approvalJson: JSON.stringify({ required: true, reason: '写代码' }),
+          environmentId: null,
+          environmentName: null,
+          waitingCount: null,
           createTime: '2026-09-27T10:05:00Z',
         },
       ],
       nextCursor: null,
+      total: 2,
+      freshnessAt: null,
     })
 
     render(<InteractionsPage />, { wrapper })
@@ -158,20 +186,34 @@ describe('InteractionsPage', () => {
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
       items: [
         {
+          type: 'INPUT',
           interactionId: 'int-err',
           status: 'WAITING_INPUT',
           threadId: 'th-err',
           rootThreadId: 'root-th-err',
           sessionId: 'sess-err',
-          owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'issue-missing', agentName: 'coder' },
+          owner: {
+            type: 'ISSUE_AGENT',
+            chatId: null,
+            chatTitle: null,
+            issueId: 'issue-missing',
+            issueTitle: null,
+            agentName: 'coder',
+            rootThreadName: null,
+          },
           toolCallId: 'call-err',
           toolName: 'ask_user',
           argumentsJson: '{}',
           approvalJson: null,
+          environmentId: null,
+          environmentName: null,
+          waitingCount: null,
           createTime: '2026-09-27T10:00:00Z',
         },
       ],
       nextCursor: null,
+      total: 1,
+      freshnessAt: null,
     })
     vi.spyOn(projectsApi, 'getIssue').mockRejectedValue(new Error('not found'))
 
@@ -186,7 +228,7 @@ describe('InteractionsPage', () => {
     })
   })
 
-  it('supports refresh, load more, raw arguments rendering, and item removal on card success', async () => {
+  it('supports refresh and load more, and renders environment waits read-only without raw fallback', async () => {
     let listCount = 0
     vi.spyOn(interactionService, 'listInteractions').mockImplementation(async (_cursor, _limit) => {
       listCount++
@@ -194,48 +236,86 @@ describe('InteractionsPage', () => {
         return {
           items: [
             {
-              interactionId: 'int-raw',
-              status: 'COMPLETED' as never,
-              threadId: 'th-raw',
-          rootThreadId: 'root-th-raw',
-              sessionId: 'sess-raw',
-              owner: { type: 'UNKNOWN' as never },
-              toolCallId: 'call-raw',
-              toolName: 'tool',
-              argumentsJson: '{"rawParam":123}',
-              approvalJson: null,
+              type: 'ENVIRONMENT_WAIT',
+              rootThreadId: 'root-th-env',
               createTime: '2026-09-27T10:00:00Z',
+              interactionId: null,
+              status: null,
+              threadId: null,
+              sessionId: null,
+              toolCallId: null,
+              toolName: null,
+              argumentsJson: null,
+              approvalJson: null,
+              environmentId: 'env-1',
+              environmentName: 'archlinux',
+              waitingCount: 3,
+              owner: {
+                type: 'CHAT',
+                chatId: 'c1',
+                chatTitle: null,
+                issueId: null,
+                issueTitle: null,
+                agentName: null,
+                rootThreadName: null,
+              },
             },
             {
+              type: 'APPROVAL',
               interactionId: 'int-appr',
               status: 'WAITING_APPROVAL',
               threadId: 'th-appr',
-          rootThreadId: 'root-th-appr',
+              rootThreadId: 'root-th-appr',
               sessionId: 'sess-appr',
-              owner: { type: 'CHAT', chatId: 'c1' },
+              owner: {
+                type: 'CHAT',
+                chatId: 'c1',
+                chatTitle: null,
+                issueId: null,
+                issueTitle: null,
+                agentName: null,
+                rootThreadName: null,
+              },
               toolCallId: 'call-appr',
               toolName: 'shell',
               argumentsJson: '{"cmd":"ls"}',
               approvalJson: JSON.stringify({ required: true }),
+              environmentId: null,
+              environmentName: null,
+              waitingCount: null,
               createTime: '2026-09-27T10:00:00Z',
             },
           ],
           nextCursor: 'cursor-2',
+          total: 2,
+          freshnessAt: null,
         }
       }
       return {
         items: [
           {
+            type: 'INPUT',
             interactionId: 'int-more',
             status: 'WAITING_INPUT',
             threadId: 'th-more',
-          rootThreadId: 'root-th-more',
+            rootThreadId: 'root-th-more',
             sessionId: 'sess-more',
-            owner: { type: 'CHAT', chatId: 'c1' },
+            owner: {
+              type: 'CHAT',
+              chatId: 'c1',
+              chatTitle: null,
+              issueId: null,
+              issueTitle: null,
+              agentName: null,
+              rootThreadName: null,
+            },
             toolCallId: 'call-more',
             toolName: 'ask_user',
             argumentsJson: JSON.stringify({ questions: [{ question: 'More Q', options: [] }] }),
             approvalJson: null,
+            environmentId: null,
+            environmentName: null,
+            waitingCount: null,
             createTime: '2026-09-27T10:00:00Z',
           },
         ],
@@ -245,9 +325,15 @@ describe('InteractionsPage', () => {
 
     render(<InteractionsPage />, { wrapper })
     await waitFor(() => {
-      expect(screen.getByText('{"rawParam":123}')).toBeInTheDocument()
+      // 环境等待卡片只展示等待的环境与调用数，不渲染任何可操作入口或原始载荷回退分支。
+      expect(screen.getByText('3 个工具调用等待 archlinux 上线')).toBeInTheDocument()
       expect(screen.getByText('加载更多')).toBeInTheDocument()
     })
+    const environmentWaitCard = screen
+      .getByText('3 个工具调用等待 archlinux 上线')
+      .closest('.interaction-feed-item')
+    // 卡片主体不得出现任何可操作入口（来源跳转按钮属于导航，不在主体内）。
+    expect(environmentWaitCard?.querySelector('.interaction-item-body button')).toBeNull()
 
     // Click refresh button in header
     const refreshBtn = screen.getByRole('button', { name: '刷新' })

@@ -11,6 +11,7 @@ import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
+import { interactionIdentity } from '@/shared/lib/interactions'
 import { InteractionCardBody } from '@/features/ai/runtime/interactions/InteractionCardBody'
 import { useInteractionsController } from '@/features/ai/runtime/interactions/useInteractionsController'
 
@@ -51,7 +52,8 @@ export function InteractionsPage() {
           title={t('ai.interaction.openChatSource')}
         >
           <MessageSquare size={14} aria-hidden="true" />
-          <span>{t('ai.interaction.sourceChat')}</span>
+          <span>{owner.chatTitle ?? t('ai.interaction.sourceChat')}</span>
+          {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
           <ExternalLink size={12} aria-hidden="true" />
         </button>
       )
@@ -66,7 +68,8 @@ export function InteractionsPage() {
           title={t('ai.interaction.openIssueSource')}
         >
           <Workflow size={14} aria-hidden="true" />
-          <span>{t('ai.interaction.sourceIssue')}</span>
+          <span>{owner.issueTitle ?? t('ai.interaction.sourceIssue')}</span>
+          {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
           {owner.agentName ? (
             <span className="interaction-agent-badge">{owner.agentName}</span>
           ) : null}
@@ -125,17 +128,17 @@ export function InteractionsPage() {
         ) : (
           <div className="interactions-list">
             {items.map((item) => (
-              <div key={item.interactionId} className="interaction-feed-item">
+              <div key={interactionIdentity(item)} className="interaction-feed-item">
                 <header className="interaction-item-header">
                   <div className="interaction-item-meta">
                     <span
-                      className={`interaction-status-tag ${item.status.toLowerCase()}`}
+                      className={`interaction-status-tag ${item.type.toLowerCase()}`}
                     >
-                      {item.status === 'WAITING_INPUT'
+                      {item.type === 'INPUT'
                         ? t('ai.interaction.waitingInput')
-                        : item.status === 'WAITING_APPROVAL'
+                        : item.type === 'APPROVAL'
                           ? t('ai.interaction.waitingApproval')
-                          : item.status}
+                          : t('ai.interaction.waitingEnvironment')}
                     </span>
                     {renderOwnerSource(item)}
                   </div>
@@ -147,7 +150,8 @@ export function InteractionsPage() {
                 <div className="interaction-item-body">
                   <InteractionCardBody
                     item={item}
-                    onSuccess={() => removeItem(item.interactionId)}
+                    onSuccess={item.type === 'ENVIRONMENT_WAIT'
+                      ? undefined : () => removeItem(item.interactionId)}
                   />
                 </div>
               </div>

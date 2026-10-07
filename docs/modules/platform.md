@@ -26,7 +26,7 @@ executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `
 | [harness/task](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本与本地路径路由 |
 | [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | Chat、Issue+Agent owner 的命令接受、Session 查询与深删除 |
-| [interaction](../../platform/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 等待问卷/审批的产品投影与人工提交 |
+| [interaction](../../platform/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | Project 宿主端口、Issue Agent 角色解析与 `issue_transition` |
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3 与耐久对象清理 |
 | [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
@@ -34,6 +34,30 @@ executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | Function 输出物化、Blob 访问与媒体处理适配 |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与启动期全局代理装配 |
 | [configsync](../../platform/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 七类配置的 YAML 读写、依赖闭包与原子导入 |
+
+## 待处理交互
+
+`GET /api/interactions` 合并三类待处理事项：`INPUT`、`APPROVAL` 与只读
+`ENVIRONMENT_WAIT`。前两类携带原始 ToolInvocation、Thread 与冻结 ToolCall，
+提交始终回写原始调用；环境等待没有调用主键，所有可操作字段显式为 null，不提供确认、
+允许或拒绝入口。前端按 `type` 判别，环境等待使用 `(rootThreadId, environmentId)` 去重；
+根面板只渲染可操作的人工等待，不重复渲染第二张环境提醒卡，也不伪造可回写的调用。
+
+环境等待不是新的持久状态：只有 READY 调用存在已到领取时间、没有有效执行租约的
+环境亲和 TOOL Work，且所需环境没有有效 READY 连接租约时才进入查询。
+沿永久父链找到真实执行根，再按根与冻结环境聚合，`waitingCount` 是组内调用数。
+分组用最早调用的 `(createTime, id)` 排序，与人工等待做 keyset 归并；`total` 是
+同一根过滤条件下的完整可见待处理数，不是当前页长度。无法解析产品归属的根不暴露。
+
+owner 附带 Chat/Issue 标题、根 Thread 名称和 Agent 名；查询内缓存产品与根读取，
+显示名称不参与路由或身份判断。工具快照还独立批量读取当前 Work 的
+`requiredEnvironmentId` 和 `waitingForEnvironment`，不从聚合卡片反推调用；
+这两项是读取时 sidecar，不属于 Thread version 所保证的 durable 快照。
+
+数据库 `environment_changed` 同时失效环境与交互查询。租约自然过期没有数据库写事件，
+因此交互页附带 `freshnessAt`：未来 READY 环境租约、可领取时间或 Work 执行租约
+可能改变等待投影的最早时刻。前端在此时刻加 250ms 宽限后仅安排一次交互查询失效，
+续租会取消旧截止点；同一已消费截止点不重新排任务，不使用浏览器轮询或新增通知通道。
 
 ## Catalog
 

@@ -11,14 +11,16 @@ import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { useInteractionFreshnessRecheck } from '@/shared/lib/useInteractionFreshnessRecheck'
 
 const PENDING_INTERACTIONS_LIMIT = 50
 
 /**
  * 全局待处理角标：读服务端给出的真实 total，绝不用首页长度或本地累加假装全局计数。
  *
- * 待处理事实变化只由服务端事件提示（含真实执行根），因此这里没有轮询：changed 只回读角标查询，
- * resync/subscribed（首订与每次重连重订阅）同样回读，关闭断线期间的状态窗口。
+ * 持久变更只由服务端事件提示（含真实执行根），租约时效由服务端 freshnessAt 安排一次回读，
+ * 因此这里没有轮询：changed 只回读角标查询，resync/subscribed（首订与每次重连重订阅）
+ * 同样回读，关闭断线期间的状态窗口。
  */
 function usePendingInteractionsCount(): number {
   const queryClient = useQueryClient()
@@ -28,6 +30,7 @@ function usePendingInteractionsCount(): number {
     queryFn: () => interactionService.listInteractions(null, null, PENDING_INTERACTIONS_LIMIT),
     staleTime: 5000,
   })
+  useInteractionFreshnessRecheck(data?.freshnessAt)
   useEffect(() => {
     const invalidate = () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all })

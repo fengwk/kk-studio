@@ -3295,4 +3295,12 @@ export const aiCatalog = {
     'en-US': 'Waiting for Approval',
     'zh-CN': '等待审批',
   },
+  'ai.interaction.waitingEnvironment': {
+    'en-US': 'Waiting for environment',
+    'zh-CN': '等待环境上线',
+  },
+  'ai.interaction.environmentWaitingCount': {
+    'en-US': '{{count}} tool calls waiting for {{environmentName}}',
+    'zh-CN': '{{count}} 个工具调用等待 {{environmentName}} 上线',
+  },
 } satisfies LocaleCatalog
