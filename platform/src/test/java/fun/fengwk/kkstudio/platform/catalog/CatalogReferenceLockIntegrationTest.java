@@ -102,8 +102,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
         definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
       }
     }
-    skillPackages.deletePackage(
-        packageName, skillPackages.getPackage(packageName) == null ? -1 : 0);
+    deletePackage(packageName, skillPackages.getPackage(packageName) == null ? -1 : 0);
     model.delete();
   }
 
@@ -138,7 +137,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     assertTrue(updated.value() != null || updated.error() instanceof AiValidationException);
     definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
     if (skillPackages.getPackage(packageName) != null) {
-      skillPackages.deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
+      deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
     }
     model.delete();
   }
@@ -173,7 +172,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
       definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
     }
     if (skillPackages.getPackage(packageName) != null) {
-      skillPackages.deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
+      deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
     }
     model.delete();
   }
@@ -386,7 +385,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
       start.countDown();
       executor.shutdownNow();
     }
-    skillPackages.deletePackage(packageName, 0);
+    deletePackage(packageName, 0);
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
   }
@@ -501,7 +500,16 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     }
     skillPackage.setSkills(skills);
     skillPackage.setVersion(0L);
-    assertTrue(skillPackages.insertPackage(skillPackage));
+    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+    Boolean inserted = transaction.execute(status -> skillPackages.insertPackage(skillPackage));
+    assertTrue(inserted);
+  }
+
+  /** Skill Package 写路径要求调用方事务：包一层短事务，使成功写与通知共用同一 Connection。 */
+  private void deletePackage(String packageName, long expectedVersion) {
+    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+    transaction.executeWithoutResult(
+        status -> skillPackages.deletePackage(packageName, expectedVersion));
   }
 
   private void replaceManifest(String packageName, String... skillNames) {
