@@ -6263,12 +6263,12 @@ select.settings-input option {
   color: var(--fg-muted);
 }
 
-.interaction-status-tag.waiting_input {
+.interaction-status-tag.input {
   background: var(--info-soft);
   color: var(--info);
 }
 
-.interaction-status-tag.waiting_approval {
+.interaction-status-tag.approval {
   background: var(--warning-soft);
   color: var(--warning);
 }

@@ -398,6 +398,16 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         color: cardStyle.tagColor, background: cardStyle.tagBackground, warning, warningSoft,
       })
 
+      // 问卷标签也按 Interaction type 着色，不依赖旧 invocation 状态类名。
+      const inputTag = page.locator('.interaction-status-tag.input')
+      await expect(inputTag).toHaveCount(1)
+      const inputTagStyle = await inputTag.evaluate((el) => {
+        const style = window.getComputedStyle(el)
+        return { color: style.color, background: style.backgroundColor }
+      })
+      expect(inputTagStyle.color).toBe(await resolveToken(page, '--info'))
+      expect(inputTagStyle.background).toBe(await resolveToken(page, '--info-soft'))
+
       // 正文对比度必须达到可读水平，这正是截图里失效的部分。
       expect(contrastRatio(cardStyle.preColor, cardStyle.preBackground)).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(cardStyle.reasonColor, cardStyle.cardBackground)).toBeGreaterThanOrEqual(4.5)
