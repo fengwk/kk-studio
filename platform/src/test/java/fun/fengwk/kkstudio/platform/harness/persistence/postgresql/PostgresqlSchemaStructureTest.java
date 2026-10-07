@@ -11,8 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
-
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -1081,8 +1079,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void userTriggersAreExactAndVersionNotifiersNeverMutateVersions() throws SQLException {
-    // 精确枚举通知 trigger，避免 schema 留下隐式写入行为。
+  void noUserTriggersOrFunctionsExistAndVersionStaysAppOwned() throws SQLException {
+    // 精确枚举用户触发器：通知已迁移到 Java 写入口，schema 不得留下隐式写入行为。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -1094,151 +1092,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         triggers.add(rs.getString(1));
       }
     }
-    assertEquals(
-        Set.of(
-            "trg_canvas_document_revision_notify",
-            "trg_canvas_function_work_notify",
-            "trg_environment_connection_changed",
-            "trg_environment_registry_changed",
-            "trg_harness_thread_tree_notify",
-            "trg_harness_thread_version_notify",
-            "trg_harness_tool_invocation_interaction_notify",
-            "trg_project_issue_work_due",
-            "trg_skill_package_changed",
-            "trg_system_setting_version_notify"),
-        triggers,
-        "public triggers must equal the exact set of 10 user triggers");
+    // 通知已迁移到 Java 写入口：public schema 不得残留任何用户触发器。
+    assertEquals(Set.of(), triggers, "public schema must not define any user trigger");
 
-    String systemSettingsDefinition =
-        singleString(
-            "select pg_get_triggerdef(oid) from pg_trigger"
-                + " where tgname = 'trg_system_setting_version_notify'");
-    assertTrue(
-        systemSettingsDefinition.contains("AFTER INSERT OR UPDATE OF version"),
-        () ->
-            "system settings trigger must fire after insert or version update: "
-                + systemSettingsDefinition);
-    assertTrue(
-        systemSettingsDefinition.contains("system_setting_version_notify"),
-        () ->
-            "system settings trigger must invoke the notify function: " + systemSettingsDefinition);
-
-    String definition =
-        singleString(
-            "select pg_get_triggerdef(oid) from pg_trigger"
-                + " where tgname = 'trg_harness_thread_version_notify'");
-    assertTrue(
-        definition.contains("AFTER INSERT OR UPDATE OF version"),
-        () -> "trigger must fire after insert or version update: " + definition);
-    assertTrue(
-        definition.contains("harness_thread_version_notify"),
-        () -> "trigger must invoke the notify function: " + definition);
-
-    // notify 函数本身是唯一允许执行 notify 的地方；其函数体从不修改
-    // version（只读取 NEW/OLD 并发出 pg_notify）。
-    String functionSource =
-        singleString(
-            "select prosrc from pg_proc"
-                + " where pronamespace = 'public'::regnamespace"
-                + " and proname = 'harness_thread_version_notify'");
-    assertTrue(functionSource.contains("pg_notify"), () -> "notify function must call pg_notify");
-    assertTrue(
-        functionSource.contains("harness_thread_version"),
-        () -> "notify function must use the harness_thread_version channel");
-    assertTrue(
-        functionSource.contains("new.id::text || ':' || new.version::text"),
-        () -> "thread notify payload must be the strict threadId:version text: " + functionSource);
-    assertTrue(
-        !functionSource.contains("version := ") && !functionSource.contains("version = version"),
-        () -> "notify function must never mutate version: " + functionSource);
-
-    // system settings version hint 触发器只发送 NEW.version，不替应用自增或改写版本。
-    String systemSettingsFunctionSource =
-        singleString(
-            "select prosrc from pg_proc"
-                + " where pronamespace = 'public'::regnamespace"
-                + " and proname = 'system_setting_version_notify'");
-    assertTrue(
-        systemSettingsFunctionSource.contains("pg_notify"),
-        () -> "system settings notify function must call pg_notify");
-    assertTrue(
-        systemSettingsFunctionSource.contains("system_settings_changed"),
-        () -> "system settings notify function must use the system_settings_changed channel");
-    assertTrue(
-        systemSettingsFunctionSource.contains("new.version::text"),
-        () ->
-            "system settings notify payload must be NEW.version text: "
-                + systemSettingsFunctionSource);
-    assertTrue(
-        !systemSettingsFunctionSource.contains("version := ")
-            && !systemSettingsFunctionSource.contains("version = version"),
-        () ->
-            "system settings notify function must never mutate version: "
-                + systemSettingsFunctionSource);
-
-    // canvas revision hint 触发器只做 NOTIFY，永不写版本。
-    String canvasDefinition =
-        singleString(
-            "select pg_get_triggerdef(oid) from pg_trigger"
-                + " where tgname = 'trg_canvas_document_revision_notify'");
-    assertTrue(
-        canvasDefinition.contains("AFTER INSERT OR UPDATE OF revision"),
-        () -> "canvas trigger must fire after insert or revision update: " + canvasDefinition);
-    String canvasFunctionSource =
-        singleString(
-            "select prosrc from pg_proc"
-                + " where pronamespace = 'public'::regnamespace"
-                + " and proname = 'notify_canvas_document_revision'");
-    assertTrue(
-        canvasFunctionSource.contains("pg_notify"),
-        () -> "canvas notify function must call pg_notify");
-    assertTrue(
-        canvasFunctionSource.contains("canvas_revision"),
-        () -> "canvas notify function must use the canvas_revision channel");
-    assertTrue(
-        canvasFunctionSource.contains("new.id::text || ':' || new.revision::text"),
-        () -> "canvas notify payload must be {canvasId}:{revision}: " + canvasFunctionSource);
-
-    // canvas function work 触发器仅在 READY 且 lease_token 为 null 且 immediately claimable 时 NOTIFY
-    String canvasWorkFunctionSource =
-        singleString(
-            "select prosrc from pg_proc"
-                + " where pronamespace = 'public'::regnamespace"
-                + " and proname = 'notify_canvas_function_work'");
-    assertTrue(canvasWorkFunctionSource.contains("pg_notify"));
-    assertTrue(canvasWorkFunctionSource.contains("canvas_function_work"));
-    assertTrue(canvasWorkFunctionSource.contains("new.status = 'READY'"));
-    assertTrue(canvasWorkFunctionSource.contains("new.lease_token is null"));
-
-    // Skill Package 发布提示：channel 必须与 Platform listener 常量一致，payload 只是 package 名。
-    String skillPackageFunctionSource =
-        singleString(
-            "select prosrc from pg_proc"
-                + " where pronamespace = 'public'::regnamespace"
-                + " and proname = 'skill_package_changed_notify'");
-    assertTrue(skillPackageFunctionSource.contains("pg_notify"));
-    assertTrue(
-        skillPackageFunctionSource.contains(EnvironmentSkillSyncOrchestrator.CHANNEL),
-        () ->
-            "skill package notify function must use the orchestrator channel: "
-                + skillPackageFunctionSource);
-    assertTrue(
-        skillPackageFunctionSource.contains("new.package_name")
-            && skillPackageFunctionSource.contains("old.package_name"),
-        () ->
-            "skill package notify payload must be the package name: " + skillPackageFunctionSource);
-
-    // project_issue_work due hint 触发器
-    String issueWorkFunctionSource =
-        singleString(
-            "select prosrc from pg_proc"
-                + " where pronamespace = 'public'::regnamespace"
-                + " and proname = 'notify_project_issue_work_due'");
-    assertTrue(issueWorkFunctionSource.contains("pg_notify"));
-    assertTrue(issueWorkFunctionSource.contains("project_issue_work_due"));
-    assertTrue(issueWorkFunctionSource.contains("new.issue_id::text"));
-
-    // public 函数严格限定为通知函数
+    // 通知函数已全部删除：public schema 不得残留任何函数。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -1250,23 +1107,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         functions.add(rs.getString(1));
       }
     }
-    assertEquals(
-        Set.of(
-            "environment_connection_changed_notify",
-            "environment_registry_changed_notify",
-            "harness_thread_tree_notify",
-            "harness_thread_version_notify",
-            "harness_tool_interaction_notify",
-            "notify_canvas_document_revision",
-            "notify_canvas_function_work",
-            "notify_project_issue_work_due",
-            "skill_package_changed_notify",
-            "system_setting_version_notify"),
-        functions,
-        "only declared 10 notification helpers may exist");
+    assertEquals(Set.of(), functions, "public schema must not define any function");
 
-    // 行为：trigger 在 INSERT 与 version 写入时触发，但绝不修改存储的
-    // version 值；非 version 的应用层更新则完全不会动到 version。
+    // 行为：应用层写 version 与运行字段时，数据库绝不替应用推进或回退 version。
     UUID threadId = uuid(700L);
     UUID sessionId = uuid(701L);
     UUID rootEntryId = uuid(702L);
