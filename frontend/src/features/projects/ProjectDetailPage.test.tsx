@@ -209,6 +209,37 @@ describe('ProjectDetailPage', () => {
     expect(screen.getByText('Implement REST API')).toBeInTheDocument()
   })
 
+  it('opens workflow immediately, preserves tab drafts and resets the initial tab on reopen', async () => {
+    // 看板入口直达工作流；切换页签保留草稿，关闭重开则恢复入口页签与项目数据。
+    const api = createMockApi()
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+    await screen.findByText('Awesome Platform')
+
+    const openWorkflow = () => {
+      fireEvent.click(screen.getByRole('button', { name: '编辑 / 工作流' }))
+      const dialog = within(screen.getByRole('dialog', { name: '编辑项目配置' }))
+      expect(dialog.getByRole('tab', { name: '工作流' })).toHaveAttribute('aria-selected', 'true')
+      expect(dialog.getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'false')
+      return dialog
+    }
+
+    const dialog = openWorkflow()
+    fireEvent.change(dialog.getByLabelText(/显示名称/), { target: { value: 'Local Init' } })
+    fireEvent.click(dialog.getByRole('tab', { name: '基础信息' }))
+    fireEvent.change(dialog.getByLabelText(/项目名称/), { target: { value: 'Local Project' } })
+    fireEvent.click(dialog.getByRole('tab', { name: '工作流' }))
+    expect(dialog.getByLabelText(/显示名称/)).toHaveValue('Local Init')
+    fireEvent.click(dialog.getByRole('tab', { name: '基础信息' }))
+    expect(dialog.getByLabelText(/项目名称/)).toHaveValue('Local Project')
+    fireEvent.click(dialog.getByLabelText('关闭'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    const reopened = openWorkflow()
+    expect(reopened.getByLabelText(/显示名称/)).toHaveValue('待开始')
+    fireEvent.click(reopened.getByRole('tab', { name: '基础信息' }))
+    expect(reopened.getByLabelText(/项目名称/)).toHaveValue('Awesome Platform')
+  })
+
   it('filters issues by search query in IssueBoard', async () => {
     // 测试意图：验证看板搜索栏输入关键字能够即时过滤卡片
     const api = createMockApi()

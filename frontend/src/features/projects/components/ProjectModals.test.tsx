@@ -160,6 +160,28 @@ describe('CreateProjectModal', () => {
 })
 
 describe('EditProjectModal', () => {
+  it('uses initialTab only on mount and applies the requested tab again on reopen', async () => {
+    // initialTab 不是受控页签：打开期间 prop 变化不覆盖用户选择，重开才重新初始化。
+    const user = userEvent.setup()
+    const props = { project: mockProject, onClose: vi.fn(), onSuccess: vi.fn() }
+    const { rerender } = renderWithClient(
+      <EditProjectModal {...props} isOpen initialTab="workflow" />,
+    )
+    expect(screen.getByRole('tab', { name: '工作流' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByRole('tab', { name: '基础信息' }))
+    await user.clear(screen.getByLabelText(/项目名称/))
+    await user.type(screen.getByLabelText(/项目名称/), 'Local Project')
+    rerenderWithClient(rerender, <EditProjectModal {...props} isOpen initialTab="basic" />)
+    rerenderWithClient(rerender, <EditProjectModal {...props} isOpen initialTab="workflow" />)
+    expect(screen.getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText(/项目名称/)).toHaveValue('Local Project')
+
+    rerenderWithClient(rerender, <EditProjectModal {...props} isOpen={false} />)
+    rerenderWithClient(rerender, <EditProjectModal {...props} isOpen />)
+    expect(screen.getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText(/项目名称/)).toHaveValue(mockProject.title)
+  })
+
   it('protects archived-only and blocked-from references even with no visible issues', async () => {
     const user = userEvent.setup()
     const project = {
