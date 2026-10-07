@@ -111,7 +111,15 @@ public abstract class HarnessStoreCommandContract {
               UUID id = tx.nextId();
               tx.insertThread(
                   StoreTestSupport.threadState(
-                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      "sibling",
+                      false,
+                      1,
+                      0,
+                      T1,
+                      T1));
               return id;
             });
     inTransaction(
@@ -253,7 +261,15 @@ public abstract class HarnessStoreCommandContract {
               UUID id = tx.nextId();
               tx.insertThread(
                   StoreTestSupport.threadState(
-                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      "sibling",
+                      false,
+                      1,
+                      0,
+                      T1,
+                      T1));
               return id;
             });
     inTransaction(
@@ -859,7 +875,15 @@ public abstract class HarnessStoreCommandContract {
               UUID id = tx.nextId();
               tx.insertThread(
                   StoreTestSupport.threadState(
-                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      "sibling",
+                      false,
+                      1,
+                      0,
+                      T1,
+                      T1));
               return id;
             });
     UUID turnStartEntryId =
@@ -917,7 +941,15 @@ public abstract class HarnessStoreCommandContract {
               UUID id = tx.nextId();
               tx.insertThread(
                   StoreTestSupport.threadState(
-                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      "sibling",
+                      false,
+                      1,
+                      0,
+                      T1,
+                      T1));
               return id;
             });
     UUID sameTimeHigherId =
@@ -926,7 +958,15 @@ public abstract class HarnessStoreCommandContract {
               UUID id = tx.nextId();
               tx.insertThread(
                   StoreTestSupport.threadState(
-                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T0, T0));
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      "sibling-b",
+                      false,
+                      1,
+                      0,
+                      T0,
+                      T0));
               return id;
             });
     Baseline other = seedThreadBaseline(store);
