@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -92,14 +91,18 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling-2"));
               return id;
             });
     UUID thread3 =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling-3"));
               return id;
             });
 

@@ -24,8 +24,8 @@
 -- application-allocated UUID (client for node/group/request/command ids, server
 -- for document/resource/run ids): there are no id sequences. `revision` (Canvas)
 -- and `version` (Project) are application-owned cursors; the owning Java write
--- paths publish NOTIFY hints inside the same transaction (visible after commit)
--- and never mutate a row. Resource blobs
+-- paths write durable facts and publish NOTIFY hints in the same transaction
+-- (visible after commit). Notifications never advance a version themselves. Resource blobs
 -- are owned by the global `storage_blob` refcount lifecycle; product rows only
 -- reference them (RESTRICT).
 --
@@ -892,6 +892,14 @@ create index idx_harness_thread_session
 
 comment on index idx_harness_thread_parent is 'parent 回溯与子 Thread 树遍历索引';
 comment on index idx_harness_thread_session is 'listThreadsBySession 按 (session_id, created_at, id) 读取 Session 的 Thread 列表';
+
+-- 同一 Session 内执行根（parent_thread_id 为 null）名称唯一；子代理与跨 Session 同名不受限。
+-- name 由应用拥有（默认名或手动重命名），冲突在服务端映射为类型化 409，不静默改动名称。
+create unique index uk_harness_thread_root_name
+    on harness_thread (session_id, name)
+    where parent_thread_id is null;
+
+comment on index uk_harness_thread_root_name is '同一 Session 内执行根名称唯一（partial unique：仅约束 parent_thread_id is null 的根行）';
 
 create table harness_thread_command (
     thread_id uuid not null,

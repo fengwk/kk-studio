@@ -847,7 +847,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                           userMessage("inherited")),
                       NOW));
               UUID forkedId = tx.nextId();
-              tx.insertThread(threadState(forkedId, baseline.sessionId(), entryId, NOW));
+              tx.insertThread(threadState(forkedId, baseline.sessionId(), entryId, "forked", NOW));
               return entryId;
             });
 

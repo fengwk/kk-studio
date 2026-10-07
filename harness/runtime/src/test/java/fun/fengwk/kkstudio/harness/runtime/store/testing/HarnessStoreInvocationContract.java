@@ -24,7 +24,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.syntheticToolResultPayload;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolResultPayload;
@@ -652,7 +651,12 @@ public abstract class HarnessStoreInvocationContract {
         response,
         assistantEntryId,
         T1);
-    inTransaction(store, tx -> tx.insertThread(thread(thread5, baseline.sessionId(), turnStartB)));
+    inTransaction(
+        store,
+        tx ->
+            tx.insertThread(
+                StoreTestSupport.siblingRoot(
+                    thread5, baseline.sessionId(), turnStartB, "sibling-5")));
     insertTerminalModel(
         TestIds.id(5),
         thread5,
@@ -661,7 +665,12 @@ public abstract class HarnessStoreInvocationContract {
         ModelInvocationStatus.FAILED,
         errorEntryId,
         T2);
-    inTransaction(store, tx -> tx.insertThread(thread(thread6, baseline.sessionId(), turnStartC)));
+    inTransaction(
+        store,
+        tx ->
+            tx.insertThread(
+                StoreTestSupport.siblingRoot(
+                    thread6, baseline.sessionId(), turnStartC, "sibling-6")));
     insertTerminalModel(
         TestIds.id(6),
         thread6,
@@ -680,7 +689,8 @@ public abstract class HarnessStoreInvocationContract {
                 tx -> {
                   UUID thread7 = tx.nextId();
                   tx.insertThread(
-                      thread(thread7, baseline.sessionId(), baseline.turnStartEntryId()));
+                      StoreTestSupport.siblingRoot(
+                          thread7, baseline.sessionId(), baseline.turnStartEntryId(), "sibling-7"));
                   tx.insertModelInvocation(
                       modelInvocation(
                           TestIds.id(7),

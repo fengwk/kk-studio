@@ -231,6 +231,7 @@ class PostgresqlHarnessSchemaTest {
             "uk_harness_model_invocation_result",
             "uk_harness_model_invocation_turn",
             "uk_harness_thread_command_idempotency",
+            "uk_harness_thread_root_name",
             "uk_harness_thread_session",
             "uk_harness_tool_invocation_call_index"),
         indexes);
@@ -250,6 +251,10 @@ class PostgresqlHarnessSchemaTest {
     assertTrue(workLease.contains("WHERE (lease_until IS NOT NULL)"));
     assertTrue(threadParent.contains("(parent_thread_id)"));
     assertTrue(threadSession.contains("(session_id, created_at, id)"));
+    String rootName = indexDefinition("uk_harness_thread_root_name");
+    assertTrue(rootName.contains("CREATE UNIQUE INDEX"));
+    assertTrue(rootName.contains("(session_id, name)"));
+    assertTrue(rootName.contains("WHERE (parent_thread_id IS NULL)"));
     // Stop 幂等键索引必须按 stop_request_id 聚合并只覆盖非 null 行。
     assertTrue(stopRequest.contains("(thread_id, stop_request_id, sequence)"));
     assertTrue(stopRequest.contains("WHERE (stop_request_id IS NOT NULL)"));

@@ -17,6 +17,12 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     this.reason = Objects.requireNonNull(reason, "reason");
   }
 
+  /** 保留底层原因（如数据库唯一索引冲突）以便日志与诊断，同时不改变对外 reason 语义。 */
+  public HarnessRuntimeConflictException(Reason reason, String message, Throwable cause) {
+    super(message, cause);
+    this.reason = Objects.requireNonNull(reason, "reason");
+  }
+
   /** 类型化的冲突分类，对 HTTP 映射与客户端重试决策保持稳定。 */
   public Reason reason() {
     return reason;
@@ -51,6 +57,8 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     /** 人工输入目标已被其他提交接受，或相同提交身份的答案与已接受事实不一致。 */
     INPUT_SUBMISSION_MISMATCH,
     /** Thread 当前不满足手动压缩的可用性条件。 */
-    MANUAL_COMPACTION_UNAVAILABLE
+    MANUAL_COMPACTION_UNAVAILABLE,
+    /** 同一 Session 内已存在同名执行根 Thread（root-name 部分唯一索引冲突）。 */
+    THREAD_NAME_CONFLICT
   }
 }

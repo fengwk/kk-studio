@@ -91,13 +91,54 @@ class HarnessRuntimeAcceptInitialTest {
 
   private static AcceptCommandsCommand entry(
       UUID sessionId, UUID startEntryId, UUID threadId, List<NewThreadCommand> commands) {
+    return entry(sessionId, startEntryId, threadId, "branch", commands);
+  }
+
+  private static AcceptCommandsCommand entry(
+      UUID sessionId,
+      UUID startEntryId,
+      UUID threadId,
+      String name,
+      List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewThread(sessionId, startEntryId, threadId, "branch", false),
+        new AcceptCommandsTarget.NewThread(sessionId, startEntryId, threadId, name, false),
         commands);
   }
 
   private static NewThreadCommand setAgent(UUID idempotencyKey) {
     return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
+  }
+
+  /** 同身份重放在写入之前返回；重命名后也不能被名称索引误拒绝。 */
+  @Test
+  void sameNameRejectsAnotherRootButExactCreationReplaySurvivesRename() {
+    HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
+    AcceptCommandsCommand command =
+        entry(
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            TestIds.id(203),
+            List.of(userMessageCommand(TestIds.id(1), "hello")));
+    AcceptedCommands accepted = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    runtime.renameThread(new RenameThreadCommand(accepted.thread().id(), "renamed"));
+    AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    assertTrue(replay.replayed());
+    assertEquals(accepted.thread().id(), replay.thread().id());
+    assertEquals("renamed", replay.thread().name());
+    HarnessRuntimeConflictException conflict =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.acceptCommands(
+                    entry(
+                        baseline.sessionId(),
+                        baseline.rootEntryId(),
+                        TestIds.id(204),
+                        "renamed",
+                        List.of(userMessageCommand(TestIds.id(2), "other"))),
+                    AcceptancePreflight.IDENTITY));
+    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, conflict.reason());
+    assertNoNewThreadFacts(TestIds.id(204));
   }
 
   @Test
@@ -631,6 +672,7 @@ class HarnessRuntimeAcceptInitialTest {
                   baseline.sessionId(),
                   boundary,
                   threadId,
+                  "branch-" + boundary,
                   List.of(userMessageCommand(TestIds.id(1), "hello"))),
               AcceptancePreflight.IDENTITY);
       assertFalse(result.replayed());

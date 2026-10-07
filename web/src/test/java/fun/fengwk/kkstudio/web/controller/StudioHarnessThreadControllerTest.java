@@ -402,10 +402,23 @@ class StudioHarnessThreadControllerTest {
     verify(runtime, never()).compactThread(any(CompactThreadCommand.class));
   }
 
-  /**
-   * 意图：验证 PUT /api/harness/threads/{threadId}/name 执行 Runtime 重命名，并从重命名后权威 snapshot 回读
-   * name/version。
-   */
+  /** 名称冲突保留类型化 reason，并由既有异常边界映射为 409。 */
+  @Test
+  void renameNameConflictIsHttp409WithTypedReason() throws Exception {
+    when(runtime.renameThread(any(RenameThreadCommand.class)))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, "name already used"));
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"main\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.errors.reason").value("THREAD_NAME_CONFLICT"));
+  }
+
+  /** 验证重命名成功后从权威 snapshot 回读 name/version。 */
   @Test
   void renameThreadCallsRuntimeAndReturnsCanonicalNameAndVersion() throws Exception {
     when(runtime.renameThread(any(RenameThreadCommand.class)))

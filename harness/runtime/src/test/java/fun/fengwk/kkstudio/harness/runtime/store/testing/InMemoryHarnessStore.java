@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -694,6 +695,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
         throw new IllegalArgumentException(
             "parent thread " + thread.parentThreadId() + " does not exist");
       }
+      requireUniqueRootThreadName(thread);
       boolean joinedChild =
           thread.parentThreadId() != null
               && !lockedTrees.isEmpty()
@@ -784,7 +786,34 @@ public final class InMemoryHarnessStore implements HarnessStore {
       ThreadState.validateTransition(stored, thread);
       requireExistingEntry(thread.headEntryId());
       requireThreadHeadInSession(thread);
+      requireUniqueRootThreadName(thread);
       state.threads.put(thread.id(), thread);
+    }
+
+    /**
+     * 模拟 {@code uk_harness_thread_root_name}：同一 Session 内执行根（parent 为 null）名称唯一，子代理与跨 Session
+     * 同名不受影响。按规范化后的原值精确比较，不引入大小写/兼容折叠。
+     */
+    private void requireUniqueRootThreadName(ThreadState thread) {
+      if (thread.parentThreadId() != null) {
+        return;
+      }
+      boolean conflict =
+          state.threads.values().stream()
+              .anyMatch(
+                  existing ->
+                      !existing.id().equals(thread.id())
+                          && existing.parentThreadId() == null
+                          && existing.sessionId().equals(thread.sessionId())
+                          && existing.name().equals(thread.name()));
+      if (conflict) {
+        throw new HarnessRuntimeConflictException(
+            HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT,
+            "thread name "
+                + thread.name()
+                + " is already used by an execution root in session "
+                + thread.sessionId());
+      }
     }
 
     @Override

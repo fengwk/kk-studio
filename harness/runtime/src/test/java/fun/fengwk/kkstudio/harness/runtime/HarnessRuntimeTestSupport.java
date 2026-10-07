@@ -755,13 +755,13 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** 在同一 Session 内增加一条 Thread，指向现有 head Entry。 */
+  /** 在同一 Session 内增加一条 Thread，指向现有 head Entry；名称须与 Session 内其他根不同。 */
   static UUID seedThreadAt(InMemoryHarnessStore store, UUID headEntryId) {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
           UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
-          tx.insertThread(thread(id, sessionId, headEntryId));
+          tx.insertThread(thread(id, sessionId, headEntryId, "sibling", false));
           return id;
         });
   }

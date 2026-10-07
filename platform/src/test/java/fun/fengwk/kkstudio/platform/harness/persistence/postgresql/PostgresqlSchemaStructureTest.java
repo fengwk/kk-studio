@@ -883,6 +883,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_model_invocation_result",
             "uk_harness_model_invocation_turn",
             "uk_harness_thread_command_idempotency",
+            "uk_harness_thread_root_name",
             "uk_harness_thread_session",
             "uk_harness_tool_invocation_call_index",
             "uk_mcp_tool_server_source_name",
@@ -896,7 +897,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate"),
         indexes,
-        "the final schema must expose only its declared 23 domain unique keys");
+        "the final schema must expose only its declared 24 domain unique keys");
 
     Set<String> foreignKeys = new TreeSet<>();
     try (Connection conn = newConnection();
