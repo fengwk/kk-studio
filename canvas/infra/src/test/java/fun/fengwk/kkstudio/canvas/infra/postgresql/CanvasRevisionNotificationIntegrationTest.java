@@ -29,8 +29,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * {@code canvas_revision} 事务通知：只有 document 插入或 revision 真实前进才在提交时投递。
  *
- * <p>测试 fixture 已删除旧 Schema 触发器，因此这里的断言只可能由 Java 写入口（{@link PostgresqlCanvasStore} 的 {@code
- * addDocument} / {@code advanceRevision}）满足。回滚与未提交必须不可见，CAS 失败与未变更必须静默。
+ * <p>通知由 Java 写入口（{@link PostgresqlCanvasStore} 的 {@code addDocument} / {@code
+ * advanceRevision}）在事务内发布。回滚与未提交必须不可见，CAS 失败与未变更必须静默。
  */
 class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestSupport {
 

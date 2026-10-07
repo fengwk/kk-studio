@@ -58,7 +58,6 @@ public abstract class PostgresCanvasInfraTestSupport {
     try (Connection connection = newConnection()) {
       resetDatabase(connection);
       migrateDatabase(connection);
-      dropLegacyCanvasNotificationTriggers(connection);
     } catch (SQLException error) {
       throw new ExceptionInInitializerError(error);
     }
@@ -84,7 +83,6 @@ public abstract class PostgresCanvasInfraTestSupport {
     try (Connection connection = newConnection()) {
       resetDatabase(connection);
       migrateDatabase(connection);
-      dropLegacyCanvasNotificationTriggers(connection);
     }
   }
 
@@ -181,22 +179,6 @@ public abstract class PostgresCanvasInfraTestSupport {
         .validateMigrationNaming(true)
         .load()
         .migrate();
-  }
-
-  /**
-   * 删除 V1 baseline 中的 Canvas 通知触发器。
-   *
-   * <p>通知迁移由 Java 生产写入口负责，触发器会在 N6 从 Schema 移除。测试fixture 必须在应用 baseline 后显式 drop，否则本模块的
-   * 通知断言会由旧触发器而非 Java 写路径满足，无法证明迁移正确。
-   */
-  private static void dropLegacyCanvasNotificationTriggers(Connection connection)
-      throws SQLException {
-    try (Statement statement = connection.createStatement()) {
-      statement.execute(
-          "drop trigger if exists trg_canvas_document_revision_notify on canvas_document");
-      statement.execute(
-          "drop trigger if exists trg_canvas_function_work_notify on canvas_function_run");
-    }
   }
 
   /** 节点夹具：保持节点行、资源行与领域投影一致，便于测试直接表达目标模型。 */

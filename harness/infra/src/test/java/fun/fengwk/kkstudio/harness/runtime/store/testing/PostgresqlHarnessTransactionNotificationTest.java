@@ -54,12 +54,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import javax.sql.DataSource;
 
 import java.sql.Connection;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -74,8 +72,7 @@ import java.util.function.UnaryOperator;
 /**
  * 事务内 Harness 失效通知的 PostgreSQL 集成验证：走真实生产写入口，断言提交后才投递的内建 {@code pg_notify}。
  *
- * <p>每个测试的隔离 fixture 先删除 {@code harness_thread} / {@code harness_tool_invocation}
- * 上的全部非内部触发器，确保断言不会被 数据库触发器顶包：每条断言都只能由 {@code PostgresqlHarnessTransaction} 自己发布的通知满足。
+ * <p>通知由 {@code PostgresqlHarnessTransaction} 在真实写事务内发布；每条断言都只能由生产写路径自己发布的通知满足。
  */
 class PostgresqlHarnessTransactionNotificationTest {
 
@@ -89,10 +86,9 @@ class PostgresqlHarnessTransactionNotificationTest {
   private DataSource dataSource;
 
   @BeforeEach
-  void setUp() throws SQLException {
+  void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     dataSource = PostgresqlHarnessStoreFixture.dataSource();
-    dropLegacyHarnessNotificationTriggers(dataSource);
   }
 
   /**
@@ -639,45 +635,6 @@ class PostgresqlHarnessTransactionNotificationTest {
   /** 来源 Thread 已不可解析时的空 payload：listener 依此回退全量 resync。 */
   private static String interactionResyncNotification() {
     return INTERACTION_CHANNEL + "|";
-  }
-
-  /**
-   * 删除 {@code harness_thread} / {@code harness_tool_invocation} 上的全部非内部触发器（当前 Schema 中是三个通知触发器）， 使
-   * fixture 内不存在任何 DB 侧通知来源；断言只能由 {@code PostgresqlHarnessTransaction} 自己发布的 {@code pg_notify} 满足。
-   */
-  private static void dropLegacyHarnessNotificationTriggers(DataSource dataSource)
-      throws SQLException {
-    try (Connection connection = dataSource.getConnection();
-        Statement statement = connection.createStatement()) {
-      connection.setAutoCommit(true);
-      List<String[]> triggers = new ArrayList<>();
-      try (ResultSet rs =
-          statement.executeQuery(
-              """
-              select tgname, tgrelid::regclass::text
-              from pg_trigger
-              where not tgisinternal
-                and tgrelid in ('harness_thread'::regclass, 'harness_tool_invocation'::regclass)
-              """)) {
-        while (rs.next()) {
-          triggers.add(new String[] {rs.getString(1), rs.getString(2)});
-        }
-      }
-      for (String[] trigger : triggers) {
-        statement.execute("drop trigger \"" + trigger[0] + "\" on \"" + trigger[1] + "\"");
-      }
-      try (ResultSet rs =
-          statement.executeQuery(
-              """
-              select count(*)
-              from pg_trigger
-              where not tgisinternal
-                and tgrelid in ('harness_thread'::regclass, 'harness_tool_invocation'::regclass)
-              """)) {
-        rs.next();
-        assertEquals(0, rs.getInt(1), "fixture 必须不含 harness 触发器");
-      }
-    }
   }
 
   private static void seedEnvironmentConnection(
