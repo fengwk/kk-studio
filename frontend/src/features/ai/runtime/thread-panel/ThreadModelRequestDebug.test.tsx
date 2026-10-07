@@ -95,13 +95,13 @@ describe('ThreadModelRequestDebug & Inspector', () => {
   it('renders preview rails without DEBUG prefix, localized labels and tool/skill chips (zh-CN)', () => {
     render(<DebugViewHarness />)
 
-    // 标题去掉 DEBUG 前缀，本地化为“下一次请求预览”
-    expect(screen.getByText('下一次请求预览')).toBeInTheDocument()
+    // 标题去掉 DEBUG 前缀，本地化为“预览当前草稿”
+    expect(screen.getByText('预览当前草稿')).toBeInTheDocument()
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
     expect(screen.getByText('System prompt content with instructions')).toBeInTheDocument()
 
     // 工具标题与徽章
-    expect(screen.getByText(/工具 1 已发送 · 1 已过滤/)).toBeInTheDocument()
+    expect(screen.getByText(/工具 1 纳入规划 · 1 已过滤/)).toBeInTheDocument()
     expect(screen.getByText('read')).toBeInTheDocument()
     const readBadge = screen.getByTitle('可选环境 (OPTIONAL)')
     expect(readBadge).toHaveTextContent('P+E')
@@ -130,9 +130,9 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     render(<DebugViewHarness />)
 
     // 英文下标题无 DEBUG 前缀
-    expect(screen.getByText('Next Request Preview')).toBeInTheDocument()
+    expect(screen.getByText('Preview current draft')).toBeInTheDocument()
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
-    expect(screen.getByText(/TOOLS 1 sent · 1 filtered/)).toBeInTheDocument()
+    expect(screen.getByText(/TOOLS 1 planned · 1 filtered/)).toBeInTheDocument()
     expect(screen.getByTitle('Optional environment (OPTIONAL)')).toBeInTheDocument()
     expect(screen.getByTitle('Environment required (REQUIRED)')).toBeInTheDocument()
     expect(screen.getByText('SKILLS 1')).toBeInTheDocument()
@@ -173,7 +173,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(inspector).toHaveAttribute('aria-label', 'read')
     expect(screen.getByRole('heading', { level: 3, name: 'read' })).toBeInTheDocument()
     expect(screen.getByText('名称')).toBeInTheDocument()
-    expect(screen.getByText('已发送 (SENT)')).toBeInTheDocument()
+    expect(screen.getByText('纳入当前规划 (SENT)')).toBeInTheDocument()
     expect(screen.getByText('可选环境 (OPTIONAL)')).toBeInTheDocument()
     expect(screen.getByText('builtin:read')).toBeInTheDocument()
     expect(screen.getByText('Read file')).toBeInTheDocument()
@@ -211,15 +211,15 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       const user = userEvent.setup()
       render(<DebugViewHarness />)
 
-      const snapshotBtn = screen.getByRole('button', { name: '查看当前调用规范化请求快照' })
+      const snapshotBtn = screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' })
       expect(snapshotBtn).toBeInTheDocument()
-      expect(snapshotBtn).toHaveTextContent('请求快照')
+      expect(snapshotBtn).toHaveTextContent('冻结调用输入')
 
       await user.click(snapshotBtn)
 
       const inspector = screen.getByTestId('thread-debug-inspector')
-      expect(inspector).toHaveAttribute('aria-label', '请求快照')
-      expect(screen.getByRole('heading', { level: 3, name: '请求快照' })).toBeInTheDocument()
+      expect(inspector).toHaveAttribute('aria-label', '冻结调用输入')
+      expect(screen.getByRole('heading', { level: 3, name: '冻结调用输入' })).toBeInTheDocument()
 
       const pre = screen.getByTestId('frozen-request-json')
       expect(pre).toHaveTextContent('"model": "minimax"')
@@ -229,8 +229,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     it('does NOT render Request Snapshot button when frozenInvocation is null', () => {
       render(<DebugViewHarness debug={sampleDebug({ frozenInvocation: null })} />)
 
-      expect(screen.queryByRole('button', { name: /查看当前调用规范化请求快照/ })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /请求快照/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /查看当前调用冻结的规范化 ProviderRequest/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /冻结调用输入/ })).not.toBeInTheDocument()
     })
 
     it('displays defensive placeholder when opening request inspector without active frozen invocation', () => {
@@ -243,7 +243,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       )
 
       expect(
-        screen.getByText('当前无活动的冻结调用请求。仅在活动调用回合中显示规范化请求 JSON。'),
+        screen.getByText('当前没有可读取的对应模型调用；调用物化清理后不再提供冻结输入。'),
       ).toBeInTheDocument()
     })
   })
@@ -992,9 +992,9 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       const { rerender } = render(
         <ThreadModelRequestDebug debug={sampleDebug()} onSelectInspector={vi.fn()} />,
       )
-      const idleTitle = screen.getByRole('button', { name: '下一次请求预览' })
+      const idleTitle = screen.getByRole('button', { name: '预览当前草稿' })
       expect(idleTitle).toBeDisabled()
-      expect(idleTitle).toHaveAttribute('title', '下一次请求预览')
+      expect(idleTitle).toHaveAttribute('title', '预览当前草稿')
 
       rerender(
         <ThreadModelRequestDebug
@@ -1005,9 +1005,9 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           previewDisabledReason="草稿为空"
         />,
       )
-      const blockedTitle = screen.getByRole('button', { name: '下一次请求预览 (草稿为空)' })
+      const blockedTitle = screen.getByRole('button', { name: '预览当前草稿 (草稿为空)' })
       expect(blockedTitle).toBeDisabled()
-      expect(blockedTitle).toHaveAttribute('title', '下一次请求预览 (草稿为空)')
+      expect(blockedTitle).toHaveAttribute('title', '预览当前草稿 (草稿为空)')
     })
 
     it('swaps the title to the loading label with a spinner while a preview is in flight', () => {
@@ -1037,7 +1037,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           onPreview={onPreview}
         />,
       )
-      const titleButton = screen.getByRole('button', { name: '下一次请求预览' })
+      const titleButton = screen.getByRole('button', { name: '预览当前草稿' })
       expect(titleButton).toBeEnabled()
       await user.click(titleButton)
       expect(onPreview).toHaveBeenCalledTimes(1)
@@ -1066,8 +1066,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           onPreview={vi.fn()}
         />,
       )
-      expect(screen.getByRole('button', { name: '下一次请求预览' })).toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: '查看当前调用规范化请求快照' }))
+      expect(screen.getByRole('button', { name: '预览当前草稿' })).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' }))
       expect(onSelectInspector).toHaveBeenCalledWith({ type: 'request' })
 
       rerender(
@@ -1077,8 +1077,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           onPreview={vi.fn()}
         />,
       )
-      expect(screen.queryByRole('button', { name: '查看当前调用规范化请求快照' })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '下一次请求预览' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '预览当前草稿' })).toBeInTheDocument()
     })
   })
 })
