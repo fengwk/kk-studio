@@ -397,6 +397,22 @@ public interface HarnessStore {
         Instant afterCreatedAt, UUID afterId, int limit);
 
     /**
+     * 按 {@code (representativeCreatedAt, representativeInvocationId)} 升序读取「等待环境」分组：一组调用已 READY、其
+     * TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}，且该环境没有有效 READY 连接租约。
+     *
+     * <p>分组键是 {@code (真实执行根, 所需环境)}：根沿不可变祖先链解析，代表取组内最早的 {@code (createdAt, id)}，{@code
+     * waitingCount} 是组内调用数。时间条件在各自实现的权威时间域内判定：生产实现使用数据库时钟（{@code statement_timestamp()}），{@code
+     * now} 只做毫秒精度校验；内存实现以 {@code now} 为同一时间域。{@code afterRepresentativeCreatedAt} / {@code
+     * afterRepresentativeInvocationId} 是分组代表的游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零 UUID；{@code
+     * limit} 必须为正，实现按 {@code limit} 截断。本查询只读、不产生锁，不新增任何持久等待 状态；返回不可变列表。
+     */
+    List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
+        Instant now,
+        Instant afterRepresentativeCreatedAt,
+        UUID afterRepresentativeInvocationId,
+        int limit);
+
+    /**
      * 在指定 Session 的不可变 Entry 历史中，按原 ToolInvocation ID 查找已物化的 ToolResult MESSAGE Entry。
      *
      * <p>Terminal ToolInvocation 行在结果物化后被物理删除，此时只能靠 Entry 的 runtime 元数据（{@code

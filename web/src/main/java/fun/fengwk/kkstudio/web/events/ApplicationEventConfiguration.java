@@ -135,11 +135,18 @@ public class ApplicationEventConfiguration {
                 InteractionChangeHub.CHANNEL,
                 interactionChangeHub::onNotification,
                 interactionChangeHub::broadcastResync),
-            // 13. Environment 连接行失效；租约到期由读取投影与浏览器单次回读处理
+            // 13. Environment 连接行失效：既失效环境列表，也让待处理读模型失效——环境上线/离线会改变「待领取环境」事实，
+            // 不能只监听请求/Work 变化而漏掉「环境已离线后才产生新调用」。租约到期仍由读取投影与浏览器单次回读处理。
             new PostgresqlNotificationHandler(
                 EnvironmentChangeHub.CHANNEL,
-                environmentChangeHub::onNotification,
-                environmentChangeHub::broadcastResync)),
+                payload -> {
+                  environmentChangeHub.onNotification(payload);
+                  interactionChangeHub.onNotification(payload);
+                },
+                () -> {
+                  environmentChangeHub.broadcastResync();
+                  interactionChangeHub.broadcastResync();
+                })),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }

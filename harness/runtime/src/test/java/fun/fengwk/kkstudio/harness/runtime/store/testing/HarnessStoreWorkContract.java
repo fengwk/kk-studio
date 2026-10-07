@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -37,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -87,6 +89,23 @@ public abstract class HarnessStoreWorkContract {
    * <p>PostgreSQL 直接改写持久化行的 available_at，内存实现改写内存 available_at；两者都不依赖 JVM 与数据库的时钟关系。
    */
   protected abstract void forceWorkAvailable(WorkTarget target);
+
+  /**
+   * 让 target 的 available_at 落在权威时间域内的未来 {@code delay} 之后（验证未到期 Work 不进入等待环境投影）。
+   *
+   * <p>PostgreSQL 直接改写持久化行的 available_at，内存实现改写内存 available_at；两者都不依赖 JVM 与数据库的时钟关系。
+   */
+  protected abstract void forceWorkAvailableAfter(WorkTarget target, Duration delay);
+
+  /**
+   * 为环境播种「任意节点持有有效 READY 连接租约」事实：环境已上线，其待领取工具有可路由的承接节点。
+   *
+   * <p>实现必须在各自权威时间域内给出租约（远长于测试跨度）。内存实现用 READY 租约谓词表达，生产实现改写 {@code environment_connection} 行。
+   */
+  protected abstract void seedReadyEnvironmentLease(EnvironmentId environmentId);
+
+  /** 让环境的 READY 连接租约在权威时间域内失效（自然到期或离开 READY），表征环境离线。 */
+  protected abstract void expireReadyEnvironmentLease(EnvironmentId environmentId);
 
   protected ClaimedWork claimNext(WorkTargetType type, Instant now) {
     return store
@@ -939,5 +958,181 @@ public abstract class HarnessStoreWorkContract {
     ClaimedWork claimed = claimNext(WorkTargetType.TOOL, authorityNow());
     assertEquals(toolTarget, claimed.target());
     assertEquals(env, claimed.requiredEnvironmentId());
+  }
+
+  /** 等待环境投影使用的环境身份；实现必须保证该 environment 注册行存在（生产实现由 createStore 播种）。 */
+  protected static final EnvironmentId WAITING_ENVIRONMENT =
+      EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
+
+  /** 另一环境身份，用于验证按 (根, 环境) 分组。 */
+  protected static final EnvironmentId SECOND_ENVIRONMENT =
+      EnvironmentId.parse("44444444-4444-4444-4444-444444444444");
+
+  private static final UUID CURSOR_ZERO = new UUID(0L, 0L);
+
+  protected record SeededTools(UUID threadId, UUID modelId, List<UUID> toolIds) {}
+
+  private List<PendingEnvironmentWaitRow> environmentWaits(Instant afterCreatedAt, UUID afterId) {
+    return store.transaction(
+        tx -> tx.listPendingEnvironmentWaits(authorityNow(), afterCreatedAt, afterId, 10));
+  }
+
+  /** 在同一 root thread 播种 {@code count} 个 READY TOOL 调用，用于验证按根聚合计数。 */
+  protected SeededTools seedTools(HarnessStore store, int count) {
+    TurnBaseline baseline = seedTurnBaseline(store);
+    ModelRequestSpec requestSpec = succeededRequest();
+    String[] callIds = new String[count];
+    for (int index = 0; index < count; index++) {
+      callIds[index] = "call-" + (index + 1);
+    }
+    ProviderResponse response = StoreTestSupport.assistantResponse(callIds);
+    return store.transaction(
+        tx -> {
+          UUID modelId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  baseline.turnStartEntryId(),
+                  StoreTestSupport.userMessagePayload(),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId,
+                  baseline.sessionId(),
+                  userEntryId,
+                  mappedAssistant(requestSpec, response),
+                  T1));
+          tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.insertModelInvocation(
+              new ModelInvocation(
+                  modelId,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  requestSpec,
+                  ModelInvocationStatus.READY,
+                  0,
+                  null,
+                  null,
+                  null,
+                  null,
+                  List.of(),
+                  T1,
+                  T1));
+          ModelInvocation model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.beginDispatch(T1));
+          model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.markRunning(T1));
+          model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.succeed(response, T1));
+          model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          List<UUID> toolIds = new ArrayList<>();
+          List<ToolInvocation> tools = new ArrayList<>();
+          for (int index = 0; index < count; index++) {
+            UUID toolId = tx.nextId();
+            toolIds.add(toolId);
+            tools.add(
+                toolInvocation(
+                    toolId,
+                    modelId,
+                    assistantEntryId,
+                    index,
+                    callIds[index],
+                    ToolInvocationStatus.READY,
+                    T1));
+          }
+          tx.insertToolInvocations(tools);
+          return new SeededTools(baseline.threadId(), modelId, List.copyOf(toolIds));
+        });
+  }
+
+  /**
+   * 测试意图：只有「READY 调用 + 到期且无有效执行 lease 的 TOOL Work + 环境无有效 READY 连接租约」同时成立才进入等待环境投影；环境上线后消失，
+   * 自然到期后重新出现（不依赖任何写入事件）。
+   */
+  @Test
+  void environmentWaitTracksOfflineEnvironmentAndLeaseExpiry() {
+    SeededTools seeded = seedTools(store, 1);
+    UUID toolId = seeded.toolIds().get(0);
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, toolId);
+    requestWork(target, WAITING_ENVIRONMENT);
+
+    PendingEnvironmentWaitRow expected =
+        new PendingEnvironmentWaitRow(seeded.threadId(), WAITING_ENVIRONMENT, T1, toolId, 1);
+    assertEquals(List.of(expected), environmentWaits(Instant.EPOCH, CURSOR_ZERO));
+
+    // 环境持有有效 READY 租约：待领取事实消失。
+    seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
+    assertEquals(List.of(), environmentWaits(Instant.EPOCH, CURSOR_ZERO));
+
+    // 租约自然到期（无数据库写事件）：重新成为等待环境。
+    expireReadyEnvironmentLease(WAITING_ENVIRONMENT);
+    assertEquals(List.of(expected), environmentWaits(Instant.EPOCH, CURSOR_ZERO));
+  }
+
+  /** 测试意图：未到期的 Work 不是「待领取环境等待」；server-side TOOL（无冻结环境）不计入。 */
+  @Test
+  void environmentWaitRequiresDueWorkAndFrozenEnvironment() {
+    SeededTools dueSeeded = seedTools(store, 1);
+    WorkTarget dueTarget = new WorkTarget(WorkTargetType.TOOL, dueSeeded.toolIds().get(0));
+    requestWork(dueTarget, WAITING_ENVIRONMENT);
+    forceWorkAvailableAfter(dueTarget, Duration.ofMinutes(5));
+    assertEquals(List.of(), environmentWaits(Instant.EPOCH, CURSOR_ZERO));
+
+    forceWorkAvailable(dueTarget);
+    assertEquals(1, environmentWaits(Instant.EPOCH, CURSOR_ZERO).size());
+
+    // server-side TOOL：没有冻结 required_environment_id，不进入环境等待。
+    SeededTools serverSide = seedTools(store, 1);
+    requestWork(new WorkTarget(WorkTargetType.TOOL, serverSide.toolIds().get(0)));
+    List<PendingEnvironmentWaitRow> waits = environmentWaits(Instant.EPOCH, CURSOR_ZERO);
+    assertEquals(1, waits.size());
+    assertEquals(dueSeeded.threadId(), waits.get(0).rootThreadId());
+  }
+
+  /** 测试意图：按 (真实执行根, 所需环境) 聚合，代表取组内最早 {@code (createdAt, id)}；跨根/跨环境分组不重复，并可按代表游标稳定翻页。 */
+  @Test
+  void environmentWaitAggregatesByRootAndEnvironmentWithStableCursor() {
+    SeededTools first = seedTools(store, 2);
+    requestWork(new WorkTarget(WorkTargetType.TOOL, first.toolIds().get(0)), WAITING_ENVIRONMENT);
+    requestWork(new WorkTarget(WorkTargetType.TOOL, first.toolIds().get(1)), WAITING_ENVIRONMENT);
+    SeededTools second = seedTools(store, 2);
+    requestWork(new WorkTarget(WorkTargetType.TOOL, second.toolIds().get(0)), WAITING_ENVIRONMENT);
+    requestWork(new WorkTarget(WorkTargetType.TOOL, second.toolIds().get(1)), SECOND_ENVIRONMENT);
+
+    List<PendingEnvironmentWaitRow> all = environmentWaits(Instant.EPOCH, CURSOR_ZERO);
+    assertEquals(3, all.size());
+    assertEquals(
+        new PendingEnvironmentWaitRow(
+            first.threadId(), WAITING_ENVIRONMENT, T1, first.toolIds().get(0), 2),
+        all.get(0));
+    assertEquals(
+        new PendingEnvironmentWaitRow(
+            second.threadId(), WAITING_ENVIRONMENT, T1, second.toolIds().get(0), 1),
+        all.get(1));
+    assertEquals(
+        new PendingEnvironmentWaitRow(
+            second.threadId(), SECOND_ENVIRONMENT, T1, second.toolIds().get(1), 1),
+        all.get(2));
+
+    // 同一根不同环境是两个独立分组，不会合并；按代表游标翻页不重不漏。
+    List<PendingEnvironmentWaitRow> firstPage =
+        store.transaction(
+            tx -> tx.listPendingEnvironmentWaits(authorityNow(), Instant.EPOCH, CURSOR_ZERO, 2));
+    assertEquals(all.subList(0, 2), firstPage);
+    PendingEnvironmentWaitRow cursor = firstPage.get(firstPage.size() - 1);
+    List<PendingEnvironmentWaitRow> secondPage =
+        store.transaction(
+            tx ->
+                tx.listPendingEnvironmentWaits(
+                    authorityNow(),
+                    cursor.representativeCreatedAt(),
+                    cursor.representativeInvocationId(),
+                    2));
+    assertEquals(List.of(all.get(2)), secondPage);
   }
 }
