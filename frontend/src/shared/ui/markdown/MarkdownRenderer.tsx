@@ -5,7 +5,9 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import { CodeBlock } from '@/shared/ui/markdown/CodeBlock'
+import { MarkdownTable } from '@/shared/ui/markdown/MarkdownTable'
 import { MermaidBlock } from '@/shared/ui/markdown/MermaidBlock'
+import { MarkdownSegmentSourceContext } from '@/shared/ui/markdown/markdownTableSource'
 import { splitMarkdownSegments } from '@/shared/ui/markdown/splitMarkdownSegments'
 import 'katex/dist/katex.min.css'
 import 'highlight.js/styles/github-dark.min.css'
@@ -58,7 +60,10 @@ const REHYPE_PLUGINS: RehypePlugins = [
 const REHYPE_PLUGINS_PRESERVING_RAW_TEXT: RehypePlugins = [...REHYPE_PLUGINS, REHYPE_RAW_TEXT_SPAN]
 const MARKDOWN_COMPONENTS = createMarkdownComponents()
 
-/** 单段 markdown：content 不变则跳过 re-parse（流式时前缀段不再重复解析） */
+/**
+ * 单段 markdown：content 不变则跳过 re-parse（流式时前缀段不再重复解析）。
+ * 表格复制按钮需要本段原文来切 offset，因此把 content 一并作为段源上下文下发。
+ */
 const MarkdownSegmentView = memo(
   function MarkdownSegmentView({
     content,
@@ -68,13 +73,15 @@ const MarkdownSegmentView = memo(
     preserveRawText: boolean
   }) {
     return (
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={preserveRawText ? REHYPE_PLUGINS_PRESERVING_RAW_TEXT : REHYPE_PLUGINS}
-        components={MARKDOWN_COMPONENTS}
-      >
-        {content}
-      </ReactMarkdown>
+      <MarkdownSegmentSourceContext.Provider value={content}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={preserveRawText ? REHYPE_PLUGINS_PRESERVING_RAW_TEXT : REHYPE_PLUGINS}
+          components={MARKDOWN_COMPONENTS}
+        >
+          {content}
+        </ReactMarkdown>
+      </MarkdownSegmentSourceContext.Provider>
     )
   },
   (prev, next) => prev.content === next.content && prev.preserveRawText === next.preserveRawText,
@@ -128,6 +135,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
 function createMarkdownComponents(): Components {
   return {
+    table: MarkdownTable,
     a: ({ href, children }) => (
       <a href={href} target="_blank" rel="noreferrer noopener">
         {children}
