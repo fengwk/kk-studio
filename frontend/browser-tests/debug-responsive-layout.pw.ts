@@ -487,8 +487,9 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(inspector).toHaveAttribute('aria-label', '缓存策略')
     await expect(colDetail.locator('h3')).toHaveText('缓存策略')
     await expect(colDetail.getByText('SHORT')).toBeVisible()
-    await expect(colDetail.getByText('prefix-key-1')).toBeVisible()
-    await expect(colDetail.getByText('SYSTEM, TOOLS')).toBeVisible()
+    // 会话缓存键就是真实 Session UUID；断点事实已从契约移除，不得再出现断点行。
+    await expect(colDetail.getByText('00000000-0000-0000-0000-000000000001')).toBeVisible()
+    await expect(colDetail.getByText(/断点/)).toHaveCount(0)
 
     // 按 Escape 局部关闭详情，焦点恢复至 cacheBtn
     await page.keyboard.press('Escape')
