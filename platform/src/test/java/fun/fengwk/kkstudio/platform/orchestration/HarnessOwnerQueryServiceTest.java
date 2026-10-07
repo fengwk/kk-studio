@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -288,6 +289,59 @@ class HarnessOwnerQueryServiceTest {
         service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
     assertEquals("latest user", reminderHeadPreview);
     assertFalse(reminderHeadPreview.contains("system-reminder"), reminderHeadPreview);
+  }
+
+  /** Session 摘要保留同名根与子，父身份只从既有 snapshot 读取，不追加查询。 */
+  @Test
+  void threadSummariesPreserveSameNamedRootAndChildWithSnapshotParentIdentity() {
+    UUID sessionId = id(70);
+    UUID rootId = id(71);
+    UUID childId = id(72);
+    Entry entry = root(sessionId, id(701), T0, ROOT_SETTINGS);
+    ThreadState root = thread(rootId, sessionId, entry.id(), T0, T1);
+    ThreadState child =
+        new ThreadState(
+            childId,
+            sessionId,
+            rootId,
+            entry.id(),
+            "0".repeat(64),
+            root.name(),
+            ThreadYoloPolicy.follow(rootId),
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0L,
+            T0,
+            T1);
+    when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(root, child));
+    for (ThreadState state : List.of(root, child)) {
+      when(runtime.getThreadSnapshot(state.id()))
+          .thenReturn(
+              new ThreadSnapshot(
+                  state,
+                  new EntryPath(List.of(entry)),
+                  List.of(),
+                  null,
+                  List.of(),
+                  List.of(),
+                  List.of()));
+    }
+
+    List<HarnessThreadSummaryDTO> summaries = service.listThreadSummaries(sessionId);
+
+    assertEquals(
+        List.of(rootId.toString(), childId.toString()),
+        summaries.stream().map(HarnessThreadSummaryDTO::getThreadId).toList());
+    assertEquals(
+        List.of("thread", "thread"),
+        summaries.stream().map(HarnessThreadSummaryDTO::getName).toList());
+    assertNull(summaries.getFirst().getParentThreadId());
+    assertEquals(rootId.toString(), summaries.get(1).getParentThreadId());
+    verify(runtime).listThreadsBySession(sessionId);
+    verify(runtime).getThreadSnapshot(rootId);
+    verify(runtime).getThreadSnapshot(childId);
+    verifyNoMoreInteractions(runtime);
   }
 
   @Test
