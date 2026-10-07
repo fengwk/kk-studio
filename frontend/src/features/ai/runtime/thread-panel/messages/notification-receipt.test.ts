@@ -40,10 +40,35 @@ describe('parseSubagentReceipt', () => {
       threadId: '00000000-0000-0000-0000-0000000000aa',
       agent: 'coder',
       state: 'completed',
+      task: 'do the thing',
       result: report,
       error: null,
       partial: null,
     })
+  })
+
+  it('returns the historical task section instead of discarding it', () => {
+    // 测试意图：折叠卡要用原始 task 做短预览、展开要展示原文，解析层必须返回 task。
+    const parsed = parseSubagentReceipt(completedReceipt('done'))
+
+    expect(parsed.ok && parsed.receipt.task).toBe('do the thing')
+  })
+
+  it('decodes XML entities one level without re-interpreting the decoded text', () => {
+    // 测试意图：textContent 只还原一层实体；已还原的 &lt;script&gt; 不得再被当成标签或二次反转义。
+    const xml = [
+      '<subagent_result thread_id="t" agent="a" state="completed">',
+      '<task>explore &amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;</task>',
+      '<result>a &amp; b &lt;tag&gt;</result>',
+      '</subagent_result>',
+    ].join('\n')
+
+    const parsed = parseSubagentReceipt(xml)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    // 信封里 &amp;lt; 是一层转义后的字面量，还原一次后仍保持为字面量文本。
+    expect(parsed.receipt.task).toBe('explore &lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(parsed.receipt.result).toBe('a & b <tag>')
   })
 
   it('keeps result content that itself starts or ends with a newline', () => {
@@ -114,7 +139,7 @@ describe('parseSubagentReceipt', () => {
   })
 
   it('rejects a receipt whose thread does not match the notification source', () => {
-    // 测试意图：信封 thread_id 与通知来源不一致时拒绝，避免把回执错误归属到其它子 Thread。
+    // 测试意图：信封 thread_id 与通知来源不一致时拒绝，避免把回执错误归属到其它 subagent 执行。
     const xml =
       '<subagent_result thread_id="other-thread" agent="a" state="completed">'
       + '<task>t</task><result>r</result></subagent_result>'
