@@ -6254,25 +6254,6 @@ select.settings-input option {
   flex-wrap: wrap;
 }
 
-.interaction-status-tag {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--surface-soft);
-  color: var(--fg-muted);
-}
-
-.interaction-status-tag.input {
-  background: var(--info-soft);
-  color: var(--info);
-}
-
-.interaction-status-tag.approval {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
 .interaction-source-link {
   display: inline-flex;
   align-items: center;
@@ -6302,12 +6283,6 @@ select.settings-input option {
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--surface-soft);
-}
-
-.interaction-create-time {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--fg-dim);
 }
 
 /* Questionnaire Card */

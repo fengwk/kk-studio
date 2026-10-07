@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
 import { ResourceBlobUrlContext } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcript-reading'
+import { setLocale } from '@/shared/i18n'
 import type {
   ToolAttachment,
   ToolContent,
@@ -60,6 +61,60 @@ const expandButton = () => screen.queryByRole('button', { name: '展开工具预
 const collapseButton = () => screen.queryByRole('button', { name: '收起工具预览' })
 
 describe('ToolMessageBlock shell', () => {
+  it('localizes the real environment wait label in English', () => {
+    setLocale('en-US')
+    render(<ToolMessageBlock message={message({
+      phase: 'call', invocationStatus: 'READY', waitingForEnvironment: true,
+      requiredEnvironmentName: 'archlinux',
+    })} />)
+    expect(screen.getByText('· Waiting for environment archlinux to come online')).toBeInTheDocument()
+    expect(document.querySelector('.animate-spin')).toBeNull()
+  })
+  it.each([
+    ['READY', 'queued', '排队中'],
+    ['WAITING_APPROVAL', 'approval', '等待审批'],
+    ['WAITING_INPUT', 'input', '等待输入'],
+    ['DISPATCHING', 'dispatching', '分派中'],
+    ['RUNNING', 'running', '执行中'],
+    ['SUCCEEDED', 'succeeded', '成功'],
+    ['FAILED', 'failed', '失败'],
+    ['CANCELLED', 'cancelled', '已停止'],
+    ['UNKNOWN', 'unknown', '执行结果未知'],
+  ])('durable %s has a distinct label and only RUNNING spins', (status, state, label) => {
+    const { container } = render(
+      <ToolMessageBlock message={message({ phase: 'call', invocationStatus: status })} />,
+    )
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', state)
+    expect(screen.getByText(`· ${label}`)).toBeInTheDocument()
+    expect(container.querySelectorAll('.animate-spin')).toHaveLength(status === 'RUNNING' ? 1 : 0)
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', String(status === 'RUNNING'))
+  })
+
+  it('waits statically for the frozen environment and task success only means accepted', () => {
+    const { container, rerender } = render(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'bash', invocationStatus: 'READY',
+      requiredEnvironmentId: 'environment-frozen', requiredEnvironmentName: 'archlinux',
+      waitingForEnvironment: true, arguments: '{"command":"pwd"}',
+    })} />)
+    expect(container.querySelector('.thread-tool-summary')).toHaveTextContent('bash · 等待环境 archlinux 上线')
+    expect(container.querySelector('.animate-spin')).toBeNull()
+    rerender(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'task', invocationStatus: 'SUCCEEDED',
+    })} />)
+    expect(screen.getByText('· 委派已受理')).toBeInTheDocument()
+    expect(screen.queryByText('· 成功')).not.toBeInTheDocument()
+  })
+
+  it('does not label a SUCCEEDED invocation with an error result as a successful tool operation', () => {
+    const { container } = render(<ToolMessageBlock
+      message={message({ phase: 'call', invocationStatus: 'SUCCEEDED' })}
+      result={message({ phase: 'result', status: 'error', errorMessage: 'permission failure' })}
+    />)
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', 'failed')
+    expect(screen.getByText('permission failure')).toBeInTheDocument()
+    expect(screen.getByText('· 失败')).toBeInTheDocument()
+  })
+
   it('announces reading intent when the user toggles a card (streaming growth must not steal it)', async () => {
     const onReadingIntent = vi.fn()
     document.addEventListener(TRANSCRIPT_READING_INTENT_EVENT, onReadingIntent)
@@ -130,12 +185,14 @@ describe('ToolMessageBlock shell', () => {
     expect(screen.queryByText('无文本输出')).not.toBeInTheDocument()
   })
 
-  it('uses color state instead of WORKING/DONE/FAILED labels', () => {
+  it('does not mistake a streamed call for a running invocation', () => {
     render(<ToolMessageBlock message={message({ phase: 'call', toolName: '', status: 'streaming' })} />)
 
     expect(screen.getByText('Tool')).toBeInTheDocument()
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
-    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'true')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
+    expect(screen.getByText('· 生成调用中')).toBeInTheDocument()
+    expect(document.querySelector('.animate-spin')).toBeNull()
     expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
   })
 
@@ -225,7 +282,7 @@ describe('ToolMessageBlock shell', () => {
       <ToolMessageBlock message={message({ phase: 'call', status: 'streaming' })} />,
     )
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
-    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'true')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
 
     rerender(
       <ToolMessageBlock

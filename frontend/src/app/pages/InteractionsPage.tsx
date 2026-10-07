@@ -7,7 +7,6 @@ import {
   Workflow,
 } from 'lucide-react'
 import { useNavigate } from 'react-router'
-import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
@@ -52,7 +51,7 @@ export function InteractionsPage() {
           title={t('ai.interaction.openChatSource')}
         >
           <MessageSquare size={14} aria-hidden="true" />
-          <span>{owner.chatTitle ?? t('ai.interaction.sourceChat')}</span>
+          <span>{owner.chatTitle ?? t('ai.interaction.viewSource')}</span>
           {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
           <ExternalLink size={12} aria-hidden="true" />
         </button>
@@ -68,7 +67,7 @@ export function InteractionsPage() {
           title={t('ai.interaction.openIssueSource')}
         >
           <Workflow size={14} aria-hidden="true" />
-          <span>{owner.issueTitle ?? t('ai.interaction.sourceIssue')}</span>
+          <span>{owner.issueTitle ?? t('ai.interaction.viewSource')}</span>
           {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
           {owner.agentName ? (
             <span className="interaction-agent-badge">{owner.agentName}</span>
@@ -131,20 +130,8 @@ export function InteractionsPage() {
               <div key={interactionIdentity(item)} className="interaction-feed-item">
                 <header className="interaction-item-header">
                   <div className="interaction-item-meta">
-                    <span
-                      className={`interaction-status-tag ${item.type.toLowerCase()}`}
-                    >
-                      {item.type === 'INPUT'
-                        ? t('ai.interaction.waitingInput')
-                        : item.type === 'APPROVAL'
-                          ? t('ai.interaction.waitingApproval')
-                          : t('ai.interaction.waitingEnvironment')}
-                    </span>
                     {renderOwnerSource(item)}
                   </div>
-                  <time className="interaction-create-time">
-                    {formatBackendDate(item.createTime)}
-                  </time>
                 </header>
 
                 <div className="interaction-item-body">

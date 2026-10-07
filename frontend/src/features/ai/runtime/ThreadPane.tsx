@@ -16,6 +16,8 @@ import { storageService } from '@/shared/api/storage-service'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { EnvironmentStatusIdentity } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
+import { useI18n } from '@/shared/i18n'
+import { toolExecutionState } from '@/features/ai/runtime/thread-panel/messages/tool-message-view'
 
 /** 只读 Footer facts；缺失字段整段省略。 */
 export interface ThreadPaneLabels {
@@ -64,6 +66,18 @@ export function ThreadPane({
   views: ThreadPaneViews
 }) {
   const labels = useBoundThreadPanelLabels(environments, projection)
+  const { t } = useI18n()
+  const pendingTool = projection.toolInvocations.find(
+    (invocation) => ['READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'DISPATCHING'].includes(invocation.status),
+  )
+  const executing = projection.toolInvocations.some(
+    (invocation) => invocation.status === 'RUNNING',
+  ) || projection.modelInvocation?.status === 'RUNNING'
+  const pendingToolState = pendingTool ? toolExecutionState({
+    invocationStatus: pendingTool.status,
+    waitingForEnvironment: pendingTool.waitingForEnvironment,
+    phase: 'call',
+  }) : null
   const transcript: ThreadPanelTranscriptInput = {
     messages: projection.timeline.messages,
     queuedMessages: projection.timeline.queuedMessages,
@@ -76,7 +90,9 @@ export function ThreadPane({
   }
   const panelActivity: ThreadPanelActivityInput = {
     working: activity.working,
-    workingLabel: activity.workingLabel,
+    workingLabel: pendingToolState && !executing
+      ? t(`ai.runtime.tool.${pendingToolState}`, { environment: pendingTool?.requiredEnvironmentName ?? '' })
+      : activity.workingLabel,
     widgets: activity.widgets,
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,

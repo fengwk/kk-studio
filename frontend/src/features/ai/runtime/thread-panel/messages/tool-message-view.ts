@@ -12,6 +12,30 @@ import type {
 } from '@/features/ai/runtime/thread-timeline-types'
 
 export type ToolVisualState = 'pending' | 'success' | 'error'
+export type ToolExecutionState =
+  | 'preparing' | 'queued' | 'environment' | 'approval' | 'input' | 'dispatching'
+  | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown'
+
+/** 状态仅取 durable invocation；模型流里的 call.done 只是参数完整。 */
+export function toolExecutionState(
+  message: Pick<ToolDialogueMessage, 'invocationStatus' | 'waitingForEnvironment' | 'phase' | 'status'>,
+): ToolExecutionState {
+  switch (message.invocationStatus) {
+    case 'READY': return message.waitingForEnvironment ? 'environment' : 'queued'
+    case 'WAITING_APPROVAL': return 'approval'
+    case 'WAITING_INPUT': return 'input'
+    case 'DISPATCHING': return 'dispatching'
+    case 'RUNNING': return 'running'
+    case 'SUCCEEDED': return 'succeeded'
+    case 'FAILED': return 'failed'
+    case 'CANCELLED': return 'cancelled'
+    case 'UNKNOWN': return 'unknown'
+    default:
+      return message.phase === 'result' && message.status !== 'streaming'
+        ? (message.status === 'error' ? 'failed' : 'succeeded')
+        : 'preparing'
+  }
+}
 
 /** 正文默认可见的工具：写入正文、执行前 diff、持续输出、任务 prompt 与问答记录。 */
 const BODY_VISIBLE_BY_DEFAULT_TOOLS = new Set(['write', 'edit', 'bash', 'task', 'ask_user'])
@@ -26,6 +50,7 @@ export interface ToolMessageView {
   preview: ToolCallPreview | null
   summary: ToolCallSummary
   visualState: ToolVisualState
+  executionState: ToolExecutionState
   /** 结果的有序内容：durable result 优先，否则退回瞬态 partial。 */
   contents: ToolContent[]
   /** 必须始终可见的失败摘要（正文已含同一文本时不重复）。 */
@@ -98,6 +123,9 @@ export function buildToolMessageView({
   const contents = toolMessageContents(message, result)
   const preview = previewForToolCall(toolName, argumentsValue)
   const facts = toolErrorFacts({ message, result })
+  const executionState = toolExecutionState(
+    callMessage?.invocationStatus != null ? callMessage : resultMessage ?? message,
+  )
   const hasCallPreview =
     CALL_PREVIEW_TOOLS.has(normalizedName) && preview != null && preview.lines.length > 0
   const hasCallRecordBody =
@@ -110,6 +138,7 @@ export function buildToolMessageView({
     preview,
     summary: formatToolCallSummary(toolName, argumentsValue),
     visualState: facts.visualState,
+    executionState: facts.hasError && executionState === 'succeeded' ? 'failed' : executionState,
     contents,
     errorText: facts.errorText,
     hasError: facts.hasError,
@@ -214,6 +243,7 @@ export function toolErrorFacts({
   const source = resultMessage ?? callMessage
   const hasError =
     errorText != null || source?.status === 'error' || Boolean(source?.errorMessage)
+    || callMessage?.invocationStatus === 'FAILED'
   return {
     errorText,
     hasError,
@@ -245,6 +275,9 @@ function toolVisualState(
 ): ToolVisualState {
   if (hasError) {
     return 'error'
+  }
+  if (callMessage?.invocationStatus != null) {
+    return callMessage.invocationStatus === 'SUCCEEDED' ? 'success' : 'pending'
   }
   const source = resultMessage ?? callMessage
   if (source == null || source.status === 'streaming') {
