@@ -26,7 +26,7 @@ const queryClient = new QueryClient({
  * 后端全部由 Playwright `page.route` 提供；不启动后端、模型或任何主机服务。
  *
  * `?scenario=` 选择入口：
- * - `tree`（默认）：历史树 `/tree` 分叉；
+ * - `tree`（默认）：历史树 `/history` 分叉；
  * - `footer`：回合 footer（TURN_END）图标分叉；
  * - `debug`：Debug 主视图下隐藏底部 chrome 并在退出后原样恢复草稿。
  */

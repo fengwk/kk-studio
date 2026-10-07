@@ -84,7 +84,7 @@ import { parsePayload } from '@/features/ai/runtime/payload-json'
 export type PaneInteraction =
   | 'agent'
   | 'shortcuts'
-  | 'tree'
+  | 'history'
   | 'thread-sessions'
   | 'thread-threads'
   | 'rename-session'
@@ -409,7 +409,7 @@ export function useRootThreadControl({
     queryKey: ['agent-pane', 'entries', threadNavigationSessionId ?? currentSessionId],
     queryFn: () => harnessService.listSessionEntries(threadNavigationSessionId ?? currentSessionId!),
     enabled:
-      (interaction === 'tree' || isNewThreadTarget(target))
+      (interaction === 'history' || isNewThreadTarget(target))
       && (threadNavigationSessionId ?? currentSessionId) != null,
   })
 
@@ -1210,7 +1210,7 @@ export function useRootThreadControl({
         }
         setInteraction('thread-sessions')
         return
-      case 'tree':
+      case 'history':
         if (capabilities?.allowBranching === false) {
           setActionError(t('ai.runtime.action.branchingDisabled'))
           return
@@ -1223,7 +1223,7 @@ export function useRootThreadControl({
           setActionError(t('ai.runtime.action.threadNotLoaded'))
           return
         }
-        setInteraction('tree')
+        setInteraction('history')
         return
       case 'new':
         if (capabilities?.readOnly) {
@@ -1369,7 +1369,7 @@ export function useRootThreadControl({
       return
     }
     setThreadNavigationSessionId(session.sessionId)
-    setInteraction(session.threadCount === 0 ? 'tree' : 'thread-threads')
+    setInteraction(session.threadCount === 0 ? 'history' : 'thread-threads')
   }
 
   function selectThread(thread: RuntimeThreadSummaryDTO): void {

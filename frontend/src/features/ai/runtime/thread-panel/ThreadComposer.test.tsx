@@ -112,7 +112,7 @@ describe('ThreadComposer and commands', () => {
       'agent',
       'yolo',
       'models',
-      'tree',
+      'history',
       'stop',
       'new',
       'upload',
@@ -128,7 +128,7 @@ describe('ThreadComposer and commands', () => {
     // 命令可用性只由目标 kind 与显式能力决定，不再接受 owner 选项。
     const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/debug`/`/compact`
+    // 空面板还没有 Thread，因此 `/history`/`/stop`/`/new`/`/debug`/`/compact`
     // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
     expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'thread',
@@ -139,19 +139,19 @@ describe('ThreadComposer and commands', () => {
       'shortcuts',
     ])
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'history')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'debug')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'compact')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'rename-session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'rename-thread')?.disabled).toBe(true)
     expect(threadCommandsForTarget({ kind: 'BOUND_THREAD' }).every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
-    expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
-    expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
+    expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop', 'history'])
+    expect(filterThreadCommands('hist')[0]?.id).toBe('history')
     expect(filterThreadCommands('debug')[0]?.id).toBe('debug')
     expect(filterThreadCommands('shortcuts')[0]?.id).toBe('shortcuts')
     expect(['history', 'branch'].every((keyword) =>
-      filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
+      filterThreadCommands(keyword).some((command) => command.id === 'history'))).toBe(true)
     expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     expect(firstEnabledCommandIndex(blank)).toBe(0)
     expect(filterThreadCommands('missing')).toEqual([])
@@ -221,7 +221,7 @@ describe('ThreadComposer and commands', () => {
     onCommand.mockClear()
     rerender(
       <ThreadComposer
-        parts={[createTextPart('/tree')]}
+        parts={[createTextPart('/history')]}
         pending={false}
         disabled={false}
         onPartsChange={onPartsChange}
@@ -231,7 +231,7 @@ describe('ThreadComposer and commands', () => {
     )
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('{Enter}')
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'tree' }))
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'history' }))
   })
 
   it('opens the primary command menu from plus without writing slash into the editor', async () => {

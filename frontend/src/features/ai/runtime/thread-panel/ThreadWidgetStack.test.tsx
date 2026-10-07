@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
 import { formatThreadStatusLabel } from '@/features/ai/runtime/thread-panel/thread-status-format'
+import { setLocale } from '@/shared/i18n'
 
 describe('ThreadWidgetStack', () => {
   it('shows the generic working strip when working without custom retry copy', () => {
@@ -12,15 +13,23 @@ describe('ThreadWidgetStack', () => {
       />,
     )
 
-    expect(screen.getByText('Working...')).toBeInTheDocument()
+    expect(screen.getByText('执行中')).toBeInTheDocument()
     expect(screen.getByText('queued')).toBeInTheDocument()
     expect(screen.getByText('下一条消息')).toBeInTheDocument()
     expect(screen.queryByText('本次请求已停止；发送新消息可重新开始。')).not.toBeInTheDocument()
-    const workingBox = screen.getByText('Working...').closest('.thread-working')
+    const workingBox = screen.getByText('执行中').closest('.thread-working')
     const queueBox = screen.getByRole('list', { name: '等待处理的消息' })
     expect(workingBox).not.toBeNull()
     expect(workingBox?.nextElementSibling).toBe(queueBox)
     expect(workingBox).not.toContainElement(queueBox)
+  })
+
+  it('localizes the working strip copy (zh-CN 执行中 / en-US Working...)', () => {
+    render(<ThreadWidgetStack working />)
+    expect(screen.getByText('执行中')).toBeInTheDocument()
+    act(() => setLocale('en-US'))
+    expect(screen.getByText('Working...')).toBeInTheDocument()
+    act(() => setLocale('zh-CN'))
   })
 
   it('hides the working strip when idle with no queue', () => {

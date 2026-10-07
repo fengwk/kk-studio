@@ -17,7 +17,7 @@ export function useEntryBranchRequest(): EntryBranchRequest {
 
 /**
  * 回合 footer 请求到新建分支请求的映射：`endEntryId` 必须是该回合真实的 TURN_END
- * Entry id，作为新分支的 `startEntryId`（`/tree` 的“从此处分支”走同一形状）。
+ * Entry id，作为新分支的 `startEntryId`（`/history` 的“从此处分支”走同一形状）。
  * 创建仍由目标 pane 的首次输入原子提交，映射阶段不产生任何写操作。
  */
 export function branchRequestFromEndEntry({

@@ -26,11 +26,25 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof NewBranchDi
 }
 
 const nameInput = () => document.querySelector<HTMLInputElement>('.new-branch-name')!
-const submit = () => document.querySelector<HTMLButtonElement>('.new-branch-actions button[type="submit"]')!
-const value = () => document.querySelector('.new-branch-form .ui-select-value')?.textContent ?? ''
+const submit = () => document.querySelector<HTMLButtonElement>('.modal-footer button[type="submit"]')!
+const value = () => document.querySelector('.new-branch-dialog .ui-select-value')?.textContent ?? ''
 
 describe('NewBranchDialog', () => {
   setLocale('zh-CN')
+
+  it('uses the shared dialog body/footer and form controls', () => {
+    renderDialog()
+    // 标题 / 正文 / 操作区使用共享 Dialog 布局，输入与按钮不再贴边。
+    const form = document.querySelector('.new-branch-dialog .modal-card-form')
+    expect(form).not.toBeNull()
+    expect(form!.querySelector('.modal-body')).not.toBeNull()
+    expect(form!.querySelector('.modal-footer')).not.toBeNull()
+    // 名称/位置使用共享控件与共享标签，提交/取消使用共享 Button 变体。
+    expect(nameInput().classList.contains('ui-text-input')).toBe(true)
+    expect(form!.querySelector('.field-label')).not.toBeNull()
+    expect(submit().classList.contains('btn-primary')).toBe(true)
+    expect(document.querySelector('.modal-footer .ghost-btn')).not.toBeNull()
+  })
 
   it('submits the normalized name with the default destination pane', async () => {
     const user = userEvent.setup()
@@ -59,7 +73,7 @@ describe('NewBranchDialog', () => {
   it('lets the user pick any destination position 1..9', async () => {
     const user = userEvent.setup()
     const { onConfirm } = renderDialog()
-    await user.click(document.querySelector<HTMLButtonElement>('.new-branch-form .ui-select-trigger')!)
+    await user.click(document.querySelector<HTMLButtonElement>('.new-branch-dialog .ui-select-trigger')!)
     const options = [...document.querySelectorAll<HTMLButtonElement>('.ui-select-option')]
     expect(options.map((option) => option.textContent)).toEqual(['1', '2 · thread-one', '9'])
     await user.click(options[1]!)
@@ -80,7 +94,7 @@ describe('NewBranchDialog', () => {
     expect(document.querySelector('.new-branch-overwrite')?.textContent).toBe('overwrite draft?')
     // 在途（目标 pane 有未完成操作）时提交与取消都被禁用。
     expect(submit()).toBeDisabled()
-    expect(document.querySelector<HTMLButtonElement>('.new-branch-actions .ghost-btn')).toBeDisabled()
+    expect(document.querySelector<HTMLButtonElement>('.modal-footer .ghost-btn')).toBeDisabled()
 
     // 覆盖确认阶段：目标位置仍然合法则保留用户/调用方的选择，提交走同一回调。
     rerender(

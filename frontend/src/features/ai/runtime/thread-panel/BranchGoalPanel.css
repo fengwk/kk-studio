@@ -1,0 +1,155 @@
+/*
+ * thread 目标正文与 Agent 进展报告；面板外壳由 ThreadInteractionPanel 提供。
+ */
+.goal-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  overflow: hidden auto;
+}
+
+.goal-panel-current,
+.goal-panel-report-block,
+.goal-panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.goal-panel-section-label {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.goal-panel-text {
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.goal-panel-empty {
+  color: var(--fg-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.goal-panel-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.goal-panel-report.complete {
+  border-left-color: var(--accent);
+}
+
+.goal-panel-report.blocked {
+  border-left-color: var(--warning);
+}
+
+.goal-panel-report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.goal-panel-report-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.goal-panel-report-title svg {
+  width: 14px;
+  height: 14px;
+}
+
+.goal-panel-report.complete .goal-panel-report-title svg {
+  color: var(--accent);
+}
+
+.goal-panel-report.blocked .goal-panel-report-title svg {
+  color: var(--warning);
+}
+
+.goal-panel-report-disclaimer {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.goal-panel-report-reason {
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.goal-panel-report-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.goal-panel-report-time svg {
+  width: 12px;
+  height: 12px;
+}
+
+.goal-panel-stale {
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.goal-panel-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.goal-panel-counter.overflow {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.goal-panel-error {
+  color: var(--danger);
+}
+
+.goal-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.goal-panel-readonly {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-style: italic;
+}

@@ -299,7 +299,7 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await treeRow.click()
 
   await expect(page.getByText('只读查看')).toBeVisible()
-  const backToRootLayer = await expectBackEntryOnTop(page, '返回上一层')
+  const backToRootLayer = await expectBackEntryOnTop(page, '返回父 agent')
   await expect(backToRootLayer).toBeVisible()
   expect(new URL(page.url()).pathname).toBe(HARNESS_URL)
   // 上传注册表没有被卸载释放：没有 DELETE，也没有第二次 reserve。
@@ -327,7 +327,7 @@ test('the hidden inert root ignores Escape and cannot be clicked', async ({ page
   await editor.fill('根草稿要保留')
 
   await page.locator('.active-thread-tree').getByRole('link', { name: /worker child/ }).click()
-  await expect(page.getByRole('button', { name: '返回上一层' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回父 agent' })).toBeVisible()
 
   const hiddenLayer = page.locator('.chat-pane-layer[hidden]')
   await expect(hiddenLayer).toHaveCount(1)
@@ -355,7 +355,7 @@ test('the hidden inert root ignores Escape and cannot be clicked', async ({ page
   await expect(hiddenLayer.locator('.composer-editor')).toContainText('根草稿要保留')
 
   // 返回后根层重新可交互：焦点回到可见层，输入继续落在根草稿上。
-  await page.getByRole('button', { name: '返回上一层' }).click()
+  await page.getByRole('button', { name: '返回父 agent' }).click()
   await expect(composer).toBeVisible()
   expect(await page.evaluate(() => document.activeElement?.closest('[hidden]') == null)).toBe(true)
   await editor.click()
@@ -408,4 +408,30 @@ test('an idle root still stops its running subtree with a root-scoped request', 
   expect(recorded.stopRequests[0]?.expectedVersion).toBe('1')
   // 根交互汇聚的来源指向子 Thread，但决策写回仍用原始 Thread 身份。
   await expect(page.getByRole('link', { name: /worker child/ }).first()).toBeVisible()
+})
+
+test('the goal panel closes on Escape and restores focus to the editable composer', async ({ page }) => {
+  const recorded = await installPaneApi(page)
+  const { composer } = await openRootPane(page, recorded)
+  const editor = composer.locator('.composer-editor')
+  await editor.click()
+  await editor.fill('/goal')
+  const palette = composer.locator('.thread-command-palette')
+  const goalItem = palette.locator('button', { hasText: 'goal' })
+  await expect(goalItem).toBeVisible()
+  await goalItem.click()
+
+  const panel = page.locator('.thread-interaction-panel[aria-label="thread 目标"]')
+  await expect(panel).toBeVisible()
+  // 打开即把焦点放进面板内的目标输入框：Esc 不再依赖被接管（active=false）的 Composer。
+  await expect(panel.locator('.ui-textarea')).toBeFocused()
+
+  await page.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  // 关闭后焦点回到当前可编辑 Composer 编辑器；输入直接落在草稿上，且不提交/不停。
+  await expect(editor).toBeFocused()
+  await page.keyboard.type('继续输入')
+  await expect(editor).toContainText('继续输入')
+  expect(recorded.commandRequests).toEqual([])
+  expect(recorded.stopRequests).toEqual([])
 })
