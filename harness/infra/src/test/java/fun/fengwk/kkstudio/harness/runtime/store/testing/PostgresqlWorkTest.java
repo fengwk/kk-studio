@@ -82,6 +82,58 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             target.id()));
   }
 
+  @Override
+  protected void forceWorkAvailableAfter(WorkTarget target, Duration delay) {
+    assertEquals(
+        1,
+        jdbc.update(
+            """
+            update harness_work
+            set available_at = statement_timestamp() + ?::interval
+            where target_type = ? and target_id = ?
+            """,
+            delay.toMillis() + " milliseconds",
+            target.type().name(),
+            target.id()));
+  }
+
+  @Override
+  protected void seedReadyEnvironmentLease(EnvironmentId environmentId) {
+    assertEquals(
+        1,
+        jdbc.update(
+            """
+            insert into environment_connection (
+                environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until
+            ) values (
+                ?, gen_random_uuid(), gen_random_uuid(), 'READY', '{}'::jsonb,
+                statement_timestamp(), statement_timestamp() + interval '1 hour'
+            )
+            on conflict (environment_id) do update
+            set owner_node_id = excluded.owner_node_id,
+                lease_token = excluded.lease_token,
+                status = excluded.status,
+                runtime_info = excluded.runtime_info,
+                last_seen_at = excluded.last_seen_at,
+                lease_until = excluded.lease_until
+            """,
+            environmentId.value()));
+  }
+
+  @Override
+  protected void expireReadyEnvironmentLease(EnvironmentId environmentId) {
+    assertEquals(
+        1,
+        jdbc.update(
+            """
+            update environment_connection
+            set lease_until = statement_timestamp() - interval '1 second',
+                last_seen_at = statement_timestamp() - interval '2 seconds'
+            where environment_id = ?
+            """,
+            environmentId.value()));
+  }
+
   /** 生产实现的权威时间是数据库时钟：requestWork 一律写入「此刻」，因此只能直接改写持久化 available_at 来构造确定的 due 顺序。 */
   @Test
   @Override

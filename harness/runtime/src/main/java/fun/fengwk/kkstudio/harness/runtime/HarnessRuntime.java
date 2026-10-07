@@ -7,6 +7,8 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
+import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
+import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
@@ -27,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -452,6 +455,51 @@ public final class HarnessRuntime {
         invocation.call().argumentsJson(),
         approvalJson,
         invocation.createdAt());
+  }
+
+  /**
+   * 在单个短 transaction 内读取一页「等待环境」只读分组（{@code READY} TOOL 调用 + 到期且无有效执行 lease 的 TOOL Work + 环境无有效
+   * READY 连接租约），按分组代表的 {@code (createdAt, id)} 稳定升序 keyset 分页。
+   *
+   * <p>{@code afterRepresentativeCreatedAt} / {@code afterRepresentativeInvocationId}
+   * 是游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零 UUID；storage 多取一条判定 {@code hasMore}。这里只暴露聚合事实，产品
+   * owner 与来源展示由上层按根解析。生产实现的 due / lease 判定使用数据库时钟，本入口只传入 JVM 毫秒时钟供内存实现使用。
+   */
+  public PendingEnvironmentWaitPage listPendingEnvironmentWaits(
+      Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
+    Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
+    Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
+    return store.transaction(
+        tx -> {
+          List<PendingEnvironmentWaitRow> rows =
+              tx.listPendingEnvironmentWaits(
+                  clock.instant(),
+                  afterRepresentativeCreatedAt,
+                  afterRepresentativeInvocationId,
+                  probeSize);
+          boolean hasMore = rows.size() > limit;
+          List<PendingEnvironmentWait> waits = new ArrayList<>(Math.min(rows.size(), limit));
+          for (PendingEnvironmentWaitRow row : rows) {
+            if (waits.size() == limit) {
+              break;
+            }
+            waits.add(toPendingEnvironmentWait(row));
+          }
+          return new PendingEnvironmentWaitPage(waits, hasMore);
+        });
+  }
+
+  private static PendingEnvironmentWait toPendingEnvironmentWait(PendingEnvironmentWaitRow row) {
+    return new PendingEnvironmentWait(
+        row.rootThreadId(),
+        row.environmentId(),
+        row.representativeCreatedAt(),
+        row.representativeInvocationId(),
+        row.waitingCount());
   }
 
   /**
