@@ -15,8 +15,8 @@ import java.util.Objects;
 /**
  * 基于 PostgreSQL 的 Platform 全局 Skill Package 权威行仓库。
  *
- * <p>写路径要求调用方已开启事务：成功写与 {@code skill_package_changed} 通知共用同一事务 Connection，因此只有真正提交的 insert/delete
- * 或推进 version 的 update 才会在提交后投递；CAS 影响 0 行与未开启事务都静默/拒绝。
+ * <p>写路径要求调用方已开启事务：每个成功写在执行 SQL 前先校验事务，未开启事务在写任何行之前直接拒绝；成功写与 {@code skill_package_changed} 通知共用同一事务
+ * Connection，因此只有提交的 insert/delete 或推进 version 的 update 才会投递，CAS 影响 0 行静默。
  */
 @AllArgsConstructor
 @Repository
@@ -47,6 +47,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
 
   @Override
   public boolean insertPackage(SkillPackage skillPackage) {
+    PostgresqlSkillPackageChangeNotifier.requireTransaction();
     if (skillPackageMapper.insertPackage(toPackageDO(skillPackage)) != 1) {
       return false;
     }
@@ -56,6 +57,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
 
   @Override
   public boolean updatePackage(SkillPackage skillPackage, long expectedVersion) {
+    PostgresqlSkillPackageChangeNotifier.requireTransaction();
     if (skillPackageMapper.updatePackage(toPackageDO(skillPackage), expectedVersion) != 1) {
       return false;
     }
@@ -66,6 +68,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
 
   @Override
   public boolean deletePackage(String packageName, long expectedVersion) {
+    PostgresqlSkillPackageChangeNotifier.requireTransaction();
     if (skillPackageMapper.deletePackage(packageName, expectedVersion) != 1) {
       return false;
     }

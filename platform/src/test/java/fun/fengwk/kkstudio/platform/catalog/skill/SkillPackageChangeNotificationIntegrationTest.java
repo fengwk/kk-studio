@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.skill;
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,10 +39,9 @@ import java.util.List;
 /**
  * Skill Package 生产写入口的事务内 {@code skill_package_changed} 通知验证。
  *
- * <p>意图：由真实 Java 写入口（仓储 insert/update/delete 与 {@code SkillCatalogService} 的 {@code NOT_SUPPORTED}
- * 外层 + {@code SkillCatalogWrites.REQUIRES_NEW} 内层事务）在成功写事实的同一事务内发布失效提示，提交后由独立的 PostgreSQL LISTEN
- * 连接观测。 未提交不可见、回滚静默、CAS 影响 0 行与未变化编辑都静默。夹具在隔离的每测试数据库里删除旧的 {@code
- * trg_skill_package_changed}，因此观测到的通知只能来自 Java 写入口，而不是尚未删除的生产触发器。
+ * <p>意图：真实 Java 写入口（仓储 insert/update/delete 与 {@code SkillCatalogService} 的 {@code NOT_SUPPORTED}
+ * 外层 + {@code SkillCatalogWrites.REQUIRES_NEW} 内层事务）在成功写事实的同一事务内发布失效提示，由独立 PostgreSQL LISTEN
+ * 连接观测。覆盖提交后投递、 未提交不可见、回滚静默、CAS 0 行与未变化编辑静默、无事务调用在写行前拒绝。夹具在每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口。
  */
 class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSupport {
 
@@ -58,7 +58,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
 
   @BeforeEach
   void dropLegacyTrigger() {
-    // N6 删除生产触发器前，只在隔离的每测试库移除它，使断言真正证明 Java 写入口的发布行为。
+    // 每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口的发布。
     jdbcTemplate.execute("drop trigger if exists trg_skill_package_changed on skill_package");
   }
 
@@ -176,6 +176,41 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       assertNotification(pg, PACKAGE);
       assertNoNotification(pg);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).getVersion());
+    }
+  }
+
+  /** 无事务直接调用仓储写路径：在执行 SQL 前拒绝，权威行原样不变，listener 静默。 */
+  @Test
+  void repositoryWriteWithoutTransactionIsRejectedBeforeAnyWrite() throws Exception {
+    TransactionTemplate tx = new TransactionTemplate(transactionManager);
+    tx.executeWithoutResult(
+        status -> assertTrue(skillPackageRepository.insertPackage(packageRow())));
+    SkillPackage before = skillPackageRepository.getPackage(PACKAGE);
+
+    try (Connection listener = newConnection();
+        Statement statement = listener.createStatement()) {
+      statement.execute("listen " + EnvironmentSkillSyncOrchestrator.CHANNEL);
+      PGConnection pg = listener.unwrap(PGConnection.class);
+
+      // 三个写入口都在执行 SQL 前拒绝，未产生 autocommit 写入。
+      assertThrows(
+          IllegalStateException.class, () -> skillPackageRepository.insertPackage(packageRow()));
+      assertThrows(
+          IllegalStateException.class,
+          () -> {
+            SkillPackage changed = skillPackageRepository.getPackage(PACKAGE);
+            changed.setBranch("release");
+            skillPackageRepository.updatePackage(changed, changed.getVersion());
+          });
+      assertThrows(
+          IllegalStateException.class,
+          () -> skillPackageRepository.deletePackage(PACKAGE, before.getVersion()));
+
+      SkillPackage after = skillPackageRepository.getPackage(PACKAGE);
+      assertNotNull(after);
+      assertEquals(before.getVersion(), after.getVersion());
+      assertEquals(before.getBranch(), after.getBranch());
+      assertNoNotification(pg);
     }
   }
 

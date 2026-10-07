@@ -9,9 +9,8 @@ import java.util.Objects;
 /**
  * 在 Skill Package 的写事务中发送 {@code skill_package_changed} 失效信号。
  *
- * <p>payload 是 package 名，只用于唤醒 {@code EnvironmentSkillSyncOrchestrator} 做权威回读，不承载可信状态。PostgreSQL
- * 只在提交时投递 {@code pg_notify}：未提交不可见、回滚静默。发布必须与成功写共用同一事务 Connection（Spring/MyBatis
- * 写入口的真实事务），不得改到提交后再开连接，否则会 产生「事实已提交、通知尚未发送」的额外失败窗口。
+ * <p>payload 是 package 名，只用于唤醒 {@code EnvironmentSkillSyncOrchestrator} 做权威回读，不承载可信状态。必须与成功写共用同一事务
+ * Connection：PostgreSQL 只在提交时投递，未提交不可见、回滚静默。
  */
 @Component
 public class PostgresqlSkillPackageChangeNotifier {
