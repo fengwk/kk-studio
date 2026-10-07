@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 
 export function CanvasEditor() {
   const { state, snapshot, snapshotQuery } = useCanvasRuntime()
@@ -13,12 +15,17 @@ export function CanvasEditor() {
   if (snapshotQuery.isError) {
     const notFound = (snapshotQuery.error as { status?: number }).status === 404
     return (
-      <section className="canvas-editor-state danger" role="alert">
-        <h2>{notFound ? t('canvas.editor.notFound') : t('canvas.editor.loadFailed')}</h2>
+      <section className="canvas-editor-state" role="alert">
+        <StateBlock
+          tone="danger"
+          title={notFound ? t('canvas.editor.notFound') : t('canvas.editor.loadFailed')}
+        />
         <p>{(snapshotQuery.error as Error).message}</p>
-        <div>
-          <button type="button" onClick={openLibrary}>{t('canvas.editor.backToLibrary')}</button>
-          {!notFound ? <button type="button" onClick={() => void snapshotQuery.refetch()}>{t('canvas.editor.retry')}</button> : null}
+        <div className="canvas-editor-state-actions">
+          <Button variant="ghost" onClick={openLibrary}>{t('canvas.editor.backToLibrary')}</Button>
+          {!notFound ? (
+            <Button onClick={() => void snapshotQuery.refetch()}>{t('canvas.editor.retry')}</Button>
+          ) : null}
         </div>
       </section>
     )
@@ -27,7 +34,7 @@ export function CanvasEditor() {
     return (
       <section className="canvas-editor-state" role="status">
         <span className="canvas-spinner" />
-        {t('canvas.editor.loading')}
+        <StateBlock title={t('canvas.editor.loading')} />
       </section>
     )
   }

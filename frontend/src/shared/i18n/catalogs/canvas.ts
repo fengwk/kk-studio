@@ -5,25 +5,13 @@ export const canvasCatalog = {
     'en-US': 'Loading canvas',
     'zh-CN': '正在加载画布',
   },
-  'canvas.library.eyebrow': {
-    'en-US': 'Agent workspace',
-    'zh-CN': 'Agent 工作区',
-  },
-  'canvas.library.headingLine1': {
-    'en-US': 'Put ideas, references, and results',
-    'zh-CN': '把想法、资料和结果',
-  },
-  'canvas.library.headingLine2': {
-    'en-US': 'in one place.',
-    'zh-CN': '放在同一个空间。',
+  'canvas.library.title': {
+    'en-US': 'Your canvases',
+    'zh-CN': '你的画布',
   },
   'canvas.library.description': {
     'en-US': 'Organize assets and run image or video Functions.',
     'zh-CN': '整理素材，并运行图片或视频 Function。',
-  },
-  'canvas.library.title': {
-    'en-US': 'Your canvases',
-    'zh-CN': '你的画布',
   },
   'canvas.library.loading': {
     'en-US': 'Loading canvases',
@@ -33,49 +21,69 @@ export const canvasCatalog = {
     'en-US': 'Failed to load canvases: {{message}}',
     'zh-CN': '画布列表加载失败：{{message}}',
   },
-  'canvas.library.createAria': {
-    'en-US': 'Create a new canvas',
-    'zh-CN': '创建新画布',
-  },
   'canvas.library.createTitle': {
     'en-US': 'Create new canvas',
     'zh-CN': '创建新画布',
   },
   'canvas.library.createSubtitle': {
-    'en-US': 'Blank canvas · Start now',
-    'zh-CN': '空白画布 · 立即开始',
+    'en-US': 'Blank canvas · Create and open',
+    'zh-CN': '空白画布 · 创建并进入',
   },
-  'canvas.library.version': {
-    'en-US': 'version',
-    'zh-CN': '版本',
+  'canvas.library.name': {
+    'en-US': 'Canvas name',
+    'zh-CN': '画布名称',
   },
-  'canvas.library.realCanvas': {
-    'en-US': 'Server snapshot',
-    'zh-CN': '服务端快照',
+  'canvas.library.namePlaceholder': {
+    'en-US': 'e.g. Research board',
+    'zh-CN': '例如：研究看板',
   },
-  'canvas.library.untitled': {
-    'en-US': 'Untitled canvas',
-    'zh-CN': '未命名画布',
+  'canvas.library.nameRequired': {
+    'en-US': 'Enter a canvas name',
+    'zh-CN': '请输入画布名称',
   },
-  'canvas.library.emptyTitle': {
-    'en-US': 'No canvases yet',
-    'zh-CN': '还没有画布',
+  'canvas.library.createConfirm': {
+    'en-US': 'Create and open',
+    'zh-CN': '创建并进入',
   },
-  'canvas.library.emptyDescription': {
-    'en-US': 'Create a blank canvas to organize resources and Functions.',
-    'zh-CN': '创建一个空白画布，开始组织资源与 Function。',
+  'canvas.library.open': {
+    'en-US': 'Open',
+    'zh-CN': '进入',
   },
-  'canvas.toast.library.created': {
-    'en-US': 'Created canvas “{{title}}”',
-    'zh-CN': '已创建画布「{{title}}」',
+  'canvas.library.openAria': {
+    'en-US': 'Open canvas “{{title}}”',
+    'zh-CN': '进入画布「{{title}}」',
+  },
+  'canvas.library.updatedAt': {
+    'en-US': 'Last updated',
+    'zh-CN': '最近更新',
   },
   'canvas.toast.library.createError': {
     'en-US': 'Failed to create canvas',
     'zh-CN': '创建画布失败',
   },
-  'canvas.toast.library.open': {
-    'en-US': 'Open “{{title}}”',
-    'zh-CN': '打开「{{title}}」',
+  'canvas.draft.saveFailed': {
+    'en-US': 'Failed to save the draft: {{message}}',
+    'zh-CN': '保存草稿失败：{{message}}',
+  },
+  'canvas.conflict.remoteDeleted': {
+    'en-US': 'The node was deleted remotely; the unsaved draft is kept locally',
+    'zh-CN': '节点已被远端删除，本地保留未保存草稿',
+  },
+  'canvas.conflict.contentConflict': {
+    'en-US': 'The node content conflicts with the remote version',
+    'zh-CN': '节点内容与远端存在冲突',
+  },
+  'canvas.conflict.retryLatest': {
+    'en-US': 'Retry with the latest version',
+    'zh-CN': '使用最新版本重试',
+  },
+  'canvas.conflict.saveAsNew': {
+    'en-US': 'Save as a new node',
+    'zh-CN': '另存为新节点',
+  },
+  'canvas.conflict.discard': {
+    'en-US': 'Discard draft',
+    'zh-CN': '放弃草稿',
   },
   'canvas.editor.ariaLabel': {
     'en-US': 'Canvas resource editor',
@@ -340,6 +348,98 @@ export const canvasCatalog = {
   'canvas.generation.runFailed': {
     'en-US': 'Generation failed; previous resources are kept',
     'zh-CN': '生成失败，已有资源已保留',
+  },
+  'canvas.generation.unknownRegionAria': {
+    'en-US': 'Pending verification',
+    'zh-CN': '待核查确认',
+  },
+  'canvas.generation.unknownTitle': {
+    'en-US': 'Manual verification required (UNKNOWN)',
+    'zh-CN': '待人工核查确认 (UNKNOWN)',
+  },
+  'canvas.generation.unknownStage': {
+    'en-US': 'Pending verification',
+    'zh-CN': '待核查确认',
+  },
+  'canvas.generation.verifyDecision': {
+    'en-US': 'Verification decision',
+    'zh-CN': '核查决定',
+  },
+  'canvas.generation.verifyNote': {
+    'en-US': 'Verification note',
+    'zh-CN': '核查说明',
+  },
+  'canvas.generation.verifyNotePlaceholder': {
+    'en-US': 'Enter the verification record (required)',
+    'zh-CN': '输入核查记录文本（必填）',
+  },
+  'canvas.generation.verifySubmit': {
+    'en-US': 'Submit verification',
+    'zh-CN': '提交核查',
+  },
+  'canvas.generation.resolution.resume': {
+    'en-US': 'RESUME (continue the run)',
+    'zh-CN': 'RESUME（继续运行）',
+  },
+  'canvas.generation.resolution.failed': {
+    'en-US': 'FAILED (mark as failed)',
+    'zh-CN': 'FAILED（标记失败）',
+  },
+  'canvas.generation.resolution.cancelled': {
+    'en-US': 'CANCELLED (cancel the run)',
+    'zh-CN': 'CANCELLED（取消运行）',
+  },
+  'canvas.generation.jsonConfiguration': {
+    'en-US': 'Full JSON configuration',
+    'zh-CN': '完整 JSON 配置',
+  },
+  'canvas.generation.jsonEdit': {
+    'en-US': 'Edit parameter JSON',
+    'zh-CN': '编辑参数 JSON',
+  },
+  'canvas.generation.jsonCollapse': {
+    'en-US': 'Collapse parameter JSON',
+    'zh-CN': '收起参数 JSON',
+  },
+  'canvas.generation.jsonArgsAria': {
+    'en-US': 'Parameter JSON',
+    'zh-CN': '参数 JSON',
+  },
+  'canvas.generation.jsonObjectRequired': {
+    'en-US': 'The parameters must be a JSON object',
+    'zh-CN': '参数必须为 JSON 对象',
+  },
+  'canvas.generation.jsonSyntaxError': {
+    'en-US': 'JSON syntax error',
+    'zh-CN': 'JSON 语法错误',
+  },
+  'canvas.generation.outputsAria': {
+    'en-US': 'Expected Function outputs',
+    'zh-CN': '函数预期输出',
+  },
+  'canvas.generation.attachedReferencesAria': {
+    'en-US': 'Attached references',
+    'zh-CN': '已添加参考',
+  },
+  'canvas.generation.localPendingTitle': {
+    'en-US': 'Unsettled run record error',
+    'zh-CN': '未决运行记录异常',
+  },
+  'canvas.generation.discardPending': {
+    'en-US': 'Discard the local unsettled record',
+    'zh-CN': '放弃本地未决记录',
+  },
+  'canvas.generation.discardConfirmAria': {
+    'en-US': 'Confirm discarding the unsettled record',
+    'zh-CN': '确认放弃未决记录',
+  },
+  'canvas.generation.discardConfirmText': {
+    'en-US': 'This does not undo the server run; verify before continuing',
+    'zh-CN': '这不会撤销服务端运行，核实后再继续',
+  },
+  'canvas.generation.discardConfirm': {
+    'en-US': 'Discard',
+    'zh-CN': '确认放弃',
   },
   'canvas.media.playVideo': {
     'en-US': 'Play video {{name}}',
