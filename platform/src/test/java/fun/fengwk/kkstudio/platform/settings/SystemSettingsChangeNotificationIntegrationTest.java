@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
@@ -31,7 +30,7 @@ import java.util.List;
  *
  * <p>意图：{@code PostgresqlSystemSettingsRepository} 的成功 CAS 与通知共用同一事务 Connection，提交后投递写后权威 {@code
  * version} 的十进制字符串；未提交不可见、回滚静默、陈旧 CAS 静默、无事务调用在写行前拒绝。{@code SystemSettingsServiceImpl}
- * 的提交后快照刷新与本通知并存。夹具在每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口。
+ * 的提交后快照刷新与本通知并存。
  */
 class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTestSupport {
 
@@ -43,13 +42,6 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
   @Autowired private PostgresqlSystemSettingsChangeNotifier notifier;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private JdbcTemplate jdbcTemplate;
-
-  @BeforeEach
-  void dropLegacyTrigger() {
-    // 每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口的发布。
-    jdbcTemplate.execute(
-        "drop trigger if exists trg_system_setting_version_notify on system_setting");
-  }
 
   /** 提交的 CAS 推进 version 并投递一次；同一事务未提交前对其它连接不可见。 */
   @Test

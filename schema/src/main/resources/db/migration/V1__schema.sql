@@ -23,8 +23,9 @@
 -- through the direct `chat_session` association. Every product id is an
 -- application-allocated UUID (client for node/group/request/command ids, server
 -- for document/resource/run ids): there are no id sequences. `revision` (Canvas)
--- and `version` (Project) are application-owned cursors; the NOTIFY triggers
--- below only hint listeners after commit and never mutate a row. Resource blobs
+-- and `version` (Project) are application-owned cursors; the owning Java write
+-- paths publish NOTIFY hints inside the same transaction (visible after commit)
+-- and never mutate a row. Resource blobs
 -- are owned by the global `storage_blob` refcount lifecycle; product rows only
 -- reference them (RESTRICT).
 --
@@ -233,28 +234,6 @@ comment on column skill_package.skills is '从 current_commit 派生的 Skill ma
 comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
 comment on column skill_package.create_time is '创建时间（毫秒精度）';
 comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
-
--- Skill Package 发布提示。
---
--- version 由应用拥有，PostgreSQL 绝不修改行。该触发器只在行被插入、version 真正变化或
--- 行被删除后发出提示，payload 是 package 名；listener 建连/重连时全量回读 Package，
--- 因此通知丢失不会改变 durable truth。
-create or replace function skill_package_changed_notify()
-returns trigger language plpgsql as $$
-begin
-    if tg_op = 'DELETE' then
-        perform pg_notify('skill_package_changed', old.package_name);
-        return old;
-    end if;
-    if tg_op = 'INSERT' or new.version is distinct from old.version then
-        perform pg_notify('skill_package_changed', new.package_name);
-    end if;
-    return new;
-end $$;
-
-create trigger trg_skill_package_changed
-    after insert or update or delete on skill_package
-    for each row execute function skill_package_changed_notify();
 
 -- -----------------------------------------------------------------------------
 -- 构建期 Plugin 凭据
@@ -625,41 +604,6 @@ comment on column canvas_command_dedup.idempotency_key is '客户端整批命令
 comment on column canvas_command_dedup.request_hash is '整批命令的 SHA-256（64 位小写十六进制）';
 comment on column canvas_command_dedup.accepted_revision is '首次接受时的 revision 位置（非负）；重放不改变它';
 
--- Canvas revision NOTIFY hint.
---
--- revision is owned by the application; PostgreSQL never bumps it. This trigger
--- only wakes the in-process Canvas revision/application event hub after a
--- committed insert or actual revision change. The payload is the parsable text
--- `{canvasId}:{revision}`.
-create or replace function notify_canvas_document_revision() returns trigger as $$
-begin
-    if tg_op = 'INSERT' or new.revision is distinct from old.revision then
-        perform pg_notify('canvas_revision', new.id::text || ':' || new.revision::text);
-    end if;
-    return new;
-end;
-$$ language plpgsql;
-
-create trigger trg_canvas_document_revision_notify after insert or update of revision on canvas_document
-    for each row execute function notify_canvas_document_revision();
-
--- Canvas Function durable work NOTIFY hint.
---
--- canvas_function_run remains the only queue fact. This trigger only hints when
--- the row written by the current statement is immediately claimable READY work;
--- future READY work and expired RUNNING leases are recovered by periodic poll.
-create or replace function notify_canvas_function_work() returns trigger as $$
-begin
-    if new.status = 'READY' and new.lease_token is null and new.available_at <= current_timestamp then
-        perform pg_notify('canvas_function_work', '');
-    end if;
-    return new;
-end;
-$$ language plpgsql;
-
-create trigger trg_canvas_function_work_notify after insert or update on canvas_function_run
-    for each row execute function notify_canvas_function_work();
-
 create table chat (
     id                  uuid          primary key,
     title               varchar(256),
@@ -739,51 +683,6 @@ create index idx_environment_connection_lease_until
 create index idx_environment_connection_owner
     on environment_connection (owner_node_id);
 
--- Environment registry change NOTIFY hint.
---
--- environment remains the only registry fact (name, install config, version).
--- The browser list also shows environments that are merely registered without a
--- live connection, so create/rename/reconfigure/delete must invalidate the list
--- too. The payload is the registry id and the channel is a whole-list hint.
-create or replace function environment_registry_changed_notify()
-returns trigger language plpgsql as $$
-begin
-    if tg_op = 'DELETE' then
-        perform pg_notify('environment_changed', old.id::text);
-        return old;
-    end if;
-    perform pg_notify('environment_changed', new.id::text);
-    return new;
-end $$;
-
-create trigger trg_environment_registry_changed
-    after insert or update or delete on environment
-    for each row execute function environment_registry_changed_notify();
-
--- Environment connection change NOTIFY hint.
---
--- environment_connection remains the only lease fact; PostgreSQL never derives
--- readiness here (a lease merely expires by time). This trigger hints the
--- application event hub after every committed connection-row write, including
--- the Daemon HEARTBEAT lease renewals that are the only existing lease
--- maintenance cadence: the browser re-reads the authoritative card at connect,
--- READY, metadata/capability change, skill-state change, disconnect and
--- renewal cadence, without any UI polling of its own.
-create or replace function environment_connection_changed_notify()
-returns trigger language plpgsql as $$
-begin
-    if tg_op = 'DELETE' then
-        perform pg_notify('environment_changed', old.environment_id::text);
-        return old;
-    end if;
-    perform pg_notify('environment_changed', new.environment_id::text);
-    return new;
-end $$;
-
-create trigger trg_environment_connection_changed
-    after insert or update or delete on environment_connection
-    for each row execute function environment_connection_changed_notify();
-
 ------------------------------------------------------------------------------
 -- 1c. Singleton system settings (id=1)
 --
@@ -815,25 +714,6 @@ insert into system_setting (id, config) values (
     1,
      '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"network":{"noProxyHosts":"localhost,127.*,::1"},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
 );
-
--- System settings version NOTIFY hint.
---
--- version is owned by the application; PostgreSQL never bumps it. This trigger
--- only wakes settings listeners after a committed insert or actual version
--- change. The payload is the nonnegative decimal `version`.
-
-create or replace function system_setting_version_notify()
-returns trigger language plpgsql as $$
-begin
-    if tg_op = 'INSERT' or new.version is distinct from old.version then
-        perform pg_notify('system_settings_changed', new.version::text);
-    end if;
-    return new;
-end $$;
-
-create trigger trg_system_setting_version_notify
-    after insert or update of version on system_setting
-    for each row execute function system_setting_version_notify();
 
 ------------------------------------------------------------------------------
 -- 2. Harness runtime execution protocol
@@ -1250,72 +1130,6 @@ create index idx_harness_tool_invocation_pending
     where status in ('WAITING_APPROVAL', 'WAITING_INPUT');
 
 comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
-
--- Pending interaction change NOTIFY hint.
---
--- harness_tool_invocation remains the only pending fact; this trigger only
--- hints the application event hub after a committed insert/delete or a status
--- transition into/out of WAITING_APPROVAL / WAITING_INPUT (every other status
--- write is silent). The payload is the true execution root of the source
--- thread so browsers invalidate both the global red dot and that root's list;
--- when the source facts were already deleted the payload is empty and the
--- listener falls back to a full resync.
-create or replace function harness_tool_interaction_notify()
-returns trigger language plpgsql as $$
-declare
-    model_invocation uuid;
-    source_thread uuid;
-    root_thread uuid;
-begin
-    if tg_op = 'INSERT' then
-        if new.status not in ('WAITING_APPROVAL', 'WAITING_INPUT') then
-            return new;
-        end if;
-        model_invocation := new.model_invocation_id;
-    elsif tg_op = 'DELETE' then
-        if old.status not in ('WAITING_APPROVAL', 'WAITING_INPUT') then
-            return old;
-        end if;
-        model_invocation := old.model_invocation_id;
-    else
-        if new.status not in ('WAITING_APPROVAL', 'WAITING_INPUT')
-            and old.status not in ('WAITING_APPROVAL', 'WAITING_INPUT') then
-            return new;
-        end if;
-        model_invocation := new.model_invocation_id;
-    end if;
-
-    select m.thread_id into source_thread
-    from harness_model_invocation m
-    where m.id = model_invocation;
-
-    if source_thread is not null then
-        select t.id into root_thread
-        from harness_thread t
-        where t.id = source_thread and t.parent_thread_id is null;
-        if root_thread is null then
-            with recursive ancestors as (
-                select t.id, t.parent_thread_id from harness_thread t where t.id = source_thread
-                union all
-                select p.id, p.parent_thread_id
-                from harness_thread p
-                join ancestors a on p.id = a.parent_thread_id
-            )
-            select id into root_thread from ancestors where parent_thread_id is null limit 1;
-        end if;
-    end if;
-
-    perform pg_notify('harness_tool_interaction', coalesce(root_thread::text, ''));
-
-    if tg_op = 'DELETE' then
-        return old;
-    end if;
-    return new;
-end $$;
-
-create trigger trg_harness_tool_invocation_interaction_notify
-    after insert or update or delete on harness_tool_invocation
-    for each row execute function harness_tool_interaction_notify();
 
 create table harness_work (
     target_type varchar(16) not null,
@@ -1780,21 +1594,6 @@ comment on column project_issue_work.lease_token is '当前持有节点租约令
 comment on column project_issue_work.lease_until is '租约截止时间戳';
 
 create index idx_project_issue_work_due on project_issue_work (due_at, issue_id);
-
--- Issue work due notification hint（提交后的回读提示，不是事件日志）。
-create or replace function notify_project_issue_work_due()
-returns trigger as $$
-begin
-    if new.due_at <= clock_timestamp() and (new.lease_until is null or new.lease_until <= clock_timestamp()) then
-        perform pg_notify('project_issue_work_due', new.issue_id::text);
-    end if;
-    return new;
-end;
-$$ language plpgsql;
-
-create trigger trg_project_issue_work_due
-    after insert or update on project_issue_work
-    for each row execute function notify_project_issue_work_due();
 ------------------------------------------------------------------------------
 -- 4. Chat Session association
 --
@@ -1821,69 +1620,7 @@ comment on column chat_session.created_at is '关联建立时间（毫秒精度�
 
 create index idx_chat_session_chat on chat_session (chat_id, created_at, session_id);
 
-------------------------------------------------------------------------------
--- 5. Thread version NOTIFY hint
---
--- version is owned by HarnessRuntime; PostgreSQL never bumps it. This trigger
--- is only a wake-up hint for in-process projection listeners: it notifies when
--- a Thread row is inserted or its version column actually changed, and never
--- mutates the row. The NOTIFY payload is the strict parsable text
--- `{threadId}:{version}`; there are deliberately no child-table version
--- triggers.
-------------------------------------------------------------------------------
-
-create or replace function harness_thread_version_notify()
-returns trigger language plpgsql as $$
-begin
-    if tg_op = 'INSERT' or new.version is distinct from old.version then
-        perform pg_notify(
-            'harness_thread_version',
-            new.id::text || ':' || new.version::text
-        );
-    end if;
-    return new;
-end $$;
-
-create trigger trg_harness_thread_version_notify
-    after insert or update of version on harness_thread
-    for each row execute function harness_thread_version_notify();
-
--- 5b. Execution tree NOTIFY hint
---
--- Thread rows are written per row, so a child change never advances the root
--- row (version stays the per-Thread CAS cursor). This trigger only hints the
--- application event hub after a committed insert or actual version change, and
--- aggregates the payload to the true execution root by walking the immutable
--- parent chain inside the transaction; it never mutates any Thread row.
-create or replace function harness_thread_tree_notify()
-returns trigger language plpgsql as $$
-declare
-    root_thread uuid;
-begin
-    if tg_op = 'UPDATE' and new.version is not distinct from old.version then
-        return new;
-    end if;
-    if new.parent_thread_id is null then
-        root_thread := new.id;
-    else
-        with recursive ancestors as (
-            select t.id, t.parent_thread_id from harness_thread t where t.id = new.id
-            union all
-            select p.id, p.parent_thread_id
-            from harness_thread p
-            join ancestors a on p.id = a.parent_thread_id
-        )
-        select id into root_thread from ancestors where parent_thread_id is null limit 1;
-    end if;
-    perform pg_notify('harness_thread_tree', coalesce(root_thread::text, ''));
-    return new;
-end $$;
-
-create trigger trg_harness_thread_tree_notify
-    after insert or update of version on harness_thread
-    for each row execute function harness_thread_tree_notify();
-
--- 6. Global blob storage
+-- 5. Global blob storage
 --
 -- storage_blob is the deduplicated immutable content address of the global
 -- storage foundation. sha256+size_bytes uniquely identify one content in the
@@ -2095,7 +1832,7 @@ comment on column session_blob_ref.created_at is '引用创建时间（timestamp
 comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
 
 ------------------------------------------------------------------------------
--- 7. Issue published evidence
+-- 6. Issue published evidence
 --
 -- 一条记录是 Issue 显式持有的一个已发布 Blob 引用：只有执行者最终答复明确引用且来源 Run
 -- 的 Session 在提交时确实持有该引用的产物，以及人经 Issue 入口上传的附件，才成为公开
@@ -2142,7 +1879,7 @@ comment on column project_issue_evidence.created_at is '发布时间戳（毫秒
 comment on index idx_project_issue_evidence_blob is '按 blob 反向枚举引用它的 Issue（对账与深删除）';
 
 ------------------------------------------------------------------------------
--- 8. Canvas resource blob FK (must follow the global blob storage section)
+-- 7. Canvas resource blob FK (must follow the global blob storage section)
 ------------------------------------------------------------------------------
 
 alter table canvas_resource

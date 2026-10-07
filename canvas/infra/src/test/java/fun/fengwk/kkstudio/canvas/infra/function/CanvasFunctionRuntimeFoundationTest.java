@@ -188,7 +188,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(3L, version(canvasId));
   }
 
-  /** start 经 bumpVersion 前进 revision，必须在提交时发布 canvas_revision 失效提示；测试 fixture 已删除旧 Schema 触发器。 */
+  /** start 经 bumpVersion 前进 revision，必须在提交时发布 canvas_revision 失效提示 */
   @Test
   void startNotifiesRevisionThroughBumpVersion() throws Exception {
     UUID canvasId = addDocument();

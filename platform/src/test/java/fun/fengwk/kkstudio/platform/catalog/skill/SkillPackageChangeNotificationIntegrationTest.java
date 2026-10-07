@@ -9,12 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -40,8 +38,8 @@ import java.util.List;
  * Skill Package 生产写入口的事务内 {@code skill_package_changed} 通知验证。
  *
  * <p>意图：真实 Java 写入口（仓储 insert/update/delete 与 {@code SkillCatalogService} 的 {@code NOT_SUPPORTED}
- * 外层 + {@code SkillCatalogWrites.REQUIRES_NEW} 内层事务）在成功写事实的同一事务内发布失效提示，由独立 PostgreSQL LISTEN
- * 连接观测。覆盖提交后投递、 未提交不可见、回滚静默、CAS 0 行与未变化编辑静默、无事务调用在写行前拒绝。夹具在每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口。
+ * 外层 + {@code SkillCatalogWrites.REQUIRES_NEW} 内层事务）在成功写事实的同一事务内发布失效提示，由独立非池化 PostgreSQL LISTEN
+ * 连接观测。覆盖提交后投递、 未提交不可见、回滚静默、CAS 0 行与未变化编辑静默、无事务调用在写行前拒绝。
  */
 class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSupport {
 
@@ -54,13 +52,6 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
   @Autowired private SkillPackageRepository skillPackageRepository;
   @Autowired private PostgresqlSkillPackageChangeNotifier notifier;
   @Autowired private PlatformTransactionManager transactionManager;
-  @Autowired private JdbcTemplate jdbcTemplate;
-
-  @BeforeEach
-  void dropLegacyTrigger() {
-    // 每个隔离测试库删除该表遗留触发器，使断言只观测 Java 写入口的发布。
-    jdbcTemplate.execute("drop trigger if exists trg_skill_package_changed on skill_package");
-  }
 
   /** 插入/版本变化/删除都在提交后投递一次；未提交不可见，回滚静默且不改变权威事实。 */
   @Test

@@ -325,7 +325,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     assertFalse(workStore.isOwned(claimed, T0.plusSeconds(1)));
   }
 
-  /** READY insert 提交后 Java 写入口必须立即发送空 payload；测试 fixture 已删除旧 Schema 触发器。 */
+  /** READY insert 提交后 Java 写入口必须立即发送空 payload */
   @Test
   void readyCommitSendsAnImmediateEmptyNotification() throws Exception {
     UUID canvasId = addDocument();

@@ -2,10 +2,12 @@ package fun.fengwk.kkstudio.web.events.postgresql;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
@@ -15,9 +17,6 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import javax.sql.DataSource;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,9 +27,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code system_settings_changed} 通知到 live 快照的端到端接线测试。
  *
  * <p>意图：另一个节点（真实 {@link PostgresqlNotificationLoop} + 生产 {@link SystemSettingsChangeHandler} + 独立
- * {@link SystemSettingsSnapshot}）必须由数据库触发器在提交后唤醒并权威回读，而不是靠进程内 afterCommit 直写内存。覆盖三条真实 PostgreSQL
- * 语义：提交的 version 推进投递通知并刷新快照；回滚事务绝不投递通知（用随后一条已提交控制通知作为投递屏障）；只改 config 不推进 version 时不投递通知，改由
- * listener 重连 resync 补齐。测试不 mock {@code pg_notify}，也不修改生产 wiring。
+ * {@link SystemSettingsSnapshot}）必须由真实 Java 写入口提交后投递的通知唤醒并权威回读，而不是靠进程内 afterCommit 直写内存。覆盖三条真实
+ * PostgreSQL 语义：提交的 version 推进投递通知并刷新快照；回滚事务绝不投递通知（用随后一条已提交控制通知作为投递屏障）；断连期间提交的变更没有投递路径，只能靠 listener
+ * 重连 resync 补齐。测试不 mock {@code pg_notify}，也不修改生产 wiring。
  */
 class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSupport {
 
@@ -38,23 +37,9 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
   private static final Duration LOOP_RECONNECT_BACKOFF = Duration.ofMillis(20);
   private static final Duration REFRESH_TIMEOUT = Duration.ofSeconds(10);
 
-  /** 提交后 version 推进 + 改一个可读字段：触发器按 version 变化投递通知。 */
-  private static final String UPDATE_VERSION_AND_RETRY_MAX_RETRIES =
-      "update system_setting set version = ?,"
-          + " config = jsonb_set(config, '{aiRuntime,retryMaxRetries}'::text[], to_jsonb(?::int))"
-          + " where id = 1";
-
-  /** 只改 config 不推进 version：触发器条件不成立，不投递通知。 */
-  private static final String UPDATE_RETRY_MAX_RETRIES_ONLY =
-      "update system_setting set"
-          + " config = jsonb_set(config, '{aiRuntime,retryMaxRetries}'::text[], to_jsonb(?::int))"
-          + " where id = 1";
-
-  private static final String SELECT_VERSION = "select version from system_setting where id = 1";
-
-  @Autowired private JdbcTemplate jdbcTemplate;
-  @Autowired private DataSource dataSource;
   @Autowired private SystemSettingsRepository systemSettingsRepository;
+  @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private DataSource dataSource;
 
   /** 提交的 version 推进必须通过真实 loop 投递通知，并把权威记录整体刷新进独立快照。 */
   @Test
@@ -62,12 +47,10 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
     try (OtherNode node = startOtherNode()) {
       SystemSettings before = node.settings();
       int updatedRetries = before.aiRuntime().retryMaxRetries() + 1;
-      long updatedVersion = currentVersion() + 1;
-
-      jdbcTemplate.update(UPDATE_VERSION_AND_RETRY_MAX_RETRIES, updatedVersion, updatedRetries);
+      long updatedVersion = commitRetryMaxRetries(updatedRetries);
 
       awaitRetryMaxRetries(node, updatedRetries);
-      // 通知 payload 是 version：一次提交只投递一条，且确实由数据库触发器产生。
+      // 通知 payload 是写后权威 version：一次提交只投递一条，且由 Java 写入口发布。
       assertEquals(List.of(Long.toString(updatedVersion)), node.deliveredPayloads());
       // 权威回读是整体替换：未修改的 section 保持旧值，改动字段来自数据库而非通知 payload。
       assertEquals(before.tool(), node.settings().tool());
@@ -77,29 +60,27 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
 
   /** 回滚事务绝不投递通知：用随后一条已提交控制通知作为屏障，证明投递已越过回滚点。 */
   @Test
-  void rolledBackUpdateNeverDeliversNotification() throws SQLException {
+  void rolledBackUpdateNeverDeliversNotification() {
     try (OtherNode node = startOtherNode()) {
       SystemSettings before = node.settings();
       long committedVersion = currentVersion();
       int abandonedRetries = before.aiRuntime().retryMaxRetries() + 5;
 
-      try (Connection connection = dataSource.getConnection()) {
-        connection.setAutoCommit(false);
-        try (PreparedStatement statement =
-            connection.prepareStatement(UPDATE_VERSION_AND_RETRY_MAX_RETRIES)) {
-          statement.setLong(1, committedVersion + 5);
-          statement.setInt(2, abandonedRetries);
-          assertEquals(1, statement.executeUpdate());
-        }
-        connection.rollback();
-      }
+      // 真实 Java 写入口在事务中推进 version，但整个事务回滚，绝不提交。
+      new TransactionTemplate(transactionManager)
+          .executeWithoutResult(
+              status -> {
+                assertTrue(
+                    systemSettingsRepository.update(
+                        withRetryMaxRetries(before, abandonedRetries), committedVersion));
+                status.setRollbackOnly();
+              });
       assertEquals(
           committedVersion, currentVersion(), "rolled back update must not advance version");
 
       // 屏障：控制通知在回滚之后提交；它一旦到达即说明投递顺序已越过回滚点，回滚事务的 version 与配置绝不出现。
       int controlRetries = before.aiRuntime().retryMaxRetries() + 1;
-      long controlVersion = committedVersion + 1;
-      jdbcTemplate.update(UPDATE_VERSION_AND_RETRY_MAX_RETRIES, controlVersion, controlRetries);
+      long controlVersion = commitRetryMaxRetries(controlRetries);
 
       awaitRetryMaxRetries(node, controlRetries);
       assertEquals(
@@ -110,23 +91,27 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
     }
   }
 
-  /** 不推进 version 的 config 变更不发通知，只能靠 listener 重连 resync 权威回读补齐。 */
+  /** 断连期间提交的变更没有投递路径，只能靠 listener 重连 resync 权威回读补齐。 */
   @Test
-  void reconnectResyncCoversConfigChangeWithoutVersionBump() {
+  void reconnectResyncCoversChangePublishedWhileDisconnected() {
     try (OtherNode node = startOtherNode()) {
       SystemSettings before = node.settings();
-      long alignedVersion = currentVersion() + 1;
       int alignedRetries = before.aiRuntime().retryMaxRetries() + 1;
-      jdbcTemplate.update(UPDATE_VERSION_AND_RETRY_MAX_RETRIES, alignedVersion, alignedRetries);
+      long alignedVersion = commitRetryMaxRetries(alignedRetries);
       awaitRetryMaxRetries(node, alignedRetries);
-
-      int missedRetries = alignedRetries + 1;
-      jdbcTemplate.update(UPDATE_RETRY_MAX_RETRIES_ONLY, missedRetries);
-      assertEquals(alignedVersion, currentVersion(), "config-only change must not advance version");
-      // version 未推进 + 无新 payload：这条已提交变更确实没有通知路径。
       assertEquals(List.of(Long.toString(alignedVersion)), node.deliveredPayloads());
 
-      // 真实重连：listener 建连后 resync 权威回读，补上遗漏的 config-only 变更。
+      // 断开 listener 后提交：通知无法抵达本节点。
+      node.stop();
+      int missedRetries = alignedRetries + 1;
+      long missedVersion = commitRetryMaxRetries(missedRetries);
+      assertNotEquals(alignedVersion, missedVersion);
+      assertEquals(
+          List.of(Long.toString(alignedVersion)),
+          node.deliveredPayloads(),
+          "no delivery path exists while the listener is stopped");
+
+      // 真实重连：listener 建连后 resync 权威回读，补上断连期间的变更。
       node.restart();
 
       awaitRetryMaxRetries(node, missedRetries);
@@ -135,6 +120,38 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
           node.deliveredPayloads(),
           "catch-up must come from resync, not from a notification");
     }
+  }
+
+  /** 真实 Java 写入口：CAS 推进 version 并返回写后版本；不 mock 事务或通知。 */
+  private long commitRetryMaxRetries(int retryMaxRetries) {
+    SystemSettingsRepository.SystemSettingsRecord record = systemSettingsRepository.get();
+    SystemSettings updated = withRetryMaxRetries(record.settings(), retryMaxRetries);
+    new TransactionTemplate(transactionManager)
+        .executeWithoutResult(
+            status -> assertTrue(systemSettingsRepository.update(updated, record.version())));
+    return record.version() + 1;
+  }
+
+  private static SystemSettings withRetryMaxRetries(SystemSettings base, int retryMaxRetries) {
+    SystemSettings.AiRuntime ai = base.aiRuntime();
+    return new SystemSettings(
+        base.tool(),
+        new SystemSettings.AiRuntime(
+            retryMaxRetries,
+            ai.retryBackoffStrategy(),
+            ai.retryBaseDelayMillis(),
+            ai.retryMaxDelayMillis(),
+            ai.compactionKeepRecentTokens(),
+            ai.compactionFallbackModel(),
+            ai.subagentMaxDepth(),
+            ai.subagentMaxConcurrency(),
+            ai.subagentMaxTotalConcurrency(),
+            ai.subagentMaxTurns()),
+        base.environment(),
+        base.network(),
+        base.integrations(),
+        base.storageMedia(),
+        base.advanced());
   }
 
   private OtherNode startOtherNode() {
@@ -148,11 +165,11 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
   }
 
   private long currentVersion() {
-    Long version = jdbcTemplate.queryForObject(SELECT_VERSION, Long.class);
-    if (version == null) {
+    SystemSettingsRepository.SystemSettingsRecord record = systemSettingsRepository.get();
+    if (record == null) {
       throw new AssertionError("system_setting seed row must exist");
     }
-    return version;
+    return record.version();
   }
 
   /** 轮询独立快照直到权威回读生效；异步投递无法用固定 sleep 证明，超时即失败。 */
@@ -230,6 +247,11 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
       loop.stop();
       loop.start();
       awaitResync(before + 1);
+    }
+
+    /** 停止 listener：连接被中止，期间提交的变更没有投递路径。 */
+    private void stop() {
+      loop.stop();
     }
 
     private SystemSettings settings() {
