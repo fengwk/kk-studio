@@ -25,6 +25,8 @@ import type {
 import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceActions } from '@/features/canvas/useCanvasResourceActions'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 
 export type { CanvasContextMenuState, ContextMenuTarget } from '@/features/canvas/canvas-stage-model'
 
@@ -167,7 +169,7 @@ export function CanvasContextMenu({
         <div className="context-menu-rename" role="presentation">
           <label>
             <span>{t('canvas.menu.renameInputAria')}</span>
-            <input
+            <TextInput
               className="nodrag nowheel"
               value={renameValue}
               onChange={(event) => setRenameValue(event.target.value)}
@@ -180,21 +182,22 @@ export function CanvasContextMenu({
             />
           </label>
           <div>
-            <button
-              type="button"
+            <Button
               className="context-menu-cancel"
+              variant="ghost"
+              size="compact"
               onClick={() => setMode('menu')}
             >
               {t('canvas.menu.cancel')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               className="context-menu-save"
+              size="compact"
               disabled={!renameValue.trim()}
               onClick={saveRename}
             >
               {t('canvas.menu.save')}
-            </button>
+            </Button>
           </div>
         </div>
       ) : mode === 'confirm' ? (
@@ -202,16 +205,17 @@ export function CanvasContextMenu({
           <strong>{confirmTitle}</strong>
           <p>{confirmDescription}</p>
           <div>
-            <button
-              type="button"
+            <Button
               className="context-menu-confirm-cancel"
+              variant="ghost"
+              size="compact"
               onClick={() => setMode('menu')}
             >
               {t('canvas.node.deleteCancel')}
-            </button>
-            <button type="button" className="danger" onClick={confirmDelete}>
+            </Button>
+            <Button size="compact" danger onClick={confirmDelete}>
               {t('canvas.node.deleteConfirm')}
-            </button>
+            </Button>
           </div>
         </div>
       ) : target.kind === 'resource' ? (

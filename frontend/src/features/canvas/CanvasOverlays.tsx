@@ -1,4 +1,6 @@
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
 
 export function CanvasOverlays() {
   const {
@@ -10,6 +12,7 @@ export function CanvasOverlays() {
     dismissConflictMessage,
     saveDraftAsNewNode,
   } = useCanvasRuntime()
+  const { t } = useI18n()
   const uploads = Object.entries(state.uploadProgress)
 
   const conflictedEntries = Object.entries(state.drafts).filter(
@@ -33,58 +36,39 @@ export function CanvasOverlays() {
       </div>
       {state.storageError ? (
         <div className="canvas-storage-error-banner" role="alert">
-          <span>保存草稿失败：{state.storageError}</span>
-          <button
-            type="button"
-            className="canvas-conflict-action-retry"
-            style={{ marginLeft: 8 }}
-            onClick={() => void retryDraftPersist()}
-          >
-            重试
-          </button>
+          <span>{t('canvas.draft.saveFailed', { message: state.storageError })}</span>
+          <Button size="compact" onClick={() => void retryDraftPersist()}>
+            {t('shared.retry')}
+          </Button>
         </div>
       ) : null}
       {conflictedEntries.map(([nodeId, draft]) => {
         const isRemoteDeleted = draft.conflict?.type === 'remote_deleted' || draft.conflict?.kind === 'TARGET_MISSING'
         const message = draft.conflict?.message
-          || (isRemoteDeleted ? '节点已被远端删除，本地保留未保存草稿' : '节点内容与远端存在冲突')
+          || (isRemoteDeleted
+            ? t('canvas.conflict.remoteDeleted')
+            : t('canvas.conflict.contentConflict'))
         return (
           <div key={nodeId} className="canvas-conflict-banner" role="alert" data-node-id={nodeId}>
             <span className="canvas-conflict-message">{message}</span>
             <div className="canvas-conflict-actions">
               {isRemoteDeleted ? (
-                <button
-                  type="button"
-                  className="canvas-conflict-action-restore"
-                  onClick={() => void saveDraftAsNewNode(nodeId)}
-                >
-                  另存为新节点
-                </button>
+                <Button variant="ghost" size="compact" onClick={() => void saveDraftAsNewNode(nodeId)}>
+                  {t('canvas.conflict.saveAsNew')}
+                </Button>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    className="canvas-conflict-action-retry"
-                    onClick={() => void retryDraft(nodeId)}
-                  >
-                    使用最新版本重试
-                  </button>
-                  <button
-                    type="button"
-                    className="canvas-conflict-action-restore"
-                    onClick={() => void saveDraftAsNewNode(nodeId)}
-                  >
-                    另存为新节点
-                  </button>
+                  <Button variant="ghost" size="compact" onClick={() => void retryDraft(nodeId)}>
+                    {t('canvas.conflict.retryLatest')}
+                  </Button>
+                  <Button variant="ghost" size="compact" onClick={() => void saveDraftAsNewNode(nodeId)}>
+                    {t('canvas.conflict.saveAsNew')}
+                  </Button>
                 </>
               )}
-              <button
-                type="button"
-                className="canvas-conflict-action-dismiss"
-                onClick={() => dismissDraft(nodeId)}
-              >
-                放弃草稿
-              </button>
+              <Button variant="ghost" size="compact" danger onClick={() => dismissDraft(nodeId)}>
+                {t('canvas.conflict.discard')}
+              </Button>
             </div>
           </div>
         )
@@ -94,21 +78,17 @@ export function CanvasOverlays() {
           <span className="canvas-conflict-message">{state.conflictMessage}</span>
           <div className="canvas-conflict-actions">
             {isRecoverableConflict ? (
-              <button
-                type="button"
-                className="canvas-conflict-action-retry"
+              <Button
+                variant="ghost"
+                size="compact"
                 onClick={() => void retryRecovery().catch(() => undefined)}
               >
-                重试
-              </button>
+                {t('shared.retry')}
+              </Button>
             ) : null}
-            <button
-              type="button"
-              className="canvas-conflict-action-dismiss"
-              onClick={dismissConflictMessage}
-            >
-              关闭
-            </button>
+            <Button variant="ghost" size="compact" onClick={dismissConflictMessage}>
+              {t('shared.close')}
+            </Button>
           </div>
         </div>
       ) : null}
