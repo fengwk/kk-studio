@@ -25,8 +25,8 @@ import java.util.function.Consumer;
  * 启动/重连成功时也调用 {@link #broadcastResync()}，覆盖断连期间不可恢复的通知。{@link #subscribe} 先注册 consumer 再读当前
  * revision 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
  *
- * <p>数据库侧由 {@code canvas_document} 的 revision 触发器在 {@code canvas_revision} 通道发出提示；两者是同一坐标系：
- * 通道名与列名都使用 revision，不保留 version 别名。
+ * <p>数据库侧由 {@code PostgresqlCanvasStore} 在写事务内沿 {@code canvas_revision} 通道发出提示；两者是同一坐标系： 通道名与列名都使用
+ * revision，不保留 version 别名。
  */
 @Slf4j
 @Component

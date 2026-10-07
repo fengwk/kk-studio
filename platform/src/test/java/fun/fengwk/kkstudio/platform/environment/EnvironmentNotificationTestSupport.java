@@ -2,16 +2,14 @@ package fun.fengwk.kkstudio.platform.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-
-import javax.sql.DataSource;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -22,32 +20,19 @@ import java.util.List;
 /**
  * {@code environment_changed} 通知的 PostgreSQL 集成测试基座。
  *
- * <p>schema 当前仍带 environment 与 environment_connection 两个数据库行触发器。本基座在每个测试前只在隔离测试库中删除这两个
- * 触发器，使本类观测到的通知只可能来自 Java 生产写入口。
- *
- * <p>观察者使用独立 JDBC 连接 LISTEN 同一 channel，因此「提交后才可见」「回滚与未提交不可见」是被直接观测的事实。
+ * <p>通知由 Java 生产写入口在成功写事实的同一事务内发布。观察者使用一条独立的非池化 JDBC 连接 LISTEN 同一 channel，因此「提交后才可见」
+ * 「回滚与未提交不可见」是被直接观测的事实；连接由每个测试关闭，不依赖连接池归还，避免残留 LISTEN 或未消费通知掩盖错误。
  */
 public abstract class EnvironmentNotificationTestSupport extends PostgresSpringTestSupport {
 
   protected static final String ENVIRONMENT_CHANNEL = "environment_changed";
 
-  @Autowired protected DataSource dataSource;
   @Autowired protected PlatformTransactionManager transactionManager;
   @Autowired protected JdbcTemplate jdbcTemplate;
 
-  @BeforeEach
-  void dropLegacyEnvironmentNotifyTriggers() throws SQLException {
-    try (Connection conn = dataSource.getConnection();
-        Statement statement = conn.createStatement()) {
-      statement.execute("drop trigger if exists trg_environment_registry_changed on environment");
-      statement.execute(
-          "drop trigger if exists trg_environment_connection_changed on environment_connection");
-    }
-  }
-
-  /** 打开一条独立观察者连接并 LISTEN {@code environment_changed}。 */
+  /** 打开一条独立、非池化的观察者连接并 LISTEN {@code environment_changed}；由调用方 try-with-resources 关闭。 */
   protected EnvironmentChannelListener listen() throws SQLException {
-    return new EnvironmentChannelListener(dataSource.getConnection());
+    return new EnvironmentChannelListener(PostgresSchemaSupport.newConnection());
   }
 
   /** 独立观察者连接：只等待确定数量的已提交通知，因此「没有通知」也是被观测的结果。 */

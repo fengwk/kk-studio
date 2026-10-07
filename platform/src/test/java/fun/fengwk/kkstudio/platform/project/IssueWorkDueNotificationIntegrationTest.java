@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.project;
 
+import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -7,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
@@ -20,8 +20,6 @@ import fun.fengwk.kkstudio.project.model.IssueWork;
 import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
-import javax.sql.DataSource;
-
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -29,42 +27,24 @@ import java.time.Duration;
 import java.util.UUID;
 
 /**
- * 通过独立 PostgreSQL LISTEN 连接验证 {@code project_issue_work_due} 由 Java 生产写入口在事务内发布。
+ * 通过独立非池化 PostgreSQL LISTEN 连接验证 {@code project_issue_work_due} 由 Java 生产写入口在事务内发布。
  *
- * <p>夹具先删除同名 Schema 触发器与函数，使观察到的通知只能来自写路径本身。断言覆盖提交/未提交/回滚，以及「写后行已到期且无有效租约」这一合成判据：立即与未来
+ * <p>观察者连接不依赖连接池归还，避免残留 LISTEN 或未消费通知掩盖错误。断言覆盖提交/未提交/回滚，以及「写后行已到期且无有效租约」这一合成判据：立即与未来
  * due、活跃与过期租约、reschedule 的最终 due，以及公共 {@code completeWork} 返回 false 时 released 真实写入与围栏未写的区分。
  */
 class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
 
   private static final Duration LEASE = Duration.ofMinutes(1);
 
-  @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private IssueWorkStore issueWorkStore;
   @Autowired private IssueWorkRepository issueWorkRepository;
-
-  /** 删除 Schema 触发器，使后续断言只能由 Java 写入口产生；确认确实移除，避免测试因触发器残留而假绿。 */
-  @BeforeEach
-  void dropSchemaTriggerToProveJavaPath() {
-    jdbc.execute("drop trigger if exists trg_project_issue_work_due on project_issue_work");
-    jdbc.execute("drop function if exists notify_project_issue_work_due()");
-    assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from pg_trigger where tgname = 'trg_project_issue_work_due'",
-            Integer.class));
-    assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from pg_proc where proname = 'notify_project_issue_work_due'",
-            Integer.class));
-  }
 
   /** 已提交的真实写入提交后投递一次；同一事务未提交不可见，回滚静默。 */
   @Test
   void committedWriteNotifiesButUncommittedAndRollbackDoNot() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -95,7 +75,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void immediateRequestNotifiesWhileFutureRequestStaysSilent() throws Exception {
     UUID immediateIssue = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -105,7 +85,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
     }
 
     UUID futureIssue = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -121,7 +101,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void claimRenewAndRequestUnderActiveLeaseStaySilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -144,7 +124,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void releasedCompletionNotifiesWhileFenceFailureAndDeletionStaySilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -186,7 +166,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void rescheduleZeroDelayNotifiesImmediately() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -207,7 +187,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void reschedulePositiveDelayStaysSilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -228,7 +208,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void rescheduleFenceFailureStaysSilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -257,7 +237,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void rescheduleWithNewWakeNotifiesDespitePositiveDelay() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -281,7 +261,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void expiredLeaseIsTreatedAsUnleased() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -311,7 +291,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void issueDeletionDoesNotEmitDueNotification() throws Exception {
     var issue = createIssue(createProject());
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);
@@ -328,7 +308,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void writeEntriesWithoutTransactionAreRejectedBeforeAnyWrite() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = dataSource.getConnection();
+    try (Connection listener = newConnection();
         Statement statement = listener.createStatement()) {
       statement.execute("listen project_issue_work_due");
       PGConnection pg = listener.unwrap(PGConnection.class);

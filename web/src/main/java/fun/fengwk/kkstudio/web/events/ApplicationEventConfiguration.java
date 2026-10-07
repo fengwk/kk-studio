@@ -125,7 +125,7 @@ public class ApplicationEventConfiguration {
                 EnvironmentSkillSyncOrchestrator.CHANNEL,
                 environmentSkillSyncOrchestrator::onPackageChanged,
                 environmentSkillSyncOrchestrator::reconcileReadyEnvironments),
-            // 11. 执行树失效：Thread 行提交后触发器把 payload 聚合为真实执行根 id，浏览器回读该根的树
+            // 11. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
             new PostgresqlNotificationHandler(
                 ExecutionTreeChangeHub.CHANNEL,
                 executionTreeChangeHub::onNotification,

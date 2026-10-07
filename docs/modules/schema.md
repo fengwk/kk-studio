@@ -1,7 +1,7 @@
 # Schema 模块
 
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)
-是当前 PostgreSQL 表、列、外键、索引、CHECK 与通知 trigger 的权威声明。
+是当前 PostgreSQL 表、列、外键、索引与 CHECK 的权威声明，不定义通知触发器。
 Web 和集成测试使用同一份 Flyway 资源。模块提供 SQL 与契约测试，
 依赖 scope 见 [`schema/pom.xml`](../../schema/pom.xml)。
 
@@ -61,8 +61,8 @@ PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外�
 对象清理记录与最后数据库事实消失同事务登记、永久保留，后台重复删除使迟到对象写入最终收敛；
 存储写入本身的阻断仍属于对象存储能力边界。
 
-通知只作提交后回读/唤醒提示。Thread/Canvas 版本由应用推进，数据库 trigger 根据已变化事实发提示；
-Project 写库通知由 repository 发送。执行树、工具交互与环境另有只定位真实根的失效提示 trigger（`harness_thread_tree`、`harness_tool_interaction`、`environment_changed`），它们不推进、也不伪造任何 Thread version。恢复依赖权威行、poll 和租约，而非通知保存。
+通知只作提交后回读/唤醒提示。应用推进 Thread/Canvas 版本与 Project/Issue 事实，并由该写路径在同一事务内对数据库连接执行内建 `pg_notify`（提交后才投递，回滚静默）。
+执行树、工具交互与环境失效提示（`harness_thread_tree`、`harness_tool_interaction`、`environment_changed`）同样由写入口发布，payload 只定位真实执行根，不推进、也不伪造任何 Thread version。恢复依赖权威行、poll 和租约，而非通知保存。
 
 ## 修改结构
 
@@ -82,7 +82,7 @@ UUID、行版本、连接和执行状态不随配置文件恢复，完整运行�
 [`FreshInstallSchemaContractTest`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)
 在隔离 PostgreSQL 执行 baseline，检查快照与 SQL 探针。
 [Platform schema 测试](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql)
-覆盖精确表/列/外键/trigger、非法事实、Blob 引用、删除语义和 seed 幂等；
+覆盖精确表/列/外键/索引、非法事实、Blob 引用、删除语义和 seed 幂等；
 [Web bootstrap 测试](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java)
 验证依赖 scope 与 profile 入口。命令和数据库测试基座见 [开发与测试](../operations/development-and-testing.md)。
 

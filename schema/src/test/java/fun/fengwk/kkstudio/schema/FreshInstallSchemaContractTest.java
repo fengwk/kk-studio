@@ -136,8 +136,22 @@ class FreshInstallSchemaContractTest {
           "canvas_function_work_notify",
           "project_issue_changed_notify");
 
-  /** V1 唯一应当存在的 NOTIFY 提示触发器（提交后回读提示，不是事件日志）。 */
-  private static final List<String> NOTIFY_TRIGGERS =
+  /** 已迁移到 Java 写入口、必须从 V1 删除的 10 个通知提示函数。 */
+  private static final List<String> REMOVED_NOTIFY_FUNCTIONS =
+      List.of(
+          "environment_connection_changed_notify",
+          "environment_registry_changed_notify",
+          "harness_thread_tree_notify",
+          "harness_thread_version_notify",
+          "harness_tool_interaction_notify",
+          "notify_canvas_document_revision",
+          "notify_canvas_function_work",
+          "notify_project_issue_work_due",
+          "skill_package_changed_notify",
+          "system_setting_version_notify");
+
+  /** 已迁移到 Java 写入口、必须从 V1 删除的 10 个通知提示触发器。 */
+  private static final List<String> REMOVED_NOTIFY_TRIGGERS =
       List.of(
           "trg_canvas_document_revision_notify",
           "trg_canvas_function_work_notify",
@@ -267,6 +281,11 @@ class FreshInstallSchemaContractTest {
             queryString(connection, "select to_regprocedure('" + function + "()')::text"),
             function + " must not exist");
       }
+      for (String function : REMOVED_NOTIFY_FUNCTIONS) {
+        assertNull(
+            queryString(connection, "select to_regprocedure('" + function + "()')::text"),
+            function + " must not exist");
+      }
       for (String trigger : REMOVED_TRIGGERS) {
         assertEquals(
             0,
@@ -277,16 +296,21 @@ class FreshInstallSchemaContractTest {
                     + "' and not tgisinternal"),
             trigger + " must not exist");
       }
+      // 通知已迁移到 Java 写入口：空库不得残留任何用户触发器。
       assertEquals(
-          NOTIFY_TRIGGERS.size(),
-          queryInt(connection, "select count(*) from pg_trigger where not tgisinternal"));
-      assertEquals(
-          NOTIFY_TRIGGERS.size(),
-          queryInt(
-              connection,
-              "select count(*) from pg_trigger where not tgisinternal and tgname in ('"
-                  + String.join("', '", NOTIFY_TRIGGERS)
-                  + "')"));
+          0,
+          queryInt(connection, "select count(*) from pg_trigger where not tgisinternal"),
+          "no user trigger may exist");
+      for (String trigger : REMOVED_NOTIFY_TRIGGERS) {
+        assertEquals(
+            0,
+            queryInt(
+                connection,
+                "select count(*) from pg_trigger where tgname = '"
+                    + trigger
+                    + "' and not tgisinternal"),
+            trigger + " must not exist");
+      }
       // 业务实体 id 全部由应用生成：基线里没有 create sequence / serial / identity。
       assertEquals(
           0,
