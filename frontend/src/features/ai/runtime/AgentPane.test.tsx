@@ -369,16 +369,28 @@ function treeNode(
 /** 根交互汇聚里的一个待决审批（来源 Thread 可指定）。 */
 function approvalInteraction(threadId: string) {
   return {
+    type: 'APPROVAL',
     interactionId: `inv-${threadId}`,
     status: 'WAITING_APPROVAL',
     threadId,
     rootThreadId: THREAD_ID,
     sessionId: 'session-1',
-    owner: { type: 'CHAT', chatId: CHAT_ID, issueId: null, agentName: null },
+    owner: {
+      type: 'CHAT',
+      chatId: CHAT_ID,
+      chatTitle: null,
+      issueId: null,
+      issueTitle: null,
+      agentName: null,
+      rootThreadName: null,
+    },
     toolCallId: 'call-bash-1',
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
     approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
+    environmentId: null,
+    environmentName: null,
+    waitingCount: null,
     createTime: '2026-07-28T10:00:01Z',
   }
 }
