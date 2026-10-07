@@ -5,6 +5,7 @@ import {
   environmentEventLevelClass,
   filterEnvironments,
   formatTimestamp,
+  timestampMillis,
 } from '@/features/ai/environment/environment-utils'
 import { EnvironmentInstallModal } from '@/features/ai/environment/EnvironmentInstallModal'
 import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
@@ -34,13 +35,8 @@ const STATUS_EXPIRY_RECHECK_SLACK_MS = 250
 function earliestStatusExpiresAt(cards: EnvironmentCardDTO[]): number | null {
   let earliest: number | null = null
   for (const card of cards) {
-    if (card.statusExpiresAt == null) {
-      continue
-    }
-    const at = typeof card.statusExpiresAt === 'number'
-      ? card.statusExpiresAt
-      : Date.parse(card.statusExpiresAt)
-    if (!Number.isFinite(at)) {
+    const at = timestampMillis(card.statusExpiresAt)
+    if (at == null) {
       continue
     }
     if (earliest == null || at < earliest) {
