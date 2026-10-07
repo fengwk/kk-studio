@@ -71,7 +71,9 @@ describe('EnvironmentManagementModal', () => {
     expect(screen.queryByText('根路径')).toBeNull()
     expect(screen.queryByText('/opt/studio/workspace')).toBeNull()
     expect(screen.getByText('Production host')).toBeInTheDocument()
-    expect(screen.getByText('2026-07-20T02:00:00.000Z')).toBeInTheDocument()
+    // lastSeen 必须本地化展示，不直接铺 UTC 原文。
+    expect(screen.getByText(/2026\/07\/20 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument()
+    expect(screen.queryByText('2026-07-20T02:00:00.000Z')).toBeNull()
     expect(screen.queryByText('/opt/studio/workspace')).not.toBeInTheDocument()
 
     // 绝不包含任何操作记录区域

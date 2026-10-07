@@ -1,4 +1,5 @@
 import { useI18n } from '@/shared/i18n'
+import { formatTimestamp } from '@/features/ai/environment/environment-utils'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 
 export interface EnvironmentHostSectionProps {
@@ -6,7 +7,8 @@ export interface EnvironmentHostSectionProps {
 }
 
 export function EnvironmentHostSection({ environment }: EnvironmentHostSectionProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
+  const lastSeen = formatTimestamp(environment.lastSeen, locale)
 
   return (
     <section className="env-mgmt-section" aria-label={t('ai.environment.runtime.title')}>
@@ -33,7 +35,7 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.lastSeen')}</span>
-          <span className="val">{environment.lastSeen ?? '—'}</span>
+          <span className="val">{lastSeen || '—'}</span>
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.runtime.note')}</span>

@@ -27,6 +27,11 @@ export function ResourceCardHarnessApp() {
           icon={<Bot />}
           title="标准资源卡"
           subtitle="标准副标题"
+          badge={
+            <span id="standard-badge" className="status-pill is-ready">
+              Ready
+            </span>
+          }
           meta={[
             ['类型', 'agent'],
             { label: '工具', tags: ['read', 'bash', 'grep', 'write'], limit: 2 },

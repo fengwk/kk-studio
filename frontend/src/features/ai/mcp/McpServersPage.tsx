@@ -8,6 +8,9 @@ import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Button } from '@/shared/ui/controls/Button'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
@@ -443,7 +446,7 @@ export function McpServersPage() {
             tone="danger"
           />
         )}
-        <div className="cards-grid">
+        <ResourceGrid>
           <CreateCard
             title={t('ai.mcp.create')}
             subtitle={t('ai.mcp.createDescription')}
@@ -508,7 +511,7 @@ export function McpServersPage() {
               />
             )
           })}
-        </div>
+        </ResourceGrid>
       </div>
 
       {createModal && (
@@ -522,7 +525,7 @@ export function McpServersPage() {
               <div className="modal-body">
                 <label className="form-group">
                   <FieldLabel required>{t('ai.mcp.name')}</FieldLabel>
-                  <input
+                  <TextInput
                     value={createModal.name}
                     onChange={(e) =>
                       setCreateModal({ ...createModal, name: e.target.value, error: null })
@@ -540,7 +543,7 @@ export function McpServersPage() {
 
                 <label className="form-group">
                   <FieldLabel required>{t('ai.mcp.url')}</FieldLabel>
-                  <input
+                  <TextInput
                     value={createModal.url}
                     onChange={(e) =>
                       setCreateModal({ ...createModal, url: e.target.value, error: null })
@@ -557,8 +560,8 @@ export function McpServersPage() {
 
                 <label className="form-group">
                   <FieldLabel>{t('ai.mcp.headers')}</FieldLabel>
-                  <textarea
-                    className="code-textarea mcp-headers-textarea"
+                  <TextArea
+                    className="mcp-headers-textarea"
                     value={createModal.headersText}
                     onChange={(e) =>
                       setCreateModal({ ...createModal, headersText: e.target.value, error: null })
@@ -641,7 +644,7 @@ export function McpServersPage() {
                 <div className="modal-body">
                   <label className="form-group">
                     <FieldLabel>{t('ai.mcp.name')}</FieldLabel>
-                    <input
+                    <TextInput
                       value={editModal.server.name}
                       disabled
                       readOnly
@@ -650,7 +653,7 @@ export function McpServersPage() {
 
                   <label className="form-group">
                     <FieldLabel required>{t('ai.mcp.url')}</FieldLabel>
-                    <input
+                    <TextInput
                       value={editModal.url}
                       onChange={(e) =>
                         setEditModal({ ...editModal, url: e.target.value, error: null })
@@ -665,8 +668,8 @@ export function McpServersPage() {
 
                   <label className="form-group">
                     <FieldLabel>{t('ai.mcp.headers')}</FieldLabel>
-                    <textarea
-                      className="code-textarea mcp-headers-textarea"
+                    <TextArea
+                      className="mcp-headers-textarea"
                       value={editModal.headersText}
                       onChange={(e) =>
                         setEditModal({ ...editModal, headersText: e.target.value, error: null })
