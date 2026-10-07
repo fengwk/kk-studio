@@ -63,6 +63,15 @@ Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 
 连接失效是时间事实而非写入事实，客户端只按最早的 `statusExpiresAt` 排一次回读（越过截止点一个短容差），
 不轮询、也不维护本地过期集合，租约续期或任何 changed 更新数据后自动重排。
 
+有 READY 环境工具的 Thread（包括只读后代）复用 interactions 订阅，按 parent/YOLO 投影确定真实执行根：
+本根 changed、subscribed 与 resync 使当前 Snapshot 失效，同 version 的等待事实也会更新；
+普通 lossy delta 仍只更新 overlay，不逐帧 GET。工具的 `requiredEnvironmentId`、`requiredEnvironmentName`、
+`waitingForEnvironment` 与 `environmentWaitFreshnessAt` 来自 Work 冻结路由和服务端时间投影，
+不从 composer 选择或环境聚合数推断单调用。Snapshot 最早边界与 interactions 的 `freshnessAt`
+由 [`useReadModelFreshnessRecheck`](../../frontend/src/shared/lib/useReadModelFreshnessRecheck.ts) 安排单次回读：
+同 QueryClient、查询 scope、截止点共用消费记录；续租、换绑与卸载注销旧 timer，
+重复返回已消费的旧边界不会热循环，不同 scope 互不抑制。
+
 MODEL_DELTA 按连续 sequence 累积；gap 启动单飞 Snapshot recovery，使用有界退避。
 TOOL_PARTIAL 按 thread/invocation/attempt 内 eventId 精确去重，process.output 按 offset。
 增量先归约进 refs，再按 animation frame 合并发布。
@@ -143,6 +152,11 @@ Snapshot、Debug 和 usage，并在顶部提供返回执行根入口；身份未
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
 
+全局与根交互区共用 InteractionCardBody/ApprovalCard。审批保留一次完整 `argumentsJson`（含 workdir），
+默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
+来源名称来自 owner 或既有根执行树，不逐卡获取 Snapshot；无名称用“查看来源”，
+后代入口用“查看 subagent 执行”，名称与跳转目标一致，不显示裸 UUID，也不改变审批/问卷的原始来源身份。
+
 根面板自动查询执行树，在 Widget 区以单行节点展示 processing 后代及其必要祖先；
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
 树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；
@@ -153,8 +167,13 @@ Snapshot、Debug 和 usage，并在顶部提供返回执行根入口；身份未
 工具卡片按各自 invocation 的结果判定终态：同批其他调用尚未物化 durable 结果时，
 已完成调用仍显示其结果，等待审批的调用保持未决。结果配对使用
 `assistantEntryId:callIndex`，相同 toolCallId 的历史结果不会占用当前调用。
-终态结果优先于尚未结束时的 partial。Thread 处于等待审批时，
-活动条显示“等待审批”，其余非空闲状态仍显示正在工作。
+终态结果优先于尚未结束时的 partial。工具名与参数属于同一 inline 文本流，保留换行、可选中复制，
+长路径在剩余宽度自然折行，不横滚；状态与展开图标占不收缩的尾部。
+工具状态直接保留 invocation 的 READY（排队或权威环境等待）、WAITING_APPROVAL、WAITING_INPUT、
+DISPATCHING、RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 使用 spinner；
+没有 invocation 的模型调用草稿不表示已运行或成功。task 的成功只表示“委派已受理”，不保证目标验收。
+Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
+不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
 `/goal` 维护用户目标，进度按当前 goalId 展示；工具契约见
 [Harness Builtin](harness-builtin.md#goal用户拥有的目标与-agent-进度声明)。
 

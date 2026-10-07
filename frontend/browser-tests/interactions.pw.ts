@@ -24,7 +24,7 @@ const LONG_REASON =
   + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/reason.json'
 const LONG_ARGUMENTS = JSON.stringify({
   command: 'npm --prefix frontend run test -- src/features/ai/runtime/thread-panel/messages/tool-message.view.test.tsx',
-  cwd: '/srv/kk-studio/frontend/browser-tests/nested/deeply/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  workdir: '/srv/kk-studio/frontend/browser-tests/nested/deeply/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   env: { NODE_ENV: 'test', CI: 'true' },
   timeoutMs: 120000,
 })
@@ -338,7 +338,6 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
   }) => {
     fs.mkdirSync(REPORTS_DIR, { recursive: true })
     await mockPendingApi(page)
-    const statusTagStyles: Array<{ color: string; background: string; warning: string; warningSoft: string }> = []
 
     for (const viewport of [
       { width: 1280, height: 900, name: 'desktop-1280' },
@@ -350,7 +349,8 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
       const card = page.locator('.interaction-feed-item').first()
       await expect(card).toBeVisible()
-      await expect(card.locator('.interaction-status-tag')).toHaveClass(/approval/)
+      await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
+      await expect(card.locator('time')).toHaveCount(0)
       await expect(card.locator('.interaction-approval-reason-text')).toContainText('bash requires approval')
       await expect(card.locator('.interaction-raw-pre')).toContainText('npm --prefix frontend run test')
 
@@ -361,7 +361,6 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         fg,
         fgMuted,
         warning,
-        warningSoft,
       ] = await Promise.all([
         resolveToken(page, '--surface'),
         resolveToken(page, '--border'),
@@ -369,7 +368,6 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         resolveToken(page, '--fg'),
         resolveToken(page, '--fg-muted'),
         resolveToken(page, '--warning'),
-        resolveToken(page, '--warning-soft'),
       ])
 
       // 卡片、审批原因与原始参数必须落在现行暗色 token 上，不能残留浅色回退。
@@ -377,15 +375,14 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         const style = window.getComputedStyle(el)
         const reason = el.querySelector<HTMLElement>('.interaction-approval-reason-text')!
         const pre = el.querySelector<HTMLElement>('.interaction-raw-pre')!
-        const tag = el.querySelector<HTMLElement>('.interaction-status-tag')!
+        const icon = el.querySelector<HTMLElement>('.interaction-approval-icon')!
         return {
           cardBackground: style.backgroundColor,
           cardBorder: style.borderTopColor,
           reasonColor: window.getComputedStyle(reason).color,
           preColor: window.getComputedStyle(pre).color,
           preBackground: window.getComputedStyle(pre).backgroundColor,
-          tagColor: window.getComputedStyle(tag).color,
-          tagBackground: window.getComputedStyle(tag).backgroundColor,
+          iconColor: window.getComputedStyle(icon).color,
         }
       })
 
@@ -394,19 +391,8 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(cardStyle.reasonColor).toBe(fgMuted)
       expect(cardStyle.preColor).toBe(fg)
       expect(cardStyle.preBackground).toBe(bg)
-      statusTagStyles.push({
-        color: cardStyle.tagColor, background: cardStyle.tagBackground, warning, warningSoft,
-      })
-
-      // 问卷标签也按 Interaction type 着色，不依赖旧 invocation 状态类名。
-      const inputTag = page.locator('.interaction-status-tag.input')
-      await expect(inputTag).toHaveCount(1)
-      const inputTagStyle = await inputTag.evaluate((el) => {
-        const style = window.getComputedStyle(el)
-        return { color: style.color, background: style.backgroundColor }
-      })
-      expect(inputTagStyle.color).toBe(await resolveToken(page, '--info'))
-      expect(inputTagStyle.background).toBe(await resolveToken(page, '--info-soft'))
+      // 权限语义保留在唯一工具行的静态图标，不叠第二份状态标题。
+      expect(cardStyle.iconColor).toBe(warning)
 
       // 正文对比度必须达到可读水平，这正是截图里失效的部分。
       expect(contrastRatio(cardStyle.preColor, cardStyle.preBackground)).toBeGreaterThanOrEqual(4.5)
@@ -415,6 +401,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       // 长原因与长 JSON 必须完整保留（真实审批所需信息）而不是被截断。
       await expect(card.locator('.interaction-approval-reason-text')).toHaveText(LONG_REASON)
       await expect(card.locator('.interaction-raw-pre')).toHaveText(LONG_ARGUMENTS)
+      expect((await card.textContent())?.split('/srv/kk-studio/frontend/browser-tests/nested/deeply/')).toHaveLength(2)
 
       const optionLabel = page.locator('.interaction-option-label').first()
       await expect(optionLabel).toBeVisible()
@@ -443,6 +430,18 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(allowStyle.backgroundImage).toBe(referencePrimary)
       expect(allowStyle.color).toBe(await resolveToken(page, '--green-on'))
       expect(allowStyle.border).toBe(await resolveToken(page, '--green-border'))
+      const denyStyle = await card.locator('.interaction-deny-btn').evaluate((el) => {
+        const probe = document.createElement('span')
+        probe.style.background = 'var(--danger-gradient)'
+        document.body.appendChild(probe)
+        const expected = getComputedStyle(probe).backgroundImage
+        probe.remove()
+        const style = getComputedStyle(el)
+        return { background: style.backgroundImage, expected, border: style.borderTopColor }
+      })
+      expect(denyStyle.background).toBe(denyStyle.expected)
+      expect(denyStyle.background).not.toBe('none')
+      expect(denyStyle.border).toBe(await resolveToken(page, '--danger-strong'))
 
       await expectNoHorizontalOverflow(page)
 
@@ -450,11 +449,6 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         path: path.join(REPORTS_DIR, `interactions-pending-${viewport.name}.png`),
         fullPage: false,
       })
-    }
-    // 在所有宽度完成正文、可操作性和溢出校验后，仍严格验证审批语义色。
-    for (const style of statusTagStyles) {
-      expect(style.color).toBe(style.warning)
-      expect(style.background).toBe(style.warningSoft)
     }
   })
 
@@ -469,7 +463,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(card).toHaveCount(1)
     await expect(card.getByRole('status')).toContainText('migration-node')
     await expect(card.getByRole('status')).toContainText('2')
-    await expect(card.locator('.interaction-status-tag')).toHaveClass(/environment_wait/)
+    await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
     await expect(card.locator('.interaction-allow-btn, .interaction-deny-btn, .interaction-submit-btn')).toHaveCount(0)
     await expect(card.getByRole('textbox')).toHaveCount(0)
     await expect(card.locator('.interaction-source-link')).toContainText('环境执行根')

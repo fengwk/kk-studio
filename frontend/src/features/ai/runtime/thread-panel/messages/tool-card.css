@@ -47,7 +47,7 @@
 /*
  * Header 允许换行：任意长度的参数（未知/MCP 的数千字 JSON 也不例外）在可用宽度内
  * 折行，完整原文留在 DOM 中可选中复制；不做横向滚动，也不撑破 pane。
- * 右侧为展开箭头预留固定留白，箭头固定在首行右上角。
+ * 右侧是不会收缩的状态/展开尾部，参数不能挤掉或覆盖图标。
  */
 .thread-tool-header {
   position: relative;
@@ -55,7 +55,7 @@
   min-width: 0;
   display: flex;
   align-items: flex-start;
-  padding: 0 22px 0 0;
+  gap: 8px;
   border: 0;
   background: transparent;
   color: var(--fg-muted);
@@ -67,31 +67,28 @@
 .thread-tool-summary {
   min-width: 0;
   flex: 1 1 auto;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .thread-tool-name {
-  flex: 0 0 auto;
   color: var(--fg);
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 600;
-  white-space: nowrap;
+  white-space: normal;
 }
 
-/* 参数行内折行：white-space normal + overflow-wrap anywhere，无横向滚动。 */
+/* 参数与名称属于同一 inline 文本流，保留换行且无横向滚动。 */
 .thread-tool-summary-detail {
   min-width: 0;
-  flex: 1 1 auto;
   color: var(--fg-dim);
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.45;
   text-overflow: clip;
-  white-space: normal;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -101,13 +98,9 @@
 }
 
 .thread-tool-toggle {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 1;
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -116,13 +109,26 @@
   background: transparent;
   color: var(--fg-dim);
   cursor: pointer;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 120ms ease, background-color 120ms ease;
 }
 
 .thread-tool-toggle svg {
   width: 14px;
   height: 14px;
+}
+
+.thread-tool-tail {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+}
+
+.thread-tool-state-label {
+  color: var(--fg-muted);
+  font-size: 12px;
 }
 
 .thread-tool-surface:hover .thread-tool-toggle,
