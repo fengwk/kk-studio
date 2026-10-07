@@ -13,7 +13,12 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** 基于 PostgreSQL 的 Environment 仓库实现。 */
+/**
+ * 基于 PostgreSQL 的 Environment 仓库实现。
+ *
+ * <p>三个写方法都要求调用方已开启真实外层事务：SQL 执行前先校验事务，写入成功后再在同一事务连接上发布 {@code
+ * environment_changed}，因此通知失败会连同写入一起回滚。
+ */
 @AllArgsConstructor
 @Repository
 public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
@@ -65,6 +70,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
   @Override
   public boolean create(Environment environment) {
+    PostgresqlEnvironmentChangeNotifier.requireTransaction();
     boolean created = environmentMapper.insert(toDO(environment)) == 1;
     if (created) {
       notifier.environmentChanged(environment.getId());
@@ -74,6 +80,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
   @Override
   public boolean updateById(Environment environment, long expectedVersion) {
+    PostgresqlEnvironmentChangeNotifier.requireTransaction();
     boolean updated = environmentMapper.updateById(toDO(environment), expectedVersion) == 1;
     if (updated) {
       notifier.environmentChanged(environment.getId());
@@ -83,6 +90,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
+    PostgresqlEnvironmentChangeNotifier.requireTransaction();
     boolean deleted = environmentMapper.deleteById(id, expectedVersion) == 1;
     if (deleted) {
       // 连接行随 environment 级联删除，同一 environment 的通知已覆盖级联，不另造连接级来源。

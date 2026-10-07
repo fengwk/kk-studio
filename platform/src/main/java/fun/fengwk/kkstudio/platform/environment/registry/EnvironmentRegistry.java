@@ -277,16 +277,14 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
    * <p>围栏失效（0 行）静默；发布抛出的数据库异常会回滚整条事务并向上传播，调用方无法看到「围栏已提交但通知失败」的中间态。
    */
   private boolean fencedWrite(EnvironmentId environmentId, Supplier<Integer> fence) {
-    Integer updated =
-        transactionTemplate.execute(
-            status -> {
-              int rows = fence.get();
-              if (rows > 0) {
-                notifier.environmentChanged(environmentId.value());
-              }
-              return rows;
-            });
-    return updated != null && updated > 0;
+    return transactionTemplate.execute(
+        status -> {
+          int rows = fence.get();
+          if (rows > 0) {
+            notifier.environmentChanged(environmentId.value());
+          }
+          return rows > 0;
+        });
   }
 
   public UUID ownerNodeId() {
@@ -321,7 +319,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                 EnvironmentEvent.TYPE_CONNECTING,
                 "daemon connection accepted"));
     // 只有真实 upsert 成功（Acquired）才在提交前发布；认证拒绝与活跃租约抢占失败都不写行，保持静默。
-    AcquireRow row =
+    Optional<AcquireRow> acquired =
         transactionTemplate.execute(
             status -> {
               List<AcquireRow> rows =
@@ -341,18 +339,19 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                       EnvironmentConnection.MAX_RECENT_EVENTS,
                       millis);
               if (rows.isEmpty()) {
-                return null;
+                return Optional.<AcquireRow>empty();
               }
-              AcquireRow acquired = rows.get(0);
-              if (acquired.acquired() && acquired.leaseToken() != null) {
+              AcquireRow candidate = rows.get(0);
+              if (candidate.acquired() && candidate.leaseToken() != null) {
                 notifier.environmentChanged(environmentId.value());
               }
-              return acquired;
+              return Optional.of(candidate);
             });
 
-    if (row == null) {
+    if (acquired.isEmpty()) {
       return new LeaseBindResult.RetryLater("route acquisition returned no row: " + environmentId);
     }
+    AcquireRow row = acquired.get();
     if (row.acquired() && row.leaseToken() != null) {
       return new LeaseBindResult.Acquired(row.leaseToken());
     }

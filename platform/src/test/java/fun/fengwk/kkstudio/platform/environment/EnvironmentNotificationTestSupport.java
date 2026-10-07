@@ -22,10 +22,10 @@ import java.util.List;
 /**
  * {@code environment_changed} 通知的 PostgreSQL 集成测试基座。
  *
- * <p>Java 事务通知迁移合并前（N6 之前）Schema 仍带有 environment 与 environment_connection 两个遗留触发器。本基座在每个测试前
- * <b>只在隔离测试库中</b>删除这两个触发器，从而证明可观测到的通知确实来自 Java 生产写入口，而不是数据库行触发器。
+ * <p>schema 当前仍带 environment 与 environment_connection 两个数据库行触发器。本基座在每个测试前只在隔离测试库中删除这两个
+ * 触发器，使本类观测到的通知只可能来自 Java 生产写入口。
  *
- * <p>观察者使用独立 JDBC 连接 LISTEN 同一 channel，因此「提交后才可见」「回滚与未提交不可见」是被直接观测的事实，而不是被假设的。
+ * <p>观察者使用独立 JDBC 连接 LISTEN 同一 channel，因此「提交后才可见」「回滚与未提交不可见」是被直接观测的事实。
  */
 public abstract class EnvironmentNotificationTestSupport extends PostgresSpringTestSupport {
 
