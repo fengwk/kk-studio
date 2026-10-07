@@ -8,11 +8,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 setLocale('zh-CN')
 
 /**
- * 布局基座门禁的真实控件基座。
- *
- * 挂载生产共享 Dialog 与 Select（含弹窗内子控件），用于在真实浏览器中固化：
- * 关闭后焦点归还 opener、弹窗内 Select 的 Escape 优先收弹层再由下一次 Escape 关闭弹窗。
- * 不引入任何临时兼容层或替身控件——被验证的就是产品实际使用的实现。
+ * 在浏览器中验证共享 Dialog 的焦点归还，以及嵌套 Select 的 Escape 处理顺序。
  */
 export function LayoutFoundationHarnessApp() {
   const [dialogOpen, setDialogOpen] = useState(false)

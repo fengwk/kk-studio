@@ -171,8 +171,7 @@ async function expectNoHorizontalOverflow(widget: ReturnType<Page['getByRole']>)
 }
 
 /**
- * 绑定执行根已加载完成的真实身份事实：pane 不再重复展示 Thread 名（顶栏面包屑承载身份），
- * 当前身份由 composer 的设置入口承载——模型/变体与环境都必须来自该 Thread 的 branchSettings。
+ * 会话名由顶栏面包屑承载；这里校验 composer 设置来自绑定 Thread 的 branchSettings。
  */
 async function expectBoundRootIdentity(page: Page) {
   await expect(page.getByRole('button', { name: 'Model 与 Variant' }))

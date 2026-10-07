@@ -22,7 +22,7 @@ test.describe('Layout Foundation Infrastructure Contract', () => {
     ).toBeGreaterThan(0)
   })
 
-  // 关闭后焦点归还 opener 是 Dialog 的既有契约；base 挂载的是真实共享 Dialog。
+  // 关闭弹窗后，焦点应归还打开它的按钮。
   test('dialog restores focus to its opener on close', async ({ page }, testInfo) => {
     await page.goto('/browser-tests/layout-foundation-harness.html')
 
@@ -40,7 +40,7 @@ test.describe('Layout Foundation Infrastructure Contract', () => {
     await expect(opener).toBeFocused()
   })
 
-  // 弹窗内的真实 Select 是“冒泡子控件”：Escape 必须先收弹层并归还触发器焦点，第二次才关弹窗。
+  // 嵌套 Select 优先处理 Escape，第二次 Escape 才关闭外层弹窗。
   test('real Select inside the dialog consumes Escape before the dialog closes', async ({ page }, testInfo) => {
     await page.goto('/browser-tests/layout-foundation-harness.html')
 

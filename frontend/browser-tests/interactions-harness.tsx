@@ -18,10 +18,7 @@ const queryClient = new QueryClient({
 })
 
 /**
- * 只渲染真实待处理页与现行 styles：数据全部由 Playwright 拦截 /api 提供，
- * 不依赖后端、模型或任何主机服务。
- * 待处理列表的权威事实由服务端 changed 推送驱动，因此必须挂载真实 ApplicationEventProvider
- * （单例 WebSocket，连接失败只走真实退避）；不得替换为 no-op context。
+ * 待处理页使用应用事件 Provider；HTTP 数据由 Playwright 拦截提供。
  */
 export function InteractionsHarnessApp() {
   return (
