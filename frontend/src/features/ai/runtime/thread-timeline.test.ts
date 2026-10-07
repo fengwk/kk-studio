@@ -11,6 +11,31 @@ import type { RealtimeModelStream, RealtimeToolStream } from '@/features/ai/runt
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 
 describe('thread timeline', () => {
+  it.each([
+    'READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'DISPATCHING', 'RUNNING',
+    'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN',
+  ])('preserves durable %s and frozen environment facts at the sole overlay boundary', (status) => {
+    const tool = invocation('inv-status', 'assistant-status', 'call-status', {
+      status, requiredEnvironmentId: 'frozen-route', requiredEnvironmentName: 'archlinux',
+      waitingForEnvironment: status === 'READY', environmentWaitFreshnessAt: 1791417600,
+    })
+    const timeline = buildThreadTimeline([
+      entry('assistant-status', 'MESSAGE', messagePayload('ASSISTANT', [{
+        type: 'tool_call', toolCallId: 'call-status', toolName: 'bash', rendererKey: 'bash',
+        argumentsJson: '{"command":"ls"}',
+      }])),
+    ], [], [tool])
+    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    expect(call).toMatchObject({
+      invocationId: tool.id, invocationStatus: status,
+      requiredEnvironmentId: 'frozen-route', requiredEnvironmentName: 'archlinux',
+      waitingForEnvironment: status === 'READY', environmentWaitFreshnessAt: 1791417600,
+    })
+    if (status !== 'RUNNING') {
+      expect(call?.status).not.toBe('streaming')
+    }
+  })
+
   it('projects durable entries as the transcript baseline', () => {
     const timeline = buildThreadTimeline(
       [
@@ -711,7 +736,8 @@ describe('thread timeline', () => {
     expect(call).toMatchObject({
       role: 'tool',
       phase: 'call',
-      status: 'streaming',
+      status: 'done',
+      invocationStatus: 'WAITING_APPROVAL',
       invocationId: 'inv-1',
       partialContents: [{ type: 'text', text: 'streaming partial output' }],
       approval: { required: true, decision: null, decisionId: null },
@@ -798,7 +824,8 @@ describe('thread timeline', () => {
     expect(calls[1]).toMatchObject({
       subjectEntryId: '41',
       toolCallId: 'call-1',
-      status: 'streaming',
+      status: 'done',
+      invocationStatus: 'WAITING_APPROVAL',
       invocationId: 'inv-2',
       partialContents: [{ type: 'text', text: 'second-turn partial output' }],
       approval: { required: true, decision: null, decisionId: null },
@@ -1154,7 +1181,7 @@ describe('thread timeline', () => {
         ],
         status: 'done',
       },
-      { phase: 'call', toolCallId: 'call-ask', status: 'streaming', threadId: 'thread-1' },
+      { phase: 'call', toolCallId: 'call-ask', status: 'done', invocationStatus: 'WAITING_APPROVAL', threadId: 'thread-1' },
     ])
     // 有序内容：文本在前、资源在后，不被压平成「全部文本 + 全部附件」。
     expect(tools[1]?.role === 'tool' ? tools[1].contents : []).toEqual([
@@ -1650,7 +1677,11 @@ function invocation(
     toolCallId,
     toolName: 'bash',
     rendererKey: 'bash',
-    environment: null,
+    environmentId: null,
+    requiredEnvironmentId: null,
+    waitingForEnvironment: false,
+    requiredEnvironmentName: null,
+    environmentWaitFreshnessAt: null,
     argumentsJson: '{"command":"ls"}',
     approvalJson: null,
     resultJson: null,

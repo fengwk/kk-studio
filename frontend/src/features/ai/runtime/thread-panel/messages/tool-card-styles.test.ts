@@ -33,17 +33,20 @@ describe('tool card style contracts', () => {
     const detail = rule(css, /\.thread-tool-summary-detail\s*\{[^}]*\}/)
     const toggle = rule(css, /\.thread-tool-toggle\s*\{[^}]*\}/)
 
-    // 参数在可用宽度内折行：normal 空白 + anywhere 断行，不做横向滚动。
-    expect(summary).toContain('flex-wrap: wrap')
-    expect(detail).toContain('white-space: normal')
+    // 参数与名称属于同一 inline 流，不把 detail 作为 flex 整块提前下移。
+    expect(summary).toContain('display: block')
+    expect(summary).not.toContain('flex-wrap')
+    expect(detail).not.toContain('flex:')
+    expect(detail).toContain('white-space: pre-wrap')
     expect(detail).toContain('overflow-wrap: anywhere')
     expect(detail).not.toContain('white-space: nowrap')
     expect(detail).not.toContain('overflow-x: auto')
     expect(detail).not.toContain('text-overflow: ellipsis')
-    // 展开箭头固定在首行右上角。
-    expect(toggle).toContain('position: absolute')
-    expect(toggle).toContain('top: 0')
-    expect(toggle).toContain('right: 0')
+    // 状态与展开按钮占独立、不收缩的尾部，不覆盖参数。
+    const tail = rule(css, /\.thread-tool-tail\s*\{[^}]*\}/)
+    expect(tail).toContain('flex: 0 0 auto')
+    expect(toggle).toContain('width: 28px')
+    expect(toggle).toContain('opacity: 1')
     expect(toggle).not.toContain('margin-left: auto')
   })
 

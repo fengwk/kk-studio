@@ -146,9 +146,11 @@ describe('InteractionsPage', () => {
     render(<InteractionsPage />, { wrapper })
 
     await waitFor(() => {
-      expect(screen.getByText('等待输入')).toBeInTheDocument()
-      expect(screen.getByText('等待审批')).toBeInTheDocument()
+      expect(screen.getByText('你选择哪个？')).toBeInTheDocument()
+      expect(screen.getByText('write')).toBeInTheDocument()
     })
+    expect(screen.queryByText('等待审批')).not.toBeInTheDocument()
+    expect(document.querySelector('time')).toBeNull()
 
     // 验证问卷内容存在
     expect(screen.getByText('你选择哪个？')).toBeInTheDocument()

@@ -6,6 +6,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
+import { Button } from '@/shared/ui/controls/Button'
 import './interaction-cards.css'
 
 export interface ApprovalCardProps {
@@ -52,7 +53,7 @@ export function ApprovalCard({
     setBusy(true)
     setError(null)
 
-    const key = `${decision}`
+    const key = `${threadId}:${invocationId}:${decision}`
     let decisionId = decisionIdMap.get(key)
     if (!decisionId) {
       decisionId = createUuid()
@@ -109,7 +110,10 @@ export function ApprovalCard({
             <span className="interaction-approval-reason-label">
               {t('ai.interaction.approvalReason')}:
             </span>
-            <span className="interaction-approval-reason-text">{reason}</span>
+            <span className="interaction-approval-reason-text">
+              {reason === 'Permission rules require approval'
+                ? t('ai.interaction.defaultApprovalReason') : reason}
+            </span>
           </div>
         ) : null}
       </div>
@@ -130,23 +134,24 @@ export function ApprovalCard({
       ) : null}
 
       <div className="interaction-actions-bar">
-        <button
-          type="button"
-          className="ghost-btn interaction-deny-btn"
+        <Button
+          variant="primary"
+          danger
+          className="interaction-deny-btn"
           disabled={busy || isNonRecoverable}
           onClick={() => handleDecision('DENY')}
         >
           {t('ai.interaction.deny')}
-        </button>
+        </Button>
 
-        <button
-          type="button"
-          className="btn-primary interaction-allow-btn"
+        <Button
+          variant="primary"
+          className="interaction-allow-btn"
           disabled={busy || isNonRecoverable}
           onClick={() => handleDecision('ALLOW')}
         >
           {t('ai.interaction.allow')}
-        </button>
+        </Button>
       </div>
     </div>
   )

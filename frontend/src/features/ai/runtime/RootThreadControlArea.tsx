@@ -159,20 +159,21 @@ function RootInteractionList({
           <div key={interactionIdentity(item)} className="interaction-feed-item">
             <header className="interaction-item-header">
               <div className="interaction-item-meta">
-                <span className={`interaction-status-tag ${item.type.toLowerCase()}`}>
-                  {item.type === 'INPUT'
-                    ? t('ai.interaction.waitingInput')
-                    : t('ai.interaction.waitingApproval')}
-                </span>
                 <ThreadLink
                   threadId={item.threadId}
                   className="interaction-source-link"
-                  title={item.threadId}
+                  title={item.threadId === rootThreadId
+                    ? t('ai.interaction.viewSource')
+                    : t('ai.runtime.notification.entry.viewSubagentExecution')}
                 >
                   <GitBranch size={14} aria-hidden="true" />
                   <span className="interaction-source-name">
-                    {source?.name ?? item.owner.rootThreadName ?? item.threadId}
+                    {item.threadId === rootThreadId
+                      ? source?.name ?? item.owner.rootThreadName ?? t('ai.interaction.viewSource')
+                      : t('ai.runtime.notification.entry.viewSubagentExecution')}
                   </span>
+                  {item.threadId !== rootThreadId && source?.name
+                    ? <span>{source.name}</span> : null}
                 </ThreadLink>
                 {source ? (
                   <span className="interaction-agent-badge">{source.agentName}</span>

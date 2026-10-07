@@ -1,3 +1,5 @@
+import type { InstantTimestamp } from '@/shared/api/contracts/base'
+
 type DialogueRole =
   | 'user'
   | 'assistant'
@@ -153,6 +155,12 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   partialErrorText?: string
   /** 持有此次调用持久状态（approval/partial）的 ToolInvocation id。 */
   invocationId?: string
+  /** 原始 durable 状态；缺失时只是模型生成的调用，并非已经执行。 */
+  invocationStatus?: string
+  requiredEnvironmentId?: string | null
+  waitingForEnvironment?: boolean
+  requiredEnvironmentName?: string | null
+  environmentWaitFreshnessAt?: InstantTimestamp | null
   /** 该 Tool 归属的 Thread id（用于归属解析）。 */
   threadId?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */

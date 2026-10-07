@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, CircleHelp, Clock, LoaderCircle, X } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useState } from 'react'
 import { AskUserRecord } from '@/features/ai/runtime/thread-panel/messages/AskUserRecord'
@@ -82,53 +82,77 @@ export function ToolMessageBlock({
       bodyTexts,
       errorNotice,
     })
+  const stateLabel = view.executionState === 'environment'
+    ? t('ai.runtime.tool.environment', { environment: message.requiredEnvironmentName ?? '' })
+    : view.executionState === 'succeeded' && message.toolName === 'task'
+      ? t('ai.runtime.tool.accepted')
+      : t(`ai.runtime.tool.${view.executionState}`)
+  const StatusIcon = view.executionState === 'running' ? LoaderCircle
+    : view.executionState === 'succeeded' ? Check
+      : view.executionState === 'failed' || view.executionState === 'cancelled' ? X
+        : view.executionState === 'unknown' ? CircleHelp : Clock
 
   return (
     <div className={`thread-turn thread-turn-tool tool-state-${view.visualState}`}>
       <section
         className="thread-block thread-block-tool"
         data-tool-state={view.visualState}
-        aria-busy={view.visualState === 'pending'}
+        data-invocation-state={view.executionState}
+        aria-busy={view.executionState === 'running'}
       >
         <div className="thread-tool-surface">
           <div className={`thread-tool-header${view.hasBody ? ' has-toggle' : ''}`}>
             <span className="thread-tool-summary">
               <span className="thread-tool-name">{view.summary.name}</span>
+              {view.executionState === 'environment'
+                ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
               {view.summary.detail ? (
                 // 参数在可用宽度内折行：完整原文留在 DOM 中可选中复制，不横向滚动，
                 // 也不撑破 pane（tabIndex 让键盘可聚焦这段参数区）。
-                <span className="thread-tool-summary-detail" tabIndex={0}>
-                  {view.summary.detail}
-                </span>
+                <>
+                  {' '}
+                  <span className="thread-tool-summary-detail" tabIndex={0}>
+                    {view.summary.detail}
+                  </span>
+                </>
+              ) : null}
+              {view.executionState !== 'environment'
+                ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
+            </span>
+            <span className="thread-tool-tail">
+              <StatusIcon
+                className={view.executionState === 'running' ? 'animate-spin' : undefined}
+                aria-label={stateLabel}
+                size={14}
+              />
+              {view.hasBody ? (
+                <button
+                  type="button"
+                  className="thread-tool-toggle"
+                  aria-expanded={expanded}
+                  aria-label={
+                    expanded
+                      ? t('ai.runtime.message.collapseTool')
+                      : t('ai.runtime.message.expandTool')
+                  }
+                  title={
+                    expanded
+                      ? t('ai.runtime.message.collapseTool')
+                      : t('ai.runtime.message.expandTool')
+                  }
+                  onClick={(event) => {
+                    // 展开/收起是用户对只读卡片的交互意图：暂停外层自动贴底，
+                    // 之后到达的流式文本不会把用户正在看的卡片拉走。
+                    announceTranscriptReading(event.currentTarget, 'tool-toggle')
+                    setUserExpanded(!expanded)
+                  }}
+                >
+                  {expanded
+                    ? <ChevronDown aria-hidden="true" />
+                    : <ChevronRight aria-hidden="true" />}
+                </button>
               ) : null}
             </span>
-            {view.hasBody ? (
-              <button
-                type="button"
-                className="thread-tool-toggle"
-                aria-expanded={expanded}
-                aria-label={
-                  expanded
-                    ? t('ai.runtime.message.collapseTool')
-                    : t('ai.runtime.message.expandTool')
-                }
-                title={
-                  expanded
-                    ? t('ai.runtime.message.collapseTool')
-                    : t('ai.runtime.message.expandTool')
-                }
-                onClick={(event) => {
-                  // 展开/收起是用户对只读卡片的交互意图：暂停外层自动贴底，
-                  // 之后到达的流式文本不会把用户正在看的卡片拉走。
-                  announceTranscriptReading(event.currentTarget, 'tool-toggle')
-                  setUserExpanded(!expanded)
-                }}
-              >
-                {expanded
-                  ? <ChevronDown aria-hidden="true" />
-                  : <ChevronRight aria-hidden="true" />}
-              </button>
-            ) : null}
           </div>
           {notice ? <p className="thread-tool-approval-note">{notice}</p> : null}
           {view.showBody && view.hasBody ? (
