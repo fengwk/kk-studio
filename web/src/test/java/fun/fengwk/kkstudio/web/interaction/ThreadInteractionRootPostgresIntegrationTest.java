@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -78,11 +79,14 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -474,6 +478,21 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(firstEnvironmentId));
     bindChat(second.sessionId());
 
+    StudioHarnessThreadController threadController =
+        new StudioHarnessThreadController(
+            runtime,
+            mock(ModelRequestDebugService.class),
+            interactionService,
+            mock(UsageCostProjectionService.class));
+    var waitingTool =
+        threadController
+            .getSnapshot(second.threadId().toString())
+            .getData()
+            .getToolInvocations()
+            .getFirst();
+    assertEquals(firstEnvironmentId.toString(), waitingTool.getRequiredEnvironmentId());
+    assertTrue(waitingTool.isWaitingForEnvironment());
+
     // 执行根 R3：独立根，另一环境 -> 第三个分组。
     Seed third =
         seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(secondEnvironmentId));
@@ -518,6 +537,13 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
     // 环境上线：R1/R2 的待领取事实立即消失（无写事件），只剩另一环境的分组。
     markEnvironmentReady(firstEnvironmentId, UUID.randomUUID());
+    assertFalse(
+        threadController
+            .getSnapshot(second.threadId().toString())
+            .getData()
+            .getToolInvocations()
+            .getFirst()
+            .isWaitingForEnvironment());
     List<InteractionDTO> afterReady = drain(null, 10);
     assertEquals(1, afterReady.size());
     assertEnvironmentWait(

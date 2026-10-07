@@ -11,7 +11,8 @@ import java.util.List;
  * <p>Thread、Entry、Command 与 Invocation 字段来自同一数据库快照；{@code version} 是 Thread 结构与控制状态的 durable
  * invalidation cursor，不是整个响应的 ETag。ModelInvocation 的 {@code streamCheckpointJson} 可在同一 {@code
  * version} 内推进，恢复时必须读取完整快照。{@code manualCompaction} 是随后计算的瞬时 advisory sidecar，实际提交始终由同一 {@code
- * version} 做最终 fence。列表默认为不可变空列表。
+ * version} 做最终 fence。工具的 requiredEnvironmentId / waitingForEnvironment 是随后从 Work 与环境租约 读取的瞬时
+ * sidecar，不属于 version 所保证的 durable 快照。列表默认为不可变空列表。
  */
 @Data
 public class HarnessThreadSnapshotDTO {
