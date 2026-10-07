@@ -175,7 +175,9 @@ public interface HarnessStore {
 
     /**
      * 插入新 Thread；head Entry 必须存在且属于 {@code thread.sessionId} 的 Session（Session 到 head 的同一 Session
-     * 索引强制），id 冲突抛 {@link IllegalArgumentException}。插入后本事务内可更新。
+     * 索引强制），id 冲突抛 {@link IllegalArgumentException}。同一 Session 内执行根（{@code parentThreadId} 为
+     * null）名称重复抛 {@link fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException}
+     * （{@code THREAD_NAME_CONFLICT}）；子代理与跨 Session 同名不受限。插入后本事务内可更新。
      */
     void insertThread(ThreadState thread);
 
@@ -205,7 +207,9 @@ public interface HarnessStore {
      * creationRequestHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
      * Session，nextCommandSequence / version / updatedAt 不得回退，任何对外字段变化必须 version 精确 +1。未锁定抛 {@link
      * IllegalStateException}，行不存在、身份改变、非法 transition 或 head 不存在/跨 Session 抛 {@link
-     * IllegalArgumentException}。
+     * IllegalArgumentException}；执行根名称与其他执行根重复抛 {@link
+     * fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException}（{@code
+     * THREAD_NAME_CONFLICT}）。
      */
     void updateThread(ThreadState thread);
 

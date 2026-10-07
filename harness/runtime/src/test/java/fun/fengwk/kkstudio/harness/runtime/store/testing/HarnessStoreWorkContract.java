@@ -7,7 +7,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -294,7 +293,9 @@ public abstract class HarnessStoreWorkContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
     store.transaction(
@@ -484,14 +485,18 @@ public abstract class HarnessStoreWorkContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling-2"));
               return id;
             });
     UUID thread3 =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling-3"));
               return id;
             });
     inTransaction(

@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -57,6 +59,86 @@ public abstract class HarnessStoreEntryTreeContract {
   }
 
   abstract HarnessStore createStore();
+
+  /** 两个实现都必须拒绝同名根；失败的插入和重命名不能留下事实或推进版本。 */
+  @Test
+  void rootNameConflictsRollbackInsertAndRenameButAllowSelfReplay() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID duplicateId = TestIds.id(101);
+    HarnessRuntimeConflictException insert =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                inTransaction(
+                    store,
+                    tx ->
+                        tx.insertThread(
+                            thread(duplicateId, baseline.sessionId(), baseline.rootEntryId()))));
+    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, insert.reason());
+    assertTrue(store.transaction(tx -> tx.findThread(duplicateId)).isEmpty());
+    UUID siblingId = TestIds.id(102);
+    inTransaction(
+        store,
+        tx ->
+            tx.insertThread(
+                StoreTestSupport.siblingRoot(
+                    siblingId, baseline.sessionId(), baseline.rootEntryId(), "branch")));
+    ThreadState before = store.transaction(tx -> tx.findThread(siblingId).orElseThrow());
+    HarnessRuntimeConflictException rename =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                inTransaction(
+                    store,
+                    tx -> {
+                      ThreadState locked = tx.lockThread(siblingId).orElseThrow();
+                      tx.updateThread(locked.renameThread("main", T1));
+                    }));
+    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, rename.reason());
+    assertEquals(before, store.transaction(tx -> tx.findThread(siblingId).orElseThrow()));
+    inTransaction(store, tx -> tx.updateThread(tx.lockThread(siblingId).orElseThrow()));
+    assertEquals(before, store.transaction(tx -> tx.findThread(siblingId).orElseThrow()));
+    // 非 name 约束（重复主键）不能误分类为名称冲突。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertThread(
+                        StoreTestSupport.siblingRoot(
+                            baseline.threadId(),
+                            baseline.sessionId(),
+                            baseline.rootEntryId(),
+                            "unused-name"))));
+  }
+
+  @Test
+  void sameRootNameIsAllowedAcrossSessionsAndForSubagents() {
+    Baseline first = seedThreadBaseline(store);
+    Baseline second = seedThreadBaseline(store);
+    assertEquals(
+        "main", store.transaction(tx -> tx.findThread(second.threadId()).orElseThrow()).name());
+    UUID childId = TestIds.id(101);
+    ThreadState root = thread(childId, first.sessionId(), first.rootEntryId());
+    ThreadState child =
+        new ThreadState(
+            root.id(),
+            root.sessionId(),
+            first.threadId(),
+            root.headEntryId(),
+            root.creationRequestHash(),
+            root.name(),
+            ThreadYoloPolicy.follow(first.threadId()),
+            root.executionControl(),
+            root.inputThroughSequence(),
+            root.nextCommandSequence(),
+            root.version(),
+            root.createdAt(),
+            root.updatedAt());
+    inTransaction(store, tx -> tx.insertThread(child));
+    assertEquals(child, store.transaction(tx -> tx.findThread(childId).orElseThrow()));
+  }
 
   @Test
   void sessionEntryAndThreadRoundTrip() {
@@ -616,13 +698,16 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              tx.insertThread(
+                  StoreTestSupport.siblingRoot(
+                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               ThreadState inserted = tx.findThread(id).orElseThrow();
               tx.updateThread(
                   StoreTestSupport.threadState(
                       inserted.id(),
                       inserted.sessionId(),
                       inserted.headEntryId(),
+                      "sibling",
                       true,
                       inserted.nextCommandSequence(),
                       inserted.version() + 1,
