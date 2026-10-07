@@ -440,7 +440,7 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
   await page.screenshot({ path: resolve(reportsDir, 'notification-system-card.png') })
 })
 
-test.describe('Debug Preview Title Real React Browser Regression', () => {
+test.describe('Debug Inspect Actions Real React Browser Regression', () => {
   test('agent selection follows its model in preview and rejects invalid configuration without losing draft', async ({ page }) => {
     // 真实 /agent 入口必须联动模型；拒绝无效配置后仍可用原选择预览同一草稿。
     const recorded = await installPreviewApiMock(page, {
@@ -463,7 +463,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
 
     // 2. + 命令表进入 Debug（不消费草稿），草稿与 Agent/Model 选择随之进入预览
     await enterDebugView(page)
-    await page.locator('.thread-debug-preview-title-btn').click()
+    await page.locator('.thread-debug-preview-action').click()
     await expect.poll(() => recorded.filter((item) => item.kind === 'preview').length).toBe(1)
     const request = recorded.find((item) => item.kind === 'preview') as PreviewRequest
     expect(request.body.commands).toEqual([
@@ -490,13 +490,11 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await page.screenshot({ path: resolve(reportsDir, 'agent-model-follow.png') })
   })
 
-  test('title click previews with a fresh cursor in both layouts, auto-selects the detail tab, and returns to the title without losing the draft', async ({
+  test('inspect action previews with a fresh cursor in both layouts and restores action focus without losing the draft', async ({
     page,
   }) => {
-    // 测试意图：真实浏览器中 Debug「预览当前草稿」标题是唯一预览入口。
-    // 宽布局证明标题点击先取 fresh 快照再预览；随后在窄布局单列 Tab 下从已 mount 的 Debug
-    // 真正点击同一个标题，必须独立走一遍 fresh GET -> preview POST -> 自动切到详情 Tab，
-    // 再由关闭详情安全回到 preview Tab 并把可见焦点还给标题按钮，草稿全程不变。
+    // 当前规划标题不可点击；检查操作按需取 fresh GET -> preview POST，
+    // 自动切详情后关闭恢复检查操作焦点，草稿全程不变。
     let cursor: Cursor = INITIAL_CURSOR
     const recorded = await installPreviewApiMock(page, { cursor: () => cursor })
 
@@ -534,12 +532,15 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     expect(dockMetrics.dockScrollWidth).toBeLessThanOrEqual(dockMetrics.dockClientWidth + 1)
     expect(dockMetrics.composerScrollWidth).toBeLessThanOrEqual(dockMetrics.composerClientWidth + 1)
 
-    // 4. 带草稿进入 Debug：预览标题是唯一入口，入口立即可用
+    // 4. 带草稿进入 Debug：预览检查操作立即可用
     await enterDebugView(page)
 
     const shell = page.locator('.thread-events-shell')
     await expect(shell).toHaveAttribute('data-layout', 'wide')
-    const previewTitleBtn = page.locator('.thread-debug-preview-title-btn')
+    const previewTitleBtn = page.locator('.thread-debug-preview-action')
+    await expect(page.getByRole('heading', { name: '当前规划' })).toBeVisible()
+    await expect(page.locator('.thread-debug-preview-header button')).toHaveCount(0)
+    await expect(page.getByText('检查操作', { exact: true })).toBeVisible()
     await expect(previewTitleBtn).toBeVisible()
     await expect(previewTitleBtn).toBeEnabled()
     await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿')
@@ -556,10 +557,10 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(previewTitleBtn).toBeDisabled()
     await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿 (草稿为空)')
 
-    // 6. 按钮布局不溢出：header 与预览列均无横向滚动，按钮不越出 header
+    // 6. 检查操作区与规划列均无横向滚动，按钮不越出操作区
     const headerMetrics = await page.evaluate(() => {
-      const header = document.querySelector('.thread-debug-preview-header') as HTMLElement
-      const btn = document.querySelector('.thread-debug-preview-title-btn') as HTMLElement
+      const header = document.querySelector('.thread-debug-preview-actions') as HTMLElement
+      const btn = document.querySelector('.thread-debug-preview-action') as HTMLElement
       const column = document.querySelector('.thread-debug-col-preview') as HTMLElement
       const headerBox = header.getBoundingClientRect()
       const btnBox = btn.getBoundingClientRect()
@@ -589,7 +590,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
 
-    // 8. 宽布局点击标题：先 fresh GET 快照，再用 fresh 游标 POST 预览
+    // 8. 宽布局点击检查操作：先 fresh GET，再用 fresh 游标 POST 预览
     const wideMark = recorded.length
     cursor = WIDE_CLICK_CURSOR
     await previewTitleBtn.click()
@@ -615,9 +616,9 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
 
     // Composer 底栏的溢出契约已在会话可见态（步骤 3）测量；Debug 激活后控制区不可见。
 
-    await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-wide.png') })
+    await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-wide.png'), animations: 'disabled' })
 
-    // 9. 窄布局复核：Debug 组件仍是同一棵已 mount 的树，同一个标题按钮不溢出
+    // 9. 窄布局复核：同一棵已 mount 的 Debug，检查操作不溢出
     await page.setViewportSize(NARROW_VIEWPORT)
     await expect(shell).toHaveAttribute('data-layout', 'narrow')
     const tabs = page.locator('.thread-debug-tabs')
@@ -629,8 +630,8 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(shell).toHaveAttribute('data-active-tab', 'preview')
     await expect(previewTitleBtn).toBeVisible()
     const narrowMetrics = await page.evaluate(() => {
-      const header = document.querySelector('.thread-debug-preview-header') as HTMLElement
-      const btn = document.querySelector('.thread-debug-preview-title-btn') as HTMLElement
+      const header = document.querySelector('.thread-debug-preview-actions') as HTMLElement
+      const btn = document.querySelector('.thread-debug-preview-action') as HTMLElement
       const column = document.querySelector('.thread-debug-col-preview') as HTMLElement
       const headerBox = header.getBoundingClientRect()
       const btnBox = btn.getBoundingClientRect()
@@ -647,7 +648,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     expect(narrowMetrics.columnScrollWidth).toBeLessThanOrEqual(narrowMetrics.columnClientWidth + 1)
     expect(narrowMetrics.btnRight).toBeLessThanOrEqual(narrowMetrics.headerRight + 1)
 
-    await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-narrow.png') })
+    await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-narrow.png'), animations: 'disabled' })
 
     // 10. 清掉宽布局遗留的详情选择，保证接下来的窄点击是 debugSelection 从 null 变为新选择
     await detailTab.click()
@@ -661,7 +662,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(detailTab).toHaveAttribute('aria-selected', 'false')
     await expect(editor).toHaveText(DRAFT)
 
-    // 11. 窄布局真正点击标题：独立走一遍 fresh GET -> preview POST，并自动切到详情 Tab
+    // 11. 窄布局检查操作独立走 fresh GET -> preview POST，自动切到详情 Tab
     const narrowMark = recorded.length
     cursor = NARROW_CLICK_CURSOR
     await previewTitleBtn.click()
@@ -694,7 +695,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
       .getByRole('button', { name: '关闭检查器' })
       .click()
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-    // 返回契约：安全回到 preview Tab，焦点还给标题按钮，草稿不变且不发新请求
+    // 返回契约：回到 preview Tab，焦点还给检查操作，草稿不变且不发新请求
     await expect(previewTab).toHaveAttribute('aria-selected', 'true')
     await expect(detailTab).toHaveAttribute('aria-selected', 'false')
     await expect(eventsTab).toHaveAttribute('aria-selected', 'false')
@@ -707,7 +708,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await page.screenshot({ path: resolve(reportsDir, 'narrow-return.png'), animations: 'disabled' })
   })
 
-  test('narrow preview blocks re-entry while loading and a failed preview keeps the title entry usable', async ({
+  test('narrow preview blocks re-entry while loading and a failed preview keeps the inspect action usable', async ({
     page,
   }) => {
     // 测试意图：预览期间必须锁住唯一入口（按钮禁用 + loading 语义 + 不重复发请求）；
@@ -753,7 +754,7 @@ test.describe('Debug Preview Title Real React Browser Regression', () => {
     await expect(shell).toHaveAttribute('data-active-tab', 'preview')
     await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
 
-    const previewTitleBtn = page.locator('.thread-debug-preview-title-btn')
+    const previewTitleBtn = page.locator('.thread-debug-preview-action')
     await expect(previewTitleBtn).toBeVisible()
     await expect(previewTitleBtn).toBeEnabled()
 

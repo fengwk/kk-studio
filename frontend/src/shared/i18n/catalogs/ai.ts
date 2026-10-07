@@ -2039,6 +2039,22 @@ export const aiCatalog = {
     'en-US': 'Preview current draft',
     'zh-CN': '预览当前草稿',
   },
+  'ai.runtime.debug.currentPlanningTitle': {
+    'en-US': 'Current planning',
+    'zh-CN': '当前规划',
+  },
+  'ai.runtime.debug.inspectActions': {
+    'en-US': 'Inspect',
+    'zh-CN': '检查操作',
+  },
+  'ai.runtime.debug.plannedToolEnvironment': {
+    'en-US': 'Currently planned tool environment',
+    'zh-CN': '当前规划的工具环境',
+  },
+  'ai.runtime.debug.close': {
+    'en-US': 'Close Debug',
+    'zh-CN': '关闭 Debug',
+  },
   'ai.runtime.debug.envPrefix': {
     'en-US': 'env: ',
     'zh-CN': '环境: ',
