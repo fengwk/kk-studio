@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -18,6 +19,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import java.sql.Connection;
@@ -61,8 +63,16 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
         new SingleConnectionDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
     this.jdbcTemplate = new JdbcTemplate(ds);
-    this.registry1 = new EnvironmentRegistry(jdbcTemplate, node1, Clock.systemUTC());
-    this.registry2 = new EnvironmentRegistry(jdbcTemplate, node2, Clock.systemUTC());
+    // 写入口必须走真实事务边界：围栏 SQL 与 pg_notify 共享同一 DataSource 的同一事务连接。
+    DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
+    PostgresqlEnvironmentChangeNotifier notifier =
+        new PostgresqlEnvironmentChangeNotifier(jdbcTemplate);
+    this.registry1 =
+        new EnvironmentRegistry(
+            jdbcTemplate, node1, Clock.systemUTC(), transactionManager, notifier);
+    this.registry2 =
+        new EnvironmentRegistry(
+            jdbcTemplate, node2, Clock.systemUTC(), transactionManager, notifier);
 
     // 播种底层 environment 卡片行
     jdbcTemplate.update(

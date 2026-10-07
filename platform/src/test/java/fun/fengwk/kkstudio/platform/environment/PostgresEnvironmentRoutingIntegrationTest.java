@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -30,6 +31,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
@@ -106,6 +108,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         new SingleConnectionDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
     this.jdbcTemplate = new JdbcTemplate(ds);
+    DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
+    PostgresqlEnvironmentChangeNotifier notifier =
+        new PostgresqlEnvironmentChangeNotifier(jdbcTemplate);
 
     // 播种稳定 environment 卡片
     jdbcTemplate.update(
@@ -198,8 +203,12 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     this.node1 = UUID.randomUUID();
     this.node2 = UUID.randomUUID();
 
-    this.registryNode1 = new EnvironmentRegistry(jdbcTemplate, node1, Clock.systemUTC());
-    this.registryNode2 = new EnvironmentRegistry(jdbcTemplate, node2, Clock.systemUTC());
+    this.registryNode1 =
+        new EnvironmentRegistry(
+            jdbcTemplate, node1, Clock.systemUTC(), transactionManager, notifier);
+    this.registryNode2 =
+        new EnvironmentRegistry(
+            jdbcTemplate, node2, Clock.systemUTC(), transactionManager, notifier);
 
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     EnvironmentSessionListener sessionListener = env -> {};
