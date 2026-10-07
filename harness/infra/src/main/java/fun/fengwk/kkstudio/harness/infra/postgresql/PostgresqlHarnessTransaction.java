@@ -705,7 +705,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         thread.version(),
         PostgresqlHarnessRows.timestamp(thread.createdAt()),
         PostgresqlHarnessRows.timestamp(thread.updatedAt()));
-    // 原 harness_thread_version / harness_thread_tree 触发器语义：插入即视为 version 变化，同一位置发布两条失效信号。
+    // 插入即视为 version 变化：同一位置发布 Thread version 与真实执行根 tree 两条失效信号。
     notifyThreadVersion(thread.id(), thread.version());
     notifyExecutionTree(executionRootOfThread(thread.id()));
     if (joinedChild) {
@@ -1796,8 +1796,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     requireCanLockTools(copied);
     for (ToolInvocation invocation : copied) {
-      // 原 harness_tool_interaction_notify 触发器的 INSERT 分支仅在等待态触发；本原语按上方不变量只创建
-      // READY/FAILED，因此插入永不产生人工交互失效，无需在此发布提示。
+      // 仅等待态需要交互失效；本原语按上方不变量只创建 READY/FAILED，因此插入永不发布交互失效信号。
       update(
           """
           insert into harness_tool_invocation (
@@ -1848,7 +1847,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                       new IllegalArgumentException(
                           "tool invocation " + invocation.id() + " does not exist"));
       ToolInvocation.validateTransition(stored, invocation);
-      // 原 harness_tool_interaction_notify 触发器的 UPDATE 分支：写前或写后任一状态为等待态即失效。
+      // 写前或写后任一状态为等待态：等待集合发生变化，按真实执行根发布交互失效。
       if (isWaitingInteraction(stored.status()) || isWaitingInteraction(invocation.status())) {
         interactionIds.add(invocation.id());
       }
@@ -1971,7 +1970,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             target.type().name(),
             target.id());
     requireSingleUpdate(deleted, "work", target.id());
-    // Work 行删除同样改变「待领取环境等待」集合；属主实体仍在该事务内（调用方保证删除顺序），可解析真实执行根。
+    // Work 行删除使「待领取环境等待」集合变化；属主实体若仍在该事务内即可解析真实执行根。
     notifyEnvironmentWorkChanged(locked.get());
     return true;
   }
@@ -2110,13 +2109,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
 
     // 删除前沿不可变祖先链取得受影响执行根：行一旦删除，parent 链已不存在，无法再解析根身份。
-    // 原 Schema 没有 Thread 删除触发器，这里按 plan N1 在原 tree channel 补同事务定点失效；绝不合成不存在的 Thread version。
-    List<UUID> deletedThreadRoots = new ArrayList<>();
+    // 同一执行根只发一次：先按根聚合，再在删除成功后按根定点失效。
+    Set<UUID> deletedThreadRoots = new LinkedHashSet<>();
     for (UUID threadId : copied) {
-      UUID root = executionRootOfThread(threadId);
-      if (!deletedThreadRoots.contains(root)) {
-        deletedThreadRoots.add(root);
-      }
+      deletedThreadRoots.add(executionRootOfThread(threadId));
     }
 
     for (WorkTarget target : lockedWorkTargets) {
@@ -2954,7 +2950,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_TREE, rootThreadId.toString());
   }
 
-  /** 待处理交互失效：payload 为真实执行根 id；来源事实在写事务内已不存在时为空串，由 listener 全量 resync。 */
+  /**
+   * 待处理交互失效：payload 为真实执行根 id；来源 Thread 已不可解析时为空 payload，由 listener 全量 resync； 数据库故障与祖先链异常不在此吞掉。
+   */
   private void notifyToolInteraction(UUID rootThreadId) {
     notifyChannel(
         PostgresqlHarnessNotificationChannel.TOOL_INTERACTION,
@@ -2989,8 +2987,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * 沿 {@code harness_tool_invocation -> harness_model_invocation -> harness_thread} 定位来源
    * Thread，再解析真实执行根。
    *
-   * <p>仅用于来源事实仍在写事务内的边界；来源行已不存在时返回 {@code null}，由调用方以空 payload 触发 listener 全量 resync（与原触发器 {@code
-   * coalesce(root_thread::text, '')} 一致）。祖先链不完整属于数据损坏，不在此吞成空 payload。
+   * <p>返回 {@code null} 仅表示来源 Thread 已不可解析（合法清理路径上来源行已删除），此时调用方以空 payload 触发 listener 全量 resync；
+   * 数据库故障与祖先链异常一律向上抛出，绝不吞成空 payload。
    */
   private UUID executionRootOfToolInvocation(UUID toolInvocationId) {
     Optional<UUID> sourceThreadId =
@@ -3006,14 +3004,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return sourceThreadId.map(this::executionRootOfThread).orElse(null);
   }
 
-  /** 原触发器判据：仅等待审批/等待输入两种状态属于人工交互等待态。 */
+  /** 仅等待审批/等待输入两种状态属于人工交互等待态。 */
   private static boolean isWaitingInteraction(ToolInvocationStatus status) {
     return status == ToolInvocationStatus.WAITING_APPROVAL
         || status == ToolInvocationStatus.WAITING_INPUT;
   }
 
   /**
-   * 环境等待待处理失效：仅对冻结了 {@code required_environment_id} 的 TOOL Work 发布，沿用原 interaction channel
+   * 环境等待待处理失效：仅对冻结了 {@code required_environment_id} 的 TOOL Work 发布，payload 沿用 interaction channel
    * 的真实执行根协议。使用 Work 行冻结的环境事实，而非当前 composer/settings；只提示待处理查询刷新，不创建审批事实。
    */
   private void notifyEnvironmentWorkChanged(Work work) {
