@@ -107,6 +107,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
   private boolean inTransaction;
   private volatile RouteReadyPredicate routeReadyPredicate;
   private volatile EnvironmentReadyLeasePredicate environmentReadyLeasePredicate;
+  private final Map<EnvironmentId, String> environmentNames = new HashMap<>();
 
   /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
   @FunctionalInterface
@@ -154,6 +155,13 @@ public final class InMemoryHarnessStore implements HarnessStore {
   public void setEnvironmentReadyLeasePredicate(
       EnvironmentReadyLeasePredicate environmentReadyLeasePredicate) {
     this.environmentReadyLeasePredicate = environmentReadyLeasePredicate;
+  }
+
+  /** 测试环境目录：名称沿 Work 冻结身份查询，不依赖 Thread 设置。 */
+  public void setEnvironmentName(EnvironmentId environmentId, String name) {
+    synchronized (monitor) {
+      environmentNames.put(environmentId, name);
+    }
   }
 
   private boolean hasReadyEnvironmentLease(EnvironmentId environmentId, Instant now) {
@@ -1902,9 +1910,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocationId));
         EnvironmentId environmentId = work == null ? null : work.requiredEnvironmentId();
+        Instant freshnessAt = null;
+        if (invocation.status() == ToolInvocationStatus.READY && environmentId != null) {
+          freshnessAt =
+              earliestOf(laterThan(work.availableAt(), now), laterThan(work.leaseUntil(), now));
+        }
+        // 已有内存 READY 环境谓词只有 boolean、没有 deadline；仍真实计算本调用的 Work 时间边界。
         rows.add(
             new EnvironmentToolWaitRow(
-                invocationId, environmentId, isWaitingForEnvironment(invocation, work, now)));
+                invocationId,
+                environmentId,
+                isWaitingForEnvironment(invocation, work, now),
+                environmentNames.get(environmentId),
+                freshnessAt));
       }
       return List.copyOf(rows);
     }

@@ -523,7 +523,11 @@ public final class HarnessRuntime {
           for (EnvironmentToolWaitRow row : rows) {
             waits.add(
                 new EnvironmentToolWait(
-                    row.invocationId(), row.environmentId(), row.waitingForEnvironment()));
+                    row.invocationId(),
+                    row.environmentId(),
+                    row.waitingForEnvironment(),
+                    row.environmentName(),
+                    row.freshnessAt()));
           }
           return List.copyOf(waits);
         });

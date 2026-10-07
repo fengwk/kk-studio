@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,6 +30,93 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
   private static final Duration LEASE_30S = Duration.ofSeconds(30);
 
   private JdbcTemplate jdbc;
+
+  /** 每调用只取自身未来边界：在线租约 / future due / active Work lease，PG least 忽略 null。 */
+  @Test
+  void toolProjectionUsesPerInvocationDeadlinesAndDatabaseTime() {
+    SeededTools seeded = seedTools(store, 3);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(seeded.threadId()).orElseThrow();
+          for (UUID id : seeded.toolIds()) {
+            tx.requestWork(
+                new WorkTarget(WorkTargetType.TOOL, id), authorityNow(), WAITING_ENVIRONMENT);
+          }
+        });
+    jdbc.update(
+        "update environment set name = 'frozen-env' where id = ?", WAITING_ENVIRONMENT.value());
+    seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
+    Instant environmentDeadline =
+        jdbc.queryForObject(
+            "select lease_until from environment_connection where environment_id = ?",
+            (rs, row) -> rs.getTimestamp(1).toInstant(),
+            WAITING_ENVIRONMENT.value());
+    UUID online = seeded.toolIds().get(0);
+    UUID future = seeded.toolIds().get(1);
+    UUID leased = seeded.toolIds().get(2);
+    forceWorkAvailableAfter(new WorkTarget(WorkTargetType.TOOL, future), Duration.ofMinutes(5));
+    forceWorkAvailableAfter(new WorkTarget(WorkTargetType.TOOL, leased), Duration.ofMinutes(15));
+    jdbc.update(
+        """
+        update harness_work set lease_token = 'projection-lease',
+            lease_until = statement_timestamp() + interval '10 minutes'
+        where target_type = 'TOOL' and target_id = ?
+        """,
+        leased);
+    // 应用时钟错到未来仍按同一 SQL statement_timestamp 判断，而不是误认为全部已过期。
+    var rows =
+        store.transaction(
+            tx ->
+                tx.listEnvironmentToolWaits(
+                    Instant.parse("2099-01-01T00:00:00Z"), seeded.toolIds()));
+    for (var row : rows) {
+      assertEquals("frozen-env", row.environmentName());
+      assertFalse(row.waitingForEnvironment());
+      Instant expected =
+          row.invocationId().equals(online)
+              ? environmentDeadline
+              : store
+                  .transaction(
+                      tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, row.invocationId())))
+                  .map(
+                      work ->
+                          row.invocationId().equals(future)
+                              ? work.availableAt()
+                              : work.leaseUntil())
+                  .orElseThrow();
+      assertEquals(expected, row.freshnessAt());
+    }
+    expireReadyEnvironmentLease(WAITING_ENVIRONMENT);
+    var offline =
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(online)))
+            .getFirst();
+    assertTrue(offline.waitingForEnvironment());
+    assertNull(offline.freshnessAt());
+    // CONNECTING 即使租约有效也不作为环境 READY 边界。
+    seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
+    jdbc.update(
+        "update environment_connection set status = 'CONNECTING' where environment_id = ?",
+        WAITING_ENVIRONMENT.value());
+    assertNull(
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(online)))
+            .getFirst()
+            .freshnessAt());
+    forceWorkAvailable(new WorkTarget(WorkTargetType.TOOL, future));
+    expireLease(new WorkTarget(WorkTargetType.TOOL, leased));
+    forceWorkAvailable(new WorkTarget(WorkTargetType.TOOL, leased));
+    assertTrue(
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), seeded.toolIds()))
+            .stream()
+            .allMatch(row -> row.waitingForEnvironment() && row.freshnessAt() == null));
+    assertEquals(
+        List.of(),
+        store.transaction(
+            tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(UUID.randomUUID()))));
+  }
 
   @Override
   HarnessStore createStore() {

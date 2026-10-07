@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -70,6 +72,80 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
   @Override
   protected void expireReadyEnvironmentLease(EnvironmentId environmentId) {
     readyEnvironments.remove(environmentId.value());
+  }
+
+  /** boolean 环境谓词没有到期时刻；每调用仍精确输出 Work 最早未来边界，等于 now 即不再定时。 */
+  @Test
+  void toolProjectionUsesFrozenNameAndWorkDeadlineWithBooleanEnvironment() {
+    SeededTool seeded = seedTool(store);
+    EnvironmentId environment = EnvironmentId.of(UUID.randomUUID());
+    InMemoryHarnessStore memory = (InMemoryHarnessStore) store;
+    memory.setEnvironmentName(environment, "frozen-environment");
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(seeded.threadId()).orElseThrow();
+          tx.requestWork(target, CLOCK, environment);
+        });
+    seedReadyEnvironmentLease(environment);
+    var online =
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(CLOCK, List.of(seeded.toolId())))
+            .getFirst();
+    assertEquals("frozen-environment", online.environmentName());
+    assertFalse(online.waitingForEnvironment());
+    assertNull(online.freshnessAt());
+    Instant due = CLOCK.plusSeconds(60);
+    memory.forceAvailableAt(target, due);
+    var future =
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(CLOCK, List.of(seeded.toolId())))
+            .getFirst();
+    assertEquals(due, future.freshnessAt());
+    expireReadyEnvironmentLease(environment);
+    var expired =
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(due, List.of(seeded.toolId())))
+            .getFirst();
+    assertTrue(expired.waitingForEnvironment());
+    assertNull(expired.freshnessAt());
+    memory.setRouteReadyPredicate((node, env, now) -> true);
+    seedReadyEnvironmentLease(environment);
+    ClaimedWork claim =
+        store
+            .transaction(
+                tx ->
+                    tx.claimNextWork(
+                        WorkTargetType.TOOL,
+                        due,
+                        "projection-lease",
+                        CLAIM_LEASE,
+                        UUID.randomUUID()))
+            .orElseThrow();
+    expireReadyEnvironmentLease(environment);
+    Instant nextDue = due.plusSeconds(120);
+    memory.forceAvailableAt(target, nextDue);
+    assertEquals(
+        nextDue,
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(due, List.of(seeded.toolId())))
+            .getFirst()
+            .freshnessAt());
+    memory.forceAvailableAt(target, Instant.EPOCH);
+    var leased =
+        store
+            .transaction(tx -> tx.listEnvironmentToolWaits(due, List.of(seeded.toolId())))
+            .getFirst();
+    assertFalse(leased.waitingForEnvironment());
+    assertEquals(claim.leaseUntil(), leased.freshnessAt());
+    var leaseExpired =
+        store
+            .transaction(
+                tx -> tx.listEnvironmentToolWaits(claim.leaseUntil(), List.of(seeded.toolId())))
+            .getFirst();
+    assertTrue(leaseExpired.waitingForEnvironment());
+    assertNull(leaseExpired.freshnessAt());
   }
 
   /**

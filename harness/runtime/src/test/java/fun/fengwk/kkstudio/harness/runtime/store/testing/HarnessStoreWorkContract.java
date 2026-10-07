@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -1156,9 +1157,19 @@ public abstract class HarnessStoreWorkContract {
     forceWorkAvailableAfter(futureTarget, Duration.ofMinutes(5));
     List<EnvironmentToolWaitRow> rows =
         store.transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), seeded.toolIds()));
-    assertTrue(rows.contains(new EnvironmentToolWaitRow(waiting, WAITING_ENVIRONMENT, true)));
-    assertTrue(rows.contains(new EnvironmentToolWaitRow(future, WAITING_ENVIRONMENT, false)));
-    assertTrue(rows.contains(new EnvironmentToolWaitRow(server, null, false)));
+    EnvironmentToolWaitRow waitingRow =
+        rows.stream().filter(row -> row.invocationId().equals(waiting)).findFirst().orElseThrow();
+    assertEquals(WAITING_ENVIRONMENT, waitingRow.environmentId());
+    assertTrue(waitingRow.waitingForEnvironment());
+    assertNull(waitingRow.freshnessAt());
+    EnvironmentToolWaitRow futureRow =
+        rows.stream().filter(row -> row.invocationId().equals(future)).findFirst().orElseThrow();
+    assertEquals(WAITING_ENVIRONMENT, futureRow.environmentId());
+    assertFalse(futureRow.waitingForEnvironment());
+    assertEquals(
+        store.transaction(tx -> tx.findWork(futureTarget)).orElseThrow().availableAt(),
+        futureRow.freshnessAt());
+    assertTrue(rows.contains(new EnvironmentToolWaitRow(server, null, false, null, null)));
     Instant horizon =
         store.transaction(tx -> tx.findNextEnvironmentWaitChange(authorityNow())).orElseThrow();
     assertTrue(horizon.isAfter(authorityNow()));
@@ -1171,5 +1182,48 @@ public abstract class HarnessStoreWorkContract {
             .waitingForEnvironment());
     assertEquals(
         List.of(), store.transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of())));
+  }
+
+  /** RUNNING/terminal 即使保留有未来 Work 和在线环境租约也不等待、不安排到期回读。 */
+  @Test
+  void toolProjectionDoesNotScheduleNonReadyInvocations() {
+    SeededTool seeded = seedTool(store);
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
+    requestWork(target, WAITING_ENVIRONMENT);
+    forceWorkAvailableAfter(target, Duration.ofMinutes(5));
+    seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(seeded.threadId()).orElseThrow();
+          ToolInvocation ready = tx.lockToolInvocation(seeded.toolId()).orElseThrow();
+          ToolInvocation approved = ready.markApprovalNotRequired(T1);
+          tx.updateToolInvocations(List.of(approved));
+          ToolInvocation dispatching = approved.beginDispatch(T1);
+          tx.updateToolInvocations(List.of(dispatching));
+          tx.updateToolInvocations(List.of(dispatching.markRunning(T1)));
+        });
+    EnvironmentToolWaitRow running =
+        store
+            .transaction(
+                tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(seeded.toolId())))
+            .getFirst();
+    assertFalse(running.waitingForEnvironment());
+    assertNull(running.freshnessAt());
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(seeded.threadId()).orElseThrow();
+          ToolInvocation runningTool = tx.lockToolInvocation(seeded.toolId()).orElseThrow();
+          tx.updateToolInvocations(
+              List.of(runningTool.fail(new ToolInvocationError("FAILED", "test failure"), T1)));
+        });
+    EnvironmentToolWaitRow terminal =
+        store
+            .transaction(
+                tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(seeded.toolId())))
+            .getFirst();
+    assertFalse(terminal.waitingForEnvironment());
+    assertNull(terminal.freshnessAt());
   }
 }

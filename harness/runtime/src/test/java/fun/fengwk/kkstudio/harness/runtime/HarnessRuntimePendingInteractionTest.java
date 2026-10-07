@@ -30,14 +30,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.List;
@@ -62,6 +67,55 @@ class HarnessRuntimePendingInteractionTest {
     store = new InMemoryHarnessStore();
     clock = new TestClock(T5);
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
+  }
+
+  /** Runtime 原样转换一批只读 sidecar（含名字/边界），空批不查 store，读取不改 Work。 */
+  @Test
+  void toolWaitBatchPreservesNamesDeadlinesAndNulls() {
+    ToolBaseline seeded = seedToolBaselineAt(store, T1);
+    EnvironmentId environment = EnvironmentId.of(UUID.randomUUID());
+    store.setEnvironmentName(environment, "frozen-env");
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
+    store.transaction(
+        tx -> {
+          tx.lockThread(seeded.threadId()).orElseThrow();
+          tx.requestWork(target, T5, environment);
+          return null;
+        });
+    Instant future = T5.plusSeconds(60);
+    store.forceAvailableAt(target, future);
+    var before = store.transaction(tx -> tx.findWork(target)).orElseThrow();
+    assertEquals(
+        List.of(new EnvironmentToolWait(seeded.toolId(), environment, false, "frozen-env", future)),
+        runtime.listEnvironmentToolWaits(List.of(seeded.toolId(), UUID.randomUUID())));
+    assertEquals(before, store.transaction(tx -> tx.findWork(target)).orElseThrow());
+    store.forceAvailableAt(target, T5);
+    assertEquals(
+        List.of(new EnvironmentToolWait(seeded.toolId(), environment, true, "frozen-env", null)),
+        runtime.listEnvironmentToolWaits(List.of(seeded.toolId())));
+    int count = store.transactionCount();
+    assertEquals(List.of(), runtime.listEnvironmentToolWaits(List.of()));
+    assertEquals(count, store.transactionCount());
+    assertEquals(List.of(), runtime.listEnvironmentToolWaits(List.of(UUID.randomUUID())));
+    assertThrows(NullPointerException.class, () -> runtime.listEnvironmentToolWaits(null));
+  }
+
+  /** 保留投影不变量：等待必须有冻结环境；没有亲和性的 server-side 字段允许全 null。 */
+  @Test
+  void toolWaitRecordsValidateIdentityAndAllowNullableSidecar() {
+    UUID id = UUID.randomUUID();
+    assertThrows(
+        NullPointerException.class, () -> new EnvironmentToolWait(null, null, false, null, null));
+    assertThrows(
+        IllegalArgumentException.class, () -> new EnvironmentToolWait(id, null, true, null, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new EnvironmentToolWaitRow(null, null, false, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EnvironmentToolWaitRow(id, null, true, null, null));
+    assertNull(new EnvironmentToolWait(id, null, false, null, null).freshnessAt());
+    assertNull(new EnvironmentToolWaitRow(id, null, false, null, null).environmentName());
   }
 
   /** 在指定时间戳创建带有 READY ToolInvocation 的 TOOL baseline。 */
