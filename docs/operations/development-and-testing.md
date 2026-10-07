@@ -413,13 +413,16 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   tree/interactions/environments 资源回读与 `statusExpiresAt` 一次性回读由前端 jsdom/组件测试覆盖。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
-`model.attempt_failure_visibility` 依赖 case 内自建的宿主 `127.0.0.1` mock Provider，因此
-属于 `requires=host-mock`：它们不读取真实凭据，但在 distributed 容器拓扑下不可用。
+`thread.provider_request_preview_readonly`、`model.attempt_failure_visibility` 依赖 case 内自建的宿主
+`127.0.0.1` mock Provider（后者是只读预览的计数 trap），因此属于 `requires=host-mock`：它们不读取真实凭据，
+但在 distributed 容器拓扑下不可用。
 `canvas.storage_upload_contract` 需要 S3，`canvas.function_fake_runtime` 还需要
 `--with-canvas-function` 打开 fake adapter。
 
 Goal 工具目录、Branch 设置命令以及草稿请求预览的拒绝与零写入边界也由 L1 覆盖；
-预览的 Provider wire body 与附件等价性由本地数据库/S3 集成测试覆盖。真实 Agent 的 Issue 接受、阶段交接与
+`thread.provider_request_preview_readonly` 以自建 Provider 覆盖 endpoint 缺省时的 409 与只读编码路径（绝不触达
+transport），历史预览的正向 200 由 `interaction.pending_input_contract` 在真实模型输出上覆盖；预览的 Provider
+wire body 与附件等价性由本地数据库/S3 集成测试覆盖。真实 Agent 的 Issue 接受、阶段交接与
 Goal 进度链路不能仅靠 API 契约断言，需另行在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
