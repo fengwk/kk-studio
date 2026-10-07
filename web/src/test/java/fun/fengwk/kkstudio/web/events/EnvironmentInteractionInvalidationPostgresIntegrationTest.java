@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.events;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -18,12 +20,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-/**
- * 环境连接变更必须同时失效「环境读模型」与「待处理交互读模型」的真实 PostgreSQL 通知回归。
- *
- * <p>测试意图：环境上线/离线会改变「待领取环境等待」事实，而该事实不由任何交互/Work 写事件产生；只有真实 {@code environment_changed} 通知同时驱动两个
- * Hub，浏览器才能在不刷新页面时看到环境等待条目的出现与消失。空 payload（来源事实已不存在）与 LISTEN 重连一样必须退化为两个资源各自的全量 resync。
- */
+/** 真实 PostgreSQL 通知回归：环境 id 只能驱动环境 changed 与交互 resync，执行根才驱动交互 changed。 */
 class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private ApplicationEventHub hub;
@@ -40,7 +37,24 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
         hub.subscribe(new ResourceKey(ResourceKind.ENVIRONMENTS, null), environmentSignals::add)) {
       environmentSubscription.activate();
 
+      UUID environmentId = UUID.randomUUID();
       UUID rootThreadId = UUID.randomUUID();
+      assertNotEquals(rootThreadId, environmentId);
+      jdbc.update(
+          "insert into environment (id, name, registration_token) values (?, ?, ?)",
+          environmentId,
+          "notification-routing",
+          "test-token-" + environmentId);
+      long initialInteractionResyncs = countResyncs(interactionSignals);
+      notifyUntil(
+          () ->
+              countResyncs(interactionSignals) > initialInteractionResyncs
+                  && environmentSignals.stream()
+                      .anyMatch(signal -> signal instanceof Signal.EnvironmentChanged),
+          EnvironmentChangeHub.CHANNEL,
+          environmentId.toString());
+
+      // 同一 LISTEN 连接的后续根通知也是投递围栏，避免只在环境回调的中途检查负断言。
       notifyUntil(
           () ->
               interactionSignals.stream()
@@ -48,11 +62,16 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
                       signal ->
                           signal instanceof Signal.InteractionsChanged changed
                               && rootThreadId.equals(changed.rootThreadId())),
+          InteractionChangeHub.CHANNEL,
           rootThreadId.toString());
-      assertTrue(
-          environmentSignals.stream()
-              .anyMatch(signal -> signal instanceof Signal.EnvironmentChanged),
-          "an environment connection change must invalidate the environment read model");
+      assertFalse(
+          interactionSignals.stream()
+              .anyMatch(
+                  signal ->
+                      signal instanceof Signal.InteractionsChanged changed
+                          && !rootThreadId.equals(changed.rootThreadId())),
+          "an environment id must never be delivered as an interaction root");
+      assertTrue(countResyncs(interactionSignals) > initialInteractionResyncs);
 
       long interactionResyncsBefore = countResyncs(interactionSignals);
       long environmentResyncsBefore = countResyncs(environmentSignals);
@@ -60,6 +79,7 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
           () ->
               countResyncs(interactionSignals) > interactionResyncsBefore
                   && countResyncs(environmentSignals) > environmentResyncsBefore,
+          EnvironmentChangeHub.CHANNEL,
           "");
     } finally {
       interactionSubscription.close();
@@ -67,10 +87,10 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
   }
 
   /** 在 LISTEN 建立前投递的 NOTIFY 会丢失，因此这里按固定节奏重投直到观察到信号；断言只要求「曾经送达」，与投递次数无关。 */
-  private void notifyUntil(BooleanSupplier observed, String payload) {
+  private void notifyUntil(BooleanSupplier observed, String channel, String payload) {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
     while (System.nanoTime() < deadline) {
-      jdbc.execute("select pg_notify('environment_changed', '" + payload + "')");
+      jdbc.queryForObject("select pg_notify(?, ?)", String.class, channel, payload);
       if (observed.getAsBoolean()) {
         return;
       }
@@ -82,7 +102,7 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
       }
     }
     throw new AssertionError(
-        "environment_changed notification with payload '" + payload + "' was never delivered");
+        channel + " notification with payload '" + payload + "' was never delivered");
   }
 
   private static long countResyncs(List<Signal> signals) {
