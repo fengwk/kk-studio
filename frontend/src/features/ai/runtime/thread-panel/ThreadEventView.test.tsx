@@ -104,7 +104,7 @@ describe('ThreadEventView', () => {
         }}
       />,
     )
-    const preview = screen.getByRole('region', { name: /下一次请求预览|Next Request Preview/ })
+    const preview = screen.getByRole('region', { name: /预览当前草稿|Preview current draft/ })
     expect(preview).toHaveTextContent('line1')
     expect(preview).toHaveTextContent('line11')
     expect(preview.querySelector('.thread-system-prompt-body')).not.toBeNull()
@@ -130,7 +130,7 @@ describe('ThreadEventView', () => {
 
     const { rerender } = render(
       <ThreadEventView
-        events={[record('e1')]}
+        events={[record('e1', { historicalPreviewEligible: true })]}
         selectedEventId="e1"
         onSelectedEventIdChange={vi.fn()}
         onRequestHistoricalPreview={onRequest}
@@ -142,7 +142,7 @@ describe('ThreadEventView', () => {
 
     rerender(
       <ThreadEventView
-        events={[record('e1')]}
+        events={[record('e1', { historicalPreviewEligible: true })]}
         selectedEventId="e1"
         onSelectedEventIdChange={vi.fn()}
         onRequestHistoricalPreview={onRequest}
@@ -530,7 +530,7 @@ describe('ThreadEventView', () => {
       const previewTab = screen.getByRole('tab', { name: '请求预览' })
       const detailTab = screen.getByRole('tab', { name: '详情' })
       await user.click(previewTab)
-      const title = screen.getByRole('button', { name: '下一次请求预览' })
+      const title = screen.getByRole('button', { name: '预览当前草稿' })
       await user.click(title)
       expect(onPreview).toHaveBeenCalledTimes(1)
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
@@ -859,4 +859,16 @@ describe('ThreadEventView', () => {
       expect(screen.getByTestId('preview-request-body')).toBeInTheDocument()
     })
   })
+})
+it('distinguishes request loading and read errors from an empty projection', () => {
+  const { rerender } = render(
+    <ThreadEventView events={[]} selectedEventId={null} onSelectedEventIdChange={vi.fn()} debugLoading />,
+  )
+  expect(screen.getByTestId('thread-debug-preview-loading')).toHaveTextContent('正在加载请求预览')
+  expect(screen.queryByText('暂无请求预览数据')).toBeNull()
+  rerender(
+    <ThreadEventView events={[]} selectedEventId={null} onSelectedEventIdChange={vi.fn()} debugError="请求预览加载失败" />,
+  )
+  expect(screen.getByRole('alert')).toHaveTextContent('请求预览加载失败')
+  expect(screen.queryByText('暂无请求预览数据')).toBeNull()
 })

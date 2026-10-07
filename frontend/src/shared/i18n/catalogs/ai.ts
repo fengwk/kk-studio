@@ -2004,8 +2004,8 @@ export const aiCatalog = {
     'zh-CN': '调试视图',
   },
   'ai.runtime.debug.previewTitle': {
-    'en-US': 'Next Request Preview',
-    'zh-CN': '下一次请求预览',
+    'en-US': 'Preview current draft',
+    'zh-CN': '预览当前草稿',
   },
   'ai.runtime.debug.envPrefix': {
     'en-US': 'env: ',
@@ -2016,12 +2016,12 @@ export const aiCatalog = {
     'zh-CN': '未选择环境',
   },
   'ai.runtime.debug.requestSnapshot': {
-    'en-US': 'Request Snapshot',
-    'zh-CN': '请求快照',
+    'en-US': 'Frozen invocation input',
+    'zh-CN': '冻结调用输入',
   },
   'ai.runtime.debug.requestSnapshotTitle': {
-    'en-US': 'View normalized request snapshot for current invocation',
-    'zh-CN': '查看当前调用规范化请求快照',
+    'en-US': 'View frozen canonical ProviderRequest for current invocation (not raw HTTP wire payload)',
+    'zh-CN': '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）',
   },
   'ai.runtime.debug.copyPrompt': {
     'en-US': 'Copy Prompt',
@@ -2056,8 +2056,8 @@ export const aiCatalog = {
     'zh-CN': '工具',
   },
   'ai.runtime.debug.toolsSent': {
-    'en-US': 'sent',
-    'zh-CN': '已发送',
+    'en-US': 'planned',
+    'zh-CN': '纳入规划',
   },
   'ai.runtime.debug.toolsFiltered': {
     'en-US': 'filtered',
@@ -2148,12 +2148,20 @@ export const aiCatalog = {
     'zh-CN': '技能',
   },
   'ai.runtime.debug.requestLabel': {
-    'en-US': 'Request Snapshot',
-    'zh-CN': '请求快照',
+    'en-US': 'Frozen invocation input',
+    'zh-CN': '冻结调用输入',
   },
   'ai.runtime.debug.historicalRequest': {
-    'en-US': 'Historical Request',
-    'zh-CN': '历史请求',
+    'en-US': 'Historical Request Preview',
+    'zh-CN': '历史请求预览',
+  },
+  'ai.runtime.debug.historicalRequestHint': {
+    'en-US': 'Historical request preview: reconstructed under current catalog and provider definitions, not the original sent request',
+    'zh-CN': '历史请求预览：按当前目录与 Provider 定义重建，非当时发送原文',
+  },
+  'ai.runtime.debug.historicalUnavailable': {
+    'en-US': 'Historical request preview is not supported for this record',
+    'zh-CN': '当前记录不支持历史请求预览',
   },
   'ai.runtime.debug.backToConversation': {
     'en-US': 'Back to conversation',
@@ -2172,8 +2180,8 @@ export const aiCatalog = {
     'zh-CN': '状态',
   },
   'ai.runtime.debug.inspector.toolState.sent': {
-    'en-US': 'SENT',
-    'zh-CN': '已发送 (SENT)',
+    'en-US': 'PLANNED (SENT)',
+    'zh-CN': '纳入当前规划 (SENT)',
   },
   'ai.runtime.debug.inspector.toolState.filtered': {
     'en-US': 'FILTERED',
@@ -2252,8 +2260,8 @@ export const aiCatalog = {
     'zh-CN': '不保证 Provider 自动缓存',
   },
   'ai.runtime.debug.noFrozenInvocation': {
-    'en-US': 'No active frozen invocation request. This view displays canonical request JSON only during an active invocation turn.',
-    'zh-CN': '当前无活动的冻结调用请求。仅在活动调用回合中显示规范化请求 JSON。',
+    'en-US': 'No corresponding model invocation is currently readable. Frozen input is no longer available after the invocation is materialized and cleaned up.',
+    'zh-CN': '当前没有可读取的对应模型调用；调用物化清理后不再提供冻结输入。',
   },
   'ai.runtime.debug.previewFailed': {
     'en-US': 'Failed to preview request',
@@ -2370,6 +2378,34 @@ export const aiCatalog = {
   'ai.runtime.debug.inspector.requestBodyJson': {
     'en-US': 'Provider Request Body (JSON)',
     'zh-CN': 'Provider 请求体 (JSON)',
+  },
+  'ai.runtime.debug.previewLoading': {
+    'en-US': 'Loading request preview...',
+    'zh-CN': '正在加载请求预览...',
+  },
+  'ai.runtime.debug.previewLoadFailed': {
+    'en-US': 'Failed to load request preview',
+    'zh-CN': '请求预览加载失败',
+  },
+  'ai.runtime.debug.draftNotice': {
+    'en-US': 'Read-only materialization of settings and draft input at click time. This operation does not send a model request; a later send may differ.',
+    'zh-CN': '按点击时的设置与草稿输入只读物化；本次操作不调用模型，后续发送内容可能不同。',
+  },
+  'ai.runtime.debug.historicalNotice': {
+    'en-US': 'Reconstructed from the recorded history under current catalog, provider and model definitions; not the original request sent at the time.',
+    'zh-CN': '基于已记录历史，按当前目录、Provider 与模型定义重建；不是当时实际发送的原文。',
+  },
+  'ai.runtime.debug.frozenNotice': {
+    'en-US': 'Frozen canonical ProviderRequest for this invocation, not the provider HTTP body. It is readable at READY and does not prove a request has been sent.',
+    'zh-CN': '当前调用冻结的 canonical ProviderRequest，不是 Provider HTTP 请求体；READY 阶段即可读取，不证明请求已经发送。',
+  },
+  'ai.runtime.debug.httpOriginalUnavailable': {
+    'en-US': 'Raw HTTP wire payload is not captured',
+    'zh-CN': '未捕获网络层原始 HTTP 报文',
+  },
+  'ai.runtime.debug.inspector.recordedAt': {
+    'en-US': 'Output recorded at (planning time)',
+    'zh-CN': '输出记录时间（规划时刻）',
   },
   'ai.runtime.event.detail.entryId': {
     'en-US': 'Entry ID',

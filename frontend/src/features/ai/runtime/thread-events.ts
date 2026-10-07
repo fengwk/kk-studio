@@ -40,6 +40,7 @@ export type ThreadEventKind =
   | 'ASSISTANT_MESSAGE'
   | 'TOOL_CALL'
   | 'TOOL_RESULT'
+  | 'NOTIFICATION'
   | 'MODEL_ATTEMPT_FAILURE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
@@ -68,7 +69,10 @@ export interface ThreadEventRecord {
   turnNumber: number
   kind: ThreadEventKind
   status: ThreadEventStatus
-  /** 调试标签：durable Entry 使用真实 entryType 枚举；synthetic 使用内部 kind 名。 */
+  /**
+   * 调试标签：durable Entry 使用语义标题（消息按真实 USER/ASSISTANT/TOOL 角色，通知按真实
+   * kind），synthetic 使用内部 kind 名。entryType 只在详情行保留，不覆盖语义标题。
+   */
   title: string
   /** 单行摘要：durable Entry 使用压缩后的 payload JSON。 */
   summary: string
@@ -77,7 +81,7 @@ export interface ThreadEventRecord {
   details: ThreadEventDetailRow[]
   /** 事件的完整原始 JSON（durable Entry 为 payload JSON，synthetic 活跃记录为其 DTO / realtime stream 的 pretty JSON）。 */
   rawJson: string | null
-  /** COMPACTION 结果实际携带真实模型输出 metadata（可读取历史请求预览）；其它 durable 记录为 false/省略。 */
+  /** ASSISTANT / COMPACTION 实际携带模型输出 metadata，可读取历史请求预览；非模型记录无入口。 */
   historicalPreviewEligible?: boolean
 }
 
@@ -107,13 +111,16 @@ function kindTitle(kind: ThreadEventKind): string {
   return kind
 }
 
-function asBranchDebugRecord(
+/**
+ * durable Entry 的 raw 事实：summary 为压缩后的 payload JSON，rawJson 为 pretty JSON。
+ * 语义标题/kind 由各分支决定，绝不在此用 entryType 覆盖。
+ */
+function withRawPayload(
   record: ThreadEventRecord,
   entry: HarnessSessionEntryDTO,
 ): ThreadEventRecord {
   return {
     ...record,
-    title: entry.entryType || record.kind,
     summary: compactJson(entry.payloadJson || '{}'),
     rawJson: prettyJson(entry.payloadJson || '{}'),
   }
@@ -133,6 +140,16 @@ function prettyJson(raw: string): string {
   } catch {
     return raw
   }
+}
+
+/**
+ * 一条 durable Entry 是否携带真实模型输出 metadata（assistantMetadata）。
+ *
+ * 它与后端历史预览的准入完全一致：只有真正发生过 provider 调用的 ASSISTANT / COMPACTION
+ * 输出才带它，USER/TOOL 通知等没有可重建的请求前缀。
+ */
+function hasAssistantMetadata(payload: Record<string, unknown>): boolean {
+  return Object.keys(asRecord(payload.assistantMetadata)).length > 0
 }
 
 /**
@@ -223,7 +240,7 @@ export function buildThreadEventTimeline(
     turnStartByEntryId.set(entry.entryId, currentTurnStartEntryId)
     const payload = parsePayload(entry.payloadJson)
     records.push(
-      asBranchDebugRecord(
+      withRawPayload(
         projectEntryRecord(entry, payload, {
           turnStartEntryId: currentTurnStartEntryId,
           turnNumber: currentTurnNumber,
@@ -410,7 +427,7 @@ function projectEntryRecord(
         title: kindTitle('COMPACTION'),
         summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
         // 只有真实模型输出（携带 canonical metadata）才可读取历史请求预览；纯摘要无请求可重建。
-        historicalPreviewEligible: Object.keys(asRecord(payload.assistantMetadata)).length > 0,
+        historicalPreviewEligible: hasAssistantMetadata(payload),
         details: withTime(base.details, entry.createTime),
       }
     case 'TURN_END': {
@@ -516,6 +533,26 @@ function projectEntryRecord(
     }
     case 'CUSTOM_MESSAGE':
       return projectMessageRecord(base, payload, 'CUSTOM_MESSAGE')
+    case 'NOTIFICATION': {
+      // 系统结果通知：它是 runtime 的上下文事实，不是人类输入。按真实 kind 呈现，绝不伪装成人类消息。
+      const notificationKind = getString(payload.kind)
+      return {
+        ...base,
+        kind: 'NOTIFICATION',
+        status: 'completed',
+        title: notificationKind || translate('ai.runtime.event.unknownType', { type: entry.entryType }),
+        summary: notificationKind,
+        details: withTime([
+          ...base.details,
+          ...(getString(payload.sourceThreadId)
+            ? [{
+              label: translate('ai.runtime.notification.entry.source'),
+              value: getString(payload.sourceThreadId),
+            }]
+            : []),
+        ], entry.createTime),
+      }
+    }
     case 'MESSAGE': {
       const message = asRecord(payload.message)
       const role = getString(message.role)
@@ -524,9 +561,13 @@ function projectEntryRecord(
       }
       if (role === 'ASSISTANT') {
         const contents = getRecordList(message.contents)
-        return contents.some((content) => getString(content.type) === 'tool_call')
+        const record = contents.some((content) => getString(content.type) === 'tool_call')
           ? projectToolCallRecord(base, payload)
           : projectMessageRecord(base, payload, 'ASSISTANT_MESSAGE')
+        // 模型输出来源以 assistantMetadata 判定：普通输出与带 tool_call 的输出同样可读取历史预览。
+        return hasAssistantMetadata(payload)
+          ? { ...record, historicalPreviewEligible: true }
+          : record
       }
       if (role === 'TOOL') {
         return projectToolResultRecord(base, payload)
@@ -559,7 +600,8 @@ function projectMessageRecord(
     ...base,
     kind,
     status: 'completed',
-    title: kindTitle(kind),
+    // 标题用消息真实角色（USER/ASSISTANT/TOOL/SYSTEM），不再被 entryType 覆盖成 "MESSAGE"。
+    title: role,
     summary: summarizeField(text, role),
     details: withTime([
       ...base.details,
@@ -572,7 +614,8 @@ function projectToolCallRecord(
   base: RecordBase,
   payload: Record<string, unknown>,
 ): ThreadEventRecord {
-  const contents = getRecordList(asRecord(payload.message).contents)
+  const message = asRecord(payload.message)
+  const contents = getRecordList(message.contents)
   const toolCall = contents.find((content) => getString(content.type) === 'tool_call')
   const toolName = getString(toolCall?.toolName) || translate('ai.runtime.event.unknownTool')
   const text = messageContentsText(contents)
@@ -580,10 +623,12 @@ function projectToolCallRecord(
     ...base,
     kind: 'TOOL_CALL',
     status: 'completed',
-    title: kindTitle('TOOL_CALL'),
+    // 带 tool_call 的输出仍是 ASSISTANT：kind 保留 TOOL_CALL，标题仍是真实角色。
+    title: getString(message.role) || translate('ai.runtime.entry.unknownRole'),
     summary: summarizeField([text, toolName].filter(Boolean).join(' · '), toolName),
     details: withTime([
       ...base.details,
+      { label: translate('ai.runtime.event.detail.role'), value: getString(message.role) },
       { label: translate('ai.runtime.event.detail.toolName'), value: toolName },
       { label: translate('ai.runtime.event.detail.toolCallId'), value: getString(toolCall?.toolCallId) },
     ], base.createdAt),
@@ -594,14 +639,15 @@ function projectToolResultRecord(
   base: RecordBase,
   payload: Record<string, unknown>,
 ): ThreadEventRecord {
-  const contents = getRecordList(asRecord(payload.message).contents)
+  const message = asRecord(payload.message)
+  const contents = getRecordList(message.contents)
   const toolResult = contents.find((content) => getString(content.type) === 'tool_result')
   const text = toolResultText(contents)
   return {
     ...base,
     kind: 'TOOL_RESULT',
     status: 'completed',
-    title: kindTitle('TOOL_RESULT'),
+    title: getString(message.role) || 'TOOL',
     summary: summarizeField(text, translate('ai.runtime.event.emptyText')),
     details: withTime([
       ...base.details,

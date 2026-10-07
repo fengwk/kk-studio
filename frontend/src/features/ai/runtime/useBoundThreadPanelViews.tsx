@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
 import '@/features/ai/runtime/thread-panel/debug-view-toolbar.css'
 import {
@@ -8,10 +8,19 @@ import {
 } from '@/features/ai/runtime/thread-panel'
 import { useModelRequestDebug, useHistoricalRequestPreview } from '@/features/ai/runtime/useModelRequestDebug'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
-import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import type { ThreadPaneLabels } from '@/features/ai/runtime/ThreadPane'
+import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+
+/**
+ * Bound Thread 只读视图需要的投影字段；生产 root/readOnly 都传入完整 {@link ThreadProjection}
+ * （它是本契约的超集），因此无需另建 controller 或订阅。
+ */
+export type BoundThreadPanelController = Pick<
+  ThreadProjection,
+  'bodyRef' | 'events' | 'sessionId' | 'thread' | 'modelInvocation' | 'models'
+>
 
 /** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影（只读视图状态）。 */
 export interface BoundThreadPreviewOptions {
@@ -30,13 +39,7 @@ export interface BoundThreadPreviewOptions {
 
 export function useBoundThreadPanelViews(
   threadId: string,
-  controller: {
-    bodyRef: RefObject<HTMLDivElement | null>
-    events: ThreadEventRecord[]
-    working: boolean
-    /** 当前 Session，用于按需读取历史 Entry 的调用前请求预览（只读）。 */
-    sessionId: string | null
-  },
+  controller: BoundThreadPanelController,
   previewOptions?: BoundThreadPreviewOptions,
 ) {
   const { t } = useI18n()
@@ -51,8 +54,47 @@ export function useBoundThreadPanelViews(
     initialConversationScrollTop,
     initialEventsScrollTop,
   } = useThreadPanelViewState(viewKey, controller.bodyRef, controller.events)
-  const { debug } = useModelRequestDebug(threadId, mode === 'debug', controller.working)
-  const historicalPreview = useHistoricalRequestPreview(controller.sessionId)
+
+  // Debug 请求投影的读取身份：调用 id/phase/requestHead、head 与规划 settings/目录事实。
+  // working 一直为 true 的连续 model -> tool -> 下一 model 期间，调用身份已经改变，
+  // 因此 revision 必须由这些事实构成，而不是 working 的一次 true/false。
+  const debugRevision = useMemo(() => {
+    const settings = controller.thread?.branchSettings
+    const catalog = controller.models
+      .map((item) => `${item.providerName}/${item.name}`)
+      .join(',')
+    return [
+      viewKey,
+      controller.thread?.threadId ?? '',
+      controller.thread?.version ?? '',
+      controller.thread?.status ?? '',
+      controller.thread?.headEntryId ?? '',
+      controller.modelInvocation?.id ?? '',
+      controller.modelInvocation?.status ?? '',
+      controller.modelInvocation?.requestHeadEntryId ?? '',
+      settings?.model?.providerName ?? '',
+      settings?.model?.modelName ?? '',
+      settings?.model?.variant ?? '',
+      settings?.agentName ?? '',
+      settings?.goal?.id ?? '',
+      settings?.environmentName ?? '',
+      catalog,
+    ].join('|')
+  }, [controller.modelInvocation, controller.thread, controller.models, viewKey])
+
+  const {
+    debug,
+    loading: debugLoading,
+    error: debugError,
+  } = useModelRequestDebug(threadId, mode === 'debug', debugRevision)
+  const historicalPreview = useHistoricalRequestPreview(controller.sessionId, viewKey)
+  const lastSelectedRef = useRef(selectedEventId)
+  useEffect(() => {
+    if (lastSelectedRef.current !== selectedEventId) {
+      lastSelectedRef.current = selectedEventId
+      historicalPreview.dismiss()
+    }
+  }, [selectedEventId, historicalPreview])
   const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
 
   // 检查器选中与视图状态同属一个身份：身份变化时必须一起清空，否则会残留旧目标的预览。
@@ -66,11 +108,13 @@ export function useBoundThreadPanelViews(
   }, [viewKey])
 
   const switchMode = (nextMode: 'conversation' | 'debug') => {
+    historicalPreview.dismiss()
     setDebugSelection(null)
     internalSwitchMode(nextMode)
   }
 
   const selectDebugInspector = (selection: DebugInspectorSelection | null) => {
+    historicalPreview.dismiss()
     selectEvent(null)
     setDebugSelection(selection)
     if (selection != null && mode !== 'debug') {
@@ -136,8 +180,11 @@ export function useBoundThreadPanelViews(
             bodyRef={eventsBodyRef}
             initialScrollTop={initialEventsScrollTop}
             debug={debug}
+            debugLoading={debugLoading}
+            debugError={debugError ? t('ai.runtime.debug.previewLoadFailed') : null}
             debugSelection={debugSelection}
             onSelectInspector={(selection) => {
+              historicalPreview.dismiss()
               if (selection != null) {
                 selectEvent(null)
               }
