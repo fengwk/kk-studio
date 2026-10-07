@@ -303,13 +303,17 @@ class StudioProjectControllerTest {
         ProjectSnapshotDTO.builder()
             .project(mapper.toDto(Project.builder().id(projectId).version(0L).build()))
             .issues(List.of())
+            .referencedStateCodes(List.of("INIT", "WORK"))
             .build();
     when(snapshotAssembler.assemble(projectId)).thenReturn(snapshot);
 
     mockMvc
         .perform(get("/api/projects/" + projectId + "/snapshot"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.project.id").value(projectId.toString().toLowerCase()));
+        .andExpect(jsonPath("$.data.project.id").value(projectId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.data.referencedStateCodes").isArray())
+        .andExpect(jsonPath("$.data.referencedStateCodes[0]").value("INIT"))
+        .andExpect(jsonPath("$.data.referencedStateCodes[1]").value("WORK"));
   }
 
   @Test
