@@ -91,6 +91,36 @@ test('readonly preview case is a free L1 host-mock case covering provider unavai
   assert.match(caseDef.docs, /PREVIEW_PROVIDER_UNAVAILABLE/)
 })
 
+test('readonly preview builds its local model config and cleans up a failed fixture', async () => {
+  // 在模型创建边界停止，验证前置配置构造实际可执行且失败后清理专用 Provider。
+  const stopped = new Error('stop at model creation')
+  let config = null
+  let deleted = false
+  const ctx = {
+    async call(method, path, body) {
+      if (method === 'POST' && path === '/api/ai/catalog/providers') {
+        return { json: { data: { name: body.name, version: '1' } } }
+      }
+      if (method === 'POST' && path === '/api/ai/catalog/models') {
+        config = body.config
+        throw stopped
+      }
+      if (method === 'DELETE' && path.startsWith('/api/ai/catalog/providers/')) {
+        deleted = true
+        return { json: null }
+      }
+      assert.fail(`unexpected fixture call: ${method} ${path}`)
+    },
+    writeArtifact() {
+      assert.fail('successful cleanup must not write failure artifacts')
+    },
+  }
+  await assert.rejects(getCase('thread.provider_request_preview_readonly').run(ctx), error => error === stopped)
+  assert.deepEqual(config.limit, { context: 4096, output: 128 })
+  assert.ok(config.pricing)
+  assert.equal(deleted, true)
+})
+
 test('preview trap only counts calls, retains no request material, and closes cleanly', async () => {
   // 测试意图：证明 trap 只累计调用次数、不保留 header/token/body，且 close 后监听真正释放。
   const trap = new ProviderPreviewTrap()

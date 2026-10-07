@@ -38,7 +38,7 @@ import {
   waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { canonicalSeedCatalog } from '../lib/fixtures.mjs'
+import { baseModelConfig, canonicalSeedCatalog } from '../lib/fixtures.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
