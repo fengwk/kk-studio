@@ -195,13 +195,21 @@ describe('AppShell settings navigation', () => {
 describe('AppShell platform feature navigation', () => {
   it.each([
     ['/projects', '项目 Projects', '/projects'],
-    ['/projects/123', '项目 Projects', '/projects'],
   ])('activates the feature link and keeps the brand in that feature for %s', (path, label, href) => {
     renderShell(path, <div>Feature content</div>)
 
     expect(screen.getByRole('link', { name: label })).toHaveClass('active')
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', href)
     expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
+  })
+
+  it('uses the immersive workspace shell for a project board', () => {
+    // 看板只有业务内部头部，不重复应用导航；项目列表仍保留全局导航。
+    renderShell('/projects/123', <div>Project board</div>)
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    expect(document.querySelector('.app-frame')).toHaveClass('workspace-immersive')
+    expect(screen.getByText('Project board')).toBeInTheDocument()
   })
 })
 

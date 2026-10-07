@@ -322,7 +322,10 @@ beforeEach(() => {
   vi.mocked(harnessService.previewProviderRequest).mockReset()
   vi.mocked(harnessService.previewBranchRequest).mockReset()
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
-  vi.mocked(harnessService.getThreadTree).mockResolvedValue([])
+  // 无活跃后代仍返回真实根；空数组不符合执行树读取契约。
+  vi.mocked(harnessService.getThreadTree).mockImplementation(async (threadId) => [
+    treeNode(threadId, null, 'thread-name', false),
+  ])
   vi.mocked(interactionService.listInteractions).mockResolvedValue({
     items: [],
     nextCursor: null,
@@ -2403,7 +2406,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
   })
 
-/** Debug 视图的结构化投影：它就绪时 Debug 区才渲染「下一次请求预览」标题按钮。 */
+/** Debug 视图的结构化投影：就绪后提供「预览当前草稿」操作。 */
 function modelRequestDebug(): HarnessModelRequestDebugDTO {
   return {
     kind: 'NEXT_REQUEST_PREVIEW',
@@ -2613,11 +2616,11 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         </QueryClientProvider>,
       )
       const composer = await openDebugView(user)
-      expect(await screen.findByRole('button', { name: '下一次请求预览 (草稿为空)' })).toBeDisabled()
+      expect(await screen.findByRole('button', { name: '预览当前草稿 (草稿为空)' })).toBeDisabled()
 
       await user.click(composer)
       await user.type(composer, 'preview owner-free')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       expect(trigger).toBeEnabled()
       await user.click(trigger)
 
@@ -2640,7 +2643,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await user.keyboard('/debug{Enter}')
 
       expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /下一次请求预览/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /预览当前草稿/ })).not.toBeInTheDocument()
       expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
       expect(harnessService.previewBranchRequest).not.toHaveBeenCalled()
     })
@@ -2654,13 +2657,13 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
       const composer = await openDebugView(user)
 
-      expect(await screen.findByRole('button', { name: '下一次请求预览 (草稿为空)' })).toBeDisabled()
+      expect(await screen.findByRole('button', { name: '预览当前草稿 (草稿为空)' })).toBeDisabled()
       expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(1)
       expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
 
       await user.click(composer)
       await user.type(composer, 'ready draft')
-      expect(await screen.findByRole('button', { name: '下一次请求预览' })).toBeEnabled()
+      expect(await screen.findByRole('button', { name: '预览当前草稿' })).toBeEnabled()
     })
 
     it('posts the live draft with the fresh thread cursor and keeps the draft on success', async () => {
@@ -2681,7 +2684,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'preview test message')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       serveFresh(() => Promise.resolve(snapshot(thread({ headEntryId: 'head-2', nextCommandSequence: '7' }))))
       await user.click(trigger)
 
@@ -2718,7 +2721,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'settings moved')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       serveFresh(() => Promise.resolve(snapshot(thread({
         headEntryId: 'head-3',
         branchSettings: {
@@ -2769,7 +2772,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'fresh state moved on')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       serveFresh(serveSnapshot)
       await user.click(trigger)
 
@@ -2790,7 +2793,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'initial text')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       serveFresh(() => gate.promise)
       await clickPreviewAndAwaitFreshGet(user, trigger)
 
@@ -2820,7 +2823,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'moving target')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       serveFresh(() => gate.promise)
       await clickPreviewAndAwaitFreshGet(user, trigger)
 
@@ -2848,7 +2851,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'unmount me')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       serveFresh(() => gate.promise)
       await clickPreviewAndAwaitFreshGet(user, trigger)
 
@@ -2875,7 +2878,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'draft to keep')
-      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await user.click(await screen.findByRole('button', { name: '预览当前草稿' }))
 
       await expectAlertText('会话游标已过期，请刷新状态后重试')
       expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
@@ -2896,7 +2899,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'initial text')
-      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await user.click(await screen.findByRole('button', { name: '预览当前草稿' }))
       await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
 
       await user.type(composer, ' edited')
@@ -2925,7 +2928,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'moving target')
-      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await user.click(await screen.findByRole('button', { name: '预览当前草稿' }))
       await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
 
       await user.click(composer)
@@ -2953,7 +2956,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'unmount me')
-      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await user.click(await screen.findByRole('button', { name: '预览当前草稿' }))
       await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
 
       view.unmount()
@@ -2984,7 +2987,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'single flight')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
 
       // 同一个 React batch 内重复触发，尚未渲染 disabled，真正验证 ref 单飞栅栏。
       act(() => {
@@ -3025,7 +3028,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       expect(localId).toBeTruthy()
       expect(localId).not.toBe(SERVER_UPLOAD_ID)
 
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       expect(trigger).toBeEnabled()
       await user.click(trigger)
 
@@ -3062,7 +3065,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await user.click(composer)
       await user.type(composer, 'single flight attachment')
       await uploadAttachment(user, new File(['bytes'], 'once.png', { type: 'image/png' }))
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
 
       // 尚未重新渲染按钮的同一 batch 内连点，确保附件预览同样由 ref 单飞。
       act(() => {
@@ -3098,7 +3101,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'settings moved')
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      const trigger = await screen.findByRole('button', { name: '预览当前草稿' })
       serveFresh(() => gate.promise)
       await clickPreviewAndAwaitFreshGet(user, trigger)
 
@@ -3129,7 +3132,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'settings moved')
-      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await user.click(await screen.findByRole('button', { name: '预览当前草稿' }))
       await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
 
       await toggleYolo(user)
@@ -3158,7 +3161,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openDebugView(user)
       await user.click(composer)
       await user.type(composer, 'before')
-      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await user.click(await screen.findByRole('button', { name: '预览当前草稿' }))
       await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
 
       await user.type(composer, ' after')
@@ -3239,7 +3242,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       expect(controlArea).toHaveClass('debug-hidden')
       expect(controlArea).toHaveProperty('inert', true)
 
-      const trigger = screen.getByRole('button', { name: '下一次请求预览' })
+      const trigger = screen.getByRole('button', { name: '预览当前草稿' })
       expect(trigger).toBeEnabled()
       await user.click(trigger)
 
@@ -3304,7 +3307,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await screen.findByRole('listbox', { name: '事件' })
       await user.click(composer)
       await user.type(composer, 'settings moved in branch draft')
-      await user.click(screen.getByRole('button', { name: '下一次请求预览' }))
+      await user.click(screen.getByRole('button', { name: '预览当前草稿' }))
       await waitFor(() => expect(harnessService.previewBranchRequest).toHaveBeenCalledTimes(1))
 
       await user.click(screen.getByRole('button', { name: '权限模式' }))
