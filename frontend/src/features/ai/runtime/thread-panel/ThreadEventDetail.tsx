@@ -123,7 +123,7 @@ export function ThreadEventDetail({
           </span>
         </div>
       ) : null}
-      <pre className="thread-event-detail-payload">{record.rawJson ?? record.summary}</pre>
+      <pre className="thread-event-detail-payload" tabIndex={0}>{record.rawJson ?? record.summary}</pre>
     </section>
   )
 }

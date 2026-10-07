@@ -90,12 +90,19 @@ describe('ThreadModelRequestDebug & Inspector', () => {
   afterEach(() => {
     setLocale('zh-CN')
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   it('renders preview rails without DEBUG prefix, localized labels and tool/skill chips (zh-CN)', () => {
     render(<DebugViewHarness />)
 
-    // 标题去掉 DEBUG 前缀，本地化为“预览当前草稿”
+    // 当前规划标题不可点击，预览是独立检查操作。
+    expect(screen.getByRole('heading', { name: '当前规划' }).closest('button')).toBeNull()
+    expect(screen.getByText('检查操作')).toBeInTheDocument()
+    const environment = screen.getByText('dev-node')
+    expect(environment.closest('footer')).toHaveClass('thread-debug-environment')
+    expect(environment).toHaveClass('is-neutral')
+    expect(environment).not.toHaveClass('is-ready')
     expect(screen.getByText('预览当前草稿')).toBeInTheDocument()
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
     expect(screen.getByText('System prompt content with instructions')).toBeInTheDocument()
@@ -129,7 +136,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     const user = userEvent.setup()
     render(<DebugViewHarness />)
 
-    // 英文下标题无 DEBUG 前缀
+    expect(screen.getByRole('heading', { name: 'Current planning' })).toBeInTheDocument()
+    expect(screen.getByText('Currently planned tool environment')).toBeInTheDocument()
     expect(screen.getByText('Preview current draft')).toBeInTheDocument()
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
     expect(screen.getByText(/TOOLS 1 planned · 1 filtered/)).toBeInTheDocument()
@@ -476,7 +484,9 @@ describe('ThreadModelRequestDebug & Inspector', () => {
 
       const { unmount } = render(<DebugViewHarness />)
       const copyBtn = screen.getByRole('button', { name: '复制系统提示词' })
-      expect(copyBtn).toHaveTextContent('复制提示词')
+      expect(copyBtn).toHaveAttribute('title', '复制系统提示词')
+      expect(copyBtn).toHaveTextContent('')
+      expect(copyBtn).toHaveClass('md-code-copy')
 
       fireEvent.click(copyBtn)
       // 等待 writeText microtask resolve
@@ -485,13 +495,14 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       })
 
       expect(writeTextMock).toHaveBeenCalledWith('System prompt content with instructions')
-      expect(copyBtn).toHaveTextContent('已复制')
+      expect(copyBtn).toHaveAccessibleName('已复制')
+      expect(copyBtn).toHaveAttribute('title', '已复制')
 
-      // 2秒后恢复
+      // 共享 CopyButton 的 1500ms 成功反馈。
       act(() => {
-        vi.advanceTimersByTime(2000)
+        vi.advanceTimersByTime(1500)
       })
-      expect(copyBtn).toHaveTextContent('复制提示词')
+      expect(copyBtn).toHaveAccessibleName('复制系统提示词')
 
       // unmount 清理 timeout 不抛错
       unmount()
@@ -515,7 +526,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       fireEvent.click(copyBtn)
 
       // 在 promise resolve 之前，绝不提前显示“已复制”
-      expect(copyBtn).not.toHaveTextContent('已复制')
+      expect(copyBtn).not.toHaveAccessibleName('已复制')
       expect(copyBtn).toBeDisabled()
 
       // resolve promise
@@ -525,7 +536,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       })
 
       // 成功 resolve 之后才显示“已复制”
-      expect(copyBtn).toHaveTextContent('已复制')
+      expect(copyBtn).toHaveAccessibleName('已复制')
     })
 
     it('handles clipboard rejection safely by showing accessible error alert and avoiding false success', async () => {
@@ -544,7 +555,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       })
 
       // 拒绝路径：不显示假成功，展示 role="alert" 的错误提示
-      expect(copyBtn).not.toHaveTextContent('已复制')
+      expect(copyBtn).not.toHaveAccessibleName('已复制')
       const alert = screen.getByRole('alert')
       expect(alert).toHaveTextContent('复制失败')
     })
@@ -563,7 +574,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         await Promise.resolve()
       })
 
-      expect(copyBtn).not.toHaveTextContent('已复制')
+      expect(copyBtn).not.toHaveAccessibleName('已复制')
       const alert = screen.getByRole('alert')
       expect(alert).toHaveTextContent('复制失败')
     })
@@ -605,7 +616,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       await act(async () => {
         await Promise.resolve()
       })
-      expect(copyBtn).toHaveTextContent('已复制')
+      expect(copyBtn).toHaveAccessibleName('已复制')
 
       // 立即进行第二次尝试，第二次失败
       fireEvent.click(copyBtn)
@@ -614,7 +625,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       })
 
       // 绝不永久显示已复制，而是立即转为错误提示
-      expect(copyBtn).not.toHaveTextContent('已复制')
+      expect(copyBtn).not.toHaveAccessibleName('已复制')
       const alert = screen.getByRole('alert')
       expect(alert).toHaveTextContent('复制失败')
     })
@@ -676,7 +687,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Copy failed')
     })
 
-    it('recovers from error state to idle after 3 seconds timeout', async () => {
+    it('keeps a readable failure until retry and clears it on successful retry', async () => {
       vi.useFakeTimers()
       const writeTextMock = vi.fn().mockRejectedValue(new Error('Denied'))
       Object.defineProperty(navigator, 'clipboard', {
@@ -693,11 +704,18 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       })
       expect(screen.getByRole('alert')).toHaveTextContent('复制失败')
 
-      // 快进 3 秒
+      // 不用另一个计时器静默隐藏失败；重试前仍然可读。
       act(() => {
         vi.advanceTimersByTime(3000)
       })
+      expect(screen.getByRole('alert')).toHaveTextContent('复制失败')
+      writeTextMock.mockResolvedValue(undefined)
+      fireEvent.click(copyBtn)
+      await act(async () => {
+        await Promise.resolve()
+      })
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(copyBtn).toHaveAccessibleName('已复制')
       vi.useRealTimers()
     })
 
@@ -985,14 +1003,15 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     })
   })
 
-  describe('next request preview title button', () => {
-    it('disables the title without onPreview and surfaces the disabled reason', () => {
-      // 测试意图：预览入口是 Debug 标题的原生 button；无 onPreview 时禁用，
-      // 携带 previewDisabledReason 时 title/aria-label 暴露不可预览原因。
+  describe('on-demand inspect actions', () => {
+    it('disables the preview action without onPreview and surfaces the disabled reason', () => {
+      // 标题不是按钮；检查操作保留禁用原因与 title/aria-label。
       const { rerender } = render(
         <ThreadModelRequestDebug debug={sampleDebug()} onSelectInspector={vi.fn()} />,
       )
       const idleTitle = screen.getByRole('button', { name: '预览当前草稿' })
+      expect(screen.getByRole('heading', { name: '当前规划' }).closest('button')).toBeNull()
+      expect(idleTitle.closest('header')).toBeNull()
       expect(idleTitle).toBeDisabled()
       expect(idleTitle).toHaveAttribute('title', '预览当前草稿')
 
@@ -1010,7 +1029,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(blockedTitle).toHaveAttribute('title', '预览当前草稿 (草稿为空)')
     })
 
-    it('swaps the title to the loading label with a spinner while a preview is in flight', () => {
+    it('labels the inspect action as loading with a spinner while a preview is in flight', () => {
       // 测试意图：previewLoading 时按钮禁用，title/aria-label 变为生成中文案并渲染 spinner 图标。
       render(
         <ThreadModelRequestDebug
@@ -1026,8 +1045,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(loadingTitle.querySelector('.spin')).not.toBeNull()
     })
 
-    it('runs onPreview on title click and renders the localized preview error', async () => {
-      // 测试意图：可用时点击标题触发预览请求；预览失败以 role=alert 展示本地化错误，且不破坏其余面板内容。
+    it('runs onPreview on inspect action click and renders the localized preview error', async () => {
+      // 检查操作按需预览；失败以 role=alert 展示且不破坏其余面板内容。
       const user = userEvent.setup()
       const onPreview = vi.fn()
       const { rerender } = render(
@@ -1054,9 +1073,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('System prompt content with instructions')).toBeInTheDocument()
     })
 
-    it('keeps the frozen request snapshot entry next to the preview title', async () => {
-      // 测试意图：标题按钮化不得挤掉 frozen invocation 的请求快照入口；
-      // 无冻结调用时快照入口消失，但预览标题按钮始终存在。
+    it('keeps frozen invocation and preview together as inspect actions', async () => {
+      // 冻结调用与按需预览属于检查操作，不能挤掉任一有效入口。
       const user = userEvent.setup()
       const onSelectInspector = vi.fn()
       const { rerender } = render(

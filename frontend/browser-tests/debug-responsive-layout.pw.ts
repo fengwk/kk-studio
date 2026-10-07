@@ -1,11 +1,25 @@
 import { resolve } from 'node:path'
+import type { Page } from '@playwright/test'
 import { test, expect } from './fixture'
 
 const reportsDir = resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 
+async function expectSinglePlanningScroll(page: Page) {
+  // 提示词完整自然高度，仅整列纵向滚动，不再把内容关进 50cqh 的嵌套滚动区。
+  const metrics = await page.locator('.thread-system-prompt-body').evaluate((el) => ({
+    overflowY: getComputedStyle(el).overflowY,
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+    columnOverflow: getComputedStyle(el.closest('.thread-debug-col-preview')!).overflowY,
+  }))
+  expect(metrics.overflowY).toBe('visible')
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight + 1)
+  expect(metrics.columnOverflow).toBe('auto')
+}
+
 test.describe('Responsive Debug Layout Real React Component Regression', () => {
   // Case 1: 1920x900 宽桌面 (宽面板 >= 1100px)
-  test('1920x900 wide layout: 3 equal-width columns, independent scroll, no outer overflow, composer usable', async ({
+  test('1920x900 wide layout: bounded planning/history and remaining detail, independent scroll, no outer overflow', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1920, height: 900 })
@@ -28,14 +42,17 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(colEvents).toBeVisible()
     await expect(colDetail).toBeVisible()
 
-    // 3. 断言三列等宽 (误差 <= 2px)
+    // 配置/历史不会随大屏无限增长，详情获得所有余宽。
     const boxPreview = (await colPreview.boundingBox())!
     const boxEvents = (await colEvents.boundingBox())!
     const boxDetail = (await colDetail.boundingBox())!
 
-    expect(Math.abs(boxPreview.width - boxEvents.width)).toBeLessThanOrEqual(2)
-    expect(Math.abs(boxEvents.width - boxDetail.width)).toBeLessThanOrEqual(2)
-    expect(boxPreview.width).toBeGreaterThan(550)
+    expect(boxPreview.width).toBeGreaterThanOrEqual(280)
+    expect(boxPreview.width).toBeLessThanOrEqual(360)
+    expect(boxEvents.width).toBeGreaterThanOrEqual(280)
+    expect(boxEvents.width).toBeLessThanOrEqual(420)
+    expect(boxDetail.width).toBeGreaterThan(1100)
+    expect(boxPreview.width + boxEvents.width + boxDetail.width).toBeCloseTo((await shell.boundingBox())!.width, 0)
 
     // 4. 断言外框无纵向及横向滚动 (overflow hidden)
     const shellScroll = await shell.evaluate((el) => ({
@@ -47,7 +64,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     expect(shellScroll.scrollHeight).toBeLessThanOrEqual(shellScroll.clientHeight + 1)
     expect(shellScroll.scrollWidth).toBeLessThanOrEqual(shellScroll.clientWidth + 1)
 
-    // 5. 各列独立纵向滚动验证（系统提示词内部允许独立滚动，且互不干扰）
+    // 5. 各列唯一纵向滚动验证
     const promptBody = page.locator('.thread-system-prompt-body')
     const promptScrollBefore = await promptBody.evaluate((el) => el.scrollTop)
     const eventsList = page.locator('.thread-events')
@@ -55,12 +72,13 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     const detailScrollBefore = await colDetail.evaluate((el) => el.scrollTop)
     expect(promptScrollBefore).toBe(0)
 
-    // 滚动 System Prompt 正文（允许且仅允许此 prompt 区域内部滚动）
+    // 滚动规划整列，提示词自身不产生滚动。
     await promptBody.evaluate((el) => {
       el.scrollTop = 50
     })
-    const promptScrollAfter = await promptBody.evaluate((el) => el.scrollTop)
-    expect(promptScrollAfter).toBeGreaterThan(0)
+    expect(await promptBody.evaluate((el) => el.scrollTop)).toBe(0)
+    await colPreview.evaluate((el) => { el.scrollTop = 50 })
+    expect(await colPreview.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
     // 其他两列滚动不受影响
     expect(await eventsList.evaluate((el) => el.scrollTop)).toBe(eventsScrollBefore)
     expect(await colDetail.evaluate((el) => el.scrollTop)).toBe(detailScrollBefore)
@@ -81,25 +99,16 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     })
     expect(await colDetail.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
 
-    // 6. 验证系统提示词正文高度约为可用预览列高度的 50% (50cqh)，具有内部滚动 (overflow-y: auto)
-    const promptMetrics = await page.evaluate(() => {
-      const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
-      const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
-      const promptBox = promptEl.getBoundingClientRect()
-      const previewStyle = window.getComputedStyle(previewCol)
-      const paddingTop = parseFloat(previewStyle.paddingTop) || 0
-      const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
-      const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
-      const ratio = promptBox.height / previewContentHeight
-      const promptStyle = window.getComputedStyle(promptEl)
-      return {
-        ratio,
-        overflowY: promptStyle.overflowY,
-      }
-    })
-    expect(promptMetrics.ratio).toBeGreaterThan(0.45)
-    expect(promptMetrics.ratio).toBeLessThan(0.55)
-    expect(promptMetrics.overflowY).toBe('auto')
+    await expectSinglePlanningScroll(page)
+    const payload = colDetail.locator('.thread-event-detail-payload')
+    const payloadMetrics = await payload.evaluate((el) => ({
+      overflowX: getComputedStyle(el).overflowX,
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }))
+    expect(payloadMetrics.overflowX).toBe('auto')
+    expect(payloadMetrics.scrollWidth).toBeGreaterThan(payloadMetrics.clientWidth)
+    expect(await colDetail.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
 
     // 7. 底部 Composer 驻留且可用
     const composerBox = (await composer.boundingBox())!
@@ -111,6 +120,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     expect(await composerInput.inputValue()).toBe('测试任务指令')
 
     // 8. 验证快照按钮和复制按钮存在
+    await colPreview.evaluate((el) => { el.scrollTop = 0 })
     const snapshotBtn = page.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）', exact: true })
     await expect(snapshotBtn).toBeVisible()
     await expect(snapshotBtn).toHaveText('冻结调用输入')
@@ -118,12 +128,13 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(copyBtn).toBeVisible()
 
     // 9. 保存截图
+    await colDetail.evaluate((el) => { el.scrollTop = 0 })
     await page.screenshot({ path: resolve(reportsDir, 'debug-wide-1920x900.png') })
     await page.screenshot({ path: resolve(reportsDir, 'debug-polish-wide.png') })
   })
 
   // Case 2: 3834x681 超宽矮窗口
-  test('3834x681 ultrawide short layout: 3 equal-width columns without squishing composer', async ({
+  test('3834x681 ultrawide short layout: bounded side columns without squishing composer', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 3834, height: 681 })
@@ -134,14 +145,14 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     const colDetail = page.locator('.thread-debug-col-detail')
     const composer = page.locator('[data-testid="pane-main-composer"]')
 
-    // 三列并排等宽
+    // 超宽屏仍保持有界侧栏，不把详情限制在三分之一。
     const boxPreview = (await colPreview.boundingBox())!
     const boxEvents = (await colEvents.boundingBox())!
     const boxDetail = (await colDetail.boundingBox())!
 
-    expect(Math.abs(boxPreview.width - boxEvents.width)).toBeLessThanOrEqual(2)
-    expect(Math.abs(boxEvents.width - boxDetail.width)).toBeLessThanOrEqual(2)
-    expect(boxPreview.width).toBeGreaterThan(1200)
+    expect(boxPreview.width).toBe(360)
+    expect(boxEvents.width).toBe(420)
+    expect(boxDetail.width).toBeGreaterThan(3000)
 
     // 外层容器无滚动
     const shell = page.locator('.thread-events-shell')
@@ -205,22 +216,11 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     const eventsList = page.locator('.thread-events')
     await expect(eventsList).toBeFocused()
 
-    // 3. 点击请求预览页签并验证正文高度比近 0.5，点击 Tool 按钮唤起 Tool Inspector 并聚焦关闭按钮
+    // 3. 规划列整体滚动；点击 Tool 唤起 Inspector 并聚焦关闭按钮
     await page.getByRole('tab', { name: /请求预览|Request Preview/ }).click()
     await expect(colPreview).toBeVisible()
 
-    const narrowMetrics = await page.evaluate(() => {
-      const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
-      const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
-      const promptBox = promptEl.getBoundingClientRect()
-      const previewStyle = window.getComputedStyle(previewCol)
-      const paddingTop = parseFloat(previewStyle.paddingTop) || 0
-      const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
-      const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
-      return promptBox.height / previewContentHeight
-    })
-    expect(narrowMetrics).toBeGreaterThan(0.45)
-    expect(narrowMetrics).toBeLessThan(0.55)
+    await expectSinglePlanningScroll(page)
 
     const readToolBtn = colPreview.getByRole('button', { name: /工具 read|Tool read/ })
     await readToolBtn.click()
@@ -239,8 +239,8 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await page.screenshot({ path: resolve(reportsDir, 'debug-polish-narrow.png') })
   })
 
-  // Case 4: 360x740 移动端无横向溢出且提示词高度比近 0.5
-  test('360x740 mobile layout: no horizontal overflow, tabs cleanly switch and prompt body ratio near 0.5', async ({
+  // Case 4: 移动端单列整体滚动且无横向溢出
+  test('360x740 mobile layout: no horizontal overflow and one planning scroll owner', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 360, height: 740 })
@@ -256,20 +256,19 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     }))
     expect(shellScroll.scrollWidth).toBeLessThanOrEqual(shellScroll.clientWidth + 1)
 
-    // 切到请求预览页签检查比值
+    // 切到规划页签检查滚动归属
     await page.getByRole('tab', { name: /请求预览|Request Preview/ }).click()
-    const mobileMetrics = await page.evaluate(() => {
-      const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
-      const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
-      const promptBox = promptEl.getBoundingClientRect()
-      const previewStyle = window.getComputedStyle(previewCol)
-      const paddingTop = parseFloat(previewStyle.paddingTop) || 0
-      const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
-      const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
-      return promptBox.height / previewContentHeight
-    })
-    expect(mobileMetrics).toBeGreaterThan(0.45)
-    expect(mobileMetrics).toBeLessThan(0.55)
+    await expectSinglePlanningScroll(page)
+    const planning = page.locator('.thread-debug-col-preview')
+    expect(await planning.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    await planning.locator('.thread-debug-environment').scrollIntoViewIfNeeded()
+    await expect(planning.getByText('dev-node', { exact: true })).toHaveClass('status-pill is-neutral')
+    await page.getByRole('tab', { name: '事件' }).click()
+    await page.locator('.thread-event').first().click()
+    const detail = page.locator('.thread-debug-col-detail')
+    expect(await detail.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    const payload = detail.locator('.thread-event-detail-payload')
+    expect(await payload.evaluate((el) => el.scrollWidth)).toBeGreaterThan(await payload.evaluate((el) => el.clientWidth))
 
     const composerInput = page.locator('[data-testid="pane-main-composer-input"]')
     await expect(composerInput).toBeVisible()
@@ -332,7 +331,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     // 再动态恢复容器至 1250px
     await page.locator('[data-testid="btn-resize-wide"]').click()
     await expect(shell).toHaveAttribute('data-layout', 'wide')
-    // 恢复为 3 等宽列，选中详情依旧可见
+    // 恢复为三列，选中详情依旧可见
     await expect(page.locator('.thread-debug-col-preview')).toBeVisible()
     await expect(page.locator('.thread-debug-col-events')).toBeVisible()
     await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
@@ -417,8 +416,8 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(pane2.locator('[data-testid="thread-debug-placeholder"]')).toBeVisible()
   })
 
-  // Case 9: 动态 Viewport 高度 Resize (681px - 1100px) 系统提示词与预览列可用高度比稳定保持约 0.5
-  test('viewport height resize from 681px to 1100px maintains prompt body / preview content height ratio near 0.5', async ({
+  // Case 9: 高度变化不能重新引入提示词嵌套滚动
+  test('viewport height resize from 681px to 1100px preserves natural prompt height and column scrolling', async ({
     page,
   }) => {
     await page.goto('/browser-tests/debug-harness.html')
@@ -427,23 +426,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     for (const h of heights) {
       await page.setViewportSize({ width: 1400, height: h })
 
-      const ratio = await page.evaluate(() => {
-        const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
-        const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
-        if (!promptEl || !previewCol) {
-          return 0
-        }
-        const promptBox = promptEl.getBoundingClientRect()
-        const previewStyle = window.getComputedStyle(previewCol)
-        const paddingTop = parseFloat(previewStyle.paddingTop) || 0
-        const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
-        const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
-        return promptBox.height / previewContentHeight
-      })
-
-      // 允许 padding 容差，比值稳定在 0.5 左右
-      expect(ratio).toBeGreaterThan(0.45)
-      expect(ratio).toBeLessThan(0.55)
+      await expectSinglePlanningScroll(page)
     }
   })
 
@@ -496,5 +479,69 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await page.keyboard.press('Escape')
     await expect(colDetail).toBeHidden()
     await expect(cacheBtn).toBeFocused()
+  })
+
+  for (const width of [1400, 800]) {
+    test(`first model-output selection, re-entry restoration and explicit close survive background refresh (${width}px)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/browser-tests/debug-harness.html?viewState=1')
+      await expect(page.locator('[data-event-id="ev-46"]')).toHaveAttribute('aria-selected', 'true')
+      if (width < 1100) {
+        await expect(page.getByRole('button', { name: '关闭事件详情' })).toBeFocused()
+        await page.getByRole('tab', { name: '事件', exact: true }).click()
+        // 即使存在选中详情，roving 导航也不能被详情自动聚焦打断。
+        await page.keyboard.press('ArrowRight')
+        await expect(page.getByRole('tab', { name: '详情', exact: true })).toBeFocused()
+        await page.keyboard.press('ArrowLeft')
+      }
+      const row = page.locator('[data-event-id="ev-2"]')
+      await row.click()
+      if (width < 1100) await page.getByRole('tab', { name: '事件', exact: true }).click()
+      await page.locator('.thread-events').evaluate((el) => { el.scrollTop = 97 })
+      await page.getByRole('button', { name: 'Conversation', exact: true }).click()
+      await expect(page.locator('.thread-events-shell')).toHaveCount(0)
+      await page.getByRole('button', { name: 'Debug', exact: true }).click()
+      await expect(row).toHaveAttribute('aria-selected', 'true')
+      if (width < 1100) await page.getByRole('tab', { name: '事件', exact: true }).click()
+      await expect.poll(() => page.locator('.thread-events').evaluate((el) => el.scrollTop)).toBe(97)
+      if (width < 1100) await page.getByRole('tab', { name: '详情', exact: true }).click()
+      await page.getByRole('button', { name: '关闭事件详情' }).click()
+      await page.getByRole('button', { name: 'Refresh history' }).click()
+      await expect(page.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+      await page.getByRole('button', { name: 'Conversation', exact: true }).click()
+      await page.getByRole('button', { name: 'Debug', exact: true }).click()
+      await expect(page.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+      if (width < 1100) await page.getByRole('tab', { name: '详情', exact: true }).click()
+      await expect(page.getByTestId('thread-debug-placeholder')).toBeVisible()
+    })
+  }
+
+  test('1100px container boundary switches between bounded columns and tabs without overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto('/browser-tests/debug-harness.html?paneWidth=1101px')
+    const shell = page.locator('.thread-events-shell')
+    expect(await shell.evaluate((el) => el.clientWidth)).toBe(1100)
+    await expect(shell).toHaveAttribute('data-layout', 'wide')
+    expect(await shell.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    await page.getByTestId('pane-main').evaluate((el) => { el.style.width = '1100px' })
+    await expect(shell).toHaveAttribute('data-layout', 'narrow')
+    expect(await shell.evaluate((el) => el.clientWidth)).toBe(1099)
+    await expect(page.getByRole('tablist')).toBeVisible()
+    expect(await shell.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  })
+
+  test('shared prompt copy writes the real Chromium clipboard and exposes temporary success', async ({ page, context }) => {
+    await page.setViewportSize({ width: 1400, height: 900 })
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.goto('/browser-tests/debug-harness.html')
+    const prompt = await page.locator('.thread-system-prompt-body').textContent()
+    const button = page.locator('.thread-debug-prompt-copy')
+    await expect(button).toHaveAttribute('title', '复制系统提示词')
+    await button.click()
+    await expect(button).toHaveAccessibleName('已复制')
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(prompt)
+    await expect(button).toHaveAccessibleName('复制系统提示词')
+    await expect(button).toHaveAttribute('title', '复制系统提示词')
+    await expect(page.getByRole('alert')).toHaveCount(0)
   })
 })

@@ -69,7 +69,7 @@ export interface ThreadEventViewProps {
 /**
  * Debug 主视图：支持 3 区响应式布局。
  *
- * - 宽面板 (container >= 1100px)：三等宽列（请求预览 / 事件列表 / 详情），各自唯一纵向滚动，外框无滚动；
+ * - 宽面板 (container >= 1100px)：规划与历史有界、详情占余宽，各列唯一纵向滚动；
  * - 窄面板 (container < 1100px)：单区填满，通过带有 roving tabIndex 的 Tab 导航（请求预览 / 事件 / 详情）切换；
  * - 点击事件 / 工具 / skill / request 自动切换到详情；关闭详情安全返回来源页签并恢复可见焦点；
  * - 所有 ID 均基于 useId 作用域，防止在多 pane split 时冲突。
@@ -109,6 +109,7 @@ export function ThreadEventView({
   )
   const lastFocusedTriggerRef = useRef<HTMLElement | null>(null)
   const detailCloseBtnRef = useRef<HTMLButtonElement>(null)
+  const pendingDetailFocusRef = useRef(false)
   const tabButtonRefs = useRef<Record<DebugViewTab, HTMLButtonElement | null>>({
     preview: null,
     events: null,
@@ -124,10 +125,11 @@ export function ThreadEventView({
   })
 
   useEffect(() => {
-    if (debugSelection != null) {
+    pendingDetailFocusRef.current = debugSelection != null || selectedEventId != null
+    if (debugSelection != null || selectedEventId != null) {
       setActiveTab('detail')
     }
-  }, [debugSelection])
+  }, [debugSelection, selectedEventId])
 
   // 容器宽度判定：由 ResizeObserver 监听，判定 >= 1100px 为宽模式
   const [layoutMode, setLayoutMode] = useState<'wide' | 'narrow'>('wide')
@@ -169,6 +171,17 @@ export function ThreadEventView({
   useEffect(() => {
     bodyRef.current?.focus({ preventScroll: true })
   }, [bodyRef])
+
+  useEffect(() => {
+    // 异步初选可能挂载在隐藏列中，且初始 listbox 聚焦会覆盖子组件聚焦。
+    // 等详情页签真正显示后处理一次；roving 导航不会再从页签抢焦点。
+    if (activeTab === 'detail' && pendingDetailFocusRef.current) {
+      pendingDetailFocusRef.current = false
+      if (layoutMode === 'narrow') {
+        detailCloseBtnRef.current?.focus({ preventScroll: true })
+      }
+    }
+  }, [activeTab, layoutMode, selectedEventId, debugSelection])
 
   useEffect(() => {
     if (selectedEventId == null || lastScrolledIdRef.current === selectedEventId) {
