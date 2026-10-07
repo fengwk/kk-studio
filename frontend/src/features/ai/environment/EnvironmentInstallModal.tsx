@@ -10,6 +10,8 @@ import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { Button } from '@/shared/ui/controls/Button'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Toast } from '@/shared/ui/feedback/Toast'
@@ -313,7 +315,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 <div className="install-field">
                   <label className="form-group">
                     <span>{t('ai.environment.install.origin')}</span>
-                    <input
+                    <TextInput
                       value={studioUrl}
                       onChange={event => setStudioUrl(event.target.value)}
                       placeholder={t('ai.environment.install.originPlaceholder')}
@@ -328,7 +330,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 </div>
                 <label className="form-group">
                   <span>Java home (JDK 21)</span>
-                  <input
+                  <TextInput
                     value={javaHome}
                     onChange={event => setJavaHome(event.target.value)}
                     placeholder={PATH_EXAMPLES[os].javaHome}
@@ -337,7 +339,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 </label>
                 <label className="form-group">
                   <span>{t('ai.environment.install.bash')}</span>
-                  <input
+                  <TextInput
                     value={bashExecutable}
                     onChange={event => setBashExecutable(event.target.value)}
                     placeholder={PATH_EXAMPLES[os].bash}
@@ -346,7 +348,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 </label>
                 <label className="form-group">
                   <span>{t('ai.environment.install.note')}</span>
-                  <input
+                  <TextInput
                     value={note}
                     onChange={event => setNote(event.target.value)}
                     placeholder={t('ai.environment.install.notePlaceholder')}
@@ -364,7 +366,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                   <div className="install-field">
                     <label className="form-group">
                       <span>LSP servers (JSON)</span>
-                      <textarea
+                      <TextArea
                         rows={8}
                         value={servers}
                         onChange={event => setServers(event.target.value)}

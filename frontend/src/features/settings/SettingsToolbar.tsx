@@ -1,6 +1,7 @@
 import { useI18n } from '@/shared/i18n'
 import type { SystemSettingsEditor } from '@/features/settings/useSystemSettingsEditor'
 import type { DraftValidationReason } from '@/features/settings/system-settings-draft'
+import { Button } from '@/shared/ui/controls/Button'
 
 const DRAFT_ERROR_KEYS: Record<DraftValidationReason, string> = {
   blankToolName: 'settings.error.permissionToolNameRequired',
@@ -34,24 +35,22 @@ export function SettingsToolbar({ editor }: { editor: SystemSettingsEditor }) {
         <span className="settings-dirty" data-dirty={editor.dirty}>
           {editor.dirty ? t('settings.unsavedChanges') : t('settings.allSaved')}
         </span>
-        <button
-          type="button"
-          className="settings-button primary"
+        <Button
+          variant="primary"
           disabled={!editor.dirty || editor.saving}
           onClick={() => {
             void editor.save()
           }}
         >
           {editor.saving ? t('settings.saving') : t('settings.save')}
-        </button>
-        <button
-          type="button"
-          className="settings-button"
+        </Button>
+        <Button
+          variant="ghost"
           disabled={!editor.dirty || editor.saving}
           onClick={editor.reset}
         >
           {t('settings.reset')}
-        </button>
+        </Button>
       </div>
     </div>
   )

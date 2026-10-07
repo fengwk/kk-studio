@@ -102,8 +102,7 @@ describe('AppShell chat immersive routes', () => {
     renderShell(path, <div>Chat workspace</div>)
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
-    expect(document.querySelector('.app-frame')).toHaveClass('chat-immersive')
-    expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
+    expect(document.querySelector('.app-frame')).toHaveClass('workspace-immersive')
     expect(screen.getByText('Chat workspace')).toBeInTheDocument()
   })
 
@@ -117,7 +116,7 @@ describe('AppShell chat immersive routes', () => {
 
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'KK Studio' })).toBeInTheDocument()
-    expect(document.querySelector('.app-frame')).not.toHaveClass('chat-immersive')
+    expect(document.querySelector('.app-frame')).not.toHaveClass('workspace-immersive')
   })
 })
 
@@ -126,7 +125,7 @@ describe('AppShell canvas immersive routes', () => {
     renderShell('/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f', <div>Editor</div>)
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
-    expect(document.querySelector('.app-frame')).toHaveClass('canvas-immersive')
+    expect(document.querySelector('.app-frame')).toHaveClass('workspace-immersive')
     expect(screen.getByText('Editor')).toBeInTheDocument()
   })
 
@@ -143,7 +142,7 @@ describe('AppShell canvas immersive routes', () => {
 
       expect(screen.getByRole('banner')).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'KK Studio' })).toBeInTheDocument()
-      expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
+      expect(document.querySelector('.app-frame')).not.toHaveClass('workspace-immersive')
     },
   )
 })
@@ -178,8 +177,7 @@ describe('AppShell settings navigation', () => {
   it('keeps the global topbar and activates only Settings on /settings', () => {
     renderShell('/settings', <div>Settings content</div>)
     expect(screen.getByRole('banner')).toBeInTheDocument()
-    expect(document.querySelector('.app-frame')).not.toHaveClass('chat-immersive')
-    expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
+    expect(document.querySelector('.app-frame')).not.toHaveClass('workspace-immersive')
     // settings 激活时 AI/Projects/Canvas 一律不误激活。
     expect(screen.getByRole('link', { name: '设置 Settings' })).toHaveClass('active')
     expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')

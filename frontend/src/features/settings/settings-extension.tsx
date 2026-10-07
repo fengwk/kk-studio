@@ -2,6 +2,7 @@
 import { lazy, Suspense } from 'react'
 import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 
 const SettingsPage = lazy(async () => {
   const module = await import('@/features/settings/SettingsPage')
@@ -12,7 +13,7 @@ function SettingsRoute({ children }: ExtensionComponentProps) {
   const { t } = useI18n()
   return (
     <>
-      <Suspense fallback={<div className="state-block" role="status">{t('settings.loading')}</div>}>
+      <Suspense fallback={<StateBlock title={t('settings.loading')} />}>
         <SettingsPage />
       </Suspense>
       {children}

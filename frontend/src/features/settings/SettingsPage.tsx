@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { SettingsToolbar } from '@/features/settings/SettingsToolbar'
 import { GeneralTab } from '@/features/settings/tabs/GeneralTab'
 import { PluginsTab } from '@/features/ai/plugins/PluginsTab'
@@ -16,6 +16,9 @@ import {
 } from '@/features/settings/useSystemSettingsEditor'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
+import { Tabs, type TabItem } from '@/shared/ui/controls/Tabs'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 
 /**
  * 全局设置页：General 保留本地偏好；所有 server tabs、section/group 顺序和字段控件来自
@@ -45,25 +48,14 @@ export function SettingsPage({
     ? activeTab
     : GENERAL_SETTINGS_TAB.id
 
-  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const currentIndex = tabs.findIndex((tab) => tab.id === effectiveActiveTab)
-    let nextIndex: number | null = null
-    if (event.key === 'ArrowRight') {
-      nextIndex = (currentIndex + 1) % tabs.length
-    } else if (event.key === 'ArrowLeft') {
-      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
-    } else if (event.key === 'Home') {
-      nextIndex = 0
-    } else if (event.key === 'End') {
-      nextIndex = tabs.length - 1
-    }
-    if (nextIndex !== null) {
-      event.preventDefault()
-      const nextTab = tabs[nextIndex]!
-      setActiveTab(nextTab.id)
-      document.getElementById(`settings-tab-${nextTab.id}`)?.focus()
-    }
-  }
+  const tabItems = useMemo<TabItem[]>(
+    () =>
+      tabs.map((tab) => ({
+        id: tab.id,
+        label: t(tab.labelKey),
+      })),
+    [tabs, t],
+  )
 
   const activeSection = editor.schema?.sections.find(
     (section) => section.key === effectiveActiveTab,
@@ -76,50 +68,26 @@ export function SettingsPage({
         <div className="settings-body">
           <h1 className="settings-title">{t('settings.title')}</h1>
 
-          <div className="settings-tabs" role="tablist" aria-label={t('settings.tabs.ariaLabel')}>
-          {tabs.map((tab) => {
-            const selected = effectiveActiveTab === tab.id
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                id={`settings-tab-${tab.id}`}
-                className={`settings-tab${selected ? ' active' : ''}`}
-                aria-selected={selected}
-                aria-controls={`settings-tabpanel-${tab.id}`}
-                tabIndex={selected ? 0 : -1}
-                onClick={() => setActiveTab(tab.id)}
-                onKeyDown={onTabKeyDown}
-              >
-                {t(tab.labelKey)}
-              </button>
-            )
-          })}
-        </div>
+          <Tabs
+            tabs={tabItems}
+            activeId={effectiveActiveTab}
+            onChange={setActiveTab}
+            ariaLabel={t('settings.tabs.ariaLabel')}
+          >
+            {generalError && effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
+              <SchemaError error={generalError} onRetry={editor.retryLoad} />
+            ) : null}
 
-        {generalError && effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
-          <SchemaError error={generalError} onRetry={editor.retryLoad} />
-        ) : null}
-
-        <div
-          id={`settings-tabpanel-${effectiveActiveTab}`}
-          role="tabpanel"
-          aria-labelledby={`settings-tab-${effectiveActiveTab}`}
-        >
-          {effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
-            <GeneralTab />
-          ) : effectiveActiveTab === PLUGINS_SETTINGS_TAB.id ? (
-            <PluginsTab />
-          ) : effectiveActiveTab === SYNC_SETTINGS_TAB.id ? (
-            <SyncTab reloadSettings={editor.retryLoad} settingsDirty={editor.dirty} />
-          ) : (
-            <ServerTabPane
-              editor={editor}
-              section={activeSection}
-            />
-          )}
-        </div>
+            {effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
+              <GeneralTab />
+            ) : effectiveActiveTab === PLUGINS_SETTINGS_TAB.id ? (
+              <PluginsTab />
+            ) : effectiveActiveTab === SYNC_SETTINGS_TAB.id ? (
+              <SyncTab reloadSettings={editor.retryLoad} settingsDirty={editor.dirty} />
+            ) : (
+              <ServerTabPane editor={editor} section={activeSection} />
+            )}
+          </Tabs>
         </div>
       </div>
       <ConflictPresenter
@@ -145,11 +113,7 @@ function ServerTabPane({
   const { t } = useI18n()
 
   if (editor.loading) {
-    return (
-      <div className="state-block" role="status">
-        {t('settings.loading')}
-      </div>
-    )
+    return <StateBlock title={t('settings.loading')} />
   }
   if (editor.loadError) {
     return <SchemaError error={editor.loadError} onRetry={editor.retryLoad} />
@@ -158,11 +122,7 @@ function ServerTabPane({
     return <SchemaError error={editor.schemaError} onRetry={editor.retryLoad} />
   }
   if (!editor.draft || section == null) {
-    return (
-      <div className="state-block" role="status">
-        {t('settings.loading')}
-      </div>
-    )
+    return <StateBlock title={t('settings.loading')} />
   }
 
   return (
@@ -180,11 +140,11 @@ function ServerTabPane({
 function SchemaError({ error, onRetry }: { error: string; onRetry: () => void }) {
   const { t } = useI18n()
   return (
-    <div className="state-block" role="alert">
-      <p>{error}</p>
-      <button type="button" className="settings-button" onClick={onRetry}>
+    <div className="settings-error-state" role="alert">
+      <StateBlock title={error} tone="danger" />
+      <Button variant="ghost" onClick={onRetry}>
         {t('settings.retry')}
-      </button>
+      </Button>
     </div>
   )
 }

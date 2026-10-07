@@ -557,7 +557,7 @@ async function main(argv) {
 
   await run('ui.environments.page_loads', 'Environments 页可打开', async (caseArt) => {
     await goto('/environments')
-    await page.locator('.environment-list').waitFor({
+    await page.locator('.resource-grid').waitFor({
       state: 'visible',
       timeout: 15_000,
     })
@@ -567,12 +567,21 @@ async function main(argv) {
     const environmentCards = page.locator('.environment-card')
     assert(await environmentCards.count() > 0, 'environments page has no cards')
     for (const card of await environmentCards.all()) {
-      const actions = card.locator('.chat-card-foot button')
-      assert(await actions.count() === 4, 'environment card must expose Copy Token, Manage, Rotate Token and Delete')
-      assert(
-        await actions.filter({ hasText: /重新生成 Token|Rotate Token/ }).count() === 1,
-        'environment card must expose one Rotate Token action',
-      )
+      const actions = card.locator('.resource-card-actions button')
+      // 环境卡能力集：安装/覆盖、卸载、管理、重新生成 Token、删除，卡内动作不得缺失或重复。
+      assert(await actions.count() === 5, 'environment card must expose Install, Uninstall, Manage, Rotate Token and Delete')
+      for (const [name, pattern] of [
+        ['Install', /安装|Install/],
+        ['Uninstall', /卸载|Uninstall/],
+        ['Manage', /管理|Manage/],
+        ['Rotate Token', /重新生成 Token|Rotate Token/],
+        ['Delete', /删除|Delete/],
+      ]) {
+        assert(
+          await actions.filter({ hasText: pattern }).count() === 1,
+          `environment card must expose exactly one ${name} action`,
+        )
+      }
     }
     await shot(caseArt, 'environments')
     expectNoFatal(pageErrors, consoleErrors)
@@ -615,7 +624,7 @@ async function main(argv) {
       `canvas editor pathname invalid: ${new URL(page.url()).pathname}`,
     )
 
-    // 编辑器沉浸：无全局顶栏、挂 canvas-immersive class、返回键、保存状态与版本号。
+    // 编辑器沉浸：无全局顶栏、挂 workspace-immersive 通用沉浸 class、返回键、保存状态与版本号。
     assert(
       await page.locator('#editorView').isVisible(),
       'canvas editor view must be visible',
@@ -625,8 +634,8 @@ async function main(argv) {
       'canvas editor must not render the global topbar',
     )
     assert(
-      await page.locator('.app-frame.canvas-immersive').count() === 1,
-      'canvas editor must carry the canvas-immersive root class',
+      await page.locator('.app-frame.workspace-immersive').count() === 1,
+      'canvas editor must carry the shared workspace-immersive root class',
     )
     const backButton = page.locator('.canvas-back-button.sidebar-icon-btn')
     assert(

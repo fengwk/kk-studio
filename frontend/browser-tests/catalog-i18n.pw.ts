@@ -171,7 +171,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
   }) => {
     await page.goto('/browser-tests/catalog-i18n-harness.html')
     await page.locator('#tab-skills-btn').click()
-    const labels = page.locator('.skill-package-card .meta-row .lbl')
+    const labels = page.locator('.skill-package-card .resource-card-meta-row .resource-card-meta-label')
     await expect(labels.first()).toBeVisible()
 
     for (const width of [1280, 500]) {

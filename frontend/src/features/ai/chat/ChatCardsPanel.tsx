@@ -1,5 +1,6 @@
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { ChatCard } from '@/features/ai/chat/ChatCard'
+import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { useI18n } from '@/shared/i18n'
@@ -21,7 +22,7 @@ export function ChatCardsPanel({
 }) {
   const { t } = useI18n()
   return (
-    <div className="cards-grid">
+    <ResourceGrid>
       <CreateCard
         title={t('ai.chat.create')}
         subtitle={t('ai.chat.createDescription')}
@@ -37,6 +38,6 @@ export function ChatCardsPanel({
           deletePending={deletePending}
         />
       ))}
-    </div>
+    </ResourceGrid>
   )
 }

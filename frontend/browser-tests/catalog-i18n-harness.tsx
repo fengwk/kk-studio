@@ -127,7 +127,7 @@ export function HarnessApp() {
           <button
             type="button"
             id="toggle-locale-btn"
-            className="action-enter-btn"
+            className="ghost-inline-btn"
             onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
           >
             Locale: {locale} (Click to switch)

@@ -349,11 +349,14 @@ describe('EnvironmentsPage', () => {
 
     const card = (await screen.findByText('fat-box')).closest('article')
     expect(card).not.toBeNull()
-    const capabilityRow = within(card!).getByText('Capabilities').closest('.env-tag-row')
+    const capabilityRow = within(card!).getByText('Capabilities').closest('.resource-card-meta-row')
     expect(capabilityRow).not.toBeNull()
-    expect(capabilityRow!.querySelectorAll('.meta-chip')).toHaveLength(4)
+    expect(capabilityRow!.querySelectorAll('.resource-card-tag')).toHaveLength(4)
     expect(within(capabilityRow!).getByText('+2')).toBeInTheDocument()
-    expect(capabilityRow!.querySelector('.meta-chips')).toHaveAttribute('title', 'a, b, c, d, e')
+    expect(capabilityRow!.querySelector('.resource-card-tags')).toHaveAttribute(
+      'title',
+      'a, b, c, d, e',
+    )
   })
 
   // 验证 Environment rotate 失败时在确认弹窗中可见展示错误（防止静默失败），并在 409 时走共享 ConflictPresenter 语义

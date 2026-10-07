@@ -11,6 +11,10 @@ import { EnvironmentInstallModal } from '@/features/ai/environment/EnvironmentIn
 import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { Button } from '@/shared/ui/controls/Button'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
+import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -44,30 +48,6 @@ function earliestStatusExpiresAt(cards: EnvironmentCardDTO[]): number | null {
     }
   }
   return earliest
-}
-
-function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; limit?: number }) {
-  const clean = names.map((name) => name.trim()).filter(Boolean)
-  const visible = clean.slice(0, limit)
-  const rest = clean.length - visible.length
-
-  return (
-    <div className="meta-row env-tag-row">
-      <span className="lbl">{label}</span>
-      {clean.length === 0 ? (
-        <span className="val val-empty" />
-      ) : (
-        <div className="meta-chips meta-chips-single" title={clean.join(', ')}>
-          {visible.map((name) => (
-            <span key={name} className="meta-chip">
-              {name}
-            </span>
-          ))}
-          {rest > 0 ? <span className="meta-chip is-more">+{rest}</span> : null}
-        </div>
-      )}
-    </div>
-  )
 }
 
 export function EnvironmentsPage() {
@@ -232,7 +212,7 @@ export function EnvironmentsPage() {
             tone="danger"
           />
         )}
-        <div className="cards-grid environment-list">
+        <ResourceGrid>
           <CreateCard
             title={t('ai.environment.create')}
             subtitle={t('ai.environment.createDescription')}
@@ -252,117 +232,115 @@ export function EnvironmentsPage() {
             const lastSeen = formatTimestamp(environment.lastSeen, locale)
             const lastEvent = environment.lastEvent
             const lastEventTime = lastEvent ? formatTimestamp(lastEvent.time, locale) : ''
+
+            const rows: ResourceCardMetaRow[] = []
+            if (environment.userName) {
+              rows.push([t('ai.environment.userName'), environment.userName])
+            }
+            // 能力清单始终占一行：为空时留空，结构不随数据有无而变。
+            rows.push({ label: t('ai.environment.capabilities'), tags: capabilityIds })
+
             return (
-              <article key={environment.id} className="info-card environment-card">
-                <div className="head">
-                  <div className="head-content">
-                    <div className="icon-box">
-                      <Box aria-hidden="true" />
-                    </div>
-                    <div className="text-content">
-                      <h3 title={environment.name}>{environment.name}</h3>
-                      <p title={environment.id}>
-                        <code>{environment.id}</code>
-                      </p>
-                      {lastSeen ? (
-                        <p title={lastSeen}>
-                          {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
+              <ResourceCard
+                key={environment.id}
+                className="environment-card"
+                icon={<Box aria-hidden="true" />}
+                title={environment.name}
+                subtitle={environment.id}
+                badge={
                   <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>
                     {displayStatus}
                   </span>
-                </div>
-                <div className="meta-block">
-                  {environment.userName ? (
-                    <div className="meta-row">
-                      <span className="lbl">{t('ai.environment.userName')}</span>
-                      <span className="val" title={environment.userName}>
-                        {environment.userName}
+                }
+                meta={rows}
+                actions={
+                  <>
+                    <Button
+                      size="compact"
+                      aria-label={`${t('ai.environment.install')} ${environment.name}`}
+                      onClick={() => setInstallTarget(environment)}
+                    >
+                      <Download aria-hidden="true" />
+                      {t('ai.environment.install')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="compact"
+                      aria-label={`${t('ai.environment.uninstall')} ${environment.name}`}
+                      onClick={() => setUninstallTarget(environment)}
+                    >
+                      {t('ai.environment.uninstall')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="compact"
+                      aria-label={`${t('ai.environment.manage')} ${environment.name}`}
+                      onClick={() => {
+                        setConflict(null)
+                        setManageTarget(environment)
+                      }}
+                    >
+                      <SlidersHorizontal aria-hidden="true" />
+                      {t('ai.environment.manage')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="compact"
+                      aria-label={`${t('ai.environment.rotateToken')} ${environment.name}`}
+                      onClick={() => {
+                        setConflict(null)
+                        setRotateError(null)
+                        setRotateTarget(environment)
+                      }}
+                    >
+                      <KeyRound aria-hidden="true" />
+                      {t('ai.environment.rotateToken')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="compact"
+                      danger
+                      aria-label={`${t('ai.environment.delete')} ${environment.name}`}
+                      onClick={() => {
+                        setConflict(null)
+                        setDeleteError(null)
+                        setDeleteTarget(environment)
+                      }}
+                      disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
+                    >
+                      <Trash2 aria-hidden="true" />
+                      {t('ai.catalog.action.delete')}
+                    </Button>
+                  </>
+                }
+              >
+                {lastSeen ? (
+                  <p className="inline-hint" title={lastSeen}>
+                    {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
+                  </p>
+                ) : null}
+                {lastEvent ? (
+                  <div className={`env-last-event ${environmentEventLevelClass(lastEvent.level)}`}>
+                    <div className="env-last-event-header">
+                      <span
+                        className={`env-event-level ${environmentEventLevelClass(lastEvent.level)}`}
+                      >
+                        {lastEvent.level}
                       </span>
+                      <span className="env-event-type">{lastEvent.type}</span>
+                      {lastEventTime ? (
+                        <span className="env-event-time">{lastEventTime}</span>
+                      ) : null}
                     </div>
-                  ) : null}
-                  <TagRow label={t('ai.environment.capabilities')} names={capabilityIds} />
-                  {lastEvent ? (
-                    <div className={`env-last-event ${environmentEventLevelClass(lastEvent.level)}`}>
-                      <div className="env-last-event-header">
-                        <span
-                          className={`env-event-level ${environmentEventLevelClass(lastEvent.level)}`}
-                        >
-                          {lastEvent.level}
-                        </span>
-                        <span className="env-event-type">{lastEvent.type}</span>
-                        {lastEventTime ? (
-                          <span className="env-event-time">{lastEventTime}</span>
-                        ) : null}
-                      </div>
-                      <p className="env-last-event-message" title={lastEvent.message}>
-                        {lastEvent.message}
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="chat-card-foot split">
-                  <button
-                    type="button"
-                    className="action-enter-btn"
-                    aria-label={`${t('ai.environment.install')} ${environment.name}`}
-                    onClick={() => setInstallTarget(environment)}
-                  >
-                    <Download aria-hidden="true" />
-                    {t('ai.environment.install')}
-                  </button>
-                  <button type="button" className="action-enter-btn"
-                    aria-label={`${t('ai.environment.uninstall')} ${environment.name}`}
-                    onClick={() => setUninstallTarget(environment)}>
-                    {t('ai.environment.uninstall')}
-                  </button>
-                  <button
-                    type="button"
-                    className="action-enter-btn"
-                    aria-label={`${t('ai.environment.manage')} ${environment.name}`}
-                    onClick={() => {
-                      setConflict(null)
-                      setManageTarget(environment)
-                    }}
-                  >
-                    <SlidersHorizontal aria-hidden="true" />
-                    {t('ai.environment.manage')}
-                  </button>
-                  <button
-                    type="button"
-                    className="action-enter-btn"
-                    aria-label={`${t('ai.environment.rotateToken')} ${environment.name}`}
-                    onClick={() => {
-                      setConflict(null)
-                      setRotateError(null)
-                      setRotateTarget(environment)
-                    }}
-                  >
-                    <KeyRound aria-hidden="true" />
-                    {t('ai.environment.rotateToken')}
-                  </button>
-                  <button
-                    type="button"
-                    className="action-enter-btn danger"
-                    aria-label={`${t('ai.environment.delete')} ${environment.name}`}
-                    onClick={() => {
-                      setConflict(null)
-                      setDeleteError(null)
-                      setDeleteTarget(environment)
-                    }}
-                    disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
-                  >
-                    <Trash2 aria-hidden="true" />
-                    {t('ai.catalog.action.delete')}
-                  </button>
-                </div>
-              </article>
+                    <p className="env-last-event-message" title={lastEvent.message}>
+                      {lastEvent.message}
+                    </p>
+                  </div>
+                ) : null}
+              </ResourceCard>
             )
           })}
-        </div>
+        </ResourceGrid>
       </div>
 
       {createModalOpen && (
@@ -375,7 +353,7 @@ export function EnvironmentsPage() {
               <div className="modal-body">
                 <label className="form-group">
                   <FieldLabel required>{t('ai.environment.name')}</FieldLabel>
-                  <input
+                  <TextInput
                     value={createName}
                     onChange={(e) => setCreateName(e.target.value)}
                     placeholder={t('ai.environment.namePlaceholder')}
@@ -387,21 +365,19 @@ export function EnvironmentsPage() {
                 {createError && <p className="field-error">{createError}</p>}
               </div>
               <div className="modal-footer">
-                <button
-                  type="button"
-                  className="ghost-btn"
+                <Button
+                  variant="ghost"
                   onClick={() => setCreateModalOpen(false)}
                   disabled={createMutation.isPending}
                 >
                   {t('shared.cancel')}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="btn-primary"
                   disabled={createMutation.isPending}
                 >
                   {t('shared.confirm')}
-                </button>
+                </Button>
               </div>
             </form>
         </Dialog>
