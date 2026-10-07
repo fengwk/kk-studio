@@ -26,29 +26,26 @@
   box-sizing: border-box;
 }
 
-.canvas-feature button,
-.canvas-feature input,
-.canvas-feature textarea,
-.canvas-feature select {
+/* Canvas 原生按钮/输入基线：菜单、缩放、节点与媒体控件继续复用同一基线，
+   但写成零特异度选择器，使共享 Button/IconButton/TextInput 的类规则可以覆盖，
+   feature 不再用通用 `button` 规则重置共享控件外观。 */
+:where(.canvas-feature) :where(button, input, textarea, select) {
   font: inherit;
 }
 
-.canvas-feature button {
+:where(.canvas-feature) :where(button) {
   border: 0;
   color: inherit;
   background: none;
   cursor: pointer;
 }
 
-.canvas-feature button:focus-visible,
-.canvas-feature input:focus-visible,
-.canvas-feature textarea:focus-visible,
-.canvas-feature select:focus-visible {
+:where(.canvas-feature) :where(button, input, textarea, select):focus-visible {
   outline: 2px solid var(--green);
   outline-offset: 2px;
 }
 
-.canvas-feature button:disabled {
+:where(.canvas-feature) :where(button:disabled) {
   cursor: not-allowed;
   opacity: 0.48;
 }
@@ -68,26 +65,7 @@
 .canvas-feature .library-content {
   width: min(1180px, 100%);
   margin: 0 auto;
-  padding: 72px 32px;
-}
-
-.canvas-feature .eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--green);
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.canvas-feature .status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 14px var(--green);
+  padding: 32px;
 }
 
 .canvas-feature h1,
@@ -97,160 +75,28 @@
 }
 
 .canvas-feature .library-heading {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  margin: 14px 0 44px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
 }
 
 .canvas-feature .library-heading h1 {
-  max-width: 760px;
-  font-size: clamp(38px, 5vw, 64px);
-  line-height: 0.98;
-  letter-spacing: -0.06em;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .canvas-feature .library-heading p {
-  max-width: 560px;
-  margin-top: 20px;
+  max-width: 640px;
   color: var(--fg-muted);
-  font-size: 15px;
-  line-height: 1.65;
-}
-
-.canvas-feature .canvas-library {
-  margin-top: 26px;
-}
-
-.canvas-feature .section-heading {
-  margin-bottom: 16px;
-}
-
-.canvas-feature .section-heading h2 {
-  font-size: 18px;
-}
-
-.canvas-feature .project-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.canvas-feature .project-card {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  text-align: left;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  transition: 160ms ease;
-}
-
-.canvas-feature .project-card:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-raised);
-  transform: translateY(-2px);
-}
-
-.canvas-feature .project-card strong,
-.canvas-feature .project-card small {
-  display: block;
-}
-
-.canvas-feature .project-card strong {
-  margin: 12px 2px 5px;
-  overflow: hidden;
   font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.6;
 }
 
-.canvas-feature .project-card small {
-  margin: 0 2px;
-  color: var(--fg-muted);
-  font-size: 11px;
-}
-
-.canvas-feature .project-preview {
-  position: relative;
-  height: 112px;
-  overflow: hidden;
-  border-radius: 8px;
-  background:
-    radial-gradient(circle at 25% 45%, var(--green-border), transparent 18%),
-    linear-gradient(135deg, var(--surface-active), var(--stage-dot));
-}
-
-.canvas-feature .project-preview i {
-  position: absolute;
-  height: 12px;
-  border-radius: 4px;
-  background: var(--fg-muted);
-}
-
-.canvas-feature .project-preview i:nth-child(1) {
-  top: 24px;
-  left: 24px;
-  width: 42%;
-}
-
-.canvas-feature .project-preview i:nth-child(2) {
-  top: 48px;
-  left: 36%;
-  width: 48%;
-  background: var(--green-border);
-}
-
-.canvas-feature .project-preview i:nth-child(3) {
-  top: 74px;
-  left: 18%;
-  width: 54%;
-}
-
-.canvas-feature .create-card {
-  border-style: dashed;
-}
-
-.canvas-feature .create-preview {
+.canvas-feature .library-load-error {
   display: grid;
-  place-items: center;
-  background: var(--surface-soft);
-}
-
-.canvas-feature .create-plus {
-  color: var(--green);
-  font-size: 44px;
-}
-
-.canvas-feature .project-footer {
-  display: flex;
-  justify-content: space-between;
-  margin: 13px 2px 2px;
-  color: var(--fg-dim);
-  font-size: 10px;
-}
-
-.canvas-feature .state-block,
-.canvas-feature .canvas-empty-state {
-  margin: 16px 0;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  color: var(--fg-muted);
-  background: var(--surface);
-}
-
-.canvas-feature .state-block.danger,
-.canvas-feature .canvas-editor-state.danger {
-  color: var(--danger, #ff8b8b);
-}
-
-.canvas-feature .state-block button,
-.canvas-feature .canvas-editor-state button {
-  margin-left: 12px;
-  padding: 6px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .canvas-feature.canvas-editor-active {
@@ -313,8 +159,22 @@
   display: grid;
   min-height: 360px;
   place-content: center;
+  justify-items: center;
   gap: 12px;
+  padding: 24px;
   text-align: center;
+}
+
+.canvas-feature .canvas-editor-state .state-block,
+.canvas-feature .canvas-editor-state > p {
+  max-width: min(560px, 100%);
+  text-align: left;
+}
+
+.canvas-feature .canvas-editor-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
 }
 
 .canvas-feature .canvas-spinner {
@@ -723,7 +583,7 @@
   bottom: 2px;
   left: 12px;
   overflow: hidden;
-  color: var(--danger, #ff8b8b);
+  color: var(--danger);
   font-size: 10px;
   text-align: right;
   text-overflow: ellipsis;
@@ -932,7 +792,7 @@
 }
 
 .canvas-feature .generation-node-status.failed {
-  color: var(--danger, #ff8b8b);
+  color: var(--danger);
   background: var(--danger-soft);
 }
 
@@ -942,19 +802,7 @@
   gap: 4px;
 }
 
-.canvas-feature .generation-panel-actions button {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: 7px;
-  color: var(--fg-muted);
-}
-
-.canvas-feature .generation-panel-actions button:hover {
-  color: var(--fg);
-  background: var(--stage-dot);
-}
+/* 头部展开/关闭是普通图标动作：使用共享 IconButton（含 28px 紧凑点击区）。 */
 
 .canvas-feature .generation-reference-row {
   display: flex;
@@ -1241,16 +1089,16 @@
 }
 
 .canvas-feature .generation-run-feedback.failed {
-  color: var(--danger, #ff8b8b);
+  color: var(--danger);
 }
 
 .canvas-feature .generation-local-pending-error {
   margin-top: 8px;
   padding: 8px 10px;
-  border: 1px solid var(--danger, #ff8b8b);
+  border: 1px solid var(--danger);
   border-radius: 6px;
-  background: var(--danger-subtle, rgba(239, 68, 68, 0.12));
-  color: var(--danger, #ff8b8b);
+  background: var(--danger-soft);
+  color: var(--danger);
   font-size: 11px;
 }
 
@@ -1266,32 +1114,17 @@
   color: var(--fg);
 }
 
-.canvas-feature .generation-discard-btn {
-  padding: 3px 8px;
-  border: 1px solid var(--danger, #ff8b8b);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--danger, #ff8b8b);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.canvas-feature .generation-discard-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .canvas-feature .generation-discard-confirm {
   margin-top: 6px;
   padding: 6px 8px;
-  border: 1px solid var(--line-strong, #444);
+  border: 1px solid var(--line-strong);
   border-radius: 4px;
-  background: var(--bg-surface, #242424);
+  background: var(--surface);
 }
 
 .canvas-feature .generation-discard-confirm p {
   margin: 0 0 6px 0;
-  color: var(--warning, #faad14);
+  color: var(--warning);
   font-size: 11px;
 }
 
@@ -1301,11 +1134,76 @@
   gap: 8px;
 }
 
-.canvas-feature .generation-discard-confirm-actions button {
-  padding: 2px 8px;
-  border-radius: 3px;
+/* 未定义类与内联样式的替代：JSON 编辑区与 UNKNOWN 核查区使用已定义的作用域布局。 */
+.canvas-feature .generation-raw-editor {
+  display: grid;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.canvas-feature .generation-json-toggle {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.canvas-feature .generation-json-textarea {
+  width: 100%;
+  min-height: 120px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.canvas-feature .generation-json-error {
+  margin-top: 2px;
+  color: var(--danger);
   font-size: 11px;
-  cursor: pointer;
+}
+
+.canvas-feature .generation-unknown-resolution {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+}
+
+.canvas-feature .generation-unknown-title {
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.canvas-feature .generation-unknown-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.canvas-feature .generation-unknown-controls .generation-verify-note {
+  flex: 1 1 160px;
+}
+
+.canvas-feature .generation-outputs-badge-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.canvas-feature .generation-output-badge {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: var(--surface-raised);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .canvas-feature .canvas-text-editor {
@@ -1350,22 +1248,6 @@
   white-space: nowrap;
 }
 
-.canvas-feature .canvas-text-editor-close {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  place-items: center;
-  border-radius: 6px;
-  color: var(--fg-dim);
-  font-size: 10px;
-}
-
-.canvas-feature .canvas-text-editor-close:hover {
-  color: var(--fg);
-  background: var(--surface-active);
-}
-
 .canvas-feature .canvas-text-editor-body {
   display: grid;
   gap: 8px;
@@ -1378,24 +1260,10 @@
   font-size: 10px;
 }
 
-.canvas-feature .canvas-text-editor input,
-.canvas-feature .canvas-text-editor textarea {
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  color: var(--fg);
-  background: var(--stage-bg);
-}
-
-.canvas-feature .canvas-text-editor input {
-  height: 32px;
-  padding: 0 9px;
-}
-
-.canvas-feature .canvas-text-editor textarea {
+/* 名称与内容复用共享 TextInput/TextArea；这里只保留 Markdown 内容区的等宽编辑布局。 */
+.canvas-feature .canvas-text-editor-markdown {
   min-height: 200px;
-  padding: 9px;
-  resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -1412,20 +1280,6 @@
   gap: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
-}
-
-.canvas-feature .canvas-text-editor-footer button {
-  min-height: 28px;
-  padding: 0 12px;
-  border-radius: 7px;
-  color: var(--fg-muted);
-  background: var(--surface-active);
-  font-size: 11px;
-}
-
-.canvas-feature .canvas-text-editor-footer .primary {
-  color: var(--green-on);
-  background: var(--green);
 }
 
 .canvas-feature .canvas-context-menu {
@@ -1461,7 +1315,7 @@
 }
 
 .canvas-feature .canvas-context-menu [role="menuitem"].danger {
-  color: var(--danger, #ff8b8b);
+  color: var(--danger);
 }
 
 .canvas-feature .canvas-context-menu [role="menuitem"] svg {
@@ -1490,42 +1344,11 @@
   font-size: 10px;
 }
 
-.canvas-feature .context-menu-rename input {
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--green-border);
-  border-radius: 7px;
-  outline: 0;
-  color: var(--fg);
-  background: var(--surface-active);
-  font-size: 12px;
-}
-
 .canvas-feature .context-menu-rename > div,
 .canvas-feature .context-menu-confirm > div {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-}
-
-.canvas-feature .context-menu-rename button,
-.canvas-feature .context-menu-confirm button {
-  min-height: 26px;
-  padding: 0 9px;
-  border-radius: 6px;
-  color: var(--fg-muted);
-  background: var(--surface-active);
-  font-size: 10px;
-}
-
-.canvas-feature .context-menu-rename .context-menu-save {
-  color: var(--green-on);
-  background: var(--green);
-}
-
-.canvas-feature .context-menu-confirm button.danger {
-  color: var(--danger, #ff8b8b);
-  background: var(--danger-soft);
 }
 
 .canvas-feature .context-menu-confirm > strong {
@@ -1544,7 +1367,7 @@
 
 .canvas-feature .context-menu-error {
   padding: 2px 9px;
-  color: var(--danger, #ff8b8b);
+  color: var(--danger);
   font-size: 10px;
 }
 
@@ -1737,10 +1560,13 @@
   left: 50%;
   z-index: 59;
   max-width: min(680px, calc(100% - 24px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 8px 12px;
-  border: 1px solid var(--danger, #ff4d4f);
+  border: 1px solid var(--danger);
   border-radius: 8px;
-  color: var(--danger, #ff4d4f);
+  color: var(--danger);
   background: var(--surface);
   transform: translateX(-50%);
 }
@@ -1750,20 +1576,6 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-
-.canvas-feature .canvas-conflict-actions button {
-  padding: 4px 8px;
-  font-size: 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  border: 1px solid currentColor;
-  background: transparent;
-  color: inherit;
-}
-
-.canvas-feature .canvas-conflict-actions button:hover {
-  background: rgba(255, 255, 255, 0.1);
 }
 
 @keyframes canvas-spin {

@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { useI18n } from '@/shared/i18n'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 
 const CanvasPage = lazy(async () => {
   const module = await import('@/features/canvas/CanvasPage')
@@ -13,7 +14,13 @@ function CanvasRoutePage({ children }: ExtensionComponentProps) {
   const { t } = useI18n()
   return (
     <>
-      <Suspense fallback={<div className="state-block" role="status">{t('canvas.loading')}</div>}>
+      <Suspense
+        fallback={
+          <div role="status">
+            <StateBlock title={t('canvas.loading')} />
+          </div>
+        }
+      >
         <CanvasPage />
       </Suspense>
       {children}

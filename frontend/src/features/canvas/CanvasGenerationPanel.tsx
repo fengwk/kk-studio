@@ -1,3 +1,4 @@
+import { MoveHorizontal, X } from 'lucide-react'
 import {
   useEffect,
   useLayoutEffect,
@@ -23,20 +24,18 @@ import { CanvasResourceThumbnail } from '@/features/canvas/nodes/resources/Canva
 import type { CanvasFunctionConfig, StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import { inspectLocalPendingRun } from '@/features/canvas/function-run'
+import { Button } from '@/shared/ui/controls/Button'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
-
-const UNKNOWN_RESOLUTION_OPTIONS: SelectOption[] = [
-  { value: 'RESUME', label: 'RESUME (继续运行)' },
-  { value: 'FAILED', label: 'FAILED (标记失败)' },
-  { value: 'CANCELLED', label: 'CANCELLED (取消运行)' },
-]
 
 export interface CanvasGenerationPanelAnchor {
   node: CanvasTransformDTO
@@ -268,6 +267,11 @@ export function CanvasGenerationPanel({
     disabled: item.available === false,
   }))
   const active = node.run?.status === 'READY' || node.run?.status === 'RUNNING'
+  const unknownResolutionOptions: SelectOption[] = [
+    { value: 'RESUME', label: t('canvas.generation.resolution.resume') },
+    { value: 'FAILED', label: t('canvas.generation.resolution.failed') },
+    { value: 'CANCELLED', label: t('canvas.generation.resolution.cancelled') },
+  ]
 
   function updateConfig(next: CanvasFunctionConfig, nextModelKey = modelKey) {
     setConfig(next)
@@ -376,37 +380,36 @@ export function CanvasGenerationPanel({
           </span>
         </div>
         <div className="generation-panel-actions">
-          <button
-            type="button"
-            aria-label={t(expanded ? 'canvas.generation.collapse' : 'canvas.generation.expand')}
+          <IconButton
+            label={t(expanded ? 'canvas.generation.collapse' : 'canvas.generation.expand')}
+            size="compact"
             aria-expanded={expanded}
             onClick={() => setExpanded((current) => !current)}
           >
-            ↔
-          </button>
-          <button
+            <MoveHorizontal aria-hidden="true" />
+          </IconButton>
+          <IconButton
             className="close-panel"
-            type="button"
-            aria-label={t('canvas.generation.close')}
+            label={t('canvas.generation.close')}
+            size="compact"
             onClick={() => runtime.setSelection([])}
           >
-            ×
-          </button>
+            <X aria-hidden="true" />
+          </IconButton>
         </div>
       </div>
 
       {config.rawArgs ? (
-        <div className="generation-raw-editor" style={{ padding: '8px 12px' }}>
+        <div className="generation-raw-editor">
           {config.rawError ? (
-            <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 12, marginBottom: 8 }}>
+            <div role="alert" className="generation-json-error">
               {config.rawError}
             </div>
           ) : null}
-          <span className="generation-prompt-label" style={{ marginBottom: 4, display: 'block' }}>完整 JSON 配置</span>
-          <textarea
-            aria-label="参数 JSON"
+          <span className="generation-prompt-label">{t('canvas.generation.jsonConfiguration')}</span>
+          <TextArea
+            aria-label={t('canvas.generation.jsonArgsAria')}
             className="generation-json-textarea"
-            style={{ width: '100%', minHeight: 180, fontFamily: 'monospace', fontSize: 12, padding: 8 }}
             value={jsonArgsText}
             onChange={(e) => {
               const text = e.target.value
@@ -422,15 +425,15 @@ export function CanvasGenerationPanel({
                     rawError: undefined,
                   })
                 } else {
-                  setJsonError('参数必须为 JSON 对象')
+                  setJsonError(t('canvas.generation.jsonObjectRequired'))
                 }
               } catch {
-                setJsonError('JSON 语法错误')
+                setJsonError(t('canvas.generation.jsonSyntaxError'))
               }
             }}
           />
           {jsonError ? (
-            <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 11, marginTop: 4 }}>
+            <div role="alert" className="generation-json-error">
               {jsonError}
             </div>
           ) : null}
@@ -461,7 +464,7 @@ export function CanvasGenerationPanel({
           ) : null}
 
           {config.references.length > 0 ? (
-            <div className="generation-attached-references" aria-label="已添加参考">
+            <div className="generation-attached-references" aria-label={t('canvas.generation.attachedReferencesAria')}>
               {config.references.map((ref) => {
                 const candidate = candidateByKey.get(referenceKey(ref.nodeId, ref.index))
                 const label = candidate?.label ?? `@${ref.nodeId}_${ref.index}`
@@ -500,7 +503,7 @@ export function CanvasGenerationPanel({
 
       <div className="generation-footer">
         {activeModel.outputs && activeModel.outputs.length > 0 ? (
-          <div className="generation-outputs-badge-list" aria-label="函数预期输出">
+          <div className="generation-outputs-badge-list" aria-label={t('canvas.generation.outputsAria')}>
             {activeModel.outputs.map((out, idx) => (
               <span key={idx} className="generation-output-badge" title={out.name ? `${out.name} (${out.kind})` : out.kind}>
                 {out.kind}{out.name ? `: ${out.name}` : ''}
@@ -569,11 +572,10 @@ export function CanvasGenerationPanel({
           </div>
         )) : null}
         {!config.rawArgs ? (
-          <div className="generation-json-toggle" style={{ marginTop: 8 }}>
-            <button
-              type="button"
-              className="generation-subtle-btn"
-              style={{ fontSize: 12, padding: '2px 6px', cursor: 'pointer' }}
+          <div className="generation-json-toggle">
+            <Button
+              variant="inline"
+              size="compact"
               onClick={() => {
                 if (!showJsonArgs) {
                   // 切换打开时从当前 config.parameters 生成，确保展示表单已改最新值
@@ -588,14 +590,15 @@ export function CanvasGenerationPanel({
                 }
               }}
             >
-              {showJsonArgs ? '收起参数 JSON' : '编辑参数 JSON'}
-            </button>
+              {showJsonArgs
+                ? t('canvas.generation.jsonCollapse')
+                : t('canvas.generation.jsonEdit')}
+            </Button>
             {showJsonArgs ? (
               <>
-                <textarea
-                  aria-label="参数 JSON"
+                <TextArea
+                  aria-label={t('canvas.generation.jsonArgsAria')}
                   className="generation-json-textarea"
-                  style={{ width: '100%', minHeight: 90, marginTop: 6, fontFamily: 'monospace', fontSize: 12 }}
                   value={jsonArgsText}
                   onChange={(e) => {
                     const text = e.target.value
@@ -610,16 +613,16 @@ export function CanvasGenerationPanel({
                           parameters: parsed,
                         })
                       } else {
-                        setJsonError('参数必须为 JSON 对象')
+                        setJsonError(t('canvas.generation.jsonObjectRequired'))
                       }
                     } catch {
                       // 非法 JSON draft 保留在 textarea 中供用户继续修改，但绝不调用 updateConfig 覆盖有效表单值
-                      setJsonError('JSON 语法错误')
+                      setJsonError(t('canvas.generation.jsonSyntaxError'))
                     }
                   }}
                 />
                 {jsonError ? (
-                  <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 11, marginTop: 2 }}>
+                  <div role="alert" className="generation-json-error">
                     {jsonError}
                   </div>
                 ) : null}
@@ -628,28 +631,30 @@ export function CanvasGenerationPanel({
           </div>
         ) : null}
         {node.run?.status === 'UNKNOWN' ? (
-          <div className="generation-unknown-resolution" role="region" aria-label="待核查确认" style={{ marginTop: 10, padding: 8, border: '1px solid var(--orange, #fa8c16)', borderRadius: 4 }}>
-            <div style={{ fontWeight: 600, color: 'var(--orange, #fa8c16)', marginBottom: 6 }}>
-              待人工核查确认 (UNKNOWN)
+          <div
+            className="generation-unknown-resolution"
+            role="region"
+            aria-label={t('canvas.generation.unknownRegionAria')}
+          >
+            <div className="generation-unknown-title">
+              {t('canvas.generation.unknownTitle')}
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="generation-unknown-controls">
               <Select
-                aria-label="核查决定"
+                aria-label={t('canvas.generation.verifyDecision')}
                 value={unknownResolution}
-                options={UNKNOWN_RESOLUTION_OPTIONS}
+                options={unknownResolutionOptions}
                 onChange={(next) => setUnknownResolution(next as 'RESUME' | 'FAILED' | 'CANCELLED')}
               />
-              <input
-                type="text"
-                aria-label="核查说明"
-                placeholder="输入核查记录文本（必填）"
+              <TextInput
+                className="generation-verify-note"
+                aria-label={t('canvas.generation.verifyNote')}
+                placeholder={t('canvas.generation.verifyNotePlaceholder')}
                 value={verificationText}
                 onChange={(e) => setVerificationText(e.target.value)}
-                style={{ flex: 1, minWidth: 160 }}
               />
-              <button
-                type="button"
-                className="generation-resolve-btn"
+              <Button
+                size="compact"
                 disabled={!verificationText.trim()}
                 onClick={() => {
                   if (node.run?.requestId && verificationText.trim()) {
@@ -662,8 +667,8 @@ export function CanvasGenerationPanel({
                   }
                 }}
               >
-                提交核查
-              </button>
+                {t('canvas.generation.verifySubmit')}
+              </Button>
             </div>
           </div>
         ) : null}
@@ -673,25 +678,26 @@ export function CanvasGenerationPanel({
             role="alert"
             data-testid="local-pending-error"
           >
-            <strong>未决运行记录异常</strong>
+            <strong>{t('canvas.generation.localPendingTitle')}</strong>
             <p>{localPendingState.message}</p>
             {confirmingDiscard ? (
               <div
                 className="generation-discard-confirm"
                 role="alertdialog"
-                aria-label="确认放弃未决记录"
+                aria-label={t('canvas.generation.discardConfirmAria')}
               >
-                <p>这不会撤销服务端运行，核实后再继续</p>
+                <p>{t('canvas.generation.discardConfirmText')}</p>
                 <div className="generation-discard-confirm-actions">
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="compact"
                     onClick={() => setConfirmingDiscard(false)}
                   >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    className="danger"
+                    {t('shared.cancel')}
+                  </Button>
+                  <Button
+                    size="compact"
+                    danger
                     data-testid="confirm-discard-btn"
                     onClick={() => {
                       if (localPendingState.raw !== null) {
@@ -703,20 +709,21 @@ export function CanvasGenerationPanel({
                       }
                     }}
                   >
-                    确认放弃
-                  </button>
+                    {t('canvas.generation.discardConfirm')}
+                  </Button>
                 </div>
               </div>
             ) : (
-              <button
-                type="button"
-                className="generation-discard-btn"
+              <Button
+                variant="inline"
+                size="compact"
+                danger
                 data-testid="discard-pending-btn"
                 disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
                 onClick={() => setConfirmingDiscard(true)}
               >
-                放弃本地未决记录
-              </button>
+                {t('canvas.generation.discardPending')}
+              </Button>
             )}
           </div>
         ) : null}
@@ -776,7 +783,7 @@ function runDisplayLabel(
   stage: string,
 ): string {
   if (status === 'UNKNOWN') {
-    return stage && stage !== status ? stage : '待核查确认'
+    return stage && stage !== status ? stage : t('canvas.generation.unknownStage')
   }
   return stage && stage !== status ? stage : t(runStatusKey(status))
 }
