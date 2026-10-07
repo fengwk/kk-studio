@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
@@ -124,13 +127,100 @@ class ProjectSnapshotAssemblerTest {
     assertEquals("2", snapshot.getIssues().get(1).getIssue().getNumber());
     assertNull(snapshot.getIssues().get(1).getCurrentOrLatestRun());
 
-    // 验证 ProjectSnapshotDTO 权威聚合只包含 project 与 issues
+    assertEquals(List.of("INIT", "WORK"), snapshot.getReferencedStateCodes());
+    // 验证快照的权威字段，防止引入额外内容投影。
     assertEquals(
-        Set.of("project", "issues"),
+        Set.of("project", "issues", "referencedStateCodes"),
         Arrays.stream(ProjectSnapshotDTO.class.getDeclaredFields())
             .filter(f -> !Modifier.isStatic(f.getModifiers()))
             .map(Field::getName)
             .collect(Collectors.toSet()));
+  }
+
+  @Test
+  void testReferencedStatesIncludeArchivedAndBlockedWithoutArchivedDetails() {
+    // 两类 Issue 的状态与恢复目标必须合并；归档内容不映射，也不读取其 Run 或 Thread。
+    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
+    Issue active = referenceIssue(projectId, "BLOCKED", "WORK", false);
+    Issue activeInit = referenceIssue(projectId, "INIT", null, false);
+    Issue archived = referenceIssue(projectId, "BLOCKED", "REVIEW", true);
+    Issue archivedDone = referenceIssue(projectId, "DONE", null, true);
+    Issue archivedDuplicate = referenceIssue(projectId, "BLOCKED", "WORK", true);
+    when(issueService.listIssues(projectId, false)).thenReturn(List.of(active, activeInit));
+    when(issueService.listIssues(projectId, true))
+        .thenReturn(List.of(archivedDone, archivedDuplicate, archived));
+    when(issueRunService.listRuns(active.getId())).thenReturn(List.of());
+    when(issueRunService.listRuns(activeInit.getId())).thenReturn(List.of());
+
+    ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
+
+    assertEquals(
+        List.of("BLOCKED", "DONE", "INIT", "REVIEW", "WORK"), snapshot.getReferencedStateCodes());
+    assertEquals(
+        Set.of(active.getId().toString(), activeInit.getId().toString()),
+        snapshot.getIssues().stream()
+            .map(item -> item.getIssue().getId())
+            .collect(Collectors.toSet()));
+    var json = ObjectMapperHolder.getInstance().valueToTree(snapshot);
+    assertEquals(
+        ObjectMapperHolder.getInstance()
+            .valueToTree(List.of("BLOCKED", "DONE", "INIT", "REVIEW", "WORK")),
+        json.get("referencedStateCodes"));
+    verify(issueRunService).listRuns(active.getId());
+    verify(issueRunService).listRuns(activeInit.getId());
+    verifyNoMoreInteractions(issueRunService);
+    verify(issueService).listIssues(projectId, false);
+    verify(issueService).listIssues(projectId, true);
+    verifyNoMoreInteractions(issueService);
+  }
+
+  @Test
+  void testEmptyProjectProvidesEmptyReferenceArray() {
+    // 没有 Issue 时仍提供真实非 null 数组，而非缺失字段的兼容默认值。
+    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
+    when(issueService.listIssues(projectId, false)).thenReturn(List.of());
+    when(issueService.listIssues(projectId, true)).thenReturn(List.of());
+
+    ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
+
+    assertEquals(List.of(), snapshot.getReferencedStateCodes());
+    assertEquals(List.of(), snapshot.getIssues());
+    var json = ObjectMapperHolder.getInstance().valueToTree(snapshot);
+    assertTrue(json.get("referencedStateCodes").isArray());
+    assertEquals(0, json.get("referencedStateCodes").size());
+    verifyNoInteractions(issueRunService);
+  }
+
+  @Test
+  void testFailClosedOnForeignArchivedIssue() {
+    // 归档查询也必须验证项目归属，且失败时不得读取任何 Run。
+    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
+    when(issueService.listIssues(projectId, false))
+        .thenReturn(List.of(referenceIssue(projectId, "INIT", null, false)));
+    when(issueService.listIssues(projectId, true))
+        .thenReturn(List.of(referenceIssue(UUID.randomUUID(), "BLOCKED", "WORK", true)));
+
+    IllegalStateException ex =
+        assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
+
+    assertTrue(ex.getMessage().contains("Foreign issue"));
+    verifyNoInteractions(issueRunService);
+  }
+
+  private Issue referenceIssue(
+      UUID ownerProjectId, String state, String blockedFromState, boolean archived) {
+    return Issue.builder()
+        .id(UUID.randomUUID())
+        .projectId(ownerProjectId)
+        .number(1L)
+        .title("Issue")
+        .state(state)
+        .blockedFromState(blockedFromState)
+        .blockReason(blockedFromState == null ? null : "Blocked")
+        .archivedAt(archived ? now : null)
+        .createdAt(now)
+        .updatedAt(now)
+        .build();
   }
 
   @Test
