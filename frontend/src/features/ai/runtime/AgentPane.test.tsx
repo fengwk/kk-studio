@@ -2522,6 +2522,10 @@ function activeToolInvocation(): ToolInvocationDTO {
     toolName: 'read',
     rendererKey: 'tool',
     environmentId: null,
+    requiredEnvironmentId: null,
+    waitingForEnvironment: false,
+    requiredEnvironmentName: null,
+    environmentWaitFreshnessAt: null,
     argumentsJson: '{}',
     approvalJson: null,
     resultJson: null,
@@ -4537,6 +4541,52 @@ describe('AgentPane root control mounting', () => {
     }))
   }
 
+  function pendingInvocation(): ToolInvocationDTO {
+    return {
+      id: 'waiting-tool', modelInvocationId: 'model-1', assistantEntryId: 'assistant-1', callIndex: 0,
+      status: 'READY', attempt: 1, toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash',
+      environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
+      requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
+      argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
+      createTime: null, updateTime: null,
+    }
+  }
+
+  it.each([
+    ['READY', false, '排队中'],
+    ['READY', true, '等待环境 archlinux 上线'],
+    ['WAITING_APPROVAL', false, '等待审批'],
+    ['WAITING_INPUT', false, '等待输入'],
+    ['DISPATCHING', false, '分派中'],
+  ])('working 展示 %s 的真实等待而不是通用执行中', async (status, waiting, label) => {
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(
+      thread({ status: 'TOOL_READY', processing: true }),
+      { toolInvocations: [{
+        ...pendingInvocation(), status, waitingForEnvironment: waiting,
+        requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux',
+      }] },
+    ))
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent(label))
+    expect(document.querySelector('.thread-working')).not.toHaveTextContent('执行中')
+    expect(document.querySelector('.thread-status-footer')).not.toHaveTextContent('等待环境')
+  })
+
+  it('真实 RUNNING sibling 不被另一个环境等待覆盖为整条 Thread 等待', async () => {
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(
+      thread({ status: 'TOOL_RUNNING', processing: true }),
+      { toolInvocations: [
+        { ...pendingInvocation(), status: 'READY', waitingForEnvironment: true,
+          requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux' },
+        { ...pendingInvocation(), id: 'running-sibling', status: 'RUNNING' },
+      ] },
+    ))
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent('执行中'))
+  })
+
   it('never mounts root control for an unconfirmed bound target', async () => {
     // 绑定目标的身份还没确认时可能是子代理：不接受任何草稿、上传与人工执行 Hook。
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: CHILD_THREAD_ID })
@@ -4726,8 +4776,8 @@ describe('AgentPane root control mounting', () => {
     await waitFor(() => expect(composer).toHaveTextContent('排队中的输入'))
   })
 
-  it('keeps the raw thread id as the interaction source when the tree has no entry for it', async () => {
-    // 来源标识来自执行树，但绝不因此丢掉来源身份：树里查不到就显式展示原始 Thread ID。
+  it('keeps the original source target without exposing a UUID when its tree name is missing', async () => {
+    // 无来源名称仍保留原始跳转身份，不借用根名称，也不向用户展示裸 UUID。
     const unknownSourceId = '44444444-5555-4666-8777-888888888888'
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
@@ -4741,8 +4791,9 @@ describe('AgentPane root control mounting', () => {
 
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
-    const source = await screen.findByRole('link', { name: /44444444-5555-4666-8777-888888888888/ })
-    expect(source).toHaveAttribute('title', unknownSourceId)
+    const source = await screen.findByRole('link', { name: '查看 subagent 执行' })
+    expect(source).toHaveAttribute('title', '查看 subagent 执行')
+    expect(source).not.toHaveTextContent(unknownSourceId)
     expect(source).toHaveAttribute('href', `/threads/${unknownSourceId}`)
   })
 

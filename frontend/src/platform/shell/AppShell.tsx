@@ -11,7 +11,7 @@ import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useInteractionFreshnessRecheck } from '@/shared/lib/useInteractionFreshnessRecheck'
+import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
 
 const PENDING_INTERACTIONS_LIMIT = 50
 
@@ -30,7 +30,7 @@ function usePendingInteractionsCount(): number {
     queryFn: () => interactionService.listInteractions(null, null, PENDING_INTERACTIONS_LIMIT),
     staleTime: 5000,
   })
-  useInteractionFreshnessRecheck(data?.freshnessAt)
+  useReadModelFreshnessRecheck(queryKeys.interactions.all, data?.freshnessAt)
   useEffect(() => {
     const invalidate = () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all })

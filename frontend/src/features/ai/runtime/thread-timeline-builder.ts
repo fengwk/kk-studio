@@ -407,8 +407,15 @@ function projectInvocationOverlays(
       callIdentity: toolCallIdentity(invocation.assistantEntryId, invocation.callIndex),
       // 终态以 invocation 自己的 resultJson/errorJson 为准。call.status=done 只表示
       // arguments 已完成，不能在 durable result 或 invocation 结果到达前当成成功。
-      status: terminalResult == null ? 'streaming' : (failed ? 'error' : 'done'),
+      status: terminalResult == null
+        ? (invocation.status === 'RUNNING' ? 'streaming' : 'done')
+        : (failed ? 'error' : 'done'),
       invocationId: invocation.id,
+      invocationStatus: invocation.status,
+      requiredEnvironmentId: invocation.requiredEnvironmentId,
+      waitingForEnvironment: invocation.waitingForEnvironment,
+      requiredEnvironmentName: invocation.requiredEnvironmentName,
+      environmentWaitFreshnessAt: invocation.environmentWaitFreshnessAt,
       // environmentId 是环境路由身份，绝不能当作审批目标 Thread。
       threadId: threadId || undefined,
       // 终态结果已经可见时，旧 partial 不能再盖过正文和错误。

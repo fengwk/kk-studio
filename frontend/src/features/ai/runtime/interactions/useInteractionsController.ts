@@ -4,7 +4,7 @@ import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { interactionService } from '@/shared/api/interaction-service'
 import { readInteractionsChangedRoot, useApplicationEvents } from '@/shared/app-events'
 import { interactionIdentity } from '@/shared/lib/interactions'
-import { useInteractionFreshnessRecheck } from '@/shared/lib/useInteractionFreshnessRecheck'
+import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export interface UseInteractionsControllerResult {
@@ -101,7 +101,7 @@ export function useInteractionsController(
   // 过滤范围派生：累积状态属于旧根时一律不外泄——首帧直接暴露新根自己的第一页
   // （缓存命中时不会出现空帧），分页游标与加载状态同样只反映新根。
   const inScope = accumulatedScope === rootThreadId
-  useInteractionFreshnessRecheck(initialPage?.freshnessAt)
+  useReadModelFreshnessRecheck(queryKeys.interactions.all, initialPage?.freshnessAt)
   const scopedItems = inScope ? accumulatedItems : initialPage?.items ?? []
   const scopedCursor = inScope ? nextCursor : initialPage?.nextCursor ?? null
   const scopedFetchingMore = inScope && isFetchingMore

@@ -437,8 +437,8 @@ test.describe('narrow pane header', () => {
 
     // 无横向溢出：详情自身与整个对话流都不产生水平滚动。
     const detailOverflow = await detail.evaluate((element) => ({
-      scrollWidth: element.scrollWidth,
-      clientWidth: element.clientWidth,
+      scrollWidth: element.parentElement!.scrollWidth,
+      clientWidth: element.parentElement!.clientWidth,
     }))
     expect(detailOverflow.scrollWidth).toBeLessThanOrEqual(detailOverflow.clientWidth + 1)
     const overflow = await body.evaluate((element) => ({
@@ -481,10 +481,45 @@ test.describe('narrow pane header', () => {
       (bodyDetailBox?.x ?? 0) + (bodyDetailBox?.width ?? 0) - 1,
     )
     const detailScroll = await bodyDetail.evaluate((element) => ({
-      scrollWidth: element.scrollWidth,
-      clientWidth: element.clientWidth,
+      scrollWidth: element.parentElement!.scrollWidth,
+      clientWidth: element.parentElement!.clientWidth,
     }))
     expect(detailScroll.scrollWidth).toBeLessThanOrEqual(detailScroll.clientWidth + 1)
   })
+
+  test('long paths start after the tool name on the same line and wrap without losing tail icons', async ({ page }) => {
+    await page.evaluate(() => window.toolCardHarness.longPath())
+    const card = bashCard(page)
+    const metrics = await card.evaluate((element) => {
+      const name = element.querySelector('.thread-tool-name')!
+      const detail = element.querySelector('.thread-tool-summary-detail')!
+      const range = document.createRange()
+      range.setStart(detail.firstChild!, 0)
+      range.setEnd(detail.firstChild!, 1)
+      const first = range.getBoundingClientRect()
+      const nameBox = name.getBoundingClientRect()
+      const tail = element.querySelector('.thread-tool-tail')!.getBoundingClientRect()
+      const summary = element.querySelector('.thread-tool-summary')!.getBoundingClientRect()
+      return { firstY: first.y, nameY: nameBox.y, firstX: first.x, nameEnd: nameBox.right,
+        summaryEnd: summary.right, tailX: tail.x,
+        scroll: element.scrollWidth, width: element.clientWidth }
+    })
+    expect(Math.abs(metrics.firstY - metrics.nameY)).toBeLessThan(2)
+    expect(metrics.firstX).toBeGreaterThan(metrics.nameEnd)
+    expect(metrics.tailX).toBeGreaterThanOrEqual(metrics.summaryEnd)
+    expect(metrics.scroll).toBeLessThanOrEqual(metrics.width + 1)
+    await expect(card.locator('.thread-tool-tail svg')).toHaveCount(2)
+    await expect(card.locator('.thread-tool-toggle')).toBeVisible()
+    await expect(card.locator('.thread-tool-summary-detail')).toContainText('end.txt')
+  })
+})
+
+test('all durable states retain distinct labels with exactly one actual RUNNING spinner', async ({ page }) => {
+  await page.evaluate(() => window.toolCardHarness.durableStates())
+  const states = ['queued', 'approval', 'input', 'dispatching', 'running', 'succeeded', 'failed', 'cancelled', 'unknown']
+  for (const state of states) {
+    await expect(page.locator(`[data-invocation-state="${state}"]`)).toHaveCount(1)
+  }
+  await expect(page.locator('.thread-tool-tail .animate-spin')).toHaveCount(1)
 })
 

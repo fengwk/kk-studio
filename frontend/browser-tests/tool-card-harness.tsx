@@ -297,6 +297,28 @@ export function ToolCardHarnessApp() {
 }
 
 const toolCardHarness = {
+  longPath() {
+    publish({
+      messages: [{
+        ...bashTool('long-path', 1, false),
+        toolName: 'read', rendererKey: 'read', invocationStatus: 'RUNNING',
+        arguments: JSON.stringify({ path: `/srv/${'long-directory/'.repeat(30)}end.txt` }),
+        partialContents: [{ type: 'text', text: 'reading' }],
+      }],
+      streaming: false,
+    })
+  },
+  durableStates() {
+    publish({
+      messages: [
+        'READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'DISPATCHING', 'RUNNING',
+        'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN',
+      ].map((status) => ({
+        ...bashTool(status, 1, false), invocationStatus: status,
+      })),
+      streaming: false,
+    })
+  },
   /**
    * 流式且卡片在末尾：外部贴底时 bash 卡片与末尾 read 文本卡片都在可视区内。
    * 末尾 read 文本卡片默认收起，点开箭头就是「流式期间手动展开」。

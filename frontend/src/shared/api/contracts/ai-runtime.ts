@@ -364,6 +364,11 @@ export interface ToolInvocationDTO {
   toolName: string
   rendererKey: string
   environmentId: string | null
+  /** Work 冻结的路由与等待投影，不来自当前 composer 设置。 */
+  requiredEnvironmentId: string | null
+  waitingForEnvironment: boolean
+  requiredEnvironmentName: string | null
+  environmentWaitFreshnessAt: InstantTimestamp | null
   argumentsJson: string
   approvalJson: string | null
   resultJson: string | null
