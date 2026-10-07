@@ -279,7 +279,9 @@ final class PostgresqlHarnessRows {
           new EnvironmentToolWaitRow(
               uuid(resultSet, "invocation_id"),
               nullableEnvironmentId(resultSet.getObject("required_environment_id")),
-              resultSet.getBoolean("waiting_for_environment"));
+              resultSet.getBoolean("waiting_for_environment"),
+              resultSet.getString("environment_name"),
+              nullableInstant(resultSet, "freshness_at"));
 
   private PostgresqlHarnessRows() {}
 

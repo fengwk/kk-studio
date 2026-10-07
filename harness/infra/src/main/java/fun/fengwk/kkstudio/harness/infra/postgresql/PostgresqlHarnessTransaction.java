@@ -1874,6 +1874,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         select i.id as invocation_id,
                w.required_environment_id,
+               e.name as environment_name,
+               case when i.status = 'READY' and w.required_environment_id is not null then
+                 least(
+                   (select min(ec.lease_until)
+                    from environment_connection ec
+                    where ec.environment_id = w.required_environment_id
+                      and ec.status = 'READY'
+                      and ec.lease_until > statement_timestamp()),
+                   case when w.available_at > statement_timestamp() then w.available_at end,
+                   case when w.lease_until > statement_timestamp() then w.lease_until end
+                 )
+               end as freshness_at,
                i.status = 'READY'
                  and w.target_id is not null
                  and w.required_environment_id is not null
@@ -1888,6 +1900,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                  ) as waiting_for_environment
         from harness_tool_invocation i
         left join harness_work w on w.target_type = 'TOOL' and w.target_id = i.id
+        left join environment e on e.id = w.required_environment_id
         where i.id in (%s)
         """
             .formatted(placeholders(ids.size())),

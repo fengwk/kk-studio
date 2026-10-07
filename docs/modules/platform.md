@@ -51,8 +51,12 @@ executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `
 
 owner 附带 Chat/Issue 标题、根 Thread 名称和 Agent 名；查询内缓存产品与根读取，
 显示名称不参与路由或身份判断。工具快照还独立批量读取当前 Work 的
-`requiredEnvironmentId` 和 `waitingForEnvironment`，不从聚合卡片反推调用；
-这两项是读取时 sidecar，不属于 Thread version 所保证的 durable 快照。
+`requiredEnvironmentId`、`requiredEnvironmentName`、`waitingForEnvironment` 和
+`environmentWaitFreshnessAt`，不从聚合卡片反推调用。名称沿 Work 冻结身份读取环境目录，
+与 Thread 当前环境选择无关；时效边界只取该 READY 环境调用未来的有效 READY 连接租约、
+Work 可领取时间和执行租约的最小值，不使用全局交互截止点。非 READY、server-side
+或无未来边界时不定时。这四项是读取时 sidecar，不属于 Thread version 所保证的
+durable 快照，到期后同 version 重新 GET 会自然变化，无额外持久写入。
 
 数据库 `environment_changed` 同时失效环境与交互查询。租约自然过期没有数据库写事件，
 因此交互页附带 `freshnessAt`：未来 READY 环境租约、可领取时间或 Work 执行租约

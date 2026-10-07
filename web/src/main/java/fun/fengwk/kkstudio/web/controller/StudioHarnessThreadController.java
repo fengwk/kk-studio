@@ -122,6 +122,8 @@ public class StudioHarnessThreadController {
                 tool.setRequiredEnvironmentId(
                     wait.environmentId() == null ? null : wait.environmentId().toString());
                 tool.setWaitingForEnvironment(wait.waitingForEnvironment());
+                tool.setRequiredEnvironmentName(wait.environmentName());
+                tool.setEnvironmentWaitFreshnessAt(wait.freshnessAt());
               }
               return dto;
             }));

@@ -7,12 +7,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -151,6 +157,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   @Autowired private ThreadProcessor threadProcessor;
   @Autowired private ModelProcessor modelProcessor;
   @Autowired private ToolProcessor toolProcessor;
+  @Autowired private WebApplicationContext webContext;
+  @Autowired private JsonMapper jsonMapper;
 
   private final List<HarnessWorkDispatcher> testDispatchers = new ArrayList<>();
   private final List<ExecutorService> testExecutors = new ArrayList<>();
@@ -570,7 +578,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
    * (createdAt, id)} 归并，环境等待不冒充可操作 interaction。
    */
   @Test
-  void environmentWaitExcludesNonWaitingFactsAndMergesWithManualInteractions() {
+  void environmentWaitExcludesNonWaitingFactsAndMergesWithManualInteractions() throws Exception {
     UUID environmentId = bindEnvironment("wa-env-due-" + UUID.randomUUID());
     UUID leasedEnvironmentId = bindEnvironment("wa-env-leased-" + UUID.randomUUID());
 
@@ -621,6 +629,105 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals("INPUT", items.get(1).getType());
     assertEquals("CHAT", items.get(1).getOwner().getType());
     assertEquals(manualChatId.toString(), items.get(1).getOwner().getChatId());
+
+    // 真实 snapshot HTTP 不把聚合页的全局 freshnessAt 复制给每个调用。
+    MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
+    var futureTool = snapshotHttp(mvc, future.threadId()).path("toolInvocations").get(0);
+    assertFalse(futureTool.path("waitingForEnvironment").asBoolean());
+    assertEquals(
+        jsonMapper
+            .valueToTree(
+                store
+                    .transaction(
+                        tx ->
+                            tx.findWork(new WorkTarget(WorkTargetType.TOOL, future.invocationId())))
+                    .orElseThrow()
+                    .availableAt())
+            .asDouble(),
+        futureTool.path("environmentWaitFreshnessAt").asDouble());
+    var leasedTool = snapshotHttp(mvc, leased.threadId()).path("toolInvocations").get(0);
+    assertFalse(leasedTool.path("waitingForEnvironment").asBoolean());
+    assertEquals(
+        jsonMapper
+            .valueToTree(
+                store
+                    .transaction(
+                        tx ->
+                            tx.findWork(new WorkTarget(WorkTargetType.TOOL, leased.invocationId())))
+                    .orElseThrow()
+                    .leaseUntil())
+            .asDouble(),
+        leasedTool.path("environmentWaitFreshnessAt").asDouble());
+    var serverTool = snapshotHttp(mvc, serverSide.threadId()).path("toolInvocations").get(0);
+    assertFalse(serverTool.path("waitingForEnvironment").asBoolean());
+    assertTrue(serverTool.has("requiredEnvironmentName"));
+    assertTrue(serverTool.path("requiredEnvironmentName").isNull());
+    assertTrue(serverTool.has("environmentWaitFreshnessAt"));
+    assertTrue(serverTool.path("environmentWaitFreshnessAt").isNull());
+    var manualTool = snapshotHttp(mvc, manual.threadId()).path("toolInvocations").get(0);
+    assertFalse(manualTool.path("waitingForEnvironment").asBoolean());
+    assertTrue(manualTool.path("environmentWaitFreshnessAt").isNull());
+  }
+
+  /** 真实 PG + HTTP mapper：冻结路由不取当前 Thread，租约自然到期同 version GET 即变化、无持久写。 */
+  @Test
+  void toolSnapshotHttpUsesFrozenNameAndExpiresWithoutVersionChange() throws Exception {
+    String name = "snapshot-frozen-" + UUID.randomUUID();
+    UUID environmentId = bindEnvironment(name);
+    Seed seed =
+        seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(environmentId));
+    // 当前 Thread 设置没有环境，Work 冻结的环境仍应完整呈现。
+    assertNull(SETTINGS.environmentName());
+    MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
+    var offline = snapshotHttp(mvc, seed.threadId());
+    var tool = offline.path("toolInvocations").get(0);
+    assertEquals(environmentId.toString(), tool.path("requiredEnvironmentId").asText());
+    assertEquals(name, tool.path("requiredEnvironmentName").asText());
+    assertTrue(tool.path("waitingForEnvironment").asBoolean());
+    assertTrue(tool.has("environmentWaitFreshnessAt"));
+    assertTrue(tool.path("environmentWaitFreshnessAt").isNull());
+    String version = offline.path("version").asText();
+    UUID node = UUID.randomUUID();
+    markEnvironmentReady(environmentId, node);
+    jdbc.update(
+        "update environment_connection set lease_until = statement_timestamp() + interval '2 seconds' where environment_id = ?",
+        environmentId);
+    Instant deadline =
+        jdbc.queryForObject(
+            "select lease_until from environment_connection where environment_id = ?",
+            (rs, row) -> rs.getTimestamp(1).toInstant(),
+            environmentId);
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seed.invocationId());
+    var before = store.transaction(tx -> tx.findWork(target)).orElseThrow();
+    var online = snapshotHttp(mvc, seed.threadId());
+    assertEquals(version, online.path("version").asText());
+    var onlineTool = online.path("toolInvocations").get(0);
+    assertFalse(onlineTool.path("waitingForEnvironment").asBoolean());
+    // 新字段与既有 Instant 用同一真实 HTTP mapper，epoch 时间戳而非独立字符串转换。
+    assertTrue(onlineTool.path("environmentWaitFreshnessAt").isNumber());
+    assertEquals(
+        jsonMapper.valueToTree(deadline).asDouble(),
+        onlineTool.path("environmentWaitFreshnessAt").asDouble());
+    awaitTrue(
+        () ->
+            Boolean.TRUE.equals(
+                jdbc.queryForObject(
+                    "select lease_until <= statement_timestamp() from environment_connection where environment_id = ?",
+                    Boolean.class,
+                    environmentId)),
+        "database environment lease must naturally expire");
+    var expired = snapshotHttp(mvc, seed.threadId());
+    assertEquals(version, expired.path("version").asText());
+    assertTrue(expired.path("toolInvocations").get(0).path("waitingForEnvironment").asBoolean());
+    assertTrue(expired.path("toolInvocations").get(0).path("environmentWaitFreshnessAt").isNull());
+    assertEquals(before, store.transaction(tx -> tx.findWork(target)).orElseThrow());
+    assertEquals(ToolInvocationStatus.READY, toolInvocation(seed.invocationId()).status());
+  }
+
+  private JsonNode snapshotHttp(MockMvc mvc, UUID threadId) throws Exception {
+    var response = mvc.perform(get("/api/harness/threads/" + threadId)).andReturn().getResponse();
+    assertEquals(200, response.getStatus());
+    return jsonMapper.readTree(response.getContentAsString()).path("data");
   }
 
   /** 环境等待分组的公共断言：聚合身份、展示名、计数、排序代表、归属，且绝不冒充可操作 interaction。 */
