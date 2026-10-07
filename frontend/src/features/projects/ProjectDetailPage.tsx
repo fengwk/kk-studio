@@ -6,11 +6,9 @@ import {
   Archive,
   ArrowLeft,
   Bot,
-  Calendar,
   FileText,
-  Layers,
   Pencil,
-  RefreshCw,
+  Plus,
   Trash2,
   X,
 } from 'lucide-react'
@@ -22,8 +20,14 @@ import { IssueDetailModal } from './components/IssueDetailModal'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/shared/api/environment-service'
+import { Button } from '@/shared/ui/controls/Button'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { SearchField } from '@/shared/ui/controls/SearchField'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
+import { useI18n } from '@/shared/i18n'
 import { createUuid } from '@/shared/lib/uuid'
 import { queryKeys } from '@/shared/lib/query-keys'
 import {
@@ -47,6 +51,7 @@ export function ProjectDetailPage({
   onBack,
   api = projectsApi,
 }: ProjectDetailPageProps) {
+  const { t } = useI18n()
   const location = useLocation()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -72,6 +77,10 @@ export function ProjectDetailPage({
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
   const [isManualModalOpen, setIsManualModalOpen] = useState(false)
+
+  // 看板筛选（搜索 / 归档）由页面头部统一持有，IssueBoard 只负责按结果渲染列与卡片。
+  const [searchQuery, setSearchQuery] = useState('')
+  const [includeArchived, setIncludeArchived] = useState(false)
 
   // 路由或参数变化时关闭 manualModal，避免前进后退复活弹窗
   useEffect(() => {
@@ -171,11 +180,11 @@ export function ProjectDetailPage({
 
     const loadResult = loadPendingAction(issueId)
     if (loadResult.type === 'STORAGE_ERROR') {
-      setActionError(`无法访问本地存储，未发送请求: ${loadResult.error}`)
+      setActionError(t('projects.detail.storageUnavailable', { reason: loadResult.error }))
       return false
     }
     if (loadResult.type === 'CORRUPT') {
-      setActionError('该 Issue 存在未确认结果的损坏操作记录，为避免覆盖未发送请求；请在详情中确认或放弃')
+      setActionError(t('projects.detail.corruptPending'))
       handleSelectIssue(issueId)
       return false
     }
@@ -202,13 +211,15 @@ export function ProjectDetailPage({
           if (!isNetworkUnknownError(err)) {
             clearPendingAction(issueId, existing.requestKey)
           }
-          setActionError(err instanceof Error ? err.message : `${failureLabel}重试失败`)
+          setActionError(
+            err instanceof Error ? err.message : t('projects.detail.retryFailed', { label: failureLabel }),
+          )
           return false
         } finally {
           inflightIssuesRef.current.delete(issueId)
         }
       } else {
-        setActionError('该 Issue 存在未确认结果的写操作，暂不能继续；请在详情中确认或放弃')
+        setActionError(t('projects.detail.pendingWriteBlocked'))
         handleSelectIssue(issueId)
         return false
       }
@@ -218,7 +229,11 @@ export function ProjectDetailPage({
     try {
       storePendingAction(issueId, action)
     } catch (err) {
-      setActionError(`无法保存操作记录，未发送请求: ${err instanceof Error ? err.message : String(err)}`)
+      setActionError(
+        t('projects.detail.storePendingFailed', {
+          reason: err instanceof Error ? err.message : String(err),
+        }),
+      )
       return false
     }
 
@@ -236,7 +251,9 @@ export function ProjectDetailPage({
       if (!isNetworkUnknownError(err)) {
         clearPendingAction(issueId, action.requestKey)
       }
-      setActionError(err instanceof Error ? err.message : `${failureLabel}失败`)
+      setActionError(
+        err instanceof Error ? err.message : t('projects.detail.actionFailed', { label: failureLabel }),
+      )
       return false
     } finally {
       inflightIssuesRef.current.delete(issueId)
@@ -263,7 +280,7 @@ export function ProjectDetailPage({
       expectedVersion,
       action,
       (reqKey, expVer) => api.transitionIssue(issueId, { expectedVersion: expVer, requestKey: reqKey, toState }),
-      '流转 Issue 状态',
+      t('projects.detail.action.transition'),
     )
   }
 
@@ -287,7 +304,7 @@ export function ProjectDetailPage({
       expectedVersion,
       action,
       (reqKey, expVer) => api.recoverIssue(issueId, { expectedVersion: expVer, requestKey: reqKey }),
-      '恢复 Issue',
+      t('projects.detail.action.recover'),
     )
   }
 
@@ -307,7 +324,7 @@ export function ProjectDetailPage({
       expectedVersion,
       action,
       (reqKey, expVer) => api.reopenIssue(issueId, { expectedVersion: expVer, requestKey: reqKey }),
-      '重新打开 Issue',
+      t('projects.detail.action.reopen'),
     )
   }
 
@@ -330,7 +347,7 @@ export function ProjectDetailPage({
       }
       await invalidateSnapshot()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '项目归档操作失败')
+      setActionError(err instanceof Error ? err.message : t('projects.detail.archiveFailed'))
     }
   }
 
@@ -338,29 +355,32 @@ export function ProjectDetailPage({
 
   const isIssueDetailModalOpen = Boolean(queryIssueId && (!queryThreadId || isManualModalOpen))
 
-  if (isLoading && !snapshot) {
-    return (
-      <div style={{ textAlign: 'center', padding: '64px', color: 'var(--fg-muted)' }}>
-        加载项目详情中...
-      </div>
-    )
-  }
-
   if (!snapshot) {
+    // 加载失败、已删除或仍在加载的项目看板：始终保留返回入口与明确重试，不因隐藏全局导航而失去退出路径。
     return (
-      <div style={{ padding: '32px' }}>
-        {errorMessage && (
-          <div className="form-error-banner" role="alert">
-            <AlertTriangle size={16} aria-hidden="true" />
-            <span>{errorMessage}</span>
+      <div className="project-detail-layout">
+        <header className="project-detail-header">
+          <div className="project-detail-nav">
+            <div className="project-detail-nav-left">
+              {onBack && (
+                <IconButton label={t('projects.detail.back')} onClick={onBack}>
+                  <ArrowLeft size={16} aria-hidden="true" />
+                </IconButton>
+              )}
+              <h1 className="project-detail-title">{t('projects.detail.boardTitle')}</h1>
+            </div>
           </div>
-        )}
-        {onBack && (
-          <button type="button" className="ghost-btn" onClick={onBack}>
-            <ArrowLeft size={14} aria-hidden="true" />
-            <span>返回项目列表</span>
-          </button>
-        )}
+        </header>
+        <div className="project-detail-body project-detail-status">
+          {isLoading ? (
+            <StateBlock title={t('projects.detail.loading')} />
+          ) : (
+            <div className="project-detail-status-actions">
+              <StateBlock tone="danger" title={errorMessage ?? t('projects.detail.loadFailed')} />
+              <Button onClick={() => void refetch()}>{t('projects.retry')}</Button>
+            </div>
+          )}
+        </div>
       </div>
     )
   }
@@ -373,104 +393,52 @@ export function ProjectDetailPage({
         <div className="project-detail-nav">
           <div className="project-detail-nav-left">
             {onBack && (
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={onBack}
-                title="返回项目列表"
-                aria-label="返回项目列表"
-              >
+              <IconButton label={t('projects.detail.back')} onClick={onBack}>
                 <ArrowLeft size={16} aria-hidden="true" />
-              </button>
+              </IconButton>
             )}
-            <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600, color: 'var(--fg)' }}>
-              {project.title}
-            </h1>
-            {project.archivedAt && <span className="badge badge-archived">已归档</span>}
-          </div>
-
-          <div className="project-detail-nav-right">
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => void refetch()}
-              disabled={isLoading}
-              title="刷新"
-              aria-label="刷新项目数据"
-            >
-              <RefreshCw
-                size={14}
-                className={isLoading ? 'animate-spin' : ''}
-                aria-hidden="true"
-              />
-            </button>
-
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => setIsEditProjectOpen(true)}
-              title="编辑项目配置与工作流 JSON"
-            >
-              <Pencil size={14} aria-hidden="true" />
-              <span>编辑 / 工作流</span>
-            </button>
-
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => void handleProjectArchiveToggle()}
-              title={project.archivedAt ? '取消归档' : '归档项目'}
-            >
-              <Archive size={14} aria-hidden="true" />
-              <span>{project.archivedAt ? '取消归档' : '归档'}</span>
-            </button>
-
-            <button
-              type="button"
-              className="ghost-btn danger"
-              onClick={() => setIsDeleteProjectOpen(true)}
-              title="删除项目"
-            >
-              <Trash2 size={14} aria-hidden="true" />
-              <span>删除</span>
-            </button>
+            <h1 className="project-detail-title">{project.title}</h1>
+            {project.archivedAt && (
+              <span className="badge badge-archived">{t('projects.archived')}</span>
+            )}
+            <span className="badge" title={t('projects.detail.yoloBadge')}>
+              YOLO {project.yoloEnabled ? t('projects.yoloEnabled') : t('projects.yoloDisabled')}
+            </span>
           </div>
         </div>
 
-        <div className="project-detail-info-row">
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <span>YOLO:</span>
-            <strong style={{ color: 'var(--fg)' }}>{project.yoloEnabled ? '开启' : '关闭'}</strong>
-          </span>
-
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Layers size={14} aria-hidden="true" />
-            <span>工作流阶段:</span>
-            <strong style={{ color: 'var(--fg)' }}>{project.workflow?.states?.length ?? 0} 个</strong>
-          </span>
-
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Calendar size={14} aria-hidden="true" />
-            <span>更新于: {project.updatedAt}</span>
-          </span>
-
-          <span>
-            版本: <code>{project.version}</code>
-          </span>
-
-          {project.description && (
-            <span
-              style={{
-                color: 'var(--fg-muted)',
-                maxWidth: '400px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {project.description}
-            </span>
-          )}
+        <div className="project-detail-toolbar">
+          <SearchField
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder={t('projects.detail.searchPlaceholder')}
+            aria-label={t('projects.detail.searchIssues')}
+          />
+          <Checkbox
+            checked={includeArchived}
+            onChange={setIncludeArchived}
+            label={t('projects.includeArchived')}
+          />
+          <div className="project-detail-toolbar-actions">
+            <Button onClick={() => setIsCreateIssueOpen(true)}>
+              <Plus size={14} aria-hidden="true" />
+              <span>{t('projects.issue.create')}</span>
+            </Button>
+            <Button variant="ghost" onClick={() => setIsEditProjectOpen(true)}>
+              <Pencil size={14} aria-hidden="true" />
+              <span>{t('projects.detail.editWorkflow')}</span>
+            </Button>
+            <Button variant="ghost" onClick={() => void handleProjectArchiveToggle()}>
+              <Archive size={14} aria-hidden="true" />
+              <span>
+                {project.archivedAt ? t('projects.unarchive') : t('projects.detail.archiveAction')}
+              </span>
+            </Button>
+            <Button variant="ghost" danger onClick={() => setIsDeleteProjectOpen(true)}>
+              <Trash2 size={14} aria-hidden="true" />
+              <span>{t('projects.detail.deleteAction')}</span>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -486,8 +454,9 @@ export function ProjectDetailPage({
         <IssueBoard
           workflow={project.workflow}
           issues={snapshot.issues}
+          searchQuery={searchQuery}
+          includeArchived={includeArchived}
           onSelectIssue={(id) => handleSelectIssue(id)}
-          onCreateIssue={() => setIsCreateIssueOpen(true)}
           onTransitionIssue={handleTransitionIssue}
           onBlockIssue={handleBlockIssue}
           onRecoverIssue={handleRecoverIssue}
@@ -501,41 +470,39 @@ export function ProjectDetailPage({
               <div className="project-agent-dock-meta">
                 <Bot size={16} aria-hidden="true" />
                 <span className="project-agent-dock-title">
-                  {issueDetail?.issue.title ?? 'Agent 线程'}
+                  {issueDetail?.issue.title ?? t('projects.detail.threadTitle')}
                 </span>
                 {matchedAgentName && <span className="badge badge-agent">{matchedAgentName}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <button
-                  type="button"
-                  className="ghost-btn"
+                <Button
+                  variant="ghost"
+                  size="compact"
                   onClick={() => setIsManualModalOpen(true)}
-                  title="查看完整 Issue 详情"
-                  aria-label="查看完整 Issue 详情"
+                  title={t('projects.detail.viewIssueDetail')}
+                  aria-label={t('projects.detail.viewIssueDetail')}
                 >
                   <FileText size={14} aria-hidden="true" />
-                  <span>Issue 详情</span>
-                </button>
-                <button
-                  type="button"
-                  className="ghost-btn"
+                  <span>{t('projects.detail.issueDetail')}</span>
+                </Button>
+                <IconButton
+                  label={t('projects.detail.closeAgentView')}
+                  size="compact"
                   onClick={handleCloseThread}
-                  title="关闭 Agent 视图"
-                  aria-label="关闭 Agent 视图"
                 >
                   <X size={14} aria-hidden="true" />
-                </button>
+                </IconButton>
               </div>
             </div>
 
             <div className="project-agent-dock-content">
               {issueQuery.isLoading ? (
-                <div className="empty-tip">加载 Issue 与 Agent 线程中...</div>
+                <StateBlock title={t('projects.detail.loadingThread')} />
               ) : !isThreadValid ? (
                 <div style={{ padding: '24px' }}>
                   <div className="form-error-banner" role="alert">
                     <AlertTriangle size={16} aria-hidden="true" />
-                    <span>目标 Thread 不属于该 Issue 绑定的 Agent 线程或 Run 记录，已拒绝接入</span>
+                    <span>{t('projects.detail.threadRejected')}</span>
                   </div>
                 </div>
               ) : (
@@ -561,6 +528,8 @@ export function ProjectDetailPage({
       <EditProjectModal
         isOpen={isEditProjectOpen}
         project={project}
+        snapshot={snapshot}
+        snapshotError={queryError}
         onClose={() => setIsEditProjectOpen(false)}
         onSuccess={() => void invalidateSnapshot()}
         api={api}

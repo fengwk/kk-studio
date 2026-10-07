@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import { FolderPlus } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { useI18n } from '@/shared/i18n'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO } from '../types'
@@ -20,6 +24,7 @@ export function CreateProjectModal({
   onSuccess,
   api = projectsApi,
 }: CreateProjectModalProps) {
+  const { t } = useI18n()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [yoloEnabled, setYoloEnabled] = useState(true)
@@ -43,7 +48,7 @@ export function CreateProjectModal({
     e.preventDefault()
     const trimmedTitle = title.trim()
     if (!trimmedTitle) {
-      setErrorMessage('项目名称不能为空')
+      setErrorMessage(t('projects.edit.nameRequired'))
       return
     }
 
@@ -58,7 +63,7 @@ export function CreateProjectModal({
       onSuccess(created)
       onClose()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '创建项目失败')
+      setErrorMessage(err instanceof Error ? err.message : t('projects.create.failed'))
     } finally {
       setIsSubmitting(false)
     }
@@ -67,7 +72,7 @@ export function CreateProjectModal({
   return (
     <Dialog
       className="resource-modal-card"
-      title="新建项目"
+      title={t('projects.create')}
       headerIcon={<FolderPlus size={18} aria-hidden="true" />}
       pending={isSubmitting}
       onClose={onClose}
@@ -80,42 +85,35 @@ export function CreateProjectModal({
               </div>
             )}
 
-            <div className="form-group">
-              <label htmlFor="create-project-title" className="form-label required">
-                项目名称
-              </label>
-              <input
+            <label className="edit-project-field" htmlFor="create-project-title">
+              <FieldLabel required>{t('projects.edit.projectName')}</FieldLabel>
+              <TextInput
                 id="create-project-title"
-                type="text"
-                className="form-input"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="例如：视频生成流水线"
+                placeholder={t('projects.create.namePlaceholder')}
                 disabled={isSubmitting}
                 autoFocus
               />
-            </div>
+            </label>
 
-            <div className="form-group">
-              <label htmlFor="create-project-desc" className="form-label">
-                项目描述
-              </label>
-              <textarea
+            <label className="edit-project-field" htmlFor="create-project-desc">
+              <FieldLabel>{t('projects.edit.description')}</FieldLabel>
+              <TextArea
                 id="create-project-desc"
-                className="form-textarea"
                 rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="描述项目的目标与业务范围..."
+                placeholder={t('projects.create.descPlaceholder')}
                 disabled={isSubmitting}
               />
-            </div>
+            </label>
 
-            <div className="form-group">
+            <div className="edit-project-field">
               <Checkbox
                 checked={yoloEnabled}
                 onChange={setYoloEnabled}
-                label="启用 YOLO 执行策略 (自主执行，跳过人工交互门禁)"
+                label={t('projects.edit.yoloToggle')}
                 disabled={isSubmitting}
               />
             </div>
@@ -123,10 +121,10 @@ export function CreateProjectModal({
 
           <div className="modal-footer">
             <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
-              取消
+              {t('projects.cancel')}
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? '创建中...' : '创建项目'}
+              {isSubmitting ? t('projects.create.submitting') : t('projects.create.submit')}
             </Button>
           </div>
         </form>

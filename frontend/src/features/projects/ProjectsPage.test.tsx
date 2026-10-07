@@ -71,6 +71,7 @@ describe('ProjectsPage', () => {
     getProjectSnapshot: vi.fn().mockResolvedValue({
       project: mockProjects[0],
       issues: [],
+      referencedStateCodes: [],
     }),
     createIssue: vi.fn(),
     getIssue: vi.fn(),
@@ -215,9 +216,9 @@ describe('ProjectsPage', () => {
     })
     fireEvent.click(saveBtn)
 
-    // CAS conflict banner should appear
+    // 冲突（结果未确认）时不自动推进版本，改为显式恢复入口
     await waitFor(() => {
-      expect(screen.getByText(/409 冲突/i)).toBeInTheDocument()
+      expect(screen.getByText(/基础信息未确认写入结果/)).toBeInTheDocument()
     })
 
     // User draft remains in form
@@ -225,8 +226,8 @@ describe('ProjectsPage', () => {
       'My Custom Draft',
     )
 
-    // Click "刷新版本"
-    const reloadBtn = screen.getByRole('button', { name: '刷新版本' })
+    // 用户显式选择「加载最新并保留草稿」
+    const reloadBtn = screen.getByRole('button', { name: '加载最新并保留草稿' })
     fireEvent.click(reloadBtn)
 
     await waitFor(() => {
@@ -308,7 +309,7 @@ describe('ProjectsPage', () => {
     fireEvent.change(searchInput, { target: { value: 'nonexistent-query-123' } })
 
     expect(await screen.findByText('暂无匹配项目')).toBeInTheDocument()
-    expect(screen.getByText('没有找到符合搜索条件的项目')).toBeInTheDocument()
+    expect(screen.queryByText('Alpha Project')).not.toBeInTheDocument()
 
     // 验证整个页面仍只有首张 CreateCard 创建入口，无状态块内重复创建按钮
     const createButtons = screen.getAllByRole('button', { name: '新建项目' })
@@ -358,8 +359,8 @@ describe('ProjectsPage', () => {
     })
   })
 
-  it('triggers onSelectProject when clicking project title or enter project button', async () => {
-    // 测试意图：验证点击项目卡片标题或“进入项目”主按钮触发 onSelectProject 回调
+  it('navigates into the board only through the explicit entry action', async () => {
+    // 测试意图：卡片标题是纯展示文本，进入项目必须通过显式的「进入看板」动作
     const onSelectProject = vi.fn()
     const api = createMockApi()
     renderProjectsPage(<ProjectsPage api={api} onSelectProject={onSelectProject} />)
@@ -368,37 +369,32 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
     })
 
-    // Click title
+    // 标题不是按钮：点击标题不触发导航
+    expect(screen.queryByRole('button', { name: 'Alpha Project' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByText('Alpha Project'))
-    expect(onSelectProject).toHaveBeenCalledWith(mockProjects[0].id)
+    expect(onSelectProject).not.toHaveBeenCalled()
 
-    // Click "进入项目" button
+    // 「进入看板」按钮触发 onSelectProject
     const enterBtns = screen.getAllByRole('button', { name: /进入看板/i })
     fireEvent.click(enterBtns[0])
     expect(onSelectProject).toHaveBeenCalledWith(mockProjects[0].id)
   })
 
-  it('reloads project list on refresh button click and on invalidation broadcast', async () => {
-    // 测试意图：验证点击标题旁的刷新按钮以及全局发布项目变更通知时，能够触发重新加载列表
+  it('reloads project list when a project change is broadcast', async () => {
+    // 测试意图：全局发布项目变更通知时重新加载列表（不再提供手工刷新按钮）
     const api = createMockApi()
     const { queryClient } = renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
     })
-
-    const refreshBtn = screen.getByLabelText('刷新项目列表')
-    fireEvent.click(refreshBtn)
-
-    await waitFor(() => {
-      expect(api.listProjects).toHaveBeenCalledTimes(2)
-    })
+    expect(api.listProjects).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       await invalidateProjectQueries(queryClient)
     })
     await waitFor(() => {
-      expect(api.listProjects).toHaveBeenCalledTimes(3)
+      expect(api.listProjects).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -422,10 +418,10 @@ describe('ProjectsPage', () => {
     expect(screen.queryByText('Initial Project')).not.toBeInTheDocument()
   })
 
-  it('enforces UI consistency with single CreateCard as first item, info-card inheritance, and modern checkbox', async () => {
-    // 测试意图：验证 UI 一致性规范，包括全局唯一张创建卡、项目卡片继承 info-card 以及已归档过滤使用现代 Checkbox
+  it('enforces UI consistency with single CreateCard as first item, shared card skin, and modern checkbox', async () => {
+    // 测试意图：验证 UI 一致性规范：全局唯一张创建卡并位于首项、项目卡片统一继承共享 resource-card、归档过滤使用共享 Checkbox
     const api = createMockApi()
-    renderProjectsPage(<ProjectsPage api={api} />)
+    const { container } = renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -435,15 +431,21 @@ describe('ProjectsPage', () => {
     expect(createButtons).toHaveLength(1)
     expect(createButtons[0]).toHaveClass('create-card')
 
+    const grid = container.querySelector('.resource-grid')
+    expect(grid).not.toBeNull()
+    expect(grid!.firstElementChild).toBe(createButtons[0])
+
     const projectCards = screen.getAllByRole('article')
     expect(projectCards).toHaveLength(2)
     for (const card of projectCards) {
-      expect(card).toHaveClass('info-card')
-      expect(card).toHaveClass('project-card')
+      expect(card).toHaveClass('resource-card')
     }
+    // 已归档项目沿用同一张共享卡，仅以状态修饰类区分
+    const betaCard = screen.getByText('Beta Project').closest('article')
+    expect(betaCard).not.toBeNull()
+    expect(betaCard).toHaveClass('is-archived')
 
     const archiveCheckbox = screen.getByRole('checkbox', { name: '显示已归档' })
-    expect(archiveCheckbox).toBeInTheDocument()
     expect(archiveCheckbox).toHaveClass('ui-checkbox-input')
   })
 })

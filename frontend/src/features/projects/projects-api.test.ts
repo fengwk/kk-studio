@@ -151,6 +151,7 @@ describe('projectsApi', () => {
     vi.mocked(mockClient.get).mockResolvedValueOnce({
       project: mockProject,
       issues: [{ issue: mockIssue, currentOrLatestRun: null }],
+      referencedStateCodes: ['INIT'],
     })
     const snap = await api.getProjectSnapshot(mockProject.id)
     expect(mockClient.get).toHaveBeenCalledWith(`/projects/${mockProject.id}/snapshot`)

@@ -72,4 +72,32 @@ describe('invalidateProjectQueries', () => {
     // proj-2 的 issue query 不受影响（isInvalidated = false）
     expect(stateProj2?.isInvalidated).toBe(false)
   })
+
+  it('covers nested evidence queries for the targeted project without touching other projects', async () => {
+    // 测试意图：evidence key 位于 issue 前缀下，定向失效应覆盖目标项目 issue 的 evidence，且不波及无关项目的 evidence。
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    const fetchProj1Evidence = vi.fn().mockResolvedValue([])
+    const fetchProj2Evidence = vi.fn().mockResolvedValue([])
+
+    await queryClient.prefetchQuery({
+      queryKey: queryKeys.projects.evidence('proj-1', 'issue-1'),
+      queryFn: fetchProj1Evidence,
+    })
+    await queryClient.prefetchQuery({
+      queryKey: queryKeys.projects.evidence('proj-2', 'issue-2'),
+      queryFn: fetchProj2Evidence,
+    })
+
+    await invalidateProjectQueries(queryClient, { projectId: 'proj-1' })
+
+    expect(
+      queryClient.getQueryState(queryKeys.projects.evidence('proj-1', 'issue-1'))?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState(queryKeys.projects.evidence('proj-2', 'issue-2'))?.isInvalidated,
+    ).toBe(false)
+  })
 })
