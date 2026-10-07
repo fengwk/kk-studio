@@ -1,0 +1,165 @@
+/*
+ * SUBAGENT_RESULT 专属轻量信息卡：使用现有 info/info-soft 语义 token 的浅青蓝染色与细边框。
+ * 全部规则限定在 .thread-subagent-receipt 下，不改变 SystemMessageCard、思考、压缩摘要与其它通知。
+ */
+.thread-subagent-receipt {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--info) 35%, transparent);
+  border-radius: 8px;
+  background: var(--info-soft);
+  font-size: 12px;
+}
+
+.thread-subagent-receipt-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+/* 一行摘要兼任展开入口：整行都是原生按钮，Enter/Space 直接可用。 */
+.thread-subagent-receipt-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-subagent-receipt-toggle:focus-visible {
+  outline: 1px solid var(--info);
+  outline-offset: 2px;
+}
+
+.thread-subagent-receipt-glyph {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--info);
+}
+
+.thread-subagent-receipt-glyph svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 长 agent 名在自身范围内换行，不截断、不撑破摘要。 */
+.thread-subagent-receipt-agent {
+  flex: 0 0 auto;
+  max-width: 45%;
+  min-width: 0;
+  color: var(--fg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* 状态只用小图标 + 短标签区分，不给整张卡涂成功/错误色。 */
+.thread-subagent-receipt-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+}
+
+.thread-subagent-receipt-state svg {
+  width: 12px;
+  height: 12px;
+}
+
+.thread-subagent-receipt-state.is-completed {
+  color: var(--green-primary);
+}
+
+.thread-subagent-receipt-state.is-error {
+  color: var(--danger);
+}
+
+.thread-subagent-receipt-state.is-cancelled {
+  color: var(--fg-muted);
+}
+
+/* 任务预览是前端截取的单行预览，窄 pane 下优先压缩它。 */
+.thread-subagent-receipt-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-subagent-receipt-chevron {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--fg-dim);
+}
+
+.thread-subagent-receipt-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 来源跳转与展开动作分离：窄 pane 时整条链接换行，文本本身也可再折行。 */
+.thread-subagent-receipt-source {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--info);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.thread-subagent-receipt-source:hover {
+  text-decoration: underline;
+}
+
+.thread-subagent-receipt-source svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.thread-subagent-receipt-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--info) 22%, transparent);
+}
+
+.thread-subagent-receipt-section {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.thread-subagent-receipt-label {
+  margin-bottom: 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.thread-subagent-receipt-error .thread-subagent-receipt-label {
+  color: var(--danger);
+}
+
+.thread-subagent-receipt-invalid {
+  margin: 0;
+  color: var(--danger);
+  line-height: 1.45;
+}
