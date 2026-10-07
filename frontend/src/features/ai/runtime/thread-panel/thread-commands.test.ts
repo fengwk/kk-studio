@@ -13,7 +13,7 @@ describe('AgentPane command registry', () => {
       'agent',
       'yolo',
       'models',
-      'tree',
+      'history',
       'stop',
       'new',
       'upload',
@@ -65,7 +65,7 @@ describe('AgentPane command registry', () => {
       'agent',
       'yolo',
       'models',
-      'tree',
+      'history',
       'new',
       'upload',
       'debug',
@@ -115,14 +115,14 @@ describe('AgentPane command registry', () => {
     const commands = threadCommandsForTarget(bound, { readOnly: true })
     const stopCommand = commands.find((c) => c.id === 'stop')
     const newCommand = commands.find((c) => c.id === 'new')
-    const treeCommand = commands.find((c) => c.id === 'tree')
+    const historyCommand = commands.find((c) => c.id === 'history')
     const shortcutsCommand = commands.find((c) => c.id === 'shortcuts')
 
     expect(stopCommand?.disabled).toBe(true)
     expect(stopCommand?.disabledReason).toBe('只读模式')
     expect(newCommand?.disabled).toBe(true)
     expect(newCommand?.disabledReason).toBe('只读模式')
-    expect(treeCommand?.disabled).toBe(false)
+    expect(historyCommand?.disabled).toBe(false)
     expect(shortcutsCommand?.disabled).toBe(false)
   })
 

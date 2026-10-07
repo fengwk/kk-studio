@@ -8,6 +8,7 @@ import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import '@/features/ai/chat/chat-workspace.css'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -72,12 +73,13 @@ export function ThreadWorkspacePage() {
       <header className="chat-workspace-header">
         <div className="chat-workspace-title">
           <Link
-            className="sidebar-icon-btn"
+            className="chat-workspace-back"
             to="/chats"
-            title={t('ai.chat.backToChatList')}
-            aria-label={t('ai.chat.backToChatList')}
+            title={t('ai.chat.backToConversation')}
+            aria-label={t('ai.chat.backToConversation')}
           >
             <ArrowLeft aria-hidden="true" />
+            <span>{t('ai.chat.backToConversation')}</span>
           </Link>
           <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
           <h1>{title}</h1>

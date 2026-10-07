@@ -339,7 +339,7 @@ export function RootAgentPane({
         />
       )
     }
-    if (pane.interaction === 'tree') {
+    if (pane.interaction === 'history') {
       if (capabilities?.allowBranching === false) {
         return null
       }

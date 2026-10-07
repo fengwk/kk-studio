@@ -2,7 +2,9 @@ import { Coins, GitBranch } from 'lucide-react'
 import type { MetaDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { useEntryBranchRequest } from '@/features/ai/runtime/thread-panel/entry-branch-context'
 import { formatUsageDetails } from '@/features/ai/runtime/thread-panel/thread-status-format'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 import { useI18n } from '@/shared/i18n'
+import '@/features/ai/runtime/thread-panel/messages/meta-message-block.css'
 
 /**
  * 特殊 entry / 回合摘要：左对齐，与正文同列，用图标区分。
@@ -39,16 +41,15 @@ export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) 
           {message.text}
         </div>
         {canBranch ? (
-          <button
-            type="button"
-            className="ghost-inline-btn thread-meta-branch-btn"
-            aria-label={branchLabel}
+          <IconButton
+            className="thread-meta-branch-btn"
+            label={branchLabel}
             title={branchLabel}
             data-testid="thread-turn-end-branch"
             onClick={() => requestBranch(endEntryId)}
           >
-            <GitBranch size={12} aria-hidden="true" />
-          </button>
+            <GitBranch aria-hidden="true" />
+          </IconButton>
         ) : null}
       </div>
     </section>

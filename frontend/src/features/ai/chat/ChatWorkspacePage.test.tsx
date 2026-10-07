@@ -601,7 +601,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
   async function openBranchDialogFromTree(user: ReturnType<typeof userEvent.setup>, paneIndex = 0) {
     const composers = await screen.findAllByLabelText('给 AI 发送消息')
     await user.click(composers[paneIndex]!)
-    await user.keyboard('/tree{Enter}')
+    await user.keyboard('/history{Enter}')
     const rows = await waitFor(() => {
       const found = document.querySelectorAll('.history-tree-entry')
       expect(found.length).toBeGreaterThan(0)
@@ -620,7 +620,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
   }
 
   async function chooseDestination(user: ReturnType<typeof userEvent.setup>, position: number) {
-    await user.click(document.querySelector<HTMLButtonElement>('.new-branch-form .ui-select-trigger')!)
+    await user.click(document.querySelector<HTMLButtonElement>('.new-branch-dialog .ui-select-trigger')!)
     const options = await waitFor(() => {
       const found = [...document.querySelectorAll<HTMLButtonElement>('.ui-select-option')]
       expect(found.length).toBe(9)

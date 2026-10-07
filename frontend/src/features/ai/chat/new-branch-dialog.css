@@ -1,16 +1,19 @@
 /*
- * 新建分支对话框（/tree 与回合 footer 共用）的补充样式。
- * 复用既有 .form-group / .field-error / .form-error-banner 全局基础类与 Dialog 外壳。
+ * 新建 thread 分支对话框（/history 与回合 footer 共用）的补充样式。
+ * 布局、正文留白与按钮区复用共享 Dialog（modal-card-form / modal-body / modal-footer）
+ * 与 FieldLabel/TextInput/Select/Button，本文件只保留卡片宽度、窄视口滚动与覆盖提示。
  */
 .new-branch-dialog {
   width: min(460px, 100%);
-}
-
-.new-branch-form {
+  max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 4px 2px;
+}
+
+.new-branch-dialog .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .new-branch-overwrite {
@@ -20,11 +23,4 @@
   background: var(--surface-active);
   color: var(--fg);
   font-size: 12px;
-}
-
-.new-branch-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
 }

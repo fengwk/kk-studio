@@ -817,7 +817,7 @@ describe('AgentPane orchestration', () => {
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
-    await user.keyboard('/tree{Enter}')
+    await user.keyboard('/history{Enter}')
 
     const list = await screen.findByRole('list')
     const rows = await waitFor(() => {
@@ -854,7 +854,7 @@ describe('AgentPane orchestration', () => {
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
-    await user.keyboard('/tree{Enter}')
+    await user.keyboard('/history{Enter}')
     await waitFor(() => expect(document.querySelector('.history-tree-panel')).not.toBeNull())
     expect(harnessService.listSessionEntries).toHaveBeenCalledWith('session-1')
   })
@@ -992,7 +992,7 @@ describe('AgentPane orchestration', () => {
     const hook = renderController()
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
 
-    act(() => hook.result.current.composer.onCommand(testCommand('tree')))
+    act(() => hook.result.current.composer.onCommand(testCommand('history')))
     expect(hook.result.current.error).toBeTruthy()
     act(() => hook.result.current.dismissActionError())
 
@@ -1024,7 +1024,7 @@ describe('AgentPane orchestration', () => {
       firstMessagePreview: '',
       threadCount: 0,
     }))
-    expect(hook.result.current.interaction).toBe('tree')
+    expect(hook.result.current.interaction).toBe('history')
     act(() => hook.result.current.selectSession({
       sessionId: 'threaded-session',
       name: 'Threaded Session',
@@ -1089,7 +1089,7 @@ describe('AgentPane orchestration', () => {
     act(() => hook.result.current.composer.onCommand(testCommand('new')))
     expect(hook.result.current.error).toBeTruthy()
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
-    act(() => hook.result.current.composer.onCommand(testCommand('tree')))
+    act(() => hook.result.current.composer.onCommand(testCommand('history')))
     act(() => hook.result.current.composer.onSubmit([createTextPart('second')]))
     act(() => hook.result.current.composer.onPartsChange([createTextPart('typed during request')]))
     resolve?.(acceptedResponse())
@@ -1250,7 +1250,7 @@ describe('AgentPane orchestration', () => {
     expect(document.querySelector('.agent-pane-thread-heading')).toBeNull()
     await user.click(composer)
     await user.keyboard('/rename-thread{Enter}')
-    await screen.findByRole('region', { name: '重命名 Thread' })
+    await screen.findByRole('region', { name: '重命名 thread' })
     const input = screen.getByRole('textbox', { name: '名称' })
     expect(input).toHaveValue('thread-name')
     await user.clear(input)
@@ -1259,7 +1259,7 @@ describe('AgentPane orchestration', () => {
 
     await waitFor(() =>
       expect(harnessService.renameThread).toHaveBeenCalledWith(THREAD_ID, { name: 'renamed thread' }))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 thread' })).not.toBeInTheDocument())
     expect(composer).toBeInTheDocument()
     expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
   })
@@ -1413,7 +1413,7 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/rename-thread{Enter}')
 
-    await screen.findByRole('region', { name: '重命名 Thread' })
+    await screen.findByRole('region', { name: '重命名 thread' })
     const input = screen.getByRole('textbox', { name: '名称' })
     expect(input).toHaveValue('old name')
     await user.clear(input)
@@ -1422,7 +1422,7 @@ describe('AgentPane orchestration', () => {
 
     await waitFor(() =>
       expect(harnessService.renameThread).toHaveBeenCalledWith(THREAD_ID, { name: 'slash renamed' }))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 thread' })).not.toBeInTheDocument())
   })
 
   it('keeps the rename input and shows the error when a rename request fails', async () => {
@@ -1444,7 +1444,7 @@ describe('AgentPane orchestration', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('rename rejected')
     expect(screen.getByRole('textbox', { name: '名称' })).toHaveValue('keep me')
-    expect(screen.getByRole('region', { name: '重命名 Thread' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '重命名 thread' })).toBeInTheDocument()
   })
 
   it('renames the parent Session from a NEW_THREAD_DRAFT via /rename-session', async () => {
@@ -1688,7 +1688,7 @@ describe('AgentPane orchestration', () => {
       THREAD_ID,
       { name: 'thread renamed' },
     ))
-    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 thread' })).not.toBeInTheDocument())
     expect(await screen.findByRole('region', { name: '选择 Thread' })).toBeInTheDocument()
   })
 
@@ -1860,7 +1860,7 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
 
     // STOPPED 不是工作态：不展示任何工作条
-    expect(screen.queryByText('Working...')).not.toBeInTheDocument()
+    expect(document.querySelector('.thread-working')).toBeNull()
 
     await user.click(composer)
     await user.keyboard('/stop')
@@ -2116,7 +2116,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
   }
 
   it('binds the TURN_END footer entry id as the new branch start entry', async () => {
-    // /tree 的“从此处分支”与回合 footer 共用同一条绑定：传入的是真实 TURN_END Entry id，
+    // /history 的“从此处分支”与回合 footer 共用同一条绑定：传入的是真实 TURN_END Entry id，
     // 作为新分支的 startEntryId；本步骤不写任何目标、不发起任何请求。
     const onRequestBranch = vi.fn()
     localStorage.setItem(
@@ -4353,7 +4353,7 @@ describe('AgentPane root control and child observation', () => {
 
     await user.click(source)
 
-    const back = await screen.findByRole('button', { name: '返回上一层' })
+    const back = await screen.findByRole('button', { name: '返回父 agent' })
     expect(screen.getByText('只读查看')).toBeInTheDocument()
     // 返回入口在查看层顶部标题区（名称/只读标识旁），不是 transcript 与 widget 之后的底部控制区。
     expect(back.closest('.agent-pane-thread-heading')).not.toBeNull()
@@ -4811,7 +4811,7 @@ describe('AgentPane root control mounting', () => {
     await user.click(composer)
     await user.keyboard('/goal{Enter}')
 
-    const input = await screen.findByPlaceholderText('输入分支目标（最多 2000 字符）...')
+    const input = await screen.findByPlaceholderText('输入 thread 目标（最多 2000 字符）...')
     await user.type(input, '先把契约梳理清楚')
     await user.click(screen.getByRole('button', { name: '设置目标' }))
 
