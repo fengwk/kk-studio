@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
@@ -36,7 +37,12 @@ import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -54,6 +60,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -137,6 +144,59 @@ class StudioHarnessThreadControllerTest {
 
     // 一次快照只投影一次，绝不逐消息请求。
     verify(usageCostProjectionService, times(1)).project(any());
+  }
+
+  /** sidecar 一次批量回填所有调用；默认 HTTP mapper 的 ISO Instant 语义不需字段专属转换。 */
+  @Test
+  void snapshotBatchFillsEnvironmentNamesAndDeadlines() throws Exception {
+    ModelInvocation model = mock(ModelInvocation.class);
+    when(model.id()).thenReturn(id(10));
+    when(model.threadId()).thenReturn(id(1));
+    when(model.turnStartEntryId()).thenReturn(id(2));
+    when(model.requestHeadEntryId()).thenReturn(id(3));
+    when(model.resultEntryId()).thenReturn(id(4));
+    when(model.status()).thenReturn(ModelInvocationStatus.SUCCEEDED);
+    when(model.result()).thenReturn(HarnessRuntimeTestFixtures.toolCallResponse());
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            HarnessRuntimeTestFixtures.activeThread(id(1), id(4)),
+            new EntryPath(
+                List.of(
+                    HarnessRuntimeTestFixtures.rootEntry(),
+                        HarnessRuntimeTestFixtures.turnStartEntry(),
+                    HarnessRuntimeTestFixtures.userMessageEntry(),
+                        HarnessRuntimeTestFixtures.assistantEntry())),
+            List.of(),
+            model,
+            List.of(
+                HarnessRuntimeTestFixtures.waitingApprovalTool()
+                    .decideApproval(
+                        ToolApprovalDecision.ALLOWED,
+                        id(300),
+                        "test",
+                        null,
+                        Instant.parse("2026-10-08T10:00:00Z"),
+                        Instant.parse("2026-10-08T10:00:00Z"))),
+            List.of(),
+            List.of());
+    Instant deadline = Instant.parse("2026-10-08T12:00:00Z");
+    when(runtime.getThreadSnapshot(id(1))).thenReturn(snapshot);
+    when(runtime.manualCompactionAvailability(id(1)))
+        .thenReturn(ManualCompactionAvailability.enabled());
+    when(runtime.listEnvironmentToolWaits(any()))
+        .thenReturn(
+            List.of(
+                new EnvironmentToolWait(
+                    id(100), EnvironmentId.of(id(200)), false, "archlinux", deadline)));
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(1)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.toolInvocations[0].requiredEnvironmentId").value(idText(200)))
+        .andExpect(jsonPath("$.data.toolInvocations[0].requiredEnvironmentName").value("archlinux"))
+        .andExpect(
+            jsonPath("$.data.toolInvocations[0].environmentWaitFreshnessAt")
+                .value(deadline.toString()));
+    verify(runtime, times(1)).listEnvironmentToolWaits(Set.of(id(100)));
   }
 
   /** 子节点入口返回真实根和父关系；根与未结束 outcome 必须显式序列化为 null。 */

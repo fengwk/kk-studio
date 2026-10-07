@@ -41,6 +41,7 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 | [`IssueEvidenceDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/IssueEvidenceDTO.java) | `actorAgentName`、`runId` |
 | [`HarnessThreadDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadDTO.java) | `parentThreadId` |
 | [`HarnessThreadSnapshotDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadSnapshotDTO.java) | `modelInvocation` |
+| [`ToolInvocationDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/ToolInvocationDTO.java) | `environmentId`、`requiredEnvironmentId`、`requiredEnvironmentName`、`environmentWaitFreshnessAt`、`approvalJson`、`resultJson`、`errorJson` |
 | [`HarnessStoppedThreadReceiptDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessStoppedThreadReceiptDTO.java) | `stoppedTurnEndEntryId` |
 | [`HarnessSessionEntryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessSessionEntryDTO.java) | `usageCost` |
 | [`EnvironmentCardDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentCardDTO.java) | `statusExpiresAt` |
@@ -76,6 +77,13 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries（每条带读取时 `usageCost`；金额是精确十进制字符串，无法计价显式为 null）、queued commands、活跃 invocation、tool siblings、未物化的 attempt failure 与该 Thread 自己的 Stop 回执；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整七 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
 Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 按字符串展示，secret 与 Base64 正文在输出边界去除。
+
+工具行的环境等待是批量读取时投影，不是 Invocation 状态：`requiredEnvironmentId` 来自
+Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，不取 Thread 当前选择。
+`waitingForEnvironment` 表达读取时是否待环境；`environmentWaitFreshnessAt` 是该 READY
+环境调用未来有效 READY 连接租约、Work 可领取时间、执行租约的最小边界。
+非 READY、server-side 或没有未来边界时为 null；日期沿用 HTTP mapper 的既有 Instant
+语义。这些字段可在同一 Thread version 下因时间推移而变化，重新 GET 不产生持久写入。
 
 `ProjectSnapshotDTO.referencedStateCodes` 是非 null 的去重、有序阶段集合，
 包含活动及归档 Issue 的 `state` 与非 null `blockedFromState`。引用集合不改变正常 Issue 列表，

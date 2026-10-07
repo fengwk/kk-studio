@@ -56,6 +56,14 @@ public class ToolInvocationDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String requiredEnvironmentId;
 
+  /** Work 冻结环境的当前权威名称；无环境或名称不可用时显式为 null，不取 Thread 当前选择。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String requiredEnvironmentName;
+
+  /** 此调用的环境等待投影下一次可能因时间失效的时刻；非 READY 或无未来边界时显式为 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private Instant environmentWaitFreshnessAt;
+
   /** 读取时是否因所需环境不可领取而等待；不属于 durable Invocation 状态。 */
   private boolean waitingForEnvironment;
 

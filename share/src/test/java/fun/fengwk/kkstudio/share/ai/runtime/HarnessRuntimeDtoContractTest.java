@@ -25,6 +25,31 @@ class HarnessRuntimeDtoContractTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
+  /** 工具等待 sidecar 的可空字段在真实 NON_NULL Jackson 下仍显式输出，日期类型沿用 Instant。 */
+  @Test
+  void toolEnvironmentWaitFieldsAreRequiredNullable() throws Exception {
+    assertEquals(
+        String.class,
+        ToolInvocationDTO.class.getDeclaredField("requiredEnvironmentName").getType());
+    assertEquals(
+        Instant.class,
+        ToolInvocationDTO.class.getDeclaredField("environmentWaitFreshnessAt").getType());
+    assertRequiredNullable(ToolInvocationDTO.class, "requiredEnvironmentName");
+    assertRequiredNullable(ToolInvocationDTO.class, "environmentWaitFreshnessAt");
+    ObjectMapper mapper =
+        new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    ToolInvocationDTO tool = new ToolInvocationDTO();
+    var json = mapper.readTree(mapper.writeValueAsString(tool));
+    assertTrue(json.has("requiredEnvironmentName"));
+    assertTrue(json.get("requiredEnvironmentName").isNull());
+    assertTrue(json.has("environmentWaitFreshnessAt"));
+    assertTrue(json.get("environmentWaitFreshnessAt").isNull());
+    tool.setRequiredEnvironmentName("archlinux");
+    assertEquals(
+        "archlinux",
+        mapper.readTree(mapper.writeValueAsString(tool)).get("requiredEnvironmentName").asText());
+  }
+
   /**
    * 显式宽松的 Jackson2 mapper：关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES}，复现 wire 上真实 mapper（Jackson3 HTTP
    * mapper 与 convention4j 共享 Jackson2 bean）默认忽略未知字段的语义，用来证明请求体的 fail-closed 来自 DTO 注解而非 mapper

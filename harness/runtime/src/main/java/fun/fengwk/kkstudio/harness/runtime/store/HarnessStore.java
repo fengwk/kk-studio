@@ -422,7 +422,9 @@ public interface HarnessStore {
      * null），以及它此刻是否在等待该环境上线（{@code READY} 调用 + Work 已到期 + 无有效执行 lease + 环境无有效 READY 连接租约）。
      *
      * <p>它与 {@link #listPendingEnvironmentWaits} 判定同一事实、同一权威时间域，只是不做 <em>根+环境</em>
-     * 聚合，因此工具行不需要从分组反推具体 调用。{@code invocationIds} 为空返回空列表；不存在的 id 不产出行；不产生锁；返回不可变列表。
+     * 聚合，因此工具行不需要从分组反推具体 调用。{@code invocationIds} 为空返回空列表；不存在的 id 不产出行；不产生锁；返回不可变列表。 名称沿 Work
+     * 冻结身份读取环境目录；时效边界只取该 READY 环境调用未来的有效 READY 连接租约、Work availableAt 和 leaseUntil 的最小值；非
+     * READY、server-side 或无未来边界为 null，不使用全局截止点。
      */
     List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
         Instant now, Collection<UUID> invocationIds);
