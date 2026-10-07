@@ -528,14 +528,70 @@ describe('EnvironmentsPage', () => {
   })
 
   /**
-   * 测试意图：心跳续租会把截止点推后；页面必须取消旧定时器并按新截止点重排，而不是在旧截止点提前回读。
+   * 测试意图：后端 StrictJackson 把 statusExpiresAt 写成数字时间戳（epoch 秒，可带小数）时，
+   * 页面必须按真实截止点排一次回读；ISO、数字毫秒与数字 epoch 秒三种 wire 形态行为一致。
    */
-  it('cancels and rearms the deadline when a committed change renews the lease', async () => {
+  it.each([
+    ['ISO 字符串', '2026-07-20T00:00:10.250Z'],
+    ['数字毫秒', 1784505610250],
+    ['数字 epoch 秒（带小数）', 1784505610.25],
+  ])('rechecks once at the lease deadline served as %s and never polls', async (_label, statusExpiresAt) => {
     vi.useFakeTimers()
     try {
       vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+        environment({ id: 'env-1', name: 'lease-box', statusExpiresAt }),
+      ])
+      renderPage()
+      await flushUntil(() => screen.queryByText('lease-box') != null)
+      expect(screen.getByText('lease-box')).toBeInTheDocument()
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(1)
+
+      // 截止点（含 250ms 容差）之前不得回读。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10499)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(1)
+
+      // 静默死亡：越过截止点后恰好回读一次，服务端此时已派生 OFFLINE（statusExpiresAt 为空）。
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({
+          id: 'env-1',
+          name: 'lease-box',
+          status: 'OFFLINE',
+          ready: false,
+          statusExpiresAt: null,
+        }),
+      ])
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+      expect(screen.getByText('OFFLINE')).toBeInTheDocument()
+
+      // 已无截止点，之后不再有任何定时回读。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * 测试意图：心跳续租会把截止点推后；页面必须取消旧定时器并按新截止点重排，而不是在旧截止点提前回读。
+   * 数字 epoch 秒形态同样如此，否则毫秒/秒混淆会让旧截止点立即触发一次回读。
+   */
+  it.each([
+    ['ISO 字符串', '2026-07-20T00:00:10.000Z', '2026-07-20T00:01:10.000Z'],
+    ['数字 epoch 秒', 1784505610, 1784505670],
+  ])('cancels and rearms the deadline when a committed change renews the lease (%s)', async (_label, initial, renewed) => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: initial }),
       ])
       const { sockets } = renderPage()
       await flushUntil(() => screen.queryByText('local-dev') != null)
@@ -545,7 +601,7 @@ describe('EnvironmentsPage', () => {
 
       // 续租提交后推送 changed：权威数据把截止点推后 70s。
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: '2026-07-20T00:01:10.000Z' }),
+        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: renewed }),
       ])
       await act(async () => {
         socket.emitServer({
