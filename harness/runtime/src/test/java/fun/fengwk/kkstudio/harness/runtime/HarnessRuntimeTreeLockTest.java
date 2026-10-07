@@ -8,6 +8,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setW
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -124,18 +125,86 @@ class HarnessRuntimeTreeLockTest {
 
   @Test
   void lockForThreadOnNonExistentThreadLocksTargetId() {
-    // 测试意图：验证 ThreadTreeLocks.lockForThread 在不存在的线程 ID 上加锁时，回退到目标 ID 自身加锁。
+    // 测试意图：验证 ThreadTreeLocks.lockForThread 在不存在的线程 ID 上加锁时，回退到目标 ID 自身加锁，并返回空链表示合法缺失。
     UUID nonExistentId = TestIds.id(999);
     List<String> locks = new ArrayList<>();
     HarnessStore recording = recordingStore(store, locks);
 
-    recording.transaction(
-        tx -> {
-          ThreadTreeLocks.lockForThread(tx, nonExistentId);
-          return null;
-        });
+    List<UUID> confirmed =
+        recording.transaction(tx -> ThreadTreeLocks.lockForThread(tx, nonExistentId));
 
+    assertTrue(confirmed.isEmpty());
     assertEquals(List.of("lockTree:" + nonExistentId), locks);
+  }
+
+  /** 构造「首次读取到 ancestors、加树锁后已被删空」的 Store，模拟持树锁的并发深删除在锁等待期间提交。 */
+  private HarnessStore threadDeletedWhileAcquiringTreeLockStore(List<UUID> firstChain) {
+    AtomicInteger chainReads = new AtomicInteger();
+    return sabotagingStore(
+        store,
+        Map.of(
+            "findAncestorChain",
+            args -> chainReads.getAndIncrement() == 0 ? firstChain : List.of()));
+  }
+
+  @Test
+  void lockForThreadReturnsEmptyWhenThreadDeletedWhileAcquiringTreeLock() {
+    // 测试意图：首次读取到 ancestors、加树锁后线程已被并发删除（confirmed 为空）时返回空链，不把合法并发删除当作结构漂移抛出。
+    Baseline baseline = seedBaseline(store);
+    UUID childId =
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
+    HarnessStore deletingStore =
+        threadDeletedWhileAcquiringTreeLockStore(List.of(childId, baseline.threadId()));
+
+    List<UUID> confirmed =
+        deletingStore.transaction(tx -> ThreadTreeLocks.lockForThread(tx, childId));
+
+    assertTrue(confirmed.isEmpty(), "deleted thread must yield an empty confirmed chain");
+  }
+
+  @Test
+  void lockThreadWithAncestorsReturnsNullWhenThreadDeletedWhileAcquiringTreeLock() {
+    // 测试意图：协调器在取得唯一 helper 的空链后立即返回 null，不再按当前线程状态报结构漂移异常。
+    Baseline baseline = seedBaseline(store);
+    UUID childId =
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
+    HarnessStore deletingStore =
+        threadDeletedWhileAcquiringTreeLockStore(List.of(childId, baseline.threadId()));
+
+    ThreadState locked =
+        deletingStore.transaction(
+            tx -> ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, childId));
+
+    assertNull(locked);
+  }
+
+  @Test
+  void getThreadTreeThrowsNotFoundWhenThreadDeletedWhileAcquiringTreeLock() {
+    // 测试意图：getThreadTree 对并发删除（空链）映射为 typed NotFound，而不是按结构漂移报 IllegalStateException。
+    Baseline baseline = seedBaseline(store);
+    UUID childId =
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
+    HarnessRuntime deletingRuntime =
+        HarnessRuntimeTestSupport.runtime(
+            threadDeletedWhileAcquiringTreeLockStore(List.of(childId, baseline.threadId())), clock);
+
+    assertThrows(
+        HarnessRuntimeNotFoundException.class, () -> deletingRuntime.getThreadTree(childId));
   }
 
   @Test

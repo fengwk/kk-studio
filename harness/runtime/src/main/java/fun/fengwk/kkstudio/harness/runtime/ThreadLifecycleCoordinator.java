@@ -55,11 +55,10 @@ public final class ThreadLifecycleCoordinator {
   public static ThreadState lockThreadWithAncestors(HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
-    List<UUID> chain = tx.findAncestorChain(threadId);
-    UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
-    tx.lockTree(root);
-    if (!chain.equals(tx.findAncestorChain(threadId))) {
-      throw new IllegalStateException("execution tree changed while acquiring its lock");
+    List<UUID> chain = ThreadTreeLocks.lockForThread(tx, threadId);
+    if (chain.isEmpty()) {
+      // 目标线程在取得树锁前已被并发删除：合法缺失，不抛异常也不重试。
+      return null;
     }
     Map<UUID, ThreadState> immutableThreads = new HashMap<>();
     for (UUID id : chain) {
