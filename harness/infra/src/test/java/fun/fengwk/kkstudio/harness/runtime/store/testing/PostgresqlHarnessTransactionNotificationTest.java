@@ -72,10 +72,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 
 /**
- * 事务内 Harness 失效通知（N1 + W2 通知部分）的 PostgreSQL 集成验证：走真实生产写入口，断言提交后才投递的内建 {@code pg_notify}。
+ * 事务内 Harness 失效通知的 PostgreSQL 集成验证：走真实生产写入口，断言提交后才投递的内建 {@code pg_notify}。
  *
- * <p>测试在隔离 fixture 内先删除旧 Schema 中三个 Harness 相关触发器，确保断言不会被遗留触发器“顶包”：每条断言都只能由 {@code
- * PostgresqlHarnessTransaction} 自己发布的通知满足。
+ * <p>每个测试的隔离 fixture 先删除 {@code harness_thread} / {@code harness_tool_invocation}
+ * 上的全部非内部触发器，确保断言不会被 数据库触发器顶包：每条断言都只能由 {@code PostgresqlHarnessTransaction} 自己发布的通知满足。
  */
 class PostgresqlHarnessTransactionNotificationTest {
 
@@ -406,6 +406,48 @@ class PostgresqlHarnessTransactionNotificationTest {
     }
   }
 
+  /**
+   * 测试意图：环境等待的来源工具调用已被清理（合法清理先删调用再删 Work）时，Work 终态仍必须失效待处理读模型；此时已无法解析真实执行根， 按既有协议发空 payload，由
+   * listener 全量 resync。
+   */
+  @Test
+  void environmentWorkInvalidationResyncsWhenToolSourceIsAlreadyDeleted() throws SQLException {
+    JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+    UUID node = UUID.randomUUID();
+    seedEnvironmentConnection(jdbc, ENVIRONMENT, node);
+    SessionRoot root = seedSessionRoot(store);
+    ToolChain chain = seedToolChain(store, root, null, null, ToolKind.BASH);
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, chain.toolId());
+
+    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+      requestEnvironmentWork(store, chain.threadId(), target, ENVIRONMENT);
+      listener.expectExactly(interactionNotification(chain.threadId()));
+
+      Instant now = Instant.ofEpochMilli(System.currentTimeMillis());
+      ClaimedWork claim =
+          store
+              .transaction(
+                  tx ->
+                      tx.claimNextWork(
+                          WorkTargetType.TOOL, now, "lease-1", Duration.ofSeconds(60), node))
+              .orElseThrow();
+      listener.expectExactly(interactionNotification(chain.threadId()));
+
+      // 清理来源调用：READY 调用删除本身不属等待态，保持静默。
+      inTransaction(
+          store,
+          tx -> {
+            tx.lockToolInvocation(chain.toolId()).orElseThrow();
+            assertEquals(1, tx.deleteToolInvocationsByIds(List.of(chain.toolId())));
+          });
+      listener.assertSilent();
+
+      // 来源 Thread 已不可解析：Work 终态失效退化为空 payload 全量 resync。
+      store.transaction(tx -> tx.completeWork(claim, now));
+      listener.expectExactly(interactionResyncNotification());
+    }
+  }
+
   // ---------------- fixture ----------------
 
   private record SessionRoot(UUID sessionId, UUID rootEntryId) {}
@@ -594,10 +636,14 @@ class PostgresqlHarnessTransactionNotificationTest {
     return INTERACTION_CHANNEL + "|" + rootThreadId;
   }
 
+  /** 来源 Thread 已不可解析时的空 payload：listener 依此回退全量 resync。 */
+  private static String interactionResyncNotification() {
+    return INTERACTION_CHANNEL + "|";
+  }
+
   /**
-   * 删除 {@code harness_thread} / {@code harness_tool_invocation} 上的全部非内部触发器（当前 Schema 中是三个遗留通知触发器），
-   * 使 fixture 内不存在任何 DB 侧通知来源；断言只能由 {@code PostgresqlHarnessTransaction} 自己发布的 {@code pg_notify}
-   * 满足。
+   * 删除 {@code harness_thread} / {@code harness_tool_invocation} 上的全部非内部触发器（当前 Schema 中是三个通知触发器）， 使
+   * fixture 内不存在任何 DB 侧通知来源；断言只能由 {@code PostgresqlHarnessTransaction} 自己发布的 {@code pg_notify} 满足。
    */
   private static void dropLegacyHarnessNotificationTriggers(DataSource dataSource)
       throws SQLException {
@@ -629,7 +675,7 @@ class PostgresqlHarnessTransactionNotificationTest {
                 and tgrelid in ('harness_thread'::regclass, 'harness_tool_invocation'::regclass)
               """)) {
         rs.next();
-        assertEquals(0, rs.getInt(1), "fixture 必须不含 harness 遗留触发器");
+        assertEquals(0, rs.getInt(1), "fixture 必须不含 harness 触发器");
       }
     }
   }
