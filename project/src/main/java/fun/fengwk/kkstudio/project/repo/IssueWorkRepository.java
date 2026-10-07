@@ -19,7 +19,11 @@ public interface IssueWorkRepository {
 
   boolean renewLease(UUID issueId, String leaseToken, Duration leaseDuration);
 
-  /** 有效 lease 且版本匹配时删除；新 wake 保留行并释放 lease，返回 false。 */
+  /**
+   * 有效 lease 且版本匹配时删除；新 wake 保留行并释放 lease，返回 false。
+   *
+   * <p>释放分支是真实写入（due 已提前到当前时刻），在同一事务内发送到期提示；围栏未匹配的返回 false 不写也不提示。
+   */
   boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion);
 
   /**
