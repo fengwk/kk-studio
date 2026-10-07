@@ -144,6 +144,15 @@ describe('NumberInput', () => {
     expect(field).toHaveAttribute('aria-describedby', 'volume-hint')
   })
 
+  // 测试意图：校验失败时与其它共享表单控件给出同一 aria-invalid 语义与 danger 边框标记
+  it('marks the field invalid for shared form error styling', () => {
+    render(<NumberInput value="5" invalid aria-label="数量" onChange={() => undefined} />)
+
+    const field = screen.getByLabelText('数量')
+    expect(field).toHaveAttribute('aria-invalid', 'true')
+    expect(field.closest('.number-input')).toHaveAttribute('data-invalid', 'true')
+  })
+
   it('does not intercept unrelated keys', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
