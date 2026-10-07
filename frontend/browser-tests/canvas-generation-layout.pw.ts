@@ -108,4 +108,55 @@ test.describe('Canvas Generation Panel Real Browser Layout Regression', () => {
     await expect(output).toBeVisible()
     await expect(output).toContainText('updated raw prompt')
   })
+
+  test('native canvas controls keep their zero-specificity baseline and the shared compact icon actions keep 28px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/browser-tests/canvas-generation-harness.html')
+
+    const panel = page.locator('.generation-panel')
+    await expect(panel).toBeVisible()
+
+    // 头部动作迁移到共享 IconButton：仍是 28px 紧凑点击区，没有被 feature 重置覆盖。
+    const actions = panel.locator('.generation-panel-actions .icon-button')
+    expect(await actions.count()).toBe(2)
+    const actionBox = (await actions.first().boundingBox())!
+    expect(Math.round(actionBox.width)).toBe(28)
+    expect(Math.round(actionBox.height)).toBe(28)
+
+    // 原生 canvas 按钮（引用候选、芯片删除）继续得到基线 border/background 归零，
+    // `:where()` 只降低特异度，不放弃 UA 归零职责，也不回退几何。
+    const baseline = await panel
+      .locator('.generation-reference')
+      .first()
+      .evaluate((element) => {
+        const style = getComputedStyle(element)
+        const box = element.getBoundingClientRect()
+        return {
+          borderWidth: style.borderTopWidth,
+          borderStyle: style.borderTopStyle,
+          background: style.backgroundColor,
+          cursor: style.cursor,
+          width: Math.round(box.width),
+          display: style.display,
+        }
+      })
+    expect(baseline.borderWidth).toBe('0px')
+    expect(baseline.borderStyle).toBe('none')
+    expect(baseline.background).toBe('rgba(0, 0, 0, 0)')
+    expect(baseline.cursor).toBe('pointer')
+    expect(baseline.display).toBe('grid')
+    expect(baseline.width).toBe(62)
+
+    const chipButton = await panel
+      .locator('.generation-attached-chip button')
+      .first()
+      .evaluate((element) => {
+        const style = getComputedStyle(element)
+        return { borderWidth: style.borderTopWidth, background: style.backgroundColor }
+      })
+    expect(chipButton.borderWidth).toBe('0px')
+    expect(chipButton.background).toBe('rgba(0, 0, 0, 0)')
+  })
 })

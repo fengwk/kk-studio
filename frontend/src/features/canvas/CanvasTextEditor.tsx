@@ -1,8 +1,13 @@
+import { X } from 'lucide-react'
 import { useMemo, useRef } from 'react'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { projectNodes } from '@/features/canvas/projection'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 
 const EDITOR_WIDTH = 400
 const EDITOR_GAP = 10
@@ -82,19 +87,19 @@ export function CanvasTextEditor() {
         <span className="canvas-text-editor-kicker">
           {createMode ? t('canvas.textEditor.createKicker') : t('canvas.textEditor.editKicker')}
         </span>
-        <button
-          type="button"
+        <IconButton
           className="canvas-text-editor-close"
-          aria-label={t('canvas.textEditor.close')}
+          size="compact"
+          label={t('canvas.textEditor.close')}
           onClick={closeTextEditor}
         >
-          ✕
-        </button>
+          <X aria-hidden="true" />
+        </IconButton>
       </div>
       <div className="canvas-text-editor-body">
         <label>
           <span>{t('canvas.textEditor.name')}</span>
-          <input
+          <TextInput
             aria-label={t('canvas.textEditor.name')}
             autoFocus
             value={editor.name}
@@ -103,7 +108,8 @@ export function CanvasTextEditor() {
         </label>
         <label>
           <span>{t('canvas.textEditor.markdown')}</span>
-          <textarea
+          <TextArea
+            className="canvas-text-editor-markdown"
             aria-label={t('canvas.textEditor.markdown')}
             value={editor.markdown}
             onChange={(event) => setTextEditorDraft({ markdown: event.target.value })}
@@ -114,17 +120,16 @@ export function CanvasTextEditor() {
         </span>
       </div>
       <footer className="canvas-text-editor-footer">
-        <button type="button" onClick={closeTextEditor}>
+        <Button variant="ghost" size="compact" onClick={closeTextEditor}>
           {t('canvas.textEditor.cancel')}
-        </button>
-        <button
-          type="button"
-          className="primary"
+        </Button>
+        <Button
+          size="compact"
           disabled={!editor.name.trim() || !editor.markdown.trim()}
           onClick={saveTextEditor}
         >
           {t('canvas.textEditor.save')}
-        </button>
+        </Button>
       </footer>
     </div>
   )
