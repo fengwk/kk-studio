@@ -273,6 +273,8 @@ export interface ProjectIssueSnapshotDTO {
 export interface ProjectSnapshotDTO {
   project: ProjectDTO
   issues: ProjectIssueSnapshotDTO[]
+  /** 所有当前及归档 Issue 的 state / blockedFromState 引用，去重、确定性排序。 */
+  referencedStateCodes: string[]
 }
 
 export interface ProjectsChangedEventPayload {

@@ -49,6 +49,7 @@ function createProjectSnapshot() {
           run: null,
         },
       ],
+      referencedStateCodes: ['INIT'],
     },
   }
 }
@@ -308,7 +309,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     // 2. 详情弹窗打开，切换到 Agent 线程 Tab
     const dialog = page.getByRole('dialog', { name: 'Issue #1 详情' })
     await expect(dialog).toBeVisible()
-    const agentTab = dialog.getByRole('button', { name: /Agent 线程/ })
+    const agentTab = dialog.getByRole('tab', { name: /Agent 线程/ })
     await agentTab.click()
 
     // 3. 点击打开线程视图按钮

@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { FilePlus } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { useI18n } from '@/shared/i18n'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { IssueDTO } from '../types'
@@ -21,6 +25,7 @@ export function CreateIssueModal({
   onSuccess,
   api = projectsApi,
 }: CreateIssueModalProps) {
+  const { t } = useI18n()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -42,7 +47,7 @@ export function CreateIssueModal({
     e.preventDefault()
     const trimmedTitle = title.trim()
     if (!trimmedTitle) {
-      setErrorMessage('Issue 标题不能为空')
+      setErrorMessage(t('projects.issue.titleRequired'))
       return
     }
 
@@ -56,7 +61,7 @@ export function CreateIssueModal({
       onSuccess(created)
       onClose()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '创建 Issue 失败')
+      setErrorMessage(err instanceof Error ? err.message : t('projects.issue.createFailed'))
     } finally {
       setIsSubmitting(false)
     }
@@ -65,7 +70,7 @@ export function CreateIssueModal({
   return (
     <Dialog
       className="resource-modal-card"
-      title="新建 Issue"
+      title={t('projects.issue.create')}
       headerIcon={<FilePlus size={18} aria-hidden="true" />}
       pending={isSubmitting}
       onClose={onClose}
@@ -78,48 +83,41 @@ export function CreateIssueModal({
               </div>
             )}
 
-            <div className="form-group">
-              <label htmlFor="create-issue-title" className="form-label required">
-                需求标题
-              </label>
-              <input
+            <label className="edit-project-field" htmlFor="create-issue-title">
+              <FieldLabel required>{t('projects.issue.titleLabel')}</FieldLabel>
+              <TextInput
                 id="create-issue-title"
-                type="text"
-                className="form-input"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="例如：支持批量导入视频元数据"
+                placeholder={t('projects.issue.titlePlaceholder')}
                 disabled={isSubmitting}
                 autoFocus
               />
-            </div>
+            </label>
 
-            <div className="form-group">
-              <label htmlFor="create-issue-desc" className="form-label">
-                需求事实与描述
-              </label>
-              <textarea
+            <label className="edit-project-field" htmlFor="create-issue-desc">
+              <FieldLabel>{t('projects.issue.descLabel')}</FieldLabel>
+              <TextArea
                 id="create-issue-desc"
-                className="form-textarea"
                 rows={4}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="描述需求背景、验收标准及阶段交付物要求..."
+                placeholder={t('projects.issue.descPlaceholder')}
                 disabled={isSubmitting}
               />
-            </div>
+            </label>
 
             <div style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
-              <span>创建后将自动初始化进入 <code>INIT</code> 阶段。</span>
+              <span>{t('projects.issue.createHint')}</span>
             </div>
           </div>
 
           <div className="modal-footer">
             <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
-              取消
+              {t('projects.cancel')}
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? '创建中...' : '创建 Issue'}
+              {isSubmitting ? t('projects.create.submitting') : t('projects.issue.createSubmit')}
             </Button>
           </div>
         </form>
