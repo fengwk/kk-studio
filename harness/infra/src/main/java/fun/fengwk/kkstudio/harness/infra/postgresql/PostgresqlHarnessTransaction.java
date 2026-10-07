@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
@@ -47,9 +48,11 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -254,6 +257,22 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       where (representative_created_at, representative_invocation_id) > (?, ?)
       order by representative_created_at, representative_invocation_id
       limit ?
+      """;
+
+  /** 待处理读模型仅因时间推移最早可能改变的权威时刻（见 {@link HarnessStore.Transaction#findNextEnvironmentWaitChange}）。 */
+  private static final String NEXT_ENVIRONMENT_WAIT_CHANGE =
+      """
+      select least(
+                 min(case when ec.lease_until > statement_timestamp() then ec.lease_until end),
+                 min(case when w.available_at > statement_timestamp() then w.available_at end),
+                 min(case when w.lease_until > statement_timestamp() then w.lease_until end)
+             ) as next_change_at
+      from harness_tool_invocation i
+      join harness_work w on w.target_type = 'TOOL' and w.target_id = i.id
+      left join environment_connection ec
+        on ec.environment_id = w.required_environment_id and ec.status = 'READY'
+      where i.status = 'READY'
+        and w.required_environment_id is not null
       """;
 
   /**
@@ -1823,6 +1842,51 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         PostgresqlHarnessRows.timestamp(afterRepresentativeCreatedAt),
         afterRepresentativeInvocationId,
         limit);
+  }
+
+  @Override
+  public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
+      Instant now, Collection<UUID> invocationIds) {
+    checkOpen();
+    Objects.requireNonNull(now, "now");
+    Objects.requireNonNull(invocationIds, "invocationIds");
+    PostgresqlHarnessRows.requireMillisecondPrecision(now);
+    List<UUID> ids = List.copyOf(invocationIds);
+    if (ids.isEmpty()) {
+      return List.of();
+    }
+    return queryList(
+        """
+        select i.id as invocation_id,
+               w.required_environment_id,
+               i.status = 'READY'
+                 and w.target_id is not null
+                 and w.required_environment_id is not null
+                 and w.available_at <= statement_timestamp()
+                 and (w.lease_until is null or w.lease_until <= statement_timestamp())
+                 and not exists (
+                     select 1
+                     from environment_connection ec
+                     where ec.environment_id = w.required_environment_id
+                       and ec.status = 'READY'
+                       and ec.lease_until > statement_timestamp()
+                 ) as waiting_for_environment
+        from harness_tool_invocation i
+        left join harness_work w on w.target_type = 'TOOL' and w.target_id = i.id
+        where i.id in (%s)
+        """
+            .formatted(placeholders(ids.size())),
+        PostgresqlHarnessRows.ENVIRONMENT_TOOL_WAIT,
+        ids.toArray());
+  }
+
+  @Override
+  public Optional<Instant> findNextEnvironmentWaitChange(Instant now) {
+    checkOpen();
+    Objects.requireNonNull(now, "now");
+    PostgresqlHarnessRows.requireMillisecondPrecision(now);
+    Timestamp nextChangeAt = queryForObject(NEXT_ENVIRONMENT_WAIT_CHANGE, Timestamp.class);
+    return Optional.ofNullable(nextChangeAt).map(Timestamp::toInstant);
   }
 
   @Override

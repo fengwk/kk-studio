@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -25,12 +26,16 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
@@ -48,7 +53,9 @@ class InteractionQueryServiceTest {
   }
 
   private ChatSessionRepository chatSessionRepository;
+  private ChatRepository chatRepository;
   private IssueAgentThreadRepository issueAgentThreadRepository;
+  private IssueRepository issueRepository;
   private EnvironmentRepository environmentRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
@@ -58,7 +65,9 @@ class InteractionQueryServiceTest {
   @SuppressWarnings("unchecked")
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
+    chatRepository = mock(ChatRepository.class);
     issueAgentThreadRepository = mock(IssueAgentThreadRepository.class);
+    issueRepository = mock(IssueRepository.class);
     environmentRepository = mock(EnvironmentRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
@@ -69,24 +78,41 @@ class InteractionQueryServiceTest {
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
     service =
         new InteractionQueryService(
-            chatSessionRepository, issueAgentThreadRepository, environmentRepository, runtimes);
+            chatSessionRepository,
+            chatRepository,
+            issueAgentThreadRepository,
+            issueRepository,
+            environmentRepository,
+            runtimes);
   }
 
-  /** 显式过滤根必须解析为执行根；不存在抛 not-found、非根抛非法参数。 */
+  /** 显式过滤根/直接来源根必须解析为执行根；同时提供该根的快照（展示名）。后代来源会用 {@link #stubRootSession} 覆盖同一根的快照。 */
   private void stubRoot(UUID threadId) {
     when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId));
+    stubRootSnapshot(threadId, ZERO_UUID, "thread-" + threadId);
   }
 
   private void stubDescendant(UUID threadId, UUID rootThreadId) {
     when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId, rootThreadId));
   }
 
+  /** 根快照同时提供 Session（归属解析）与名称（展示）；服务端每个根只回读一次。 */
   private void stubRootSession(UUID rootThreadId, UUID sessionId) {
+    stubRootSnapshot(rootThreadId, sessionId, "thread-" + rootThreadId);
+  }
+
+  private void stubRootSnapshot(UUID rootThreadId, UUID sessionId, String name) {
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
+    when(thread.name()).thenReturn(name);
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     when(snapshot.thread()).thenReturn(thread);
     when(runtime.getThreadSnapshot(rootThreadId)).thenReturn(snapshot);
+  }
+
+  /** 直接以根为来源的人工等待：根 Session 直接取自行，但展示名称仍需根快照。 */
+  private void stubRootName(UUID rootThreadId, String name) {
+    stubRootSnapshot(rootThreadId, ZERO_UUID, name);
   }
 
   /** 计数扫描固定从首屏游标按 {@link InteractionQueryService#COUNT_PAGE_SIZE} 推进，因此每个用例都要显式给出该源。 */
@@ -154,9 +180,15 @@ class InteractionQueryServiceTest {
 
     when(chatSessionRepository.findBySessionId(sessionId1))
         .thenReturn(new ChatSession(sessionId1, id(1001)));
+    Chat chat = mock(Chat.class);
+    when(chat.getTitle()).thenReturn("deploy chat");
+    when(chatRepository.getById(id(1001))).thenReturn(chat);
     when(chatSessionRepository.findBySessionId(sessionId2)).thenReturn(null);
     when(issueAgentThreadRepository.findByThreadId(threadId2))
         .thenReturn(new IssueAgentThread(id(2001), "planner", threadId2));
+    Issue issue = mock(Issue.class);
+    when(issue.getTitle()).thenReturn("fix the pipeline");
+    when(issueRepository.getById(id(2001))).thenReturn(issue);
     when(chatSessionRepository.findBySessionId(sessionId3)).thenReturn(null);
     when(issueAgentThreadRepository.findByThreadId(threadId3)).thenReturn(null);
 
@@ -183,7 +215,10 @@ class InteractionQueryServiceTest {
     assertEquals(t1, dto1.getCreateTime());
     assertEquals("CHAT", dto1.getOwner().getType());
     assertEquals(id(1001).toString(), dto1.getOwner().getChatId());
+    assertEquals("deploy chat", dto1.getOwner().getChatTitle());
+    assertEquals("thread-" + threadId1, dto1.getOwner().getRootThreadName());
     assertNull(dto1.getOwner().getIssueId());
+    assertNull(dto1.getOwner().getIssueTitle());
     assertNull(dto1.getOwner().getAgentName());
 
     InteractionDTO dto2 = page.getItems().get(1);
@@ -197,8 +232,15 @@ class InteractionQueryServiceTest {
     assertEquals(t2, dto2.getCreateTime());
     assertEquals("ISSUE_AGENT", dto2.getOwner().getType());
     assertEquals(id(2001).toString(), dto2.getOwner().getIssueId());
+    assertEquals("fix the pipeline", dto2.getOwner().getIssueTitle());
     assertEquals("planner", dto2.getOwner().getAgentName());
+    assertEquals("thread-" + threadId2, dto2.getOwner().getRootThreadName());
     assertNull(dto2.getOwner().getChatId());
+    assertNull(dto2.getOwner().getChatTitle());
+
+    // 展示名按请求缓存：同一根的 Chat 标题只从仓储补齐一次，不逐卡回读。
+    verify(chatRepository, times(1)).getById(id(1001));
+    verify(issueRepository, times(1)).getById(id(2001));
   }
 
   /**
@@ -751,21 +793,61 @@ class InteractionQueryServiceTest {
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                null, issueAgentThreadRepository, environmentRepository, runtimes));
+                null,
+                chatRepository,
+                issueAgentThreadRepository,
+                issueRepository,
+                environmentRepository,
+                runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                chatSessionRepository, null, environmentRepository, runtimes));
+                chatSessionRepository,
+                null,
+                issueAgentThreadRepository,
+                issueRepository,
+                environmentRepository,
+                runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                chatSessionRepository, issueAgentThreadRepository, null, runtimes));
+                chatSessionRepository,
+                chatRepository,
+                null,
+                issueRepository,
+                environmentRepository,
+                runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                chatSessionRepository, issueAgentThreadRepository, environmentRepository, null));
+                chatSessionRepository,
+                chatRepository,
+                issueAgentThreadRepository,
+                null,
+                environmentRepository,
+                runtimes));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new InteractionQueryService(
+                chatSessionRepository,
+                chatRepository,
+                issueAgentThreadRepository,
+                issueRepository,
+                null,
+                runtimes));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new InteractionQueryService(
+                chatSessionRepository,
+                chatRepository,
+                issueAgentThreadRepository,
+                issueRepository,
+                environmentRepository,
+                null));
   }
 }

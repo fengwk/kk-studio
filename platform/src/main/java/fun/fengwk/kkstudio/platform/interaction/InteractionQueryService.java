@@ -4,18 +4,23 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
@@ -55,19 +60,25 @@ public class InteractionQueryService {
   private static final String TYPE_ENVIRONMENT_WAIT = "ENVIRONMENT_WAIT";
 
   private final ChatSessionRepository chatSessionRepository;
+  private final ChatRepository chatRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final IssueRepository issueRepository;
   private final EnvironmentRepository environmentRepository;
   private final InteractionRootResolver rootResolver;
 
   public InteractionQueryService(
       ChatSessionRepository chatSessionRepository,
+      ChatRepository chatRepository,
       IssueAgentThreadRepository issueAgentThreadRepository,
+      IssueRepository issueRepository,
       EnvironmentRepository environmentRepository,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
+    this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.issueAgentThreadRepository =
         Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
+    this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.rootResolver = new InteractionRootResolver(runtimes);
@@ -166,6 +177,7 @@ public class InteractionQueryService {
     dto.setNextCursor(
         moreRemaining ? InteractionCursor.encode(consumedCreatedAt, consumedId) : null);
     dto.setTotal(countVisibleInteractions(context));
+    dto.setFreshnessAt(context.runtime().findNextEnvironmentWaitChange().orElse(null));
     return dto;
   }
 
@@ -279,6 +291,9 @@ public class InteractionQueryService {
     private final UUID filterRootThreadId;
     private final Map<UUID, UUID> rootBySourceThread = new HashMap<>();
     private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
+    private final Map<UUID, ThreadSnapshot> rootSnapshotByRootThread = new HashMap<>();
+    private final Map<UUID, String> chatTitleById = new HashMap<>();
+    private final Map<UUID, String> issueTitleById = new HashMap<>();
     private final Map<String, String> environmentNameById = new HashMap<>();
 
     private QueryContext(HarnessRuntime runtime, UUID filterRootThreadId) {
@@ -320,16 +335,26 @@ public class InteractionQueryService {
     private Optional<InteractionOwnerDTO> resolveOwnerForManual(
         UUID rootThreadId, PendingInteraction row) {
       UUID rootSessionId =
-          rootThreadId.equals(row.threadId())
-              ? row.sessionId()
-              : runtime.getThreadSnapshot(rootThreadId).thread().sessionId();
+          rootThreadId.equals(row.threadId()) ? row.sessionId() : rootSessionId(rootThreadId);
       return ownerForRootSession(rootThreadId, rootSessionId);
     }
 
     /** 环境等待的来源可能位于任意深度，这里统一回读根快照取得根 Session 再解析 owner。 */
     private Optional<InteractionOwnerDTO> resolveOwnerForRoot(UUID rootThreadId) {
-      UUID rootSessionId = runtime.getThreadSnapshot(rootThreadId).thread().sessionId();
-      return ownerForRootSession(rootThreadId, rootSessionId);
+      return ownerForRootSession(rootThreadId, rootSessionId(rootThreadId));
+    }
+
+    /** 每个根只回读一次快照：根 Session 用于归属解析，根名称用于展示；后续条目直接命中缓存。 */
+    private UUID rootSessionId(UUID rootThreadId) {
+      return rootSnapshot(rootThreadId).thread().sessionId();
+    }
+
+    private ThreadSnapshot rootSnapshot(UUID rootThreadId) {
+      return rootSnapshotByRootThread.computeIfAbsent(rootThreadId, runtime::getThreadSnapshot);
+    }
+
+    private String rootThreadName(UUID rootThreadId) {
+      return rootSnapshot(rootThreadId).thread().name();
     }
 
     private Optional<InteractionOwnerDTO> ownerForRootSession(
@@ -339,6 +364,8 @@ public class InteractionQueryService {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
         owner.setType("CHAT");
         owner.setChatId(chatSession.chatId().toString());
+        owner.setChatTitle(chatTitle(chatSession.chatId()));
+        owner.setRootThreadName(rootThreadName(rootThreadId));
         return Optional.of(owner);
       }
       IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(rootThreadId);
@@ -346,10 +373,39 @@ public class InteractionQueryService {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
         owner.setType("ISSUE_AGENT");
         owner.setIssueId(binding.issueId().toString());
+        owner.setIssueTitle(issueTitle(binding.issueId()));
         owner.setAgentName(binding.agentName());
+        owner.setRootThreadName(rootThreadName(rootThreadId));
         return Optional.of(owner);
       }
       return Optional.empty();
+    }
+
+    /** 展示名只按产品身份从原仓储补齐一次（按请求缓存），绝不逐卡回读。 */
+    private String chatTitle(UUID chatId) {
+      String cached = chatTitleById.get(chatId);
+      if (cached != null) {
+        return cached;
+      }
+      Chat chat = chatRepository.getById(chatId);
+      String title = chat == null ? null : chat.getTitle();
+      if (title != null) {
+        chatTitleById.put(chatId, title);
+      }
+      return title;
+    }
+
+    private String issueTitle(UUID issueId) {
+      String cached = issueTitleById.get(issueId);
+      if (cached != null) {
+        return cached;
+      }
+      Issue issue = issueRepository.getById(issueId);
+      String title = issue == null ? null : issue.getTitle();
+      if (title != null) {
+        issueTitleById.put(issueId, title);
+      }
+      return title;
     }
 
     /** 环境展示名只按环境 id 从注册表补齐一次（按页去重），绝不按当前 composer 环境猜测，也不逐卡快照。 */
