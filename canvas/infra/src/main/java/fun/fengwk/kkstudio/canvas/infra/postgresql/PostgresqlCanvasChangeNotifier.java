@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 在持久化事务中发送 Canvas 失效信号，替代数据库侧的 revision/work 通知触发器。
+ * 在持久化事务内发送 Canvas revision 与 Function work 的失效/唤醒信号。
  *
  * <p>两类信号都必须在持有事实的同一事务内发送：PostgreSQL 只在提交时投递 {@code pg_notify}，回滚不投递、未提交不可见。通知只是唤醒/失效提示， 权威事实仍由
  * {@code canvas_document.revision} 与 {@code canvas_function_run} 回读。

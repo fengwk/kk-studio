@@ -87,7 +87,7 @@ public class PostgresqlCanvasStore implements CanvasStore {
     if (documentMapper.advanceRevision(canvasId, expectedRevision, newRevision) != 1) {
       return false;
     }
-    // revision 未真实变化时与数据库触发器语义一致：不发布 revision 失效提示。
+    // revision 未真实变化时保持静默：不发布 revision 失效提示。
     if (newRevision != expectedRevision) {
       notifier.revisionChanged(canvasId, newRevision);
     }
