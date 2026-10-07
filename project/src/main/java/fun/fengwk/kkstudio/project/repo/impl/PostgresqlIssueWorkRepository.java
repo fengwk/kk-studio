@@ -12,6 +12,13 @@ import fun.fengwk.kkstudio.project.repo.impl.model.IssueWorkDO;
 import java.time.Duration;
 import java.util.UUID;
 
+/**
+ * {@code project_issue_work} 的 PostgreSQL 写入端口。
+ *
+ * <p>{@link #requestWork}、{@link #completeWork} 与 {@link #rescheduleWork}
+ * 会产生到期通知，写入前先要求活跃事务：通知必须与写入共用同一 连接，否则无事务时 autocommit 会先提交再在通知处抛出，留下「已提交但无提示」。claim/renew/delete
+ * 不通知，保持原单条语义。
+ */
 @AllArgsConstructor
 @Repository
 public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
@@ -31,6 +38,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public IssueWork requestWork(UUID issueId, Duration delay) {
+    PostgresqlIssueWorkNotifier.requireTransaction();
     IssueWorkDO row = mapper.upsertRequest(issueId, delay);
     if (row != null) {
       notifier.notifyIfDue(issueId);
@@ -50,6 +58,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion) {
+    PostgresqlIssueWorkNotifier.requireTransaction();
     IssueWorkCompletion completion = mapper.completeWork(issueId, leaseToken, claimedWakeVersion);
     if (completion == IssueWorkCompletion.RELEASED) {
       // released 是真实写入：新 wake 已释放租约并把 due 提前到当前时刻，必须提示后续调度。
@@ -61,6 +70,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
   @Override
   public boolean rescheduleWork(
       UUID issueId, String leaseToken, long claimedWakeVersion, Duration delay) {
+    PostgresqlIssueWorkNotifier.requireTransaction();
     boolean written = mapper.rescheduleWork(issueId, leaseToken, claimedWakeVersion, delay) == 1;
     if (written) {
       notifier.notifyIfDue(issueId);

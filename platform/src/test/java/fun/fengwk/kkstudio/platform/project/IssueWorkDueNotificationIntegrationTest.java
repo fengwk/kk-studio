@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.IssueWork;
+import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
 import javax.sql.DataSource;
@@ -40,6 +41,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private IssueWorkStore issueWorkStore;
+  @Autowired private IssueWorkRepository issueWorkRepository;
 
   /** 删除 Schema 触发器，使后续断言只能由 Java 写入口产生；确认确实移除，避免测试因触发器残留而假绿。 */
   @BeforeEach
@@ -318,6 +320,56 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
       assertNotification(pg, issue.getId());
 
       issueService.deleteIssue(issue.getId(), issueService.getIssue(issue.getId()).getVersion());
+      assertNoNotification(pg);
+    }
+  }
+
+  /** 通知相关写入口在无事务时先于任何写入拒绝：行、wakeVersion 与租约不变，通知静默，公共语义不变。 */
+  @Test
+  void writeEntriesWithoutTransactionAreRejectedBeforeAnyWrite() throws Exception {
+    UUID issueId = newIssueId();
+    try (Connection listener = dataSource.getConnection();
+        Statement statement = listener.createStatement()) {
+      statement.execute("listen project_issue_work_due");
+      PGConnection pg = listener.unwrap(PGConnection.class);
+
+      // 未来 due 播种，播种本身不通知。
+      issueWorkStore.requestWork(issueId, Duration.ofMinutes(5));
+      assertNoNotification(pg);
+      IssueWork beforeRequest = issueWorkStore.getWork(issueId);
+
+      assertThrows(
+          IllegalStateException.class,
+          () -> issueWorkRepository.requestWork(issueId, Duration.ZERO));
+      assertEquals(beforeRequest, issueWorkStore.getWork(issueId));
+      assertNoNotification(pg);
+
+      // 持有活跃租约，覆盖 complete 的删除路径与 reschedule 的释放路径。
+      issueWorkStore.requestWork(issueId, Duration.ZERO);
+      assertNotification(pg, issueId);
+      IssueWork claimed = claim(issueId);
+      assertNoNotification(pg);
+      IssueWork beforeFence = issueWorkStore.getWork(issueId);
+
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              issueWorkRepository.completeWork(
+                  issueId, claimed.getLeaseToken(), claimed.getWakeVersion()));
+      assertEquals(beforeFence, issueWorkStore.getWork(issueId));
+      assertNoNotification(pg);
+
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              issueWorkRepository.rescheduleWork(
+                  issueId, claimed.getLeaseToken(), claimed.getWakeVersion(), Duration.ZERO));
+      assertEquals(beforeFence, issueWorkStore.getWork(issueId));
+      assertNoNotification(pg);
+
+      // 事务内公共语义不变：仍可完成删除。
+      assertTrue(
+          issueWorkStore.completeWork(issueId, claimed.getLeaseToken(), claimed.getWakeVersion()));
       assertNoNotification(pg);
     }
   }
