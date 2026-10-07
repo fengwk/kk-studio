@@ -1,9 +1,11 @@
 import { cloneElement, type ReactElement } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
+import { agentService } from '@/shared/api/agent-service'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { CreateProjectModal } from './CreateProjectModal'
 import { EditProjectModal, type EditProjectModalProps } from './EditProjectModal'
 import { DeleteProjectModal } from './DeleteProjectModal'
@@ -160,6 +162,80 @@ describe('CreateProjectModal', () => {
 })
 
 describe('EditProjectModal', () => {
+  it.each(['empty', 'loading', 'failed'] as const)(
+    'keeps incomplete Agent mode with a %s catalog and saves only after explicit configuration',
+    async (catalogState) => {
+      // 空/读取中/失败目录不撤销用户模式选择；真实查询刷新后仍须显式选 Agent 与额度。
+      const user = userEvent.setup()
+      const emptyPage = { results: [], totalCount: 0, pageNumber: 1, pageSize: 50 }
+      let resolveCatalog!: (value: typeof emptyPage) => void
+      if (catalogState === 'loading') {
+        vi.mocked(agentService.listAgents).mockImplementationOnce(
+          () => new Promise((resolve) => { resolveCatalog = resolve }),
+        )
+      } else if (catalogState === 'failed') {
+        vi.mocked(agentService.listAgents).mockRejectedValueOnce(new Error('Catalog unavailable'))
+      } else {
+        vi.mocked(agentService.listAgents).mockResolvedValueOnce(emptyPage)
+      }
+      const project = {
+        ...workflowProject,
+        workflow: { states: workflowProject.workflow.states.map((state) =>
+          state.state === 'WORK'
+            ? { ...state, agent: null, environment: null, maxRuns: null }
+            : state,
+        ) },
+      }
+      const api = {
+        updateWorkflow: vi.fn().mockResolvedValue({ ...project, version: '2' }),
+      } as unknown as ProjectsApi
+      const queryClient = client()
+      render(<QueryClientProvider client={queryClient}>
+        <EditProjectModal isOpen initialTab="workflow" project={project}
+          snapshot={{ project, issues: [], referencedStateCodes: [] }}
+          api={api} onClose={vi.fn()} onSuccess={vi.fn()} />
+      </QueryClientProvider>)
+      const catalogKey = [...queryKeys.agents.list, 'all-names']
+      if (catalogState !== 'loading') {
+        await waitFor(() => expect(queryClient.getQueryData(catalogKey)).toEqual([]))
+      }
+      await user.click(screen.getByRole('button', { name: /2处理中/ }))
+      await user.click(screen.getByRole('button', { name: '执行方式' }))
+      await user.click(screen.getByRole('option', { name: 'Agent 执行' }))
+      expect(screen.getByRole('button', { name: '执行方式' })).toHaveTextContent('Agent 执行')
+      const agentField = screen.getByRole('button', { name: 'Agent', exact: true })
+      expect(agentField).toHaveAttribute('aria-required', 'true')
+      expect(agentField).toHaveAttribute('aria-invalid', 'true')
+      expect(within(screen.getByRole('button', { name: /2处理中/ })).getByText('Agent')).toBeInTheDocument()
+      if (catalogState === 'loading') {
+        expect(agentField).toBeDisabled()
+      }
+      await user.click(screen.getByRole('button', { name: '保存工作流' }))
+      expect(await screen.findByText('Agent 阶段「WORK」必须选择 Agent')).toBeInTheDocument()
+      expect(api.updateWorkflow).not.toHaveBeenCalled()
+
+      if (catalogState === 'loading') {
+        await act(async () => { resolveCatalog(emptyPage) })
+        await waitFor(() => expect(agentField).toBeEnabled())
+      }
+      await act(async () => { await queryClient.invalidateQueries({ queryKey: catalogKey, exact: true }) })
+      expect(screen.getByRole('button', { name: '执行方式' })).toHaveTextContent('Agent 执行')
+      expect(agentField).toHaveAttribute('aria-invalid', 'true')
+      await user.click(agentField)
+      await user.click(screen.getByRole('option', { name: 'backend-dev' }))
+      expect(agentField).not.toHaveAttribute('aria-invalid')
+      await user.type(screen.getByRole('textbox', { name: 'Run 额度（maxRuns）' }), '3')
+      await user.click(screen.getByRole('button', { name: '保存工作流' }))
+      await waitFor(() => expect(api.updateWorkflow).toHaveBeenCalledTimes(1))
+      expect(api.updateWorkflow).toHaveBeenCalledWith(project.id, expect.objectContaining({
+        expectedVersion: '1',
+        workflow: { states: expect.arrayContaining([
+          expect.objectContaining({ state: 'WORK', agent: 'backend-dev', maxRuns: '3' }),
+        ]) },
+      }))
+    },
+  )
+
   it('uses initialTab only on mount and applies the requested tab again on reopen', async () => {
     // initialTab 不是受控页签：打开期间 prop 变化不覆盖用户选择，重开才重新初始化。
     const user = userEvent.setup()

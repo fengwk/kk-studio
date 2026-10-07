@@ -687,6 +687,10 @@ export const projectsCatalog = {
     'zh-CN': '人工阶段「{{state}}」不能配置 Environment 或 Run 额度',
     'en-US': 'Manual stage "{{state}}" cannot configure an environment or run budget',
   },
+  'projects.workflow.error.agentRequired': {
+    'zh-CN': 'Agent 阶段「{{state}}」必须选择 Agent',
+    'en-US': 'Agent stage "{{state}}" requires an agent',
+  },
   'projects.workflow.error.agentMaxRuns': {
     'zh-CN': 'Agent 阶段「{{state}}」的 Run 额度必须是 1 到 {{max}} 之间的整数',
     'en-US': 'Stage "{{state}}" run budget must be an integer between 1 and {{max}}',
