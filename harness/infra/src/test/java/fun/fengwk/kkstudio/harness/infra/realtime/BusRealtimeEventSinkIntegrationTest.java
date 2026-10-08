@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -178,7 +179,7 @@ class BusRealtimeEventSinkIntegrationTest {
   void committedBatchReachesSourceSubscribersWithoutResync() throws Exception {
     BusRealtimeEventSink sink = new BusRealtimeEventSink(bus, DEFAULT_MAX_BYTES);
     UUID threadId = id(1L);
-    List<RealtimeEvent> receivedEvents = new ArrayList<>();
+    List<RealtimeEvent> receivedEvents = new CopyOnWriteArrayList<>();
     AtomicInteger resyncs = new AtomicInteger();
     try (BusRealtimeEventSource source = new BusRealtimeEventSource()) {
       // 本地订阅必须先于总线订阅注册，总线订阅的初始对账标记才会命中该 Thread。
