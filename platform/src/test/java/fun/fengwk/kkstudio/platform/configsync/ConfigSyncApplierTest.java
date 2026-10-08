@@ -236,7 +236,13 @@ class ConfigSyncApplierTest {
     SkillManifestEntry manifest = new SkillManifestEntry("s", "desc");
     ConfigSyncPlan.SkillImport skill =
         new ConfigSyncPlan.SkillImport(
-            "pkg", "d", "https://example.com/pkg.git", "main", "a".repeat(40), List.of(manifest));
+            "pkg",
+            "d",
+            "https://example.com/pkg.git",
+            "main",
+            "a".repeat(40),
+            List.of(manifest),
+            null);
     McpTool tool = ConfigSyncFixtures.mcpTool("tool_x", "mcp");
     ConfigSyncPlan.McpImport mcp =
         new ConfigSyncPlan.McpImport(
@@ -252,7 +258,13 @@ class ConfigSyncApplierTest {
 
     verify(skillCatalogService)
         .importPackage(
-            "pkg", "d", "https://example.com/pkg.git", "main", "a".repeat(40), List.of(manifest));
+            "pkg",
+            "d",
+            "https://example.com/pkg.git",
+            "main",
+            "a".repeat(40),
+            List.of(manifest),
+            null);
     verify(mcpServerService)
         .importServer(
             "mcp",

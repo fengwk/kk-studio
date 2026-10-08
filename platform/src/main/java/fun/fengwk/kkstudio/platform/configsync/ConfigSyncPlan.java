@@ -36,14 +36,15 @@ public record ConfigSyncPlan(
     skipped = List.copyOf(skipped);
   }
 
-  /** 已按 exact commit 扫描完成的 Skill Package 导入。 */
+  /** 已按 exact commit 扫描完成的 Skill Package 导入；{@code token} 为 null 表示未配置访问令牌。 */
   public record SkillImport(
       String packageName,
       String description,
       String repositoryUrl,
       String branch,
       String currentCommit,
-      List<SkillManifestEntry> manifest) {}
+      List<SkillManifestEntry> manifest,
+      String token) {}
 
   /** 已按事务外发现准备好的 MCP Server 导入；{@code discoveredTools} 为 null 表示发现失败。 */
   public record McpImport(

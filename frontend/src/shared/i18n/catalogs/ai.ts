@@ -3151,6 +3151,38 @@ export const aiCatalog = {
     'en-US': 'Branch',
     'zh-CN': '分支',
   },
+  'ai.skillPackages.token': {
+    'en-US': 'Access Token',
+    'zh-CN': '访问令牌',
+  },
+  'ai.skillPackages.tokenPlaceholder': {
+    'en-US': 'Personal Access Token (optional)',
+    'zh-CN': 'Personal Access Token（可选）',
+  },
+  'ai.skillPackages.tokenCreateHint': {
+    'en-US': 'Optional Personal Access Token (PAT) for private repositories. Stored encrypted and never echoed.',
+    'zh-CN': '私有仓库的访问令牌（PAT），可选。加密存储且绝不回显。',
+  },
+  'ai.skillPackages.tokenEditPlaceholder': {
+    'en-US': 'Leave blank to keep existing token',
+    'zh-CN': '留空保留已有令牌',
+  },
+  'ai.skillPackages.tokenEditHint': {
+    'en-US': 'Leave blank to keep the configured token; the secret is never echoed.',
+    'zh-CN': '留空保留已配置的访问令牌；密钥绝不回显。',
+  },
+  'ai.skillPackages.clearToken': {
+    'en-US': 'Clear token',
+    'zh-CN': '清除令牌',
+  },
+  'ai.skillPackages.tokenConfigured': {
+    'en-US': 'Configured',
+    'zh-CN': '已配置',
+  },
+  'ai.skillPackages.tokenNotConfigured': {
+    'en-US': 'Not configured',
+    'zh-CN': '未配置',
+  },
   'ai.skillPackages.currentCommit': {
     'en-US': 'Current Commit',
     'zh-CN': '当前发布 Commit',

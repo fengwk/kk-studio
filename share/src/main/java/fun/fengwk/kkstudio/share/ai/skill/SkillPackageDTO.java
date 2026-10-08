@@ -28,6 +28,9 @@ public class SkillPackageDTO {
   /** 只用于检查候选更新的 branch；不决定已发布内容。 */
   private String branch;
 
+  /** 是否已配置私有仓库访问令牌；绝不回显令牌本身。 */
+  private boolean hasToken;
+
   /** 人工确认并已发布的 exact Git object id（40 或 64 位小写 hex）。 */
   private String currentCommit;
 

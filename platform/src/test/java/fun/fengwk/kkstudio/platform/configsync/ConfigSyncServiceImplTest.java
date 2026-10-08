@@ -51,7 +51,8 @@ class ConfigSyncServiceImplTest {
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
           ConfigSyncFixtures.AGENT_CONFIG_CODEC,
           new SystemSettingsCodec(),
-          yaml);
+          yaml,
+          ConfigSyncFixtures.tokenCipher());
   private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
 
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);

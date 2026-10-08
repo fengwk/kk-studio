@@ -15,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -26,13 +28,15 @@ import java.util.Map;
 class ConfigSyncExporterTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
+  private final SkillTokenCipher tokenCipher = ConfigSyncFixtures.tokenCipher();
   private final ConfigSyncExporter exporter =
       new ConfigSyncExporter(
           ConfigSyncFixtures.PROVIDER_CONFIG_CODEC,
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
           ConfigSyncFixtures.AGENT_CONFIG_CODEC,
           new SystemSettingsCodec(),
-          yaml);
+          yaml,
+          tokenCipher);
 
   private ConfigSyncSnapshot buildSnapshot() {
     return snapshot(
@@ -81,6 +85,23 @@ class ConfigSyncExporterTest {
     assertFalse(mcpServers.get(0).containsKey("discoveryStatus"));
 
     assertTrue(document.get("settings") instanceof Map<?, ?>);
+  }
+
+  @Test
+  void exportIncludesSkillAccessTokenVerbatim() {
+    SkillPackage pkg = skillPackage("pkg", "s");
+    pkg.setEncryptedToken(tokenCipher.encrypt("pkg", "pkg-token"));
+    ConfigSyncSnapshot snapshot =
+        snapshot(List.of(), List.of(), List.of(), List.of(pkg), List.of(), List.of(), List.of());
+
+    String yamlText =
+        exporter.export(snapshot, List.of(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    Map<String, Object> document = yaml.parse(yamlText);
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> skillPackages =
+        (List<Map<String, Object>>) document.get("skillPackages");
+    assertEquals("pkg-token", skillPackages.get(0).get("token"));
   }
 
   @Test

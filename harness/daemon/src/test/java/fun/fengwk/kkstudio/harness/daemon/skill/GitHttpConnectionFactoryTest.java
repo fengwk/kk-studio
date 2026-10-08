@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.RefNotAdvertisedException;
+import org.eclipse.jgit.api.errors.TransportException;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.FetchConnection;
 import org.eclipse.jgit.transport.PushConnection;
@@ -23,6 +24,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResultCodes;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
@@ -326,6 +329,51 @@ class GitHttpConnectionFactoryTest {
         () -> {
           new GitHttpConnectionFactory(executor, 1, -1);
         });
+  }
+
+  /** 意图：权限与凭据错误必须被分类为 GIT_AUTHENTICATION_FAILED，链条大小写不敏感，且不可 fallback。 */
+  @Test
+  void classifiesAuthenticationFailuresWithoutFallback() {
+    String[] keywords = {
+      "not authorized",
+      "Authentication is required",
+      "not permitted",
+      "401",
+      "403",
+      "NOT AUTHORIZED",
+      "AUTHENTICATION IS REQUIRED",
+      "Not Permitted",
+      "HTTP 401 Unauthorized",
+      "Remote returned 403 Forbidden"
+    };
+
+    for (String keyword : keywords) {
+      TransportException direct = new TransportException("remote: " + keyword);
+      assertEquals("GIT_AUTHENTICATION_FAILED", GitHttpConnectionFactory.failureCode(direct));
+      assertFalse(GitHttpConnectionFactory.canFallback(direct));
+
+      Exception nested = new RuntimeException("wrapped", new TransportException(keyword));
+      assertEquals("GIT_AUTHENTICATION_FAILED", GitHttpConnectionFactory.failureCode(nested));
+      assertFalse(GitHttpConnectionFactory.canFallback(nested));
+
+      Exception causeNested =
+          new TransportException("fetch failed", new IOException("server returned " + keyword));
+      assertEquals("GIT_AUTHENTICATION_FAILED", GitHttpConnectionFactory.failureCode(causeNested));
+      assertFalse(GitHttpConnectionFactory.canFallback(causeNested));
+    }
+
+    // 非 TransportException 的纯 IOException 或普通错误不应被误判为 auth failure
+    IOException plainIo = new IOException("401");
+    assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(plainIo));
+
+    // 普通 TransportException 无 auth 关键字时不被误判为 auth failure
+    TransportException genericTransport = new TransportException("remote server closed connection");
+    assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(genericTransport));
+
+    // 验证 stable result code 满足 EnvironmentCapabilityResultCodes
+    assertEquals(
+        "GIT_AUTHENTICATION_FAILED",
+        EnvironmentCapabilityResultCodes.requireCode("GIT_AUTHENTICATION_FAILED"));
   }
 
   /** 意图：取消无限总等待时实际断开网络，不等 production read idle 到期。 */
