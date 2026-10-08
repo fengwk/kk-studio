@@ -1,73 +1,76 @@
 package fun.fengwk.kkstudio.platform.project;
 
-import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.IssueWork;
+import fun.fengwk.kkstudio.project.notification.IssueWorkNotifier;
+import fun.fengwk.kkstudio.project.notification.ProjectNotifications;
 import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
+import javax.sql.DataSource;
+
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
- * 通过独立非池化 PostgreSQL LISTEN 连接验证 {@code project_issue_work_due} 由 Java 生产写入口在事务内发布。
+ * 通过真实 {@link NotificationBus} 订阅验证 {@link ProjectNotifications#WORK_DUE} 由 Java 生产写入口在事务内发布。
  *
- * <p>观察者连接不依赖连接池归还，避免残留 LISTEN 或未消费通知掩盖错误。断言覆盖提交/未提交/回滚，以及「写后行已到期且无有效租约」这一合成判据：立即与未来
- * due、活跃与过期租约、reschedule 的最终 due，以及公共 {@code completeWork} 返回 false 时 released 真实写入与围栏未写的区分。
+ * <p>断言覆盖提交/未提交/回滚，以及「写后行已到期且无有效租约」这一合成判据：立即与未来 due、活跃与过期租约、reschedule 的最终 due，以及公共 {@code
+ * completeWork} 返回 false 时 released 真实写入与围栏未写的区分。
  */
 class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
 
   private static final Duration LEASE = Duration.ofMinutes(1);
 
+  @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private IssueWorkStore issueWorkStore;
   @Autowired private IssueWorkRepository issueWorkRepository;
+  @Autowired private NotificationBus notificationBus;
 
   /** 已提交的真实写入提交后投递一次；同一事务未提交不可见，回滚静默。 */
   @Test
   void committedWriteNotifiesButUncommittedAndRollbackDoNot() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
-      assertNoNotification(pg);
+      assertNotification(notifications, issueId);
+      assertNoNotification(notifications);
 
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
       tx.executeWithoutResult(
           status -> {
             issueWorkStore.requestWork(issueId, Duration.ZERO);
-            assertNoNotificationUnchecked(pg);
+            assertNoNotification(notifications);
           });
-      assertNotification(pg, issueId);
-      assertNoNotification(pg);
+      assertNotification(notifications, issueId);
+      assertNoNotification(notifications);
 
       tx.executeWithoutResult(
           status -> {
             issueWorkStore.requestWork(issueId, Duration.ZERO);
             status.setRollbackOnly();
           });
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -75,23 +78,15 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void immediateRequestNotifiesWhileFutureRequestStaysSilent() throws Exception {
     UUID immediateIssue = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(immediateIssue, Duration.ZERO);
-      assertNotification(pg, immediateIssue);
-    }
+      assertNotification(notifications, immediateIssue);
 
-    UUID futureIssue = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+      UUID futureIssue = newIssueId();
       issueWorkStore.requestWork(futureIssue, Duration.ofMinutes(10));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       IssueWork future = issueWorkStore.getWork(futureIssue);
       assertEquals(future.getUpdatedAt().plus(Duration.ofMinutes(10)), future.getDueAt());
     }
@@ -101,22 +96,20 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void claimRenewAndRequestUnderActiveLeaseStaySilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
 
       IssueWork claimed = claim(issueId);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       issueWorkStore.renewLease(issueId, claimed.getLeaseToken(), LEASE);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -124,40 +117,38 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void releasedCompletionNotifiesWhileFenceFailureAndDeletionStaySilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
 
       IssueWork claimed = claim(issueId);
       // 新 wake 保留活跃租约：行已到期但租约有效，不能误发提示。
       issueWorkStore.requestWork(issueId, Duration.ofMinutes(5));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 旧 claim 版本已被新 wake 推进：释放租约并立即到期，返回 false 但必须通知。
       assertFalse(
           issueWorkStore.completeWork(issueId, claimed.getLeaseToken(), claimed.getWakeVersion()));
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
       IssueWork released = issueWorkStore.getWork(issueId);
       assertNull(released.getLeaseToken());
       assertNull(released.getLeaseUntil());
 
       IssueWork reclaimed = claim(issueId);
       assertEquals(2L, reclaimed.getWakeVersion());
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 非本人 token：围栏未匹配、完全未写，静默。
       assertFalse(issueWorkStore.completeWork(issueId, "intruder", reclaimed.getWakeVersion()));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 匹配 token/version 删除行，返回 true；删除不产生到期提示。
       assertTrue(
           issueWorkStore.completeWork(
               issueId, reclaimed.getLeaseToken(), reclaimed.getWakeVersion()));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       assertThrows(ProjectNotFoundException.class, () -> issueWorkStore.getWork(issueId));
     }
   }
@@ -166,20 +157,18 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void rescheduleZeroDelayNotifiesImmediately() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
       IssueWork claimed = claim(issueId);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       assertTrue(
           issueWorkStore.rescheduleWork(
               issueId, claimed.getLeaseToken(), claimed.getWakeVersion(), Duration.ZERO));
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
     }
   }
 
@@ -187,20 +176,18 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void reschedulePositiveDelayStaysSilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
       IssueWork claimed = claim(issueId);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       assertTrue(
           issueWorkStore.rescheduleWork(
               issueId, claimed.getLeaseToken(), claimed.getWakeVersion(), Duration.ofSeconds(30)));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -208,28 +195,26 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void rescheduleFenceFailureStaysSilent() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
       IssueWork claimed = claim(issueId);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 活跃租约被其他 token 持有：不写。
       assertFalse(
           issueWorkStore.rescheduleWork(
               issueId, "intruder", claimed.getWakeVersion(), Duration.ZERO));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 本人 token 但租约已过期：不写，即使行此刻已到期也静默。
       expire(issueId);
       assertFalse(
           issueWorkStore.rescheduleWork(
               issueId, claimed.getLeaseToken(), claimed.getWakeVersion(), Duration.ZERO));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -237,23 +222,21 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void rescheduleWithNewWakeNotifiesDespitePositiveDelay() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
       IssueWork claimed = claim(issueId);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       assertTrue(
           issueWorkStore.rescheduleWork(
               issueId, claimed.getLeaseToken(), claimed.getWakeVersion(), Duration.ofMinutes(10)));
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
     }
   }
 
@@ -261,29 +244,27 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void expiredLeaseIsTreatedAsUnleased() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
       IssueWork claimed = claim(issueId);
 
       expire(issueId);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
 
       IssueWork current = issueWorkStore.getWork(issueId);
       assertFalse(
           issueWorkStore.completeWork(issueId, claimed.getLeaseToken(), current.getWakeVersion()));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       assertEquals(
           issueId, issueWorkStore.claimNext("reclaimer", LEASE).orElseThrow().getIssueId());
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -291,16 +272,14 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void issueDeletionDoesNotEmitDueNotification() throws Exception {
     var issue = createIssue(createProject());
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       issueWorkStore.requestWork(issue.getId(), Duration.ZERO);
-      assertNotification(pg, issue.getId());
+      assertNotification(notifications, issue.getId());
 
       issueService.deleteIssue(issue.getId(), issueService.getIssue(issue.getId()).getVersion());
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -308,27 +287,28 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
   @Test
   void writeEntriesWithoutTransactionAreRejectedBeforeAnyWrite() throws Exception {
     UUID issueId = newIssueId();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_work_due");
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    IssueWorkNotifier notifier =
+        new IssueWorkNotifier(new JdbcTemplate(dataSource), notificationBus);
+    BlockingQueue<UUID> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(ProjectNotifications.WORK_DUE, notifications::add, () -> {})) {
       // 未来 due 播种，播种本身不通知。
       issueWorkStore.requestWork(issueId, Duration.ofMinutes(5));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       IssueWork beforeRequest = issueWorkStore.getWork(issueId);
 
+      assertThrows(IllegalStateException.class, () -> notifier.notifyIfDue(issueId));
       assertThrows(
           IllegalStateException.class,
           () -> issueWorkRepository.requestWork(issueId, Duration.ZERO));
       assertEquals(beforeRequest, issueWorkStore.getWork(issueId));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 持有活跃租约，覆盖 complete 的删除路径与 reschedule 的释放路径。
       issueWorkStore.requestWork(issueId, Duration.ZERO);
-      assertNotification(pg, issueId);
+      assertNotification(notifications, issueId);
       IssueWork claimed = claim(issueId);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       IssueWork beforeFence = issueWorkStore.getWork(issueId);
 
       assertThrows(
@@ -337,7 +317,7 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
               issueWorkRepository.completeWork(
                   issueId, claimed.getLeaseToken(), claimed.getWakeVersion()));
       assertEquals(beforeFence, issueWorkStore.getWork(issueId));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       assertThrows(
           IllegalStateException.class,
@@ -345,12 +325,12 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
               issueWorkRepository.rescheduleWork(
                   issueId, claimed.getLeaseToken(), claimed.getWakeVersion(), Duration.ZERO));
       assertEquals(beforeFence, issueWorkStore.getWork(issueId));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 事务内公共语义不变：仍可完成删除。
       assertTrue(
           issueWorkStore.completeWork(issueId, claimed.getLeaseToken(), claimed.getWakeVersion()));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -371,23 +351,17 @@ class IssueWorkDueNotificationIntegrationTest extends ProjectTestSupport {
     return createIssue(createProject()).getId();
   }
 
-  private static void assertNotification(PGConnection pg, UUID issueId) throws SQLException {
-    PGNotification[] notifications = pg.getNotifications(2000);
-    assertNotNull(notifications);
-    assertEquals(1, notifications.length);
-    assertEquals("project_issue_work_due", notifications[0].getName());
-    assertEquals(issueId.toString(), notifications[0].getParameter());
+  private static void assertNotification(BlockingQueue<UUID> notifications, UUID issueId)
+      throws InterruptedException {
+    assertEquals(issueId, notifications.poll(2, TimeUnit.SECONDS));
+    assertTrue(notifications.isEmpty());
   }
 
-  private static void assertNoNotification(PGConnection pg) throws SQLException {
-    PGNotification[] notifications = pg.getNotifications(200);
-    assertTrue(notifications == null || notifications.length == 0);
-  }
-
-  private static void assertNoNotificationUnchecked(PGConnection pg) {
+  private static void assertNoNotification(BlockingQueue<UUID> notifications) {
     try {
-      assertNoNotification(pg);
-    } catch (SQLException error) {
+      assertNull(notifications.poll(50, TimeUnit.MILLISECONDS));
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
       throw new IllegalStateException(error);
     }
   }

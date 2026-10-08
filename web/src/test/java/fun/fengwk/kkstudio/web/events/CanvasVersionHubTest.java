@@ -12,8 +12,12 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
+import fun.fengwk.kkstudio.share.notification.VersionHint;
+
 import javax.sql.DataSource;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -204,15 +208,29 @@ class CanvasVersionHubTest {
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     hub.subscribe(canvasId, received::add);
 
-    // 合法 payload 轻量 fan-out；每个畸形 payload 都降级为 resync，失败订阅者不阻断正常订阅者或后续通知。
-    hub.onNotification("00000000-0000-0000-0000-000000000009:7");
-    hub.onNotification("not-a-uuid:7");
-    hub.onNotification("00000000-0000-0000-0000-000000000009");
-    hub.onNotification("00000000-0000-0000-0000-000000000009:07");
-    hub.onNotification("00000000-0000-0000-0000-000000000009:-1");
-    hub.onNotification("00000000-0000-0000-0000-000000000009:9223372036854775808");
-    hub.onNotification("00000000-0000-0000-0000-00000000009:7");
-    hub.onNotification(null);
+    // 合法 payload 轻量 fan-out；每个畸形 payload 由总线 codec 拒绝并降级为 resync，失败订阅者不阻断正常订阅者或后续通知。
+    List<String> malformedPayloads =
+        List.of(
+            "not-a-uuid:7",
+            "00000000-0000-0000-0000-000000000009",
+            "00000000-0000-0000-0000-000000000009:07",
+            "00000000-0000-0000-0000-000000000009:-1",
+            "00000000-0000-0000-0000-000000000009:9223372036854775808",
+            "00000000-0000-0000-0000-00000000009:7");
+
+    hub.onNotification(new VersionHint(canvasId, 7L));
+
+    for (String malformed : malformedPayloads) {
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              CanvasNotifications.REVISION
+                  .codec()
+                  .decode(malformed.getBytes(StandardCharsets.UTF_8)),
+          "总线 codec 必须拒绝畸形 payload: " + malformed);
+      hub.broadcastResync();
+    }
+    hub.broadcastResync();
 
     assertEquals(
         List.of(
@@ -233,7 +251,7 @@ class CanvasVersionHubTest {
     DataSource dataSource = mock(DataSource.class);
     CanvasVersionHub hub = new CanvasVersionHub(dataSource);
 
-    hub.onNotification("00000000-0000-0000-0000-000000000009:7");
+    hub.onNotification(new VersionHint(new UUID(0L, 9L), 7L));
 
     verifyNoInteractions(dataSource);
   }

@@ -13,10 +13,10 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
 import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
@@ -27,8 +27,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 /**
  * {@link IssueControllerRuntimeConfiguration} 运行时装配集成测试：
  *
- * <p>验证 Issue Controller 的 dispatcher、executors、lifecycle 与 PostgreSQL notification loop 的 Spring
- * 依赖图装配，以及 workers-enabled=false 时的行为。
+ * <p>验证 Issue Controller 的 dispatcher、executors、lifecycle 与通知总线 {@link DefaultNotificationBus} 的
+ * Spring 依赖图装配，以及 workers-enabled=false 时的行为。
  */
 class IssueControllerRuntimeConfigurationTest extends WebPostgresTestSupport {
 
@@ -62,7 +62,7 @@ class IssueControllerRuntimeConfigurationTest extends WebPostgresTestSupport {
   @Qualifier("issueControllerDispatcherPollScheduler")
   private ScheduledExecutorService pollScheduler;
 
-  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
+  @Autowired private DefaultNotificationBus notificationBus;
 
   /** 测试意图：验证完整的 Issue Controller 运行时 bean 图正确装配， 且配置属性正确绑定到 IssueControllerProperties。 */
   @Test
@@ -118,14 +118,14 @@ class IssueControllerRuntimeConfigurationTest extends WebPostgresTestSupport {
 
   /**
    * 测试意图：验证 workers-enabled=false 时，Issue Controller dispatcher 不启动（lifecycle 处于 stopped 状态）， 但
-   * PostgresqlNotificationLoop 保持运行，且向 dispatcher 发起 wake 为安全 no-op。
+   * 通知总线保持运行且健康，向 dispatcher 发起 wake 为安全 no-op。
    */
   @Test
-  void workersDisabledKeepsDispatcherStoppedWhileNotificationLoopRuns() {
+  void workersDisabledKeepsDispatcherStoppedWhileNotificationBusRuns() {
     assertFalse(
         lifecycle.isRunning(),
         "dispatcher lifecycle must not be running when workers are disabled");
-    assertTrue(postgresqlNotificationLoop.isRunning(), "notification loop must remain active");
+    assertTrue(notificationBus.healthy(), "notification bus must remain healthy");
 
     // wake 调用必须是安全的 no-op
     dispatcher.wake();

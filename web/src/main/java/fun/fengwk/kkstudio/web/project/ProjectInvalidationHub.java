@@ -12,14 +12,12 @@ import java.util.function.Consumer;
 /**
  * Project 变更失效信号分发器。
  *
- * <p>Project 持久化仓库在事实事务内通过 PostgreSQL {@code LISTEN/NOTIFY} 发送 Project id，提交后才投递。此 Hub 不复制领域事实；合法
- * payload 只作为定向刷新提示，非法 payload 与 LISTEN 重连都退化为全量重同步。
+ * <p>Project 持久化仓库在事实事务内经统一通知总线发布 project id，提交后才投递。此 Hub 不复制领域事实；payload 只作为定向刷新提示， 畸形 payload 由总线
+ * topic codec 拒绝并退化为全量重同步。
  */
 @Slf4j
 @Component
 public class ProjectInvalidationHub {
-
-  public static final String CHANNEL = "project_issue_changed";
 
   private final Set<Subscriber> subscribers = new CopyOnWriteArraySet<>();
 
@@ -31,13 +29,9 @@ public class ProjectInvalidationHub {
     return () -> subscribers.remove(subscriber);
   }
 
-  /** PostgreSQL LISTEN 通知入口。payload 只用于缩小浏览器快照刷新范围。 */
-  public void onNotification(String payload) {
-    UUID projectId = parseCanonicalUuid(payload);
-    if (projectId == null) {
-      broadcastResync();
-      return;
-    }
+  /** 交付一条已由总线解码的失效提示；payload 只用于缩小浏览器快照刷新范围。 */
+  public void onNotification(UUID projectId) {
+    Objects.requireNonNull(projectId, "projectId");
     for (Subscriber subscriber : subscribers) {
       try {
         subscriber.consumer().accept(projectId);
@@ -55,18 +49,6 @@ public class ProjectInvalidationHub {
       } catch (RuntimeException error) {
         log.warn("Failed to resync project subscriber", error);
       }
-    }
-  }
-
-  private static UUID parseCanonicalUuid(String value) {
-    if (value == null) {
-      return null;
-    }
-    try {
-      UUID parsed = UUID.fromString(value);
-      return parsed.toString().equals(value) ? parsed : null;
-    } catch (IllegalArgumentException error) {
-      return null;
     }
   }
 

@@ -29,6 +29,7 @@ class CanvasInfraArchitectureTest {
           "com.fasterxml.jackson.core:jackson-databind",
           "fun.fengwk.convention4j:convention4j-spring-boot-starter",
           "fun.fengwk.kk-studio:kk-studio-canvas-core",
+          "fun.fengwk.kk-studio:kk-studio-share",
           "org.mybatis.spring.boot:mybatis-spring-boot-starter",
           "org.springframework.boot:spring-boot-starter-aspectj");
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
@@ -36,6 +37,7 @@ class CanvasInfraArchitectureTest {
           "com.fasterxml.jackson.",
           "fun.fengwk.convention4j.",
           "fun.fengwk.kkstudio.canvas.",
+          "fun.fengwk.kkstudio.share.",
           "java.",
           "javax.",
           "lombok.",

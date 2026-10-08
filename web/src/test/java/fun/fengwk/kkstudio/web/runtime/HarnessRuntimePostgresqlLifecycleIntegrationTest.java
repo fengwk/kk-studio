@@ -24,8 +24,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationAddress;
+import fun.fengwk.kkstudio.share.notification.NotificationSignal;
 import fun.fengwk.kkstudio.web.WebTestApplication;
-import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -38,7 +41,7 @@ import java.util.function.BooleanSupplier;
 /**
  * Web 组合根的 worker 生命周期集成测试（Testcontainers PostgreSQL，{@code workers-enabled=true}）。
  *
- * <p>上下文启动时注册 dispatcher periodic poll 与应用共享 PostgreSQL notification loop。测试分别验证 Work NOTIFY
+ * <p>上下文启动时注册 dispatcher periodic poll 与应用唯一 {@link DefaultNotificationBus}。测试分别验证 Work 统一通知
  * 立即唤醒以及无通知时 periodic poll 兜底，最终都经 dispatcher drain -&gt; claim -&gt; ThreadProcessor quiescent
  * complete 删除 work 行。
  */
@@ -85,7 +88,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   private SmartLifecycle harnessRuntimeLifecycle;
 
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
-  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
+  @Autowired private DefaultNotificationBus notificationBus;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
@@ -100,15 +103,18 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   @Order(1)
   void lifecycleStartsWorkersAndDueWorkIsProcessedToCompletion() throws Exception {
     assertTrue(harnessRuntimeLifecycle.isRunning(), "lifecycle must be running");
-    assertTrue(postgresqlNotificationLoop.isRunning(), "notification loop must be running");
+    assertTrue(notificationBus.healthy(), "notification bus must be healthy");
 
     seedDueThreadWork();
-    jdbc.execute("select pg_notify('harness_runtime_work', '" + THREAD_ID + "')");
+    notificationBus.publish(
+        HarnessNotifications.WORK_AVAILABLE,
+        NotificationAddress.broadcast(),
+        NotificationSignal.CHANGED);
 
     awaitTrue(
         () -> workRowCount(THREAD_ID) == 0,
         5,
-        "NOTIFY must wake and complete due THREAD work before the 10s periodic poll");
+        "WORK_AVAILABLE notification must wake and complete due THREAD work before the 10s periodic poll");
   }
 
   @Test
@@ -125,14 +131,14 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
 
   @Test
   @Order(3)
-  void lifecycleStopStopsDispatcherButKeepsApplicationNotificationLoopRunning() {
+  void lifecycleStopStopsDispatcherButKeepsApplicationNotificationBusRunning() {
     assertTrue(harnessRuntimeLifecycle.isRunning());
-    assertTrue(postgresqlNotificationLoop.isRunning());
+    assertTrue(notificationBus.healthy());
 
     harnessRuntimeLifecycle.stop();
 
     assertFalse(harnessRuntimeLifecycle.isRunning());
-    assertTrue(postgresqlNotificationLoop.isRunning());
+    assertTrue(notificationBus.healthy());
     assertNotNull(harnessWorkDispatcher, "dispatcher bean stays available after stop");
     harnessRuntimeLifecycle.stop();
   }

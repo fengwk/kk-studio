@@ -10,6 +10,7 @@
 
     <modules>
         <module>share</module>
+        <module>notification</module>
         <module>schema</module>
         <module>canvas</module>
         <module>project</module>
@@ -134,6 +135,11 @@
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-share</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-notification</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

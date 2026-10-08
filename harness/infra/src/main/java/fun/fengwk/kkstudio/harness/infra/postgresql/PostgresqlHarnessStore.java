@@ -8,6 +8,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 
 import javax.sql.DataSource;
 
@@ -34,13 +35,15 @@ public final class PostgresqlHarnessStore implements HarnessStore {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
   private final Supplier<UUID> idGenerator;
+  private final NotificationBus bus;
   private final ThreadLocal<Boolean> active = new ThreadLocal<>();
   private final ThreadLocal<List<Runnable>> afterCommitActions = new ThreadLocal<>();
 
   public PostgresqlHarnessStore(
       DataSource dataSource,
       PlatformTransactionManager transactionManager,
-      Supplier<UUID> idGenerator) {
+      Supplier<UUID> idGenerator,
+      NotificationBus bus) {
     DataSource requiredDataSource = Objects.requireNonNull(dataSource, "dataSource");
     this.jdbc = new JdbcTemplate(requiredDataSource);
     this.transactions =
@@ -49,6 +52,7 @@ public final class PostgresqlHarnessStore implements HarnessStore {
     this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.bus = Objects.requireNonNull(bus, "bus");
   }
 
   /**
@@ -75,7 +79,7 @@ public final class PostgresqlHarnessStore implements HarnessStore {
           transactions.execute(
               status -> {
                 PostgresqlHarnessTransaction transaction =
-                    new PostgresqlHarnessTransaction(jdbc, idGenerator);
+                    new PostgresqlHarnessTransaction(jdbc, idGenerator, bus);
                 try {
                   T value = callback.apply(transaction);
                   transaction.rethrowDatabaseFailure();

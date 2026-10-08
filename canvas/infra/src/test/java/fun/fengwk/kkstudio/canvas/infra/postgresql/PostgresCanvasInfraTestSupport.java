@@ -1,12 +1,8 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,13 +23,13 @@ import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.infra.CanvasInfraTestApplication;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.UUID;
 
 /**
@@ -67,6 +63,7 @@ public abstract class PostgresCanvasInfraTestSupport {
   @Autowired protected TransactionTemplate transactions;
   @Autowired protected CanvasStore canvasStore;
   @Autowired protected CanvasResourceRepository resourceRepository;
+  @Autowired protected NotificationBus bus;
   @MockitoBean private CanvasFunctionDispatcher dispatcher;
 
   @DynamicPropertySource
@@ -139,30 +136,6 @@ public abstract class PostgresCanvasInfraTestSupport {
   protected static Connection newConnection() throws SQLException {
     return DriverManager.getConnection(
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-  }
-
-  /** 建立独立的 autocommit LISTEN 连接，用于断言事务提交时投递的通知。 */
-  protected static Connection listenOn(String channel) throws SQLException {
-    Connection listener = newConnection();
-    listener.setAutoCommit(true);
-    try (Statement statement = listener.createStatement()) {
-      statement.execute("listen " + channel);
-    }
-    return listener;
-  }
-
-  /** 轮询该 LISTEN 连接上已投递的通知；超时返回 null 或空数组。 */
-  protected static PGNotification[] pollNotifications(Connection listener, int timeoutMillis)
-      throws SQLException {
-    return listener.unwrap(PGConnection.class).getNotifications(timeoutMillis);
-  }
-
-  /** 断言当前没有任何已投递通知；用短超时覆盖本不应发生的投递。 */
-  protected static void assertNoNotification(Connection listener) throws SQLException {
-    PGNotification[] notifications = pollNotifications(listener, 300);
-    assertTrue(
-        notifications == null || notifications.length == 0,
-        () -> "unexpected notifications: " + Arrays.toString(notifications));
   }
 
   private static void resetDatabase(Connection connection) throws SQLException {

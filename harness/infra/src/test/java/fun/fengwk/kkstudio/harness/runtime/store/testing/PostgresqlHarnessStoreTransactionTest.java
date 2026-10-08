@@ -19,6 +19,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -125,7 +126,8 @@ class PostgresqlHarnessStoreTransactionTest {
         new PostgresqlHarnessStore(
             PostgresqlHarnessStoreFixture.dataSource(),
             new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource()),
-            () -> null);
+            () -> null,
+            PostgresqlHarnessStoreFixture.notificationBus());
     assertThrows(
         IllegalStateException.class,
         () -> nullGeneratorStore.transaction(HarnessStore.Transaction::nextId));
@@ -414,19 +416,28 @@ class PostgresqlHarnessStoreTransactionTest {
   void publicConstructorRejectsNullArguments() {
     DataSourceTransactionManager transactionManager =
         new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource());
+    DefaultNotificationBus bus = PostgresqlHarnessStoreFixture.notificationBus();
     assertThrows(
         NullPointerException.class,
-        () -> new PostgresqlHarnessStore(null, transactionManager, () -> UUID.randomUUID()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new PostgresqlHarnessStore(
-                PostgresqlHarnessStoreFixture.dataSource(), null, () -> UUID.randomUUID()));
+        () -> new PostgresqlHarnessStore(null, transactionManager, () -> UUID.randomUUID(), bus));
     assertThrows(
         NullPointerException.class,
         () ->
             new PostgresqlHarnessStore(
-                PostgresqlHarnessStoreFixture.dataSource(), transactionManager, null));
+                PostgresqlHarnessStoreFixture.dataSource(), null, () -> UUID.randomUUID(), bus));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new PostgresqlHarnessStore(
+                PostgresqlHarnessStoreFixture.dataSource(), transactionManager, null, bus));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new PostgresqlHarnessStore(
+                PostgresqlHarnessStoreFixture.dataSource(),
+                transactionManager,
+                () -> UUID.randomUUID(),
+                null));
   }
 
   private static void await(CountDownLatch latch) {

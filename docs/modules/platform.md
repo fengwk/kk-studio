@@ -58,7 +58,7 @@ Work 可领取时间和执行租约的最小值，不使用全局交互截止点
 或无未来边界时不定时。这四项是读取时 sidecar，不属于 Thread version 所保证的
 durable 快照，到期后同 version 重新 GET 会自然变化，无额外持久写入。
 
-数据库 `environment_changed` 同时失效环境与交互查询。租约自然过期没有数据库写事件，
+写入口通过 [`PlatformNotifications.ENVIRONMENT_CHANGED`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/notification/PlatformNotifications.java)（topic 为 `environment.changed`）广播通知，同时失效环境与交互查询。租约自然过期没有数据库写事件，
 因此交互页附带 `freshnessAt`：未来 READY 环境租约、可领取时间或 Work 执行租约
 可能改变等待投影的最早时刻。前端在此时刻加 250ms 宽限后仅安排一次交互查询失效，
 续租会取消旧截止点；同一已消费截止点不重新排任务，不使用浏览器轮询或新增通知通道。

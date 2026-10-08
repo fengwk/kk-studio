@@ -62,9 +62,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class EnvironmentSkillSyncOrchestrator {
 
-  /** PostgreSQL 通知 channel：与 schema 的 {@code skill_package_changed} 触发器一致。 */
-  public static final String CHANNEL = "skill_package_changed";
-
   private static final ObjectMapper JSON =
       new ObjectMapper()
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)

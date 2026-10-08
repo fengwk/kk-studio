@@ -23,7 +23,7 @@ import java.util.Objects;
 public class PostgresqlSkillPackageRepository implements SkillPackageRepository {
 
   private final SkillPackageMapper skillPackageMapper;
-  private final PostgresqlSkillPackageChangeNotifier notifier;
+  private final SkillPackageChangeNotifier notifier;
 
   @Override
   public List<SkillPackage> listPackages() {
@@ -47,7 +47,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
 
   @Override
   public boolean insertPackage(SkillPackage skillPackage) {
-    PostgresqlSkillPackageChangeNotifier.requireTransaction();
+    SkillPackageChangeNotifier.requireTransaction();
     if (skillPackageMapper.insertPackage(toPackageDO(skillPackage)) != 1) {
       return false;
     }
@@ -57,7 +57,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
 
   @Override
   public boolean updatePackage(SkillPackage skillPackage, long expectedVersion) {
-    PostgresqlSkillPackageChangeNotifier.requireTransaction();
+    SkillPackageChangeNotifier.requireTransaction();
     if (skillPackageMapper.updatePackage(toPackageDO(skillPackage), expectedVersion) != 1) {
       return false;
     }
@@ -68,7 +68,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
 
   @Override
   public boolean deletePackage(String packageName, long expectedVersion) {
-    PostgresqlSkillPackageChangeNotifier.requireTransaction();
+    SkillPackageChangeNotifier.requireTransaction();
     if (skillPackageMapper.deletePackage(packageName, expectedVersion) != 1) {
       return false;
     }

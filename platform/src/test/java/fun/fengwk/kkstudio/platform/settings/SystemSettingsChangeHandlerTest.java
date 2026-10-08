@@ -31,7 +31,7 @@ class SystemSettingsChangeHandlerTest {
     handler.onNotification(null);
     assertEquals(VERSION_ONE, snapshot.get());
 
-    handler.onNotification("{not-json");
+    handler.onNotification(-1L);
     assertEquals(VERSION_TWO, snapshot.get());
   }
 
@@ -57,8 +57,8 @@ class SystemSettingsChangeHandlerTest {
         .thenReturn(record(VERSION_ONE, 1));
     SystemSettingsChangeHandler handler = new SystemSettingsChangeHandler(repository, snapshot);
 
-    assertDoesNotThrow(() -> handler.onNotification(""));
-    handler.onNotification("");
+    assertDoesNotThrow(() -> handler.onNotification(1L));
+    handler.onNotification(1L);
 
     assertEquals(VERSION_ONE, snapshot.get());
   }
@@ -100,13 +100,13 @@ class SystemSettingsChangeHandlerTest {
         };
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     SystemSettingsChangeHandler handler = new SystemSettingsChangeHandler(repository, snapshot);
-    Thread older = new Thread(() -> handler.onNotification("1"));
+    Thread older = new Thread(() -> handler.onNotification(1L));
 
     older.start();
     if (!oldReadStarted.await(1, TimeUnit.SECONDS)) {
       throw new AssertionError("older read did not start");
     }
-    handler.onNotification("2");
+    handler.onNotification(2L);
     releaseOldRead.countDown();
     older.join(1_000);
 

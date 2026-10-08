@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.events;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.share.notification.VersionHint;
+
 import javax.sql.DataSource;
 
 import java.sql.Connection;
@@ -18,18 +20,16 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
- * PostgreSQL Thread version 通知的进程内 fan-out。
+ * Thread durable version 通知的进程内 fan-out。
  *
- * <p>初始订阅 cursor 从持久表权威读取；notification payload 携带提交后的 {@code threadId:version}，合法 payload 只做轻量解析与
- * fan-out，畸形 payload 广播 resync。共享 LISTEN loop 启动/重连成功时也调用 {@link
+ * <p>{@code harness_thread.version} 是事实源：初始订阅 cursor 从持久表权威读取，通知 payload 携带实体 id 与提交后的真实 version，
+ * 只做 fan-out。畸形 payload 由总线 topic codec 拒绝并退化为本 hub 的 resync；总线建连/重连成功时同样触发 {@link
  * #broadcastResync()}，覆盖断连期间不可恢复的通知。{@link #subscribe} 先注册 consumer 再读当前 version 返回，保证返回的 cursor
  * 之后的事件不因注册竞态丢失。
  */
 @Slf4j
 @Component
 final class ThreadVersionHub implements ThreadVersionEventSource {
-
-  static final String CHANNEL = "harness_thread_version";
 
   private final DataSource dataSource;
   private final Map<UUID, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
@@ -70,14 +70,10 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
         });
   }
 
-  void onNotification(String payload) {
-    ThreadVersion notification = parseNotification(payload);
-    if (notification == null) {
-      log.warn("malformed thread version notification payload={}; broadcasting resync", payload);
-      broadcastResync();
-      return;
-    }
-    publish(notification.threadId(), new Event(notification.version(), false));
+  /** 交付一条已由总线解码的 version hint；payload 不承载权威版本，仅提示该 Thread 需要回读。 */
+  void onNotification(VersionHint hint) {
+    Objects.requireNonNull(hint, "hint");
+    publish(hint.entityId(), new Event(Long.toString(hint.version()), false));
   }
 
   private long currentVersion(UUID threadId) {
@@ -100,35 +96,10 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
     subscribers.forEach((threadId, ignored) -> publish(threadId, new Event(null, true)));
   }
 
-  static ThreadVersion parseNotification(String payload) {
-    if (payload == null) {
-      return null;
-    }
-    int colon = payload.indexOf(':');
-    if (colon <= 0 || colon != payload.lastIndexOf(':')) {
-      return null;
-    }
-    String rawThreadId = payload.substring(0, colon);
-    String version = payload.substring(colon + 1);
-    if (!version.matches("0|[1-9]\\d*")) {
-      return null;
-    }
-    try {
-      UUID threadId = UUID.fromString(rawThreadId);
-      if (!threadId.toString().equals(rawThreadId)) {
-        return null;
-      }
-      Long.parseLong(version);
-      return new ThreadVersion(threadId, version);
-    } catch (IllegalArgumentException ignored) {
-      return null;
-    }
-  }
-
   private void publish(UUID threadId, Event event) {
     Set<Consumer<Event>> threadSubscribers = subscribers.get(threadId);
     if (threadSubscribers != null) {
-      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不杀死 LISTEN 循环。
+      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不中断后续通知投递。
       for (Consumer<Event> consumer : threadSubscribers) {
         try {
           consumer.accept(event);
@@ -139,6 +110,4 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
       }
     }
   }
-
-  record ThreadVersion(UUID threadId, String version) {}
 }

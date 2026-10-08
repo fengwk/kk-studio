@@ -21,9 +21,10 @@ import java.util.List;
 /**
  * Skill Package 发布通知到 Skill 同步编排器的端到端接线测试。
  *
- * <p>意图：真实 Java 写入口（{@code SkillPackageRepository}）提交后 {@code skill_package_changed} 通知必须带 package
- * 名抵达编排器 （该环境无 READY Environment 时不做任何同步）；读取自身不触发通知。这条链路决定「HTTP 发布立即返回、同步异步收敛」，因此 channel 名与
- * payload 语义必须由真实 PostgreSQL 写路径证明，而不是只靠常量重命名守护。
+ * <p>意图：真实 Java 写入口（{@code SkillPackageRepository}）提交后 {@code
+ * PlatformNotifications.SKILL_PACKAGE_CHANGED} 通知必须带 package 名抵达编排器 （该环境无 READY Environment
+ * 时不做任何同步）；读取自身不触发通知。这条链路决定「HTTP 发布立即返回、同步异步收敛」，因此 topic 与 payload 语义必须由真实 PostgreSQL
+ * 写路径证明，而不是只靠常量重命名守护。
  */
 class SkillPackageChangedNotificationIntegrationTest extends WebPostgresTestSupport {
 
@@ -38,7 +39,7 @@ class SkillPackageChangedNotificationIntegrationTest extends WebPostgresTestSupp
 
   @Test
   void packageChangeNotificationReachesOrchestratorWithPackageName() {
-    // 真实 Java 写入口：仓储 insert 在提交后发布 skill_package_changed，payload 是 package 名。
+    // 真实 Java 写入口：仓储 insert 在提交后发布 SKILL_PACKAGE_CHANGED，payload 是 package 名。
     new TransactionTemplate(transactionManager)
         .executeWithoutResult(status -> skillPackageRepository.insertPackage(packageRow()));
 

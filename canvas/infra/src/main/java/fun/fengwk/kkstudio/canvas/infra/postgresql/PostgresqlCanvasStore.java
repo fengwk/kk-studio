@@ -22,14 +22,14 @@ public class PostgresqlCanvasStore implements CanvasStore {
   private final CanvasNodeMapper nodeMapper;
   private final CanvasGroupMapper groupMapper;
   private final CanvasCommandDedupMapper commandDedupMapper;
-  private final PostgresqlCanvasChangeNotifier notifier;
+  private final CanvasChangeNotifier notifier;
 
   public PostgresqlCanvasStore(
       CanvasDocumentMapper documentMapper,
       CanvasNodeMapper nodeMapper,
       CanvasGroupMapper groupMapper,
       CanvasCommandDedupMapper commandDedupMapper,
-      PostgresqlCanvasChangeNotifier notifier) {
+      CanvasChangeNotifier notifier) {
     this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
     this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");

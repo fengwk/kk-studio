@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -253,7 +253,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private final UUID ownerNodeId;
   private final Clock clock;
   private final TransactionTemplate transactionTemplate;
-  private final PostgresqlEnvironmentChangeNotifier notifier;
+  private final EnvironmentChangeNotifier notifier;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final EnvironmentStateCodec stateCodec = new EnvironmentStateCodec();
 
@@ -262,7 +262,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       @Qualifier("nodeInstanceId") UUID ownerNodeId,
       Clock clock,
       PlatformTransactionManager transactionManager,
-      PostgresqlEnvironmentChangeNotifier notifier) {
+      EnvironmentChangeNotifier notifier) {
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
     this.clock = Objects.requireNonNull(clock, "clock");

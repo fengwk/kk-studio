@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,8 +20,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.notification.NotificationLimits;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -49,6 +54,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
 
   private final UUID node1 = UUID.randomUUID();
   private final UUID node2 = UUID.randomUUID();
+  private SingleConnectionDataSource dataSource;
+  private NotificationBus notificationBus;
   private JdbcTemplate jdbcTemplate;
   private EnvironmentRegistry registry1;
   private EnvironmentRegistry registry2;
@@ -59,14 +66,21 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
       resetDatabase(conn);
       applyBaseline(conn);
     }
-    SingleConnectionDataSource ds =
+    this.dataSource =
         new SingleConnectionDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
-    this.jdbcTemplate = new JdbcTemplate(ds);
-    // 写入口必须走真实事务边界：围栏 SQL 与 pg_notify 共享同一 DataSource 的同一事务连接。
-    DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
-    PostgresqlEnvironmentChangeNotifier notifier =
-        new PostgresqlEnvironmentChangeNotifier(jdbcTemplate);
+    this.jdbcTemplate = new JdbcTemplate(dataSource);
+    // 写入口必须走真实事务边界：围栏 SQL 与通知发布共享同一 DataSource 的同一事务连接。
+    DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(dataSource);
+    this.notificationBus =
+        new DefaultNotificationBus(
+            dataSource,
+            node1,
+            List.of(PlatformNotifications.ENVIRONMENT_CHANGED),
+            NotificationLimits.defaults(),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(1));
+    EnvironmentChangeNotifier notifier = new EnvironmentChangeNotifier(notificationBus);
     this.registry1 =
         new EnvironmentRegistry(
             jdbcTemplate, node1, Clock.systemUTC(), transactionManager, notifier);
@@ -83,6 +97,16 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
         "insert into environment (id, name, registration_token, version) values (?, 'prod', ?, 0)",
         PROD.value(),
         PROD_TOKEN);
+  }
+
+  @AfterEach
+  void tearDown() {
+    if (notificationBus != null) {
+      notificationBus.close();
+    }
+    if (dataSource != null) {
+      dataSource.destroy();
+    }
   }
 
   /** 测试意图：验证正确 token 的新环境首次路由认领成功并生成有效 leaseToken 与 CONNECTING 状态。 */

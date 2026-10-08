@@ -468,8 +468,8 @@ public record SystemSettings(
       long applicationEventMaxBytes,
       long applicationEventSendTimeoutMillis,
       long applicationEventHeartbeatIntervalMillis,
-      long postgresqlWorkNotificationPollMillis,
-      long postgresqlWorkReconnectBackoffMillis) {
+      long notificationPollMillis,
+      long notificationReconnectBackoffMillis) {
 
     public static final Advanced DEFAULT =
         new Advanced(
@@ -516,9 +516,9 @@ public record SystemSettings(
           applicationEventHeartbeatIntervalMillis,
           "advanced.applicationEventHeartbeatIntervalMillis");
       SystemSettingsValidation.requirePositiveMillis(
-          postgresqlWorkNotificationPollMillis, "advanced.postgresqlWorkNotificationPollMillis");
+          notificationPollMillis, "advanced.notificationPollMillis");
       SystemSettingsValidation.requirePositiveMillis(
-          postgresqlWorkReconnectBackoffMillis, "advanced.postgresqlWorkReconnectBackoffMillis");
+          notificationReconnectBackoffMillis, "advanced.notificationReconnectBackoffMillis");
     }
   }
 }

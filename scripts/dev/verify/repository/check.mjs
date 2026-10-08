@@ -50,6 +50,7 @@ const moduleDocuments = [
   'harness-provider.md',
   'harness-runtime.md',
   'harness-tool.md',
+  'notification.md',
   'platform.md',
   'project.md',
   'schema.md',
@@ -89,6 +90,7 @@ const checkableTopLevels = new Set([
   'deploy',
   'frontend',
   'harness',
+  'notification',
   'platform',
   'project',
   'schema',
@@ -452,6 +454,7 @@ function checkRepositoryStructure() {
 
   const expectedRootModules = [
     'share',
+    'notification',
     'schema',
     'canvas',
     'project',

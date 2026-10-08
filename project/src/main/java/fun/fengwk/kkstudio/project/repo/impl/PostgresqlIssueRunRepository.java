@@ -5,6 +5,7 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueRunMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueRunDO;
@@ -17,7 +18,7 @@ import java.util.UUID;
 public class PostgresqlIssueRunRepository implements IssueRunRepository {
 
   private final IssueRunMapper mapper;
-  private final PostgresqlProjectChangeNotifier notifier;
+  private final ProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueRun run) {

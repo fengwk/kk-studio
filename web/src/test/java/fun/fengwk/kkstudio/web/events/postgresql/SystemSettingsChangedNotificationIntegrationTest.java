@@ -9,10 +9,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.notification.NotificationLimits;
+import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import javax.sql.DataSource;
@@ -21,15 +25,16 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * {@code system_settings_changed} 通知到 live 快照的端到端接线测试。
+ * {@link PlatformNotifications#SETTINGS_CHANGED} 通知到 live 快照的端到端接线测试。
  *
- * <p>意图：另一个节点（真实 {@link PostgresqlNotificationLoop} + 生产 {@link SystemSettingsChangeHandler} + 独立
- * {@link SystemSettingsSnapshot}）必须由真实 Java 写入口提交后投递的通知唤醒并权威回读，而不是靠进程内 afterCommit 直写内存。覆盖三条真实
- * PostgreSQL 语义：提交的 version 推进投递通知并刷新快照；回滚事务绝不投递通知（用随后一条已提交控制通知作为投递屏障）；断连期间提交的变更没有投递路径，只能靠 listener
- * 重连 resync 补齐。测试不 mock {@code pg_notify}，也不修改生产 wiring。
+ * <p>意图：另一个节点（真实第二个 {@link DefaultNotificationBus} + 生产 {@link SystemSettingsChangeHandler} + 独立
+ * {@link SystemSettingsSnapshot}）必须由真实 Java 写入口提交后投递的通知唤醒并权威回读，而不是靠进程内 afterCommit 直写内存。覆盖真实
+ * PostgreSQL 语义：提交的 version 推进跨节点投递通知并刷新快照；回滚事务绝不投递通知（用随后一条已提交控制通知作为投递屏障）。 传输重连与 resync 生命周期由
+ * notification 模块覆盖。
  */
 class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSupport {
 
@@ -41,7 +46,7 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private DataSource dataSource;
 
-  /** 提交的 version 推进必须通过真实 loop 投递通知，并把权威记录整体刷新进独立快照。 */
+  /** 提交的 version 推进必须通过真实 bus 投递通知，并把权威记录整体刷新进独立快照。 */
   @Test
   void committedVersionChangeNotifiesAndRefreshesOtherNodeSnapshot() {
     try (OtherNode node = startOtherNode()) {
@@ -51,7 +56,7 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
 
       awaitRetryMaxRetries(node, updatedRetries);
       // 通知 payload 是写后权威 version：一次提交只投递一条，且由 Java 写入口发布。
-      assertEquals(List.of(Long.toString(updatedVersion)), node.deliveredPayloads());
+      assertEquals(List.of(updatedVersion), node.deliveredPayloads());
       // 权威回读是整体替换：未修改的 section 保持旧值，改动字段来自数据库而非通知 payload。
       assertEquals(before.tool(), node.settings().tool());
       assertEquals(before.advanced(), node.settings().advanced());
@@ -84,41 +89,10 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
 
       awaitRetryMaxRetries(node, controlRetries);
       assertEquals(
-          List.of(Long.toString(controlVersion)),
+          List.of(controlVersion),
           node.deliveredPayloads(),
           "rolled back update must not deliver a notification");
       assertNotEquals(abandonedRetries, node.settings().aiRuntime().retryMaxRetries());
-    }
-  }
-
-  /** 断连期间提交的变更没有投递路径，只能靠 listener 重连 resync 权威回读补齐。 */
-  @Test
-  void reconnectResyncCoversChangePublishedWhileDisconnected() {
-    try (OtherNode node = startOtherNode()) {
-      SystemSettings before = node.settings();
-      int alignedRetries = before.aiRuntime().retryMaxRetries() + 1;
-      long alignedVersion = commitRetryMaxRetries(alignedRetries);
-      awaitRetryMaxRetries(node, alignedRetries);
-      assertEquals(List.of(Long.toString(alignedVersion)), node.deliveredPayloads());
-
-      // 断开 listener 后提交：通知无法抵达本节点。
-      node.stop();
-      int missedRetries = alignedRetries + 1;
-      long missedVersion = commitRetryMaxRetries(missedRetries);
-      assertNotEquals(alignedVersion, missedVersion);
-      assertEquals(
-          List.of(Long.toString(alignedVersion)),
-          node.deliveredPayloads(),
-          "no delivery path exists while the listener is stopped");
-
-      // 真实重连：listener 建连后 resync 权威回读，补上断连期间的变更。
-      node.restart();
-
-      awaitRetryMaxRetries(node, missedRetries);
-      assertEquals(
-          List.of(Long.toString(alignedVersion)),
-          node.deliveredPayloads(),
-          "catch-up must come from resync, not from a notification");
     }
   }
 
@@ -128,7 +102,9 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
     SystemSettings updated = withRetryMaxRetries(record.settings(), retryMaxRetries);
     new TransactionTemplate(transactionManager)
         .executeWithoutResult(
-            status -> assertTrue(systemSettingsRepository.update(updated, record.version())));
+            status -> {
+              assertTrue(systemSettingsRepository.update(updated, record.version()));
+            });
     return record.version() + 1;
   }
 
@@ -198,18 +174,19 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
   }
 
   /**
-   * 集群中的另一个节点：真实 {@link PostgresqlNotificationLoop} 连接真实 PostgreSQL，注册生产 {@link
+   * 集群中的另一个节点：真实 {@link DefaultNotificationBus} 连接真实 PostgreSQL，注册生产 {@link
    * SystemSettingsChangeHandler}，并持有独立 {@link SystemSettingsSnapshot}。
    *
    * <p>独立快照与测试上下文中的共享快照无关，因此版本门控从数据库当前 version 自然推导，无需为陈旧上下文让步。payload 序列被记录，用于区分 notification 与
-   * resync 两条收敛路径。
+   * resync 路径。
    */
   private static final class OtherNode implements AutoCloseable {
 
-    private final List<String> deliveredPayloads = Collections.synchronizedList(new ArrayList<>());
+    private final List<Long> deliveredPayloads = Collections.synchronizedList(new ArrayList<>());
     private final AtomicInteger resyncs = new AtomicInteger();
     private final SystemSettingsSnapshot snapshot;
-    private final PostgresqlNotificationLoop loop;
+    private final DefaultNotificationBus bus;
+    private final NotificationSubscription subscription;
 
     private OtherNode(
         DataSource dataSource,
@@ -218,47 +195,52 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
       this.snapshot = new SystemSettingsSnapshot(initialSettings);
       SystemSettingsChangeHandler changeHandler =
           new SystemSettingsChangeHandler(repository, snapshot);
-      this.loop =
-          new PostgresqlNotificationLoop(
+      this.bus =
+          new DefaultNotificationBus(
               dataSource,
-              List.of(
-                  new PostgresqlNotificationHandler(
-                      SystemSettingsChangeHandler.CHANNEL,
-                      payload -> {
-                        deliveredPayloads.add(payload);
-                        changeHandler.onNotification(payload);
-                      },
-                      () -> {
-                        resyncs.incrementAndGet();
-                        changeHandler.onResync();
-                      })),
+              UUID.randomUUID(),
+              List.of(PlatformNotifications.SETTINGS_CHANGED),
+              NotificationLimits.defaults(),
               LOOP_POLL_INTERVAL,
               LOOP_RECONNECT_BACKOFF);
+      this.subscription =
+          this.bus.subscribe(
+              PlatformNotifications.SETTINGS_CHANGED,
+              payload -> {
+                deliveredPayloads.add(payload);
+                changeHandler.onNotification(payload);
+              },
+              () -> {
+                resyncs.incrementAndGet();
+                changeHandler.onResync();
+              });
     }
 
+    /** 启动并等待 LISTEN 建连完成。订阅建立时的权威恢复先于建连发生，因此就绪屏障必须用连接健康状态而不是恢复计数；否则可能在建连完成前发布而丢失跨节点 提示。 */
     private void start() {
-      loop.start();
-      awaitResync(1);
+      int baseline = resyncs.get();
+      bus.start();
+      awaitListenerReady();
+      // 建连完成后的全量对账必须发生；若与订阅期恢复并发到达会被折叠为一次，因此只断言相对增量。
+      awaitResync(baseline + 1);
     }
 
-    /** 真实重连：先停止 listener（连接被中止），再重新建连触发一次权威 resync。 */
-    private void restart() {
-      int before = resyncs.get();
-      loop.stop();
-      loop.start();
-      awaitResync(before + 1);
-    }
-
-    /** 停止 listener：连接被中止，期间提交的变更没有投递路径。 */
-    private void stop() {
-      loop.stop();
+    private void awaitListenerReady() {
+      long deadline = System.nanoTime() + REFRESH_TIMEOUT.toNanos();
+      while (System.nanoTime() < deadline) {
+        if (bus.healthy()) {
+          return;
+        }
+        sleepBeforeNextPoll();
+      }
+      throw new AssertionError("timed out waiting for other node listener readiness");
     }
 
     private SystemSettings settings() {
       return snapshot.get();
     }
 
-    private List<String> deliveredPayloads() {
+    private List<Long> deliveredPayloads() {
       return List.copyOf(deliveredPayloads);
     }
 
@@ -270,12 +252,16 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
         }
         sleepBeforeNextPoll();
       }
-      throw new AssertionError("timed out waiting for notification loop resync");
+      throw new AssertionError("timed out waiting for notification bus resync");
     }
 
     @Override
     public void close() {
-      loop.close();
+      try {
+        subscription.close();
+      } finally {
+        bus.close();
+      }
     }
   }
 }

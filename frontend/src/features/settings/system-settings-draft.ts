@@ -134,8 +134,8 @@ export interface SystemSettingsAdvancedDraft {
   applicationEventMaxBytes: DraftNumericField
   applicationEventSendTimeoutMillis: DraftNumericField
   applicationEventHeartbeatIntervalMillis: DraftNumericField
-  postgresqlWorkNotificationPollMillis: DraftNumericField
-  postgresqlWorkReconnectBackoffMillis: DraftNumericField
+  notificationPollMillis: DraftNumericField
+  notificationReconnectBackoffMillis: DraftNumericField
 }
 
 export interface SystemSettingsSectionsDraft {
@@ -211,9 +211,8 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       applicationEventMaxBytes: dto.advanced.applicationEventMaxBytes,
       applicationEventSendTimeoutMillis: dto.advanced.applicationEventSendTimeoutMillis,
       applicationEventHeartbeatIntervalMillis: dto.advanced.applicationEventHeartbeatIntervalMillis,
-      postgresqlWorkNotificationPollMillis:
-        dto.advanced.postgresqlWorkNotificationPollMillis,
-      postgresqlWorkReconnectBackoffMillis: dto.advanced.postgresqlWorkReconnectBackoffMillis,
+      notificationPollMillis: dto.advanced.notificationPollMillis,
+      notificationReconnectBackoffMillis: dto.advanced.notificationReconnectBackoffMillis,
     },
   }
 }
@@ -476,11 +475,11 @@ export function assembleSettingsUpdate(
       applicationEventHeartbeatIntervalMillis: requiredLong(
         draft.advanced.applicationEventHeartbeatIntervalMillis,
       ),
-      postgresqlWorkNotificationPollMillis: requiredLong(
-        draft.advanced.postgresqlWorkNotificationPollMillis,
+      notificationPollMillis: requiredLong(
+        draft.advanced.notificationPollMillis,
       ),
-      postgresqlWorkReconnectBackoffMillis: requiredLong(
-        draft.advanced.postgresqlWorkReconnectBackoffMillis,
+      notificationReconnectBackoffMillis: requiredLong(
+        draft.advanced.notificationReconnectBackoffMillis,
       ),
     },
     expectedVersion,

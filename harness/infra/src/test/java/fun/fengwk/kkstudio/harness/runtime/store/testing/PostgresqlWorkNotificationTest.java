@@ -10,17 +10,16 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
@@ -28,43 +27,39 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationSignal;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
 import javax.sql.DataSource;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 class PostgresqlWorkNotificationTest {
 
-  private static final String WORK_CHANNEL = "harness_runtime_work";
-
   private HarnessStore store;
-  private DataSource dataSource;
+  private DefaultNotificationBus bus;
 
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    dataSource = PostgresqlHarnessStoreFixture.dataSource();
+    bus = PostgresqlHarnessStoreFixture.notificationBus();
   }
 
   @Test
   void workMutationsPublishOnlyCommittedAvailabilityHints() throws Exception {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    BlockingQueue<NotificationSignal> signals = new LinkedBlockingQueue<>();
 
-    try (Connection connection = dataSource.getConnection();
-        Statement statement = connection.createStatement()) {
-      connection.setAutoCommit(true);
-      PGConnection notifications = connection.unwrap(PGConnection.class);
-      statement.execute("LISTEN " + WORK_CHANNEL);
+    try (NotificationSubscription ignored =
+        bus.subscribe(HarnessNotifications.WORK_AVAILABLE, signals::add, () -> {})) {
 
       assertThrows(
           IllegalStateException.class,
@@ -75,11 +70,11 @@ class PostgresqlWorkNotificationTest {
                     tx.requestWork(target, T0);
                     throw new IllegalStateException("rollback");
                   }));
-      assertNoNotification(notifications);
+      assertNoSignal(signals);
       assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
 
       requestWork(baseline.threadId(), target, T0);
-      assertNotification(notifications);
+      assertSignal(signals);
 
       ClaimedWork first =
           store
@@ -88,14 +83,14 @@ class PostgresqlWorkNotificationTest {
                       tx.claimNextWork(
                           WorkTargetType.THREAD, T1, "lease-1", Duration.between(T1, T5)))
               .orElseThrow();
-      assertNoNotification(notifications);
+      assertNoSignal(signals);
       inTransaction(store, tx -> tx.renewWork(first, T1, Duration.ofSeconds(5)));
-      assertNoNotification(notifications);
+      assertNoSignal(signals);
 
       requestWork(baseline.threadId(), target, T1);
-      assertNotification(notifications);
+      assertSignal(signals);
       assertTrue(store.transaction(tx -> tx.completeWork(first, T2)).isPresent());
-      assertNotification(notifications);
+      assertSignal(signals);
 
       ClaimedWork second =
           store
@@ -104,9 +99,9 @@ class PostgresqlWorkNotificationTest {
                       tx.claimNextWork(
                           WorkTargetType.THREAD, T2, "lease-2", Duration.between(T2, T5)))
               .orElseThrow();
-      assertNoNotification(notifications);
+      assertNoSignal(signals);
       inTransaction(store, tx -> tx.rescheduleWork(second, T2, Duration.ZERO));
-      assertNotification(notifications);
+      assertSignal(signals);
 
       ClaimedWork third =
           store
@@ -115,12 +110,12 @@ class PostgresqlWorkNotificationTest {
                       tx.claimNextWork(
                           WorkTargetType.THREAD, T3, "lease-3", Duration.ofSeconds(60)))
               .orElseThrow();
-      assertNoNotification(notifications);
+      assertNoSignal(signals);
       assertTrue(store.transaction(tx -> tx.completeWork(third, T4)).isEmpty());
-      assertNoNotification(notifications);
+      assertNoSignal(signals);
 
       requestWork(baseline.threadId(), target, T4);
-      assertNotification(notifications);
+      assertSignal(signals);
       boolean deleted =
           store.transaction(
               tx -> {
@@ -128,7 +123,7 @@ class PostgresqlWorkNotificationTest {
                 return tx.deleteWork(target);
               });
       assertTrue(deleted);
-      assertNoNotification(notifications);
+      assertNoSignal(signals);
     }
   }
 
@@ -153,18 +148,18 @@ class PostgresqlWorkNotificationTest {
     Baseline baseline = seedThreadBaseline(durable);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     HarnessStore failing = notifyFailingStore();
-    AtomicReference<DataAccessException> caught = new AtomicReference<>();
+    AtomicReference<IllegalStateException> caught = new AtomicReference<>();
 
-    DataAccessException thrown =
+    IllegalStateException thrown =
         assertThrows(
-            DataAccessException.class,
+            IllegalStateException.class,
             () ->
                 failing.transaction(
                     tx -> {
                       tx.lockThread(baseline.threadId()).orElseThrow();
                       try {
                         tx.requestWork(target, T0);
-                      } catch (DataAccessException error) {
+                      } catch (IllegalStateException error) {
                         caught.set(error);
                       }
                       return null;
@@ -192,17 +187,17 @@ class PostgresqlWorkNotificationTest {
             .orElseThrow();
     Work beforeFailure = durable.transaction(tx -> tx.findWork(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
-    AtomicReference<DataAccessException> caught = new AtomicReference<>();
+    AtomicReference<IllegalStateException> caught = new AtomicReference<>();
 
-    DataAccessException thrown =
+    IllegalStateException thrown =
         assertThrows(
-            DataAccessException.class,
+            IllegalStateException.class,
             () ->
                 failing.transaction(
                     tx -> {
                       try {
                         tx.rescheduleWork(claim, T1, Duration.ofSeconds(1));
-                      } catch (DataAccessException error) {
+                      } catch (IllegalStateException error) {
                         caught.set(error);
                       }
                       return null;
@@ -236,17 +231,17 @@ class PostgresqlWorkNotificationTest {
         });
     Work beforeFailure = durable.transaction(tx -> tx.findWork(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
-    AtomicReference<DataAccessException> caught = new AtomicReference<>();
+    AtomicReference<IllegalStateException> caught = new AtomicReference<>();
 
-    DataAccessException thrown =
+    IllegalStateException thrown =
         assertThrows(
-            DataAccessException.class,
+            IllegalStateException.class,
             () ->
                 failing.transaction(
                     tx -> {
                       try {
                         tx.completeWork(claim, T2);
-                      } catch (DataAccessException error) {
+                      } catch (IllegalStateException error) {
                         caught.set(error);
                       }
                       return null;
@@ -257,73 +252,29 @@ class PostgresqlWorkNotificationTest {
   }
 
   private static HarnessStore notifyFailingStore() {
-    DataSource failingDataSource =
-        interceptNotifyPreparation(PostgresqlHarnessStoreFixture.dataSource());
+    DefaultNotificationBus failingBus = PostgresqlHarnessStoreFixture.newBus();
+    failingBus.close();
+    DataSource dataSource = PostgresqlHarnessStoreFixture.dataSource();
     return new PostgresqlHarnessStore(
-        failingDataSource,
-        new DataSourceTransactionManager(failingDataSource),
-        PostgresqlHarnessStoreFixture.idGenerator());
+        dataSource,
+        new DataSourceTransactionManager(dataSource),
+        PostgresqlHarnessStoreFixture.idGenerator(),
+        failingBus);
   }
 
-  private static DataSource interceptNotifyPreparation(DataSource delegate) {
-    return (DataSource)
-        Proxy.newProxyInstance(
-            DataSource.class.getClassLoader(),
-            new Class<?>[] {DataSource.class},
-            (proxy, method, arguments) -> {
-              Object result = invoke(delegate, method, arguments);
-              if (method.getName().equals("getConnection")
-                  && result instanceof Connection connection) {
-                return interceptNotifyPreparation(connection);
-              }
-              return result;
-            });
+  private static void assertSignal(BlockingQueue<NotificationSignal> queue) throws Exception {
+    NotificationSignal signal = queue.poll(5, TimeUnit.SECONDS);
+    assertNotNull(signal);
+    assertEquals(NotificationSignal.CHANGED, signal);
+    drainSignals(queue);
   }
 
-  private static Connection interceptNotifyPreparation(Connection delegate) {
-    return (Connection)
-        Proxy.newProxyInstance(
-            Connection.class.getClassLoader(),
-            new Class<?>[] {Connection.class},
-            (proxy, method, arguments) -> {
-              if (method.getName().equals("prepareStatement")
-                  && arguments != null
-                  && arguments.length > 0
-                  && arguments[0] instanceof String sql
-                  && sql.contains("pg_notify")) {
-                throw new SQLException("injected pg_notify preparation failure");
-              }
-              return invoke(delegate, method, arguments);
-            });
+  private static void assertNoSignal(BlockingQueue<NotificationSignal> queue) throws Exception {
+    NotificationSignal signal = queue.poll(150, TimeUnit.MILLISECONDS);
+    assertNull(signal);
   }
 
-  private static Object invoke(Object target, Method method, Object[] arguments) throws Throwable {
-    try {
-      return method.invoke(target, arguments);
-    } catch (InvocationTargetException error) {
-      throw error.getCause();
-    }
-  }
-
-  private static void assertNotification(PGConnection connection) throws Exception {
-    PGNotification[] notifications = connection.getNotifications(5_000);
-    assertNotNull(notifications);
-    assertTrue(notifications.length > 0);
-    assertEquals(WORK_CHANNEL, notifications[0].getName());
-    drainNotifications(connection);
-  }
-
-  private static void assertNoNotification(PGConnection connection) throws Exception {
-    PGNotification[] notifications = connection.getNotifications(200);
-    assertTrue(notifications == null || notifications.length == 0);
-  }
-
-  private static void drainNotifications(PGConnection connection) throws Exception {
-    while (true) {
-      PGNotification[] notifications = connection.getNotifications(1);
-      if (notifications == null || notifications.length == 0) {
-        return;
-      }
-    }
+  private static void drainSignals(BlockingQueue<NotificationSignal> queue) throws Exception {
+    while (queue.poll(50, TimeUnit.MILLISECONDS) != null) {}
   }
 }

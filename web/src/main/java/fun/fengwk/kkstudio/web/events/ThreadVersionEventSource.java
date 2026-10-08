@@ -27,7 +27,7 @@ interface ThreadVersionEventSource {
 
   /**
    * 原子注册一个 Thread 的 version 订阅：先注册 consumer 再读取当前 version 返回。返回的 cursor 之后的 version 变化保证经 {@code
-   * consumer} 送达（LISTEN 断连期间由 resync 事件覆盖）；未知 Thread 抛 {@link IllegalArgumentException} 且不遗留注册。
+   * consumer} 送达（总线建连/重连期间由 resync 事件覆盖）；未知 Thread 抛 {@link IllegalArgumentException} 且不遗留注册。
    */
   SourceSubscribed subscribe(UUID threadId, Consumer<Event> consumer);
 }

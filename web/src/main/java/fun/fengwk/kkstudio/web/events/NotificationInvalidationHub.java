@@ -11,10 +11,11 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
- * PostgreSQL NOTIFY 提示型失效信号的进程内 fan-out：按 key 定点分发，全局订阅额外接收全部合法通知。
+ * 提示型失效信号的进程内 fan-out：按 key 定点分发，全局订阅额外接收全部合法通知。
  *
- * <p>事实提交后由数据库触发器投递 canonical UUID payload；本 Hub 不复制领域事实、不做持久游标，只把「需要回读」的信号转成 {@link
- * InvalidationEventSource.Event}。空 payload 表示来源事实已不存在，与畸形 payload、LISTEN 重连一样退化为全量 resync。
+ * <p>事实提交后由写出方在同一事务内经统一通知总线广播 canonical UUID payload；本 Hub 不复制领域事实、不做持久游标，只把「需要回读」的信号转成 {@link
+ * InvalidationEventSource.Event}。{@code key} 为 null 表示来源事实已不存在，与畸形 payload（由总线 topic codec
+ * 拒绝）一样退化为全量 resync。
  */
 @Slf4j
 class NotificationInvalidationHub implements InvalidationEventSource {
@@ -41,13 +42,9 @@ class NotificationInvalidationHub implements InvalidationEventSource {
     return new SourceSubscribed(0L, () -> release(key, consumer));
   }
 
-  /** PostgreSQL LISTEN 通知入口。 */
-  public void onNotification(String payload) {
-    UUID key = parseCanonicalUuid(payload);
+  /** 交付一条已由总线解码的失效提示；{@code key} 为 null 表示来源事实已不存在，退化为全量 resync。 */
+  public void onNotification(UUID key) {
     if (key == null) {
-      if (payload != null && !payload.isEmpty()) {
-        log.warn("malformed invalidation notification payload={}; broadcasting resync", payload);
-      }
       broadcastResync();
       return;
     }
@@ -68,7 +65,7 @@ class NotificationInvalidationHub implements InvalidationEventSource {
   }
 
   private void publish(Event event) {
-    // 单个消费者异常只隔离该消费者，不阻断同资源其他消费者，也不杀死 LISTEN 循环。
+    // 单个消费者异常只隔离该消费者，不阻断同资源其他消费者，也不中断后续通知投递。
     for (Consumer<Event> consumer : globalSubscribers) {
       deliver(consumer, event);
     }
@@ -93,18 +90,6 @@ class NotificationInvalidationHub implements InvalidationEventSource {
       consumer.accept(event);
     } catch (RuntimeException error) {
       log.warn("invalidation subscriber callback failed; skipping", error);
-    }
-  }
-
-  private static UUID parseCanonicalUuid(String value) {
-    if (value == null) {
-      return null;
-    }
-    try {
-      UUID parsed = UUID.fromString(value);
-      return parsed.toString().equals(value) ? parsed : null;
-    } catch (IllegalArgumentException error) {
-      return null;
     }
   }
 }

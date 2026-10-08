@@ -14,7 +14,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGNotification;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.util.AopTestUtils;
@@ -38,8 +37,10 @@ import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunTransactions;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
+import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
+import fun.fengwk.kkstudio.share.notification.NotificationSignal;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
-import java.sql.Connection;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -49,10 +50,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -325,27 +328,27 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     assertFalse(workStore.isOwned(claimed, T0.plusSeconds(1)));
   }
 
-  /** READY insert 提交后 Java 写入口必须立即发送空 payload */
+  /** READY insert 提交后 Java 写入口必须立即发送唤醒提示。 */
   @Test
   void readyCommitSendsAnImmediateEmptyNotification() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
-
-      PGNotification[] notifications = pollNotifications(listener, 5_000);
-      assertEquals(1, notifications.length);
-      assertEquals("canvas_function_work", notifications[0].getName());
-      assertEquals("", notifications[0].getParameter());
+      assertWorkNotification(notifications);
     }
   }
 
-  /** READY 写入回滚时 PostgreSQL 不得投递 NOTIFY，行、pin/version 等事务事实也不能部分可见。 */
+  /** READY 写入回滚时不得投递通知，行、pin/version 等事务事实也不能部分可见。 */
   @Test
   void rolledBackReadyInsertDoesNotNotify() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       assertThrows(
           IllegalStateException.class,
           () ->
@@ -355,7 +358,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
                     throw new IllegalStateException("rollback");
                   }));
 
-      assertNoNotification(listener);
+      assertNoWorkNotification(notifications);
       assertTrue(runs.findByNodeId(node.id()).isEmpty());
     }
   }
@@ -365,11 +368,13 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   void futureReadyInsertStaysSilent() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       runs.insertReady(
           ready(node.id(), UUID.randomUUID(), Instant.now().plus(Duration.ofHours(1))));
 
-      assertNoNotification(listener);
+      assertNoWorkNotification(notifications);
     }
   }
 
@@ -381,13 +386,15 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
     ClaimedRun claim = workStore.claimNext(T0, LEASE, "owner").orElseThrow();
 
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       assertTrue(
           runs.transitionTerminal(
               terminal(claim.run(), CanvasFunctionRunStatus.SUCCEEDED, "SUCCEEDED"),
               claim.leaseToken()));
 
-      assertNoNotification(listener);
+      assertNoWorkNotification(notifications);
     }
   }
 
@@ -403,16 +410,16 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     ClaimedRun immediate = workStore.claimNext(now, LEASE, "owner-immediate").orElseThrow();
     ClaimedRun future = workStore.claimNext(now, LEASE, "owner-future").orElseThrow();
 
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       // available_at = now - 4s（已到期）→ 立即领取提示
       assertTrue(workStore.reschedule(immediate, now.minusSeconds(5), Duration.ofSeconds(1)));
-      PGNotification[] notifications = pollNotifications(listener, 5_000);
-      assertEquals(1, notifications.length);
-      assertEquals("", notifications[0].getParameter());
+      assertWorkNotification(notifications);
 
       // available_at = now + 1h（未来）→ 静默
       assertTrue(workStore.reschedule(future, now, Duration.ofHours(1)));
-      assertNoNotification(listener);
+      assertNoWorkNotification(notifications);
     }
   }
 
@@ -425,11 +432,13 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     ClaimedRun stale = workStore.claimNext(T0, LEASE, "owner-old").orElseThrow();
     workStore.claimNext(T0.plus(LEASE), LEASE, "owner-new").orElseThrow();
 
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       assertFalse(
           workStore.reschedule(stale, T0.plus(LEASE).plusSeconds(1), Duration.ofSeconds(1)));
 
-      assertNoNotification(listener);
+      assertNoWorkNotification(notifications);
     }
   }
 
@@ -440,11 +449,11 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     NodeRecord node = addNode(canvasId, true);
     insertRunRow(node.id(), UUID.randomUUID(), "CANCELLED");
 
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       assertTrue(runs.replaceTerminalWithReady(ready(node.id(), UUID.randomUUID(), T0)));
-      PGNotification[] notifications = pollNotifications(listener, 5_000);
-      assertEquals(1, notifications.length);
-      assertEquals("", notifications[0].getParameter());
+      assertWorkNotification(notifications);
     }
   }
 
@@ -456,12 +465,24 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID requestId = UUID.randomUUID();
     insertRunRow(node.id(), requestId, "UNKNOWN");
 
-    try (Connection listener = listenOn("canvas_function_work")) {
+    BlockingQueue<NotificationSignal> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.FUNCTION_WORK, notifications::add, () -> {})) {
       assertTrue(runs.resumeUnknown(ready(node.id(), requestId, T0)));
-      PGNotification[] notifications = pollNotifications(listener, 5_000);
-      assertEquals(1, notifications.length);
-      assertEquals("", notifications[0].getParameter());
+      assertWorkNotification(notifications);
     }
+  }
+
+  private static void assertWorkNotification(BlockingQueue<NotificationSignal> queue)
+      throws Exception {
+    NotificationSignal signal = queue.poll(5, TimeUnit.SECONDS);
+    assertEquals(NotificationSignal.CHANGED, signal);
+  }
+
+  private static void assertNoWorkNotification(BlockingQueue<NotificationSignal> queue)
+      throws Exception {
+    NotificationSignal signal = queue.poll(300, TimeUnit.MILLISECONDS);
+    assertNull(signal, () -> "unexpected notification: " + signal);
   }
 
   /** 直接写入非 READY 行，准备终态替换与 UNKNOWN 解除的既有事实。 */

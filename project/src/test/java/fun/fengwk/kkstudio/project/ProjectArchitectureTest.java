@@ -41,6 +41,7 @@ class ProjectArchitectureTest {
           "com.fasterxml.jackson.",
           "fun.fengwk.convention4j.",
           "fun.fengwk.kkstudio.harness.runtime.",
+          "fun.fengwk.kkstudio.share.",
           "lombok.",
           "org.apache.ibatis.",
           "org.mybatis.",
@@ -52,7 +53,8 @@ class ProjectArchitectureTest {
           "fun.fengwk.kk-studio:kk-studio-harness-runtime",
           "fun.fengwk.convention4j:convention4j-spring-boot-starter",
           "org.mybatis.spring.boot:mybatis-spring-boot-starter",
-          "com.fasterxml.jackson.core:jackson-databind");
+          "com.fasterxml.jackson.core:jackson-databind",
+          "fun.fengwk.kk-studio:kk-studio-share");
 
   private static final Pattern DEPENDENCY_PATTERN =
       Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL);
