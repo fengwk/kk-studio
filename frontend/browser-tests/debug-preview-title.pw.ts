@@ -411,7 +411,8 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
   await expect(card).toHaveClass(/thread-notification/)
   await expect(card).toHaveClass(/thread-subagent-receipt/)
   await expect(card).toHaveAttribute('data-subagent-state', 'completed')
-  await expect(card).toContainText('已返回')
+  await expect(card).not.toContainText('已返回')
+  await expect(card.getByRole('img', { name: '已返回', exact: true })).toHaveAttribute('title', '已返回')
   // 来源与可点击 Thread 链接来自固定 XML 信封，而不是原始 JSON 转储。
   await expect(card).toContainText('coder')
   await expect(card.locator(`a[href="/threads/${sourceThreadId}"]`)).toBeVisible()
