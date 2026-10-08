@@ -89,7 +89,9 @@ class NotificationInvalidationHub implements InvalidationEventSource {
     try {
       consumer.accept(event);
     } catch (RuntimeException error) {
-      log.warn("invalidation subscriber callback failed; skipping", error);
+      log.warn(
+          "invalidation subscriber callback failed; errorType={}; skipping",
+          error.getClass().getSimpleName());
     }
   }
 }

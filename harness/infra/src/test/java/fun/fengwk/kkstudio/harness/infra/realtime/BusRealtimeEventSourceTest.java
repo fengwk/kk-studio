@@ -2,17 +2,23 @@ package fun.fengwk.kkstudio.harness.infra.realtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeNotificationCodec.Envelope;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlHarnessStoreFixture;
-import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -24,19 +30,16 @@ class BusRealtimeEventSourceTest {
 
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
 
-  private DefaultNotificationBus bus;
   private BusRealtimeEventSource source;
 
   @BeforeEach
   void setUp() {
-    bus = PostgresqlHarnessStoreFixture.newBus();
-    source = new BusRealtimeEventSource(bus);
+    source = new BusRealtimeEventSource();
   }
 
   @AfterEach
   void tearDown() {
     source.close();
-    bus.close();
   }
 
   /** EVENT 只进入对应 Thread，且同 Thread 的多个本地订阅都收到同一个完整事件。 */
@@ -195,9 +198,47 @@ class BusRealtimeEventSourceTest {
         IllegalStateException.class, () -> source.subscribe(id(1L), ignored -> {}, () -> {}));
   }
 
+  /** 回调失败日志只记录 threadId 与 errorType，绝不回显领域异常消息或堆栈（隐私契约）。 */
+  @Test
+  void callbackFailureLogOmitsDomainMessageAndThrowable() {
+    ListAppender<ILoggingEvent> logs = attachListAppender(BusRealtimeEventSource.class);
+    try {
+      source.subscribe(
+          id(1L),
+          ignored -> {
+            throw new IllegalStateException("SECRET-domain-message");
+          },
+          () -> {});
+      source.onEnvelope(new Envelope.Event(modelDelta(1L, "one")));
+    } finally {
+      detachListAppender(BusRealtimeEventSource.class, logs);
+    }
+
+    assertEquals(1, logs.list.size());
+    ILoggingEvent event = logs.list.get(0);
+    assertEquals(Level.WARN, event.getLevel());
+    String message = event.getFormattedMessage();
+    assertTrue(message.contains("errorType=IllegalStateException"), message);
+    assertFalse(message.contains("SECRET-domain-message"), message);
+    assertNull(event.getThrowableProxy(), "failure log must not retain the domain throwable");
+  }
+
   private static RealtimeEvent.ModelDelta modelDelta(long threadId, String text) {
     return new RealtimeEvent.ModelDelta(
         id(threadId), id(42L), 1, 1L, new ProviderStreamEvent.TextDelta(text), NOW);
+  }
+
+  /** 临时给指定 logger 挂一个 logback ListAppender，用于断言日志 level、格式化消息与 throwable。 */
+  private static ListAppender<ILoggingEvent> attachListAppender(Class<?> type) {
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    ((Logger) LoggerFactory.getLogger(type)).addAppender(appender);
+    return appender;
+  }
+
+  private static void detachListAppender(Class<?> type, ListAppender<ILoggingEvent> appender) {
+    ((Logger) LoggerFactory.getLogger(type)).detachAppender(appender);
+    appender.stop();
   }
 
   private static void closeUnchecked(AutoCloseable closeable) {

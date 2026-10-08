@@ -1,11 +1,18 @@
 package fun.fengwk.kkstudio.web.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.share.notification.EntityHint;
 import fun.fengwk.kkstudio.share.notification.NotificationCodecs;
@@ -143,5 +150,42 @@ class NotificationInvalidationHubTest {
   @Test
   void resyncEventRejectsAKey() {
     assertThrows(IllegalArgumentException.class, () -> new Event(ROOT_A, true));
+  }
+
+  /** 消费者异常日志只记录 errorType，绝不回显领域异常消息或堆栈（隐私契约）。 */
+  @Test
+  void failingConsumerLogOmitsDomainMessageAndThrowable() {
+    ListAppender<ILoggingEvent> logs = attachListAppender(NotificationInvalidationHub.class);
+    try {
+      hub.subscribe(
+          null,
+          event -> {
+            throw new IllegalStateException("SECRET-domain-message");
+          });
+      hub.onNotification(ROOT_A);
+    } finally {
+      detachListAppender(NotificationInvalidationHub.class, logs);
+    }
+
+    assertEquals(1, logs.list.size());
+    ILoggingEvent event = logs.list.get(0);
+    assertEquals(Level.WARN, event.getLevel());
+    String message = event.getFormattedMessage();
+    assertTrue(message.contains("errorType=IllegalStateException"), message);
+    assertFalse(message.contains("SECRET-domain-message"), message);
+    assertNull(event.getThrowableProxy(), "failure log must not retain the domain throwable");
+  }
+
+  /** 临时给指定 logger 挂一个 logback ListAppender，用于断言日志 level、格式化消息与 throwable。 */
+  private static ListAppender<ILoggingEvent> attachListAppender(Class<?> type) {
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    ((Logger) LoggerFactory.getLogger(type)).addAppender(appender);
+    return appender;
+  }
+
+  private static void detachListAppender(Class<?> type, ListAppender<ILoggingEvent> appender) {
+    ((Logger) LoggerFactory.getLogger(type)).detachAppender(appender);
+    appender.stop();
   }
 }

@@ -173,26 +173,32 @@ class BusRealtimeEventSinkIntegrationTest {
     assertEnvelopes(awaitNotifications(3), events);
   }
 
-  /** Source 端到端：一次已提交批量后，订阅方按序收到全部事件且不触发任何 resync。 */
+  /** Source 端到端：一次已提交批量后，订阅方按序收到全部事件；只有订阅恢复边界产生一次初始 resync，合法事件不再降级。 */
   @Test
   void committedBatchReachesSourceSubscribersWithoutResync() throws Exception {
     BusRealtimeEventSink sink = new BusRealtimeEventSink(bus, DEFAULT_MAX_BYTES);
     UUID threadId = id(1L);
     List<RealtimeEvent> receivedEvents = new ArrayList<>();
     AtomicInteger resyncs = new AtomicInteger();
-    try (BusRealtimeEventSource source = new BusRealtimeEventSource(bus)) {
+    try (BusRealtimeEventSource source = new BusRealtimeEventSource()) {
+      // 本地订阅必须先于总线订阅注册，总线订阅的初始对账标记才会命中该 Thread。
       source.subscribe(threadId, receivedEvents::add, resyncs::incrementAndGet);
-      List<RealtimeEvent> events = modelDeltas(5);
+      // 组合根在生产中由 NotificationSubscriptions 绑定这条唯一订阅；本测试显式持有并在 source 之前关闭。
+      try (NotificationSubscription realtimeSubscription =
+          bus.subscribe(HarnessNotifications.REALTIME, source::onEnvelope, source::onResync)) {
+        List<RealtimeEvent> events = modelDeltas(5);
 
-      transactionTemplate.executeWithoutResult(status -> sink.appendAll(events));
+        transactionTemplate.executeWithoutResult(status -> sink.appendAll(events));
 
-      // 等待事件通过 bus 派发到 source
-      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-      while (receivedEvents.size() < events.size() && System.nanoTime() < deadline) {
-        Thread.sleep(50);
+        // 等待事件通过 bus 派发到 source
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (receivedEvents.size() < events.size() && System.nanoTime() < deadline) {
+          Thread.sleep(50);
+        }
+        assertEquals(events, receivedEvents);
+        // 订阅自身的恢复标记是一次初始 resync；批次内合法 canonical 通知绝不额外触发 resync。
+        assertEquals(1, resyncs.get(), "valid canonical notifications must not trigger resync");
       }
-      assertEquals(events, receivedEvents);
-      assertEquals(0, resyncs.get(), "valid canonical notifications must not trigger resync");
     }
   }
 
