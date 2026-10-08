@@ -22,6 +22,7 @@ import {
   getThreadSnapshot,
   createNewThread,
   createNewSession,
+  listSessionEntries,
   setAgentCommand,
   setModelCommand,
   stopThreadForCleanup,
@@ -513,9 +514,11 @@ export async function runComposerMatrix(ui) {
           )
           await expectThreadDraft(page, fixture.threadId, draft)
 
+          const sessionEntries = await listSessionEntries(apiCtx, fixture.sessionId)
+          const historySnapshotBefore = await getThreadSnapshot(apiCtx, siblingThreadId)
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^history/ }).click()
-          const historyPanel = page.getByRole('region', { name: '历史分支' })
+          const historyPanel = page.getByRole('region', { name: '历史树' })
           await historyPanel.waitFor({ state: 'visible', timeout: 10_000 })
           assert(
             await page.locator('.modal-backdrop').count() === 0,
@@ -537,21 +540,29 @@ export async function runComposerMatrix(ui) {
               viewport,
             })}`,
           )
-          const selectedHistoryRow = historyPanel.locator('.history-branch-entry[aria-pressed="true"]')
+          const selectedHistoryRow = historyPanel.locator('.history-tree-entry[aria-pressed="true"]')
           const selectedPrefix = await selectedHistoryRow.evaluate((element) => ({
             classes: [...element.children].slice(0, 3).map((child) => child.className),
-            path: element.querySelector('.history-branch-entry-path')?.textContent ?? '',
-            cursor: element.querySelector('.history-branch-entry-cursor')?.textContent ?? '',
+            path: element.querySelector('.history-tree-entry-path')?.textContent ?? '',
+            cursor: element.querySelector('.history-tree-entry-cursor')?.textContent ?? '',
           }))
           assert(
-            selectedPrefix.classes[0] === 'history-branch-entry-cursor'
-            && selectedPrefix.classes.includes('history-branch-entry-path')
+            selectedPrefix.classes[0] === 'history-tree-entry-cursor'
+            && selectedPrefix.classes[1] === 'history-tree-entry-lane'
+            && selectedPrefix.classes.includes('history-tree-entry-path')
             && selectedPrefix.path === '•'
             && selectedPrefix.cursor === '›',
-            `history row does not use the pi tree cursor/path grammar: ${JSON.stringify(selectedPrefix)}`,
+            `history row lost the cursor/lane/path grammar: ${JSON.stringify(selectedPrefix)}`,
           )
-          const treeRows = historyPanel.locator('.history-branch-entry')
-          assert(await treeRows.count() === 4, `branched history row count: ${await treeRows.count()}`)
+          const treeRows = historyPanel.locator('.history-tree-entry')
+          assert(
+            await treeRows.count() === sessionEntries.length,
+            `history must render every durable Entry: ${await treeRows.count()} != ${sessionEntries.length}`,
+          )
+          assert(
+            await historyPanel.locator('.history-tree-entry[aria-current="true"]').count() === 1,
+            'history must mark exactly one current head row',
+          )
           const originalBranchRow = historyPanel.getByRole('button', {
             name: new RegExp(`selection original branch ${stamp}`),
           })
@@ -562,16 +573,40 @@ export async function runComposerMatrix(ui) {
             name: new RegExp(`selection alternate branch ${stamp}`),
           })
           assert(
-            (await originalBranchRow.locator('.history-branch-entry-glyphs').textContent()) === '├─ ',
-            'first branch did not render a fork connector',
+            await historyPanel.locator('.history-tree-entry[data-fork="true"]').count() === 1,
+            'history must mark exactly one real parent fork',
           )
           assert(
-            (await originalDescendantRow.locator('.history-branch-entry-glyphs').textContent())?.startsWith('│  '),
-            'branch descendant did not preserve the vertical ancestor gutter',
+            await originalBranchRow.getAttribute('data-lane') === '0'
+              && (await originalBranchRow.locator('.history-tree-entry-lane').textContent()) === '●│',
+            'first branch must stay in lane zero and preserve the pending sibling lane',
           )
           assert(
-            (await alternateBranchRow.locator('.history-branch-entry-glyphs').textContent()) === '└─ ',
-            'last branch did not render an elbow connector',
+            await originalDescendantRow.getAttribute('data-lane') === '0'
+              && (await originalDescendantRow.locator('.history-tree-entry-lane').textContent()) === '●│',
+            'linear descendants must preserve their lane and the pending sibling gutter',
+          )
+          assert(
+            await alternateBranchRow.getAttribute('data-lane') === '1'
+              && (await alternateBranchRow.locator('.history-tree-entry-lane').textContent()) === ' ●',
+            'alternate branch must occupy lane one after the original lane closes',
+          )
+          await historySearch.fill(`selection original descendant ${stamp}`)
+          assert(
+            await treeRows.count() === sessionEntries.length
+              && await originalDescendantRow.locator('mark').count() > 0
+              && (await alternateBranchRow.getAttribute('class')).split(' ').includes('dimmed'),
+            'history search must highlight matches without removing entries or changing lanes',
+          )
+          await historySearch.fill('')
+          const selectedIndex = await treeRows.evaluateAll((rows) =>
+            rows.findIndex((row) => row.getAttribute('aria-pressed') === 'true'))
+          assert(selectedIndex > 0, 'history fixture must have an Entry before the current head')
+          const previousEntryRow = treeRows.nth(selectedIndex - 1)
+          const previousEntryLabel = await previousEntryRow.getAttribute('aria-label')
+          assert(
+            await selectedHistoryRow.getAttribute('aria-current') === 'true',
+            'history must initially select the current durable head',
           )
           const selectedBeforeTreeMove = await selectedHistoryRow.getAttribute('aria-label')
           await historySearch.press('ArrowUp')
@@ -579,15 +614,15 @@ export async function runComposerMatrix(ui) {
             ({ panelLabel, previous }) => {
               const region = [...document.querySelectorAll('[role="region"]')]
                 .find((element) => element.getAttribute('aria-label') === panelLabel)
-              const selected = region?.querySelector('.history-branch-entry[aria-pressed="true"]')
+              const selected = region?.querySelector('.history-tree-entry[aria-pressed="true"]')
               return selected?.getAttribute('aria-label') !== previous
             },
-            { panelLabel: '历史分支', previous: selectedBeforeTreeMove },
+            { panelLabel: '历史树', previous: selectedBeforeTreeMove },
             { timeout: 10_000 },
           )
           assert(
-            await originalBranchRow.getAttribute('aria-pressed') === 'true',
-            'ArrowUp did not move the tree selection to the previous visible row',
+            await selectedHistoryRow.getAttribute('aria-label') === previousEntryLabel,
+            'ArrowUp must move to the immediately preceding real Entry',
           )
           await shot(caseArt, 'history-panel-keyboard-mode')
           await page.waitForFunction(
@@ -604,6 +639,12 @@ export async function runComposerMatrix(ui) {
           )
           await expectComposerText(page, '')
           await expectThreadDraft(page, fixture.threadId, draft)
+          const historySnapshotAfter = await getThreadSnapshot(apiCtx, siblingThreadId)
+          assert(
+            historySnapshotAfter.thread.headEntryId === historySnapshotBefore.thread.headEntryId
+              && historySnapshotAfter.thread.version === historySnapshotBefore.thread.version,
+            'history search and keyboard selection must not mutate the durable thread cursor',
+          )
           expectNoFatal(pageErrors, consoleErrors)
         },
       )

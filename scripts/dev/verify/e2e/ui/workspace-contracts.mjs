@@ -11,7 +11,6 @@ import {
   getThreadSnapshot,
   createNewSession,
   listEnvironments,
-  listSessionThreads,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
@@ -22,11 +21,13 @@ import {
 } from '../lib/harness.mjs'
 import {
   assert,
+  assertExactFields,
   cid,
   envelopeData,
   sleep,
 } from '../lib/http.mjs'
 import { expectThreadDraft, readThreadDraft } from '../lib/browser-state.mjs'
+import { collectTaskToolResults } from '../cases/real.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
 
@@ -1108,24 +1109,24 @@ function pendingApprovalInteraction({
   }
 }
 
-/** 会话内由 task 委派真实创建的唯一子 Thread：执行父关系与 Agent 命名都由真实执行给出。 */
-async function resolveTaskChildThread(apiCtx, fixture, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs
-  let children = []
-  for (;;) {
-    const threads = await listSessionThreads(apiCtx, fixture.sessionId)
-    children = threads.filter((thread) => thread.parentThreadId === fixture.threadId)
-    if (children.length > 0 || Date.now() >= deadline) {
-      break
-    }
-    await sleep(100)
-  }
-  assert(
-    children.length === 1,
-    'task must materialize exactly one child Thread in the session: '
-      + `${JSON.stringify(children.map((child) => child.threadId))}`,
-  )
-  return canonicalUuid(children[0].threadId, 'task child thread id')
+/** 子 Thread 属于独立 Session；身份只取父 Thread 的持久 accepted 回执。 */
+async function resolveTaskChildThread(apiCtx, fixture) {
+  await waitForQuiescentThread(apiCtx, fixture.threadId, {
+    timeoutMs: 30_000,
+    intervalMs: 100,
+  })
+  const snapshot = await getThreadSnapshot(apiCtx, fixture.threadId)
+  const results = collectTaskToolResults(snapshot.entries)
+  assert(results.length === 1, `task must persist one accepted receipt: ${results.length}`)
+  assert(results[0].rendererKey === 'task', 'task receipt lost its renderer identity')
+  const text = results[0].contents
+    .filter((content) => content.type === 'text')
+    .map((content) => content.text)
+    .join('')
+  const receipt = JSON.parse(text)
+  assertExactFields(receipt, ['thread_id', 'status'], 'task accepted receipt')
+  assert(receipt.status === 'accepted', `unexpected task receipt status: ${receipt.status}`)
+  return canonicalUuid(receipt.thread_id, 'task child thread id')
 }
 
 /** 等待审批回写请求到达：根面板聚合卡提交必须回写原始子 Thread 的原始调用。 */
@@ -1223,7 +1224,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    // 先用不存在的 Agent 确定性创建空闲 Thread；浏览器绑定后 start 经 THREAD batch 启动 task。
+    // 先用不存在的 Agent 创建空闲 Thread，再由 start 经 THREAD batch 启动 task。
     await createNewSession(apiCtx, {
       owner,
       sessionId,
@@ -1243,7 +1244,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     state.sessionId = String(sessionId)
     return {
       ...state,
-      // 浏览器先绑定 Thread，再显式启动 task。
+      // 显式启动 task，等待真实子 Thread 发起模型请求。
       start: async () => {
         const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
           timeoutMs: 60_000,
