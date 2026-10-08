@@ -348,12 +348,12 @@
 }
 
 .task-tool-thread-link {
-  color: var(--primary);
+  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
   overflow-wrap: anywhere;
 }
 
 .task-tool-thread-link:hover {
-  color: var(--primary-hover, var(--primary));
+  color: color-mix(in srgb, var(--accent) 80%, var(--fg));
 }

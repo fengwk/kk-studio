@@ -114,8 +114,8 @@ export const settingsCatalog = {
     'zh-CN': '最近错误',
   },
   'plugins.connectDialog.title': {
-    'en-US': 'Connect Plugin: {name}',
-    'zh-CN': '连接插件：{name}',
+    'en-US': 'Connect Plugin: {{name}}',
+    'zh-CN': '连接插件：{{name}}',
   },
   'plugins.connectDialog.step1': {
     'en-US': '1. Select Region and Open Login Page',
@@ -136,6 +136,26 @@ export const settingsCatalog = {
   'plugins.connectDialog.complete': {
     'en-US': 'Complete Connection',
     'zh-CN': '完成连接',
+  },
+  'plugins.connectDialog.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'plugins.connectDialog.preparing': {
+    'en-US': 'Opening login…',
+    'zh-CN': '正在打开登录页面…',
+  },
+  'plugins.connectDialog.completing': {
+    'en-US': 'Connecting…',
+    'zh-CN': '正在连接…',
+  },
+  'plugins.connectDialog.beforeLoginHint': {
+    'en-US': 'Open the login page first, then paste the callback link here.',
+    'zh-CN': '先打开登录页面，再将回调链接粘贴到这里。',
+  },
+  'plugins.connectDialog.afterLoginHint': {
+    'en-US': 'After login, copy the callback deep link from the browser and paste it here.',
+    'zh-CN': '登录后，从浏览器复制回调 Deep Link 并粘贴到这里。',
   },
   'plugins.connectDialog.keyUnavailableHint': {
     'en-US': 'Deployment master key is unavailable. Credential operations are locked.',
