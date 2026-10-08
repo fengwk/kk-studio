@@ -31,7 +31,7 @@ Stop 的本地取消在提交后执行：`stop` 把取消登记在 [`HarnessStor
 advisory 围栏先于业务行锁，行锁守卫维护六级 rank。
 同级集合排序及树内 Command 交付例外见 [Harness Infra](harness-infra.md#事务边界与锁序)。
 
-task 接受先取全局准入锁，跨所有执行树统计非空闲子 Thread，保证全局额度判定与创建原子；根 Thread 不计入子代理额度。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
+task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一子 Thread 上的多个未完成 Join 各占一份。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
 创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一允许只锁单条 Work 的调度事务，且它们不得制造新的业务 wake。
 

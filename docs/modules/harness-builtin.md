@@ -129,7 +129,7 @@ URI 的支持范围由读取器显式校验。Skill 读取使用 read 的路由�
 
 接受成功后 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 立即返回成功 tool_result JSON `{"thread_id":"...","status":"accepted"}`（[`SubagentTaskMessages.accepted`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)）。执行结果在子 Thread 到达收敛终态边界（源输入已应用、且无未完成直接子 Join / 未送达子回执 / 待处理输入时的最终回答 `TURN_END`、不可继续 `FAILED`，或 Stop 强制收尾）结算 join 后，由 Runtime 作为父 Thread 的 `NOTIFICATION` 命令交付（父 `STOPPED` 时只固化、不唤醒）；完成消息的 XML 编码与转义由 runtime.join 纯函数处理，见 [Harness Runtime](harness-runtime.md)。
 
-[`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。全局额度跨所有执行树按非空闲子 Thread 计数，根 Thread 不计入，同一忙碌子上的多个 join 不重复占额；判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
+[`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。单父与全局额度均按尚未冻结终态的子 Join 计数，全局范围跨所有执行树；root ticket 不计入，同一忙碌子上的多个未完成 join 各占一份，继续委派也需要额度准入。判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
 
 委派的完整契约见 [内置工具与异步委派](builtin-tools-design.md)，逐用例对照见 [Builtin Task 测试映射](../operations/builtin-task-tests.md)。
 
