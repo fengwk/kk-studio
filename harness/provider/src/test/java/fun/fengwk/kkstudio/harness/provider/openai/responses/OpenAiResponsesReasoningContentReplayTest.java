@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -41,6 +43,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /** 合成 reasoning.content 历史的生产、持久化、投影与严格回放回归。 */
 class OpenAiResponsesReasoningContentReplayTest {
@@ -51,6 +54,28 @@ class OpenAiResponsesReasoningContentReplayTest {
   private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final ProviderDescriptor SOURCE = descriptor("deepseek_test", GENERATION);
   private static final String MODEL = "synthetic-source-model";
+
+  /** known reasoning.content 的已知坏形状；consumer（INVALID_REQUEST）与 producer（INVALID_RESPONSE）两侧共用。 */
+  private static final List<String> MALFORMED_CONTENT_SHAPES =
+      List.of(
+          "null",
+          "{}",
+          "\"text\"",
+          "1",
+          "[null]",
+          "[1]",
+          "[\"text\"]",
+          "[{}]",
+          "[{\"type\":null,\"text\":\"x\"}]",
+          "[{\"type\":1,\"text\":\"x\"}]",
+          "[{\"type\":\"unknown\",\"text\":\"x\"}]",
+          "[{\"type\":\"reasoning_text\"}]",
+          "[{\"type\":\"reasoning_text\",\"text\":null}]",
+          "[{\"type\":\"reasoning_text\",\"text\":1}]");
+
+  private static Stream<Arguments> malformedContentShapes() {
+    return MALFORMED_CONTENT_SHAPES.stream().map(Arguments::of);
+  }
 
   private static ProviderDescriptor descriptor(String name, UUID generation) {
     return new ProviderDescriptor(
@@ -221,23 +246,7 @@ class OpenAiResponsesReasoningContentReplayTest {
 
   /** 每种 known content 损坏都严格拒绝，即便有可用 summary 且 affinity 不匹配。 */
   @ParameterizedTest
-  @ValueSource(
-      strings = {
-        "null",
-        "{}",
-        "\"text\"",
-        "1",
-        "[null]",
-        "[1]",
-        "[\"text\"]",
-        "[{}]",
-        "[{\"type\":null,\"text\":\"x\"}]",
-        "[{\"type\":1,\"text\":\"x\"}]",
-        "[{\"type\":\"unknown\",\"text\":\"x\"}]",
-        "[{\"type\":\"reasoning_text\"}]",
-        "[{\"type\":\"reasoning_text\",\"text\":null}]",
-        "[{\"type\":\"reasoning_text\",\"text\":1}]"
-      })
+  @MethodSource("malformedContentShapes")
   void malformedContentRejectedBeforeAffinityFallback(String contentJson) throws Exception {
     ObjectNode payload = MAPPER.createObjectNode();
     ObjectNode item = payload.putArray("output").addObject().put("type", "reasoning");
@@ -261,6 +270,66 @@ class OpenAiResponsesReasoningContentReplayTest {
     ObjectNode payload = MAPPER.createObjectNode();
     reasoning(payload.putArray("output"), "  ");
     assertRejected(payload, "durable thought");
+  }
+
+  /** producer 明确 terminal.output 路径：已知 content 坏形状必须在捕获阶段以 INVALID_RESPONSE 拒绝。 */
+  @ParameterizedTest
+  @MethodSource("malformedContentShapes")
+  void malformedTerminalReasoningContentRejectedAtCapture(String contentJson) throws Exception {
+    JsonNode item = secretReasoningItem(contentJson);
+    OpenAiResponsesStreamAccumulator accumulator = newAccumulator();
+    ProviderException error =
+        assertThrows(
+            ProviderException.class, () -> accumulator.processEvent(completedWithOutput(item)));
+    assertCaptureRejection(error);
+  }
+
+  /** producer output_item.done 后无 output 的 finish 路径：拒绝发生在 done 捕获而非延迟到 finish。 */
+  @ParameterizedTest
+  @MethodSource("malformedContentShapes")
+  void malformedDoneReasoningContentRejectedAtCapture(String contentJson) throws Exception {
+    JsonNode item = secretReasoningItem(contentJson);
+    OpenAiResponsesStreamAccumulator accumulator = newAccumulator();
+    ObjectNode done = MAPPER.createObjectNode().put("type", "response.output_item.done");
+    done.set("item", item);
+    // 未调用 finish()：若把畸形 content 延迟到终态聚合才判错，这里不会抛异常而会失败。
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> accumulator.processEvent(done));
+    assertCaptureRejection(error);
+  }
+
+  private static OpenAiResponsesStreamAccumulator newAccumulator() {
+    return new OpenAiResponsesStreamAccumulator(request(SOURCE, MODEL, List.of()), SOURCE, e -> {});
+  }
+
+  /** 畸形 reasoning item 内嵌可识别的思考/密文标记，用于断言失败消息不回显原文。 */
+  private static ObjectNode secretReasoningItem(String contentJson) throws Exception {
+    ObjectNode item =
+        MAPPER
+            .createObjectNode()
+            .put("type", "reasoning")
+            .put("id", "rs_secret")
+            .put("encrypted_content", "SECRET_CIPHER");
+    item.putArray("summary").addObject().put("type", "summary_text").put("text", "SECRET_THOUGHT");
+    item.set("content", MAPPER.readTree(contentJson));
+    return item;
+  }
+
+  private static ObjectNode completedWithOutput(JsonNode reasoningItem) {
+    ObjectNode terminal = MAPPER.createObjectNode().put("type", "response.completed");
+    ObjectNode response = terminal.putObject("response");
+    response.put("id", "resp_capture").put("status", "completed");
+    ArrayNode output = response.putArray("output");
+    output.add(reasoningItem);
+    ObjectNode message = MAPPER.createObjectNode().put("type", "message").put("role", "assistant");
+    message.putArray("content").addObject().put("type", "output_text").put("text", TEXT);
+    output.add(message);
+    return terminal;
+  }
+
+  private static void assertCaptureRejection(ProviderException error) {
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertFalse(error.getMessage().contains("SECRET"));
   }
 
   private static void assertRejected(ObjectNode payload, String thinking) {
