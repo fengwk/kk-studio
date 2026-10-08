@@ -394,7 +394,7 @@ describe('AI domain utilities', () => {
     expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
     expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
     expect(formatBackendDate(0)).toBe('-')
-    expect(formatBackendDate(1_782_000_000)).toBe('2026-06-21 00:00')
+    expect(formatBackendDate(1_782_000_000)).toBe(formatBackendDate('2026-06-21T00:00:00Z'))
     expect(formatBackendDate([Number.NaN])).toBe('-')
   })
 

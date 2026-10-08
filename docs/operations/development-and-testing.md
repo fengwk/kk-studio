@@ -254,6 +254,12 @@ Playwright 通过 `preview:layout` 在 loopback 5174 端口启动静态预览
 在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
 网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。
 
+Chat 卡片和 Session/Thread 选择器的时间回归可在 `frontend/` 定向执行
+`npm run build:layout && npx playwright test --config playwright.layout.config.ts browser-tests/local-time.pw.ts`。
+该离线用例通过独立浏览器 context 固定上海、UTC、纽约时区，在宽窄视口验证实际组件：
+有时区 ISO 字符串及 epoch 秒/毫秒按浏览器本地时区显示为 `YYYY-MM-DD HH:mm`，
+包括跨日转换；无时区字符串和数组保留本地墙上时钟含义，空值及非法输入显示 `-`。
+
 Thread 控制与消息展示有独立的离线 Chromium 入口，可按改动范围选择：
 
 ```bash
