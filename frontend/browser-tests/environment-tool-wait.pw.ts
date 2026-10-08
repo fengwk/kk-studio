@@ -133,12 +133,13 @@ for (const scenario of ['pane-root', 'pane-child']) {
     await expect.poll(() => reads).toBe(3)
     await page.clock.runFor(60000)
     expect(reads).toBe(3)
-    // 同 durable version 的环境恢复也回读；工具本身开始执行才出现 spinner。
+    // 同 durable version 的环境恢复也回读；运行语义由 aria-busy 保留，不恢复尾部状态图标。
     waiting = false
     status = 'RUNNING'
     changed(ROOT)
     await expect(card).toHaveAttribute('data-invocation-state', 'running')
-    await expect(card.locator('.animate-spin')).toHaveCount(1)
+    await expect(card).toHaveAttribute('aria-busy', 'true')
+    await expect(card.locator('.animate-spin, .thread-tool-tail > svg')).toHaveCount(0)
     await expect(card.locator('.thread-tool-summary')).not.toContainText('等待环境')
     expect(writes).toEqual([])
     await page.screenshot({ path: `../reports/layout/environment-tool-${scenario}.png`, fullPage: true })

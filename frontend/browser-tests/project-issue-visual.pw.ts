@@ -102,11 +102,19 @@ for (const width of [320, 1280]) {
     await noOverflow(dialog)
     await page.screenshot({ path: info.outputPath(`budgets-${width}.png`) })
     const link = page.getByRole('link', { name: 'Task thread' })
-    await expect(link).toHaveCSS('color', await token(link, 'color', '--accent'))
+    // task 导航沿用周围正文的字体与颜色，hover 也不改为强调色。
+    const bodyStyle = await link.evaluate((element) => {
+      const style = getComputedStyle(element.parentElement!)
+      return { color: style.color, fontFamily: style.fontFamily, fontSize: style.fontSize, fontWeight: style.fontWeight }
+    })
+    await expect(link).toHaveCSS('color', bodyStyle.color)
+    await expect(link).toHaveCSS('font-family', bodyStyle.fontFamily)
+    await expect(link).toHaveCSS('font-size', bodyStyle.fontSize)
+    await expect(link).toHaveCSS('font-weight', bodyStyle.fontWeight)
     await dialog.getByRole('button', { name: '关闭', exact: true }).first().click()
     await expect(dialog).toHaveCount(0)
     await link.hover()
-    await expect(link).toHaveCSS('color', await token(link, 'color', 'color-mix(in srgb, var(--accent) 80%, var(--fg))'))
+    await expect(link).toHaveCSS('color', bodyStyle.color)
   })
 }
 
