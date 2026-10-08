@@ -201,7 +201,7 @@ function resolveRowId(
 }
 
 /** lane gutter 字形：每个 lane 一列，节点列画节点，其余列按连通性画竖线。 */
-export function historyLaneGlyphs(row: HistoryTreeRow): string {
+function historyLaneGlyphs(row: HistoryTreeRow): string {
   const width = Math.max(row.gutter.length, row.lane + 1)
   let glyphs = ''
   for (let column = 0; column < width; column += 1) {
