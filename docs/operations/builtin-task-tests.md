@@ -10,14 +10,15 @@
 父 task 调用
   -> 同事务接受源命令、不可变父子关系、join 凭据与 Work
   -> 立即 tool_result {"thread_id":"…","status":"accepted"}
-子执行到达首个终态边界
+子执行到达收敛终态边界（源输入已应用，且无未完成直接子 Join / 未送达子回执 / 待处理输入）
   -> 同事务冻结 terminal/final-answer 回执、向父入队 SUBAGENT_RESULT NOTIFICATION
   -> 父 RUNNABLE 时唤醒；父 STOPPED 时通知只固化进历史
   -> 父收到内层 <subagent_result thread_id agent state>
 ```
 
 join 保存身份、源命令、冻结的终态/最终回答回执与交付引用，不复制 prompt/报告/错误，也没有独立状态枚举。
-Thread 的空闲只描述自身：等待子 join 不影响父的 `IDLE`，父也不空转模型或保留等待线程。
+Thread 的空闲只描述自身：等待子 join 不影响父的 `IDLE`，父也不空转模型或保留等待线程；
+但本地 `IDLE` 不等同于整次委派已可回执——子执行仍有未完成后代或待处理输入时，它的本地 final 不会被交付，只有消费这些义务后的下一个收敛终态才结算并向上交付。
 父为 `STOPPED` 时完成通知仍持久固化、不唤醒模型；父接受新的任务输入后由 INPUT 一并消费未越过水位的通知。
 
 ## 按层运行
@@ -30,7 +31,7 @@ Platform 中的集成测试以及后两组需要 Docker/Testcontainers。
 # 接受、终态结算、回执与内存 Store 契约
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/runtime -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dtest='HarnessRuntimeJoinAcceptanceTest,ThreadLifecycleCoordinatorJoinTest,ThreadProcessorSoftBudgetTest,ThreadJoin*Test,HarnessRuntimeStopSubtreeTest,HarnessRuntimeStopReplayTest,HarnessRuntimeThreadSemanticsScenarioTest,HarnessRuntimeStopIdleTest,InMemoryJoinTest,ModelProcessorTest,SystemReminderTest'
+  -Dtest='HarnessRuntimeJoinAcceptanceTest,ThreadLifecycleCoordinatorJoinTest,ThreadInputDemandTest,ThreadProcessorSoftBudgetTest,ThreadJoin*Test,HarnessRuntimeStopSubtreeTest,HarnessRuntimeStopReplayTest,HarnessRuntimeThreadSemanticsScenarioTest,HarnessRuntimeStopIdleTest,InMemoryJoinTest,ModelProcessorTest,SystemReminderTest'
 
 # 工具解析、即时回执、配置与 Contributor 目录
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/builtin -am test \
@@ -42,10 +43,10 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dtest='SubagentTaskRunnerTest,AgentBranchSettingsMaterializerTest,AgentPromptComposerTest,HarnessOneShotServiceTest,DatabaseTurnResolverTest,BuiltinHarnessContributorConfigurationTest,SystemSettingsTest,SessionDeletionOrchestratorTest,HarnessOwnerQueryServiceTest,IssueReconcilerIntegrationTest'
 
-# PostgreSQL 事务、全局准入锁、树锁、回滚与停止/交付竞争
+# PostgreSQL 事务、全局准入锁、树锁、回滚与停止/交付竞争，以及委派收敛的原子窗口
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/infra -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dtest='PostgresqlJoinAcceptanceRollbackTest,PostgresqlParentStopChildJoinConcurrencyTest,PostgresqlJoinTest'
+  -Dtest='PostgresqlJoinAcceptanceRollbackTest,PostgresqlParentStopChildJoinConcurrencyTest,PostgresqlJoinQuiescenceConcurrencyTest,PostgresqlJoinTest'
 
 # Runtime + dispatcher/Processor + PostgreSQL 执行链路，以及公开状态投影
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl web -am test \
@@ -90,9 +91,10 @@ Docker 不可用时的跳过不算数据库事务已验证。
 创建子必须附带 join，父与 expected head 一致，父 STOPPED 时拒绝新委派；
 重放不能改写冻结身份、版本、时间、receipt 或 reminder 进度。
 
-## 首次终态结算、receipt 与提醒
+## 收敛终态结算、receipt 与提醒
 
-`ThreadLifecycleCoordinatorJoinTest` 验证源输入未应用时不结算，以及结算后只投递一次。
+`ThreadLifecycleCoordinatorJoinTest` 验证源输入未应用时不结算、普通结算的收敛判据（未完成直接子 Join、未送达子回执、待处理输入）以及结算后只投递一次；
+`ThreadInputDemandTest` 以 typed 矩阵锁定被复用的输入需求判据（QUEUED 消息/通知与越过水位前已物化的 APPLIED 通知构成需求，设置命令不构成）。
 `HarnessRuntimeThreadSemanticsScenarioTest`、`HarnessRuntimeStopSubtreeTest` 与 PostgreSQL 委派用例
 覆盖父 `RUNNABLE` 唤醒、父 `STOPPED` 只固化通知及多层委派。
 `ThreadJoinProjectorTest` 固定源命令的执行边界到冻结的 `terminalEntryId` / `finalAnswerEntryId`
@@ -121,7 +123,8 @@ NOTIFICATION 是系统通知，不是产品 HTTP 面允许提交的普通用户�
 
 `PostgresqlParentStopChildJoinConcurrencyTest` 验证父停止与子终态的真实竞争、
 advisory 树锁阻塞、错误回滚、stale version 零写入和恰一次交付。
-`ThreadJoinDelegationPostgresIntegrationTest` 进一步验证父停止后结果直接固化、接受新输入不重复交付，
+`PostgresqlJoinQuiescenceConcurrencyTest` 覆盖 B 先完成、C 先交付两种调度：B 必须消费子回执并完成新回合，才能以新的成功 final 向 A 结算。测试还用真实 PG 树锁与被 latch 的写入代理证明：子冻结结算与父通知入队在同一事务、同一把树锁内，父快照查询在该窗口被阻塞，提交后看到完整通知；该窗口内回滚则 entries/joins/commands/work 全部回退，重试恰交付一次。
+`ThreadJoinDelegationPostgresIntegrationTest` 进一步验证父停止后结果直接固化、接受新输入不重复交付、多层委派向上传播，
 以及 dispatcher 仅靠 durable Work/Join 在无通知情况下恢复。
 
 `HarnessRuntimeResponseMapperTest`、`StudioHarnessThreadControllerTest`、

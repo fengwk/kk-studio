@@ -32,8 +32,9 @@ import java.util.UUID;
 /**
  * 执行终止边界上的 Join 冻结与父 Thread 通知交付，以及短预算提醒物化。
  *
- * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：Join 在源输入应用后的首次执行终止（最终回答 / 不可继续失败 / Stop）冻结一次，并与终态
- * Entry、父通知在同一事务提交。父 Thread 为 STOPPED 时通知直接固化到历史而不唤醒模型。
+ * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：普通终止（最终回答 / 不可继续失败）只有在源输入已应用、且本 Thread 收敛（无未完成的直接子
+ * Join、无未送达子回执、无待处理输入）时才冻结 Join；Stop 的强制结算不受该收敛判据限制。冻结结果与终态 Entry、父通知在同一事务提交。 父 Thread 为 STOPPED
+ * 时通知直接固化到历史而不唤醒模型。
  */
 public final class ThreadLifecycleCoordinator {
 
@@ -98,9 +99,13 @@ public final class ThreadLifecycleCoordinator {
   /**
    * 在执行终止边界冻结本次 Thread 上尚未完成的 Join，并向父 Thread 交付系统通知。
    *
+   * <p>普通终止（{@code includeUnappliedSource == false}）只在该 Thread 收敛时结算：源输入已应用、没有未完成的直接子
+   * Join、没有未送达的子回执且没有待处理输入；否则保留未匹配 Join，等待后续真实输入或子结算再次到达终止边界。Stop 强制结算（{@code
+   * includeUnappliedSource == true}）不受收敛判据限制。
+   *
    * @param tx 当前事务句柄，不能为 null
    * @param child 已锁定且刚到达终止边界的子 Thread
-   * @param terminalEntryId 冻结的终态 Entry（首次最终回答的 TURN_END、不可继续失败或 Stop 收尾），不能为 null
+   * @param terminalEntryId 冻结的终态 Entry（最终回答的 TURN_END、不可继续失败或 Stop 收尾），不能为 null
    * @param finalAnswerEntryId 可空最终回答入口；不借用源输入之前的回答
    * @param now 当前时间
    * @param includeUnappliedSource true 表示 Stop 场景：源输入被执行前取消也算本次结算；普通终止只结算已应用源输入的 Join
@@ -118,6 +123,11 @@ public final class ThreadLifecycleCoordinator {
     Objects.requireNonNull(now, "now");
     List<ThreadJoin> incomplete = tx.loadIncompleteJoins(child.id());
     if (incomplete.isEmpty()) {
+      return;
+    }
+    if (!includeUnappliedSource && !isQuiescent(tx, child)) {
+      // 本次终态不是委派收敛点：子执行还欠未完成的直接子 Join、未送达的子回执或待处理输入，只保留未匹配 Join，
+      // 不向父结算、不自唤醒忙轮询；后续真实输入/子结算路径会再次到达终止边界。
       return;
     }
     List<ThreadJoin> matched = new ArrayList<>(incomplete.size());
@@ -138,6 +148,18 @@ public final class ThreadLifecycleCoordinator {
     if (!matched.isEmpty()) {
       deliverMatchedJoins(tx, matched, now);
     }
+  }
+
+  /**
+   * 普通终止的委派收敛判据：子执行没有尚未冻结结果的直接子 Join、没有已冻结但未送达的子回执，且本 Thread 没有待处理输入（QUEUED 消息/通知，或已物化但未越过输入水位的
+   * APPLIED 通知）。
+   *
+   * <p>直接子 Join 自身也遵循同一判据，A-B-C 及更深的委派因此自底向上自然收敛，不需要遍历全树历史空闲节点。
+   */
+  private static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
+    return tx.countIncompleteChildJoins(child.id()) == 0
+        && tx.loadPendingDeliveries(child.id()).isEmpty()
+        && !ThreadInputDemand.hasInputDemand(tx, child);
   }
 
   /**
