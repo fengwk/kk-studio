@@ -507,6 +507,23 @@ test('the turn footer hover readout uses full usage facts instead of the compact
   expect(title).toContain('7 tokens')
   expect(title).not.toContain('↑')
   expect(title.split('\n')).toHaveLength(3)
+  for (const width of [1440, 360, 320]) {
+    await page.setViewportSize({ width, height: 820 })
+    const centers = await metaText.evaluate((element) => {
+      const center = (target: Element) => {
+        const box = target.getBoundingClientRect()
+        return box.y + box.height / 2
+      }
+      const row = element.closest('.thread-meta-row')!
+      return {
+        text: center(element), coins: center(row.querySelector('.thread-meta-icon svg')!),
+        branch: center(row.querySelector('.thread-meta-branch-btn')!),
+      }
+    })
+    expect(Math.abs(centers.text - centers.coins)).toBeLessThanOrEqual(1)
+    expect(Math.abs(centers.text - centers.branch)).toBeLessThanOrEqual(1)
+    await testInfo.attach(`usage-centers-${width}`, { body: JSON.stringify(centers, null, 2), contentType: 'application/json' })
+  }
   await page.screenshot({ path: testInfo.outputPath('turn-footer-hover-narrow.png') })
 })
 
@@ -724,7 +741,7 @@ test('selecting a Thread waits for readiness, preserves its text and never steal
   await expect(first.getByLabel('给 AI 发送消息')).toHaveText('bound draft text')
 })
 
-test('Debug preserves an open root subagent panel without queuing hidden-composer focus', async ({ page }) => {
+test('root slash selectors preserve the draft, close on Escape and keep Debug exclusive', async ({ page }) => {
   const recorded = await installChatApi(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.addInitScript(({ chatId, threadId }) => {
@@ -735,16 +752,23 @@ test('Debug preserves an open root subagent panel without queuing hidden-compose
   await expect(editor).toBeEditable()
   await editor.fill('root panel draft')
   const header = page.locator('.chat-workspace-header')
-  await header.getByRole('button', { name: '查看 subagent 执行' }).click()
+  await expect(header.getByRole('button', { name: '查看 subagent 执行' })).toHaveCount(0)
+  await expect(header.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '打开命令表' }).click()
+  await page.getByRole('option', { name: /subagent/ }).click()
   const tree = page.locator('.subagent-tree-panel')
   await expect(tree).toBeFocused()
-  const savedTree = await tree.elementHandle()
   for (const event of [{ key: 'Escape', repeat: true }, { key: 'Escape', keyCode: 229 }]) {
     await tree.dispatchEvent('keydown', event)
     await expect(tree).toBeVisible()
   }
-  await header.getByRole('button', { name: 'Debug', exact: true }).click()
-  await expect(tree).toBeHidden()
+  await page.keyboard.press('Escape')
+  await expect(tree).toHaveCount(0)
+  await expect(editor).toBeFocused()
+  await expect(editor).toContainText('root panel draft')
+  await page.getByRole('button', { name: '打开命令表' }).click()
+  await page.getByRole('option', { name: /debug/ }).click()
+  await expect(page.locator('.thread-control-area')).toBeHidden()
   for (const target of [page.locator('.chat-pane:not([hidden])'), page.locator('.chat-workspace')]) {
     for (const event of [{ key: 'Escape', repeat: true }, { key: 'Escape', keyCode: 229 }]) {
       await target.dispatchEvent('keydown', event)
@@ -752,21 +776,14 @@ test('Debug preserves an open root subagent panel without queuing hidden-compose
     }
   }
   await header.getByRole('button', { name: '关闭 Debug', exact: true }).click()
-  await expect(tree).toBeVisible()
-  expect(await savedTree?.evaluate((element) => element.isConnected)).toBe(true)
-  await expect(header.getByRole('button', { name: 'Debug', exact: true })).toBeFocused()
-  await expect(editor).toBeHidden()
-  await tree.focus()
-  await page.keyboard.press('Escape')
-  await expect(tree).toHaveCount(0)
   await expect(editor).toBeFocused()
   await expect(editor).toContainText('root panel draft')
   expect(recorded.commandBatches).toEqual([])
 })
 
-for (const layout of ['split-3', 'grid-4']) {
-  test(`readonly grandchild Debug exclusively occupies ${layout} from non-first pane and restores drafts`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 1440, height: 900 })
+for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 320]] as const) {
+  test(`readonly grandchild returns to its direct parent in ${layout} at ${width}px and restores drafts`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
     const recorded = await installChatApi(page, { longHistory: true })
     const writes: string[] = []
     page.on('request', (request) => {
@@ -800,10 +817,17 @@ for (const layout of ['split-3', 'grid-4']) {
     await source.getByRole('button', { name: '打开命令表' }).click()
     await source.getByRole('option', { name: /subagent/ }).click()
     const tree = source.locator('.subagent-tree-panel')
-    await expect(tree.locator('.thread-tree-row')).toHaveCount(2)
+    await expect(tree.locator('.subagent-card-list li')).toHaveCount(2)
+    await expect(tree.locator('[data-depth], .thread-tree-connectors')).toHaveCount(0)
+    await expect(tree.locator(`[data-thread-id="${THREAD_ID}"]`)).toHaveCount(0)
+    expect(await tree.locator('.subagent-card-list li').evaluateAll((items) => items.map((item) => (item as HTMLElement).dataset.threadId)))
+      .toEqual([CHILD_ID, GRANDCHILD_ID])
     await expect(tree.locator(`[data-thread-id="${GRANDCHILD_ID}"]`)).toContainText('turns: 4 · tools: 5')
     // 从根直接点开孙执行，返回必须先落在实际直属父，而非浏览栈的根。
-    await tree.locator(`[data-thread-id="${GRANDCHILD_ID}"] a`).click()
+    await tree.focus()
+    await page.keyboard.press('ArrowDown')
+    await expect(tree.locator(`[data-thread-id="${GRANDCHILD_ID}"] a`)).toBeFocused()
+    await page.keyboard.press('Enter')
     const header = page.locator('.chat-workspace-header')
     await expect(header.getByText('main', { exact: true })).toHaveCount(0)
     await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · minimax/MiniMax · high')
@@ -816,41 +840,31 @@ for (const layout of ['split-3', 'grid-4']) {
     })
     expect(childScroll).toBeGreaterThan(0)
     await expect(page.getByRole('alert')).toHaveCount(0)
-    const debugTrigger = await header.getByRole('button', { name: 'Debug', exact: true }).elementHandle()
-    await header.getByRole('button', { name: 'Debug', exact: true }).click()
-    await expect(page.locator('.chat-pane-grid')).toHaveClass(/layout-single/)
-    await expect(page.locator('.chat-pane:not([hidden])')).toHaveCount(1)
-    await expect(source).toBeVisible()
-    await expect(first).toBeHidden()
-    await expect(first).toHaveAttribute('inert', '')
+    await expect(header.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
+    await expect(header.getByRole('button', { name: '查看 subagent 执行' })).toHaveCount(0)
+    await expect(header.getByRole('link', { name: '回到对话' })).toHaveCount(0)
+    expect(await header.evaluate((element) => element.querySelector('.chat-workspace-title')?.firstElementChild?.textContent))
+      .toBe('回到父 agent')
+    await expect(source.locator('.chat-pane-layer[hidden]').first()).toHaveAttribute('inert', '')
     expect(await savedEditor?.evaluate((element) => element.isConnected)).toBe(true)
-    await expect(page.locator('.thread-events-shell:visible')).toHaveCount(1)
     const treeReads = recorded.treeReads
     recorded.completeGrandchild()
-    await expect(source.getByRole('option', { name: /Background completion persisted/ })).toBeVisible()
+    await expect(childLog).toContainText('Background completion persisted')
     await expect.poll(() => recorded.treeReads).toBeGreaterThan(treeReads)
     await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · minimax/MiniMax · high')
-    await expect(page.locator('.thread-composer:visible, .thread-status-footer:visible, .thread-widget-stack:visible')).toHaveCount(0)
+    await expect(source.locator('.chat-pane-layer:not([hidden]) .thread-composer')).toHaveCount(0)
     await expect(page.locator('.agent-pane-thread-heading:visible')).toHaveCount(0)
-    await expect(page.getByRole('combobox', { name: '布局' })).toHaveCount(0)
-    await expect(header.getByRole('button', { name: '关闭 Debug', exact: true })).toBeVisible()
+    await expect(header.getByRole('button', { name: '关闭 Debug', exact: true })).toHaveCount(0)
     await expect(page.locator('.thread-debug-back')).toHaveCount(0)
-    await page.screenshot({ path: testInfo.outputPath(`${layout}-readonly-grandchild-debug.png`) })
-    // 第一层 Escape 只关闭已初选的检查详情；下一次才退出 workspace Debug。
-    await page.getByRole('listbox', { name: '事件', exact: true }).focus()
-    await page.keyboard.press('Escape')
-    await expect(header.getByRole('button', { name: '关闭 Debug', exact: true })).toBeVisible()
-    await page.keyboard.press('Escape')
+    await page.screenshot({ path: testInfo.outputPath(`${layout}-${width}-readonly-grandchild.png`) })
     await expect(page.locator('.chat-pane-grid')).toHaveClass(new RegExp(`layout-${layout}`))
     await expect(firstEditor).toContainText('background pane draft')
     expect(await savedEditor?.evaluate((element) => element.isConnected)).toBe(true)
-    expect(await debugTrigger?.evaluate((element) => element.isConnected)).toBe(true)
-    await expect(header.getByRole('button', { name: 'Debug', exact: true })).toBeFocused()
     await expect.poll(() => childLog.evaluate((element) => element.scrollTop)).toBe(childScroll)
-    await header.getByRole('button', { name: '返回父 agent' }).click()
+    await header.getByRole('button', { name: '回到父 agent' }).click()
     await expect(header).toContainText('direct parent')
     await expect(header.locator('.workspace-view-identity')).toHaveText('worker · minimax/MiniMax')
-    await header.getByRole('button', { name: '返回父 agent' }).click()
+    await header.getByRole('button', { name: '回到父 agent' }).click()
     await expect(sourceEditor).toBeVisible()
     await expect(sourceEditor).toContainText('root source draft')
     await expect.poll(() => rootLog.evaluate((element) => element.scrollTop)).toBe(rootScroll)
@@ -858,6 +872,5 @@ for (const layout of ['split-3', 'grid-4']) {
     expect(writes).toEqual([])
     await expect(page.getByRole('alert')).toHaveCount(0)
     await savedEditor?.dispose()
-    await debugTrigger?.dispose()
   })
 }

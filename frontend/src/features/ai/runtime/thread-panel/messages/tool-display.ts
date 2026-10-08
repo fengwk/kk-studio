@@ -112,8 +112,10 @@ function formatKnownToolDetail(
       if (!subagentType) {
         return null
       }
-      // thread_id 在正文以可点击 Thread 链接出现，Header 不重复。
-      return withOptions(subagentType, [['max_turns', values.max_turns]])
+      return withOptions(subagentType, [
+        ['max_turns', values.max_turns],
+        ['thread_id', values.thread_id],
+      ])
     }
     default:
       return null

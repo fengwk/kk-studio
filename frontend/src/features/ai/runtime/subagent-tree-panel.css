@@ -1,0 +1,51 @@
+.thread-interaction-panel.subagent-tree-panel {
+  border-color: transparent;
+}
+
+.subagent-card-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.subagent-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.subagent-card strong {
+  color: var(--fg);
+}
+
+.subagent-card:hover {
+  background: var(--surface-hover);
+}
+
+.subagent-card-list [data-selected='true'] .subagent-card {
+  background: var(--surface-active);
+}
+
+.subagent-card:focus-visible,
+.subagent-tree-panel:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.subagent-card-status[data-processing='true'] {
+  color: var(--info);
+}
+
+.subagent-card-status[data-outcome='FAILED'] {
+  color: var(--danger);
+}

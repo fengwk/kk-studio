@@ -4605,7 +4605,7 @@ describe('AgentPane root control and child observation', () => {
 
     await user.click(source)
 
-    const back = await screen.findByRole('button', { name: '返回父 agent' })
+    const back = await screen.findByRole('button', { name: '回到父 agent' })
     expect(screen.getByText('只读查看')).toBeInTheDocument()
     // 返回入口在查看层顶部标题区（名称/只读标识旁），不是 transcript 与 widget 之后的底部控制区。
     expect(back.closest('.agent-pane-thread-heading')).not.toBeNull()

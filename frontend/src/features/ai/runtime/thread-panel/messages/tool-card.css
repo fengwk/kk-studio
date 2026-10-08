@@ -47,7 +47,7 @@
 /*
  * Header 允许换行：任意长度的参数（未知/MCP 的数千字 JSON 也不例外）在可用宽度内
  * 折行，完整原文留在 DOM 中可选中复制；不做横向滚动，也不撑破 pane。
- * 右侧是不会收缩的状态/展开尾部，参数不能挤掉或覆盖图标。
+ * 右侧是不会收缩的展开尾部，参数不能挤掉或覆盖箭头。
  */
 .thread-tool-header {
   position: relative;
@@ -68,11 +68,18 @@
   min-width: 0;
   flex: 1 1 auto;
   display: block;
+  padding: 4px 0;
+  line-height: 20px;
+  font-size: 12px;
+  font-family: var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .thread-tool-name {
+  display: inline-block;
+  vertical-align: top;
+  line-height: 20px;
   color: var(--fg);
   font-family: var(--mono);
   font-size: 12px;
@@ -316,44 +323,23 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.task-tool-fields {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.task-tool-field {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.task-tool-field dt {
-  color: var(--fg-dim);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.task-tool-field dd {
-  margin: 0;
-  min-width: 0;
   color: var(--fg-muted);
-  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.task-tool-renderer .thread-tool-pre {
+  font-family: inherit;
 }
 
 .task-tool-thread-link {
-  color: var(--accent);
+  color: inherit;
+  font: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
   overflow-wrap: anywhere;
 }
 
 .task-tool-thread-link:hover {
-  color: color-mix(in srgb, var(--accent) 80%, var(--fg));
+  color: inherit;
 }

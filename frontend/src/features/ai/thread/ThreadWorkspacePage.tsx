@@ -103,7 +103,7 @@ function ThreadWorkspaceContent({ thread, agents, environments }: {
           {debugActive ? <Button variant="ghost" size="compact"
             onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
             {t('ai.runtime.debug.close')}
-          </Button> : <Link
+          </Button> : (presentation?.parentThreadId ?? thread.parentThreadId) ? <ThreadPresentationActions view={presentation} /> : <Link
             className="chat-workspace-back"
             to="/chats"
             title={t('ai.chat.backToConversation')}
@@ -114,7 +114,6 @@ function ThreadWorkspaceContent({ thread, agents, environments }: {
           </Link>}
           <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
           <h1>{presentation?.name ?? title}</h1>
-          <ThreadPresentationActions view={presentation} />
         </div>
       </header>
       <div className="chat-pane-grid layout-single">

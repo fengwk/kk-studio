@@ -358,7 +358,7 @@ function ChatWorkspaceContent({
         <div className="chat-workspace-title">
           {debugSource ? <Button variant="ghost" size="compact" onClick={closeDebug}>
             {t('ai.runtime.debug.close')}
-          </Button> : <Link
+          </Button> : currentView?.parentThreadId ? <ThreadPresentationActions view={currentView} /> : <Link
             className="chat-workspace-back"
             to="/chats"
             title={t('ai.chat.backToConversation')}
@@ -394,7 +394,6 @@ function ChatWorkspaceContent({
               </>
             ) : null}
           </nav>
-          <ThreadPresentationActions view={currentView} />
         </div>
         <div className="chat-workspace-actions">
           {debugSource == null ? <ChatLayoutSelector

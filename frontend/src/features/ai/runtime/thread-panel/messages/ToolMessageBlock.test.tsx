@@ -85,8 +85,9 @@ describe('ToolMessageBlock shell', () => {
       <ToolMessageBlock message={message({ phase: 'call', invocationStatus: status })} />,
     )
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', state)
-    expect(screen.getByText(`· ${label}`)).toBeInTheDocument()
-    expect(container.querySelectorAll('.animate-spin')).toHaveLength(status === 'RUNNING' ? 1 : 0)
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', label)
+    expect(screen.queryByText(`· ${label}`)).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-tail > svg')).toBeNull()
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', String(status === 'RUNNING'))
   })
 
@@ -101,7 +102,8 @@ describe('ToolMessageBlock shell', () => {
     rerender(<ToolMessageBlock message={message({
       phase: 'call', toolName: 'task', invocationStatus: 'SUCCEEDED',
     })} />)
-    expect(screen.getByText('· 委派已受理')).toBeInTheDocument()
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', '委派已受理')
+    expect(screen.queryByText('· 委派已受理')).not.toBeInTheDocument()
     expect(screen.queryByText('· 成功')).not.toBeInTheDocument()
   })
 
@@ -112,7 +114,7 @@ describe('ToolMessageBlock shell', () => {
     />)
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', 'failed')
     expect(screen.getByText('permission failure')).toBeInTheDocument()
-    expect(screen.getByText('· 失败')).toBeInTheDocument()
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', '失败')
   })
 
   it('announces reading intent when the user toggles a card (streaming growth must not steal it)', async () => {
@@ -191,7 +193,7 @@ describe('ToolMessageBlock shell', () => {
     expect(screen.getByText('Tool')).toBeInTheDocument()
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
     expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
-    expect(screen.getByText('· 生成调用中')).toBeInTheDocument()
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('title', '生成调用中')
     expect(document.querySelector('.animate-spin')).toBeNull()
     expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
   })

@@ -19,10 +19,22 @@
   min-width: 0;
 }
 
-/* 一行摘要兼任展开入口：整行都是原生按钮，Enter/Space 直接可用。 */
+.thread-subagent-receipt-identity {
+  display: flex;
+  flex: 1 1 180px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 展开控件是最后一个独立按钮，与来源链接互不嵌套。 */
 .thread-subagent-receipt-toggle {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+  margin-left: auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -40,18 +52,6 @@
   outline-offset: 2px;
 }
 
-.thread-subagent-receipt-glyph {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  color: var(--info);
-}
-
-.thread-subagent-receipt-glyph svg {
-  width: 14px;
-  height: 14px;
-}
-
 /* 长 agent 名在自身范围内换行，不截断、不撑破摘要。 */
 .thread-subagent-receipt-agent {
   flex: 0 0 auto;
@@ -62,7 +62,7 @@
   overflow-wrap: anywhere;
 }
 
-/* 状态只用小图标 + 短标签区分，不给整张卡涂成功/错误色。 */
+/* 状态只用小图标，语义由 aria-label/title 保留。 */
 .thread-subagent-receipt-state {
   display: inline-flex;
   flex: 0 0 auto;
@@ -113,7 +113,8 @@
 /* 来源跳转与展开动作分离：窄 pane 时整条链接换行，文本本身也可再折行。 */
 .thread-subagent-receipt-source {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  max-width: calc(100% - 38px);
   align-items: center;
   gap: 4px;
   min-width: 0;

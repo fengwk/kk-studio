@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { MemoryRouter } from 'react-router'
+import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
+import { TaskToolRenderer } from '@/features/ai/runtime/thread-panel/messages/TaskToolRenderer'
+import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 import '@/styles.css'
 import { ResourceBlobUrlContext } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/ThreadConversationView'
@@ -258,6 +262,7 @@ function createBlobResolver(delayMs: number, imageUrl: string) {
 
 export function ToolCardHarnessApp() {
   const [state, setState] = useState<HarnessState>(initialState)
+  const [selected, setSelected] = useState('')
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const imageUrl = useMemo(() => bigImageDataUrl(), [])
   const resolveBlobUrls = useMemo(() => createBlobResolver(600, imageUrl), [imageUrl])
@@ -283,7 +288,13 @@ export function ToolCardHarnessApp() {
       <div className="harness-hint">
         tool card browser harness
       </div>
-      <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
+      <output hidden aria-label="selected thread">{selected}</output>
+      {state.messages[0]?.role === 'tool' && state.messages[0].toolName === 'task' ? (
+        <MemoryRouter><ThreadNavigationContext.Provider value={setSelected}>
+          <ToolMessageBlock message={state.messages[0]}
+            result={state.messages[1] as ToolDialogueMessage} renderer={TaskToolRenderer} />
+        </ThreadNavigationContext.Provider></MemoryRouter>
+      ) : <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
         <ThreadConversationView
           messages={state.messages}
           loading={false}
@@ -291,12 +302,28 @@ export function ToolCardHarnessApp() {
           bodyRef={bodyRef}
           initialScrollTop={state.initialScrollTop ?? null}
         />
-      </ResourceBlobUrlContext.Provider>
+      </ResourceBlobUrlContext.Provider>}
     </div>
   )
 }
 
 const toolCardHarness = {
+  task() {
+    const argumentsValue = JSON.stringify({
+      subagent_type: 'Explorer', max_turns: 4,
+      thread_id: '00000000-0000-4000-8000-000000000004',
+      prompt: 'Keep this user text: Thread ID user-owned-marker',
+    })
+    publish({
+      messages: [
+        { ...bashTool('task', 1, false), toolName: 'task', rendererKey: 'task',
+          invocationStatus: 'SUCCEEDED', arguments: argumentsValue },
+        { ...bashResult('task', 1), toolName: 'task', rendererKey: 'task', arguments: argumentsValue,
+          contents: [{ type: 'text', text: '{"status":"accepted","thread_id":"00000000-0000-4000-8000-000000000005"}' }] },
+      ],
+      streaming: false,
+    })
+  },
   longPath() {
     publish({
       messages: [{

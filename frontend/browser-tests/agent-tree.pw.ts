@@ -234,11 +234,11 @@ test('the active subagent tree renders automatically inside the bound pane and o
   })
   await widget.getByRole('link', { name: /Child Planner/ }).click()
   await expect(page.getByText('只读查看')).toBeVisible()
-  await expect(page.getByRole('button', { name: '返回父 agent' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '回到父 agent' })).toBeVisible()
   await expect(page).toHaveURL(/debug-preview-harness/)
   expect(popupOpened.value).toBe(false)
 
-  await page.getByRole('button', { name: '返回父 agent' }).click()
+  await page.getByRole('button', { name: '回到父 agent' }).click()
   await expectBoundRootIdentity(page)
   await expect(widget).toBeVisible()
 })

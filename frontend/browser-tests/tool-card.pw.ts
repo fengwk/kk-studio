@@ -11,6 +11,7 @@ import type { Locator, Page } from './fixture'
  */
 
 type HarnessApi = {
+  task(): void
   idle(lines?: number): void
   idleMid(lines?: number): void
   streaming(lines?: number): void
@@ -76,6 +77,53 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/browser-tests/tool-card-harness.html')
   await expect(page.locator('.harness-hint')).toHaveText('tool card browser harness')
 })
+
+for (const width of [1440, 360, 320]) {
+  test(`task readable links and balanced header geometry at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 820 })
+    await harness(page, 'task')
+    const card = page.locator('.thread-turn-tool')
+    await expect(card.locator('.thread-tool-summary')).toHaveText(
+      'task Explorer [max_turns=4 thread_id=00000000-0000-4000-8000-000000000004]',
+    )
+    await expect(card.locator('.thread-tool-state-label, .thread-tool-tail > svg, .task-tool-fields')).toHaveCount(0)
+    await expect(card).toContainText('Keep this user text: Thread ID user-owned-marker')
+    const links = card.getByRole('link', { name: 'View subagent execution' })
+    await expect(links).toHaveCount(2)
+    await expect(links.nth(1)).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000005')
+    const typography = await links.nth(1).evaluate((element) => {
+      const style = getComputedStyle(element)
+      const body = getComputedStyle(document.querySelector('.task-tool-renderer .thread-tool-pre')!)
+      return {
+        link: [style.fontFamily, style.fontSize, style.fontWeight, style.color],
+        body: [body.fontFamily, body.fontSize, body.fontWeight, body.color],
+      }
+    })
+    expect(typography.link).toEqual(typography.body)
+    expect(typography.link[0].toLowerCase()).not.toContain('monospace')
+    await links.nth(1).click()
+    await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000005')
+    await expect(card.locator('.thread-tool-toggle')).toHaveAttribute('aria-expanded', 'true')
+    await page.screenshot({ path: testInfo.outputPath(`task-card-expanded-${width}.png`) })
+    await card.locator('.thread-tool-toggle').click()
+    const geometry = await card.evaluate((element) => {
+      const surface = element.querySelector('.thread-tool-surface')!.getBoundingClientRect()
+      const header = element.querySelector('.thread-tool-header')!.getBoundingClientRect()
+      const summary = element.querySelector('.thread-tool-name')!.getBoundingClientRect()
+      const toggle = element.querySelector('.thread-tool-toggle')!.getBoundingClientRect()
+      return {
+        top: header.top - surface.top, bottom: surface.bottom - header.bottom,
+        center: Math.abs(summary.y + summary.height / 2 - toggle.y - toggle.height / 2),
+        overflow: element.scrollWidth - element.clientWidth,
+      }
+    })
+    expect(Math.abs(geometry.top - geometry.bottom)).toBeLessThanOrEqual(1)
+    expect(geometry.center).toBeLessThanOrEqual(1)
+    expect(geometry.overflow).toBeLessThanOrEqual(1)
+    await testInfo.attach('geometry', { body: JSON.stringify({ width, geometry, typography }, null, 2), contentType: 'application/json' })
+    await page.screenshot({ path: testInfo.outputPath(`task-card-${width}.png`) })
+  })
+}
 
 test('follows streaming growth, pauses on user scroll-up, and resumes at the bottom', async ({ page }) => {
   await harness(page, 'streaming', 20)
@@ -497,7 +545,8 @@ test.describe('narrow pane header', () => {
       range.setStart(detail.firstChild!, 0)
       range.setEnd(detail.firstChild!, 1)
       const first = range.getBoundingClientRect()
-      const nameBox = name.getBoundingClientRect()
+      range.selectNodeContents(name)
+      const nameBox = range.getBoundingClientRect()
       const tail = element.querySelector('.thread-tool-tail')!.getBoundingClientRect()
       const summary = element.querySelector('.thread-tool-summary')!.getBoundingClientRect()
       return { firstY: first.y, nameY: nameBox.y, firstX: first.x, nameEnd: nameBox.right,
@@ -508,18 +557,20 @@ test.describe('narrow pane header', () => {
     expect(metrics.firstX).toBeGreaterThan(metrics.nameEnd)
     expect(metrics.tailX).toBeGreaterThanOrEqual(metrics.summaryEnd)
     expect(metrics.scroll).toBeLessThanOrEqual(metrics.width + 1)
-    await expect(card.locator('.thread-tool-tail svg')).toHaveCount(2)
+    await expect(card.locator('.thread-tool-tail svg')).toHaveCount(1)
     await expect(card.locator('.thread-tool-toggle')).toBeVisible()
     await expect(card.locator('.thread-tool-summary-detail')).toContainText('end.txt')
   })
 })
 
-test('all durable states retain distinct labels with exactly one actual RUNNING spinner', async ({ page }) => {
+test('all durable states retain accessible labels without visible status icons or text', async ({ page }) => {
   await page.evaluate(() => window.toolCardHarness.durableStates())
   const states = ['queued', 'approval', 'input', 'dispatching', 'running', 'succeeded', 'failed', 'cancelled', 'unknown']
   for (const state of states) {
     await expect(page.locator(`[data-invocation-state="${state}"]`)).toHaveCount(1)
+    await expect(page.locator(`[data-invocation-state="${state}"]`)).toHaveAttribute('aria-label', /bash: .+/)
   }
-  await expect(page.locator('.thread-tool-tail .animate-spin')).toHaveCount(1)
+  await expect(page.locator('.thread-tool-tail > svg, .thread-tool-state-label')).toHaveCount(0)
+  await expect(page.locator('[data-invocation-state="running"]')).toHaveAttribute('aria-busy', 'true')
 })
 

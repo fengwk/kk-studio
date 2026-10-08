@@ -261,18 +261,25 @@ npm --prefix frontend run test:pane
 (
   cd frontend
   npx playwright test --config playwright.tool-card.config.ts
+  npx playwright test --config playwright.subagent-tree.config.ts
   npx playwright test --config playwright.compaction.config.ts
   npx vite build --config vite.composer-editor.config.ts
   npx playwright test --config playwright.composer-editor.config.ts
 )
 ```
 
+Thread/subagent 展示收口可定向运行 `playwright.pane.config.ts` 的 `chat-branch.browser.ts`、
+`playwright.tool-card.config.ts`、`playwright.subagent-tree.config.ts`，以及 layout 配置下的
+`subagent-receipt.pw.ts` 与 `agent-tree.pw.ts`。这些离线回归覆盖根命令入口、只读直接父导航、
+完整当前执行根范围、选择键盘与零写请求、task 可读链接、工具 header/padding、回执链接与箭头顺序，
+并在宽屏及 320/360px 窄屏以实际几何验证统计行、按钮和图标中心。
+
 各入口只匹配对应 harness，使用独立构建、报告与 loopback 端口，不访问 Backend、
 共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读、根 Stop，以及新建分支的命名与
-1–9 目标路由、隐藏 pane 显露、完整祖先前缀与 409 改名恢复。Debug 回归从 split-3/grid-4 非首
-pane 的只读孙层进入工作区独占视图，验证单顶栏退出、隐藏层 inert、嵌套 Esc 消费，以及原布局、
-草稿、上传、滚动和焦点恢复；期间以合法 HTTP/WS 数据验证后台回读与零写入。
-`/subagent` 与只读顶栏入口验证完整执行树和直接父导航；迟到目标不能抢焦点。
+1–9 目标路由、隐藏 pane 显露、完整祖先前缀与 409 改名恢复。Debug 回归从根或本地草稿的命令
+进入独占视图，验证单顶栏退出、控制区挂起，以及草稿、上传和焦点恢复。
+`/subagent` 验证当前执行根的完整历史卡片；split-3/grid-4 非首 pane 的只读孙层验证直接父导航、
+隐藏根 inert、草稿和滚动保留，期间以合法 HTTP/WS 数据验证后台回读与零写入；迟到目标不能抢焦点。
 tool-card 验证流式日志和阅读锚点；
 compaction 验证完整安全正文与外层阅读保护；composer-editor 验证真实 contenteditable、
 IME、Pill 与隐藏根失活。

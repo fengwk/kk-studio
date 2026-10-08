@@ -1485,7 +1485,7 @@ export const aiCatalog = {
   },
   'ai.runtime.childThread.back': {
     'en-US': 'Back to parent agent',
-    'zh-CN': '返回父 agent',
+    'zh-CN': '回到父 agent',
   },
   'ai.runtime.agentTree.panel': {
     'en-US': 'Active subagents',
@@ -2236,8 +2236,8 @@ export const aiCatalog = {
     'zh-CN': '查看 subagent 执行',
   },
   'ai.runtime.command.subagent': {
-    'en-US': 'View the full subagent execution tree',
-    'zh-CN': '查看完整 subagent 执行树',
+    'en-US': 'View all subagent executions',
+    'zh-CN': '查看全部 subagent 执行',
   },
   'ai.runtime.debug.inspectorClose': {
     'en-US': 'Close inspector',

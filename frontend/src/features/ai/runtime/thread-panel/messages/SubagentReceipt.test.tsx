@@ -160,6 +160,8 @@ describe('SubagentReceipt collapsed summary', () => {
     // 一行摘要：agent 名 + 真实终态标签 + 任务短预览，且不叠加通用系统标题。
     expect(screen.getByText('coder')).toBeInTheDocument()
     expect(card.querySelector('.thread-subagent-receipt-state.is-completed')).not.toBeNull()
+    expect(screen.getByRole('img', { name: '已返回' })).toHaveAttribute('title', '已返回')
+    expect(container.textContent).not.toContain('已返回')
     expect(container.querySelector('.thread-system-message-header')).toBeNull()
     expect(container.textContent).not.toContain('subagent 结果')
 
@@ -179,6 +181,8 @@ describe('SubagentReceipt collapsed summary', () => {
 
     const link = screen.getByRole('link')
     expect(link).toHaveAttribute('href', '/threads/child-thread-1')
+    expect(link.nextElementSibling).toBe(toggle)
+    expect(toggle.parentElement?.lastElementChild).toBe(toggle)
   })
 
   it('falls back to the generic subagent label when the envelope has no agent name', () => {

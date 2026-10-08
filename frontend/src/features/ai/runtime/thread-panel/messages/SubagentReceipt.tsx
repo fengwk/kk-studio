@@ -5,7 +5,6 @@ import {
   CircleCheck,
   CircleSlash,
   CircleX,
-  ReceiptText,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -37,7 +36,7 @@ const STATE_ICONS: Record<SubagentReceiptState, LucideIcon> = {
 /**
  * SUBAGENT_RESULT 专属轻量信息卡：浅青蓝 info 染色 + 细边框 + 小回执图标。
  *
- * <p>默认折叠，一行摘要（agent、真实终态、任务短预览）兼任展开入口；来源跳转是独立的
+ * <p>默认折叠，摘要展示 agent、真实终态图标、任务短预览；最后的箭头负责展开，来源跳转是独立的
  * ThreadLink，与展开动作语义分开且各自键盘可达。展开后按安全 Markdown 展示完整
  * task/result/error/partial_result；partial_result 只是内容分区，不是第四种终态。
  * 非法信封明确显示解析失败，不伪装成回执正文。
@@ -79,32 +78,18 @@ export function SubagentReceipt({
       data-subagent-state={receipt.state}
     >
       <div className="thread-subagent-receipt-summary">
-        <button
-          type="button"
-          className="thread-subagent-receipt-toggle"
-          aria-expanded={expanded}
-          onClick={(event) => {
-            announceTranscriptReading(event.currentTarget, 'subagent-receipt-toggle')
-            setExpanded((current) => !current)
-          }}
-        >
-          <span className="thread-subagent-receipt-glyph" aria-hidden="true">
-            <ReceiptText />
-          </span>
+        <div className="thread-subagent-receipt-identity">
           <span className="thread-subagent-receipt-agent">
             {receipt.agent ?? t('ai.runtime.task.subagent')}
           </span>
-          <span className={`thread-subagent-receipt-state is-${receipt.state}`}>
+          <span className={`thread-subagent-receipt-state is-${receipt.state}`}
+            role="img" aria-label={t(STATE_LABEL_KEYS[receipt.state])} title={t(STATE_LABEL_KEYS[receipt.state])}>
             <StateIcon aria-hidden="true" />
-            {t(STATE_LABEL_KEYS[receipt.state])}
           </span>
           {preview != null && (
             <span className="thread-subagent-receipt-preview">{preview}</span>
           )}
-          <span className="thread-subagent-receipt-chevron" aria-hidden="true">
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-          </span>
-        </button>
+        </div>
         {sourceThreadId != null && (
           <ThreadLink
             className="thread-subagent-receipt-source"
@@ -115,6 +100,20 @@ export function SubagentReceipt({
             {t('ai.runtime.notification.entry.viewSubagentExecution')}
           </ThreadLink>
         )}
+        <button
+          type="button"
+          className="thread-subagent-receipt-toggle"
+          aria-expanded={expanded}
+          aria-label={[receipt.agent ?? t('ai.runtime.task.subagent'), t(STATE_LABEL_KEYS[receipt.state]), preview].filter(Boolean).join(' · ')}
+          onClick={(event) => {
+            announceTranscriptReading(event.currentTarget, 'subagent-receipt-toggle')
+            setExpanded((current) => !current)
+          }}
+        >
+          <span className="thread-subagent-receipt-chevron" aria-hidden="true">
+            {expanded ? <ChevronDown /> : <ChevronRight />}
+          </span>
+        </button>
       </div>
       {expanded && (
         <div className="thread-subagent-receipt-detail">

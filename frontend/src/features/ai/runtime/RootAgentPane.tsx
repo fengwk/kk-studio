@@ -143,7 +143,6 @@ export function RootAgentPane({
     selected: presentationSelected,
     active: !covered,
     onReport: onPresentation,
-    onSubagent: () => pane.openInteraction('subagent'),
     // 已打开的交互面板仍接管输入；Debug 退出恢复读入口，不向隐藏 Composer 排队焦点意图。
     onRestoreFocus: pane.interaction == null ? pane.restoreComposerFocus : undefined,
   })

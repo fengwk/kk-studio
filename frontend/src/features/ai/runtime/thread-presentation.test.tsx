@@ -37,7 +37,7 @@ function options() {
   return {
     views: { viewKey: 'thread:child', mode: 'conversation' as 'conversation' | 'debug', switchMode: vi.fn() },
     projection: { thread: thread as HarnessThreadDTO | null, models: [model] },
-    threadId: 'child', selected: true, active: true, onSubagent: vi.fn(), onReport: vi.fn(),
+    threadId: 'child', selected: true, active: true, onReport: vi.fn(),
     onParent: vi.fn(),
   }
 }
@@ -72,8 +72,8 @@ describe('visible thread presentation', () => {
     expect(initial.onReport).toHaveBeenCalledTimes(1)
     rerender({ ...initial, selected: false, views: { ...initial.views, mode: 'debug' } })
     expect(initial.onReport).toHaveBeenCalledTimes(1)
-    act(() => report.act(report.viewKey, 'subagent'))
-    expect(initial.onSubagent).not.toHaveBeenCalled()
+    act(() => report.act(report.viewKey, 'parent'))
+    expect(initial.onParent).not.toHaveBeenCalled()
   })
 
   it('scopes stable actions to the latest committed key, active layer and actual parent', () => {
@@ -84,12 +84,10 @@ describe('visible thread presentation', () => {
     act(() => {
       action('stale', 'debug')
       action('thread:child', 'debug')
-      action('thread:child', 'subagent')
       action('thread:child', 'parent')
       action('thread:child', 'close-debug')
     })
     expect(initial.views.switchMode.mock.calls).toEqual([['debug'], ['conversation']])
-    expect(initial.onSubagent).toHaveBeenCalledOnce()
     expect(initial.onParent).toHaveBeenCalledWith('parent')
     expect(restore).not.toHaveBeenCalled()
     act(() => action('thread:child', 'restore-focus'))
@@ -99,8 +97,8 @@ describe('visible thread presentation', () => {
     act(() => action('thread:child', 'debug'))
     expect(initial.views.switchMode).toHaveBeenCalledTimes(2)
     rerender({ ...next, active: true, views: { ...initial.views, viewKey: 'thread:new' } })
-    act(() => action('thread:child', 'subagent'))
-    expect(initial.onSubagent).toHaveBeenCalledOnce()
+    act(() => action('thread:child', 'parent'))
+    expect(initial.onParent).toHaveBeenCalledOnce()
     expect(result.current.act).toBe(action)
   })
 
@@ -111,11 +109,9 @@ describe('visible thread presentation', () => {
     expect(result.current).toMatchObject({ threadId: null, name: null, identity: null, parentThreadId: null })
     act(() => {
       result.current.act('thread:child', 'debug')
-      result.current.act('thread:child', 'subagent')
       result.current.act('thread:child', 'parent')
     })
     expect(initial.views.switchMode).not.toHaveBeenCalled()
-    expect(initial.onSubagent).not.toHaveBeenCalled()
     expect(initial.onParent).not.toHaveBeenCalled()
     rerender({ ...initial, threadId: '', projection: { thread: null, models: [] } })
     act(() => result.current.act('thread:child', 'debug'))
@@ -139,7 +135,7 @@ describe('visible thread presentation', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
     expect(result.current.parentHref).toBe('/threads/parent')
     render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
-    expect(screen.getByRole('link', { name: '返回父 agent' })).toHaveAttribute('href', '/threads/parent')
+    expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', '/threads/parent')
     expect(screen.getByText('researcher · provider/model · high')).toHaveAttribute('title', 'researcher · provider/model · high')
     trigger.remove()
   })
@@ -178,27 +174,25 @@ describe('visible thread presentation', () => {
     expect(result.current.identity).toBe('researcher · provider/model')
   })
 
-  it('offers only scoped read actions and disables or hides them before identity and during Debug', () => {
+  it('offers only direct-parent navigation, never topbar Debug or subagent actions', () => {
     setLocale('zh-CN')
     const initial = options()
     const { result } = renderHook(useThreadPresentation, { initialProps: initial })
     const host = render(<ThreadPresentationActions view={null} />)
     expect(screen.queryByRole('button')).toBeNull()
     host.rerender(<ThreadPresentationActions view={result.current} />)
-    fireEvent.click(screen.getByRole('button', { name: '返回父 agent' }))
-    fireEvent.click(screen.getByRole('button', { name: '查看 subagent 执行' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Debug', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: '回到父 agent' }))
     expect(initial.onParent).toHaveBeenCalledWith('parent')
-    expect(initial.onSubagent).toHaveBeenCalledOnce()
-    expect(initial.views.switchMode).toHaveBeenCalledWith('debug')
+    expect(initial.views.switchMode).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
     host.rerender(<ThreadPresentationActions view={{ ...result.current, mode: 'debug' }} />)
     expect(screen.queryByRole('button', { name: 'Debug', exact: true })).toBeNull()
-    expect(document.querySelector('.workspace-read-actions')).toHaveAttribute('inert')
+    expect(document.querySelector('.workspace-read-actions')).toBeNull()
     host.rerender(<ThreadPresentationActions view={{
       ...result.current, viewKey: '', threadId: null, identity: null, parentThreadId: null,
     }} />)
-    expect(screen.getByRole('button', { name: 'Debug', exact: true })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '查看 subagent 执行' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Debug', exact: true })).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
     expect(document.querySelector('.workspace-view-identity')).toBeNull()
   })
 })

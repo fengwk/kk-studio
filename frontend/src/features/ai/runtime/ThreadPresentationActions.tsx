@@ -17,12 +17,6 @@ export function ThreadPresentationActions({ view }: { view: ThreadPresentation |
       {view.parentThreadId && view.identity
         ? <span className="workspace-view-identity" title={view.identity}>{view.identity}</span>
         : null}
-      <span className="workspace-read-actions" hidden={view.mode === 'debug'} inert={view.mode === 'debug'}>
-        <Button variant="ghost" size="compact" disabled={view.threadId == null}
-          onClick={() => view.act(view.viewKey, 'subagent')}>{t('ai.runtime.command.subagentLabel')}</Button>
-        <Button variant="ghost" size="compact" disabled={!view.viewKey}
-          onClick={(event) => view.act(view.viewKey, 'debug', event.currentTarget)}>Debug</Button>
-      </span>
     </>
   )
 }

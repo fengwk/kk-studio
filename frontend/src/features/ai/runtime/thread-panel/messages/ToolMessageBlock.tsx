@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CircleHelp, Clock, LoaderCircle, X } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useState } from 'react'
 import { AskUserRecord } from '@/features/ai/runtime/thread-panel/messages/AskUserRecord'
@@ -87,10 +87,6 @@ export function ToolMessageBlock({
     : view.executionState === 'succeeded' && message.toolName === 'task'
       ? t('ai.runtime.tool.accepted')
       : t(`ai.runtime.tool.${view.executionState}`)
-  const StatusIcon = view.executionState === 'running' ? LoaderCircle
-    : view.executionState === 'succeeded' ? Check
-      : view.executionState === 'failed' || view.executionState === 'cancelled' ? X
-        : view.executionState === 'unknown' ? CircleHelp : Clock
 
   return (
     <div className={`thread-turn thread-turn-tool tool-state-${view.visualState}`}>
@@ -99,6 +95,8 @@ export function ToolMessageBlock({
         data-tool-state={view.visualState}
         data-invocation-state={view.executionState}
         aria-busy={view.executionState === 'running'}
+        aria-label={`${view.summary.name}: ${stateLabel}`}
+        title={stateLabel}
       >
         <div className="thread-tool-surface">
           <div className={`thread-tool-header${view.hasBody ? ' has-toggle' : ''}`}>
@@ -116,15 +114,8 @@ export function ToolMessageBlock({
                   </span>
                 </>
               ) : null}
-              {view.executionState !== 'environment'
-                ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
             </span>
             <span className="thread-tool-tail">
-              <StatusIcon
-                className={view.executionState === 'running' ? 'animate-spin' : undefined}
-                aria-label={stateLabel}
-                size={14}
-              />
               {view.hasBody ? (
                 <button
                   type="button"
