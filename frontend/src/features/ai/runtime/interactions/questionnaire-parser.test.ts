@@ -4,6 +4,14 @@ import {
   parseCompletedResult,
   parseQuestionnaire,
 } from './questionnaire-parser'
+import type { QuestionDraft } from './questionnaire-types'
+import {
+  LONG_ANSWER,
+  LONG_OPTION_COUNT,
+  LONG_QUESTION_COUNT,
+  LONG_QUESTIONNAIRE,
+  LONG_QUESTIONNAIRE_JSON,
+} from '@/test-support/resources/long-questionnaire'
 
 describe('questionnaire-parser', () => {
   const sampleJson = JSON.stringify({
@@ -85,5 +93,26 @@ describe('questionnaire-parser', () => {
       answers: [['1080P'], ['成片']],
     })
     expect(parseCompletedResult(null)).toBeNull()
+  })
+
+  it('accepts questionnaires and answers beyond the old business ceilings without truncation', () => {
+    const parsed = parseQuestionnaire(LONG_QUESTIONNAIRE_JSON)
+    expect(parsed?.questions).toHaveLength(LONG_QUESTION_COUNT)
+    expect(parsed?.questions[0].options).toHaveLength(LONG_OPTION_COUNT)
+    expect(parsed?.questions[0].question).toBe(LONG_QUESTIONNAIRE.questions[0].question)
+    expect(parsed?.questions[0].options?.[0].label).toBe(LONG_QUESTIONNAIRE.questions[0].options[0].label)
+    expect(parsed?.questions[0].options?.[0].description).toBe(
+      LONG_QUESTIONNAIRE.questions[0].options[0].description,
+    )
+
+    const drafts: Record<number, QuestionDraft> = {}
+    for (let i = 0; i < LONG_QUESTION_COUNT; i++) {
+      drafts[i] = { selectedLabels: [], customText: LONG_ANSWER }
+    }
+
+    const answers = normalizeAnswers(parsed!, drafts)
+    expect(answers).toHaveLength(LONG_QUESTION_COUNT)
+    expect(answers?.[0]).toEqual([LONG_ANSWER])
+    expect(answers?.[LONG_QUESTION_COUNT - 1]).toEqual([LONG_ANSWER])
   })
 })
