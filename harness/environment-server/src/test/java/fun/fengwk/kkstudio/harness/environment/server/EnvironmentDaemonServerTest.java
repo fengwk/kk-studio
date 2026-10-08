@@ -1333,7 +1333,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"daemonInstanceId\":\""
+                + "\",\"daemonVersion\":\"1.0.9\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
                 + "\"}"));
     assertTrue(
@@ -1343,7 +1343,7 @@ class EnvironmentDaemonServerTest {
                 + DaemonProtocol.VERSION
                 + ",\"registrationToken\":\""
                 + TOKEN
-                + "\",\"capabilityCatalogVersion\":\"999\",\"daemonInstanceId\":\""
+                + "\",\"capabilityCatalogVersion\":\"999\",\"daemonVersion\":\"1.0.9\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
                 + "\"}"));
     assertTrue(
@@ -1355,7 +1355,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"daemonInstanceId\":\""
+                + "\",\"daemonVersion\":\"1.0.9\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
                 + "\",\"extra\":true}"));
     assertTrue(
@@ -1363,7 +1363,7 @@ class EnvironmentDaemonServerTest {
             "channel-missing-token",
             "{\"protocolVersion\":"
                 + DaemonProtocol.VERSION
-                + ",\"capabilityCatalogVersion\":\""
+                + ",\"daemonVersion\":\"1.0.9\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
                 + "\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
@@ -1378,7 +1378,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\"}"));
+                + "\",\"daemonVersion\":\"1.0.9\"}"));
     assertTrue(
         helloRejected(
             "channel-non-canonical-instance",

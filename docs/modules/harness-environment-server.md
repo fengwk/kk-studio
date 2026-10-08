@@ -14,12 +14,12 @@
 
 ```text
 open(channel)
-Daemon -> HELLO(registrationToken, daemonInstanceId)
+Daemon -> HELLO(registrationToken, capabilityCatalogVersion, daemonVersion, daemonInstanceId)
   核心 -> registrationDirectory.findByRegistrationToken   # 解析 environmentId
   核心 -> leaseStore.hasActiveLeaseToken                 # 本节点同节点活跃连接防冲突
   核心 -> leaseStore.tryAcquire                          # 原子抢占/接管
   Gateway -> WELCOME(environmentId, name, maxResourceBytes)
-Daemon -> READY(version, environment)
+Daemon -> READY(version, daemonVersion, environment)
   -> leaseStore.markReady                                # 围栏失效即协议错误
   -> 重放未在当前连接代际发出的 INVOKE
 Daemon -> HEARTBEAT*

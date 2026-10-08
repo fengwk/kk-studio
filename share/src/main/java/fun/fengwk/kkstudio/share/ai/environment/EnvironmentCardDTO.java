@@ -49,6 +49,12 @@ public class EnvironmentCardDTO {
   /** 最近一次被接受的 READY 宿主备注；从未 READY 时为 null。 */
   private String note;
 
+  /**
+   * 最近一次被接受的 READY 上报的实际 Daemon 构建版本（JAR manifest {@code Implementation-Version}，未打包时为 {@code
+   * development}）；从未 READY 时为 null。它与下方 CAS {@code version} 是两个不同事实：前者是运行中的二进制版本，后者是配置行的乐观锁版本。
+   */
+  private String daemonVersion;
+
   /** 支持的原子能力列表。 */
   private List<LiveEnvironmentCapabilityDTO> capabilities;
 

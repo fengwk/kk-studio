@@ -121,6 +121,9 @@ public final class DaemonRuntime implements AutoCloseable {
   /** 本 Daemon 进程的生命周期身份：构造期随机生成一次，所有重连复用，用于区分同实例恢复与换进程接管。 */
   private final String daemonInstanceId = UUID.randomUUID().toString();
 
+  /** 本 Daemon 的构建版本：HELLO/READY 上报的事实，未打包时为 {@code development}。 */
+  private final String daemonVersion = DaemonBuildInfo.version();
+
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
   private final AtomicBoolean started = new AtomicBoolean();
@@ -489,13 +492,14 @@ public final class DaemonRuntime implements AutoCloseable {
     payload.put("protocolVersion", DaemonProtocol.VERSION);
     payload.put("registrationToken", config.registrationToken());
     payload.put("capabilityCatalogVersion", EnvironmentCapabilityCatalog.version());
+    payload.put("daemonVersion", daemonVersion);
     payload.put("daemonInstanceId", daemonInstanceId);
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
 
   private boolean sendReady(ActiveConnection connection) {
     DaemonCapabilities capabilities =
-        new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo);
+        new DaemonCapabilities(DaemonCapabilities.VERSION, daemonVersion, environmentInfo);
     return sendOn(
         connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
   }

@@ -523,7 +523,11 @@ public final class EnvironmentDaemonServer
     rejectUnexpectedFields(
         payload,
         Set.of(
-            "protocolVersion", "registrationToken", "capabilityCatalogVersion", "daemonInstanceId"),
+            "protocolVersion",
+            "registrationToken",
+            "capabilityCatalogVersion",
+            "daemonVersion",
+            "daemonInstanceId"),
         "HELLO payload");
     if (envelope.protocolVersion() != DaemonProtocol.VERSION
         || requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION) {
@@ -533,6 +537,12 @@ public final class EnvironmentDaemonServer
         .equals(requiredText(payload, "capabilityCatalogVersion", "HELLO payload"))) {
       throw new DaemonProtocolException(
           "HELLO capabilityCatalogVersion does not match server catalog");
+    }
+    try {
+      DaemonCapabilities.validateDaemonVersion(
+          requiredText(payload, "daemonVersion", "HELLO payload"));
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("HELLO daemonVersion is invalid: " + error.getMessage());
     }
     String daemonInstanceId =
         parseUuid(requiredText(payload, "daemonInstanceId", "HELLO payload"), "daemonInstanceId")
