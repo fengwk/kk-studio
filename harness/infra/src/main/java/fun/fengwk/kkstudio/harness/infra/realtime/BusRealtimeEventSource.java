@@ -3,11 +3,8 @@ package fun.fengwk.kkstudio.harness.infra.realtime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeNotificationCodec.Envelope;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.share.notification.NotificationBus;
-import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,7 +15,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * Realtime topic 的本地订阅与分发器，绑定唯一 {@link NotificationBus}。
+ * Realtime topic 的本地订阅与分发器：REALTIME 总线订阅由通知组合根持有，本类只维护 per-Thread 本地订阅与完成围栏。
  *
  * <p>本类不创建线程或连接；总线在自身独立执行阶段交付已解码的 {@link Envelope}，连接建立或重建、以及总线请求权威对账时触发 {@link #onResync()}。合法
  * EVENT 仅分发到对应 Thread，RESYNC 只提示客户端回读权威快照；畸形 payload 由总线的 topic codec 拒绝并转为 resync。 全局生命周期锁只保护
@@ -28,7 +25,6 @@ public final class BusRealtimeEventSource implements RealtimeEventSource {
 
   private static final Logger log = LoggerFactory.getLogger(BusRealtimeEventSource.class);
 
-  private final NotificationSubscription subscription;
   private final Map<UUID, List<Subscriber>> subscribersByThread = new HashMap<>();
   private final Object lifecycleFence = new Object();
 
@@ -43,12 +39,6 @@ public final class BusRealtimeEventSource implements RealtimeEventSource {
   private boolean closed;
   private int activeSourceCallbacks;
   private boolean subscriberFencesClosed;
-
-  public BusRealtimeEventSource(NotificationBus bus) {
-    Objects.requireNonNull(bus, "bus");
-    this.subscription =
-        bus.subscribe(HarnessNotifications.REALTIME, this::onEnvelope, this::onResync);
-  }
 
   @Override
   public AutoCloseable subscribe(
@@ -101,8 +91,7 @@ public final class BusRealtimeEventSource implements RealtimeEventSource {
 
   @Override
   public void close() {
-    // 先撤销总线订阅，保证不再有新回调进入；再按既有围栏等待在途回调结束。
-    subscription.close();
+    // source 不持有总线订阅；这里只关闭本地订阅并按既有围栏等待在途回调结束。
     List<Subscriber> subscribers = List.of();
     boolean firstCloser = false;
     synchronized (lifecycleFence) {
@@ -235,7 +224,10 @@ public final class BusRealtimeEventSource implements RealtimeEventSource {
       try {
         onEvent.accept(event);
       } catch (RuntimeException error) {
-        log.warn("realtime subscriber callback failed for threadId={}; skipping", threadId, error);
+        log.warn(
+            "realtime subscriber callback failed for threadId={}; errorType={}; skipping",
+            threadId,
+            error.getClass().getSimpleName());
       } finally {
         finishCallback();
       }
@@ -248,7 +240,10 @@ public final class BusRealtimeEventSource implements RealtimeEventSource {
       try {
         onResync.run();
       } catch (RuntimeException error) {
-        log.warn("realtime resync callback failed for threadId={}; skipping", threadId, error);
+        log.warn(
+            "realtime resync callback failed for threadId={}; errorType={}; skipping",
+            threadId,
+            error.getClass().getSimpleName());
       } finally {
         finishCallback();
       }

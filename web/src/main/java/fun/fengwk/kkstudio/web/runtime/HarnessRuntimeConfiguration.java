@@ -159,10 +159,10 @@ public class HarnessRuntimeConfiguration {
     return new BusRealtimeEventSink(notificationBus, notificationLimits.maxMessageBytes());
   }
 
-  /** Realtime live overlay source：订阅唯一通知总线的 realtime topic，不自行持有连接或监听通道。 */
+  /** Realtime live overlay source：只维护本进程 per-Thread 订阅与完成围栏；唯一 REALTIME 总线订阅由通知组合根绑定。 */
   @Bean
-  public BusRealtimeEventSource realtimeEventSource(NotificationBus notificationBus) {
-    return new BusRealtimeEventSource(notificationBus);
+  public BusRealtimeEventSource realtimeEventSource() {
+    return new BusRealtimeEventSource();
   }
 
   /** Model / Tool 调用的全局重试策略现读通道：每次 retry 判定点从 SystemSettings.AiRuntime 映射。 */

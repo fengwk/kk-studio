@@ -10,7 +10,11 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.infra.realtime.BusRealtimeEventSource;
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeNotificationCodec.Envelope;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
@@ -19,16 +23,19 @@ import fun.fengwk.kkstudio.share.notification.NotificationBus;
 import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 import fun.fengwk.kkstudio.share.notification.NotificationTopic;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeConfiguration;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
  * 订阅绑定的资源生命周期：绑定失败与关闭都必须尝试释放每一个已建立的订阅，绝不因首个失败跳过其余资源。
  *
- * <p>领域协作者用 mock 占位：本用例只验证绑定/关闭的资源路径，订阅回调不会被调用。
+ * <p>领域协作者用 mock 占位：本用例验证绑定/关闭的资源路径与组合根的真实 REALTIME 绑定，只有真实 Source 用例会触发回调。
  */
 class NotificationSubscriptionsLifecycleTest {
 
@@ -66,7 +73,56 @@ class NotificationSubscriptionsLifecycleTest {
         bus.created.stream().allMatch(subscription -> subscription.closed), "首个关闭失败后仍必须尝试关闭其余订阅");
   }
 
+  /**
+   * 组合根装配真实 Source 时 REALTIME 只绑定一次、一条 envelope 只交付一次；binder 关闭后回调被撤销，source 关闭后拒绝新订阅。
+   *
+   * <p>真实 Source 复现生产接线：若 Source 仍自订阅 REALTIME 或 binder 重复绑定，注册数或回调数都会超过一次。
+   */
+  @Test
+  void realSourceBindsRealtimeExactlyOnceAndDeliversWholeEnvelopeOnce() {
+    BusRealtimeEventSource source = new HarnessRuntimeConfiguration().realtimeEventSource();
+    StubBus bus = new StubBus(0, false);
+    NotificationSubscriptions subscriptions = bind(bus, source);
+
+    assertEquals(12, bus.created.size(), "组合根必须注册全部静态订阅");
+    assertEquals(1, bus.countOf(HarnessNotifications.REALTIME), "REALTIME 只能有一条本地订阅");
+
+    UUID threadId = UUID.randomUUID();
+    AtomicInteger events = new AtomicInteger();
+    AtomicInteger resyncs = new AtomicInteger();
+    source.subscribe(threadId, ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
+
+    bus.deliver(HarnessNotifications.REALTIME, new Envelope.Event(modelDelta(threadId)));
+    assertEquals(1, events.get(), "一条 realtime envelope 只能触发一次用户回调");
+
+    bus.resync(HarnessNotifications.REALTIME);
+    assertEquals(1, resyncs.get(), "建连/重连 resync 只路由一次");
+
+    subscriptions.close();
+    bus.deliver(HarnessNotifications.REALTIME, new Envelope.Event(modelDelta(threadId)));
+    assertEquals(1, events.get(), "binder 关闭后必须撤销 REALTIME 回调");
+
+    source.close();
+    assertThrows(
+        IllegalStateException.class, () -> source.subscribe(threadId, ignored -> {}, () -> {}));
+  }
+
+  private static RealtimeEvent.ModelDelta modelDelta(UUID threadId) {
+    return new RealtimeEvent.ModelDelta(
+        threadId,
+        UUID.randomUUID(),
+        1,
+        1L,
+        new ProviderStreamEvent.TextDelta("chunk"),
+        Instant.parse("2026-08-05T00:00:00Z"));
+  }
+
   private static NotificationSubscriptions bind(NotificationBus bus) {
+    return bind(bus, mock(BusRealtimeEventSource.class));
+  }
+
+  private static NotificationSubscriptions bind(
+      NotificationBus bus, BusRealtimeEventSource realtimeEventSource) {
     return NotificationSubscriptions.bind(
         bus,
         mock(HarnessWorkDispatcher.class),
@@ -76,19 +132,22 @@ class NotificationSubscriptionsLifecycleTest {
         mock(CanvasVersionHub.class),
         mock(ProjectInvalidationHub.class),
         mock(SystemSettingsChangeHandler.class),
-        mock(BusRealtimeEventSource.class),
+        realtimeEventSource,
         mock(EnvironmentSkillSyncOrchestrator.class),
         mock(ExecutionTreeChangeHub.class),
         mock(InteractionChangeHub.class),
         mock(EnvironmentChangeHub.class));
   }
 
-  /** 最小 NotificationBus stub：让第 {@code failAt} 次订阅抛出异常，并记录每个建立/关闭的订阅。 */
+  /** 最小 NotificationBus stub：让第 {@code failAt} 次订阅抛出异常，并记录每个建立/关闭的订阅及其 topic/handler。 */
   private static final class StubBus implements NotificationBus {
 
     private final int failAt;
     private final boolean failFirstClose;
     final List<StubSubscription> created = new ArrayList<>();
+    final List<NotificationTopic<?>> topics = new ArrayList<>();
+    final List<Consumer<?>> consumers = new ArrayList<>();
+    final List<Runnable> resyncs = new ArrayList<>();
     final IllegalStateException failure = new IllegalStateException("bind rejected");
     final RuntimeException closeFailure = new RuntimeException("close 1 failed");
     private int subscribes;
@@ -96,6 +155,34 @@ class NotificationSubscriptionsLifecycleTest {
     StubBus(int failAt, boolean failFirstClose) {
       this.failAt = failAt;
       this.failFirstClose = failFirstClose;
+    }
+
+    /** 把总线在独立线程交付的 payload 定向投给该 topic 的未关闭 handler，模拟真实本地派发。 */
+    @SuppressWarnings("unchecked")
+    <T> void deliver(NotificationTopic<T> topic, T payload) {
+      for (int i = 0; i < topics.size(); i++) {
+        if (created.get(i).closed) {
+          continue;
+        }
+        if (topics.get(i).name().equals(topic.name())) {
+          ((Consumer<T>) consumers.get(i)).accept(payload);
+        }
+      }
+    }
+
+    void resync(NotificationTopic<?> topic) {
+      for (int i = 0; i < topics.size(); i++) {
+        if (created.get(i).closed) {
+          continue;
+        }
+        if (topics.get(i).name().equals(topic.name())) {
+          resyncs.get(i).run();
+        }
+      }
+    }
+
+    long countOf(NotificationTopic<?> topic) {
+      return topics.stream().filter(candidate -> candidate.name().equals(topic.name())).count();
     }
 
     @Override
@@ -127,6 +214,9 @@ class NotificationSubscriptionsLifecycleTest {
         subscription.closeFailure = closeFailure;
       }
       created.add(subscription);
+      topics.add(topic);
+      consumers.add(consumer);
+      resyncs.add(resync);
       return subscription;
     }
 

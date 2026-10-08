@@ -10,8 +10,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeNotificationCodec.Envelope;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlHarnessStoreFixture;
-import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
 
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
@@ -31,8 +29,7 @@ class BusRealtimeEventSourceConcurrencyTest {
   /** 阻塞中的用户回调不能持有全局 lifecycle lock：其他 Thread 仍可 subscribe/close，另一条通知也能独立完成。 */
   @Test
   void blockingCallbackDoesNotHoldGlobalLifecycleLock() throws Exception {
-    DefaultNotificationBus bus = PostgresqlHarnessStoreFixture.newBus();
-    BusRealtimeEventSource source = new BusRealtimeEventSource(bus);
+    BusRealtimeEventSource source = new BusRealtimeEventSource();
     CountDownLatch callbackEntered = new CountDownLatch(1);
     CountDownLatch releaseCallback = new CountDownLatch(1);
     CountDownLatch otherDelivered = new CountDownLatch(1);
@@ -65,7 +62,6 @@ class BusRealtimeEventSourceConcurrencyTest {
     } finally {
       releaseCallback.countDown();
       source.close();
-      bus.close();
       executor.shutdownNow();
     }
   }
@@ -73,8 +69,7 @@ class BusRealtimeEventSourceConcurrencyTest {
   /** 订阅句柄 close 必须等待已开始的 callback；返回后旧快照与新 notification 都不能再次进入 callback。 */
   @Test
   void subscriptionCloseWaitsForStartedCallbackAndFencesLaterCallbacks() throws Exception {
-    DefaultNotificationBus bus = PostgresqlHarnessStoreFixture.newBus();
-    BusRealtimeEventSource source = new BusRealtimeEventSource(bus);
+    BusRealtimeEventSource source = new BusRealtimeEventSource();
     CountDownLatch callbackEntered = new CountDownLatch(1);
     CountDownLatch releaseCallback = new CountDownLatch(1);
     CountDownLatch closeStarted = new CountDownLatch(1);
@@ -111,7 +106,6 @@ class BusRealtimeEventSourceConcurrencyTest {
     } finally {
       releaseCallback.countDown();
       source.close();
-      bus.close();
       executor.shutdownNow();
     }
   }
@@ -119,8 +113,7 @@ class BusRealtimeEventSourceConcurrencyTest {
   /** Source close 同样等待全部已开始 callback；返回后 notification/resync 均无回调且拒绝新订阅。 */
   @Test
   void sourceCloseWaitsForStartedCallbackAndFencesLaterCallbacks() throws Exception {
-    DefaultNotificationBus bus = PostgresqlHarnessStoreFixture.newBus();
-    BusRealtimeEventSource source = new BusRealtimeEventSource(bus);
+    BusRealtimeEventSource source = new BusRealtimeEventSource();
     CountDownLatch callbackEntered = new CountDownLatch(1);
     CountDownLatch releaseCallback = new CountDownLatch(1);
     CountDownLatch closeStarted = new CountDownLatch(2);
@@ -169,7 +162,6 @@ class BusRealtimeEventSourceConcurrencyTest {
     } finally {
       releaseCallback.countDown();
       source.close();
-      bus.close();
       executor.shutdownNow();
     }
   }
@@ -177,8 +169,7 @@ class BusRealtimeEventSourceConcurrencyTest {
   /** onEvent 可以重入关闭自己的订阅，当前 callback 正常返回且后续 callback 被 fenced。 */
   @Test
   void callbackCanReenterSubscriptionClose() throws Exception {
-    DefaultNotificationBus bus = PostgresqlHarnessStoreFixture.newBus();
-    BusRealtimeEventSource source = new BusRealtimeEventSource(bus);
+    BusRealtimeEventSource source = new BusRealtimeEventSource();
     AtomicReference<AutoCloseable> subscription = new AtomicReference<>();
     AtomicInteger callbacks = new AtomicInteger();
     ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -200,7 +191,6 @@ class BusRealtimeEventSourceConcurrencyTest {
       assertEquals(1, callbacks.get());
     } finally {
       source.close();
-      bus.close();
       executor.shutdownNow();
     }
   }
@@ -208,8 +198,7 @@ class BusRealtimeEventSourceConcurrencyTest {
   /** onEvent 可以重入 source.close；close 不自锁，回调返回后 source 保持完整关闭边界。 */
   @Test
   void callbackCanReenterSourceClose() throws Exception {
-    DefaultNotificationBus bus = PostgresqlHarnessStoreFixture.newBus();
-    BusRealtimeEventSource source = new BusRealtimeEventSource(bus);
+    BusRealtimeEventSource source = new BusRealtimeEventSource();
     AtomicInteger callbacks = new AtomicInteger();
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
@@ -231,7 +220,6 @@ class BusRealtimeEventSourceConcurrencyTest {
           IllegalStateException.class, () -> source.subscribe(id(1L), ignored -> {}, () -> {}));
     } finally {
       source.close();
-      bus.close();
       executor.shutdownNow();
     }
   }
@@ -239,8 +227,7 @@ class BusRealtimeEventSourceConcurrencyTest {
   /** 两个并发 callback 同时重入 source.close 也不能形成互相等待的关闭环。 */
   @Test
   void concurrentCallbacksCanBothReenterSourceCloseWithoutDeadlock() throws Exception {
-    DefaultNotificationBus bus = PostgresqlHarnessStoreFixture.newBus();
-    BusRealtimeEventSource source = new BusRealtimeEventSource(bus);
+    BusRealtimeEventSource source = new BusRealtimeEventSource();
     CountDownLatch callbacksEntered = new CountDownLatch(2);
     CountDownLatch startClose = new CountDownLatch(1);
     AtomicInteger closesReturned = new AtomicInteger();
@@ -271,7 +258,6 @@ class BusRealtimeEventSourceConcurrencyTest {
     } finally {
       startClose.countDown();
       source.close();
-      bus.close();
       executor.shutdownNow();
     }
   }
