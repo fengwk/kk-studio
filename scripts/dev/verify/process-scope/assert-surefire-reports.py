@@ -9,9 +9,31 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
+CODING_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.coding."
+PROCESS_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.process."
+
+# 进程基座类已经整体迁到 daemon.process；其余被选中的类仍在 daemon.coding。
+PROCESS_PACKAGE_CLASSES = frozenset(
+    {
+        "ProcessScopeTest",
+        "ProcessScopeCrossPlatformTest",
+        "ProcessScopeStateTest",
+        "ProcessScopeHelperFailureTest",
+        "ProcessScopePtyIntegrationTest",
+        "PosixProcessGroupTest",
+        "WindowsCommandLineTest",
+        "WindowsJobScopeTest",
+    }
+)
+
+
+def package_of(class_name: str) -> str:
+    return PROCESS_PACKAGE if class_name in PROCESS_PACKAGE_CLASSES else CODING_PACKAGE
+
+
 # 核心验收：只用 JDK 夹具造真实进程层级，任何平台都没有跳过它们的理由。
 REQUIRED_CASES = {
-    "fun.fengwk.kkstudio.harness.daemon.coding.ProcessScopeCrossPlatformTest": {
+    "fun.fengwk.kkstudio.harness.daemon.process.ProcessScopeCrossPlatformTest": {
         "naturalExitConvergesLiveChildren",
         "terminateConvergesNestedProcesses",
         "unpermittedStartNeverRunsTheFixture",
@@ -68,7 +90,7 @@ def required_classes(os_label: str):
 
 
 def parse_report(reports_dir: Path, class_name: str):
-    report = reports_dir / ("TEST-fun.fengwk.kkstudio.harness.daemon.coding." + class_name + ".xml")
+    report = reports_dir / ("TEST-" + package_of(class_name) + class_name + ".xml")
     if not report.is_file():
         return None
     root = ElementTree.parse(report).getroot()
@@ -110,7 +132,7 @@ def main() -> int:
             continue
         counts, cases, skipped = parsed
         report(simple_name, counts, cases)
-        qualified = "fun.fengwk.kkstudio.harness.daemon.coding." + simple_name
+        qualified = package_of(simple_name) + simple_name
         strict = REQUIRED_CASES.get(qualified)
         platform_cases = WINDOWS_REQUIRED_CASES.get(qualified) if os_label.startswith("windows") else None
         if strict is None and not platform_cases:

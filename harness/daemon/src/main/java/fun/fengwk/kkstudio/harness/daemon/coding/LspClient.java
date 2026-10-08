@@ -46,6 +46,8 @@ import org.eclipse.lsp4j.launch.LSPLauncher;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageServer;
 
+import fun.fengwk.kkstudio.harness.daemon.process.ProcessScope;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;

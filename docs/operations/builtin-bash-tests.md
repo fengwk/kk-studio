@@ -59,8 +59,8 @@ Daemon 的重点类是 `BashCapabilityTest`、`ProcessScopeTest`、`ProcessScope
 
 ## 进程范围与清理
 
-[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java)
-与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java)
+[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScope.java)
+与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScopeHelper.java)
 使用 POSIX 进程组或 Windows 命名 Job Object。终态通知前必须确认整组收敛，首个进程退出并不充分。
 POSIX 先发 SIGTERM、等待宽限、再强杀；Windows 用 Job 的 `KILL_ON_JOB_CLOSE` 和活动成员计数确认收敛。
 

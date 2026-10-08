@@ -81,14 +81,14 @@ workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿�
 
 ### 进程执行范围
 
-[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java) 与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java) 先建立 OS 范围，再经父进程校验和 permit 放行用户命令。helper 冷启动也计入有效超时；放行前取消或失败不会执行用户命令。无法建立范围时明确失败，不退化为无范围直接执行。
+[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScope.java) 与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScopeHelper.java) 先建立 OS 范围，再经父进程校验和 permit 放行用户命令。helper 冷启动也计入有效超时；放行前取消或失败不会执行用户命令。无法建立范围时明确失败，不退化为无范围直接执行。
 
 - Linux/WSL/macOS：helper 用 JNA `setsid` 建立 session/进程组；普通后代从创建起归组。结束时先温和信号、宽限后强杀，再向内核确认没有活成员；僵尸不算活成员。
 - Windows：命名 Job Object 设置 kill-on-close，不开放 breakaway；首进程在创建时进入 Job，父进程另持句柄。只有 Job 的 ActiveProcesses 为 0 才确认范围结束，helper 退出或根进程退出都不能代替此检查。
 
 自然退出也收敛遗留后代，确认后才通知终态；无法确认收敛时报告失败。process.exec 的 stdin 立即 EOF，stdout/stderr 合并捕获；helper 诊断单独保存，不污染命令输出。Bash 用 `-lc` 执行；Windows 应明确配置所需 Bash，避免裸名解析到 WSL launcher。
 
-范围管理不是恶意命令隔离：POSIX 命令主动重新建立 session/进程组可离开边界，不承诺阻止逃逸。LSP 使用同一范围的双向 stdio 模式，stderr 独立，客户端关闭先发送 shutdown/exit，宽限后收敛后代。跨平台测试见 [`ProcessScopeCrossPlatformTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeCrossPlatformTest.java)，其它命令行为见[内置 Bash 测试映射](../operations/builtin-bash-tests.md)。
+范围管理不是恶意命令隔离：POSIX 命令主动重新建立 session/进程组可离开边界，不承诺阻止逃逸。LSP 使用同一范围的双向 stdio 模式，stderr 独立，客户端关闭先发送 shutdown/exit，宽限后收敛后代。跨平台测试见 [`ProcessScopeCrossPlatformTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScopeCrossPlatformTest.java)，其它命令行为见[内置 Bash 测试映射](../operations/builtin-bash-tests.md)。
 
 ### 文件与检索
 
@@ -121,6 +121,7 @@ COMPLETED(uploadId 与权威元数据)
 | --- | --- |
 | `daemon` | CLI、数据目录、能力注册、执行器所有权、握手与调用运行时 |
 | `daemon.coding` | 文件、命令、检索、文本输出与 LSP；只消费显式调用目录 |
+| `daemon.process` | 唯一 OS 执行范围基座：父进程侧 `ProcessScope`、helper 侧 `ProcessScopeHelper`、POSIX/Windows 原生原语；不注册工具 |
 | `daemon.journal` | 进程内原子去重与冻结终态，不持久化跨进程执行状态 |
 | `daemon.skill` | exact commit 的技能包拉取、校验、替换与启动恢复 |
 | `daemon.transport` | WebSocket 文本传输、压缩协商与帧边界 |

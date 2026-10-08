@@ -14,6 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.daemon.process.ProcessScope;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;

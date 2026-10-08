@@ -12,6 +12,26 @@ import unittest
 from pathlib import Path
 
 PACKAGE = "fun.fengwk.kkstudio.harness.daemon.coding"
+PROCESS_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.process"
+# 进程基座类已经整体迁到 daemon.process；其余被选中的类仍在 daemon.coding。
+PROCESS_CLASSES = frozenset(
+    {
+        "ProcessScopeTest",
+        "ProcessScopeCrossPlatformTest",
+        "ProcessScopeStateTest",
+        "ProcessScopeHelperFailureTest",
+        "ProcessScopePtyIntegrationTest",
+        "PosixProcessGroupTest",
+        "WindowsCommandLineTest",
+        "WindowsJobScopeTest",
+    }
+)
+
+
+def package_of(class_name):
+    return PROCESS_PACKAGE if class_name in PROCESS_CLASSES else PACKAGE
+
+
 REQUIRED_CASES = (
     "naturalExitConvergesLiveChildren",
     "terminateConvergesNestedProcesses",
@@ -26,6 +46,7 @@ SELECTED_CLASSES = (
     "ProcessScopeStateTest",
     "ProcessScopeHelperFailureTest",
     "PosixProcessGroupTest",
+    "ProcessScopePtyIntegrationTest",
     "BashCapabilityTest",
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",
@@ -78,11 +99,12 @@ def run_script(name, *arguments, cwd=None):
 def write_surefire_report(
     directory, class_name, cases, failures=0, errors=0, skipped=0, skipped_cases=()
 ):
+    package = package_of(class_name)
     body = "".join(
         '<testcase name="%s" classname="%s.%s">%s</testcase>'
         % (
             case,
-            PACKAGE,
+            package,
             class_name,
             "<skipped/>" if case in skipped_cases else "",
         )
@@ -90,9 +112,9 @@ def write_surefire_report(
     )
     report = (
         '<testsuite name="%s.%s" tests="%d" failures="%d" errors="%d" skipped="%d">%s</testsuite>'
-        % (PACKAGE, class_name, len(cases), failures, errors, skipped, body)
+        % (package, class_name, len(cases), failures, errors, skipped, body)
     )
-    (directory / f"TEST-{PACKAGE}.{class_name}.xml").write_text(report, encoding="utf-8")
+    (directory / f"TEST-{package}.{class_name}.xml").write_text(report, encoding="utf-8")
 
 
 def write_complete_reports(
@@ -257,7 +279,7 @@ class AssertSurefireReportsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             reports = Path(tmp)
             write_complete_reports(reports)
-            (reports / f"TEST-{PACKAGE}.WindowsJobScopeTest.xml").unlink()
+            (reports / f"TEST-{package_of('WindowsJobScopeTest')}.WindowsJobScopeTest.xml").unlink()
             result = run_script("assert-surefire-reports.py", reports, "test-os")
             self.assertEqual(1, result.returncode)
             self.assertIn("missing surefire report", result.stdout)

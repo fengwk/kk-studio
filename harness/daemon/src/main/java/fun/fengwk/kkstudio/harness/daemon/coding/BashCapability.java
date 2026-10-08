@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.daemon.process.ProcessScope;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;

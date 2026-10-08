@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.daemon.coding;
+package fun.fengwk.kkstudio.harness.daemon.process;
 
 import fun.fengwk.kkstudio.harness.daemon.DaemonOperatingSystemDetector;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -35,10 +35,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>本类的状态目录是一次调用私有的临时目录，{@link #close()} 保证在调用结束时删除。
  */
-final class ProcessScope implements AutoCloseable {
+public final class ProcessScope implements AutoCloseable {
 
   /** 父进程私有状态目录前缀：定位残留时一眼可辨，且不落在数据目录内。 */
-  static final String STATE_DIR_PREFIX = "kk-studio-daemon-process-scope-";
+  public static final String STATE_DIR_PREFIX = "kk-studio-daemon-process-scope-";
 
   /**
    * 标准流模式：用户命令的 stdin/stdout/stderr 接到哪里。
@@ -60,7 +60,7 @@ final class ProcessScope implements AutoCloseable {
 
   /** 启动许可：父进程在确认范围之后、放行用户命令之前询问调用方是否仍然允许启动。 */
   @FunctionalInterface
-  interface StartGate {
+  public interface StartGate {
 
     boolean allowStart();
   }
@@ -126,11 +126,12 @@ final class ProcessScope implements AutoCloseable {
    *
    * <p>范围未确认、helper 提前退出、平台不支持或调用方在启动阶段取消时失败关闭：用户命令不会启动，状态目录也不会残留。
    */
-  static ProcessScope start(Path workdir, List<String> command) throws IOException {
+  public static ProcessScope start(Path workdir, List<String> command) throws IOException {
     return start(workdir, command, ALWAYS_ALLOW);
   }
 
-  static ProcessScope start(Path workdir, List<String> command, StartGate gate) throws IOException {
+  public static ProcessScope start(Path workdir, List<String> command, StartGate gate)
+      throws IOException {
     return start(workdir, command, gate, Stdio.CAPTURE);
   }
 
@@ -139,11 +140,11 @@ final class ProcessScope implements AutoCloseable {
    *
    * <p>其余语义与 {@link #start(Path, List)} 完全一致——许可之前失败仍然等价于「命令没有运行过」，收敛仍然覆盖整组（含后代）。
    */
-  static ProcessScope startDuplex(Path workdir, List<String> command) throws IOException {
+  public static ProcessScope startDuplex(Path workdir, List<String> command) throws IOException {
     return startDuplex(workdir, command, ALWAYS_ALLOW);
   }
 
-  static ProcessScope startDuplex(Path workdir, List<String> command, StartGate gate)
+  public static ProcessScope startDuplex(Path workdir, List<String> command, StartGate gate)
       throws IOException {
     return start(workdir, command, gate, Stdio.DUPLEX);
   }
@@ -230,12 +231,12 @@ final class ProcessScope implements AutoCloseable {
   }
 
   /** helper 的进程对象：父进程只从它读取用户命令的输出并等待收敛。 */
-  Process process() {
+  public Process process() {
     return helper;
   }
 
   /** 用户命令的自然退出码；没有发布过就返回 {@code null}（超时、取消或 helper 异常）。 */
-  Integer naturalExitCode() {
+  public Integer naturalExitCode() {
     String value = ProcessScopeState.read(stateDir, ProcessScopeState.EXIT_FILE);
     if (value == null) {
       return null;
@@ -254,7 +255,7 @@ final class ProcessScope implements AutoCloseable {
    * <p>命令退出不等于 keeper 退出：keeper 还要收敛范围（含后代）才会结束，因此「命令是否已经退出」只能看命令自己发布的退出码， 不能拿 helper 的 {@code
    * isAlive()} 当依据。keeper 已经结束时同样返回 {@code true}——那时命令不可能还在运行。
    */
-  boolean awaitNaturalExit(long millis) {
+  public boolean awaitNaturalExit(long millis) {
     long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis);
     while (true) {
       if (naturalExitCode() != null || !helper.isAlive()) {
@@ -268,7 +269,7 @@ final class ProcessScope implements AutoCloseable {
   }
 
   /** helper 报告的失败原因；没有失败时返回 {@code null}。 */
-  String startFailure() {
+  public String startFailure() {
     return ProcessScopeState.read(stateDir, ProcessScopeState.ERROR_FILE);
   }
 
@@ -287,7 +288,7 @@ final class ProcessScope implements AutoCloseable {
    *
    * <p>幂等且有界；并发调用者等待同一次收敛，等待超时或被中断时同样返回 {@code false}——收敛结果绝不因为「等不到」而被当成 成功。
    */
-  boolean terminate() {
+  public boolean terminate() {
     if (terminationStarted.compareAndSet(false, true)) {
       try {
         convergenceProven = stop();
