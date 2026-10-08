@@ -7,7 +7,7 @@
  */
 import { createServer } from 'node:http'
 
-import { assert, assertExactFields, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertExactFields, cid, envelopeData, expectHttpError, instantEpochMillis, sleep } from '../lib/http.mjs'
 import {
   branchSettingsOf,
   chatOwner,
@@ -39,22 +39,22 @@ const INTERACTION_FIELDS = [
   'createTime',
 ]
 
-/** InteractionPageDTO 精确字段集合：total 是同一过滤条件下的真实待处理总数，与当前页长度无关。 */
-const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total']
+/** InteractionPageDTO 精确字段集合：total 是同一过滤条件下的真实待处理总数，freshnessAt 是时间驱动的最早变更时刻。 */
+const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total', 'freshnessAt']
 
 const OWNER_FIELDS = ['type', 'chatId', 'issueId', 'agentName']
 const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
 
-function instantMillis(value) {
-  if (typeof value === 'number') {
-    assert(Number.isFinite(value) && value >= 0, `invalid epoch-second instant: ${value}`)
-    return value * 1000
+/** 同宿主隔离服务以请求开始为时间下界，允许截止点在响应到达前已经过去。 */
+export function assertFreshnessAt(page, requestStartMs, label = 'interaction page') {
+  if (page.freshnessAt === null) {
+    return
   }
+  const freshnessMs = instantEpochMillis(page.freshnessAt, `${label} freshnessAt`)
   assert(
-    typeof value === 'string' && Number.isFinite(Date.parse(value)),
-    `invalid ISO instant: ${JSON.stringify(value)}`,
+    freshnessMs >= requestStartMs,
+    `${label} freshnessAt must be a time-driven deadline at/after the request boundary: ${JSON.stringify({ freshnessAt: page.freshnessAt, requestStartMs })}`,
   )
-  return Date.parse(value)
 }
 
 function parseArguments(interaction) {
@@ -78,7 +78,7 @@ function assertInteraction(
       && typeof interaction.toolCallId === 'string'
       && interaction.toolCallId.trim().length > 0
       && interaction.approvalJson === null
-      && instantMillis(interaction.createTime) >= 0,
+      && instantEpochMillis(interaction.createTime) >= 0,
     JSON.stringify(interaction),
   )
   assertExactFields(interaction.owner, OWNER_FIELDS, `${label} interaction owner`)
@@ -108,8 +108,10 @@ async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThr
   for (let page = 0; page < maxPages; page++) {
     const filter = rootThreadId ? `&rootThreadId=${encodeURIComponent(rootThreadId)}` : ''
     const query = `?limit=${pageSize}${filter}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+    const requestStartMs = Date.now()
     const page$ = envelopeData((await ctx.call('GET', `/api/interactions${query}`)).json)
     assertExactFields(page$, INTERACTION_PAGE_FIELDS, 'interaction page')
+    assertFreshnessAt(page$, requestStartMs)
     assert(Array.isArray(page$.items), JSON.stringify(page$))
     assert(page$.items.length <= pageSize, JSON.stringify(page$))
     // total 是同一过滤条件下的真实待处理总数，不是首页长度：页内、跨页都必须稳定且不小于已返回条数。
@@ -133,7 +135,7 @@ async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThr
       seen.add(interaction.interactionId)
       if (index > 0) {
         const previous = page$.items[index - 1]
-        const order = instantMillis(previous.createTime) - instantMillis(interaction.createTime)
+        const order = instantEpochMillis(previous.createTime) - instantEpochMillis(interaction.createTime)
         assert(
           order <= 0
             || (order === 0 && previous.interactionId <= interaction.interactionId),
@@ -304,6 +306,7 @@ registerCase({
       )
 
       // rootThreadId 过滤：按执行根返回该根（含后代）的待办，响应项仍保留来源 threadId/sessionId。
+      const filteredRequestStartMs = Date.now()
       const filtered = envelopeData(
         (
           await ctx.call(
@@ -313,6 +316,7 @@ registerCase({
         ).json,
       )
       assertExactFields(filtered, INTERACTION_PAGE_FIELDS, 'root-filtered interaction page')
+      assertFreshnessAt(filtered, filteredRequestStartMs, 'root-filtered interaction page')
       assert(
         filtered.items.length === 1
           && filtered.items[0].interactionId === pending.interactionId
@@ -388,7 +392,7 @@ registerCase({
           && receipt.submissionId === submissionId
           && typeof receipt.actor === 'string'
           && receipt.actor.trim().length > 0
-          && instantMillis(receipt.acceptedAt) >= 0
+          && instantEpochMillis(receipt.acceptedAt) >= 0
           && receipt.materialized === false,
         JSON.stringify(receipt),
       )

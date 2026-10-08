@@ -9,6 +9,7 @@ import {
   envelopeData,
   expectHttpError,
   httpJson,
+  instantEpochMillis,
   pageResults,
   cid,
 } from '../lib/http.mjs'
@@ -2219,7 +2220,7 @@ registerCase({
   id: 'thread_tree.query_contract',
   level: 'L1',
   title: 'Agent 关系树最小只读投影',
-  docs: 'GET /api/harness/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；缺失 Agent 确定性失败，无真实 Provider 调用',
+  docs: 'GET /api/harness/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，节点携带同源权威 updateTime，查询不推进版本或 updateTime；缺失 Agent 确定性失败，无真实 Provider 调用',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -2245,16 +2246,28 @@ registerCase({
       const root = nodes[0]
       assertExactFields(
         root,
-        ['threadId', 'parentThreadId', 'name', 'agentName', 'model', 'status', 'processing', 'turnCount', 'toolCallCount', 'outcome'],
+        ['threadId', 'parentThreadId', 'name', 'agentName', 'model', 'status', 'processing', 'turnCount', 'toolCallCount', 'outcome', 'updateTime'],
         'HarnessThreadTreeNodeDTO',
       )
       assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
       assert(root.status === 'IDLE' && root.processing === false, JSON.stringify(root))
       assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
       assert(isDeepStrictEqual(root.model, before.thread.branchSettings.model), JSON.stringify(root))
+      // 树节点与 Thread 快照使用同一 updatedAt，读取不推进它。
+      const beforeUpdateTime = before.thread.updateTime
+      instantEpochMillis(beforeUpdateTime, 'thread snapshot updateTime')
+      instantEpochMillis(root.updateTime, 'HarnessThreadTreeNodeDTO.updateTime')
+      assert(
+        root.updateTime === beforeUpdateTime,
+        `tree node updateTime must mirror the authoritative Thread updateTime: ${JSON.stringify({ root: root.updateTime, thread: before.thread.updateTime })}`,
+      )
       const after = await getThreadSnapshot(ctx, threadId)
       assert(after.thread.version === before.thread.version, 'tree query must not change version')
       assert(after.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
+      assert(
+        after.thread.updateTime === beforeUpdateTime,
+        'tree query must not change updateTime',
+      )
     } finally {
       await ctx.call(
         'DELETE',
