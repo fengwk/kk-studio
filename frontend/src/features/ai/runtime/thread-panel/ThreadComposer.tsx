@@ -86,6 +86,7 @@ export interface ComposerPreviewReadiness {
 }
 
 export interface ThreadComposerHandle {
+  focus: () => void
   preparePreview: () => { payload: ComposerPart[]; localDraft: ComposerPart[] } | null
 }
 
@@ -339,6 +340,7 @@ export function ThreadComposer({
   }, [onPreviewReadinessChange, previewReadiness])
 
   useImperativeHandle(ref, () => ({
+    focus: () => focusComposer(true),
     preparePreview: () => {
       const domParts = editorApiRef.current?.syncDraft() ?? null
       if (!previewReadiness.canPreview) {

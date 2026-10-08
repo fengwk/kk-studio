@@ -11,7 +11,7 @@ export function normalizeThreadName(raw: unknown): string | null {
   if (typeof raw !== 'string') {
     return null
   }
-  const collapsed = raw.replace(/\s+/gu, ' ').trim()
+  const collapsed = raw.replace(/\p{White_Space}+/gu, ' ').replace(/^ +| +$/g, '')
   if (collapsed.length === 0) {
     return null
   }

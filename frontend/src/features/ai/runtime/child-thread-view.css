@@ -6,6 +6,7 @@
   min-height: 0;
 }
 
+.chat-pane[hidden],
 .chat-pane-layer[hidden] {
   display: none;
 }

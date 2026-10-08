@@ -19,6 +19,9 @@ export function ThreadConversationView({
   messages,
   loading,
   error,
+  errorText,
+  onRetry,
+  emptyText,
   bodyRef,
   initialScrollTop = null,
   resetKey = null,
@@ -27,6 +30,9 @@ export function ThreadConversationView({
   messages: DialogueMessage[]
   loading: boolean
   error: unknown
+  errorText?: string
+  onRetry?: () => void
+  emptyText?: string
   bodyRef: RefObject<HTMLDivElement | null>
   /** 重新进入 conversation 视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
   initialScrollTop?: number | null
@@ -51,6 +57,9 @@ export function ThreadConversationView({
       messages={messages}
       loading={loading}
       error={error}
+      errorText={errorText}
+      onRetry={onRetry}
+      emptyText={emptyText}
       bodyRef={bodyRef}
     />
   )
