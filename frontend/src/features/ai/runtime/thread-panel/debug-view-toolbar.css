@@ -1,4 +1,4 @@
-/* Debug 主视图工具条：只读、“返回会话”是进入/退出 Debug 的稳定入口，不改动全局 styles.css。 */
+/* 草稿按需检查入口；Debug 退出由 workspace 单顶栏负责。 */
 .thread-debug-toolbar {
   display: flex;
   align-items: center;
@@ -6,11 +6,4 @@
   gap: 8px;
   flex: 0 0 auto;
   padding: 4px 8px;
-}
-
-.thread-debug-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
 }

@@ -4,6 +4,7 @@ import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { BranchRequestInput, PaneReport } from '@/features/ai/runtime/useRootThreadControl'
 import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
+import type { ThreadPresentation } from '@/features/ai/runtime/thread-presentation'
 
 /** Chat 只提供 owner/defaults；发送、导航、命令和 Thread projection 全部由 AgentPane 共享。 */
 export function ChatWorkspacePane({
@@ -19,6 +20,7 @@ export function ChatWorkspacePane({
   onTargetConsumed,
   onRequestBranch,
   onPaneReport,
+  onPresentation,
 }: {
   chat: ChatDTO
   agents: AgentDefinitionDTO[]
@@ -34,6 +36,7 @@ export function ChatWorkspacePane({
   onRequestBranch?: (sourcePaneId: string, request: BranchRequestInput) => void
   /** 面板运行时摘要：workspace 只用它做目标路由与顶栏面包屑。 */
   onPaneReport?: (paneId: string, report: PaneReport) => void
+  onPresentation?: (paneId: string, report: ThreadPresentation | null) => void
 }) {
   return (
     <AgentPane
@@ -57,6 +60,7 @@ export function ChatWorkspacePane({
       onReport={onPaneReport == null
         ? undefined
         : (report) => onPaneReport(pane.id, report)}
+      onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
     />
   )
 }

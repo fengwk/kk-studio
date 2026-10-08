@@ -19,6 +19,7 @@ export type ThreadCommandId =
   | 'new'
   | 'upload'
   | 'debug'
+  | 'subagent'
   | 'shortcuts'
   | 'compact'
   | 'rename-session'
@@ -51,6 +52,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('new', ['blank', 'fresh', 'create', 'session']),
   command('upload', ['attach', 'file', 'image', 'video', 'audio', 'paste']),
   command('debug', ['log', 'audit', 'activity', 'entry', 'conversation', 'inspect']),
+  command('subagent', ['agent', 'tree', 'execution', 'history']),
   command('shortcuts', ['keys', 'keyboard', 'help', 'hotkeys']),
   command('compact', ['context', 'tokens', 'summary', 'reduce']),
   command('rename-session', ['session', 'name']),
@@ -133,6 +135,7 @@ export function threadCommandsForTarget(
       && item.id !== 'shortcuts'
       && item.id !== 'history'
       && item.id !== 'debug'
+      && item.id !== 'subagent'
 
     const newDisabled =
       item.id === 'new'

@@ -1,13 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
+import { useLayoutEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
-import { ChildThreadRootLink, ChildThreadView } from '@/features/ai/runtime/ChildThreadView'
+import type { ThreadPresentation } from '@/features/ai/runtime/thread-presentation'
+import { ThreadPresentationActions } from '@/features/ai/runtime/ThreadPresentationActions'
+import { Button } from '@/shared/ui/controls/Button'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/ai/chat/chat-workspace.css'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -39,9 +46,9 @@ export function ThreadWorkspacePage() {
     return (
       <div className="thread-state danger">
         {t('ai.thread.invalidId')}
-        <button type="button" onClick={() => navigate('/chats')}>
+        <Button variant="ghost" onClick={() => navigate('/chats')}>
           {t('ai.chat.backToList')}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -54,25 +61,49 @@ export function ThreadWorkspacePage() {
     return (
       <div className="thread-state danger">
         {t('ai.thread.loadFailed')}
-        <button type="button" onClick={() => navigate('/chats')}>
+        <Button variant="ghost" onClick={() => navigate('/chats')}>
           {t('ai.chat.backToList')}
-        </button>
+        </Button>
       </div>
     )
   }
 
-  const thread = threadQuery.data.thread
-  const title = thread.name || thread.threadId
-  // 子代理是只读视图：独立地址只挂载 Thread 投影，不挂草稿、上传与人工执行 Hook，
-  // 并保留返回执行根的入口；根地址仍然进入完整的 pane（含根控制区）。
-  const isChildThread = thread.parentThreadId != null
-  const rootThreadId = thread.yoloPolicy.rootThreadId ?? null
+  return <ThreadWorkspaceContent key={threadId} thread={threadQuery.data.thread}
+    agents={agentsQuery.data?.results ?? []} environments={environmentsQuery.data ?? []} />
+}
+
+/** 路由身份同时隔离 presentation：新地址即使缓存命中也不复用上一地址的报告/动作。 */
+function ThreadWorkspaceContent({ thread, agents, environments }: {
+  thread: HarnessThreadDTO
+  agents: AgentDefinitionDTO[]
+  environments: EnvironmentCardDTO[]
+}) {
+  const { t } = useI18n()
+  const threadId = thread.threadId
+  const [presentation, setPresentation] = useState<ThreadPresentation | null>(null)
+  const title = thread.parentThreadId && thread.name === 'main' ? thread.branchSettings.agentName : thread.name
+  const debugActive = presentation?.mode === 'debug'
+  useLayoutEffect(() => {
+    if (presentation?.mode === 'conversation') {
+      presentation.act(presentation.viewKey, 'restore-focus')
+    }
+  }, [presentation])
 
   return (
-    <section className="chat-workspace screen active">
+    <section className="chat-workspace screen active" onKeyDown={(event) => {
+      if (debugActive && event.key === 'Escape' && !event.defaultPrevented
+        && !event.repeat && !event.nativeEvent.isComposing && event.keyCode !== 229
+        && !shouldDeferToBlockingModal(event.currentTarget)) {
+        event.preventDefault()
+        presentation.act(presentation.viewKey, 'close-debug')
+      }
+    }}>
       <header className="chat-workspace-header">
         <div className="chat-workspace-title">
-          <Link
+          {debugActive ? <Button variant="ghost" size="compact"
+            onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
+            {t('ai.runtime.debug.close')}
+          </Button> : <Link
             className="chat-workspace-back"
             to="/chats"
             title={t('ai.chat.backToConversation')}
@@ -80,32 +111,23 @@ export function ThreadWorkspacePage() {
           >
             <ArrowLeft aria-hidden="true" />
             <span>{t('ai.chat.backToConversation')}</span>
-          </Link>
+          </Link>}
           <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
-          <h1>{title}</h1>
+          <h1>{presentation?.name ?? title}</h1>
+          <ThreadPresentationActions view={presentation} />
         </div>
       </header>
       <div className="chat-pane-grid layout-single">
-        {isChildThread ? (
-          <section className="chat-pane focused" data-pane-id={`thread-${threadId}`}>
-            <ChildThreadView
-              threadId={threadId}
-              environments={environmentsQuery.data ?? []}
-              navigation={rootThreadId == null
-                ? null
-                : <ChildThreadRootLink rootThreadId={rootThreadId} />}
-            />
-          </section>
-        ) : (
           <AgentPane
+            key={threadId}
             paneId={`thread-${threadId}`}
-            agents={agentsQuery.data?.results ?? []}
-            environments={environmentsQuery.data ?? []}
+            agents={agents}
+            environments={environments}
             initialTarget={{ kind: 'BOUND_THREAD', threadId }}
             capabilities={{ allowNewSession: false }}
             focused
+            onPresentation={setPresentation}
           />
-        )}
       </div>
     </section>
   )

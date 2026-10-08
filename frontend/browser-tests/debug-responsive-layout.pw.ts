@@ -2,7 +2,8 @@ import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import { test, expect } from './fixture'
 
-const reportsDir = resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
+const reportsDir = process.env.KK_LAYOUT_REPORTS_DIR
+  ?? resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 
 async function expectSinglePlanningScroll(page: Page) {
   // 提示词完整自然高度，仅整列纵向滚动，不再把内容关进 50cqh 的嵌套滚动区。
@@ -206,7 +207,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     const boxDetail = (await colDetail.boundingBox())!
     expect(boxDetail.width).toBeGreaterThan(900)
 
-    const closeBtn = colDetail.locator('button.thread-interaction-close')
+    const closeBtn = colDetail.getByRole('button', { name: /关闭事件详情|Close event detail/ })
     await expect(closeBtn).toBeFocused()
 
     // 2. 点击关闭按钮：回退到事件列表，且焦点恢复至具有键盘交互的 listbox（非不可 focus 的 option div）
@@ -407,7 +408,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(pane2.locator('[data-testid="thread-debug-placeholder"]')).toBeVisible()
 
     // 在 Pane 1 内部按 Escape 键关闭详情
-    await pane1.locator('button.thread-interaction-close').focus()
+    await pane1.getByRole('button', { name: /关闭事件详情|Close event detail/ }).focus()
     await page.keyboard.press('Escape')
 
     // Pane 1 详情关闭，显示占位

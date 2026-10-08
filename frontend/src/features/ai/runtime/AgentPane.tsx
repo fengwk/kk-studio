@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { paneTargetViewKey, type ThreadPresentation } from './thread-presentation'
+import { ThreadPresentationActions } from './ThreadPresentationActions'
+import { Button } from '@/shared/ui/controls/Button'
+import { useI18n } from '@/shared/i18n'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import {
   BoundThreadView,
-  ChildThreadBackBar,
-  ChildThreadRootLink,
 } from '@/features/ai/runtime/ChildThreadView'
 import { RootAgentPane } from '@/features/ai/runtime/RootAgentPane'
 import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
@@ -50,6 +53,7 @@ export function AgentPane({
   capabilities,
   onRequestBranch,
   onReport,
+  onPresentation,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -67,8 +71,10 @@ export function AgentPane({
   onRequestBranch?: (request: BranchRequestInput) => void
   /** 面板运行时摘要上报；只读路径由本组件按投影派生。 */
   onReport?: (report: PaneReport) => void
+  onPresentation?: (report: ThreadPresentation | null) => void
 }) {
   const paneSectionRef = useRef<HTMLElement | null>(null)
+  const { t } = useI18n()
   const { target, targetRef, setTarget } = usePaneTarget({ owner, paneId, initialTarget })
   const [focusTarget, setFocusTarget] = useState<PaneTarget | null>(initialTarget ?? null)
   const lastRoutedTarget = useRef(initialTarget)
@@ -93,7 +99,7 @@ export function AgentPane({
       : null
   // 只有草稿目标或已确认为执行根的绑定才允许挂载根控制面：身份未确认的绑定可能
   // 是子代理，绝不提前挂载草稿、上传与人工执行 Hook（也不给它们造上传注册表）。
-  const needsControl = !isBoundTarget(target) || isRoot === true
+  const needsControl = !capabilities?.readOnly && (!isBoundTarget(target) || isRoot === true)
   const navigation = useThreadNavigation({
     rootThreadId: boundThreadId === '' ? null : boundThreadId,
     enabled: isRoot === true,
@@ -138,8 +144,29 @@ export function AgentPane({
   }, [needsControl, readOnlyBranchName, readOnlySessionId, target])
 
   const covered = hidden || navigation.layers.length > 0
-  const childRootThreadId = projection.thread?.yoloPolicy.rootThreadId ?? null
   const topLayerIndex = navigation.layers.length - 1
+  const expectedViewKey = navigation.activeThreadId
+    ? `thread:${navigation.activeThreadId}` : paneTargetViewKey(target)
+  const expectedKeyRef = useRef(expectedViewKey)
+  useLayoutEffect(() => { expectedKeyRef.current = expectedViewKey })
+  const [presentation, setPresentation] = useState<ThreadPresentation | null>(null)
+  const acceptPresentation = useCallback((report: ThreadPresentation) => {
+    if (report.viewKey === expectedKeyRef.current) {
+      setPresentation(report)
+    }
+  }, [])
+  const visiblePresentation = presentation?.viewKey === expectedViewKey ? presentation : null
+  useLayoutEffect(() => {
+    if (onPresentation == null && visiblePresentation?.mode === 'conversation') {
+      visiblePresentation.act(visiblePresentation.viewKey, 'restore-focus')
+    }
+  }, [onPresentation, visiblePresentation])
+  const presentationCallback = useRef(onPresentation)
+  useLayoutEffect(() => { presentationCallback.current = onPresentation })
+  useEffect(() => {
+    presentationCallback.current?.(visiblePresentation)
+  }, [visiblePresentation])
+  const openParent = isRoot === true ? navigation.openThread : undefined
 
   // 只有根面板能接管 pane 内导航；只读路径不提供接管者（ThreadLink 保留独立地址）。
   return (
@@ -152,7 +179,27 @@ export function AgentPane({
         hidden={hidden}
         inert={hidden}
         onMouseDown={onFocus}
+        onKeyDown={(event) => {
+          if (visiblePresentation?.mode === 'debug' && event.key === 'Escape'
+            && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing && event.keyCode !== 229
+            && !shouldDeferToBlockingModal(event.currentTarget)) {
+            event.preventDefault()
+            event.stopPropagation()
+            visiblePresentation.act(visiblePresentation.viewKey, 'close-debug')
+          }
+        }}
       >
+        {onPresentation == null && (!needsControl || visiblePresentation?.parentThreadId || visiblePresentation?.mode === 'debug') ? <header className="agent-pane-thread-heading">
+          {visiblePresentation?.mode === 'debug' ? <Button variant="ghost"
+            onClick={() => visiblePresentation.act(visiblePresentation.viewKey, 'close-debug')}>
+            {t('ai.runtime.debug.close')}
+          </Button> : null}
+          {visiblePresentation?.mode !== 'debug' ? <>
+            {visiblePresentation?.name ? <h2 className="agent-pane-thread-title" title={visiblePresentation.name}>{visiblePresentation.name}</h2> : null}
+            <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span>
+          </> : null}
+          <ThreadPresentationActions view={visiblePresentation} />
+        </header> : null}
         {/* 被覆盖的根层保持挂载但完全惰性：不可聚焦、不可点、不参与无障碍树。 */}
         <div className="chat-pane-layer" hidden={covered} inert={covered}>
           {needsControl ? (
@@ -176,16 +223,19 @@ export function AgentPane({
               covered={covered}
               focusTarget={focusTarget}
               onFocusTargetChange={setFocusTarget}
+              presentationSelected={navigation.layers.length === 0}
+              onPresentation={acceptPresentation}
             />
           ) : (
             <BoundThreadView
               threadId={boundThreadId}
               projection={projection}
               environments={environments}
-              navigation={childRootThreadId == null
-                ? undefined
-                : <ChildThreadRootLink rootThreadId={childRootThreadId} />}
               readOnly
+              selected={navigation.layers.length === 0}
+              active={!hidden}
+              onPresentation={acceptPresentation}
+              onParent={openParent}
             />
           )}
         </div>
@@ -193,14 +243,17 @@ export function AgentPane({
           <div
             key={layer.threadId}
             className="chat-pane-layer"
-            hidden={index !== topLayerIndex}
-            inert={index !== topLayerIndex}
+            hidden={hidden || index !== topLayerIndex}
+            inert={hidden || index !== topLayerIndex}
           >
             <BoundThreadView
               threadId={layer.threadId}
               environments={environments}
-              navigation={<ChildThreadBackBar onBack={navigation.goBack} />}
               readOnly
+              selected={index === topLayerIndex}
+              active={!hidden && index === topLayerIndex}
+              onPresentation={acceptPresentation}
+              onParent={openParent}
             />
           </div>
         ))}

@@ -26,8 +26,6 @@ export {
 export { RootThreadControlArea } from '@/features/ai/runtime/RootThreadControlArea'
 export {
   BoundThreadView,
-  ChildThreadBackBar,
-  ChildThreadRootLink,
   ChildThreadView,
 } from '@/features/ai/runtime/ChildThreadView'
 export { ThreadLink } from '@/features/ai/runtime/ThreadLink'

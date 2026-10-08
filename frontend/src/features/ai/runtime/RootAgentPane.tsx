@@ -8,6 +8,9 @@ import {
 import { ThreadPane } from '@/features/ai/runtime/ThreadPane'
 import { RootThreadControlArea } from '@/features/ai/runtime/RootThreadControlArea'
 import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
+import { SubagentTreePanel } from '@/features/ai/runtime/SubagentTreePanel'
+import { useThreadPresentation, type ThreadPresentation } from './thread-presentation'
+import { Button } from '@/shared/ui/controls/Button'
 import { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
 import { AgentSelectionPanel, SelectionPanel } from '@/features/ai/chat/SelectionPanel'
 import { HistoryTree } from '@/features/ai/chat/HistoryTree'
@@ -62,6 +65,8 @@ export function RootAgentPane({
   covered,
   focusTarget,
   onFocusTargetChange,
+  presentationSelected = true,
+  onPresentation,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -82,6 +87,8 @@ export function RootAgentPane({
   covered: boolean
   focusTarget: PaneTarget | null
   onFocusTargetChange: (target: PaneTarget | null) => void
+  presentationSelected?: boolean
+  onPresentation?: (report: ThreadPresentation) => void
 }) {
   const { t } = useI18n()
   const pane = useRootThreadControl({
@@ -104,7 +111,6 @@ export function RootAgentPane({
     focusTarget,
     onFocusTargetChange,
   })
-  const interactionPanel = renderInteractionPanel()
   const onDismissActionError = () => {
     pane.dismissActionError()
     pane.branchPanel.dismissYoloError()
@@ -130,6 +136,18 @@ export function RootAgentPane({
   const boundIsRoot = boundThreadName != null && pane.controller.thread?.parentThreadId == null
   const boundThreadId = pane.target.kind === 'BOUND_THREAD' ? pane.target.threadId : null
   const tree = useActiveThreadTree(boundIsRoot ? boundThreadId : null)
+  useThreadPresentation({
+    views: pane.boundViews,
+    projection: pane.controller,
+    threadId: boundThreadId ?? '',
+    selected: presentationSelected,
+    active: !covered,
+    onReport: onPresentation,
+    onSubagent: () => pane.openInteraction('subagent'),
+    // 已打开的交互面板仍接管输入；Debug 退出恢复读入口，不向隐藏 Composer 排队焦点意图。
+    onRestoreFocus: pane.interaction == null ? pane.restoreComposerFocus : undefined,
+  })
+  const interactionPanel = renderInteractionPanel()
   const composer = { ...pane.composer, interactionPanel, suspended: covered }
 
   const content = pane.target.kind === 'BOUND_THREAD'
@@ -241,48 +259,43 @@ export function RootAgentPane({
     <EntryBranchContext.Provider value={canBranchFromConversation ? entryBranchRequest : null}>
       {content}
       {pane.pendingAcceptance ? (
-        <div className="thread-acceptance-retry">
+        <div className="thread-acceptance-retry" hidden={debugActive} inert={debugActive}>
           {pane.pendingAcceptance.unknownOutcome ? (
-            <button type="button" className="btn-primary" onClick={pane.retryAcceptance}>
+            <Button onClick={pane.retryAcceptance}>
               {t('shared.conflict.retry')}
-            </button>
+            </Button>
           ) : null}
-          <button type="button" className="ghost-btn" onClick={pane.abandonPendingAcceptance}>
+          <Button variant="ghost" onClick={pane.abandonPendingAcceptance}>
             {t('shared.cancel')}
-          </button>
+          </Button>
         </div>
       ) : null}
       {pane.draftRestoreError ? (
-        <div className="thread-acceptance-retry" data-testid="draft-restore-retry">
+        <div className="thread-acceptance-retry" data-testid="draft-restore-retry" hidden={debugActive} inert={debugActive}>
           <span className="thread-acceptance-retry-text">{pane.draftRestoreError}</span>
-          <button
-            type="button"
-            className="btn-primary"
+          <Button
             disabled={pane.pending}
             onClick={pane.retryDraftRestore}
           >
             {t('ai.runtime.action.retryDraftRestore')}
-          </button>
+          </Button>
         </div>
       ) : null}
       {pane.pendingMessage && pane.pendingMessage.unknownOutcome ? (
-        <div className="thread-acceptance-retry" data-testid="bound-pending-controls">
-          <button
-            type="button"
-            className="btn-primary"
+        <div className="thread-acceptance-retry" data-testid="bound-pending-controls" hidden={debugActive} inert={debugActive}>
+          <Button
             disabled={pane.controller.pending}
             onClick={pane.retryPendingMessage}
           >
             {t('shared.conflict.retry')}
-          </button>
-          <button
-            type="button"
-            className="ghost-btn"
+          </Button>
+          <Button
+            variant="ghost"
             disabled={pane.controller.pending}
             onClick={pane.abandonPendingMessage}
           >
             {t('shared.cancel')}
-          </button>
+          </Button>
         </div>
       ) : null}
       <ConflictPresenter
@@ -301,6 +314,9 @@ export function RootAgentPane({
   )
 
   function renderInteractionPanel() {
+    if (pane.interaction === 'subagent') {
+      return <SubagentTreePanel tree={tree} currentThreadId={boundThreadId ?? undefined} onClose={pane.closeInteraction} />
+    }
     if (pane.interaction === 'rename-session' || pane.interaction === 'rename-thread') {
       if (pane.renameTarget == null) {
         return null

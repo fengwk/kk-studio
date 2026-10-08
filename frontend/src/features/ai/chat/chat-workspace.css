@@ -73,3 +73,17 @@
   font-size: 15px;
   font-weight: 600;
 }
+
+.workspace-view-identity {
+  min-width: 0;
+  max-width: 32vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.chat-workspace-title {
+  min-width: 0;
+}
