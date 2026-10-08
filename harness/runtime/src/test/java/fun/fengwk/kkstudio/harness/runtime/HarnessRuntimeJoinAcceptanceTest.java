@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -62,7 +63,7 @@ class HarnessRuntimeJoinAcceptanceTest {
 
   private static ThreadJoinRequest request(int invocation, UUID parent, UUID head) {
     return new ThreadJoinRequest(
-        TestIds.id(invocation), parent, head, HASH, "assistant", 3, 3, 2, 3);
+        TestIds.id(invocation), parent, head, HASH, "assistant", 3, 3, 2, 3, JoinPurpose.TASK);
   }
 
   @Test
@@ -125,7 +126,16 @@ class HarnessRuntimeJoinAcceptanceTest {
         AcceptancePreflight.IDENTITY);
     ThreadJoinRequest limited =
         new ThreadJoinRequest(
-            TestIds.id(35), parent, root.thread().headEntryId(), HASH, "assistant", 3, 3, 1, 3);
+            TestIds.id(35),
+            parent,
+            root.thread().headEntryId(),
+            HASH,
+            "assistant",
+            3,
+            3,
+            1,
+            3,
+            JoinPurpose.TASK);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -355,7 +365,8 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // child1 占用 parent 的唯一子任务额度（maxConcurrentChildren = 1）。
     ThreadJoinRequest join1 =
-        new ThreadJoinRequest(TestIds.id(72), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5);
+        new ThreadJoinRequest(
+            TestIds.id(72), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5, JoinPurpose.TASK);
     AcceptedCommands child1 =
         runtime.acceptCommandsAndJoin(
             session(73, 74, parentId), join1, AcceptancePreflight.IDENTITY);
@@ -364,7 +375,8 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // 第二个子任务：未完成 Join 计数已达上限 -> 拒绝，且不留下 Thread / Join 残留。
     ThreadJoinRequest join2 =
-        new ThreadJoinRequest(TestIds.id(75), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5);
+        new ThreadJoinRequest(
+            TestIds.id(75), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5, JoinPurpose.TASK);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -388,7 +400,8 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // 深度配额：新子线程深度为 2，超过 maxDepth = 1 -> 拒绝（与子任务额度无关）。
     ThreadJoinRequest tooDeep =
-        new ThreadJoinRequest(TestIds.id(79), parentId, parentHead, HASH, "assistant", 3, 1, 5, 5);
+        new ThreadJoinRequest(
+            TestIds.id(79), parentId, parentHead, HASH, "assistant", 3, 1, 5, 5, JoinPurpose.TASK);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -414,12 +427,14 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // cap = 2：A 下的 childA1 与 B 下的 childB1 各占 1 个额度。
     ThreadJoinRequest a1 =
-        new ThreadJoinRequest(TestIds.id(2202), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
+        new ThreadJoinRequest(
+            TestIds.id(2202), parentA, headA, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
     AcceptedCommands childA1 =
         runtime.acceptCommandsAndJoin(
             session(2203, 2204, parentA), a1, AcceptancePreflight.IDENTITY);
     ThreadJoinRequest b1 =
-        new ThreadJoinRequest(TestIds.id(2212), parentB, headB, HASH, "assistant", 3, 3, 5, 2);
+        new ThreadJoinRequest(
+            TestIds.id(2212), parentB, headB, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
     runtime.acceptCommandsAndJoin(session(2213, 2214, parentB), b1, AcceptancePreflight.IDENTITY);
     assertEquals(2, activeSubagentJoinCount());
 
@@ -433,7 +448,8 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // 全局额度已满：A 树自己只有 1 个子任务，但 B 树的 childB1 占用全局额度 -> 拒绝，且无残留。
     ThreadJoinRequest a2 =
-        new ThreadJoinRequest(TestIds.id(2205), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
+        new ThreadJoinRequest(
+            TestIds.id(2205), parentA, headA, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -458,7 +474,8 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // 额度释放后，A 下的新子任务再次被接受。
     ThreadJoinRequest a3 =
-        new ThreadJoinRequest(TestIds.id(2208), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
+        new ThreadJoinRequest(
+            TestIds.id(2208), parentA, headA, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
     AcceptedCommands childA3 =
         runtime.acceptCommandsAndJoin(
             session(2209, 2220, parentA), a3, AcceptancePreflight.IDENTITY);
@@ -557,7 +574,8 @@ class HarnessRuntimeJoinAcceptanceTest {
         session(111, 112, null), initialJoin, AcceptancePreflight.IDENTITY);
 
     ThreadJoinRequest conflictedJoin =
-        new ThreadJoinRequest(TestIds.id(110), null, null, HASH, "different-agent", 3, 3, 2, 3);
+        new ThreadJoinRequest(
+            TestIds.id(110), null, null, HASH, "different-agent", 3, 3, 2, 3, JoinPurpose.TASK);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -777,5 +795,112 @@ class HarnessRuntimeJoinAcceptanceTest {
                         TestIds.id(999), TestIds.id(136), settings(), false),
                     List.of(initCmd)),
                 AcceptancePreflight.IDENTITY));
+  }
+
+  /**
+   * 续接同一子线程：新 invocation 原子上位 supersede 既有未完成 join，只保留一份有效 join，旧 join 保留 invocation identity 与排队源
+   * prompt，且不占额外配额；同 invocation 重放幂等且不重复 supersede。
+   */
+  @Test
+  void continuationSupersedesUnfinishedJoinKeepingIdentityAndQueuedPrompt() {
+    AcceptedCommands parent =
+        runtime.acceptCommands(session(900, 901, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = parent.thread().id();
+    UUID parentHead = parent.thread().headEntryId();
+
+    ThreadJoinRequest first = request(902, parentId, parentHead);
+    AcceptedCommands child =
+        runtime.acceptCommandsAndJoin(
+            session(903, 904, parentId), first, AcceptancePreflight.IDENTITY);
+    UUID childId = child.thread().id();
+    assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
+
+    ThreadState childState = store.transaction(tx -> tx.findThread(childId).orElseThrow());
+    UUID secondInvocation = TestIds.id(905);
+    ThreadJoinRequest second =
+        new ThreadJoinRequest(
+            secondInvocation,
+            parentId,
+            parentHead,
+            HASH,
+            "assistant",
+            3,
+            3,
+            2,
+            3,
+            JoinPurpose.TASK);
+    AcceptCommandsCommand continuation =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                childId, childState.headEntryId(), childState.nextCommandSequence()),
+            List.of(userMessageCommand(TestIds.id(906), "more work")));
+
+    AcceptedCommands continued =
+        runtime.acceptCommandsAndJoin(continuation, second, AcceptancePreflight.IDENTITY);
+    assertTrue(continued.joinReplaced());
+
+    ThreadJoin oldJoin = runtime.findJoin(first.invocationId()).orElseThrow();
+    assertFalse(oldJoin.matched());
+    assertEquals(secondInvocation, oldJoin.supersededByInvocationId());
+    // 旧 join 保留其 invocation identity 与排队源 prompt（source command 仍在，未被删除）。
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> tx.findCommand(childId, oldJoin.sourceCommandSequence()).isPresent()));
+    ThreadJoin newJoin = runtime.findJoin(secondInvocation).orElseThrow();
+    assertNull(newJoin.supersededByInvocationId());
+    // 同一父/子对至多一个有效未完成 join：计数仍为 1，且只有新 join 属有效集合。
+    assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
+    assertEquals(
+        List.of(secondInvocation),
+        store.<List<UUID>>transaction(
+            tx -> tx.loadIncompleteJoins(childId).stream().map(ThreadJoin::invocationId).toList()));
+
+    // 同 invocation 重放幂等：不重复 supersede，也不改写既有 join。
+    AcceptedCommands replay =
+        runtime.acceptCommandsAndJoin(continuation, second, AcceptancePreflight.IDENTITY);
+    assertTrue(replay.replayed());
+    assertFalse(replay.joinReplaced());
+    assertEquals(oldJoin, runtime.findJoin(first.invocationId()).orElseThrow());
+    assertEquals(newJoin, runtime.findJoin(secondInvocation).orElseThrow());
+  }
+
+  /** COMPACTION join 不占普通 task 父子/全局配额，也不计入未完成执行子 Join 计数。 */
+  @Test
+  void compactionJoinDoesNotConsumeTaskQuota() {
+    AcceptedCommands parent =
+        runtime.acceptCommands(session(910, 911, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = parent.thread().id();
+    UUID parentHead = parent.thread().headEntryId();
+
+    ThreadJoinRequest compaction =
+        new ThreadJoinRequest(
+            TestIds.id(912),
+            parentId,
+            parentHead,
+            HASH,
+            "compactor",
+            3,
+            3,
+            1,
+            1,
+            JoinPurpose.COMPACTION);
+    AcceptedCommands compactionChild =
+        runtime.acceptCommandsAndJoin(
+            session(913, 914, parentId), compaction, AcceptancePreflight.IDENTITY);
+
+    assertEquals(
+        JoinPurpose.COMPACTION,
+        runtime.findJoin(compaction.invocationId()).orElseThrow().purpose());
+    // COMPACTION 未完成 join 不占用 task 配额。
+    assertEquals(0, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
+    assertEquals(0, store.<Integer>transaction(tx -> tx.countIncompleteSubagentJoins()));
+
+    // 因此父的唯一 task 子任务额度仍可用。
+    ThreadJoinRequest task =
+        new ThreadJoinRequest(
+            TestIds.id(915), parentId, parentHead, HASH, "assistant", 3, 3, 1, 1, JoinPurpose.TASK);
+    runtime.acceptCommandsAndJoin(session(916, 917, parentId), task, AcceptancePreflight.IDENTITY);
+    assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
+    assertNotNull(compactionChild.thread().id());
   }
 }

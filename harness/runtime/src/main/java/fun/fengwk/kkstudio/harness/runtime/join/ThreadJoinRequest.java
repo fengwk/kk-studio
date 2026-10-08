@@ -20,10 +20,12 @@ public record ThreadJoinRequest(
     Integer maxTurns,
     int maxDepth,
     int maxConcurrentChildren,
-    int maxConcurrentThreads) {
+    int maxConcurrentThreads,
+    JoinPurpose purpose) {
 
   public ThreadJoinRequest {
     Objects.requireNonNull(invocationId, "invocationId");
+    Objects.requireNonNull(purpose, "purpose");
     if (parentThreadId != null && expectedParentHeadEntryId == null) {
       throw new IllegalArgumentException("parent head is required for task join");
     }

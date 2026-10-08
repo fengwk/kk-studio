@@ -78,6 +78,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
                 HarnessRuntimeTestFixtures.rootEntry(),
                 HarnessRuntimeTestFixtures.thread(UUID.fromString(THREAD_ID)),
                 List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
+                false,
                 false));
     when(runtime.getThreadSnapshot(any())).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
   }

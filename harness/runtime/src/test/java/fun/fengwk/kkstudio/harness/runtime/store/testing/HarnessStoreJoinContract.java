@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -142,7 +143,9 @@ public abstract class HarnessStoreJoinContract {
         finalAnswerEntryId,
         deliveryCommandSequence,
         createdAt,
-        updatedAt);
+        updatedAt,
+        JoinPurpose.TASK,
+        null);
   }
 
   @Test
@@ -455,7 +458,9 @@ public abstract class HarnessStoreJoinContract {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     assertThrows(
         IllegalArgumentException.class,

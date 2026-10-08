@@ -9,6 +9,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.syst
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reaso
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -417,7 +419,8 @@ class HarnessRuntimeAcceptThreadTest {
   }
 
   private static ThreadJoinRequest rootTicket(UUID invocationId) {
-    return new ThreadJoinRequest(invocationId, null, null, "a".repeat(64), "assistant", 3, 3, 1, 1);
+    return new ThreadJoinRequest(
+        invocationId, null, null, "a".repeat(64), "assistant", 3, 3, 1, 1, JoinPurpose.TASK);
   }
 
   /** 纯设置 batch 在 STOPPED 既有 Thread 上被接受：不复活为 RUNNABLE、不打开 INPUT turn / 不启动模型，仅入队等待下一 INPUT 边界收割。 */
@@ -448,6 +451,8 @@ class HarnessRuntimeAcceptThreadTest {
     List<ThreadCommand> queued = runtime.getThreadSnapshot(baseline.threadId()).queuedCommands();
     assertEquals(2, queued.size());
     assertEquals(ThreadCommandState.QUEUED, queued.getFirst().state());
+    // 纯设置不单独调用模型：STOPPED 线程仍无 active ModelInvocation。
+    assertNull(runtime.getThreadSnapshot(baseline.threadId()).model());
   }
 
   /** RUNNABLE 既有 Thread 上的纯设置 batch 同样只入队、不打开 INPUT turn、不推进 head。 */

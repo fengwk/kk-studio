@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -464,6 +466,7 @@ final class AcceptCommandsControl {
                   requireRootEntry(tx, session.id()),
                   advanced,
                   List.copyOf(userCommands),
+                  false,
                   false),
               join);
         });
@@ -576,18 +579,40 @@ final class AcceptCommandsControl {
       if (!parent.headEntryId().equals(join.expectedParentHeadEntryId())) {
         throw new IllegalArgumentException("join parent no longer accepts this invocation");
       }
-      // task 配额按未完成 parent Join 计数：本次准入将新增一个未完成 Join。
-      if (tx.countIncompleteChildJoins(parentId) >= join.maxConcurrentChildren()) {
-        throw new IllegalArgumentException("parent join quota exceeded");
+      // 同一父/子对至多一个有效未完成 join：本次续接会原子上位并 supersede 既有未完成 join，因此按替换后的
+      // 有效数量判定父子配额，而不是把被替换的旧 join 重复计入。COMPACTION join 不占普通 task 配额。
+      if (join.purpose() == JoinPurpose.TASK) {
+        long replaced =
+            tx.loadIncompleteJoins(childId).stream()
+                .filter(
+                    pending ->
+                        parentId.equals(pending.parentThreadId())
+                            && pending.purpose() == JoinPurpose.TASK)
+                .count();
+        int projectedChildren = tx.countIncompleteChildJoins(parentId) - (int) replaced + 1;
+        if (projectedChildren > join.maxConcurrentChildren()) {
+          throw new IllegalArgumentException("parent join quota exceeded");
+        }
       }
     }
     int depth = creating ? chain.size() + 1 : chain.size();
     if (depth > join.maxDepth()) {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
-    // 全局未完成执行子 Join 上限（跨所有 root，不含 root ticket）：maxConcurrentThreads 来自冻结的 task 全局设置。
-    if (parentId != null && tx.countIncompleteSubagentJoins() >= join.maxConcurrentThreads()) {
-      throw new IllegalArgumentException("subagent concurrency quota exceeded");
+    // 全局未完成执行子 Join 上限（跨所有 root，不含 root ticket）：maxConcurrentThreads 来自冻结的 task 全局设置；
+    // 同样按替换后的有效数量判定，被 supersede 的旧 join 不消耗活跃额度。COMPACTION join 不占普通 task 配额。
+    if (parentId != null && join.purpose() == JoinPurpose.TASK) {
+      long replaced =
+          tx.loadIncompleteJoins(childId).stream()
+              .filter(
+                  pending ->
+                      parentId.equals(pending.parentThreadId())
+                          && pending.purpose() == JoinPurpose.TASK)
+              .count();
+      int projectedGlobal = tx.countIncompleteSubagentJoins() - (int) replaced + 1;
+      if (projectedGlobal > join.maxConcurrentThreads()) {
+        throw new IllegalArgumentException("subagent concurrency quota exceeded");
+      }
     }
   }
 
@@ -604,6 +629,7 @@ final class AcceptCommandsControl {
           || !existing.requestHash().equals(join.requestHash())
           || !existing.agent().equals(join.agent())
           || !Objects.equals(existing.maxTurns(), join.maxTurns())
+          || existing.purpose() != join.purpose()
           || accepted.acceptedCommands().stream()
               .noneMatch(cmd -> cmd.sequence() == existing.sourceCommandSequence())) {
         throw new IllegalArgumentException("join invocation identity reused");
@@ -614,6 +640,7 @@ final class AcceptCommandsControl {
       throw new IllegalArgumentException("source commands replayed without their join");
     }
     ThreadCommand source = accepted.acceptedCommands().get(accepted.acceptedCommands().size() - 1);
+    Instant joinNow = accepted.thread().updatedAt();
     tx.insertJoin(
         new ThreadJoin(
             join.invocationId(),
@@ -627,9 +654,24 @@ final class AcceptCommandsControl {
             null,
             null,
             null,
-            accepted.thread().updatedAt(),
-            accepted.thread().updatedAt()));
-    return accepted;
+            joinNow,
+            joinNow,
+            join.purpose(),
+            null));
+    // 同一父/子对至多一个有效未完成 join：新 join 落库后才 supersede 既有未完成 join，保证 superseded_by FK 指向已存在的新行；
+    // 旧 join 只记录接管身份并保留其 invocation identity 与排队源命令，随后不再占用配额、不再产生重复交付。
+    boolean replaced = false;
+    if (join.parentThreadId() != null) {
+      for (ThreadJoin pending : tx.loadIncompleteJoins(accepted.thread().id())) {
+        if (!pending.invocationId().equals(join.invocationId())
+            && join.parentThreadId().equals(pending.parentThreadId())) {
+          Instant supersedeNow = HarnessStoreTime.notBefore(joinNow, pending.updatedAt());
+          tx.updateJoin(pending.superseded(join.invocationId(), supersedeNow));
+          replaced = true;
+        }
+      }
+    }
+    return accepted.withJoinReplaced(replaced);
   }
 
   /** 全新 batch 的共性写入：preflight、插入 Commands、推进 version/next sequence、请求 THREAD Work。 */
@@ -668,7 +710,7 @@ final class AcceptCommandsControl {
     tx.updateThread(advanced);
     tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     return new AcceptedCommands(
-        session, requireRootEntry(tx, session.id()), advanced, List.copyOf(inserted), false);
+        session, requireRootEntry(tx, session.id()), advanced, List.copyOf(inserted), false, false);
   }
 
   /**
@@ -754,7 +796,7 @@ final class AcceptCommandsControl {
                     new IllegalStateException(
                         "session " + sessionId + " disappeared while thread existed"));
     return new AcceptedCommands(
-        session, requireRootEntry(tx, sessionId), thread, List.copyOf(ordered), true);
+        session, requireRootEntry(tx, sessionId), thread, List.copyOf(ordered), true, false);
   }
 
   /**
@@ -831,7 +873,12 @@ final class AcceptCommandsControl {
                     new IllegalStateException(
                         "session " + thread.sessionId() + " disappeared while thread existed"));
     return new AcceptedCommands(
-        session, requireRootEntry(tx, thread.sessionId()), thread, List.copyOf(ordered), true);
+        session,
+        requireRootEntry(tx, thread.sessionId()),
+        thread,
+        List.copyOf(ordered),
+        true,
+        false);
   }
 
   private static Instant effectiveMutationTime(Instant now, ThreadState thread) {
