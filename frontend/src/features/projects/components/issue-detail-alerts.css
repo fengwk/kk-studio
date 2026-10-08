@@ -1,0 +1,63 @@
+.issue-detail-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 20px 0;
+  overflow-wrap: anywhere;
+}
+
+.issue-detail-alert svg {
+  flex-shrink: 0;
+}
+
+.issue-detail-alert-danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--fg);
+}
+
+.issue-detail-alert-danger > svg {
+  color: var(--danger);
+}
+
+.issue-detail-alert-warning {
+  flex-direction: column;
+  align-items: stretch;
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--fg);
+}
+
+.issue-detail-alert-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.issue-detail-alert-warning .issue-detail-alert-heading {
+  color: var(--warning);
+}
+
+.issue-detail-alert-detail {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.issue-detail-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.issue-detail-alert-discard {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.issue-detail-alert-conflict {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
