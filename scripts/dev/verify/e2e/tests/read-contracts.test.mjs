@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { instantEpochMillis } from '../lib/http.mjs'
-import { assertFreshnessAt } from '../cases/interaction.mjs'
+import { assertFreshnessAt, assertInteraction } from '../cases/interaction.mjs'
 import { assertReferencedStateCodes } from '../cases/project.mjs'
 
 test('Instant numbers are epoch seconds and explicit ISO instants have the same value', () => {
@@ -31,5 +31,35 @@ test('referenced states have the exact independent set, canonical order and no d
     ['INIT', 1], ['INIT', ' '],
   ]) {
     assert.throws(() => assertReferencedStateCodes(invalid, ['INIT', 'WORK']))
+  }
+})
+
+test('manual input retains exact source names and never impersonates an environment wait', () => {
+  const id = '00000000-0000-0000-0000-000000000001'
+  const expected = {
+    threadId: id, rootThreadId: id, sessionId: id, chatId: id,
+    chatTitle: 'chat title', rootThreadName: 'root name',
+    questionnaire: { question: 'choose' }, label: 'manual',
+  }
+  const interaction = {
+    type: 'INPUT', interactionId: id, status: 'WAITING_INPUT',
+    threadId: id, sessionId: id, rootThreadId: id,
+    owner: {
+      type: 'CHAT', chatId: id, chatTitle: expected.chatTitle,
+      issueId: null, issueTitle: null, agentName: null, rootThreadName: expected.rootThreadName,
+    },
+    toolCallId: 'call-1', toolName: 'ask_user',
+    argumentsJson: JSON.stringify(expected.questionnaire), approvalJson: null,
+    environmentId: null, environmentName: null, waitingCount: null, createTime: 0,
+  }
+  assertInteraction(interaction, expected)
+  for (const change of [
+    { type: 'APPROVAL' }, { waitingCount: 1 }, { environmentId: id },
+    { environmentName: 'environment' },
+    { owner: { ...interaction.owner, chatTitle: 'wrong title' } },
+    { owner: { ...interaction.owner, rootThreadName: 'wrong root' } },
+    { obsolete: true },
+  ]) {
+    assert.throws(() => assertInteraction({ ...interaction, ...change }, expected))
   }
 })

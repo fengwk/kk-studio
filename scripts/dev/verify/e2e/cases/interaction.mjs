@@ -26,6 +26,7 @@ const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 /** InteractionDTO 精确字段集合：Pane 跳转与回答所需的最小事实。 */
 const INTERACTION_FIELDS = [
+  'type',
   'interactionId',
   'status',
   'threadId',
@@ -36,13 +37,16 @@ const INTERACTION_FIELDS = [
   'toolName',
   'argumentsJson',
   'approvalJson',
+  'environmentId',
+  'environmentName',
+  'waitingCount',
   'createTime',
 ]
 
 /** InteractionPageDTO 精确字段集合：total 是同一过滤条件下的真实待处理总数，freshnessAt 是时间驱动的最早变更时刻。 */
 const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total', 'freshnessAt']
 
-const OWNER_FIELDS = ['type', 'chatId', 'issueId', 'agentName']
+const OWNER_FIELDS = ['type', 'chatId', 'chatTitle', 'issueId', 'issueTitle', 'agentName', 'rootThreadName']
 const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
 
 /** 同宿主隔离服务以请求开始为时间下界，允许截止点在响应到达前已经过去。 */
@@ -62,13 +66,14 @@ function parseArguments(interaction) {
   return JSON.parse(interaction.argumentsJson)
 }
 
-function assertInteraction(
+export function assertInteraction(
   interaction,
-  { threadId, rootThreadId, sessionId, chatId, questionnaire, label },
+  { threadId, rootThreadId, sessionId, chatId, chatTitle, rootThreadName, questionnaire, label },
 ) {
   assertExactFields(interaction, INTERACTION_FIELDS, `${label} interaction`)
   assert(
     UUID_TEXT.test(interaction.interactionId)
+      && interaction.type === 'INPUT'
       && interaction.status === 'WAITING_INPUT'
       && interaction.threadId === threadId
       && interaction.sessionId === sessionId
@@ -78,6 +83,9 @@ function assertInteraction(
       && typeof interaction.toolCallId === 'string'
       && interaction.toolCallId.trim().length > 0
       && interaction.approvalJson === null
+      && interaction.environmentId === null
+      && interaction.environmentName === null
+      && interaction.waitingCount === null
       && instantEpochMillis(interaction.createTime) >= 0,
     JSON.stringify(interaction),
   )
@@ -85,7 +93,10 @@ function assertInteraction(
   assert(
     interaction.owner.type === 'CHAT'
       && interaction.owner.chatId === chatId
+      && interaction.owner.chatTitle === chatTitle
+      && interaction.owner.rootThreadName === rootThreadName
       && interaction.owner.issueId === null
+      && interaction.owner.issueTitle === null
       && interaction.owner.agentName === null,
     JSON.stringify(interaction.owner),
   )
@@ -289,6 +300,7 @@ registerCase({
       })
       threadId = String(createdThreadId)
 
+      const pendingSnapshot = await getThreadSnapshot(ctx, threadId)
       const pending = assertInteraction(
         await waitForPendingInteraction(ctx, { threadId }),
         {
@@ -296,6 +308,8 @@ registerCase({
           rootThreadId: threadId,
           sessionId: String(sessionId),
           chatId: chat.id,
+          chatTitle: chat.title,
+          rootThreadName: pendingSnapshot.thread.name,
           questionnaire,
           label: 'pending',
         },
