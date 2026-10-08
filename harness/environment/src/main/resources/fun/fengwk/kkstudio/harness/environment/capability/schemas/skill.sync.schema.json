@@ -17,6 +17,10 @@
     "targetCommit": {
       "type": "string",
       "description": "Target Git commit hash to install."
+    },
+    "credential": {
+      "type": "string",
+      "description": "Optional private-repository access token; never model-visible."
     }
   },
   "required": [

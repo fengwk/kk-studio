@@ -28,6 +28,7 @@ function samplePackage(overrides: Partial<SkillPackageDTO> = {}): SkillPackageDT
     description: 'Core developer skills',
     repositoryUrl: 'https://github.com/example/skills.git',
     branch: 'main',
+    hasToken: false,
     currentCommit: '1111111111111111111111111111111111111111',
     observedHeadCommit: null,
     headCheckedAt: null,
@@ -248,6 +249,8 @@ describe('SkillPackagesPage', () => {
     // 中文断言
     expect(screen.getByRole('button', { name: '创建技能包' })).toBeInTheDocument()
     expect(screen.getByTestId('check-status-pill')).toHaveTextContent('未检查')
+    expect(screen.getByText('访问令牌')).toBeInTheDocument()
+    expect(screen.getByText('未配置')).toBeInTheDocument()
     expect(screen.getByText('包含技能数量')).toBeInTheDocument()
     expect(screen.getByText('技能')).toBeInTheDocument()
     expect(screen.getByText('错误')).toBeInTheDocument()
@@ -264,6 +267,8 @@ describe('SkillPackagesPage', () => {
 
     expect(screen.getByRole('button', { name: 'Create Package' })).toBeInTheDocument()
     expect(screen.getByTestId('check-status-pill')).toHaveTextContent('Unchecked')
+    expect(screen.getByText('Access Token')).toBeInTheDocument()
+    expect(screen.getByText('Not configured')).toBeInTheDocument()
     expect(screen.getByText('Skills Count')).toBeInTheDocument()
     expect(screen.getByText('Skills')).toBeInTheDocument()
     expect(screen.getByText('Error')).toBeInTheDocument()
@@ -406,5 +411,217 @@ describe('SkillPackagesPage', () => {
     await user.click(within(confirmModal).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(agentService.deleteSkillPackage).not.toHaveBeenCalled()
+  })
+
+  it('creates a package including token when a non-blank token is typed', async () => {
+    // 意图：验证创建技能包时，输入访问令牌后提交数据携带 token 字段，且输入框为密码类型与关闭自动填充
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('core-tools')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /创建技能包|Create Package/i }))
+    const modal = screen.getByRole('dialog', { name: /创建技能包|Create Package/i })
+
+    const tokenInput = within(modal).getByPlaceholderText(/Personal Access Token/i)
+    expect(tokenInput).toHaveAttribute('type', 'password')
+    expect(tokenInput).toHaveAttribute('autocomplete', 'off')
+    expect(tokenInput).toHaveValue('')
+
+    await user.type(within(modal).getByPlaceholderText('my-skills'), 'private-pkg')
+    await user.type(
+      within(modal).getByPlaceholderText('https://github.com/org/repo.git'),
+      'https://github.com/myorg/private-skills.git',
+    )
+    await user.type(tokenInput, 'ghp_secret_access_token_123')
+
+    await user.click(within(modal).getByRole('button', { name: /确认创建|Confirm Create/i }))
+
+    await waitFor(() => {
+      expect(agentService.createSkillPackage).toHaveBeenCalledWith({
+        packageName: 'private-pkg',
+        description: null,
+        repositoryUrl: 'https://github.com/myorg/private-skills.git',
+        branch: 'main',
+        token: 'ghp_secret_access_token_123',
+      })
+    })
+  })
+
+  it('omits token in create request when token is whitespace only', async () => {
+    // 意图：验证创建时若 token 仅输入纯空白字符，按未填写处理，请求体完全省略 token
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('core-tools')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /创建技能包|Create Package/i }))
+    const modal = screen.getByRole('dialog', { name: /创建技能包|Create Package/i })
+
+    await user.type(within(modal).getByPlaceholderText('my-skills'), 'blank-token-pkg')
+    await user.type(
+      within(modal).getByPlaceholderText('https://github.com/org/repo.git'),
+      'https://github.com/myorg/blank-token.git',
+    )
+    const tokenInput = within(modal).getByPlaceholderText(/Personal Access Token/i)
+    await user.type(tokenInput, '   ')
+
+    await user.click(within(modal).getByRole('button', { name: /确认创建|Confirm Create/i }))
+
+    await waitFor(() => {
+      expect(agentService.createSkillPackage).toHaveBeenCalledWith({
+        packageName: 'blank-token-pkg',
+        description: null,
+        repositoryUrl: 'https://github.com/myorg/blank-token.git',
+        branch: 'main',
+      })
+    })
+  })
+
+  it('edits a package replacing token when new token is typed', async () => {
+    // 意图：编辑弹窗输入新令牌时，提交数据携带新 token 进行替换；密码输入框默认空白且绝不回显已有密钥
+    const user = userEvent.setup()
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
+      samplePackage({ packageName: 'core-tools', hasToken: true }),
+    ])
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('core-tools')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /编辑技能包.*core-tools/ }))
+    const modal = await screen.findByRole('dialog')
+
+    const tokenInput = within(modal).getByPlaceholderText(/留空保留已有令牌|Leave blank to keep existing token/i)
+    expect(tokenInput).toHaveAttribute('type', 'password')
+    expect(tokenInput).toHaveAttribute('autocomplete', 'off')
+    expect(tokenInput).toHaveValue('')
+
+    await user.type(tokenInput, 'ghp_replaced_token_456')
+    await user.click(within(modal).getByRole('button', { name: /保存修改|Save Changes/i }))
+
+    await waitFor(() => {
+      expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
+        expectedVersion: '1',
+        description: 'Core developer skills',
+        branch: 'main',
+        token: 'ghp_replaced_token_456',
+      })
+    })
+  })
+
+  it('edits a package sending token: null when clear token is selected', async () => {
+    // 意图：三态编辑中勾选“清除令牌”时，向后端发送 token: null，并禁用密码输入框
+    const user = userEvent.setup()
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
+      samplePackage({ packageName: 'core-tools', hasToken: true }),
+    ])
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('core-tools')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /编辑技能包.*core-tools/ }))
+    const modal = await screen.findByRole('dialog')
+
+    const tokenInput = within(modal).getByPlaceholderText(/留空保留已有令牌|Leave blank to keep existing token/i)
+    const clearCheckbox = within(modal).getByRole('checkbox', { name: /清除令牌|Clear token/i })
+    expect(clearCheckbox).not.toBeChecked()
+
+    // 勾选清除令牌
+    await user.click(clearCheckbox)
+    expect(clearCheckbox).toBeChecked()
+    expect(tokenInput).toBeDisabled()
+
+    await user.click(within(modal).getByRole('button', { name: /保存修改|Save Changes/i }))
+
+    await waitFor(() => {
+      expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
+        expectedVersion: '1',
+        description: 'Core developer skills',
+        branch: 'main',
+        token: null,
+      })
+    })
+  })
+
+  it('edits a package preserving token (omitting token) when left blank and clear is unchecked', async () => {
+    // 意图：编辑时密码框留空且未勾选清除，请求体中完全省略 token 字段以保留既有令牌
+    const user = userEvent.setup()
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
+      samplePackage({ packageName: 'core-tools', hasToken: true }),
+    ])
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('core-tools')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /编辑技能包.*core-tools/ }))
+    const modal = await screen.findByRole('dialog')
+
+    const tokenInput = within(modal).getByPlaceholderText(/留空保留已有令牌|Leave blank to keep existing token/i)
+    await user.type(tokenInput, '   ') // 纯空白亦按省略保留处理
+
+    await user.click(within(modal).getByRole('button', { name: /保存修改|Save Changes/i }))
+
+    await waitFor(() => {
+      const call = vi.mocked(agentService.editSkillPackage).mock.calls[0]
+      expect(call?.[0]).toBe('core-tools')
+      expect(call?.[1]).toEqual({
+        expectedVersion: '1',
+        description: 'Core developer skills',
+        branch: 'main',
+      })
+      expect('token' in (call?.[1] ?? {})).toBe(false)
+    })
+  })
+
+  it('renders card showing token configured vs unconfigured from hasToken without echoing secrets', async () => {
+    // 意图：卡片元信息行只展示已配置/未配置状态文案，绝不渲染任何明文令牌，支持双语
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
+      samplePackage({ packageName: 'with-token', hasToken: true }),
+      samplePackage({ packageName: 'without-token', hasToken: false }),
+    ])
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('with-token')).toBeInTheDocument()
+      expect(screen.getByText('without-token')).toBeInTheDocument()
+    })
+
+    const cards = screen.getAllByRole('article')
+    expect(cards).toHaveLength(2)
+
+    // zh-CN 校验
+    const withTokenCard = cards[0]!
+    const withoutTokenCard = cards[1]!
+
+    expect(within(withTokenCard).getByText('访问令牌')).toBeInTheDocument()
+    expect(within(withTokenCard).getByText('已配置')).toBeInTheDocument()
+
+    expect(within(withoutTokenCard).getByText('访问令牌')).toBeInTheDocument()
+    expect(within(withoutTokenCard).getByText('未配置')).toBeInTheDocument()
+
+    // 绝不回显任何类似令牌的内容
+    expect(screen.queryByText(/ghp_/i)).not.toBeInTheDocument()
+
+    // 实时切 en-US 校验
+    act(() => {
+      setLocale('en-US')
+    })
+
+    expect(within(withTokenCard).getByText('Access Token')).toBeInTheDocument()
+    expect(within(withTokenCard).getByText('Configured')).toBeInTheDocument()
+
+    expect(within(withoutTokenCard).getByText('Access Token')).toBeInTheDocument()
+    expect(within(withoutTokenCard).getByText('Not configured')).toBeInTheDocument()
   })
 })

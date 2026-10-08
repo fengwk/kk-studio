@@ -38,8 +38,9 @@ public final class SkillSyncCapability extends AbstractCodingCapability {
       String repositoryUrl = string(args, "repositoryUrl");
       String branch = string(args, "branch");
       String targetCommit = string(args, "targetCommit");
+      String credential = optionalCredential(args);
       InstalledSkillPackage installed =
-          installer.install(packageName, repositoryUrl, branch, targetCommit);
+          installer.install(packageName, repositoryUrl, branch, targetCommit, credential);
       ObjectNode node = OBJECT_MAPPER.createObjectNode();
       node.put("packageName", installed.packageName());
       node.put("installedCommit", installed.installedCommit());
@@ -57,5 +58,17 @@ public final class SkillSyncCapability extends AbstractCodingCapability {
       return EnvironmentCapabilityResult.codedError(
           callId, "SKILL_SYNC_FAILED", "Skill sync failed");
     }
+  }
+
+  static String optionalCredential(JsonNode args) {
+    JsonNode value = args.get("credential");
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException("credential must be a string");
+    }
+    String text = value.textValue();
+    return text.isBlank() ? null : text;
   }
 }

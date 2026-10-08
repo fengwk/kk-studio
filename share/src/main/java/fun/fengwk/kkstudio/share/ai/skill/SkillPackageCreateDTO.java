@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.skill;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * {@code POST /api/ai/catalog/skill-packages} 请求体：创建 Package 并发布当时的 branch HEAD。
@@ -23,6 +24,9 @@ public class SkillPackageCreateDTO {
 
   /** 只用于检查候选更新的 branch，也是创建时解析首个 commit 的来源。 */
   private String branch;
+
+  /** 可空私有仓库访问令牌（PAT）：省略或 null 表示匿名访问；非空值加密保存，绝不回显、绝不进入日志或模型上下文。 */
+  @ToString.Exclude private String token;
 
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object ignoredValue) {

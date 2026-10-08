@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.skill.git;
 
 import lombok.extern.slf4j.Slf4j;
+import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.FileMode;
@@ -8,35 +9,41 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 
 /**
- * Platform 拥有的 Git Skill bare cache 默认实现。
+ * Platform 拥有的 Git Skill cache 默认实现。
  *
- * <p>底层在 {@code <cacheRoot>/<packageName>.git} 维护 bare repository，严格按 exact commit 补齐与读取对象。
+ * <p>底层按 temporary clone -> materialize/checkout exact commit -> validate manifest -> atomic
+ * publish 流程维护物化目录缓存，读取与扫描均直接面向发布目录。
  */
 @Slf4j
 @DependsOn("systemProxySelector")
@@ -55,7 +62,7 @@ public class JGitSkillCache implements SkillGitCache {
   /**
    * 构造 JGitSkillCache，若 cacheRoot 目录不存在则自动创建。
    *
-   * @param cacheRoot bare 仓库的根缓存目录
+   * @param cacheRoot 仓库的根缓存目录
    */
   public JGitSkillCache(Path cacheRoot) {
     this(cacheRoot, GitHttpConnectionFactory.CONNECT_MILLIS, GitHttpConnectionFactory.READ_MILLIS);
@@ -74,7 +81,7 @@ public class JGitSkillCache implements SkillGitCache {
   }
 
   @Override
-  public String resolveBranchHead(String repositoryUrl, String branch) {
+  public String resolveBranchHead(String repositoryUrl, String branch, String token) {
     validateRepositoryUrl(repositoryUrl);
     if (branch == null || branch.isBlank()) {
       throw new SkillGitException("branch must not be blank");
@@ -84,13 +91,17 @@ public class JGitSkillCache implements SkillGitCache {
     }
 
     String targetRefName = "refs/heads/" + branch;
+    CredentialsProvider credentials = credentialsProvider(token);
     try (GitHttpConnectionFactory network =
         new GitHttpConnectionFactory(connectMillis, readMillis)) {
-      Map<String, Ref> refMap =
+      var lsRemoteCommand =
           Git.lsRemoteRepository()
               .setRemote(repositoryUrl)
-              .setTransportConfigCallback(network.callback())
-              .callAsMap();
+              .setTransportConfigCallback(network.callback());
+      if (credentials != null) {
+        lsRemoteCommand.setCredentialsProvider(credentials);
+      }
+      Map<String, Ref> refMap = lsRemoteCommand.callAsMap();
 
       Ref ref = refMap.get(targetRefName);
       if (ref == null || ref.getObjectId() == null) {
@@ -112,6 +123,9 @@ public class JGitSkillCache implements SkillGitCache {
     } catch (SkillGitException e) {
       throw e;
     } catch (Exception e) {
+      if (GitHttpConnectionFactory.isAuthenticationFailure(e)) {
+        throw authenticationFailed(e);
+      }
       throw new SkillGitException(
           GitHttpConnectionFactory.failureCode(e)
               + ": Failed to resolve branch head for "
@@ -125,85 +139,173 @@ public class JGitSkillCache implements SkillGitCache {
   }
 
   @Override
-  public void ensureCommit(String packageName, String repositoryUrl, String commit) {
+  public void ensureCommit(String packageName, String repositoryUrl, String commit, String token) {
     validateCommit(commit);
     validatePackageName(packageName);
     validateRepositoryUrl(repositoryUrl);
 
     Object lock = packageLocks.computeIfAbsent(packageName, k -> new Object());
     synchronized (lock) {
-      Path repoPath = resolveRepoPath(packageName);
-      File repoDir = repoPath.toFile();
+      Path publishedDir = resolvePublishedDir(packageName);
+      Path workRoot = cacheRoot.resolve(".work").normalize();
 
-      if (!Files.exists(repoPath)) {
+      Path commitMarker = publishedDir.resolve(".kkstudio-commit");
+      if (Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
         try {
-          Files.createDirectories(repoPath.getParent());
-          try (Git git = Git.init().setBare(true).setDirectory(repoDir).call()) {
-            StoredConfig config = git.getRepository().getConfig();
-            config.setString("remote", "origin", "url", repositoryUrl);
-            config.save();
+          String cachedCommit = Files.readString(commitMarker, StandardCharsets.UTF_8).trim();
+          if (commit.equals(cachedCommit)) {
+            return;
           }
-        } catch (Exception e) {
-          throw new SkillGitException(
-              "Failed to initialize bare repository for package "
-                  + packageName
-                  + ": "
-                  + e.getMessage(),
-              e);
+        } catch (IOException ignored) {
+          // If reading fails, proceed to clone and publish
         }
       }
 
-      try (Repository repo =
-          new FileRepositoryBuilder().setGitDir(repoDir).setMustExist(true).build()) {
-        ObjectId commitId = ObjectId.fromString(commit);
-        if (repo.getObjectDatabase().has(commitId)) {
-          // commit 已存在时必须是 no-op（不产生额外网络/fetch 副作用）
-          return;
+      try {
+        Files.createDirectories(workRoot);
+      } catch (IOException e) {
+        throw new SkillGitException("Failed to create work directory: " + workRoot, e);
+      }
+
+      String uuid = UUID.randomUUID().toString();
+      Path cloneDir = workRoot.resolve(packageName + "." + uuid + ".clone");
+      Path stagingDir = workRoot.resolve(packageName + "." + uuid + ".staging");
+      Path oldDir = workRoot.resolve(packageName + "." + uuid + ".old");
+
+      try {
+        CredentialsProvider credentials = credentialsProvider(token);
+        Git git;
+        try (GitHttpConnectionFactory network =
+            new GitHttpConnectionFactory(connectMillis, readMillis)) {
+          CloneCommand cloneCommand =
+              Git.cloneRepository()
+                  .setURI(repositoryUrl)
+                  .setDirectory(cloneDir.toFile())
+                  .setCloneAllBranches(true)
+                  .setTransportConfigCallback(network.callback());
+          if (credentials != null) {
+            cloneCommand.setCredentialsProvider(credentials);
+          }
+          try {
+            git = cloneCommand.call();
+          } catch (Exception e) {
+            if (GitHttpConnectionFactory.isAuthenticationFailure(e)) {
+              throw authenticationFailed(e);
+            }
+            throw new SkillGitException(
+                GitHttpConnectionFactory.failureCode(e) + ": Failed to clone repository", e);
+          }
         }
 
-        try (Git git = new Git(repo);
-            GitHttpConnectionFactory network =
-                new GitHttpConnectionFactory(connectMillis, readMillis)) {
-          boolean fetched = false;
-          try {
-            git.fetch()
-                .setRemote(repositoryUrl)
-                .setTransportConfigCallback(network.callback())
-                .setRefSpecs(new RefSpec(commit))
-                .call();
-            if (repo.getObjectDatabase().has(commitId)) {
-              fetched = true;
-            }
-          } catch (Exception e) {
-            if (!GitHttpConnectionFactory.canFallback(e)) {
-              throw new SkillGitException(GitHttpConnectionFactory.failureCode(e), e);
-            }
-            log.debug(
-                "Direct commit fetch failed for {}, falling back to branch fetch: {}",
-                commit,
-                e.getMessage());
-          }
-
-          if (!fetched) {
-            try {
-              git.fetch()
-                  .setRemote(repositoryUrl)
-                  .setTransportConfigCallback(network.callback())
-                  .setRefSpecs(new RefSpec("+refs/heads/*:refs/remotes/origin/*"))
-                  .call();
-            } catch (Exception e) {
-              throw new SkillGitException(
-                  GitHttpConnectionFactory.failureCode(e)
-                      + ": Failed to fetch branches from "
-                      + repositoryUrl,
-                  e);
-            }
-          }
-
+        try (git) {
+          Repository repo = git.getRepository();
+          ObjectId commitId = ObjectId.fromString(commit);
           if (!repo.getObjectDatabase().has(commitId)) {
-            throw new SkillGitException(
-                "Commit " + commit + " does not exist in repository " + repositoryUrl);
+            throw new SkillGitException("Commit " + commit + " does not exist in repository");
           }
+
+          RevCommit revCommit;
+          try (RevWalk revWalk = new RevWalk(repo)) {
+            revCommit = revWalk.parseCommit(commitId);
+          } catch (Exception e) {
+            throw new SkillGitException(
+                "Invalid commit object " + commit + " in repository: " + e.getMessage(), e);
+          }
+
+          try {
+            Files.createDirectories(stagingDir);
+          } catch (IOException e) {
+            throw new SkillGitException("Failed to create staging directory: " + stagingDir, e);
+          }
+
+          try (TreeWalk treeWalk = new TreeWalk(repo)) {
+            treeWalk.addTree(revCommit.getTree());
+            treeWalk.setRecursive(false);
+            while (treeWalk.next()) {
+              String name = treeWalk.getNameString();
+              SkillManifestScanner.validateEntrySegment(name);
+
+              String pathString = treeWalk.getPathString();
+              Path target = stagingDir.resolve(pathString).normalize();
+              if (!target.startsWith(stagingDir) || target.equals(stagingDir)) {
+                throw new SkillGitException("Path escapes staging directory: " + pathString);
+              }
+
+              FileMode fileMode = treeWalk.getFileMode(0);
+              if (fileMode == FileMode.TREE) {
+                try {
+                  Files.createDirectories(target);
+                } catch (IOException e) {
+                  throw new SkillGitException("Failed to create directory: " + pathString, e);
+                }
+                treeWalk.enterSubtree();
+              } else if (fileMode == FileMode.REGULAR_FILE
+                  || fileMode == FileMode.EXECUTABLE_FILE) {
+                Path parent = target.getParent();
+                if (parent != null) {
+                  try {
+                    Files.createDirectories(parent);
+                  } catch (IOException e) {
+                    throw new SkillGitException(
+                        "Failed to create parent directory for: " + pathString, e);
+                  }
+                }
+                ObjectId blobId = treeWalk.getObjectId(0);
+                try {
+                  ObjectLoader loader = repo.open(blobId, Constants.OBJ_BLOB);
+                  Files.write(target, loader.getBytes());
+                } catch (IOException e) {
+                  throw new SkillGitException("Failed to write blob for: " + pathString, e);
+                }
+              } else {
+                throw new SkillGitException(
+                    "Forbidden file mode " + fileMode + " for entry: " + pathString);
+              }
+            }
+          } catch (SkillGitException e) {
+            throw e;
+          } catch (Exception e) {
+            throw new SkillGitException(
+                "Failed to materialize commit tree for " + commit + ": " + e.getMessage(), e);
+          }
+        }
+
+        SkillManifestScanner.scan(stagingDir, packageName);
+
+        try {
+          Files.writeString(
+              stagingDir.resolve(".kkstudio-commit"), commit + "\n", StandardCharsets.UTF_8);
+        } catch (IOException e) {
+          throw new SkillGitException("Failed to write commit marker file in staging directory", e);
+        }
+
+        boolean backedUp = false;
+        if (Files.exists(publishedDir, LinkOption.NOFOLLOW_LINKS)) {
+          try {
+            Files.move(publishedDir, oldDir, StandardCopyOption.ATOMIC_MOVE);
+            backedUp = true;
+          } catch (IOException e) {
+            throw new SkillGitException(
+                "Failed to backup existing package directory: " + publishedDir, e);
+          }
+        }
+
+        try {
+          Files.move(stagingDir, publishedDir, StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception moveError) {
+          if (backedUp) {
+            try {
+              Files.move(oldDir, publishedDir, StandardCopyOption.ATOMIC_MOVE);
+            } catch (Exception restoreError) {
+              moveError.addSuppressed(restoreError);
+            }
+          }
+          throw new SkillGitException(
+              "Failed to publish skill cache directory for package " + packageName, moveError);
+        }
+
+        if (backedUp) {
+          deleteRecursivelyQuietly(oldDir);
         }
       } catch (SkillGitException e) {
         throw e;
@@ -216,8 +318,25 @@ public class JGitSkillCache implements SkillGitCache {
                 + ": "
                 + e.getMessage(),
             e);
+      } finally {
+        deleteRecursivelyQuietly(cloneDir);
+        deleteRecursivelyQuietly(stagingDir);
       }
     }
+  }
+
+  /** 仅在提供非空白令牌时构造 JGit 凭据；令牌只进入 HTTP authorization，绝不拼入 URL 或日志。 */
+  private static CredentialsProvider credentialsProvider(String token) {
+    if (token == null || token.isBlank()) {
+      return null;
+    }
+    return new UsernamePasswordCredentialsProvider("x-access-token", token);
+  }
+
+  /** 权限失败的稳定收敛：附带错误码但不含 URL、令牌或自由文本。 */
+  private static SkillGitException authenticationFailed(Throwable cause) {
+    return new SkillGitException(
+        SkillGitException.CODE_AUTHENTICATION_FAILED, "repository authentication failed", cause);
   }
 
   @Override
@@ -225,31 +344,27 @@ public class JGitSkillCache implements SkillGitCache {
     validateCommit(commit);
     validatePackageName(packageName);
 
-    Path repoPath = resolveRepoPath(packageName);
-    if (!Files.isDirectory(repoPath)) {
-      throw new SkillGitException("Cache repository not found for package: " + packageName);
+    Path publishedDir = resolvePublishedDir(packageName);
+    Path commitMarker = publishedDir.resolve(".kkstudio-commit");
+    if (!Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
+      throw new SkillGitException(
+          "Commit " + commit + " is not published for package " + packageName);
     }
 
-    try (Repository repo =
-        new FileRepositoryBuilder().setGitDir(repoPath.toFile()).setMustExist(true).build()) {
-      ObjectId commitId = ObjectId.fromString(commit);
-      if (!repo.getObjectDatabase().has(commitId)) {
-        throw new SkillGitException(
-            "Commit " + commit + " does not exist in cache repository for package " + packageName);
-      }
-      return SkillManifestScanner.scan(repo, commitId, packageName);
-    } catch (SkillGitException e) {
-      throw e;
-    } catch (Exception e) {
+    String publishedCommit;
+    try {
+      publishedCommit = Files.readString(commitMarker, StandardCharsets.UTF_8).trim();
+    } catch (IOException e) {
       throw new SkillGitException(
-          "Failed to scan manifest for package "
-              + packageName
-              + " commit "
-              + commit
-              + ": "
-              + e.getMessage(),
-          e);
+          "Failed to read commit marker for package " + packageName + ": " + e.getMessage(), e);
     }
+
+    if (!commit.equals(publishedCommit)) {
+      throw new SkillGitException(
+          "Commit " + commit + " is not published for package " + packageName);
+    }
+
+    return SkillManifestScanner.scan(publishedDir, packageName);
   }
 
   @Override
@@ -258,50 +373,49 @@ public class JGitSkillCache implements SkillGitCache {
     validatePackageName(packageName);
     validatePath(path);
 
-    Path repoPath = resolveRepoPath(packageName);
-    if (!Files.isDirectory(repoPath)) {
-      throw new SkillGitException("Cache repository not found for package: " + packageName);
+    Path publishedDir = resolvePublishedDir(packageName);
+    Path commitMarker = publishedDir.resolve(".kkstudio-commit");
+    if (!Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
+      throw new SkillGitException(
+          "Commit " + commit + " is not published for package " + packageName);
     }
 
-    try (Repository repo =
-        new FileRepositoryBuilder().setGitDir(repoPath.toFile()).setMustExist(true).build()) {
-      ObjectId commitId = ObjectId.fromString(commit);
-      if (!repo.getObjectDatabase().has(commitId)) {
-        throw new SkillGitException(
-            "Commit " + commit + " does not exist in cache repository for package " + packageName);
-      }
+    String publishedCommit;
+    try {
+      publishedCommit = Files.readString(commitMarker, StandardCharsets.UTF_8).trim();
+    } catch (IOException e) {
+      throw new SkillGitException(
+          "Failed to read commit marker for package " + packageName + ": " + e.getMessage(), e);
+    }
 
-      RevCommit revCommit;
-      try (RevWalk revWalk = new RevWalk(repo)) {
-        revCommit = revWalk.parseCommit(commitId);
-      } catch (Exception e) {
-        throw new SkillGitException(
-            "Invalid commit object "
-                + commit
-                + " in package "
-                + packageName
-                + ": "
-                + e.getMessage(),
-            e);
-      }
+    if (!commit.equals(publishedCommit)) {
+      throw new SkillGitException(
+          "Commit " + commit + " is not published for package " + packageName);
+    }
 
-      try (TreeWalk treeWalk = TreeWalk.forPath(repo, path, revCommit.getTree())) {
-        if (treeWalk == null) {
-          throw new SkillGitException(
-              "File not found: " + path + " in package " + packageName + " commit " + commit);
-        }
-        FileMode fileMode = treeWalk.getFileMode(0);
-        if (fileMode != FileMode.REGULAR_FILE && fileMode != FileMode.EXECUTABLE_FILE) {
-          throw new SkillGitException(
-              "Path '" + path + "' is not a regular file (mode=" + fileMode + ")");
-        }
-        ObjectId blobId = treeWalk.getObjectId(0);
-        ObjectLoader loader = repo.open(blobId, Constants.OBJ_BLOB);
-        return loader.getBytes();
-      }
-    } catch (SkillGitException e) {
-      throw e;
-    } catch (Exception e) {
+    Path target = publishedDir.resolve(path).normalize();
+    if (!target.startsWith(publishedDir) || target.equals(publishedDir)) {
+      throw new SkillGitException("Path escapes package directory: " + path);
+    }
+
+    BasicFileAttributes attrs;
+    try {
+      attrs = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    } catch (NoSuchFileException e) {
+      throw new SkillGitException(
+          "File not found: " + path + " in package " + packageName + " commit " + commit, e);
+    } catch (IOException e) {
+      throw new SkillGitException(
+          "Failed to read file attributes: " + path + " in package " + packageName, e);
+    }
+
+    if (!attrs.isRegularFile()) {
+      throw new SkillGitException("Path '" + path + "' is not a regular file");
+    }
+
+    try {
+      return Files.readAllBytes(target);
+    } catch (IOException e) {
       throw new SkillGitException(
           "Failed to read file '"
               + path
@@ -379,11 +493,39 @@ public class JGitSkillCache implements SkillGitCache {
     }
   }
 
-  private Path resolveRepoPath(String packageName) {
-    Path repoPath = cacheRoot.resolve(packageName + ".git").normalize();
-    if (!repoPath.startsWith(cacheRoot)) {
+  private Path resolvePublishedDir(String packageName) {
+    Path publishedDir = cacheRoot.resolve(packageName).normalize();
+    if (!publishedDir.startsWith(cacheRoot) || publishedDir.equals(cacheRoot)) {
       throw new SkillGitException("Package path escapes cache root: " + packageName);
     }
-    return repoPath;
+    return publishedDir;
+  }
+
+  private static void deleteRecursivelyQuietly(Path path) {
+    if (path == null) {
+      return;
+    }
+    try {
+      if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+        return;
+      }
+      try (var stream = Files.walk(path)) {
+        stream
+            .sorted(Comparator.reverseOrder())
+            .forEach(
+                p -> {
+                  try {
+                    Files.deleteIfExists(p);
+                  } catch (IOException e) {
+                    try {
+                      p.toFile().setWritable(true);
+                      Files.deleteIfExists(p);
+                    } catch (Exception ignored) {
+                    }
+                  }
+                });
+      }
+    } catch (Exception ignored) {
+    }
   }
 }

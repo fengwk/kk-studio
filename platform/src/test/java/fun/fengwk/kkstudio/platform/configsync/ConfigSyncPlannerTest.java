@@ -185,7 +185,7 @@ class ConfigSyncPlannerTest {
             + "a".repeat(40)
             + "\n";
     assertThrows(AiValidationException.class, () -> plan(yamlText));
-    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString());
+    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString(), any());
   }
 
   @Test
@@ -194,7 +194,7 @@ class ConfigSyncPlannerTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     doThrow(new SkillGitException("cannot fetch https://user:pass@example.com/secret.git"))
         .when(skillGitCache)
-        .ensureCommit(anyString(), anyString(), anyString());
+        .ensureCommit(anyString(), anyString(), anyString(), any());
 
     String yamlText =
         "skillPackages:\n"
@@ -248,7 +248,7 @@ class ConfigSyncPlannerTest {
     assertEquals(
         List.of("s2"),
         plan.skillPackages().get(0).manifest().stream().map(SkillManifestEntry::name).toList());
-    verify(skillGitCache).ensureCommit("pkg", "https://example.com/pkg.git", "a".repeat(40));
+    verify(skillGitCache).ensureCommit("pkg", "https://example.com/pkg.git", "a".repeat(40), null);
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
   }
@@ -278,7 +278,7 @@ class ConfigSyncPlannerTest {
     AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
 
     assertFalse(error.getMessage().contains("other.git"));
-    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString());
+    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString(), any());
   }
 
   @Test
@@ -451,7 +451,7 @@ class ConfigSyncPlannerTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     doThrow(new SkillGitException("boom"))
         .when(skillGitCache)
-        .ensureCommit(anyString(), anyString(), anyString());
+        .ensureCommit(anyString(), anyString(), anyString(), any());
 
     String yamlText =
         PROVIDER_AND_MODEL

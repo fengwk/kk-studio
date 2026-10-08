@@ -97,11 +97,7 @@ class LspDaemonWiringTest {
         config,
         service,
         new SkillPackageInstaller(
-            root.resolve("skills"),
-            root.resolve("cache"),
-            root.resolve("staging"),
-            root.resolve("backup"),
-            executor),
+            root.resolve("skills"), root.resolve("staging"), root.resolve("backup"), executor),
         executor,
         scheduler);
     EnvironmentCapability gotoDefinition =

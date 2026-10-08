@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.skill;
 
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.RefNotAdvertisedException;
+import org.eclipse.jgit.api.errors.TransportException;
 import org.eclipse.jgit.transport.TransportHttp;
 import org.eclipse.jgit.transport.http.HttpConnection;
 import org.eclipse.jgit.transport.http.HttpConnectionFactory;
@@ -172,6 +173,9 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
   /** 稳定分类沿 JGit 异常链传播，不依赖其本地化错误文本。 */
   static String failureCode(Throwable error) {
     for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (isAuthenticationFailure(cause)) {
+        return "GIT_AUTHENTICATION_FAILED";
+      }
       if (cause instanceof UnsupportedTransportException) {
         return "UNSUPPORTED_REPOSITORY_SCHEME";
       }
@@ -182,6 +186,35 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
       }
     }
     return "GIT_FETCH_FAILED";
+  }
+
+  private static boolean isTransportException(Throwable cause) {
+    if (cause == null) {
+      return false;
+    }
+    return cause instanceof TransportException
+        || (cause.getClass().getName().startsWith("org.eclipse.jgit.")
+            && "TransportException".equals(cause.getClass().getSimpleName()));
+  }
+
+  private static boolean isAuthenticationFailure(Throwable cause) {
+    if (!isTransportException(cause)) {
+      return false;
+    }
+    for (Throwable current = cause; current != null; current = current.getCause()) {
+      String message = current.getMessage();
+      if (message != null) {
+        String lower = message.toLowerCase(Locale.ROOT);
+        if (lower.contains("not authorized")
+            || lower.contains("authentication is required")
+            || lower.contains("not permitted")
+            || lower.contains("401")
+            || lower.contains("403")) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   static boolean canFallback(Throwable error) {

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.skill.git;
 
 import org.eclipse.jgit.api.TransportConfigCallback;
-import org.eclipse.jgit.api.errors.RefNotAdvertisedException;
+import org.eclipse.jgit.errors.TransportException;
 import org.eclipse.jgit.transport.TransportHttp;
 import org.eclipse.jgit.transport.http.HttpConnection;
 import org.eclipse.jgit.transport.http.HttpConnectionFactory;
@@ -143,6 +143,9 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
   /** 稳定分类沿 JGit 异常链传播，不依赖其本地化错误文本。 */
   static String failureCode(Throwable error) {
     for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (isAuthenticationFailure(cause)) {
+        return SkillGitException.CODE_AUTHENTICATION_FAILED;
+      }
       if (cause instanceof UnsupportedTransportException) {
         return "UNSUPPORTED_REPOSITORY_SCHEME";
       }
@@ -155,25 +158,29 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
     return "GIT_FETCH_FAILED";
   }
 
-  static boolean canFallback(Throwable error) {
-    if (!failureCode(error).equals("GIT_FETCH_FAILED")) {
+  /** 仓库要求认证或被拒绝授权：必须产生明确指导，绝不作为“可能是公共仓库”的默认回退。 */
+  static boolean isAuthenticationFailure(Throwable cause) {
+    if (cause == null) {
       return false;
     }
-    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-      if (cause instanceof InterruptedIOException) {
-        // 取消或中断（含 socket 超时）绝不能触发第二次 fetch，即使链条上另有匹配文本。
-        return false;
-      }
+    boolean transport =
+        cause instanceof TransportException
+            || (cause.getClass().getName().startsWith("org.eclipse.jgit.")
+                && "TransportException".equals(cause.getClass().getSimpleName()));
+    if (!transport) {
+      return false;
     }
-    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-      if (cause instanceof RefNotAdvertisedException) {
-        return true;
+    for (Throwable current = cause; current != null; current = current.getCause()) {
+      String message = current.getMessage();
+      if (message == null) {
+        continue;
       }
-      String message = cause.getMessage();
-      if (message != null
-          && (message.contains("not our ref")
-              || message.contains("unadvertised object")
-              || message.matches("(?s).*want [0-9a-f]{40,64} not valid.*"))) {
+      String lower = message.toLowerCase(Locale.ROOT);
+      if (lower.contains("not authorized")
+          || lower.contains("authentication is required")
+          || lower.contains("not permitted")
+          || lower.contains("401")
+          || lower.contains("403")) {
         return true;
       }
     }

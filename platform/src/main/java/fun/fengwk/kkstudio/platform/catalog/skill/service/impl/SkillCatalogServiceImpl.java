@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
@@ -70,6 +71,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   private final SkillPackageGuard guard;
   private final AgentEditableSupport editableSupport;
   private final SkillCatalogWrites writes;
+  private final SkillTokenCipher tokenCipher;
 
   @Override
   public List<SkillPackageDTO> listPackages() {
@@ -95,6 +97,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     String description = requireDescription(createDTO.getDescription());
     String repositoryUrl = requireRepositoryUrl(createDTO.getRepositoryUrl());
     String branch = requireBranch(createDTO.getBranch());
+    String token = requireTokenOrNull(createDTO.getToken());
     if (skillPackageRepository.getPackage(packageName) != null) {
       throw new AiDuplicateException(
           SkillPackageGuard.RESOURCE, "skill package already exists: " + packageName);
@@ -102,12 +105,12 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     // Create 发布当时解析出的 exact branch HEAD：请求本身不接收 commit。
     String commit =
         git(
-            () -> skillGitCache.resolveBranchHead(repositoryUrl, branch),
+            () -> skillGitCache.resolveBranchHead(repositoryUrl, branch, token),
             "cannot resolve branch head: " + branch);
     List<SkillManifestEntry> skills =
         git(
             () -> {
-              skillGitCache.ensureCommit(packageName, repositoryUrl, commit);
+              skillGitCache.ensureCommit(packageName, repositoryUrl, commit, token);
               return skillGitCache.scanManifest(packageName, commit);
             },
             "cannot publish commit: " + commit);
@@ -122,6 +125,9 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     created.setHeadCheckError(null);
     created.setSkills(skills);
     created.setVersion(0L);
+    if (token != null) {
+      created.setEncryptedToken(tokenCipher.encrypt(packageName, token));
+    }
     return writes.execute(
         () -> {
           try {
@@ -148,13 +154,29 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     requireCurrentVersion(current, rawExpected, expected);
     String description = requireDescription(editDTO.getDescription());
     String branch = requireBranch(editDTO.getBranch());
-    // repository URL 是不可变身份：编辑只可能改变 description 与 branch，事实未变化就不推进 version。
+    // token 三态：省略保留、显式 null 清除、非空替换；非法空白串拒绝。
+    boolean tokenChanged = false;
+    byte[] encryptedToken = current.getEncryptedToken();
+    if (editDTO.isTokenProvided()) {
+      String token = editDTO.getToken();
+      if (token == null) {
+        tokenChanged = current.getEncryptedToken() != null;
+        encryptedToken = null;
+      } else {
+        String canonicalToken = requireToken(token);
+        encryptedToken = tokenCipher.encrypt(current.getPackageName(), canonicalToken);
+        tokenChanged = true;
+      }
+    }
+    // repository URL 是不可变身份：编辑只可能改变 description、branch 与访问令牌，事实未变化就不推进 version。
     if (Objects.equals(description, current.getDescription())
-        && Objects.equals(branch, current.getBranch())) {
+        && Objects.equals(branch, current.getBranch())
+        && !tokenChanged) {
       return converter.convert(current);
     }
     current.setDescription(description);
     current.setBranch(branch);
+    current.setEncryptedToken(encryptedToken);
     casUpdate(current, expected);
     return getPackage(packageName);
   }
@@ -185,7 +207,8 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     String headCheckError;
     try {
       observedHeadCommit =
-          skillGitCache.resolveBranchHead(current.getRepositoryUrl(), current.getBranch());
+          skillGitCache.resolveBranchHead(
+              current.getRepositoryUrl(), current.getBranch(), resolveStoredToken(current));
       headCheckError = null;
     } catch (SkillGitException error) {
       // 检查失败只记录有界错误：current commit、manifest 与上一次成功观察值全部保持不变。
@@ -228,10 +251,12 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
           "targetCommit must equal the observed branch head of this package version: "
               + current.getObservedHeadCommit());
     }
+    String token = resolveStoredToken(current);
     List<SkillManifestEntry> skills =
         git(
             () -> {
-              skillGitCache.ensureCommit(packageName, current.getRepositoryUrl(), targetCommit);
+              skillGitCache.ensureCommit(
+                  packageName, current.getRepositoryUrl(), targetCommit, token);
               return skillGitCache.scanManifest(packageName, targetCommit);
             },
             "cannot publish commit: " + targetCommit);
@@ -286,7 +311,8 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       String repositoryUrl,
       String branch,
       String currentCommit,
-      List<SkillManifestEntry> skills) {
+      List<SkillManifestEntry> skills,
+      String token) {
     String name = requirePackageName(packageName);
     String canonicalDescription = requireDescription(description);
     String url = requireRepositoryUrl(repositoryUrl);
@@ -296,6 +322,10 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       throw new AiValidationException(SkillPackageGuard.RESOURCE, "manifest must not be null");
     }
     List<SkillManifestEntry> manifest = List.copyOf(skills);
+    // 导入按文件事实整体覆盖：null/空白令牌表示清除既有令牌，非空表示替换。
+    String canonicalToken = canonicalImportToken(token);
+    byte[] encryptedToken =
+        canonicalToken == null ? null : tokenCipher.encrypt(name, canonicalToken);
     SkillPackage current = skillPackageRepository.lockPackage(name);
     if (current == null) {
       SkillPackage created = new SkillPackage();
@@ -308,6 +338,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       created.setHeadCheckError(null);
       created.setSkills(manifest);
       created.setVersion(0L);
+      created.setEncryptedToken(encryptedToken);
       try {
         if (!skillPackageRepository.insertPackage(created)) {
           throw new IllegalStateException("create skill package failed");
@@ -329,10 +360,12 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
             .filter(skillName -> !published.contains(skillName))
             .toList();
     guard.ensureSkillsRemovable(name, removed);
+    boolean tokenChanged = current.getEncryptedToken() != null || canonicalToken != null;
     if (commit.equals(current.getCurrentCommit())
         && Objects.equals(manifest, current.getSkills())
         && Objects.equals(canonicalDescription, current.getDescription())
-        && Objects.equals(canonicalBranch, current.getBranch())) {
+        && Objects.equals(canonicalBranch, current.getBranch())
+        && !tokenChanged) {
       return converter.convert(current);
     }
     current.setDescription(canonicalDescription);
@@ -341,18 +374,27 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     current.setSkills(manifest);
     current.setObservedHeadCommit(commit);
     current.setHeadCheckError(null);
+    current.setEncryptedToken(encryptedToken);
     casUpdate(current, current.getVersion());
     return getPackage(name);
   }
 
   @Override
   public void validateImport(
-      String packageName, String description, String repositoryUrl, String branch, String commit) {
+      String packageName,
+      String description,
+      String repositoryUrl,
+      String branch,
+      String commit,
+      String token) {
     requirePackageName(packageName);
     requireDescription(description);
     requireRepositoryUrl(repositoryUrl);
     requireBranch(branch);
     requireCommit(commit, "currentCommit");
+    if (token != null && !token.isBlank()) {
+      requireToken(token);
+    }
   }
 
   /** 以锁定时读到的 {@code expected} 为条件整体更新事实；影响行数为 0 时重读判定 404 或 version conflict。 */
@@ -384,9 +426,53 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     try {
       return action.get();
     } catch (SkillGitException error) {
+      if (error.authenticationFailed()) {
+        // 权限失败给出明确指导，且不回显 URL、令牌或远端自由文本；绝不静默尝试公共访问。
+        throw new AiValidationException(
+            SkillPackageGuard.RESOURCE,
+            "repository authentication failed; verify the repository URL and, for a private repository, configure a valid access token",
+            error);
+      }
       throw new AiValidationException(
           SkillPackageGuard.RESOURCE, failure + ": " + error.getMessage(), error);
     }
+  }
+
+  /** 解密已存令牌用于 Git 鉴权；未配置令牌时返回 null。令牌绝不进入日志或响应。 */
+  private String resolveStoredToken(SkillPackage skillPackage) {
+    byte[] encryptedToken = skillPackage.getEncryptedToken();
+    if (encryptedToken == null) {
+      return null;
+    }
+    return tokenCipher.decrypt(skillPackage.getPackageName(), encryptedToken);
+  }
+
+  /** 请求或导入携带的非空白令牌；null 表示未提供。 */
+  private static String requireTokenOrNull(String raw) {
+    return raw == null ? null : requireToken(raw);
+  }
+
+  /** 令牌必须非空白；返回去除环绕空白后的规范值。诊断绝不回显令牌内容。 */
+  private static String requireToken(String raw) {
+    String token = raw == null ? null : raw.strip();
+    if (token == null || token.isEmpty()) {
+      throw new AiValidationException(
+          SkillPackageGuard.RESOURCE, "token must be a non-blank string when provided");
+    }
+    if (token.codePoints().anyMatch(SkillCatalogServiceImpl::isControl)) {
+      throw new AiValidationException(
+          SkillPackageGuard.RESOURCE, "token must not contain control characters");
+    }
+    return token;
+  }
+
+  /** 导入令牌按文件事实归一：null/空白表示清除，其余取去空白值。 */
+  private static String canonicalImportToken(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    String token = raw.strip();
+    return token.isEmpty() ? null : token;
   }
 
   private static long requireExpectedVersion(String raw) {

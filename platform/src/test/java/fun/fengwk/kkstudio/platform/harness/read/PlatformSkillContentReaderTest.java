@@ -134,7 +134,9 @@ class PlatformSkillContentReaderTest {
     pkg.setSkills(List.of(new SkillManifestEntry("dev", "desc")));
     when(queryService.getPackage("my-pkg")).thenReturn(pkg);
 
-    doThrow(new SkillGitException("fetch failed")).when(gitCache).ensureCommit(any(), any(), any());
+    doThrow(new SkillGitException("fetch failed"))
+        .when(gitCache)
+        .ensureCommit(any(), any(), any(), any());
 
     PlatformReadException error =
         assertThrows(
@@ -177,7 +179,7 @@ class PlatformSkillContentReaderTest {
     byte[] actualBytes = reader.readSkillFile("my-pkg", "dev", "SKILL.md");
 
     assertArrayEquals(expectedBytes, actualBytes);
-    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1");
+    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1", null);
     verify(gitCache).readFile("my-pkg", "c1", "dev/SKILL.md");
   }
 
@@ -191,7 +193,7 @@ class PlatformSkillContentReaderTest {
     when(gitCache.readFile("my-pkg", "c1", "dev/dev/SKILL.md")).thenReturn(nested);
 
     assertArrayEquals(nested, reader.readSkillFile("my-pkg", "dev", "dev/SKILL.md"));
-    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1");
+    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1", null);
     verify(gitCache).readFile("my-pkg", "c1", "dev/dev/SKILL.md");
     verifyNoMoreInteractions(gitCache);
   }
@@ -231,13 +233,13 @@ class PlatformSkillContentReaderTest {
   void unexpectedEnsureFailurePreservesCauseAndStopsRead() {
     publishedPackage();
     IllegalStateException cause = new IllegalStateException("cache unavailable");
-    doThrow(cause).when(gitCache).ensureCommit(any(), any(), any());
+    doThrow(cause).when(gitCache).ensureCommit(any(), any(), any(), any());
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class, () -> reader.readSkillFile("my-pkg", "dev", "SKILL.md"));
     assertEquals("skill content is unavailable: cache unavailable", error.getMessage());
     assertSame(cause, error.getCause());
-    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1");
+    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1", null);
     verifyNoMoreInteractions(gitCache);
   }
 

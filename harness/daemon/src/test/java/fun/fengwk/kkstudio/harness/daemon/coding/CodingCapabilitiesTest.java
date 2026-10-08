@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -78,7 +79,6 @@ class CodingCapabilitiesTest {
     SkillPackageInstaller installer =
         new SkillPackageInstaller(
             workspaceRoot.resolve("skills"),
-            workspaceRoot.resolve("cache"),
             workspaceRoot.resolve("staging"),
             workspaceRoot.resolve("backup"),
             executor);
@@ -898,7 +898,6 @@ class CodingCapabilitiesTest {
     SkillPackageInstaller installer =
         new SkillPackageInstaller(
             workspaceRoot.resolve("skills"),
-            workspaceRoot.resolve("cache"),
             workspaceRoot.resolve("staging"),
             workspaceRoot.resolve("backup"),
             executor);
@@ -932,6 +931,44 @@ class CodingCapabilitiesTest {
     assertTrue(badResult.error());
     assertTrue(badResult.detailsJson().contains("COMMIT_NOT_FOUND"));
     assertFalse(text(badResult).contains(remoteRepo.toUri().toString()));
+
+    // 测试携带可选凭据：token 参数正常执行，非字符串参数在执行前被 schema 校验拒绝
+    String withCredArgs =
+        "{\"packageName\":\"demo-skill-cred\",\"repositoryUrl\":"
+            + json(remoteRepo.toUri().toString())
+            + ",\"branch\":\"master\",\"targetCommit\":"
+            + json(commitId)
+            + ",\"credential\":\"sample-token\"}";
+    EnvironmentCapabilityResult credResult = invoke(capability, withCredArgs);
+    assertFalse(credResult.error());
+
+    String invalidCredArgs =
+        "{\"packageName\":\"demo-skill\",\"repositoryUrl\":"
+            + json(remoteRepo.toUri().toString())
+            + ",\"branch\":\"master\",\"targetCommit\":"
+            + json(commitId)
+            + ",\"credential\":12345}";
+    assertThrows(IllegalArgumentException.class, () -> invoke(capability, invalidCredArgs));
+
+    // 单元测试 optionalCredential 容错读取：缺省、JSON-null、空白串、合法串与非法类型
+    assertNull(
+        SkillSyncCapability.optionalCredential(
+            AbstractCodingCapability.OBJECT_MAPPER.readTree("{}")));
+    assertNull(
+        SkillSyncCapability.optionalCredential(
+            AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"credential\":null}")));
+    assertNull(
+        SkillSyncCapability.optionalCredential(
+            AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"credential\":\"   \"}")));
+    assertEquals(
+        "secret-token",
+        SkillSyncCapability.optionalCredential(
+            AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"credential\":\"secret-token\"}")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SkillSyncCapability.optionalCredential(
+                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"credential\":123}")));
   }
 
   private static String text(EnvironmentCapabilityResult result) {

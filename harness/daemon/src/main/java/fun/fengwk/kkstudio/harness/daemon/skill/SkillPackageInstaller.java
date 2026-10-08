@@ -1,16 +1,18 @@
 package fun.fengwk.kkstudio.harness.daemon.skill;
 
+import org.eclipse.jgit.api.CloneCommand;
+import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.TreeWalk;
 
 import fun.fengwk.kkstudio.harness.daemon.DaemonDataDirectory;
@@ -41,7 +43,7 @@ import java.util.regex.Pattern;
 /**
  * 守护进程侧原子 Git skill 包安装器。
  *
- * <p>通过 bare Git 缓存仓库拉取、staging 临时目录物化并原子替换到 skills 目录，支持失败回滚与重启自愈。
+ * <p>单路径安装：临时 clone 精确分支 -> 检出 exact commit -> 校验并物化到 staging -> 原子替换 skills 目录，支持失败回滚与重启自愈。
  */
 public final class SkillPackageInstaller {
 
@@ -51,7 +53,6 @@ public final class SkillPackageInstaller {
   private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
 
   private final Path skillsRoot;
-  private final Path cacheRoot;
   private final Path stagingRoot;
   private final Path backupRoot;
   private final int connectMillis;
@@ -62,15 +63,12 @@ public final class SkillPackageInstaller {
 
   private final ConcurrentHashMap<String, Object> packageLocks = new ConcurrentHashMap<>();
 
+  private final DirectoryMover directoryMover;
+
   public SkillPackageInstaller(
-      Path skillsRoot,
-      Path cacheRoot,
-      Path stagingRoot,
-      Path backupRoot,
-      ExecutorService executor) {
+      Path skillsRoot, Path stagingRoot, Path backupRoot, ExecutorService executor) {
     this(
         skillsRoot,
-        cacheRoot,
         stagingRoot,
         backupRoot,
         GitHttpConnectionFactory.CONNECT_MILLIS,
@@ -80,24 +78,40 @@ public final class SkillPackageInstaller {
 
   SkillPackageInstaller(
       Path skillsRoot,
-      Path cacheRoot,
       Path stagingRoot,
       Path backupRoot,
       int connectMillis,
       int readMillis,
       ExecutorService executor) {
+    this(
+        skillsRoot,
+        stagingRoot,
+        backupRoot,
+        connectMillis,
+        readMillis,
+        executor,
+        SkillPackageInstaller::moveDirectory);
+  }
+
+  SkillPackageInstaller(
+      Path skillsRoot,
+      Path stagingRoot,
+      Path backupRoot,
+      int connectMillis,
+      int readMillis,
+      ExecutorService executor,
+      DirectoryMover directoryMover) {
     this.connectMillis = connectMillis;
     this.readMillis = readMillis;
     this.executor = Objects.requireNonNull(executor, "executor");
+    this.directoryMover = Objects.requireNonNull(directoryMover, "directoryMover");
     this.skillsRoot = Objects.requireNonNull(skillsRoot, "skillsRoot").toAbsolutePath().normalize();
-    this.cacheRoot = Objects.requireNonNull(cacheRoot, "cacheRoot").toAbsolutePath().normalize();
     this.stagingRoot =
         Objects.requireNonNull(stagingRoot, "stagingRoot").toAbsolutePath().normalize();
     this.backupRoot = Objects.requireNonNull(backupRoot, "backupRoot").toAbsolutePath().normalize();
 
     try {
       createOwnerOnlyDirectory(this.skillsRoot);
-      createOwnerOnlyDirectory(this.cacheRoot);
       createOwnerOnlyDirectory(this.stagingRoot);
       createOwnerOnlyDirectory(this.backupRoot);
     } catch (IOException error) {
@@ -105,7 +119,6 @@ public final class SkillPackageInstaller {
     }
 
     assertRealDirectory(this.skillsRoot, "skillsRoot");
-    assertRealDirectory(this.cacheRoot, "cacheRoot");
     assertRealDirectory(this.stagingRoot, "stagingRoot");
     assertRealDirectory(this.backupRoot, "backupRoot");
 
@@ -117,7 +130,6 @@ public final class SkillPackageInstaller {
     Objects.requireNonNull(dataDirectory, "dataDirectory");
     return new SkillPackageInstaller(
         dataDirectory.skills(),
-        dataDirectory.skillCache(),
         dataDirectory.skillStaging(),
         dataDirectory.skillBackup(),
         executor);
@@ -125,10 +137,6 @@ public final class SkillPackageInstaller {
 
   public Path skillsRoot() {
     return skillsRoot;
-  }
-
-  public Path cacheRoot() {
-    return cacheRoot;
   }
 
   public Path stagingRoot() {
@@ -141,6 +149,15 @@ public final class SkillPackageInstaller {
 
   public InstalledSkillPackage install(
       String packageName, String repositoryUrl, String branch, String targetCommit) {
+    return install(packageName, repositoryUrl, branch, targetCommit, null);
+  }
+
+  public InstalledSkillPackage install(
+      String packageName,
+      String repositoryUrl,
+      String branch,
+      String targetCommit,
+      String credential) {
     validatePackageName(packageName);
     validateTargetCommit(targetCommit);
     validateRepositoryUrl(repositoryUrl);
@@ -148,201 +165,194 @@ public final class SkillPackageInstaller {
 
     Object lock = packageLocks.computeIfAbsent(packageName, k -> new Object());
     synchronized (lock) {
-      return doInstall(packageName, repositoryUrl, branch, targetCommit);
+      return doInstall(packageName, repositoryUrl, branch, targetCommit, credential);
     }
   }
 
   private InstalledSkillPackage doInstall(
-      String packageName, String repositoryUrl, String branch, String targetCommit) {
-    Path cacheGitDir = cacheRoot.resolve(packageName + ".git");
-    prepareCache(cacheGitDir, repositoryUrl);
+      String packageName,
+      String repositoryUrl,
+      String branch,
+      String targetCommit,
+      String credential) {
+    String uuid = UUID.randomUUID().toString();
+    Path cloneDir = stagingRoot.resolve(packageName + "." + uuid + ".clone");
 
-    try (Repository repo =
-        new FileRepositoryBuilder().setGitDir(cacheGitDir.toFile()).setMustExist(true).build()) {
-      ObjectId commitId = ObjectId.fromString(targetCommit);
-      if (!repo.getObjectDatabase().has(commitId)) {
-        try (Git git = new Git(repo);
-            GitHttpConnectionFactory network =
-                new GitHttpConnectionFactory(executor, connectMillis, readMillis)) {
-          boolean fetched = false;
-          try {
-            git.fetch()
-                .setRemote(repositoryUrl)
-                .setTransportConfigCallback(network.callback())
-                .setRefSpecs(new RefSpec(targetCommit))
-                .call();
-            fetched = repo.getObjectDatabase().has(commitId);
-          } catch (Exception error) {
-            if (!GitHttpConnectionFactory.canFallback(error)) {
-              throw new SkillSyncException(
-                  GitHttpConnectionFactory.failureCode(error), "Git remote fetch failed", error);
-            }
-            // 仅远端不接受 exact object 请求时回退到按分支拉取。
-          }
-          if (!fetched) {
-            try {
-              git.fetch()
-                  .setRemote(repositoryUrl)
-                  .setTransportConfigCallback(network.callback())
-                  .setRefSpecs(
-                      new RefSpec("+refs/heads/" + branch + ":refs/remotes/origin/" + branch))
-                  .call();
-            } catch (Exception error) {
-              throw new SkillSyncException(
-                  GitHttpConnectionFactory.failureCode(error), "Git branch fetch failed", error);
-            }
-          }
-        }
-      }
+    CredentialsProvider credentialsProvider =
+        (credential != null && !credential.isBlank())
+            ? new UsernamePasswordCredentialsProvider("x-access-token", credential)
+            : null;
 
-      if (!repo.getObjectDatabase().has(commitId)) {
-        throw new SkillSyncException(
-            "COMMIT_NOT_FOUND", "Target commit could not be resolved from remote repository");
-      }
+    try {
+      createOwnerOnlyDirectory(cloneDir);
 
-      RevCommit revCommit;
-      try (RevWalk revWalk = new RevWalk(repo)) {
-        revCommit = revWalk.parseCommit(commitId);
-      } catch (Exception error) {
-        throw new SkillSyncException(
-            "COMMIT_NOT_FOUND", "Target commit could not be parsed as a commit", error);
-      }
-
-      String uuid = UUID.randomUUID().toString();
-      Path stagingDir = stagingRoot.resolve(packageName + "." + uuid);
-      Path backupDir = backupRoot.resolve(packageName + "." + uuid);
-      Path packageDir = skillsRoot.resolve(packageName);
-      boolean backedUp = false;
-
-      try {
-        createOwnerOnlyDirectory(stagingDir);
-
-        try (TreeWalk treeWalk = new TreeWalk(repo)) {
-          treeWalk.addTree(revCommit.getTree());
-          treeWalk.setRecursive(true);
-          while (treeWalk.next()) {
-            FileMode fileMode = treeWalk.getFileMode(0);
-            if (fileMode.equals(FileMode.SYMLINK)) {
-              throw new SkillSyncException(
-                  "UNSAFE_PACKAGE_ENTRY", "Symbolic links are not allowed in skill package");
-            }
-            if (fileMode.equals(FileMode.GITLINK)) {
-              throw new SkillSyncException(
-                  "UNSAFE_PACKAGE_ENTRY", "Submodules are not allowed in skill package");
-            }
-            if (!fileMode.equals(FileMode.REGULAR_FILE)
-                && !fileMode.equals(FileMode.EXECUTABLE_FILE)) {
-              throw new SkillSyncException(
-                  "UNSAFE_PACKAGE_ENTRY", "Unsupported file mode in skill package");
-            }
-
-            String pathString = treeWalk.getPathString();
-            validatePackageEntryPath(pathString);
-
-            Path targetFile = stagingDir.resolve(pathString).normalize();
-            if (!targetFile.startsWith(stagingDir.normalize())
-                || targetFile.equals(stagingDir.normalize())) {
-              throw new SkillSyncException(
-                  "UNSAFE_PACKAGE_ENTRY", "Path traversal detected in package entry");
-            }
-
-            Path parent = targetFile.getParent();
-            if (parent != null && !parent.equals(stagingDir)) {
-              createParentDirectoriesOwnerOnly(stagingDir, parent);
-            }
-
-            ObjectId blobId = treeWalk.getObjectId(0);
-            ObjectLoader loader = repo.open(blobId, Constants.OBJ_BLOB);
-            writeFileOwnerOnly(targetFile, loader, fileMode.equals(FileMode.EXECUTABLE_FILE));
-          }
+      try (GitHttpConnectionFactory network =
+          new GitHttpConnectionFactory(executor, connectMillis, readMillis)) {
+        CloneCommand cloneCommand =
+            Git.cloneRepository()
+                .setURI(repositoryUrl)
+                .setDirectory(cloneDir.toFile())
+                .setBranch(branch)
+                .setTransportConfigCallback(network.callback());
+        if (credentialsProvider != null) {
+          cloneCommand.setCredentialsProvider(credentialsProvider);
         }
 
-        Path commitFile = stagingDir.resolve(".kkstudio-commit");
-        Files.deleteIfExists(commitFile);
-        Files.writeString(
-            commitFile,
-            targetCommit + "\n",
-            StandardCharsets.UTF_8,
-            StandardOpenOption.CREATE_NEW,
-            StandardOpenOption.WRITE);
-        applyOwnerOnlyFilePermissions(commitFile, false);
-
-        if (Files.exists(packageDir, LinkOption.NOFOLLOW_LINKS)) {
-          moveDirectory(packageDir, backupDir);
-          backedUp = true;
-        }
-
+        Git git;
         try {
-          moveDirectory(stagingDir, packageDir);
-        } catch (Exception moveError) {
-          if (backedUp) {
+          git = cloneCommand.call();
+        } catch (Exception error) {
+          throw new SkillSyncException(
+              GitHttpConnectionFactory.failureCode(error), "Git branch fetch failed", error);
+        }
+
+        try (git;
+            Repository repo = git.getRepository()) {
+          ObjectId commitId = ObjectId.fromString(targetCommit);
+          if (!repo.getObjectDatabase().has(commitId)) {
             try {
-              moveDirectory(backupDir, packageDir);
-            } catch (Exception rollbackError) {
-              moveError.addSuppressed(rollbackError);
+              FetchCommand fetch =
+                  git.fetch()
+                      .setRemote(repositoryUrl)
+                      .setTransportConfigCallback(network.callback())
+                      .setRefSpecs(new RefSpec(targetCommit));
+              if (credentialsProvider != null) {
+                fetch.setCredentialsProvider(credentialsProvider);
+              }
+              fetch.call();
+            } catch (Exception error) {
+              if (!GitHttpConnectionFactory.canFallback(error)) {
+                throw new SkillSyncException(
+                    GitHttpConnectionFactory.failureCode(error), "Git remote fetch failed", error);
+              }
             }
           }
-          throw new SkillSyncException(
-              "INSTALL_FAILED", "Failed to swap installed package directory", moveError);
-        }
 
-        if (backedUp) {
-          deleteRecursivelyQuietly(backupDir);
-        }
+          if (!repo.getObjectDatabase().has(commitId)) {
+            throw new SkillSyncException(
+                "COMMIT_NOT_FOUND", "Target commit could not be resolved from remote repository");
+          }
 
-        return new InstalledSkillPackage(
-            packageName, targetCommit, packageDir.toAbsolutePath().normalize().toString());
-      } catch (SkillSyncException error) {
-        throw error;
-      } catch (Exception error) {
-        throw new SkillSyncException("INSTALL_FAILED", "Skill package installation failed", error);
-      } finally {
-        deleteRecursivelyQuietly(stagingDir);
+          try {
+            git.checkout().setName(targetCommit).call();
+          } catch (Exception error) {
+            throw new SkillSyncException(
+                "COMMIT_NOT_FOUND", "Target commit could not be checked out", error);
+          }
+
+          RevCommit revCommit;
+          try (RevWalk revWalk = new RevWalk(repo)) {
+            revCommit = revWalk.parseCommit(commitId);
+          } catch (Exception error) {
+            throw new SkillSyncException(
+                "COMMIT_NOT_FOUND", "Target commit could not be parsed as a commit", error);
+          }
+
+          Path stagingDir = stagingRoot.resolve(packageName + "." + uuid);
+          Path backupDir = backupRoot.resolve(packageName + "." + uuid);
+          Path packageDir = skillsRoot.resolve(packageName);
+          boolean backedUp = false;
+
+          try {
+            createOwnerOnlyDirectory(stagingDir);
+
+            try (TreeWalk treeWalk = new TreeWalk(repo)) {
+              treeWalk.addTree(revCommit.getTree());
+              treeWalk.setRecursive(true);
+              while (treeWalk.next()) {
+                FileMode fileMode = treeWalk.getFileMode(0);
+                if (fileMode.equals(FileMode.SYMLINK)) {
+                  throw new SkillSyncException(
+                      "UNSAFE_PACKAGE_ENTRY", "Symbolic links are not allowed in skill package");
+                }
+                if (fileMode.equals(FileMode.GITLINK)) {
+                  throw new SkillSyncException(
+                      "UNSAFE_PACKAGE_ENTRY", "Submodules are not allowed in skill package");
+                }
+                if (!fileMode.equals(FileMode.REGULAR_FILE)
+                    && !fileMode.equals(FileMode.EXECUTABLE_FILE)) {
+                  throw new SkillSyncException(
+                      "UNSAFE_PACKAGE_ENTRY", "Unsupported file mode in skill package");
+                }
+
+                String pathString = treeWalk.getPathString();
+                validatePackageEntryPath(pathString);
+
+                Path targetFile = stagingDir.resolve(pathString).normalize();
+                if (!targetFile.startsWith(stagingDir.normalize())
+                    || targetFile.equals(stagingDir.normalize())) {
+                  throw new SkillSyncException(
+                      "UNSAFE_PACKAGE_ENTRY", "Path traversal detected in package entry");
+                }
+
+                Path parent = targetFile.getParent();
+                if (parent != null && !parent.equals(stagingDir)) {
+                  createParentDirectoriesOwnerOnly(stagingDir, parent);
+                }
+
+                ObjectId blobId = treeWalk.getObjectId(0);
+                ObjectLoader loader = repo.open(blobId, Constants.OBJ_BLOB);
+                writeFileOwnerOnly(targetFile, loader, fileMode.equals(FileMode.EXECUTABLE_FILE));
+              }
+            }
+
+            Path commitFile = stagingDir.resolve(".kkstudio-commit");
+            Files.deleteIfExists(commitFile);
+            Files.writeString(
+                commitFile,
+                targetCommit + "\n",
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE);
+            applyOwnerOnlyFilePermissions(commitFile, false);
+
+            if (Files.exists(packageDir, LinkOption.NOFOLLOW_LINKS)) {
+              directoryMover.move(packageDir, backupDir);
+              backedUp = true;
+            }
+
+            try {
+              directoryMover.move(stagingDir, packageDir);
+            } catch (Exception moveError) {
+              if (backedUp) {
+                try {
+                  directoryMover.move(backupDir, packageDir);
+                } catch (Exception rollbackError) {
+                  moveError.addSuppressed(rollbackError);
+                }
+              }
+              throw new SkillSyncException(
+                  "INSTALL_FAILED", "Failed to swap installed package directory", moveError);
+            }
+
+            if (backedUp) {
+              deleteRecursivelyQuietly(backupDir);
+            }
+
+            return new InstalledSkillPackage(
+                packageName, targetCommit, packageDir.toAbsolutePath().normalize().toString());
+          } catch (SkillSyncException error) {
+            throw error;
+          } catch (Exception error) {
+            throw new SkillSyncException(
+                "INSTALL_FAILED", "Skill package installation failed", error);
+          } finally {
+            deleteRecursivelyQuietly(stagingDir);
+          }
+        }
       }
     } catch (SkillSyncException error) {
       throw error;
     } catch (Exception error) {
       throw new SkillSyncException("INSTALL_FAILED", "Skill package installation failed", error);
+    } finally {
+      deleteRecursivelyQuietly(cloneDir);
     }
   }
 
-  /**
-   * 复用或重建该 Package 的 bare cache。
-   *
-   * <p>cache 的 provenance 只由 origin URL 表达，因此它是唯一可信依据：Package 删除后以同名重建可能指向完全不同的仓库，旧对象对新仓库毫无 意义（同名
-   * commit 可能来自另一个仓库的历史），所以 origin URL 不一致或不可读时整份丢弃重建，绝不复用既有对象。
-   */
-  private void prepareCache(Path cacheGitDir, String repositoryUrl) {
-    if (Files.exists(cacheGitDir, LinkOption.NOFOLLOW_LINKS)) {
-      if (repositoryUrl.equals(readOriginUrl(cacheGitDir))) {
-        return;
-      }
-      deleteRecursivelyQuietly(cacheGitDir);
-      if (Files.exists(cacheGitDir, LinkOption.NOFOLLOW_LINKS)) {
-        throw new SkillSyncException(
-            "GIT_CACHE_RESET_FAILED", "Failed to discard the stale skill cache repository");
-      }
-    }
-    try {
-      try (Git git = Git.init().setBare(true).setDirectory(cacheGitDir.toFile()).call()) {
-        StoredConfig config = git.getRepository().getConfig();
-        config.setString("remote", "origin", "url", repositoryUrl);
-        config.save();
-      }
-    } catch (Exception error) {
-      throw new SkillSyncException(
-          "GIT_INIT_FAILED", "Failed to initialize bare cache repository", error);
-    }
-  }
-
-  /** 读取 bare cache 的 origin URL；缺失、损坏或不可读时返回 null，调用方据此丢弃重建。 */
-  private static String readOriginUrl(Path cacheGitDir) {
-    try (Repository repo =
-        new FileRepositoryBuilder().setGitDir(cacheGitDir.toFile()).setMustExist(true).build()) {
-      return repo.getConfig().getString("remote", "origin", "url");
-    } catch (Exception error) {
-      return null;
-    }
+  @FunctionalInterface
+  interface DirectoryMover {
+    void move(Path source, Path target) throws IOException;
   }
 
   public void recoverArtifacts() {

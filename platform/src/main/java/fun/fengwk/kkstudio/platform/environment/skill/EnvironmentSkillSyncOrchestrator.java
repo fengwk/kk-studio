@@ -425,12 +425,17 @@ public class EnvironmentSkillSyncOrchestrator {
     return RESULT_FAILURE + ": " + code.textValue();
   }
 
-  private static String argumentsJson(SkillPackage skillPackage) {
+  private String argumentsJson(SkillPackage skillPackage) {
     ObjectNode node = JSON.createObjectNode();
     node.put("packageName", skillPackage.getPackageName());
     node.put("repositoryUrl", skillPackage.getRepositoryUrl());
     node.put("branch", skillPackage.getBranch());
     node.put("targetCommit", skillPackage.getCurrentCommit());
+    // 私有仓库令牌从加密事实解析后只进入这条受信任的 capability 通道；绝不进入模型上下文、事件或日志。
+    String credential = skillCatalogQueryService.resolveAccessToken(skillPackage);
+    if (credential != null) {
+      node.put("credential", credential);
+    }
     try {
       return JSON.writeValueAsString(node);
     } catch (JsonProcessingException error) {
