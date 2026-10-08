@@ -3,26 +3,65 @@ package fun.fengwk.kkstudio.platform;
 import static org.mockito.Mockito.mock;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.notification.NotificationLimits;
+import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
+import fun.fengwk.kkstudio.project.notification.ProjectNotifications;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
+
+import javax.sql.DataSource;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
 
 /**
- * Platform 测试上下文的 Harness 装配基座。
+ * Platform 测试上下文的 Harness 与通知装配基座。
  *
- * <p>生产 {@link EnvironmentSessionListener} 由 web 组合根（dispatcher wake）提供；platform 不再是组合根后， 测试上下文用
- * no-op 桥接满足 {@code EnvironmentDaemonGateway} 的构造依赖。internal Thread change source 同样由 web
- * 组合根提供（PostgreSQL LISTEN 适配）；本测试上下文提供不产生信号的占位 bean 满足构造依赖——platform 测试从不真正等待任务完成。
+ * <p>生产 {@link EnvironmentSessionListener} 与 {@link NotificationBus} 由 web 组合根提供；platform
+ * 不再是组合根后，测试上下文用真实 {@link DefaultNotificationBus} 支撑同节点事务提交通知断言，并用 no-op 桥接满足 {@code
+ * EnvironmentDaemonGateway} 与 {@link HarnessThreadChangeSource} 的构造依赖。
  */
 @Configuration(proxyBeanMethods = false)
 public class PlatformHarnessTestConfiguration {
+
+  @Bean
+  @ConditionalOnMissingBean(NotificationBus.class)
+  public NotificationBus notificationBus(
+      DataSource dataSource, @Qualifier("nodeInstanceId") UUID nodeInstanceId) {
+    return new DefaultNotificationBus(
+        dataSource,
+        nodeInstanceId,
+        List.of(
+            PlatformNotifications.SETTINGS_CHANGED,
+            PlatformNotifications.SKILL_PACKAGE_CHANGED,
+            PlatformNotifications.ENVIRONMENT_CHANGED,
+            ProjectNotifications.ISSUE_CHANGED,
+            ProjectNotifications.WORK_DUE,
+            CanvasNotifications.REVISION,
+            CanvasNotifications.FUNCTION_WORK,
+            HarnessNotifications.WORK_AVAILABLE,
+            HarnessNotifications.THREAD_VERSION,
+            HarnessNotifications.THREAD_TREE,
+            HarnessNotifications.TOOL_INTERACTION,
+            HarnessNotifications.REALTIME),
+        NotificationLimits.defaults(),
+        Duration.ofSeconds(5),
+        Duration.ofSeconds(1));
+  }
 
   @Bean
   public EnvironmentSessionListener environmentSessionListener() {

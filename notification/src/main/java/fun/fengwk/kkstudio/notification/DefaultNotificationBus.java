@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.notification;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -25,6 +26,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /** One bus recognizes only the actual Spring physical transaction for its own DataSource. */
+@Slf4j
 public final class DefaultNotificationBus implements NotificationBus {
   private record Publication(Notification<?> notification, WireMessage wire) {}
 
@@ -94,7 +96,7 @@ public final class DefaultNotificationBus implements NotificationBus {
   }
 
   public boolean healthy() {
-    return !closed && transport.healthy();
+    return !closed && transport.healthy() && inbox.healthy();
   }
 
   @Override
@@ -165,6 +167,10 @@ public final class DefaultNotificationBus implements NotificationBus {
       try {
         decodeAndAccept(topic, wire);
       } catch (RuntimeException error) {
+        log.warn(
+            "Notification decode failed topic={} errorType={}",
+            topic.name(),
+            error.getClass().getSimpleName());
         inbox.resync(topic.name());
       }
     }
@@ -183,6 +189,9 @@ public final class DefaultNotificationBus implements NotificationBus {
   }
 
   private ConnectionHolder physicalTransaction() {
+    if (NotificationTransactionManager.isPostCommit()) {
+      throw new IllegalStateException("publish cannot run on an afterCommit thread");
+    }
     Object resource = TransactionSynchronizationManager.getResource(dataSource);
     if (!(resource instanceof ConnectionHolder holder)) {
       if (TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -218,6 +227,9 @@ public final class DefaultNotificationBus implements NotificationBus {
         }
         return batch;
       }
+    }
+    if (NotificationTransactionManager.isPostCommit()) {
+      throw new IllegalStateException("publish cannot run on an afterCommit thread");
     }
     CommitBatch batch = new CommitBatch();
     TransactionSynchronizationManager.registerSynchronization(batch);

@@ -106,8 +106,8 @@ class SystemSettingsTest {
     assertEquals(2L * 1024 * 1024, advanced.applicationEventMaxBytes());
     assertEquals(10_000L, advanced.applicationEventSendTimeoutMillis());
     assertEquals(20_000L, advanced.applicationEventHeartbeatIntervalMillis());
-    assertEquals(5_000L, advanced.postgresqlWorkNotificationPollMillis());
-    assertEquals(1_000L, advanced.postgresqlWorkReconnectBackoffMillis());
+    assertEquals(5_000L, advanced.notificationPollMillis());
+    assertEquals(1_000L, advanced.notificationReconnectBackoffMillis());
   }
 
   @Test
@@ -240,8 +240,8 @@ class SystemSettingsTest {
                 base.applicationEventMaxBytes(),
                 base.applicationEventSendTimeoutMillis(),
                 base.applicationEventHeartbeatIntervalMillis(),
-                base.postgresqlWorkNotificationPollMillis(),
-                base.postgresqlWorkReconnectBackoffMillis()));
+                base.notificationPollMillis(),
+                base.notificationReconnectBackoffMillis()));
   }
 
   @Test

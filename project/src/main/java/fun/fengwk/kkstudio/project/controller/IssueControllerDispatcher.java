@@ -29,8 +29,6 @@ import java.util.function.Function;
 @Slf4j
 public final class IssueControllerDispatcher implements AutoCloseable {
 
-  public static final String CHANNEL = "project_issue_work_due";
-
   private final IssueWorkStore workStore;
   private final Function<IssueWorkClaim, IssueReconcileOutcome> reconciler;
   private final IssueControllerProperties properties;

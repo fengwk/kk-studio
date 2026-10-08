@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -49,8 +48,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSupport;
+import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
+import fun.fengwk.kkstudio.share.notification.VersionHint;
 
-import java.sql.Connection;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
@@ -64,7 +65,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /** 真实 PostgreSQL 上验证 Runtime 的锁、两阶段提交、UNKNOWN 收敛、人工解除、CAS、pin 与资源生命周期不变量。 */
 @Import(CanvasFunctionRuntimeFoundationTest.FoundationConfiguration.class)
@@ -188,17 +192,18 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(3L, version(canvasId));
   }
 
-  /** start 经 bumpVersion 前进 revision，必须在提交时发布 canvas_revision 失效提示 */
+  /** start 经 bumpVersion 前进 revision，必须在提交时发布 canvas.revision 失效提示 */
   @Test
   void startNotifiesRevisionThroughBumpVersion() throws Exception {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    try (Connection listener = listenOn("canvas_revision")) {
+    BlockingQueue<VersionHint> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription sub =
+        bus.subscribe(CanvasNotifications.REVISION, notifications::add, () -> {})) {
       runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
-      PGNotification[] notifications = pollNotifications(listener, 5_000);
-      assertEquals(1, notifications.length);
-      assertEquals("canvas_revision", notifications[0].getName());
-      assertEquals(canvasId + ":1", notifications[0].getParameter());
+      VersionHint hint = notifications.poll(5, TimeUnit.SECONDS);
+      assertNotNull(hint, "expected revision notification but timed out");
+      assertEquals(new VersionHint(canvasId, 1L), hint);
     }
   }
 

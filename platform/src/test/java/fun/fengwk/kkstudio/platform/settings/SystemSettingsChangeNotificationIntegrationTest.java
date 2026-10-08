@@ -1,36 +1,35 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
- * System settings 生产写入口的事务内 {@code system_settings_changed} 通知验证。
+ * System settings 生产写入口的事务内 {@link PlatformNotifications#SETTINGS_CHANGED} 通知验证。
  *
- * <p>意图：{@code PostgresqlSystemSettingsRepository} 的成功 CAS 与通知共用同一事务 Connection，提交后投递写后权威 {@code
- * version} 的十进制字符串；未提交不可见、回滚静默、陈旧 CAS 静默、无事务调用在写行前拒绝。{@code SystemSettingsServiceImpl}
- * 的提交后快照刷新与本通知并存。
+ * <p>意图：{@code PostgresqlSystemSettingsRepository} 的成功 CAS 与通知共用同一事务，提交后投递写后权威 {@code version}；
+ * 未提交不可见、回滚静默、陈旧 CAS 静默、无事务调用在写行前拒绝。{@code SystemSettingsServiceImpl} 的提交后快照刷新与本通知并存。
  */
 class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTestSupport {
 
@@ -39,39 +38,40 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
   @Autowired private SystemSettingsService systemSettingsService;
   @Autowired private SystemSettingsRepository systemSettingsRepository;
   @Autowired private SystemSettingsSnapshot systemSettingsSnapshot;
-  @Autowired private PostgresqlSystemSettingsChangeNotifier notifier;
+  @Autowired private SystemSettingsChangeNotifier notifier;
+  @Autowired private NotificationBus notificationBus;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private JdbcTemplate jdbcTemplate;
 
-  /** 提交的 CAS 推进 version 并投递一次；同一事务未提交前对其它连接不可见。 */
+  /** 提交的 CAS 推进 version 并投递一次；同一事务未提交前不可见。 */
   @Test
   void committedCasNotifiesWithDecimalVersionAndUncommittedIsInvisible() throws Exception {
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + SystemSettingsChangeHandler.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
+    BlockingQueue<Long> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SETTINGS_CHANGED, notifications::add, () -> {})) {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
       tx.executeWithoutResult(
           status -> {
             SystemSettingsRepository.SystemSettingsRecord current = systemSettingsRepository.get();
             assertTrue(systemSettingsRepository.update(withYolo(true), current.version()));
-            assertNoNotification(pg);
+            assertNoNotification(notifications);
           });
 
-      assertNotification(pg, "1");
-      assertNoNotification(pg);
+      assertNotification(notifications, 1L);
+      assertNoNotification(notifications);
       assertEquals(1L, currentVersion());
     }
   }
 
   /** 回滚的 CAS 绝不投递，权威 version 与配置保持不变。 */
   @Test
-  void rolledBackCasIsSilent() throws Exception {
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + SystemSettingsChangeHandler.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
+  void rolledBackCasIsSilent() {
+    BlockingQueue<Long> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SETTINGS_CHANGED, notifications::add, () -> {})) {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
       tx.executeWithoutResult(
@@ -81,7 +81,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
             status.setRollbackOnly();
           });
 
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       assertEquals(0L, currentVersion());
       assertFalse(systemSettingsRepository.get().settings().tool().defaultYolo());
     }
@@ -89,17 +89,17 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
 
   /** 陈旧 CAS 影响 0 行静默：version 未推进，没有通知。 */
   @Test
-  void staleRepositoryCasIsSilent() throws Exception {
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + SystemSettingsChangeHandler.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
+  void staleRepositoryCasIsSilent() {
+    BlockingQueue<Long> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SETTINGS_CHANGED, notifications::add, () -> {})) {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
       tx.executeWithoutResult(
           status -> assertFalse(systemSettingsRepository.update(withYolo(true), 5L)));
 
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       assertEquals(0L, currentVersion());
     }
   }
@@ -111,10 +111,10 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
     int beforeRetries = systemSettingsSnapshot.get().aiRuntime().retryMaxRetries();
     int changedRetries = beforeRetries == 9 ? 8 : 9;
 
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + SystemSettingsChangeHandler.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
+    BlockingQueue<Long> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SETTINGS_CHANGED, notifications::add, () -> {})) {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
       SystemSettings snapshotOnEntry = systemSettingsSnapshot.get();
@@ -127,7 +127,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
           });
 
       // 回滚：无通知，且 afterCommit 未触发，本节点快照与权威 version 都不变。
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       assertEquals(0L, currentVersion());
       assertSame(snapshotOnEntry, systemSettingsSnapshot.get());
       assertNotEquals(changedRetries, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
@@ -136,8 +136,8 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
       committed.getAiRuntime().setRetryMaxRetries(changedRetries);
       systemSettingsService.update(committed);
 
-      assertNotification(pg, "1");
-      assertNoNotification(pg);
+      assertNotification(notifications, 1L);
+      assertNoNotification(notifications);
       assertEquals(1L, currentVersion());
       assertEquals(changedRetries, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
     }
@@ -145,20 +145,19 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
 
   /** 无事务直接调用仓储 CAS：在执行 SQL 前拒绝，version 与配置原样不变，listener 静默。 */
   @Test
-  void repositoryCasWithoutTransactionIsRejectedBeforeAnyWrite() throws Exception {
+  void repositoryCasWithoutTransactionIsRejectedBeforeAnyWrite() {
     long versionBefore = currentVersion();
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + SystemSettingsChangeHandler.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<Long> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SETTINGS_CHANGED, notifications::add, () -> {})) {
       assertThrows(
           IllegalStateException.class,
           () -> systemSettingsRepository.update(withYolo(true), versionBefore));
 
       assertEquals(versionBefore, currentVersion());
       assertFalse(systemSettingsRepository.get().settings().tool().defaultYolo());
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -176,23 +175,18 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
     return version;
   }
 
-  private static void assertNotification(PGConnection pg, String expectedPayload) {
-    List<PGNotification> notifications = drain(pg, 2000);
-    assertEquals(1, notifications.size());
-    assertEquals(SystemSettingsChangeHandler.CHANNEL, notifications.get(0).getName());
-    assertEquals(expectedPayload, notifications.get(0).getParameter());
+  private static void assertNotification(BlockingQueue<Long> notifications, long expectedVersion)
+      throws InterruptedException {
+    assertEquals(expectedVersion, notifications.poll(2, TimeUnit.SECONDS));
+    assertTrue(notifications.isEmpty());
   }
 
-  private static void assertNoNotification(PGConnection pg) {
-    assertTrue(drain(pg, 200).isEmpty());
-  }
-
-  private static List<PGNotification> drain(PGConnection pg, int timeoutMillis) {
+  private static void assertNoNotification(BlockingQueue<Long> notifications) {
     try {
-      PGNotification[] notifications = pg.getNotifications(timeoutMillis);
-      return notifications == null ? List.of() : List.of(notifications);
-    } catch (SQLException error) {
-      throw new AssertionError("cannot read PostgreSQL notifications", error);
+      assertNull(notifications.poll(50, TimeUnit.MILLISECONDS));
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(error);
     }
   }
 

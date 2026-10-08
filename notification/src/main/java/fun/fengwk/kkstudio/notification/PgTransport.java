@@ -50,8 +50,11 @@ final class PgTransport implements CrossNodeTransport {
   private int pendingMessages;
   private boolean closed;
   private boolean started;
-  private volatile boolean healthy;
+  private volatile boolean readerHealthy;
+  private volatile boolean senderHealthy = true;
   private volatile Connection listenConnection;
+  private volatile Connection senderConnection;
+  private volatile Statement senderStatement;
   private Thread reader;
   private Thread sender;
 
@@ -100,7 +103,7 @@ final class PgTransport implements CrossNodeTransport {
       for (int index = 0; index < Carrier.count(message.bytes().length); index++) {
         frames.add(Carrier.chunk(message, index).encode());
       }
-      sendFrames(message.target(), frames);
+      sendTransactionalFrames(message.target(), frames);
     } else {
       synchronized (this) {
         if (closed) {
@@ -109,7 +112,7 @@ final class PgTransport implements CrossNodeTransport {
         if (pendingMessages >= limits.queueCapacity()
             || message.bytes().length > limits.pendingBytes() - pendingBytes) {
           resync.accept(message.topic());
-          return;
+          throw new IllegalStateException("transient notification outbox budget exceeded");
         }
         pending.addLast(new Cursor(message));
         pendingBytes += message.bytes().length;
@@ -119,12 +122,14 @@ final class PgTransport implements CrossNodeTransport {
     }
   }
 
-  private void sendFrames(UUID target, List<String> frames) {
+  private void sendTransactionalFrames(UUID target, List<String> frames) {
     jdbc.execute(
         (ConnectionCallback<Void>)
             connection -> {
               // JdbcTemplate uses the DataSource's thread-bound transaction connection.
+              int timeoutSeconds = Math.max(1, (int) limits.reassemblyTimeout().toSeconds());
               try (PreparedStatement statement = connection.prepareStatement(SEND_SQL)) {
+                statement.setQueryTimeout(timeoutSeconds);
                 var array = connection.createArrayOf("text", frames.toArray(String[]::new));
                 try {
                   statement.setString(1, target == null ? BROADCAST_CHANNEL : inboxChannel(target));
@@ -136,6 +141,42 @@ final class PgTransport implements CrossNodeTransport {
               }
               return null;
             });
+  }
+
+  private void sendPendingFrames(UUID target, List<String> frames) throws SQLException {
+    try (Connection connection = dataSource.getConnection()) {
+      synchronized (this) {
+        if (closed) {
+          return;
+        }
+        senderConnection = connection;
+      }
+      try {
+        int timeoutSeconds = Math.max(1, (int) limits.reassemblyTimeout().toSeconds());
+        try (PreparedStatement statement = connection.prepareStatement(SEND_SQL)) {
+          synchronized (this) {
+            if (closed) {
+              return;
+            }
+            senderStatement = statement;
+          }
+          statement.setQueryTimeout(timeoutSeconds);
+          var array = connection.createArrayOf("text", frames.toArray(String[]::new));
+          try {
+            statement.setString(1, target == null ? BROADCAST_CHANNEL : inboxChannel(target));
+            statement.setArray(2, array);
+            statement.execute();
+          } finally {
+            array.free();
+          }
+        }
+      } finally {
+        synchronized (this) {
+          senderStatement = null;
+          senderConnection = null;
+        }
+      }
+    }
   }
 
   private void sendPending() {
@@ -162,10 +203,11 @@ final class PgTransport implements CrossNodeTransport {
           while (cursor.index < end) {
             frames.add(Carrier.chunk(cursor.message, cursor.index++).encode());
           }
-          sendFrames(cursor.message.target(), frames);
-        } catch (RuntimeException error) {
+          sendPendingFrames(cursor.message.target(), frames);
+          senderHealthy = true;
+        } catch (SQLException | RuntimeException error) {
           failed = true;
-          healthy = false;
+          senderHealthy = false;
           resync.accept(cursor.message.topic());
           log.warn(
               "Notification send failed topic={} errorType={}",
@@ -173,13 +215,14 @@ final class PgTransport implements CrossNodeTransport {
               error.getClass().getSimpleName());
         }
         synchronized (this) {
-          if (!closed) {
-            if (failed || cursor.index == Carrier.count(cursor.message.bytes().length)) {
-              pendingBytes -= cursor.message.bytes().length;
-              pendingMessages--;
-            } else {
-              pending.addLast(cursor);
-            }
+          if (closed) {
+            return;
+          }
+          if (failed || cursor.index == Carrier.count(cursor.message.bytes().length)) {
+            pendingBytes -= cursor.message.bytes().length;
+            pendingMessages--;
+          } else {
+            pending.addLast(cursor);
           }
         }
       }
@@ -203,10 +246,14 @@ final class PgTransport implements CrossNodeTransport {
           statement.execute("LISTEN " + BROADCAST_CHANNEL);
           statement.execute("LISTEN " + inboxChannel(self));
         }
-        healthy = true;
+        readerHealthy = true;
         resyncAll.run();
+        int tickMillis =
+            Math.max(
+                1,
+                (int) Math.min(pollMillis, Math.min(100L, limits.reassemblyTimeout().toMillis())));
         while (!isClosed()) {
-          PGNotification[] notifications = pg.getNotifications(pollMillis);
+          PGNotification[] notifications = pg.getNotifications(tickMillis);
           if (notifications != null) {
             for (PGNotification notification : notifications) {
               try {
@@ -221,6 +268,9 @@ final class PgTransport implements CrossNodeTransport {
                 }
                 reassembler.accept(carrier);
               } catch (IllegalArgumentException error) {
+                log.warn(
+                    "Notification carrier decode failed errorType={}",
+                    error.getClass().getSimpleName());
                 resyncAll.run();
               }
             }
@@ -229,7 +279,7 @@ final class PgTransport implements CrossNodeTransport {
         }
       } catch (SQLException | RuntimeException error) {
         if (!isClosed()) {
-          healthy = false;
+          readerHealthy = false;
           reassembler.clear();
           resyncAll.run();
           log.warn(
@@ -253,7 +303,7 @@ final class PgTransport implements CrossNodeTransport {
 
   @Override
   public boolean healthy() {
-    return healthy;
+    return !closed && readerHealthy && senderHealthy;
   }
 
   private synchronized boolean isClosed() {
@@ -262,22 +312,42 @@ final class PgTransport implements CrossNodeTransport {
 
   @Override
   public void close() {
-    Connection connection;
+    Connection listenConn;
+    Connection senderConn;
+    Statement senderStmt;
     synchronized (this) {
       if (closed) {
         return;
       }
       closed = true;
-      healthy = false;
+      readerHealthy = false;
+      senderHealthy = false;
       pending.clear();
       pendingBytes = 0;
       pendingMessages = 0;
-      connection = listenConnection;
+      listenConn = listenConnection;
+      senderConn = senderConnection;
+      senderStmt = senderStatement;
       notifyAll();
     }
-    if (connection != null) {
+    if (senderStmt != null) {
       try {
-        connection.abort(Runnable::run);
+        senderStmt.cancel();
+      } catch (SQLException ignored) {
+      }
+    }
+    if (senderConn != null) {
+      try {
+        senderConn.abort(Runnable::run);
+      } catch (SQLException error) {
+        log.warn(
+            "Notification sender connection abort failed errorType={}",
+            error.getClass().getSimpleName());
+      }
+    }
+    if (listenConn != null) {
+      try {
+        listenConn.abort(Runnable::run);
       } catch (SQLException error) {
         log.warn(
             "Notification connection abort failed errorType={}", error.getClass().getSimpleName());

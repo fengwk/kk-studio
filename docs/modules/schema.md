@@ -62,8 +62,8 @@ PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外�
 对象清理记录与最后数据库事实消失同事务登记、永久保留，后台重复删除使迟到对象写入最终收敛；
 存储写入本身的阻断仍属于对象存储能力边界。
 
-通知只作提交后回读/唤醒提示。应用推进 Thread/Canvas 版本与 Project/Issue 事实，并由该写路径在同一事务内对数据库连接执行内建 `pg_notify`（提交后才投递，回滚静默）。
-执行树与工具交互提示（`harness_thread_tree`、`harness_tool_interaction`）的 payload 定位真实执行根；环境失效提示 `environment_changed` 的 payload 是 Environment ID。它们同样由写入口发布，通知本身不推进、也不伪造任何 Thread version。恢复依赖权威行、poll 和租约，而非通知保存。
+通知只作提交后回读/唤醒提示。应用推进 Thread/Canvas 版本与 Project/Issue 事实，并由该写入口在同一物理事务内经统一通知总线发布（跨节点在同一事务连接内投递，提交后投递，回滚不投递，发布失败进入 poisoning）。
+执行树与工具交互提示（`harness.thread.tree`、`harness.tool.interaction`）的 payload 为实体提示，定位真实执行根（若来源事实已不存在则为空实体 `EntityHint(null)`，触发全量 resync）；环境失效提示 `environment.changed` 的 payload 是 Environment ID。它们同样由写入口在事务内发布，通知本身不推进、也不伪造任何 Thread version。恢复依赖权威行、poll 和租约，而非通知保存。
 
 ## 修改结构
 

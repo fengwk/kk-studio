@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.skill;
 
-import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -10,8 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -19,27 +16,29 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.PostgresqlSkillPackageChangeNotifier;
+import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.SkillPackageChangeNotifier;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
-import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Skill Package 生产写入口的事务内 {@code skill_package_changed} 通知验证。
+ * Skill Package 生产写入口的事务内 {@link PlatformNotifications#SKILL_PACKAGE_CHANGED} 通知验证。
  *
  * <p>意图：真实 Java 写入口（仓储 insert/update/delete 与 {@code SkillCatalogService} 的 {@code NOT_SUPPORTED}
- * 外层 + {@code SkillCatalogWrites.REQUIRES_NEW} 内层事务）在成功写事实的同一事务内发布失效提示，由独立非池化 PostgreSQL LISTEN
- * 连接观测。覆盖提交后投递、 未提交不可见、回滚静默、CAS 0 行与未变化编辑静默、无事务调用在写行前拒绝。
+ * 外层 + {@code SkillCatalogWrites.REQUIRES_NEW} 内层事务）在成功写事实的同一事务内发布失效提示，由真实 {@link NotificationBus}
+ * 订阅观测。覆盖提交后投递、未提交不可见、回滚静默、CAS 0 行与未变化编辑静默、无事务调用在写行前拒绝。
  */
 class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSupport {
 
@@ -50,26 +49,27 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
   @MockitoBean private SkillGitCache skillGitCache;
   @Autowired private SkillCatalogService skillCatalogService;
   @Autowired private SkillPackageRepository skillPackageRepository;
-  @Autowired private PostgresqlSkillPackageChangeNotifier notifier;
+  @Autowired private SkillPackageChangeNotifier notifier;
+  @Autowired private NotificationBus notificationBus;
   @Autowired private PlatformTransactionManager transactionManager;
 
   /** 插入/版本变化/删除都在提交后投递一次；未提交不可见，回滚静默且不改变权威事实。 */
   @Test
   void committedWriteNotifiesAndUncommittedOrRolledBackIsSilent() throws Exception {
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + EnvironmentSkillSyncOrchestrator.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
+    BlockingQueue<String> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SKILL_PACKAGE_CHANGED, notifications::add, () -> {})) {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
-      // 未提交的插入对其它连接不可见。
+      // 未提交的插入不可见。
       tx.executeWithoutResult(
           status -> {
             assertTrue(skillPackageRepository.insertPackage(packageRow()));
-            assertNoNotification(pg);
+            assertNoNotification(notifications);
           });
-      assertNotification(pg, PACKAGE);
-      assertNoNotification(pg);
+      assertNotification(notifications, PACKAGE);
+      assertNoNotification(notifications);
 
       // 回滚的版本变更绝不投递，也不改变权威 version/branch。
       tx.executeWithoutResult(
@@ -79,7 +79,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
             assertTrue(skillPackageRepository.updatePackage(current, current.getVersion()));
             status.setRollbackOnly();
           });
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       SkillPackage rolledBack = skillPackageRepository.getPackage(PACKAGE);
       assertEquals(0L, rolledBack.getVersion());
       assertEquals("main", rolledBack.getBranch());
@@ -91,36 +91,35 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
             current.setBranch("release");
             assertTrue(skillPackageRepository.updatePackage(current, current.getVersion()));
           });
-      assertNotification(pg, PACKAGE);
+      assertNotification(notifications, PACKAGE);
       assertEquals(1L, skillPackageRepository.getPackage(PACKAGE).getVersion());
 
       // 删除投递一次。
       tx.executeWithoutResult(
           status -> assertTrue(skillPackageRepository.deletePackage(PACKAGE, 1L)));
-      assertNotification(pg, PACKAGE);
+      assertNotification(notifications, PACKAGE);
       assertNull(skillPackageRepository.getPackage(PACKAGE));
     }
   }
 
   /** 陈旧 CAS 影响 0 行静默；生产编辑用例在事实未变化时不写行也不通知，陈旧版本冲突同样静默。 */
   @Test
-  void staleCasAndUnchangedEditAreSilent() throws Exception {
+  void staleCasAndUnchangedEditAreSilent() {
     TransactionTemplate tx = new TransactionTemplate(transactionManager);
     tx.executeWithoutResult(
         status -> assertTrue(skillPackageRepository.insertPackage(packageRow())));
 
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + EnvironmentSkillSyncOrchestrator.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<String> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SKILL_PACKAGE_CHANGED, notifications::add, () -> {})) {
       // 陈旧 CAS：0 行受影响，version 未推进，静默。
       tx.executeWithoutResult(
           status -> {
             SkillPackage current = skillPackageRepository.getPackage(PACKAGE);
             assertFalse(skillPackageRepository.updatePackage(current, current.getVersion() + 5));
           });
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
 
       // 编辑可编辑字段但事实未变化：服务直接返回，不写行、不通知。
       SkillPackageEditDTO unchanged = new SkillPackageEditDTO();
@@ -128,7 +127,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       unchanged.setDescription("notify package");
       unchanged.setBranch("main");
       skillCatalogService.editPackage(PACKAGE, unchanged);
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).getVersion());
 
       // 陈旧版本编辑：在写行前就 conflict，静默。
@@ -138,7 +137,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       stale.setBranch("release");
       assertThrows(
           AiVersionConflictException.class, () -> skillCatalogService.editPackage(PACKAGE, stale));
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).getVersion());
     }
   }
@@ -150,11 +149,10 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
     when(skillGitCache.scanManifest(PACKAGE, COMMIT))
         .thenReturn(List.of(new SkillManifestEntry("dev", "developer skill")));
 
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + EnvironmentSkillSyncOrchestrator.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<String> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SKILL_PACKAGE_CHANGED, notifications::add, () -> {})) {
       SkillPackageCreateDTO create = new SkillPackageCreateDTO();
       create.setPackageName(PACKAGE);
       create.setDescription("notify package");
@@ -164,25 +162,24 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       // 外层方法 NOT_SUPPORTED：若通知被放到无事务路径，requireTransaction 会直接拒绝。
       skillCatalogService.createPackage(create);
 
-      assertNotification(pg, PACKAGE);
-      assertNoNotification(pg);
+      assertNotification(notifications, PACKAGE);
+      assertNoNotification(notifications);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).getVersion());
     }
   }
 
   /** 无事务直接调用仓储写路径：在执行 SQL 前拒绝，权威行原样不变，listener 静默。 */
   @Test
-  void repositoryWriteWithoutTransactionIsRejectedBeforeAnyWrite() throws Exception {
+  void repositoryWriteWithoutTransactionIsRejectedBeforeAnyWrite() {
     TransactionTemplate tx = new TransactionTemplate(transactionManager);
     tx.executeWithoutResult(
         status -> assertTrue(skillPackageRepository.insertPackage(packageRow())));
     SkillPackage before = skillPackageRepository.getPackage(PACKAGE);
 
-    try (Connection listener = newConnection();
-        Statement statement = listener.createStatement()) {
-      statement.execute("listen " + EnvironmentSkillSyncOrchestrator.CHANNEL);
-      PGConnection pg = listener.unwrap(PGConnection.class);
-
+    BlockingQueue<String> notifications = new LinkedBlockingQueue<>();
+    try (NotificationSubscription ignored =
+        notificationBus.subscribe(
+            PlatformNotifications.SKILL_PACKAGE_CHANGED, notifications::add, () -> {})) {
       // 三个写入口都在执行 SQL 前拒绝，未产生 autocommit 写入。
       assertThrows(
           IllegalStateException.class, () -> skillPackageRepository.insertPackage(packageRow()));
@@ -201,7 +198,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       assertNotNull(after);
       assertEquals(before.getVersion(), after.getVersion());
       assertEquals(before.getBranch(), after.getBranch());
-      assertNoNotification(pg);
+      assertNoNotification(notifications);
     }
   }
 
@@ -224,23 +221,18 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
     return skillPackage;
   }
 
-  private static void assertNotification(PGConnection pg, String expectedPayload) {
-    List<PGNotification> notifications = drain(pg, 2000);
-    assertEquals(1, notifications.size());
-    assertEquals(EnvironmentSkillSyncOrchestrator.CHANNEL, notifications.get(0).getName());
-    assertEquals(expectedPayload, notifications.get(0).getParameter());
+  private static void assertNotification(
+      BlockingQueue<String> notifications, String expectedPayload) throws InterruptedException {
+    assertEquals(expectedPayload, notifications.poll(2, TimeUnit.SECONDS));
+    assertTrue(notifications.isEmpty());
   }
 
-  private static void assertNoNotification(PGConnection pg) {
-    assertTrue(drain(pg, 200).isEmpty());
-  }
-
-  private static List<PGNotification> drain(PGConnection pg, int timeoutMillis) {
+  private static void assertNoNotification(BlockingQueue<String> notifications) {
     try {
-      PGNotification[] notifications = pg.getNotifications(timeoutMillis);
-      return notifications == null ? List.of() : List.of(notifications);
-    } catch (SQLException error) {
-      throw new AssertionError("cannot read PostgreSQL notifications", error);
+      assertNull(notifications.poll(50, TimeUnit.MILLISECONDS));
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(error);
     }
   }
 }

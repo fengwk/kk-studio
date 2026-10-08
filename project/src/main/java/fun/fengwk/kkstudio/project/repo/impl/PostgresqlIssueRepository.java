@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueDO;
@@ -16,7 +17,7 @@ import java.util.UUID;
 public class PostgresqlIssueRepository implements IssueRepository {
 
   private final IssueMapper issueMapper;
-  private final PostgresqlProjectChangeNotifier notifier;
+  private final ProjectChangeNotifier notifier;
 
   @Override
   public boolean create(Issue issue) {

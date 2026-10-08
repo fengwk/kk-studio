@@ -27,6 +27,7 @@ class InfraModuleArchitectureTest {
           "fun.fengwk.kk-studio:kk-studio-harness-runtime",
           "fun.fengwk.kk-studio:kk-studio-harness-tool",
           "fun.fengwk.kk-studio:kk-studio-harness-environment",
+          "fun.fengwk.kk-studio:kk-studio-share",
           "org.postgresql:postgresql",
           "org.springframework:spring-jdbc");
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
@@ -39,6 +40,7 @@ class InfraModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",
           "fun.fengwk.kkstudio.harness.environment.",
+          "fun.fengwk.kkstudio.share.",
           "org.postgresql.",
           "org.slf4j.",
           "org.springframework.dao.",

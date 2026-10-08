@@ -129,8 +129,8 @@ class IssueControllerRuntimeLifecycleTest {
   }
 
   /**
-   * 测试意图：验证 phase 为 Integer.MAX_VALUE - 1（确保早于 PostgresqlNotificationLoop 启动，晚于其停止）， 且
-   * isAutoStartup 为 true。
+   * 测试意图：验证 phase 为 Integer.MAX_VALUE - 1（确保早于 DefaultNotificationBus 启动，晚于其停止）， 且 isAutoStartup 为
+   * true。
    */
   @Test
   void phaseIsMaxMinusOneAndAutoStartupIsTrue() {

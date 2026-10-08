@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueStageBudgetMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueStageBudgetDO;
@@ -16,7 +17,7 @@ import java.util.UUID;
 public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRepository {
 
   private final IssueStageBudgetMapper mapper;
-  private final PostgresqlProjectChangeNotifier notifier;
+  private final ProjectChangeNotifier notifier;
 
   @Override
   public IssueStageBudgetRow get(UUID issueId, String state) {

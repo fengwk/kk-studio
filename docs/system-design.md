@@ -75,7 +75,7 @@ platform -> project（实现宿主端口）
 harness-daemon -> harness-environment
 ```
 
-根 [`pom.xml`](../pom.xml) 聚合 `share`、`schema`、`canvas`、`project`、`harness`、
+根 [`pom.xml`](../pom.xml) 聚合 `share`、`notification`、`schema`、`canvas`、`project`、`harness`、
 `platform`、`plugins` 和 `web`；前端是独立 Node/Vite 工程。模块职责与依赖约束见
 [文档导航](README.md#按代码区域理解系统)。公共 DTO 与严格 JSON wire 见
 [Share](modules/share.md)，数据库关系与约束见 [Schema](modules/schema.md)。

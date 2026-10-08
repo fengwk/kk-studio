@@ -8,6 +8,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
+import fun.fengwk.kkstudio.share.notification.EntityHint;
+import fun.fengwk.kkstudio.share.notification.NotificationAddress;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
@@ -24,6 +29,7 @@ import java.util.function.BooleanSupplier;
 class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private ApplicationEventHub hub;
+  @Autowired private DefaultNotificationBus bus;
   @Autowired private JdbcTemplate jdbc;
 
   @Test
@@ -46,24 +52,30 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
           "notification-routing",
           "test-token-" + environmentId);
       long initialInteractionResyncs = countResyncs(interactionSignals);
-      notifyUntil(
+      bus.publish(
+          PlatformNotifications.ENVIRONMENT_CHANGED,
+          NotificationAddress.broadcast(),
+          environmentId);
+      awaitUntil(
           () ->
               countResyncs(interactionSignals) > initialInteractionResyncs
                   && environmentSignals.stream()
                       .anyMatch(signal -> signal instanceof Signal.EnvironmentChanged),
-          EnvironmentChangeHub.CHANNEL,
-          environmentId.toString());
+          "environment change notification delivers EnvironmentChanged and triggers interaction Resync");
 
-      // 同一 LISTEN 连接的后续根通知也是投递围栏，避免只在环境回调的中途检查负断言。
-      notifyUntil(
+      // 后续交互通知投递执行根
+      bus.publish(
+          HarnessNotifications.TOOL_INTERACTION,
+          NotificationAddress.broadcast(),
+          new EntityHint(rootThreadId));
+      awaitUntil(
           () ->
               interactionSignals.stream()
                   .anyMatch(
                       signal ->
                           signal instanceof Signal.InteractionsChanged changed
                               && rootThreadId.equals(changed.rootThreadId())),
-          InteractionChangeHub.CHANNEL,
-          rootThreadId.toString());
+          "interaction notification delivers InteractionsChanged with rootThreadId");
       assertFalse(
           interactionSignals.stream()
               .anyMatch(
@@ -74,35 +86,33 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
       assertTrue(countResyncs(interactionSignals) > initialInteractionResyncs);
 
       long interactionResyncsBefore = countResyncs(interactionSignals);
-      long environmentResyncsBefore = countResyncs(environmentSignals);
-      notifyUntil(
-          () ->
-              countResyncs(interactionSignals) > interactionResyncsBefore
-                  && countResyncs(environmentSignals) > environmentResyncsBefore,
-          EnvironmentChangeHub.CHANNEL,
-          "");
+      // EntityHint(null) 空实体表示来源事实已不存在，必须退化为交互全量 resync
+      bus.publish(
+          HarnessNotifications.TOOL_INTERACTION,
+          NotificationAddress.broadcast(),
+          new EntityHint(null));
+      awaitUntil(
+          () -> countResyncs(interactionSignals) > interactionResyncsBefore,
+          "null entity hint must trigger interaction resync");
     } finally {
       interactionSubscription.close();
     }
   }
 
-  /** 在 LISTEN 建立前投递的 NOTIFY 会丢失，因此这里按固定节奏重投直到观察到信号；断言只要求「曾经送达」，与投递次数无关。 */
-  private void notifyUntil(BooleanSupplier observed, String channel, String payload) {
+  private static void awaitUntil(BooleanSupplier observed, String message) {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
     while (System.nanoTime() < deadline) {
-      jdbc.queryForObject("select pg_notify(?, ?)", String.class, channel, payload);
       if (observed.getAsBoolean()) {
         return;
       }
       try {
-        Thread.sleep(100);
+        Thread.sleep(50);
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
-        throw new IllegalStateException("interrupted while awaiting notification delivery");
+        throw new IllegalStateException("interrupted while awaiting: " + message, interrupted);
       }
     }
-    throw new AssertionError(
-        channel + " notification with payload '" + payload + "' was never delivered");
+    throw new AssertionError("condition was never satisfied within timeout: " + message);
   }
 
   private static long countResyncs(List<Signal> signals) {

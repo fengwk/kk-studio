@@ -8,11 +8,18 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.canvas.CanvasBlobReleaser;
+import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.notification.NotificationLimits;
+
+import javax.sql.DataSource;
 
 import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 /** Canvas Infra PostgreSQL 集成测试的最小 Spring Boot 组合根。 */
@@ -24,6 +31,17 @@ public class CanvasInfraTestApplication {
   ConfigurationCustomizer uuidTypeHandlerRegistration() {
     return configuration ->
         configuration.getTypeHandlerRegistry().register(UUID.class, new TestUuidTypeHandler());
+  }
+
+  @Bean(destroyMethod = "close")
+  DefaultNotificationBus notificationBus(DataSource dataSource) {
+    return new DefaultNotificationBus(
+        dataSource,
+        UUID.randomUUID(),
+        List.of(CanvasNotifications.REVISION, CanvasNotifications.FUNCTION_WORK),
+        NotificationLimits.defaults(),
+        Duration.ofMillis(100),
+        Duration.ofMillis(100));
   }
 
   /**

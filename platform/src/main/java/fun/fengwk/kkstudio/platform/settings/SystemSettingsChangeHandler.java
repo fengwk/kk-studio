@@ -14,8 +14,6 @@ import java.util.Objects;
 @Component
 public class SystemSettingsChangeHandler {
 
-  public static final String CHANNEL = "system_settings_changed";
-
   private final SystemSettingsRepository repository;
   private final SystemSettingsSnapshot snapshot;
 
@@ -25,8 +23,8 @@ public class SystemSettingsChangeHandler {
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
   }
 
-  /** 处理一条变更通知；payload 无论为空或畸形都不影响权威回读。 */
-  public void onNotification(String payload) {
+  /** 处理一条变更通知；payload 接收已由总线解码的 version hint，不影响权威回读。 */
+  public void onNotification(Long version) {
     refresh("notification");
   }
 

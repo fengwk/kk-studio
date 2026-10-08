@@ -12,8 +12,12 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
+import fun.fengwk.kkstudio.share.notification.VersionHint;
+
 import javax.sql.DataSource;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -157,14 +161,28 @@ class ThreadVersionHubTest {
     List<ThreadVersionEventSource.Event> received = new ArrayList<>();
     hub.subscribe(threadId, received::add);
 
-    // 合法 payload 轻量 fan-out；每个畸形 payload 都降级为 resync，失败订阅者不阻断正常订阅者或后续通知。
-    hub.onNotification("00000000-0000-0000-0000-000000000007:6");
-    hub.onNotification("00000000-0000-0000-0000-000000000007");
-    hub.onNotification("00000000-0000-0000-0000-000000000007:06");
-    hub.onNotification("00000000-0000-0000-0000-000000000007:9223372036854775808");
-    hub.onNotification("00000000-0000-0000-0000-00000000007:7");
-    hub.onNotification("not-a-uuid:7");
-    hub.onNotification(null);
+    // 合法 payload 轻量 fan-out；每个畸形 payload 由总线 codec 拒绝并降级为 resync，失败订阅者不阻断正常订阅者或后续通知。
+    List<String> malformedPayloads =
+        List.of(
+            "00000000-0000-0000-0000-000000000007",
+            "00000000-0000-0000-0000-000000000007:06",
+            "00000000-0000-0000-0000-000000000007:9223372036854775808",
+            "00000000-0000-0000-0000-00000000007:7",
+            "not-a-uuid:7");
+
+    hub.onNotification(new VersionHint(threadId, 6L));
+
+    for (String malformed : malformedPayloads) {
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              HarnessNotifications.THREAD_VERSION
+                  .codec()
+                  .decode(malformed.getBytes(StandardCharsets.UTF_8)),
+          "总线 codec 必须拒绝畸形 payload: " + malformed);
+      hub.broadcastResync();
+    }
+    hub.broadcastResync();
 
     assertEquals(
         List.of(
@@ -184,7 +202,7 @@ class ThreadVersionHubTest {
     DataSource dataSource = mock(DataSource.class);
     ThreadVersionHub hub = new ThreadVersionHub(dataSource);
 
-    hub.onNotification("00000000-0000-0000-0000-000000000007:6");
+    hub.onNotification(new VersionHint(new UUID(0L, 7L), 6L));
 
     verifyNoInteractions(dataSource);
   }

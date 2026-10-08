@@ -1,11 +1,16 @@
 package fun.fengwk.kkstudio.web.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.project.notification.ProjectNotifications;
+
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -19,12 +24,12 @@ class ProjectInvalidationHubTest {
     AutoCloseable subscription = hub.subscribe(changed::add, resyncs::incrementAndGet);
     UUID projectId = UUID.randomUUID();
 
-    hub.onNotification(projectId.toString());
+    hub.onNotification(projectId);
     assertEquals(List.of(projectId), changed);
     assertEquals(0, resyncs.get());
 
     subscription.close();
-    hub.onNotification(projectId.toString());
+    hub.onNotification(projectId);
     assertEquals(List.of(projectId), changed);
   }
 
@@ -34,9 +39,19 @@ class ProjectInvalidationHubTest {
     AtomicInteger resyncs = new AtomicInteger();
     hub.subscribe(ignored -> {}, resyncs::incrementAndGet);
 
-    hub.onNotification(null);
-    hub.onNotification("not-a-project-id");
-    hub.onNotification(UUID.randomUUID().toString().toUpperCase());
+    List<String> invalidPayloads =
+        List.of("not-a-project-id", UUID.randomUUID().toString().toUpperCase(Locale.ROOT), "");
+
+    for (String invalid : invalidPayloads) {
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              ProjectNotifications.ISSUE_CHANGED
+                  .codec()
+                  .decode(invalid.getBytes(StandardCharsets.UTF_8)),
+          "总线 codec 必须拒绝非法 payload: " + invalid);
+      hub.broadcastResync();
+    }
     hub.broadcastResync();
 
     assertEquals(4, resyncs.get());
@@ -57,7 +72,7 @@ class ProjectInvalidationHubTest {
     hub.subscribe(changed::add, resyncs::incrementAndGet);
     UUID projectId = UUID.randomUUID();
 
-    hub.onNotification(projectId.toString());
+    hub.onNotification(projectId);
     hub.broadcastResync();
 
     assertEquals(List.of(projectId), changed);

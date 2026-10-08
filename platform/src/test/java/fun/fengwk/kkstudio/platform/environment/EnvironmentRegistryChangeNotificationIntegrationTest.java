@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -33,9 +33,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * environment_connection 六组写的 Java 通知契约：真实短事务内「围栏 SQL + environment_changed 发布」要么一起提交、要么一起回滚。
+ * environment_connection 六组写的 Java 通知契约：真实短事务内「围栏 SQL + environment.changed 发布」要么一起提交、要么一起回滚。
  *
- * <p>测试基座已删除两个数据库行触发器，并用独立 LISTEN 连接直接观测：真实写入（含 HEARTBEAT 与 Skill 投影）提交后各投递一次； 认证拒绝、活跃租约冲突、0
+ * <p>测试基座通过真实 {@code NotificationBus} 订阅直接观测：真实写入（含 HEARTBEAT 与 Skill 投影）提交后各投递一次；认证拒绝、活跃租约冲突、0
  * 行围栏与自然到期保持静默；发布失败必须回滚对应围栏写。
  */
 class EnvironmentRegistryChangeNotificationIntegrationTest
@@ -68,7 +68,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
 
   /** 测试意图：只有真实的 Acquired upsert 才通知；认证拒绝、环境缺失与活跃租约冲突都不写行、保持静默。 */
   @Test
-  void acquireNotificationsFollowRealUpserts() throws Exception {
+  void acquireNotificationsFollowRealUpserts() {
     try (EnvironmentChannelListener listener = listen()) {
       assertInstanceOf(
           LeaseBindResult.Rejected.class,
@@ -84,12 +84,12 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
           assertInstanceOf(
               LeaseBindResult.Acquired.class,
               environmentRegistry.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
 
       // 活跃 READY 路由冲突：0 行写入，静默。
       assertTrue(
           environmentRegistry.markReady(DEV, acquired.leaseToken(), CAPABILITIES, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
       assertInstanceOf(
           LeaseBindResult.RetryLater.class,
           environmentRegistry.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION));
@@ -101,19 +101,19 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertInstanceOf(
           LeaseBindResult.Acquired.class,
           environmentRegistry.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
     }
   }
 
   /** 测试意图：markReady/heartbeat/recordSkillEvent/replaceSkillState/disconnect 各自成功时通知，0 行围栏静默。 */
   @Test
-  void fencedConnectionWritesNotifyOnlyWhenTheyWrite() throws Exception {
+  void fencedConnectionWritesNotifyOnlyWhenTheyWrite() {
     try (EnvironmentChannelListener listener = listen()) {
       LeaseBindResult.Acquired acquired =
           assertInstanceOf(
               LeaseBindResult.Acquired.class,
               environmentRegistry.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
       UUID token = acquired.leaseToken();
       EnvironmentEvent skillEvent =
           new EnvironmentEvent(
@@ -126,28 +126,28 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
           environmentRegistry.markReady(DEV, UUID.randomUUID(), CAPABILITIES, LEASE_DURATION));
       listener.assertSilent();
       assertTrue(environmentRegistry.markReady(DEV, token, CAPABILITIES, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
 
       assertFalse(environmentRegistry.heartbeat(DEV, UUID.randomUUID(), LEASE_DURATION));
       listener.assertSilent();
       assertTrue(environmentRegistry.heartbeat(DEV, token, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
 
       assertFalse(environmentRegistry.recordSkillEvent(DEV, UUID.randomUUID(), skillEvent));
       listener.assertSilent();
       assertTrue(environmentRegistry.recordSkillEvent(DEV, token, skillEvent));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
 
       assertFalse(
           environmentRegistry.replaceSkillState(DEV, UUID.randomUUID(), List.of(), skillEvent));
       listener.assertSilent();
       assertTrue(environmentRegistry.replaceSkillState(DEV, token, List.of(), skillEvent));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
 
       assertFalse(environmentRegistry.disconnect(DEV, UUID.randomUUID(), LEASE_DURATION));
       listener.assertSilent();
       assertTrue(environmentRegistry.disconnect(DEV, token, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
 
       // 过期持有者：全部围栏 0 行，连同直接改期一起保持静默。
       expireConnectionLease(DEV);
@@ -163,17 +163,16 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
 
   /** 测试意图：发布失败必须回滚对应围栏写（含 tryAcquire），绝不提交「已写但未通知」的中间态。 */
   @Test
-  void notificationFailureRollsBackTheFencedConnectionWrite() throws Exception {
+  void notificationFailureRollsBackTheFencedConnectionWrite() {
     try (EnvironmentChannelListener listener = listen()) {
       LeaseBindResult.Acquired acquired =
           assertInstanceOf(
               LeaseBindResult.Acquired.class,
               environmentRegistry.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      listener.assertNotification(DEV.value());
       UUID token = acquired.leaseToken();
 
-      PostgresqlEnvironmentChangeNotifier failingNotifier =
-          mock(PostgresqlEnvironmentChangeNotifier.class);
+      EnvironmentChangeNotifier failingNotifier = mock(EnvironmentChangeNotifier.class);
       doThrow(new DataAccessResourceFailureException("environment notification unavailable"))
           .when(failingNotifier)
           .environmentChanged(any());

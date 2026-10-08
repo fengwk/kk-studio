@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.infra.postgresql;
+package fun.fengwk.kkstudio.harness.infra.realtime;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.share.notification.NotificationCodec;
+import fun.fengwk.kkstudio.share.notification.NotificationCodecs;
 
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -17,8 +19,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-/** PostgreSQL realtime NOTIFY envelope 的严格 deterministic JSON codec。 */
-public final class RealtimeNotificationCodec {
+/**
+ * Realtime envelope 的严格 deterministic JSON codec；同时是 {@code harness.realtime} topic 的唯一 payload
+ * codec。
+ */
+public final class RealtimeNotificationCodec
+    implements NotificationCodec<RealtimeNotificationCodec.Envelope> {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
@@ -40,8 +46,13 @@ public final class RealtimeNotificationCodec {
     this.eventCodec = Objects.requireNonNull(eventCodec, "eventCodec");
   }
 
+  @Override
+  public byte[] encode(Envelope envelope) {
+    return NotificationCodecs.encodeUtf8(encodeEnvelope(envelope));
+  }
+
   /** 编码 canonical EVENT envelope。 */
-  public String encodeEvent(RealtimeEvent event) {
+  private String encodeEvent(RealtimeEvent event) {
     Objects.requireNonNull(event, "event");
     ObjectNode node = NODES.objectNode();
     node.put("kind", Kind.EVENT.name());
@@ -50,7 +61,7 @@ public final class RealtimeNotificationCodec {
   }
 
   /** 编码 canonical RESYNC envelope。 */
-  public String encodeResync(UUID threadId, String reason) {
+  private String encodeResync(UUID threadId, String reason) {
     Envelope.Resync resync = new Envelope.Resync(threadId, reason);
     ObjectNode node = NODES.objectNode();
     node.put("kind", Kind.RESYNC.name());
@@ -60,11 +71,14 @@ public final class RealtimeNotificationCodec {
   }
 
   /** 解码且验证 canonical envelope。任何 malformed、unknown、字段集合不精确或非 canonical payload 都被拒绝。 */
-  public Envelope decode(String payload) {
+  @Override
+  public Envelope decode(byte[] payload) {
     Objects.requireNonNull(payload, "payload");
+    // 严格解码：坏字节必须被拒绝，绝不静默替换成 replacement character 后再参与 canonical 比对。
+    String text = NotificationCodecs.decodeUtf8(payload);
     JsonNode root;
     try {
-      root = MAPPER.readTree(payload);
+      root = MAPPER.readTree(text);
     } catch (JsonProcessingException error) {
       throw new IllegalArgumentException("malformed realtime notification JSON", error);
     }
@@ -85,13 +99,13 @@ public final class RealtimeNotificationCodec {
               requiredCanonicalUuid(node, "threadId", "notification"),
               requiredText(node, "reason", "notification"));
     }
-    if (!encode(envelope).equals(payload)) {
+    if (!encodeEnvelope(envelope).equals(text)) {
       throw new IllegalArgumentException("realtime notification must use canonical JSON");
     }
     return envelope;
   }
 
-  private String encode(Envelope envelope) {
+  private String encodeEnvelope(Envelope envelope) {
     if (envelope instanceof Envelope.Event event) {
       return encodeEvent(event.event());
     }
@@ -135,7 +149,7 @@ public final class RealtimeNotificationCodec {
     try {
       return Kind.valueOf(value);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("unknown notification.kind: " + value, error);
+      throw new IllegalArgumentException("unknown notification kind", error);
     }
   }
 

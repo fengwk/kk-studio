@@ -23,12 +23,12 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
 
   private final CanvasFunctionRunMapper runMapper;
   private final CanvasFunctionRunStateCodecPort stateCodec;
-  private final PostgresqlCanvasChangeNotifier notifier;
+  private final CanvasChangeNotifier notifier;
 
   public PostgresqlCanvasFunctionRunRepository(
       CanvasFunctionRunMapper runMapper,
       CanvasFunctionRunStateCodecPort stateCodec,
-      PostgresqlCanvasChangeNotifier notifier) {
+      CanvasChangeNotifier notifier) {
     this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.notifier = Objects.requireNonNull(notifier, "notifier");

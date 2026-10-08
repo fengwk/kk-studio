@@ -142,7 +142,7 @@ class SystemSettingsServiceImplTest {
                 .forEach(TransactionSynchronization::afterCommit));
     assertEquals(SystemSettings.DEFAULT, snapshot.get());
 
-    changeHandler.onNotification("");
+    changeHandler.onNotification(1L);
 
     assertEquals(UPDATED_SETTINGS, snapshot.get());
   }

@@ -35,6 +35,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -303,8 +304,11 @@ class NotificationPostgresqlIntegrationTest {
             Duration.ofMillis(10));
     try (bus) {
       bus.subscribe(EVENTS, values::add, () -> resyncs.add(count.incrementAndGet()));
-      bus.start();
+      // 订阅先于 LISTEN 建连：订阅本身即完成一次权威恢复。
       assertEquals(1, take(resyncs));
+      bus.start();
+      // LISTEN 建连完成后必须再做一次权威对账。
+      assertEquals(2, take(resyncs));
       JdbcTemplate jdbc = new JdbcTemplate(source);
       Integer pid =
           jdbc.queryForObject(
@@ -312,7 +316,7 @@ class NotificationPostgresqlIntegrationTest {
               Integer.class, source.applicationName);
       assertTrue(jdbc.queryForObject("select pg_terminate_backend(?)", Boolean.class, pid));
       // Disconnection and LISTEN-completed recovery both schedule authoritative reconciliation.
-      while (take(resyncs) < 2 || !bus.healthy()) {
+      while (take(resyncs) < 3 || !bus.healthy()) {
         // The next control marker is generated only once the new LISTEN has succeeded.
       }
       WireMessage frame = wire(UUID.randomUUID(), bus.nodeId(), "after-reconnect");
@@ -496,12 +500,15 @@ class NotificationPostgresqlIntegrationTest {
     AtomicInteger count = new AtomicInteger();
     try (DefaultNotificationBus bus = bus(source)) {
       bus.subscribe(EVENTS, values::add, () -> recoveries.add(count.incrementAndGet()));
-      bus.start();
-      bus.start();
+      // 订阅建立即执行权威恢复，不依赖 LISTEN 是否已建连。
       assertEquals(1, take(recoveries));
+      bus.start();
+      bus.start();
+      // LISTEN 建连完成后再做一次全量对账。
+      assertEquals(2, take(recoveries));
       JdbcTemplate jdbc = new JdbcTemplate(source);
       sendRaw(jdbc, PgTransport.inboxChannel(bus.nodeId()), "bad-carrier");
-      assertEquals(2, take(recoveries));
+      assertEquals(3, take(recoveries));
       WireMessage invalid =
           new WireMessage(
               UUID.randomUUID(),
@@ -510,11 +517,11 @@ class NotificationPostgresqlIntegrationTest {
               UUID.randomUUID(),
               new byte[] {(byte) 0xFF});
       sendRaw(jdbc, PgTransport.inboxChannel(bus.nodeId()), Carrier.chunk(invalid, 0).encode());
-      assertEquals(3, take(recoveries));
+      assertEquals(4, take(recoveries));
       WireMessage wrongAddress = wire(UUID.randomUUID(), null, "wrong-channel");
       sendRaw(
           jdbc, PgTransport.inboxChannel(bus.nodeId()), Carrier.chunk(wrongAddress, 0).encode());
-      assertEquals(4, take(recoveries));
+      assertEquals(5, take(recoveries));
       WireMessage unknown =
           new WireMessage(
               UUID.randomUUID(), bus.nodeId(), "unknown.topic", UUID.randomUUID(), new byte[] {1});
@@ -523,6 +530,24 @@ class NotificationPostgresqlIntegrationTest {
       sendRaw(jdbc, PgTransport.inboxChannel(bus.nodeId()), Carrier.chunk(valid, 0).encode());
       assertEquals("valid", take(values));
       assertTrue(values.isEmpty());
+    }
+  }
+
+  @Test
+  void subscribeAfterListenReadyStillPerformsItsOwnAuthoritativeResync() throws Exception {
+    CountingDataSource source = dataSource();
+    BlockingQueue<Integer> resyncs = new LinkedBlockingQueue<>();
+    AtomicInteger count = new AtomicInteger();
+    try (DefaultNotificationBus bus = bus(source)) {
+      bus.start();
+      awaitHealthy(bus);
+      int baseline = count.get();
+      // 订阅晚于 LISTEN 建连完成：仍必须自行完成一次权威恢复，而不是依赖「下一次通知」。
+      bus.subscribe(
+          EVENTS,
+          ignored -> fail("no notification was published"),
+          () -> resyncs.add(count.incrementAndGet()));
+      assertEquals(baseline + 1, take(resyncs));
     }
   }
 
@@ -543,7 +568,9 @@ class NotificationPostgresqlIntegrationTest {
     try (transport) {
       WireMessage first = wire(UUID.randomUUID(), null, "first");
       transport.send(first, false);
-      transport.send(wire(UUID.randomUUID(), null, "overflow"), false);
+      assertThrows(
+          IllegalStateException.class,
+          () -> transport.send(wire(UUID.randomUUID(), null, "overflow"), false));
       assertEquals(EVENTS.name(), take(recoveries));
       assertEquals(0, source.notifies.get());
       source.failNotify = true;
@@ -602,6 +629,158 @@ class NotificationPostgresqlIntegrationTest {
     }
   }
 
+  @Test
+  void notificationTransactionManagerBlocksFirstPublishInAfterCommit() {
+    CountingDataSource source = dataSource();
+    try (DefaultNotificationBus bus = bus(source)) {
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              notificationTransactions(source)
+                  .executeWithoutResult(
+                      status -> {
+                        TransactionSynchronizationManager.registerSynchronization(
+                            new TransactionSynchronization() {
+                              @Override
+                              public void afterCommit() {
+                                bus.publish(EVENTS, NotificationAddress.broadcast(), "post-commit");
+                              }
+                            });
+                      }));
+      assertEquals(0, source.notifies.get());
+    }
+  }
+
+  @Test
+  void notificationTransactionManagerUsesProvidedDataSource() {
+    CountingDataSource source = dataSource();
+    NotificationTransactionManager transactionManager = new NotificationTransactionManager(source);
+    assertEquals(source, transactionManager.getDataSource());
+  }
+
+  @Test
+  void realPgBlockingSendIsAbortedAndReleasedImmediatelyOnClose() throws Exception {
+    CountingDataSource source = dataSource();
+    JdbcTemplate jdbc = new JdbcTemplate(source);
+    jdbc.execute("ALTER ROLE " + POSTGRES.getUsername() + " SET search_path TO public, pg_catalog");
+    try (Connection lockConn = source.getConnection();
+        Statement lockStmt = lockConn.createStatement()) {
+      lockStmt.execute("select pg_advisory_lock(999888)");
+      jdbc.execute(
+          "create or replace function public.pg_notify(channel text, payload text) returns void language plpgsql as $$ "
+              + "begin perform pg_advisory_lock(999888); end; $$");
+      try {
+        PgTransport transport =
+            new PgTransport(
+                source,
+                UUID.randomUUID(),
+                smallLimits(8),
+                Duration.ofMillis(20),
+                Duration.ofMillis(10),
+                ignored -> {},
+                ignored -> {},
+                () -> {});
+        WireMessage message = wire(UUID.randomUUID(), null, "blocking");
+        transport.send(message, false);
+        transport.start();
+        long waitDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        boolean blocked = false;
+        while (System.nanoTime() < waitDeadline) {
+          Integer count =
+              jdbc.queryForObject(
+                  "select count(*) from pg_stat_activity where query like '%pg_notify%' and state = 'active' and pid != pg_backend_pid()",
+                  Integer.class);
+          if (count != null && count > 0) {
+            blocked = true;
+            break;
+          }
+          Thread.sleep(20);
+        }
+        assertTrue(blocked, "sender must be actively blocked in PG");
+        long start = System.nanoTime();
+        transport.close();
+        long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertTrue(elapsed < 1500, "close must abort blocking sender in < 1.5s, took: " + elapsed);
+        assertFalse(transport.healthy());
+      } finally {
+        lockStmt.execute("select pg_advisory_unlock(999888)");
+        jdbc.execute("drop function if exists public.pg_notify(text, text)");
+        jdbc.execute("ALTER ROLE " + POSTGRES.getUsername() + " RESET search_path");
+      }
+    }
+  }
+
+  @Test
+  void senderFailureAndSuccessRecoversHealthSeparatelyFromReader() throws Exception {
+    CountingDataSource source = dataSource();
+    BlockingQueue<String> recoveries = new LinkedBlockingQueue<>();
+    PgTransport transport =
+        new PgTransport(
+            source,
+            UUID.randomUUID(),
+            smallLimits(8),
+            Duration.ofMillis(20),
+            Duration.ofMillis(10),
+            ignored -> {},
+            recoveries::add,
+            () -> {});
+    try (transport) {
+      transport.start();
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (!transport.healthy() && System.nanoTime() < deadline) {
+        Thread.sleep(10);
+      }
+      assertTrue(transport.healthy(), "transport should be healthy after start");
+
+      source.failNotify = true;
+      transport.send(wire(UUID.randomUUID(), null, "fail"), false);
+      assertEquals(EVENTS.name(), take(recoveries));
+      assertFalse(transport.healthy(), "sender failure must make transport unhealthy");
+
+      source.failNotify = false;
+      transport.send(wire(UUID.randomUUID(), null, "recover"), false);
+      deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (!transport.healthy() && System.nanoTime() < deadline) {
+        Thread.sleep(10);
+      }
+      assertTrue(transport.healthy(), "successful send must restore transport health");
+    }
+  }
+
+  @Test
+  void busHealthyReflectsFailedSubscriptions() throws Exception {
+    CountingDataSource source = dataSource();
+    CountDownLatch failed = new CountDownLatch(1);
+    AtomicBoolean failRecovery = new AtomicBoolean(false);
+    try (DefaultNotificationBus bus = bus(source)) {
+      bus.subscribe(
+          EVENTS,
+          value -> {
+            failRecovery.set(true);
+            throw new IllegalStateException("consumer error");
+          },
+          () -> {
+            if (failRecovery.get()) {
+              failed.countDown();
+              throw new IllegalStateException("recovery error");
+            }
+          });
+      bus.start();
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (!bus.healthy() && System.nanoTime() < deadline) {
+        Thread.sleep(10);
+      }
+      assertTrue(bus.healthy());
+      bus.publish(EVENTS, NotificationAddress.node(bus.nodeId()), "trigger-fail");
+      await(failed);
+      deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (bus.healthy() && System.nanoTime() < deadline) {
+        Thread.sleep(10);
+      }
+      assertFalse(bus.healthy(), "bus must become unhealthy when a subscription fails");
+    }
+  }
+
   private static void sendRaw(JdbcTemplate jdbc, String channel, String payload) {
     jdbc.queryForObject("select pg_notify(?, ?)", Object.class, channel, payload);
   }
@@ -610,10 +789,22 @@ class NotificationPostgresqlIntegrationTest {
     return new TransactionTemplate(new DataSourceTransactionManager(dataSource));
   }
 
+  private static TransactionTemplate notificationTransactions(CountingDataSource dataSource) {
+    return new TransactionTemplate(new NotificationTransactionManager(dataSource));
+  }
+
   private static <T> T take(BlockingQueue<T> queue) throws InterruptedException {
     T value = queue.poll(10, TimeUnit.SECONDS);
     assertNotNull(value, "notification/control marker timed out");
     return value;
+  }
+
+  private static void awaitHealthy(DefaultNotificationBus bus) throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!bus.healthy() && System.nanoTime() < deadline) {
+      Thread.sleep(10);
+    }
+    assertTrue(bus.healthy(), "notification bus did not become healthy");
   }
 
   private static CountingDataSource dataSource() {

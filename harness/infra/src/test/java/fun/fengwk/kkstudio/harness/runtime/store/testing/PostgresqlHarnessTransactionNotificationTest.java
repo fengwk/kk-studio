@@ -26,11 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -50,22 +49,27 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.share.notification.EntityHint;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
+import fun.fengwk.kkstudio.share.notification.VersionHint;
 
 import javax.sql.DataSource;
 
-import java.sql.Connection;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 
@@ -76,19 +80,18 @@ import java.util.function.UnaryOperator;
  */
 class PostgresqlHarnessTransactionNotificationTest {
 
-  private static final String VERSION_CHANNEL = "harness_thread_version";
-  private static final String TREE_CHANNEL = "harness_thread_tree";
-  private static final String INTERACTION_CHANNEL = "harness_tool_interaction";
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
   private HarnessStore store;
   private DataSource dataSource;
+  private DefaultNotificationBus bus;
 
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     dataSource = PostgresqlHarnessStoreFixture.dataSource();
+    bus = PostgresqlHarnessStoreFixture.notificationBus();
   }
 
   /**
@@ -104,7 +107,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     ToolChain grandChildChain =
         seedToolChain(store, root, childChain.threadId(), rootChain.threadId(), ToolKind.BASH);
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       // 回滚不投递：同一写入口插入新 Thread 后回滚，任何 channel 都不得收到通知。
       assertThrows(
           IllegalStateException.class,
@@ -171,7 +174,7 @@ class PostgresqlHarnessTransactionNotificationTest {
         seedToolChain(store, root, rootChain.threadId(), rootChain.threadId(), ToolKind.BASH);
     UUID interactionRoot = rootChain.threadId();
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       // READY -> WAITING_APPROVAL
       updateTool(
           store, grandChildChain.toolId(), tool -> tool.requestApproval("needs approval", T2));
@@ -209,7 +212,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     SessionRoot root = seedSessionRoot(store);
     ToolChain askChain = seedToolChain(store, root, null, null, ToolKind.ASK_USER);
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       updateTool(store, askChain.toolId(), tool -> tool.requestInput(T2));
       listener.expectExactly(interactionNotification(askChain.threadId()));
 
@@ -230,7 +233,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     SessionRoot root = seedSessionRoot(store);
     ToolChain chain = seedToolChain(store, root, null, null, ToolKind.BASH);
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       updateTool(store, chain.toolId(), tool -> tool.markApprovalNotRequired(T2));
       listener.assertSilent();
       updateTool(store, chain.toolId(), tool -> tool.beginDispatch(T3));
@@ -250,7 +253,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     ToolChain grandChildChain =
         seedToolChain(store, root, childChain.threadId(), rootChain.threadId(), ToolKind.BASH);
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       // 删除 child + grandchild，存活 root 是受影响真根；删除的 READY 调用不产生交互失效。
       int deletedChildren =
           store.transaction(
@@ -285,7 +288,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     CountDownLatch written = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       Future<UUID> future =
           executor.submit(
               () ->
@@ -324,7 +327,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     ToolChain chain = seedToolChain(store, root, null, null, ToolKind.BASH);
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, chain.toolId());
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       requestEnvironmentWork(store, chain.threadId(), target, ENVIRONMENT);
       listener.expectExactly(interactionNotification(chain.threadId()));
 
@@ -379,7 +382,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     ToolChain chain = seedToolChain(store, root, null, null, ToolKind.BASH);
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, chain.toolId());
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       inTransaction(
           store,
           tx -> {
@@ -415,7 +418,7 @@ class PostgresqlHarnessTransactionNotificationTest {
     ToolChain chain = seedToolChain(store, root, null, null, ToolKind.BASH);
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, chain.toolId());
 
-    try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
+    try (InvalidationListener listener = InvalidationListener.open(bus)) {
       requestEnvironmentWork(store, chain.threadId(), target, ENVIRONMENT);
       listener.expectExactly(interactionNotification(chain.threadId()));
 
@@ -620,21 +623,25 @@ class PostgresqlHarnessTransactionNotificationTest {
         });
   }
 
-  private static String versionNotification(UUID threadId, long version) {
-    return VERSION_CHANNEL + "|" + threadId + ":" + version;
+  private record Invalidation(String topic, Object payload) {}
+
+  private static Invalidation versionNotification(UUID threadId, long version) {
+    return new Invalidation(
+        HarnessNotifications.THREAD_VERSION.name(), new VersionHint(threadId, version));
   }
 
-  private static String treeNotification(UUID rootThreadId) {
-    return TREE_CHANNEL + "|" + rootThreadId;
+  private static Invalidation treeNotification(UUID rootThreadId) {
+    return new Invalidation(HarnessNotifications.THREAD_TREE.name(), new EntityHint(rootThreadId));
   }
 
-  private static String interactionNotification(UUID rootThreadId) {
-    return INTERACTION_CHANNEL + "|" + rootThreadId;
+  private static Invalidation interactionNotification(UUID rootThreadId) {
+    return new Invalidation(
+        HarnessNotifications.TOOL_INTERACTION.name(), new EntityHint(rootThreadId));
   }
 
   /** 来源 Thread 已不可解析时的空 payload：listener 依此回退全量 resync。 */
-  private static String interactionResyncNotification() {
-    return INTERACTION_CHANNEL + "|";
+  private static Invalidation interactionResyncNotification() {
+    return new Invalidation(HarnessNotifications.TOOL_INTERACTION.name(), new EntityHint(null));
   }
 
   private static void seedEnvironmentConnection(
@@ -674,38 +681,58 @@ class PostgresqlHarnessTransactionNotificationTest {
     }
   }
 
-  /** LISTEN 三个 Harness 失效 channel 的独立连接，按 {@code channel|payload} 收集提交后投递的通知。 */
+  /** 订阅三个 Harness 失效 topic 的监听器，收集提交后投递的类型化通知。 */
   private static final class InvalidationListener implements AutoCloseable {
 
-    private final Connection connection;
-    private final PGConnection notifications;
+    private final List<NotificationSubscription> subscriptions;
+    private final BlockingQueue<Invalidation> queue;
 
-    private InvalidationListener(Connection connection, PGConnection notifications) {
-      this.connection = connection;
-      this.notifications = notifications;
+    private InvalidationListener(
+        List<NotificationSubscription> subscriptions, BlockingQueue<Invalidation> queue) {
+      this.subscriptions = subscriptions;
+      this.queue = queue;
     }
 
-    static InvalidationListener open(DataSource dataSource) throws SQLException {
-      Connection connection = dataSource.getConnection();
-      connection.setAutoCommit(true);
-      try (Statement statement = connection.createStatement()) {
-        statement.execute("LISTEN " + VERSION_CHANNEL);
-        statement.execute("LISTEN " + TREE_CHANNEL);
-        statement.execute("LISTEN " + INTERACTION_CHANNEL);
-      } catch (SQLException error) {
-        connection.close();
-        throw error;
-      }
-      return new InvalidationListener(connection, connection.unwrap(PGConnection.class));
+    static InvalidationListener open(DefaultNotificationBus bus) {
+      BlockingQueue<Invalidation> queue = new LinkedBlockingQueue<>();
+      List<NotificationSubscription> subs = new ArrayList<>();
+      subs.add(
+          bus.subscribe(
+              HarnessNotifications.THREAD_VERSION,
+              payload ->
+                  queue.add(new Invalidation(HarnessNotifications.THREAD_VERSION.name(), payload)),
+              () -> {}));
+      subs.add(
+          bus.subscribe(
+              HarnessNotifications.THREAD_TREE,
+              payload ->
+                  queue.add(new Invalidation(HarnessNotifications.THREAD_TREE.name(), payload)),
+              () -> {}));
+      subs.add(
+          bus.subscribe(
+              HarnessNotifications.TOOL_INTERACTION,
+              payload ->
+                  queue.add(
+                      new Invalidation(HarnessNotifications.TOOL_INTERACTION.name(), payload)),
+              () -> {}));
+      return new InvalidationListener(subs, queue);
     }
 
     /** 断言收到且只收到给定通知集合（顺序无关）。 */
-    void expectExactly(String... expected) throws SQLException {
-      Set<String> expectedSet = Set.of(expected);
-      Set<String> actual = new LinkedHashSet<>();
+    void expectExactly(Invalidation... expected) {
+      Set<Invalidation> expectedSet = Set.of(expected);
+      Set<Invalidation> actual = new LinkedHashSet<>();
       long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
       while (System.nanoTime() < deadline && !actual.containsAll(expectedSet)) {
-        drain(actual, 500);
+        try {
+          Invalidation item = queue.poll(200, TimeUnit.MILLISECONDS);
+          if (item != null) {
+            actual.add(item);
+          }
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("interrupted while polling invalidations", error);
+        }
       }
       // 期望集合已满足后再短促排空一次，避免同一提交的后续消息落入下一次断言。
       drain(actual, 200);
@@ -713,24 +740,32 @@ class PostgresqlHarnessTransactionNotificationTest {
     }
 
     /** 断言在等待窗口内没有收到任何通知。 */
-    void assertSilent() throws SQLException {
-      Set<String> actual = new LinkedHashSet<>();
-      drain(actual, 500);
+    void assertSilent() {
+      Set<Invalidation> actual = new LinkedHashSet<>();
+      drain(actual, 300);
       assertTrue(actual.isEmpty(), () -> "expected no notification but received " + actual);
     }
 
-    private void drain(Set<String> sink, int timeoutMillis) throws SQLException {
-      PGNotification[] batch = notifications.getNotifications(timeoutMillis);
-      if (batch != null) {
-        for (PGNotification notification : batch) {
-          sink.add(notification.getName() + "|" + notification.getParameter());
+    private void drain(Set<Invalidation> sink, int timeoutMillis) {
+      long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+      while (System.nanoTime() < deadline) {
+        try {
+          Invalidation item = queue.poll(50, TimeUnit.MILLISECONDS);
+          if (item != null) {
+            sink.add(item);
+          }
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          return;
         }
       }
     }
 
     @Override
-    public void close() throws SQLException {
-      connection.close();
+    public void close() {
+      for (NotificationSubscription sub : subscriptions) {
+        sub.close();
+      }
     }
   }
 }

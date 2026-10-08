@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 
 import javax.sql.DataSource;
 
@@ -78,6 +79,7 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
   @Autowired private IssueRepository issueRepository;
   @Autowired private IssueAgentThreadRepository issueAgentThreadRepository;
   @Autowired private SessionBlobRefManager refManager;
+  @Autowired private NotificationBus notificationBus;
 
   private HarnessStore store;
   private SessionDeletionOrchestrator orchestrator;
@@ -86,7 +88,9 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUpOrchestrator() {
-    store = new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
+    store =
+        new PostgresqlHarnessStore(
+            dataSource, transactionManager, UUID::randomUUID, notificationBus);
     ObjectProvider<HarnessStore> stores = mock(ObjectProvider.class);
     when(stores.getIfAvailable()).thenReturn(store);
     orchestrator =

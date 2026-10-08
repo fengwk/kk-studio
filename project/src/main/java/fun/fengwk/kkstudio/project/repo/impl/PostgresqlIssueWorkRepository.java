@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.IssueWork;
+import fun.fengwk.kkstudio.project.notification.IssueWorkNotifier;
 import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueWorkCompletion;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueWorkMapper;
@@ -24,7 +25,7 @@ import java.util.UUID;
 public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   private final IssueWorkMapper mapper;
-  private final PostgresqlIssueWorkNotifier notifier;
+  private final IssueWorkNotifier notifier;
 
   @Override
   public IssueWork getById(UUID issueId) {
@@ -38,7 +39,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public IssueWork requestWork(UUID issueId, Duration delay) {
-    PostgresqlIssueWorkNotifier.requireTransaction();
+    IssueWorkNotifier.requireTransaction();
     IssueWorkDO row = mapper.upsertRequest(issueId, delay);
     if (row != null) {
       notifier.notifyIfDue(issueId);
@@ -58,7 +59,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion) {
-    PostgresqlIssueWorkNotifier.requireTransaction();
+    IssueWorkNotifier.requireTransaction();
     IssueWorkCompletion completion = mapper.completeWork(issueId, leaseToken, claimedWakeVersion);
     if (completion == IssueWorkCompletion.RELEASED) {
       // released 是真实写入：新 wake 已释放租约并把 due 提前到当前时刻，必须提示后续调度。
@@ -70,7 +71,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
   @Override
   public boolean rescheduleWork(
       UUID issueId, String leaseToken, long claimedWakeVersion, Duration delay) {
-    PostgresqlIssueWorkNotifier.requireTransaction();
+    IssueWorkNotifier.requireTransaction();
     boolean written = mapper.rescheduleWork(issueId, leaseToken, claimedWakeVersion, delay) == 1;
     if (written) {
       notifier.notifyIfDue(issueId);

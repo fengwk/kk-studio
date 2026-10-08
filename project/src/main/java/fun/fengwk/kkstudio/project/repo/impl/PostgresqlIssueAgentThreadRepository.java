@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.project.repo.impl;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueAgentThreadMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueAgentThreadDO;
@@ -16,10 +17,10 @@ import java.util.UUID;
 public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRepository {
 
   private final IssueAgentThreadMapper mapper;
-  private final PostgresqlProjectChangeNotifier notifier;
+  private final ProjectChangeNotifier notifier;
 
   public PostgresqlIssueAgentThreadRepository(
-      IssueAgentThreadMapper mapper, PostgresqlProjectChangeNotifier notifier) {
+      IssueAgentThreadMapper mapper, ProjectChangeNotifier notifier) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
@@ -46,7 +47,7 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
   @Override
   public boolean insert(IssueAgentThread binding) {
     Objects.requireNonNull(binding, "binding");
-    PostgresqlProjectChangeNotifier.requireTransaction();
+    ProjectChangeNotifier.requireTransaction();
     boolean changed =
         mapper.insert(binding.issueId(), binding.agentName(), binding.threadId()) == 1;
     if (changed) {
@@ -57,7 +58,7 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
 
   @Override
   public int deleteByIssueIdAndAgentName(UUID issueId, String agentName) {
-    PostgresqlProjectChangeNotifier.requireTransaction();
+    ProjectChangeNotifier.requireTransaction();
     int changed = mapper.deleteByIssueIdAndAgentName(issueId, agentName);
     if (changed > 0) {
       notifier.issueChanged(issueId);

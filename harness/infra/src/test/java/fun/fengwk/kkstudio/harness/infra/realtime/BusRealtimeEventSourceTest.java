@@ -1,26 +1,43 @@
-package fun.fengwk.kkstudio.harness.infra.postgresql;
+package fun.fengwk.kkstudio.harness.infra.realtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeNotificationCodec.Envelope;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlHarnessStoreFixture;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** PostgresqlRealtimeEventSource 的本地订阅、分发、恢复与关闭边界契约。 */
-class PostgresqlRealtimeEventSourceTest {
+/** BusRealtimeEventSource 的本地订阅、分发、恢复与关闭边界契约。 */
+class BusRealtimeEventSourceTest {
 
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
 
-  private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
-  private final PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+  private DefaultNotificationBus bus;
+  private BusRealtimeEventSource source;
+
+  @BeforeEach
+  void setUp() {
+    bus = PostgresqlHarnessStoreFixture.newBus();
+    source = new BusRealtimeEventSource(bus);
+  }
+
+  @AfterEach
+  void tearDown() {
+    source.close();
+    bus.close();
+  }
 
   /** EVENT 只进入对应 Thread，且同 Thread 的多个本地订阅都收到同一个完整事件。 */
   @Test
@@ -33,7 +50,7 @@ class PostgresqlRealtimeEventSourceTest {
     source.subscribe(id(1L), second::add, () -> {});
     source.subscribe(id(2L), otherThread::add, () -> {});
 
-    source.onNotification(codec.encodeEvent(event));
+    source.onEnvelope(new Envelope.Event(event));
 
     assertEquals(List.of(event), first);
     assertEquals(List.of(event), second);
@@ -54,7 +71,7 @@ class PostgresqlRealtimeEventSourceTest {
         resyncs::incrementAndGet);
     source.subscribe(id(1L), received::add, resyncs::incrementAndGet);
 
-    source.onNotification(codec.encodeEvent(event));
+    source.onEnvelope(new Envelope.Event(event));
 
     assertEquals(List.of(event), received);
     assertEquals(0, resyncs.get());
@@ -68,25 +85,24 @@ class PostgresqlRealtimeEventSourceTest {
     source.subscribe(id(1L), ignored -> {}, first::incrementAndGet);
     source.subscribe(id(2L), ignored -> {}, second::incrementAndGet);
 
-    source.onNotification(codec.encodeResync(id(1L), "EVENT_TOO_LARGE"));
+    source.onEnvelope(new Envelope.Resync(id(1L), "EVENT_TOO_LARGE"));
 
     assertEquals(1, first.get());
     assertEquals(0, second.get());
   }
 
-  /** malformed 与 unknown notification 都无法安全定位 Thread，因此每次都触发所有本地订阅 resync。 */
+  /** malformed/unknown 通知由总线层捕获并统一触发 resync 时，所有本地订阅都被恢复。 */
   @Test
-  void malformedAndUnknownPayloadsResyncAllLocalSubscribers() {
+  void busResyncRecoversAllLocalSubscribers() {
     AtomicInteger first = new AtomicInteger();
     AtomicInteger second = new AtomicInteger();
     source.subscribe(id(1L), ignored -> {}, first::incrementAndGet);
     source.subscribe(id(2L), ignored -> {}, second::incrementAndGet);
 
-    source.onNotification("{not-json");
-    source.onNotification("{\"kind\":\"UNKNOWN\"}");
+    source.onResync();
 
-    assertEquals(2, first.get());
-    assertEquals(2, second.get());
+    assertEquals(1, first.get());
+    assertEquals(1, second.get());
   }
 
   /** 统一 listener 显式报告 startup/reconnect 时，所有当前本地订阅都必须恢复，异常回调不阻断其他订阅。 */
@@ -120,7 +136,7 @@ class PostgresqlRealtimeEventSourceTest {
 
     firstSubscription.close();
     firstSubscription.close();
-    source.onNotification(codec.encodeEvent(event));
+    source.onEnvelope(new Envelope.Event(event));
 
     assertEquals(List.of(), first);
     assertEquals(List.of(event), second);
@@ -135,8 +151,8 @@ class PostgresqlRealtimeEventSourceTest {
         source.subscribe(id(1L), ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
 
     subscription.close();
-    source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
-    source.onNotification(codec.encodeResync(id(1L), "test"));
+    source.onEnvelope(new Envelope.Event(modelDelta(1L, "dropped")));
+    source.onEnvelope(new Envelope.Resync(id(1L), "test"));
 
     assertEquals(0, events.get());
     assertEquals(0, resyncs.get());
@@ -152,7 +168,7 @@ class PostgresqlRealtimeEventSourceTest {
     later[0] =
         source.subscribe(id(1L), ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
 
-    source.onNotification(codec.encodeEvent(modelDelta(1L, "one")));
+    source.onEnvelope(new Envelope.Event(modelDelta(1L, "one")));
     assertEquals(0, events.get());
 
     later[0] =
@@ -170,8 +186,7 @@ class PostgresqlRealtimeEventSourceTest {
 
     source.close();
     source.close();
-    source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
-    source.onNotification("{not-json");
+    source.onEnvelope(new Envelope.Event(modelDelta(1L, "dropped")));
     source.onResync();
 
     assertEquals(0, events.get());

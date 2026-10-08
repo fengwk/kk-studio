@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueActivityMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueActivityDO;
@@ -18,7 +19,7 @@ import java.util.UUID;
 public class PostgresqlIssueActivityRepository implements IssueActivityRepository {
 
   private final IssueActivityMapper mapper;
-  private final PostgresqlProjectChangeNotifier notifier;
+  private final ProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueActivity activity) {

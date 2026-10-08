@@ -140,6 +140,7 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
+            "fun.fengwk.kk-studio:kk-studio-share",
             "org.postgresql:postgresql",
             "org.springframework:spring-jdbc"));
     assertDirectProductionDependencies(

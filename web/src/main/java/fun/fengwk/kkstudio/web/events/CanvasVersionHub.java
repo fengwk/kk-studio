@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.events;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.share.notification.VersionHint;
+
 import javax.sql.DataSource;
 
 import java.sql.Connection;
@@ -18,21 +20,19 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
- * PostgreSQL {@code canvas_document.revision} 前进通知的进程内 fan-out。
+ * Canvas {@code canvas_document.revision} 前进通知的进程内 fan-out。
  *
- * <p>{@code canvas_document} 行与 revision 是事实源；初始订阅 cursor 从持久表权威读取，notification payload 携带提交后的
- * {@code canvasId:revision}，合法 payload 只做轻量解析与 fan-out，畸形 payload 广播 resync。共享 LISTEN loop
- * 启动/重连成功时也调用 {@link #broadcastResync()}，覆盖断连期间不可恢复的通知。{@link #subscribe} 先注册 consumer 再读当前
- * revision 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
+ * <p>{@code canvas_document} 行与 revision 是事实源：初始订阅 cursor 从持久表权威读取，通知 payload 携带实体 id 与提交后的真实
+ * revision，只做 fan-out。畸形 payload 由总线 topic codec 拒绝并退化为本 hub 的 resync；总线建连/重连成功时同样触发 {@link
+ * #broadcastResync()}，覆盖断连期间不可恢复的通知。{@link #subscribe} 先注册 consumer 再读当前 revision 返回，保证返回的 cursor
+ * 之后的事件不因注册竞态丢失。
  *
- * <p>数据库侧由 {@code PostgresqlCanvasStore} 在写事务内沿 {@code canvas_revision} 通道发出提示；两者是同一坐标系： 通道名与列名都使用
- * revision，不保留 version 别名。
+ * <p>数据库侧由 {@code CanvasChangeNotifier} 在写事务内经 {@code CanvasNotifications.REVISION} 发布提示；两者是同一坐标系：
+ * 通道 topic 名与列名都使用 revision，不保留 version 别名。
  */
 @Slf4j
 @Component
 final class CanvasVersionHub implements CanvasVersionEventSource {
-
-  static final String CHANNEL = "canvas_revision";
 
   private final DataSource dataSource;
   private final Map<UUID, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
@@ -73,14 +73,10 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
         });
   }
 
-  void onNotification(String payload) {
-    CanvasRevision notification = parseNotification(payload);
-    if (notification == null) {
-      log.warn("malformed canvas revision notification payload={}; broadcasting resync", payload);
-      broadcastResync();
-      return;
-    }
-    publish(notification.canvasId(), new Event(notification.revision(), false));
+  /** 交付一条已由总线解码的 revision hint；payload 不承载权威 revision，仅提示该 Canvas 需要回读。 */
+  void onNotification(VersionHint hint) {
+    Objects.requireNonNull(hint, "hint");
+    publish(hint.entityId(), new Event(hint.version(), false));
   }
 
   private long currentRevision(UUID canvasId) {
@@ -106,7 +102,7 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
   private void publish(UUID canvasId, Event event) {
     Set<Consumer<Event>> canvasSubscribers = subscribers.get(canvasId);
     if (canvasSubscribers != null) {
-      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不杀死 LISTEN 循环。
+      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不中断后续通知投递。
       for (Consumer<Event> consumer : canvasSubscribers) {
         try {
           consumer.accept(event);
@@ -117,31 +113,4 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
       }
     }
   }
-
-  static CanvasRevision parseNotification(String payload) {
-    if (payload == null) {
-      return null;
-    }
-    int colon = payload.indexOf(':');
-    if (colon <= 0 || colon != payload.lastIndexOf(':')) {
-      return null;
-    }
-    String rawCanvasId = payload.substring(0, colon);
-    String rawRevision = payload.substring(colon + 1);
-    if (!rawRevision.matches("0|[1-9]\\d*")) {
-      return null;
-    }
-    try {
-      UUID canvasId = UUID.fromString(rawCanvasId);
-      if (!canvasId.toString().equals(rawCanvasId)) {
-        return null;
-      }
-      long revision = Long.parseLong(rawRevision);
-      return new CanvasRevision(canvasId, revision);
-    } catch (IllegalArgumentException ignored) {
-      return null;
-    }
-  }
-
-  record CanvasRevision(UUID canvasId, long revision) {}
 }

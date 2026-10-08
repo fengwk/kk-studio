@@ -29,9 +29,9 @@ public class SystemSettingsAdvancedDTO {
 
   private Long applicationEventHeartbeatIntervalMillis;
 
-  private Long postgresqlWorkNotificationPollMillis;
+  private Long notificationPollMillis;
 
-  private Long postgresqlWorkReconnectBackoffMillis;
+  private Long notificationReconnectBackoffMillis;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

@@ -6,13 +6,15 @@ import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
+
 import java.util.UUID;
 
 /** 事务守卫必须在没有真实事务时拒绝发布，避免「事实已提交、通知另开连接发送」的失败窗口。 */
-class PostgresqlCanvasChangeNotifierTest {
+class CanvasChangeNotifierTest {
 
-  private final PostgresqlCanvasChangeNotifier notifier =
-      new PostgresqlCanvasChangeNotifier(mock(JdbcTemplate.class));
+  private final CanvasChangeNotifier notifier =
+      new CanvasChangeNotifier(mock(JdbcTemplate.class), mock(NotificationBus.class));
 
   @Test
   void rejectsNotificationWithoutActiveTransaction() {

@@ -1138,20 +1138,20 @@ export const settingsCatalog = {
     'en-US': 'Heartbeat interval in milliseconds for application event bus health checks.',
     'zh-CN': '应用事件总线健康巡检心跳的时间间隔毫秒数。',
   },
-  'settings.field.advanced.postgresqlWorkNotificationPollMillis': {
-    'en-US': 'PostgreSQL poll (ms)',
-    'zh-CN': 'PostgreSQL 轮询（毫秒）',
+  'settings.field.advanced.notificationPollMillis': {
+    'en-US': 'Notification poll (ms)',
+    'zh-CN': '通知轮询（毫秒）',
   },
-  'settings.field.advanced.postgresqlWorkNotificationPollMillis.hint': {
-    'en-US': 'Polling interval in milliseconds for PostgreSQL work notification events.',
-    'zh-CN': 'PostgreSQL 任务状态通知长轮询的时间间隔毫秒数。',
+  'settings.field.advanced.notificationPollMillis.hint': {
+    'en-US': 'Polling interval in milliseconds for work notification events.',
+    'zh-CN': '任务状态通知长轮询的时间间隔毫秒数。',
   },
-  'settings.field.advanced.postgresqlWorkReconnectBackoffMillis': {
-    'en-US': 'PostgreSQL reconnect backoff (ms)',
-    'zh-CN': 'PostgreSQL 重连退避（毫秒）',
+  'settings.field.advanced.notificationReconnectBackoffMillis': {
+    'en-US': 'Notification reconnect backoff (ms)',
+    'zh-CN': '通知重连退避（毫秒）',
   },
-  'settings.field.advanced.postgresqlWorkReconnectBackoffMillis.hint': {
-    'en-US': 'Backoff delay in milliseconds before attempting to reconnect to PostgreSQL notifications.',
-    'zh-CN': 'PostgreSQL 通知通道断开重连时的退避延迟毫秒数。',
+  'settings.field.advanced.notificationReconnectBackoffMillis.hint': {
+    'en-US': 'Backoff delay in milliseconds before attempting to reconnect to notifications.',
+    'zh-CN': '通知通道断开重连时的退避延迟毫秒数。',
   },
 } satisfies LocaleCatalog

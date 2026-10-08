@@ -1,10 +1,13 @@
-package fun.fengwk.kkstudio.harness.infra.postgresql;
+package fun.fengwk.kkstudio.harness.infra.realtime;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeNotificationCodec.Envelope;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,19 +18,17 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * PostgreSQL realtime notification 的本地订阅与分发器。
+ * Realtime topic 的本地订阅与分发器，绑定唯一 {@link NotificationBus}。
  *
- * <p>本类不创建线程或连接。统一 LISTEN loop 把 payload 交给 {@link #onNotification(String)}，连接建立或重建后调用 {@link
- * #onResync()}。malformed/unknown payload 触发全部本地订阅 resync；合法 envelope 仅分发到对应 Thread。全局生命周期锁只保护
+ * <p>本类不创建线程或连接；总线在自身独立执行阶段交付已解码的 {@link Envelope}，连接建立或重建、以及总线请求权威对账时触发 {@link #onResync()}。合法
+ * EVENT 仅分发到对应 Thread，RESYNC 只提示客户端回读权威快照；畸形 payload 由总线的 topic codec 拒绝并转为 resync。 全局生命周期锁只保护
  * closed/map 与 subscriber 快照，用户回调由每个 subscriber 的独立关闭围栏管理并始终在全局锁外执行。
  */
-public final class PostgresqlRealtimeEventSource implements RealtimeEventSource {
+public final class BusRealtimeEventSource implements RealtimeEventSource {
 
-  public static final String CHANNEL = PostgresqlRealtimeChannel.NAME;
+  private static final Logger log = LoggerFactory.getLogger(BusRealtimeEventSource.class);
 
-  private static final Logger log = LoggerFactory.getLogger(PostgresqlRealtimeEventSource.class);
-
-  private final RealtimeNotificationCodec notificationCodec;
+  private final NotificationSubscription subscription;
   private final Map<UUID, List<Subscriber>> subscribersByThread = new HashMap<>();
   private final Object lifecycleFence = new Object();
 
@@ -43,8 +44,10 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
   private int activeSourceCallbacks;
   private boolean subscriberFencesClosed;
 
-  public PostgresqlRealtimeEventSource(RealtimeNotificationCodec notificationCodec) {
-    this.notificationCodec = Objects.requireNonNull(notificationCodec, "notificationCodec");
+  public BusRealtimeEventSource(NotificationBus bus) {
+    Objects.requireNonNull(bus, "bus");
+    this.subscription =
+        bus.subscribe(HarnessNotifications.REALTIME, this::onEnvelope, this::onResync);
   }
 
   @Override
@@ -56,44 +59,35 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
     Subscriber subscriber = new Subscriber(threadId, onEvent, onResync);
     synchronized (lifecycleFence) {
       if (closed) {
-        throw new IllegalStateException("PostgresqlRealtimeEventSource is already closed");
+        throw new IllegalStateException("realtime event source is already closed");
       }
       subscribersByThread.computeIfAbsent(threadId, ignored -> new ArrayList<>()).add(subscriber);
     }
     return subscriber::close;
   }
 
-  /** 由统一 PostgreSQL listener 交付一条 {@link #CHANNEL} notification。 */
-  public void onNotification(String payload) {
-    RealtimeNotificationCodec.Envelope envelope;
-    try {
-      envelope = notificationCodec.decode(payload);
-    } catch (RuntimeException error) {
-      log.warn("cannot decode realtime PostgreSQL notification; requesting resync", error);
-      onResync();
-      return;
-    }
+  /** 由唯一通知运行时交付一条已解码的 realtime envelope。 */
+  public void onEnvelope(Envelope envelope) {
+    Objects.requireNonNull(envelope, "envelope");
     List<Subscriber> subscribers;
     synchronized (lifecycleFence) {
       if (closed) {
         return;
       }
-      if (envelope instanceof RealtimeNotificationCodec.Envelope.Event event) {
+      if (envelope instanceof Envelope.Event event) {
         subscribers = snapshot(event.event().threadId());
-      } else if (envelope instanceof RealtimeNotificationCodec.Envelope.Resync resync) {
-        subscribers = snapshot(resync.threadId());
       } else {
-        return;
+        subscribers = snapshot(((Envelope.Resync) envelope).threadId());
       }
     }
-    if (envelope instanceof RealtimeNotificationCodec.Envelope.Event event) {
+    if (envelope instanceof Envelope.Event event) {
       dispatchEvent(subscribers, event.event());
     } else {
       dispatchResync(subscribers);
     }
   }
 
-  /** 由统一 listener 在显式建立或重建连接后触发全部本地订阅恢复。 */
+  /** 连接建立或重建、以及总线请求权威对账时触发全部本地订阅恢复。 */
   public void onResync() {
     List<Subscriber> subscribers;
     synchronized (lifecycleFence) {
@@ -107,6 +101,8 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
 
   @Override
   public void close() {
+    // 先撤销总线订阅，保证不再有新回调进入；再按既有围栏等待在途回调结束。
+    subscription.close();
     List<Subscriber> subscribers = List.of();
     boolean firstCloser = false;
     synchronized (lifecycleFence) {
@@ -279,7 +275,7 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
         }
         activeCallbacks++;
         callbackDepth.set(callbackDepth.get() + 1);
-        PostgresqlRealtimeEventSource.this.callbackStarted();
+        BusRealtimeEventSource.this.callbackStarted();
         return true;
       }
     }
@@ -295,7 +291,7 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
         activeCallbacks--;
         callbackFence.notifyAll();
       }
-      PostgresqlRealtimeEventSource.this.callbackFinished();
+      BusRealtimeEventSource.this.callbackFinished();
     }
 
     private void disable() {

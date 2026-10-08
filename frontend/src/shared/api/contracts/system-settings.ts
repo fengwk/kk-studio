@@ -132,8 +132,8 @@ export interface SystemSettingsAdvancedDTO {
   applicationEventMaxBytes: DecimalLong
   applicationEventSendTimeoutMillis: DecimalLong
   applicationEventHeartbeatIntervalMillis: DecimalLong
-  postgresqlWorkNotificationPollMillis: DecimalLong
-  postgresqlWorkReconnectBackoffMillis: DecimalLong
+  notificationPollMillis: DecimalLong
+  notificationReconnectBackoffMillis: DecimalLong
 }
 
 /** GET/PUT 的公共 section 载体（tool / aiRuntime / environment / network / integrations / storageMedia / advanced）。 */

@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.mapper.EnvironmentMapper;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
@@ -32,9 +32,10 @@ import java.time.Duration;
 import java.util.UUID;
 
 /**
- * environment 注册行的 Java 通知契约：每次真实 insert/update/delete 在同一事务内发布 {@code environment_changed}。
+ * environment 注册行的 Java 通知契约：每次真实 insert/update/delete 在同一事务内发布 {@code environment.changed}。
  *
- * <p>测试基座已删除两个数据库行触发器，并用独立 LISTEN 连接直接观测：仅提交后可见；未提交与回滚不可见；删除级联连接仍由同一 environment 通知覆盖，不需要连接级第二来源。
+ * <p>测试基座通过真实 {@code NotificationBus} 订阅直接观测：仅提交后可见；未提交与回滚不可见；删除级联连接仍由同一 environment
+ * 通知覆盖，不需要连接级第二来源。
  */
 class EnvironmentRepositoryChangeNotificationIntegrationTest
     extends EnvironmentNotificationTestSupport {
@@ -45,11 +46,11 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   @Autowired private EnvironmentRepository environmentRepository;
   @Autowired private EnvironmentRegistry environmentRegistry;
   @Autowired private EnvironmentMapper environmentMapper;
-  @Autowired private PostgresqlEnvironmentChangeNotifier notifier;
+  @Autowired private EnvironmentChangeNotifier notifier;
 
   /** 测试意图：Card 行写入只在事务提交后投递一次；未提交与回滚都不投递，CAS 更新与删除同样投递。 */
   @Test
-  void environmentRowWritesNotifyOnlyAfterCommit() throws Exception {
+  void environmentRowWritesNotifyOnlyAfterCommit() {
     try (EnvironmentChannelListener listener = listen()) {
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
@@ -57,10 +58,10 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       transaction.executeWithoutResult(
           status -> {
             created[0] = environmentService.create(createDto("notify-commit"));
-            // 同一事务内尚未提交：独立观察者必须看不到任何提示。
+            // 同一事务内尚未提交：观察者必须看不到任何提示。
             listener.assertSilent();
           });
-      listener.assertNotification(created[0].getId());
+      listener.assertNotification(UUID.fromString(created[0].getId()));
 
       // 回滚不得留下通知，也不得留下行。
       transaction.executeWithoutResult(
@@ -75,11 +76,11 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       EnvironmentCardDTO rotated =
           environmentService.rotateToken(
               EnvironmentId.parse(created[0].getId()), created[0].getVersion());
-      listener.assertNotification(rotated.getId());
+      listener.assertNotification(UUID.fromString(rotated.getId()));
 
       // 删除同样投递。
       environmentService.delete(EnvironmentId.parse(rotated.getId()), rotated.getVersion());
-      listener.assertNotification(rotated.getId());
+      listener.assertNotification(UUID.fromString(rotated.getId()));
       assertNull(environmentRepository.getById(UUID.fromString(rotated.getId())));
     }
   }
@@ -116,11 +117,10 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
 
   /** 测试意图：发布失败时，真实 mapper 写入必须随外层事务回滚，不留下已写事实。 */
   @Test
-  void notificationFailureRollsBackTheRepositoryWrite() throws Exception {
+  void notificationFailureRollsBackTheRepositoryWrite() {
     UUID seededId = seedEnvironment("notify-failure-seeded", "notify-failure-token", 7);
     try (EnvironmentChannelListener listener = listen()) {
-      PostgresqlEnvironmentChangeNotifier failingNotifier =
-          mock(PostgresqlEnvironmentChangeNotifier.class);
+      EnvironmentChangeNotifier failingNotifier = mock(EnvironmentChangeNotifier.class);
       doThrow(new DataAccessResourceFailureException("environment notification unavailable"))
           .when(failingNotifier)
           .environmentChanged(any());
@@ -178,24 +178,25 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
 
   /** 测试意图：环境删除级联删除连接行时，同一 environment 通知恰好一次；自然到期改期不是通知事件。 */
   @Test
-  void cascadedConnectionDeleteIsCoveredByTheSameEnvironmentNotification() throws Exception {
+  void cascadedConnectionDeleteIsCoveredByTheSameEnvironmentNotification() {
     try (EnvironmentChannelListener listener = listen()) {
       EnvironmentCardDTO created = environmentService.create(createDto("notify-cascade"));
-      listener.assertNotification(created.getId());
+      UUID createdId = UUID.fromString(created.getId());
+      listener.assertNotification(createdId);
 
       EnvironmentId environmentId = EnvironmentId.parse(created.getId());
       LeaseBindResult acquired =
           environmentRegistry.tryAcquire(
               environmentId, created.getRegistrationToken(), LEASE_DURATION);
       assertInstanceOf(LeaseBindResult.Acquired.class, acquired);
-      listener.assertNotification(created.getId());
+      listener.assertNotification(createdId);
 
       // 租约到期没有数据库写事件：手工改期后观察者保持静默。
-      expireConnectionLease(UUID.fromString(created.getId()));
+      expireConnectionLease(createdId);
       listener.assertSilent();
 
       environmentService.delete(environmentId, created.getVersion());
-      listener.assertNotification(created.getId());
+      listener.assertNotification(createdId);
       assertTrue(environmentRegistry.find(environmentId).isEmpty());
       assertEquals(0, countEnvironments("notify-cascade"));
     }

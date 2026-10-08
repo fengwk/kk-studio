@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.ProjectMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.ProjectDO;
@@ -17,7 +18,7 @@ import java.util.UUID;
 public class PostgresqlProjectRepository implements ProjectRepository {
 
   private final ProjectMapper projectMapper;
-  private final PostgresqlProjectChangeNotifier notifier;
+  private final ProjectChangeNotifier notifier;
 
   @Override
   public boolean create(Project project) {

@@ -7,8 +7,8 @@ import java.util.function.Consumer;
 /**
  * 提示型资源失效源：只提示「本地投影需要回读权威事实」，绝不复制领域事实，也不携带持久游标（ack 恒为 0）。
  *
- * <p>{@code key} 为 null 表示全局资源订阅（接收全部合法通知），非 null 表示按 key 定点订阅（例如执行根）。 通知只能来自 PostgreSQL {@code
- * LISTEN}；畸形 payload 与 LISTEN 重连由实现退化为全量 resync。
+ * <p>{@code key} 为 null 表示全局资源订阅（接收全部合法通知），非 null 表示按 key 定点订阅（例如执行根）。 通知只来自进程内失效 Hub（由唯一通知总线驱动）；畸形
+ * payload 由 topic codec 拒绝，总线建连/重连由实现退化为全量 resync。
  */
 public interface InvalidationEventSource {
 
@@ -24,7 +24,7 @@ public interface InvalidationEventSource {
       return new Event(Objects.requireNonNull(key, "key"), false);
     }
 
-    /** 全量回读（LISTEN 重连、畸形 payload 或来源事实已不存在）。 */
+    /** 全量回读（总线建连/重连、畸形 payload 或来源事实已不存在）。 */
     public static Event fullResync() {
       return new Event(null, true);
     }

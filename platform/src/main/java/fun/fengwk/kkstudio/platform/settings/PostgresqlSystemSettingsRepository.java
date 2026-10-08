@@ -15,7 +15,7 @@ public class PostgresqlSystemSettingsRepository implements SystemSettingsReposit
 
   private final SystemSettingsMapper systemSettingsMapper;
   private final SystemSettingsCodec systemSettingsCodec;
-  private final PostgresqlSystemSettingsChangeNotifier notifier;
+  private final SystemSettingsChangeNotifier notifier;
 
   @Override
   public SystemSettingsRecord get() {
@@ -24,7 +24,7 @@ public class PostgresqlSystemSettingsRepository implements SystemSettingsReposit
 
   @Override
   public boolean update(SystemSettings settings, long expectedVersion) {
-    PostgresqlSystemSettingsChangeNotifier.requireTransaction();
+    SystemSettingsChangeNotifier.requireTransaction();
     if (systemSettingsMapper.updateByVersion(systemSettingsCodec.encode(settings), expectedVersion)
         != 1) {
       return false;

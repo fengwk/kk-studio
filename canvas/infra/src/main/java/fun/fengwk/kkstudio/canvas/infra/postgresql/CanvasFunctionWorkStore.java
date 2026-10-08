@@ -22,12 +22,12 @@ public class CanvasFunctionWorkStore {
 
   private final CanvasFunctionWorkMapper mapper;
   private final CanvasFunctionRunStateCodecPort stateCodec;
-  private final PostgresqlCanvasChangeNotifier notifier;
+  private final CanvasChangeNotifier notifier;
 
   public CanvasFunctionWorkStore(
       CanvasFunctionWorkMapper mapper,
       CanvasFunctionRunStateCodecPort stateCodec,
-      PostgresqlCanvasChangeNotifier notifier) {
+      CanvasChangeNotifier notifier) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.notifier = Objects.requireNonNull(notifier, "notifier");
@@ -58,7 +58,7 @@ public class CanvasFunctionWorkStore {
   /**
    * 归还正在处理的 claim：以真实短事务把 RUNNING 重排为 READY，并在提交前按数据库时间判断是否需要唤醒。
    *
-   * <p>dispatcher 线程不持有事务；围栏 SQL 与 {@code pg_notify} 必须落在同一事务，否则会出现「事实已提交、通知尚未发送」的额外失败窗口。
+   * <p>dispatcher 线程不持有事务；围栏 SQL 与通知发布必须落在同一事务，否则会出现「事实已提交、通知尚未发送」的额外失败窗口。
    */
   @Transactional
   public boolean reschedule(ClaimedRun claim, Instant now, Duration delay) {

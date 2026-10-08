@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,16 +28,20 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.notification.NotificationLimits;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -88,6 +93,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         }
       };
 
+  private SingleConnectionDataSource dataSource;
+  private NotificationBus notificationBus;
   private JdbcTemplate jdbcTemplate;
   private UUID node1;
   private UUID node2;
@@ -104,13 +111,22 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
       applyBaseline(conn);
     }
 
-    SingleConnectionDataSource ds =
+    this.node1 = UUID.randomUUID();
+    this.node2 = UUID.randomUUID();
+    this.dataSource =
         new SingleConnectionDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
-    this.jdbcTemplate = new JdbcTemplate(ds);
-    DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
-    PostgresqlEnvironmentChangeNotifier notifier =
-        new PostgresqlEnvironmentChangeNotifier(jdbcTemplate);
+    this.jdbcTemplate = new JdbcTemplate(dataSource);
+    DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(dataSource);
+    this.notificationBus =
+        new DefaultNotificationBus(
+            dataSource,
+            node1,
+            List.of(PlatformNotifications.ENVIRONMENT_CHANGED),
+            NotificationLimits.defaults(),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(1));
+    EnvironmentChangeNotifier notifier = new EnvironmentChangeNotifier(notificationBus);
 
     // 播种稳定 environment 卡片
     jdbcTemplate.update(
@@ -200,9 +216,6 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           }
         };
 
-    this.node1 = UUID.randomUUID();
-    this.node2 = UUID.randomUUID();
-
     this.registryNode1 =
         new EnvironmentRegistry(
             jdbcTemplate, node1, Clock.systemUTC(), transactionManager, notifier);
@@ -219,6 +232,16 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     this.serverNode2 =
         serverConfiguration.environmentDaemonServer(
             registryNode2, environmentRepository, sessionListener, UNUSED_TICKET_SERVICE, snapshot);
+  }
+
+  @AfterEach
+  void tearDown() {
+    if (notificationBus != null) {
+      notificationBus.close();
+    }
+    if (dataSource != null) {
+      dataSource.destroy();
+    }
   }
 
   @Test

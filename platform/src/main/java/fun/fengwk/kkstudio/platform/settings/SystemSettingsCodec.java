@@ -383,12 +383,10 @@ public class SystemSettingsCodec {
         requiredMillis(
             dto.getApplicationEventHeartbeatIntervalMillis(),
             "advanced.applicationEventHeartbeatIntervalMillis"),
+        requiredMillis(dto.getNotificationPollMillis(), "advanced.notificationPollMillis"),
         requiredMillis(
-            dto.getPostgresqlWorkNotificationPollMillis(),
-            "advanced.postgresqlWorkNotificationPollMillis"),
-        requiredMillis(
-            dto.getPostgresqlWorkReconnectBackoffMillis(),
-            "advanced.postgresqlWorkReconnectBackoffMillis"));
+            dto.getNotificationReconnectBackoffMillis(),
+            "advanced.notificationReconnectBackoffMillis"));
   }
 
   private static Map<String, List<PermissionRule>> toPermission(
@@ -589,8 +587,8 @@ public class SystemSettingsCodec {
     dto.setApplicationEventSendTimeoutMillis(advanced.applicationEventSendTimeoutMillis());
     dto.setApplicationEventHeartbeatIntervalMillis(
         advanced.applicationEventHeartbeatIntervalMillis());
-    dto.setPostgresqlWorkNotificationPollMillis(advanced.postgresqlWorkNotificationPollMillis());
-    dto.setPostgresqlWorkReconnectBackoffMillis(advanced.postgresqlWorkReconnectBackoffMillis());
+    dto.setNotificationPollMillis(advanced.notificationPollMillis());
+    dto.setNotificationReconnectBackoffMillis(advanced.notificationReconnectBackoffMillis());
     return dto;
   }
 

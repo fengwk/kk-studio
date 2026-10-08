@@ -28,7 +28,6 @@ class CanvasCoreArchitectureTest {
           "jakarta.persistence.",
           "fun.fengwk.kkstudio.harness.",
           "fun.fengwk.kkstudio.platform.",
-          "fun.fengwk.kkstudio.share.",
           "fun.fengwk.kkstudio.web.",
           "org.apache.ibatis.",
           "org.mybatis.",
@@ -70,7 +69,10 @@ class CanvasCoreArchitectureTest {
             requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId"));
       }
     }
-    assertEquals(List.of(), productionDependencies, "canvas core production dependencies");
+    assertEquals(
+        List.of("fun.fengwk.kk-studio:kk-studio-share"),
+        productionDependencies,
+        "canvas core production dependencies");
   }
 
   @Test
@@ -172,7 +174,8 @@ class CanvasCoreArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("jdk.")
-        || imported.startsWith(OWN_PACKAGE_PREFIX);
+        || imported.startsWith(OWN_PACKAGE_PREFIX)
+        || imported.startsWith("fun.fengwk.kkstudio.share.");
   }
 
   private static boolean isOwnPackage(String packageLine) {

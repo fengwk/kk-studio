@@ -16,6 +16,10 @@ import java.util.function.Consumer;
 
 /**
  * Independent serial subscriber workers; reader and commit hooks only perform bounded mailbox work.
+ *
+ * <p>每个订阅建立时都排入一次权威恢复标记：消费端把「订阅本身」也当作一次需要回读权威事实的边界，因此无论订阅早于还是晚于 LISTEN 建连完成，都不会
+ * 留下「建连与订阅之间提交的变更无人对账」的启动窗口。该标记与 reader 的全量对账走同一条队列路径（都只是设置 mailbox 的恢复位，由串行 worker 异步执行 {@code
+ * resync}，不在订阅调用线程内联消费），并发到达时自动折叠为一次；恢复先于此后到达的提示投递，提示之间保持原有顺序。
  */
 @Slf4j
 final class LocalInbox implements AutoCloseable {
@@ -42,6 +46,8 @@ final class LocalInbox implements AutoCloseable {
     Mailbox<T> mailbox = new Mailbox<>(topic, consumer, resync);
     mailboxes.computeIfAbsent(topic.name(), ignored -> new ArrayList<>()).add(mailbox);
     subscribers++;
+    // 先排入权威恢复标记再启动消费：订阅建立本身就是一次恢复边界，绝不依赖 LISTEN 建连时机。
+    mailbox.recover();
     mailbox.worker.start();
     return mailbox;
   }
@@ -68,6 +74,20 @@ final class LocalInbox implements AutoCloseable {
     }
   }
 
+  synchronized boolean healthy() {
+    if (closed) {
+      return false;
+    }
+    for (List<Mailbox<?>> list : mailboxes.values()) {
+      for (Mailbox<?> mailbox : list) {
+        if (mailbox.state() == NotificationSubscription.State.FAILED) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   @Override
   public void close() {
     List<Mailbox<?>> closing = new ArrayList<>();
@@ -80,8 +100,45 @@ final class LocalInbox implements AutoCloseable {
         subscribers = 0;
       }
     }
+    long deadline = System.nanoTime() + 5_000_000_000L;
+    IllegalStateException failure = null;
+    boolean interrupted = false;
     for (Mailbox<?> mailbox : closing) {
-      mailbox.awaitClosed();
+      if (mailbox.worker == Thread.currentThread()) {
+        continue;
+      }
+      long remainingNanos = deadline - System.nanoTime();
+      if (remainingNanos > 0) {
+        long waitMillis = remainingNanos / 1_000_000L;
+        int waitNanos = (int) (remainingNanos % 1_000_000L);
+        try {
+          mailbox.worker.join(waitMillis, waitNanos);
+        } catch (InterruptedException error) {
+          interrupted = true;
+          IllegalStateException ex =
+              new IllegalStateException("interrupted closing notification consumer", error);
+          if (failure == null) {
+            failure = ex;
+          } else {
+            failure.addSuppressed(ex);
+          }
+        }
+      }
+      if (mailbox.worker.isAlive()) {
+        IllegalStateException ex =
+            new IllegalStateException("notification consumer failed to stop");
+        if (failure == null) {
+          failure = ex;
+        } else {
+          failure.addSuppressed(ex);
+        }
+      }
+    }
+    if (interrupted) {
+      Thread.currentThread().interrupt();
+    }
+    if (failure != null) {
+      throw failure;
     }
   }
 
@@ -188,6 +245,10 @@ final class LocalInbox implements AutoCloseable {
                   error.getClass().getSimpleName());
               return;
             }
+            log.warn(
+                "Notification delivery failed topic={} errorType={}",
+                topic.name(),
+                error.getClass().getSimpleName());
             recover();
           } finally {
             if (entry != null) {
@@ -238,9 +299,9 @@ final class LocalInbox implements AutoCloseable {
           if (worker.isAlive()) {
             throw new IllegalStateException("notification consumer failed to stop");
           }
-        } catch (InterruptedException ignored) {
+        } catch (InterruptedException error) {
           Thread.currentThread().interrupt();
-          throw new IllegalStateException("interrupted closing notification consumer");
+          throw new IllegalStateException("interrupted closing notification consumer", error);
         }
       }
     }

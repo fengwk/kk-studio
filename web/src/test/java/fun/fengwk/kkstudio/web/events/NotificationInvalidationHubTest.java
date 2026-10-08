@@ -7,8 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.share.notification.EntityHint;
+import fun.fengwk.kkstudio.share.notification.NotificationCodecs;
 import fun.fengwk.kkstudio.web.events.InvalidationEventSource.Event;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -42,7 +45,7 @@ class NotificationInvalidationHubTest {
     assertEquals(0L, subscriptionA.cursor());
     assertEquals(0L, subscriptionB.cursor());
 
-    hub.onNotification(ROOT_A.toString());
+    hub.onNotification(ROOT_A);
 
     assertEquals(List.of(Event.changed(ROOT_A)), rootA);
     assertTrue(rootB.isEmpty(), "其他 key 的通知不得泄漏到本资源");
@@ -55,8 +58,8 @@ class NotificationInvalidationHubTest {
     List<Event> global = new ArrayList<>();
     hub.subscribe(null, global::add);
 
-    hub.onNotification(ROOT_A.toString());
-    hub.onNotification(ROOT_B.toString());
+    hub.onNotification(ROOT_A);
+    hub.onNotification(ROOT_B);
 
     assertEquals(List.of(Event.changed(ROOT_A), Event.changed(ROOT_B)), global);
   }
@@ -68,16 +71,16 @@ class NotificationInvalidationHubTest {
     hub.subscribe(ROOT_A, keyed::add);
     hub.subscribe(null, global::add);
 
-    hub.onNotification("");
-    hub.onNotification(null);
-    hub.onNotification("not-a-uuid");
+    hub.onNotification((UUID) null);
+    EntityHint emptyHint = new EntityHint(null);
+    hub.onNotification(emptyHint.entityId());
     hub.broadcastResync();
 
     assertEquals(
-        List.of(Event.fullResync(), Event.fullResync(), Event.fullResync(), Event.fullResync()),
+        List.of(Event.fullResync(), Event.fullResync(), Event.fullResync()),
         keyed,
-        "空/畸形 payload 与 LISTEN 重连都必须要求 keyed 订阅整体回读");
-    assertEquals(4, global.size());
+        "空/null key、空 EntityHint 与总线 resync 都必须要求 keyed 订阅整体回读");
+    assertEquals(3, global.size());
     assertTrue(global.stream().allMatch(Event::resync));
   }
 
@@ -87,14 +90,26 @@ class NotificationInvalidationHubTest {
     List<Event> global = new ArrayList<>();
     hub.subscribe(null, global::add);
 
-    // 大写十六进制与无连字符形式都不是 canonical UUID（与权威读取的字符串不一致），必须退化为 resync 而不是定点失效。
-    hub.onNotification(hexRoot.toString().toUpperCase(Locale.ROOT));
-    hub.onNotification(hexRoot.toString().replace("-", ""));
+    String upper = hexRoot.toString().toUpperCase(Locale.ROOT);
+    String noHyphens = hexRoot.toString().replace("-", "");
+
+    // 大写十六进制与无连字符形式都被总线 codec 严格拒绝，并退化为 resync
+    assertThrows(
+        RuntimeException.class,
+        () -> NotificationCodecs.UUID_CODEC.decode(upper.getBytes(StandardCharsets.UTF_8)));
+    hub.broadcastResync();
+
+    assertThrows(
+        RuntimeException.class,
+        () -> NotificationCodecs.UUID_CODEC.decode(noHyphens.getBytes(StandardCharsets.UTF_8)));
+    hub.broadcastResync();
 
     assertEquals(List.of(Event.fullResync(), Event.fullResync()), global);
 
-    // 同一 UUID 的 canonical 形式仍然定点失效，证明判定的是编码形式而不是 UUID 取值。
-    hub.onNotification(hexRoot.toString());
+    // 同一 UUID 的 canonical 形式正常解码并定点失效
+    UUID decoded =
+        NotificationCodecs.UUID_CODEC.decode(hexRoot.toString().getBytes(StandardCharsets.UTF_8));
+    hub.onNotification(decoded);
 
     assertEquals(Event.changed(hexRoot), global.get(2));
   }
@@ -109,7 +124,7 @@ class NotificationInvalidationHubTest {
         });
     hub.subscribe(null, healthy::add);
 
-    hub.onNotification(ROOT_A.toString());
+    hub.onNotification(ROOT_A);
 
     assertEquals(List.of(Event.changed(ROOT_A)), healthy);
   }
@@ -120,7 +135,7 @@ class NotificationInvalidationHubTest {
     SourceSubscribed subscription = hub.subscribe(ROOT_A, keyed::add);
 
     subscription.handle().close();
-    hub.onNotification(ROOT_A.toString());
+    hub.onNotification(ROOT_A);
 
     assertTrue(keyed.isEmpty());
   }

@@ -6,7 +6,7 @@ import java.util.UUID;
  * 内部 Thread durable version change 唤醒源的最小 port。
  *
  * <p>消费者只关心「是否可能发生变化」的 wake 信号，不接收 version 值；{@link #subscribe} 必须先在原子语义上完成注册再返回，之后发生的 version 变化（含
- * LISTEN 断线 resync）保证经 {@code onChange} 唤醒。缺少数值/游标返回：观察者总是订阅后再读权威 snapshot，事件的丢失由 「先注册再读
+ * 通知总线建连/重连 resync）保证经 {@code onChange} 唤醒。缺少数值/游标返回：观察者总是订阅后再读权威 snapshot，事件的丢失由 「先注册再读
  * cursor」保证不存在竞态窗口。
  */
 public interface HarnessThreadChangeSource {

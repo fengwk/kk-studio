@@ -7,7 +7,6 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
@@ -15,9 +14,8 @@ import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
-import fun.fengwk.kkstudio.harness.infra.postgresql.RealtimeNotificationCodec;
+import fun.fengwk.kkstudio.harness.infra.realtime.BusRealtimeEventSink;
+import fun.fengwk.kkstudio.harness.infra.realtime.BusRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
@@ -39,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.notification.NotificationLimits;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
@@ -57,6 +56,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 
 import javax.sql.DataSource;
 
@@ -78,8 +78,8 @@ import java.util.concurrent.TimeUnit;
  * Web 组合根：把 platform 的 gateway / resolver 与 infra 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
  *
  * <p>进程内 worker dispatcher 只受 {@code workers-enabled} 控制；关闭时控制/查询平面（{@link
- * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。PostgreSQL notification loop
- * 由事件组合根独立持有；processor 关闭与 executor shutdown 由 Spring 按依赖逆序 destroy 保证。
+ * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。跨节点提示统一经通知组合根持有的唯一总线发布；processor 关闭与
+ * executor shutdown 由 Spring 按依赖逆序 destroy 保证。
  *
  * <p>Advanced/resource 等部署软策略从共享 {@link SystemSettingsSnapshot} 在装配期读取（DB 变更需重启）；aiRuntime 的 retry
  * 经 {@link InvocationRetryPolicyProvider} 每次判定点现读。本组合根不持有任何硬编码的重复默认值。
@@ -109,8 +109,11 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public HarnessStore harnessStore(
-      DataSource dataSource, PlatformTransactionManager transactionManager) {
-    return new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
+      DataSource dataSource,
+      PlatformTransactionManager transactionManager,
+      NotificationBus notificationBus) {
+    return new PostgresqlHarnessStore(
+        dataSource, transactionManager, UUID::randomUUID, notificationBus);
   }
 
   /**
@@ -149,21 +152,17 @@ public class HarnessRuntimeConfiguration {
         harnessStore, sessionBlobRefManager, storageBlobManager, storageUploadService, properties);
   }
 
-  @Bean
-  public RealtimeNotificationCodec realtimeNotificationCodec() {
-    return new RealtimeNotificationCodec();
-  }
-
+  /** Realtime live overlay sink：单条 canonical EVENT 超过逻辑消息预算时降级为该 Thread 的 resync。 */
   @Bean
   public RealtimeEventSink realtimeEventSink(
-      DataSource dataSource, RealtimeNotificationCodec notificationCodec) {
-    return new PostgresqlRealtimeEventSink(new JdbcTemplate(dataSource), notificationCodec);
+      NotificationBus notificationBus, NotificationLimits notificationLimits) {
+    return new BusRealtimeEventSink(notificationBus, notificationLimits.maxMessageBytes());
   }
 
-  @Bean(destroyMethod = "close")
-  public PostgresqlRealtimeEventSource realtimeEventSource(
-      RealtimeNotificationCodec notificationCodec) {
-    return new PostgresqlRealtimeEventSource(notificationCodec);
+  /** Realtime live overlay source：订阅唯一通知总线的 realtime topic，不自行持有连接或监听通道。 */
+  @Bean
+  public BusRealtimeEventSource realtimeEventSource(NotificationBus notificationBus) {
+    return new BusRealtimeEventSource(notificationBus);
   }
 
   /** Model / Tool 调用的全局重试策略现读通道：每次 retry 判定点从 SystemSettings.AiRuntime 映射。 */

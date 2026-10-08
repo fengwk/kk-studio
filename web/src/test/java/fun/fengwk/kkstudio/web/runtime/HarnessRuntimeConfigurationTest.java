@@ -19,14 +19,19 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
+import fun.fengwk.kkstudio.harness.infra.realtime.BusRealtimeEventSink;
+import fun.fengwk.kkstudio.harness.infra.realtime.BusRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -39,12 +44,15 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
+import fun.fengwk.kkstudio.notification.NotificationTransactionManager;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.share.notification.NotificationAddress;
+import fun.fengwk.kkstudio.share.notification.NotificationSignal;
 import fun.fengwk.kkstudio.web.WebTestApplication;
-import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -124,8 +132,9 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
   @Autowired private ApplicationContext applicationContext;
-  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
+  @Autowired private DefaultNotificationBus notificationBus;
   @Autowired private EnvironmentSessionListener environmentSessionListener;
+  @Autowired private PlatformTransactionManager transactionManager;
 
   @Autowired
   @Qualifier("harnessRuntimeLifecycle")
@@ -155,8 +164,9 @@ class HarnessRuntimeConfigurationTest {
   void composesTheFullRuntimeBeanGraph() {
     assertInstanceOf(PostgresqlHarnessStore.class, harnessStore);
     assertInstanceOf(LocalFileResourceStore.class, resourceStore);
-    assertInstanceOf(PostgresqlRealtimeEventSource.class, realtimeEventSource);
-    assertInstanceOf(PostgresqlRealtimeEventSink.class, realtimeEventSink);
+    assertInstanceOf(BusRealtimeEventSource.class, realtimeEventSource);
+    assertInstanceOf(BusRealtimeEventSink.class, realtimeEventSink);
+    assertInstanceOf(NotificationTransactionManager.class, transactionManager);
     assertNotNull(threadProcessor);
     assertNotNull(modelProcessor);
     assertNotNull(toolProcessor);
@@ -172,7 +182,9 @@ class HarnessRuntimeConfigurationTest {
     assertEquals(Duration.ofMillis(250), harnessDispatcherProperties.getRejectionDelay());
     assertEquals(3, harnessDispatcherProperties.getWorker().getConcurrency());
     assertEquals(5, harnessDispatcherProperties.getWorker().getQueueCapacity());
-    assertNotNull(postgresqlNotificationLoop);
+    assertNotNull(notificationBus);
+    assertTrue(notificationBus.healthy());
+    assertTrue(applicationContext.containsBean("notificationSubscriptions"));
     assertNotNull(environmentSessionListener);
     assertEquals(
         new InvocationRetryPolicy(
@@ -181,6 +193,31 @@ class HarnessRuntimeConfigurationTest {
             Duration.ofSeconds(2),
             Duration.ofSeconds(60)),
         invocationRetryPolicyProvider.retryPolicy());
+  }
+
+  /** 事务管理器真实装配证明：上下文注入的就是登记阶段标记的实现，因此在 afterCommit 线程上发布会被拒绝，而不是注册一个永不提交、会被静默丢弃的批次。 */
+  @Test
+  void wiredTransactionManagerRejectsPublishOnAfterCommitThread() {
+    TransactionTemplate template = new TransactionTemplate(transactionManager);
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                template.executeWithoutResult(
+                    status ->
+                        TransactionSynchronizationManager.registerSynchronization(
+                            new TransactionSynchronization() {
+                              @Override
+                              public void afterCommit() {
+                                notificationBus.publish(
+                                    HarnessNotifications.WORK_AVAILABLE,
+                                    NotificationAddress.broadcast(),
+                                    NotificationSignal.CHANGED);
+                              }
+                            })));
+    assertTrue(
+        error.getMessage().contains("afterCommit"),
+        "unexpected rejection message: " + error.getMessage());
   }
 
   @Test
@@ -204,8 +241,8 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(harnessRuntime, "control/query plane must stay available");
     assertFalse(harnessRuntimeLifecycle.isRunning());
     assertTrue(
-        postgresqlNotificationLoop.isRunning(),
-        "application notification loop remains active for Thread/Canvas when workers are disabled");
+        notificationBus.healthy(),
+        "application notification bus remains healthy when workers are disabled");
   }
 
   /**

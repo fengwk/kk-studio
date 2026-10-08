@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -50,6 +51,12 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.share.notification.EntityHint;
+import fun.fengwk.kkstudio.share.notification.NotificationAddress;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationSignal;
+import fun.fengwk.kkstudio.share.notification.NotificationTopic;
+import fun.fengwk.kkstudio.share.notification.VersionHint;
 
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -394,6 +401,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /** 外部注入的 UUID 生成器。 */
   private final Supplier<UUID> idGenerator;
 
+  /** 唯一通知总线：所有跨节点提示都经它在同一物理事务内发布。 */
+  private final NotificationBus bus;
+
   /** 当前事务已成功获取锁的实体资源标识集合，用于支持加锁幂等并防范重入。 */
   private final Set<LockKey> locked = new HashSet<>();
 
@@ -426,9 +436,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /** 事务 handle 关闭状态标识。 */
   private boolean closed;
 
-  PostgresqlHarnessTransaction(JdbcTemplate jdbc, Supplier<UUID> idGenerator) {
+  PostgresqlHarnessTransaction(JdbcTemplate jdbc, Supplier<UUID> idGenerator, NotificationBus bus) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.bus = Objects.requireNonNull(bus, "bus");
   }
 
   /** 关闭事务 handle 并清空事务内 EntryPath 局部缓存。 */
@@ -2438,7 +2449,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    *   <li>{@code requiredEnvironmentId} 仅允许用于 TOOL Work；
    *   <li><b>已冻结 Affinity 冲突拒绝：</b>upsert WHERE 子句要求传入的 {@code requiredEnvironmentId} 与既有值一致或传入为
    *       null； 若已存在的 Work 绑定的环境与新传入的值冲突，更新 0 行并抛出 {@link IllegalArgumentException} 明确拒绝，防止环境亲和性漂移；
-   *   <li>提交前发送 {@code pg_notify} availability hint。
+   *   <li>提交前经唯一通知总线在写事务内发布 availability hint。
    * </ul>
    */
   @Override
@@ -3112,43 +3123,36 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private void notifyWorkAvailable() {
-    notifyChannel(PostgresqlWorkChannel.NAME, "");
+    publish(HarnessNotifications.WORK_AVAILABLE, NotificationSignal.CHANGED);
   }
 
-  /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
+  /** Thread version 失效：payload 为实体 id 与真实 version。 */
   private void notifyThreadVersion(UUID threadId, long version) {
-    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_VERSION, threadId + ":" + version);
+    publish(HarnessNotifications.THREAD_VERSION, new VersionHint(threadId, version));
   }
 
   /** 执行树失效：payload 为真实执行根 id；绝不伪造根 Thread 的 version。 */
   private void notifyExecutionTree(UUID rootThreadId) {
-    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_TREE, rootThreadId.toString());
+    publish(HarnessNotifications.THREAD_TREE, new EntityHint(rootThreadId));
   }
 
   /**
    * 待处理交互失效：payload 为真实执行根 id；来源 Thread 已不可解析时为空 payload，由 listener 全量 resync； 数据库故障与祖先链异常不在此吞掉。
    */
   private void notifyToolInteraction(UUID rootThreadId) {
-    notifyChannel(
-        PostgresqlHarnessNotificationChannel.TOOL_INTERACTION,
-        rootThreadId == null ? "" : rootThreadId.toString());
+    publish(HarnessNotifications.TOOL_INTERACTION, new EntityHint(rootThreadId));
   }
 
   /**
-   * 在同一自管理事务连接上执行内建 {@code pg_notify}；PostgreSQL 仅在提交时投递，回滚不投递。
+   * 在事实写入的同一物理事务内通过唯一通知总线发布提示：PostgreSQL 只在提交时投递，回滚不投递。
    *
-   * <p>底层故障经 {@link #queryOne} 记录为事务首个故障并原样抛出（poisoning），绝不吞掉发布失败后继续提交。
+   * <p>发布失败使事务进入 poisoning：记录事务首个故障并向上抛出，绝不吞掉后继续提交脏状态。
    */
-  private void notifyChannel(String channel, String payload) {
-    boolean sent =
-        queryOne(
-                "select pg_notify(?, ?) as ignored, true as sent",
-                (resultSet, rowNumber) -> resultSet.getBoolean("sent"),
-                channel,
-                payload)
-            .orElseThrow(() -> new IllegalStateException("pg_notify returned no row"));
-    if (!sent) {
-      throw new IllegalStateException("pg_notify did not confirm execution");
+  private <T> void publish(NotificationTopic<T> topic, T payload) {
+    try {
+      bus.publish(topic, NotificationAddress.broadcast(), payload);
+    } catch (RuntimeException error) {
+      throw remember(error);
     }
   }
 

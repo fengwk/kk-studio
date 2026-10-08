@@ -96,9 +96,9 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 是写用例的事务边界，`IssueReconciler.reconcile` 在 controller 内以单事务推进一个有界动作；
 `repo/impl` 的 PostgreSQL 实现只做单表读写与 CAS 行数判定。
 写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
-用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
-同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
-写入也会覆盖。Work 租约/唤醒只影响内部调度，走独立通道 `project_issue_work_due`，不产生项目快照失效信号。
+向 [`ProjectNotifications.ISSUE_CHANGED`](../../project/src/main/java/fun/fengwk/kkstudio/project/notification/ProjectNotifications.java)（topic 为 `project.issue.changed`，payload 为 `projectId`）发布快照失效提示；提交后投递、回滚不投递，
+同一事务内相同 payload 折叠。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
+写入也会覆盖。Work 租约/唤醒只影响内部调度，由 [`IssueWorkNotifier`](../../project/src/main/java/fun/fengwk/kkstudio/project/notification/IssueWorkNotifier.java) 在同一事务内按数据库时钟判定「到期且无有效租约」时向 [`ProjectNotifications.WORK_DUE`](../../project/src/main/java/fun/fengwk/kkstudio/project/notification/ProjectNotifications.java)（topic 为 `project.issue.work.due`，payload 为 `issueId`）发布，不产生项目快照失效信号。
 幂等事实落在 `project_issue_activity`（`idempotencyKey` 精确重放；`body` 的非空性按 `kind` 固定：
 COMMENT/INSTRUCTION 必须非空白且不超过 1 MiB，RUN、SPEC_CHANGE、STATE_CHANGE、CONTROL 必须为空）；
 Stage 预算、Work 邮箱与 Evidence 分别落在 `project_issue_stage_budget`、
