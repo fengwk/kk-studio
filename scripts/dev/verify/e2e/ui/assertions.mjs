@@ -3,7 +3,9 @@ export async function assertReadOnlyZeroFooter(scope, label) {
   await footer.waitFor({ state: 'visible', timeout: 10_000 })
   const text = (await footer.innerText()).replace(/\s+/g, ' ').trim()
   // 单行 Footer 分组只使用 U+2223；组内统计项由 U+00B7 分隔。
-  for (const expected of ['未选择环境', ' ∣ ', '↑0', '↓0', '$0.000']) {
+  // 无 Environment / 无用量事实：环境为「未选择环境」，用量段无定价/无测速样本如实显示 —，
+  // 绝不伪造成 $0 或 0 tok/s。
+  for (const expected of ['未选择环境', ' ∣ ', '↑0 · ↓0 · — · cache — · — tok/s']) {
     if (!text.includes(expected)) {
       throw new Error(`${label} missing "${expected}": ${text}`)
     }

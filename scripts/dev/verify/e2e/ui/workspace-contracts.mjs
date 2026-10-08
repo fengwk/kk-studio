@@ -244,14 +244,21 @@ export async function runWorkspaceContractMatrix(ui) {
           // Footer 必须投影该 Environment（无 daemon 连接 => unavailable），
           // 而不是首个 Environment，也不含任何已删除的 workspace 路径。
           const lineText = (await line.innerText()).replace(/\s+/g, ' ').trim()
+          // 最新调用未上报上下文用量；累计 tokens、费用与缓存率仍按已有事实精确断言。
+          // 解码速率受墙钟影响，只接受有限非负数或缺失占位。
+          const footerUsagePrefix =
+            `${environmentText} ∣ ctx 0/4.1k ∣ ↑16 · ↓9 · R14 · $0.000034 · cache 47% · `
+          const speedToken = lineText.slice(footerUsagePrefix.length)
           assert(
-            lineText === `${environmentText} ∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · $0.000 · cache 47% · — tok/s`,
+            lineText.startsWith(footerUsagePrefix)
+              && /^(?:—|[0-9]+(?:\.[0-9]+)?) tok\/s$/.test(speedToken)
+              && (speedToken === '— tok/s' || Number.isFinite(Number.parseFloat(speedToken))),
             `Footer facts are incorrect: ${lineText}`,
           )
           const footerTitle = await line.getAttribute('title')
           assert(
             footerTitle?.startsWith(`环境：${fixture.otherEnvironment.name}`)
-              && footerTitle.includes('30 / 4096 tokens')
+              && footerTitle.includes('0 / 4096 tokens')
               && footerTitle.includes('47%'),
             `Footer hover readout is incomplete: ${footerTitle}`,
           )
@@ -481,7 +488,8 @@ export async function runWorkspaceContractMatrix(ui) {
             has: page.locator('.thread-tool-name', { hasText: 'task' }),
           }).last()
           await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
-          await taskCard.getByText('已接受 / 后台执行').waitFor({ state: 'visible', timeout: 15_000 })
+          // 回执链接必须打开正确的 child thread，并保留后续审批子流程。
+          await taskCard.getByText('查看 subagent 执行').waitFor({ state: 'visible', timeout: 15_000 })
 
           const link = taskCard.locator('.task-tool-thread-link')
           await link.waitFor({ state: 'visible', timeout: 10_000 })
