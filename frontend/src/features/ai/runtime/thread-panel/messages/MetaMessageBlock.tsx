@@ -10,7 +10,7 @@ import '@/features/ai/runtime/thread-panel/messages/meta-message-block.css'
  * 特殊 entry / 回合摘要：左对齐，与正文同列，用图标区分。
  *
  * 当消息绑定到真正的 TURN_END（`endEntryId` 非空）时，它是一次已关闭回合的 footer：
- * 即使没有 usage 文本，也必须展示结束信息与「从此处分支」入口。入口走会话里唯一的
+ * 没有 usage 时展示 '-' 占位与「从此处分支」入口，不以回合状态替代用量。入口走会话里唯一的
  * 分支 Context（由根控制面注入，与 `/tree` 共用同一条命名/目标流程）；
  * 无该能力时（只读子代理视图、非 Chat 宿主、分支禁用）不渲染按钮，绝不在此自造流程。
  *
