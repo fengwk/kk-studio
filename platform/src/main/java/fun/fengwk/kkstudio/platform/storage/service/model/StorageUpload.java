@@ -30,9 +30,6 @@ public class StorageUpload {
   /** 客户端声明的小写十六进制 SHA-256（64 字符）。 */
   private String declaredSha256;
 
-  /** 清理截止时刻：过期后由过期批次回收。 */
-  private Instant expiresAt;
-
   /** 显式删除/消费的耐久请求时刻；非 null 后由后台清理并最终删除整行。 */
   private Instant cleanupRequestedAt;
 
@@ -42,6 +39,11 @@ public class StorageUpload {
   /** cleanupToken 的 lease 截止时刻；与 cleanupToken 成对为空或非空。 */
   private Instant cleanupUntil;
 
-  /** 创建时间（映射 {@code created_at} timestamptz，毫秒精度）。 */
+  /**
+   * 创建时间（映射 {@code created_at} timestamptz，毫秒精度）。
+   *
+   * <p>过期权威事实：未显式请求清理、未被 claim 的上传在 {@code created_at + 当前 upload TTL} 之后过期，TTL 每次操作从 {@code
+   * SystemSettingsSnapshot} 现读，因此缩短 TTL 会立即让存量过期、延长 TTL 会立即让未 claim 的存量继续有效。
+   */
   private Instant createTime;
 }

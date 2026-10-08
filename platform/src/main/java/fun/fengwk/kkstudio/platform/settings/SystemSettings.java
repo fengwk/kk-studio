@@ -432,7 +432,7 @@ public record SystemSettings(
       int thumbnailQuality) {
 
     public static final StorageMedia DEFAULT =
-        new StorageMedia(3_600L, 600L, 3_600L, 30_000L, 512, 80);
+        new StorageMedia(86_400L, 1_800L, 3_600L, 30_000L, 512, 80);
 
     public StorageMedia {
       SystemSettingsValidation.requirePositive(
