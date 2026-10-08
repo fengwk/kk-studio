@@ -34,8 +34,7 @@ public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapabilit
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = optionalWorkdir(args);
-    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
+    Path path = EnvironmentPaths.existing(string(args, "path"));
     String query = string(args, "query");
     if (query.isBlank()) {
       throw new IllegalArgumentException("query must not be blank");

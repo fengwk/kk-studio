@@ -67,15 +67,13 @@ class CodingCapabilitiesEdgeTest {
       write(config()), edit(config()), bash(config()), grep(config()), find(config())
     };
     String[] wrong = {
-      "{\"path\":\"x\",\"content\":1,\"workdir\":\"" + workspaceRoot + "\"}",
-      "{\"path\":\"x\",\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":\"yes\",\"workdir\":\""
+      "{\"path\":\"" + workspaceRoot + "/x\",\"content\":1}",
+      "{\"path\":\""
           + workspaceRoot
-          + "\"}",
+          + "/x\",\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":\"yes\"}",
       "{\"command\":\"echo x\",\"workdir\":1}",
-      "{\"pattern\":\"x\",\"path\":\".\",\"limit\":\"one\",\"workdir\":\"" + workspaceRoot + "\"}",
-      "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":false,\"workdir\":\""
-          + workspaceRoot
-          + "\"}"
+      "{\"pattern\":\"x\",\"path\":\"" + workspaceRoot + "\",\"limit\":\"one\"}",
+      "{\"pattern\":\"*\",\"path\":\"" + workspaceRoot + "\",\"timeout_seconds\":false}"
     };
     for (int index = 0; index < capabilities.length; index++) {
       EnvironmentCapability capability = capabilities[index];
@@ -157,8 +155,7 @@ class CodingCapabilitiesEdgeTest {
           }
         };
     RecordingListener listener =
-        invokeAsync(
-            blocking, "{\"path\":\"x\",\"workdir\":\"" + workspaceRoot + "\"}", Duration.ZERO);
+        invokeAsync(blocking, "{\"path\":\"" + workspaceRoot + "/x\"}", Duration.ZERO);
     assertTrue(started.await(5, TimeUnit.SECONDS));
 
     listener.handle.cancel();
@@ -177,7 +174,7 @@ class CodingCapabilitiesEdgeTest {
     assertThrows(IllegalArgumentException.class, () -> blocking.execute(wrong, listener));
   }
 
-  /** workdir 校验必须绝对且现存；path 保持字面值，绝对路径与越出 workdir 的相对路径不受 root 范围限制。 */
+  /** workdir 校验必须绝对且现存；path 必须为绝对路径，相对路径直接拒绝。 */
   @Test
   void environmentPathsUseExplicitWorkdirAndAcceptExternalPaths() throws Exception {
     Path nested = Files.createDirectories(workspaceRoot.resolve("nested"));
@@ -185,38 +182,32 @@ class CodingCapabilitiesEdgeTest {
     Files.writeString(nested.resolve("@file.txt"), "x");
     Files.writeString(externalRoot.resolve("external.txt"), "x");
     Path externalFile = externalRoot.resolve("external.txt");
-    String traversal = workspaceRoot.relativize(externalFile).toString();
 
     assertEquals(nested.toRealPath(), EnvironmentPaths.workdir(nested.toRealPath().toString()));
     assertEquals(
         nested.resolve("@file.txt").toRealPath(),
-        EnvironmentPaths.existing("@file.txt", nested.toRealPath()));
+        EnvironmentPaths.existing(nested.resolve("@file.txt").toRealPath().toString()));
     // 还不存在的新文件只能拿「真实根目录」拼出来：workdir 要的是绝对且真实存在的目录，返回的路径挂在真实根之下。
     // 直接用 junit 给的 @TempDir 拼会在两种平台上跑偏：macOS 的 /var 是指向 /private/var 的符号链接，Windows 的临时
     // 目录名可能是 8.3 短名（RUNNER~1 与 runneradmin 指向同一个目录但字符串不同）。
     assertEquals(
         nested.toRealPath().resolve("future/file.txt"),
-        EnvironmentPaths.writable("future/file.txt", nested.toRealPath()));
+        EnvironmentPaths.writable(nested.toRealPath().resolve("future/file.txt").toString()));
     assertEquals(
         nested.resolve("file.txt").toRealPath(),
-        EnvironmentPaths.writable("file.txt", nested.toRealPath()));
+        EnvironmentPaths.writable(nested.resolve("file.txt").toRealPath().toString()));
     assertEquals(
         nested.resolve("file.txt").toRealPath(),
-        EnvironmentPaths.existing(
-            nested.resolve("file.txt").toString(), workspaceRoot.toRealPath()));
+        EnvironmentPaths.existing(nested.resolve("file.txt").toString()));
 
-    // 绝对路径与 ../ 遍历都是普通路径：workdir 只提供相对路径的解析基准。
+    // 绝对路径都是普通路径：直接解析。
     assertEquals(
         externalRoot.toRealPath(), EnvironmentPaths.workdir(externalRoot.toRealPath().toString()));
     assertEquals(
-        externalFile.toRealPath(),
-        EnvironmentPaths.existing(traversal, workspaceRoot.toRealPath()));
-    assertEquals(
-        externalFile.toRealPath(),
-        EnvironmentPaths.existing(externalFile.toRealPath().toString(), nested.toRealPath()));
+        externalFile.toRealPath(), EnvironmentPaths.existing(externalFile.toRealPath().toString()));
     assertEquals(
         externalRoot.toRealPath().resolve("external.txt.new"),
-        EnvironmentPaths.writable(traversal + ".new", workspaceRoot.toRealPath()));
+        EnvironmentPaths.writable(externalRoot.resolve("external.txt.new").toString()));
 
     IllegalArgumentException nullError =
         assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.workdir(null));
@@ -239,20 +230,28 @@ class CodingCapabilitiesEdgeTest {
             () -> EnvironmentPaths.workdir(workspaceRoot.resolve("missing").toString()));
     assertTrue(missingDirError.getMessage().contains("workdir must be an existing directory"));
 
-    assertThrows(
-        IllegalArgumentException.class, () -> EnvironmentPaths.existing("", nested.toRealPath()));
+    IllegalArgumentException relativeExisting =
+        assertThrows(
+            IllegalArgumentException.class, () -> EnvironmentPaths.existing("relative.txt"));
+    assertTrue(
+        relativeExisting.getMessage().contains("path must be an absolute path: relative.txt"));
+
+    IllegalArgumentException relativeWritable =
+        assertThrows(
+            IllegalArgumentException.class, () -> EnvironmentPaths.writable("relative.txt"));
+    assertTrue(
+        relativeWritable.getMessage().contains("path must be an absolute path: relative.txt"));
+
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing(""));
     assertThrows(
         IllegalArgumentException.class,
-        () -> EnvironmentPaths.existing("missing", nested.toRealPath()));
-    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("file.txt", null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> EnvironmentPaths.existing("\u0000", nested.toRealPath()));
+        () -> EnvironmentPaths.existing(workspaceRoot.resolve("missing").toString()));
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing(null));
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("\u0000"));
     Path dangling = workspaceRoot.resolve("dangling");
     Files.createSymbolicLink(dangling, workspaceRoot.resolve("not-created"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> EnvironmentPaths.existing("dangling", workspaceRoot.toRealPath()));
+        IllegalArgumentException.class, () -> EnvironmentPaths.existing(dangling.toString()));
   }
 
   @Test
@@ -277,7 +276,7 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityResult result =
         invoke(
             read(config()),
-            "{\"path\":\"utf16.txt\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
+            "{\"path\":" + json(workspaceRoot.resolve("utf16.txt").toString()) + "}");
 
     assertFalse(result.error());
     assertTrue(text(result).contains("1|alpha"));
@@ -302,16 +301,16 @@ class CodingCapabilitiesEdgeTest {
       System.setProperty(removed[index], "must-be-ignored");
     }
     try {
-      Path resources = Files.createDirectories(workspaceRoot.resolve("data/resources"));
+      Path tmp = Files.createDirectories(workspaceRoot.resolve("data/tmp"));
       CodingToolsConfig config =
-          CodingToolsConfig.fromRuntime(resources, "/usr/bin/bash", TestCodingConfig.testLsp());
+          CodingToolsConfig.fromRuntime(tmp, "/usr/bin/bash", TestCodingConfig.testLsp());
 
       // 被删除的属性不得改写任何运行时取值。
       assertEquals("/usr/bin/bash", config.bashExecutable());
       assertEquals("test-ls", config.lsp().servers().getFirst().id());
       // 输出布局完全由数据目录决定；本地不再有二进制 resource 导出根。
-      assertEquals(resources.resolve("text"), config.textOutputStore().textDirectory());
-      assertEquals(resources.resolve("staging"), config.textOutputStore().stagingDirectory());
+      assertEquals(tmp.resolve("text"), config.textOutputStore().textDirectory());
+      assertEquals(tmp.resolve("staging"), config.textOutputStore().stagingDirectory());
     } finally {
       for (int index = 0; index < removed.length; index++) {
         if (previous[index] == null) {
@@ -326,15 +325,14 @@ class CodingCapabilitiesEdgeTest {
   /** 本地执行程序参数的默认值与显式覆盖：空白回退默认，显式取值原样保留，未配置时没有 LSP 服务器。 */
   @Test
   void runtimeConfigurationResolvesLocalExecutableDefaults() throws Exception {
-    Path resources = Files.createDirectories(workspaceRoot.resolve("data/resources"));
+    Path tmp = Files.createDirectories(workspaceRoot.resolve("data/tmp"));
 
-    CodingToolsConfig defaults =
-        CodingToolsConfig.fromRuntime(resources, "  ", LspDiscovery.empty());
+    CodingToolsConfig defaults = CodingToolsConfig.fromRuntime(tmp, "  ", LspDiscovery.empty());
     assertEquals(CodingToolsConfig.DEFAULT_BASH_EXECUTABLE, defaults.bashExecutable());
     assertTrue(defaults.lsp().servers().isEmpty(), "未配置 lsp 时没有 LSP 服务器");
 
     CodingToolsConfig explicit =
-        CodingToolsConfig.fromRuntime(resources, "custom-bash", LspDiscovery.empty());
+        CodingToolsConfig.fromRuntime(tmp, "custom-bash", LspDiscovery.empty());
     assertEquals("custom-bash", explicit.bashExecutable());
     assertTrue(explicit.lsp().servers().isEmpty());
   }
@@ -355,40 +353,40 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityResult created =
         invoke(
             write,
-            "{\"path\":\"new/created.txt\",\"content\":\"one\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("new/created.txt").toString())
+                + ",\"content\":\"one\"}");
     EnvironmentCapabilityResult unchanged =
         invoke(
             edit,
-            "{\"path\":\"new/created.txt\",\"old_string\":\"one\",\"new_string\":\"one\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("new/created.txt").toString())
+                + ",\"old_string\":\"one\",\"new_string\":\"one\"}");
     EnvironmentCapabilityResult absent =
         invoke(
             edit,
-            "{\"path\":\"new/created.txt\",\"old_string\":\"zero\",\"new_string\":\"two\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("new/created.txt").toString())
+                + ",\"old_string\":\"zero\",\"new_string\":\"two\"}");
     Files.write(workspaceRoot.resolve("binary.txt"), new byte[] {0, 1});
     EnvironmentCapabilityResult binary =
         invoke(
             edit,
-            "{\"path\":\"binary.txt\",\"old_string\":\"a\",\"new_string\":\"b\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("binary.txt").toString())
+                + ",\"old_string\":\"a\",\"new_string\":\"b\"}");
     EnvironmentCapabilityResult empty =
         invoke(
             edit,
-            "{\"path\":\"new/created.txt\",\"old_string\":\"\",\"new_string\":\"b\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("new/created.txt").toString())
+                + ",\"old_string\":\"\",\"new_string\":\"b\"}");
     EnvironmentCapabilityResult directory =
         invoke(
             edit,
-            "{\"path\":\"new\",\"old_string\":\"a\",\"new_string\":\"b\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("new").toString())
+                + ",\"old_string\":\"a\",\"new_string\":\"b\"}");
 
     assertFalse(created.error());
     assertEquals("one", Files.readString(workspaceRoot.resolve("new/created.txt")));
@@ -451,24 +449,23 @@ class CodingCapabilitiesEdgeTest {
   }
 
   @Test
-  void lspCapabilitiesRequireValidAbsoluteWorkdirAndFile() throws Exception {
+  void lspCapabilitiesRequireValidAbsolutePathAndFile() throws Exception {
     CodingToolsConfig config = config();
     Files.createDirectories(workspaceRoot.resolve("src"));
     Files.writeString(workspaceRoot.resolve("src/App.java"), "class App {}");
 
     LspGotoDefinitionCapability gotoDef =
         new LspGotoDefinitionCapability(config, lspService, executor);
-    EnvironmentCapabilityResult relWorkdir =
-        invoke(gotoDef, "{\"path\":\"src/App.java\",\"line\":1,\"workdir\":\"relative/dir\"}");
-    assertTrue(relWorkdir.error());
-    assertTrue(text(relWorkdir).contains("workdir must be an absolute path"));
+    EnvironmentCapabilityResult relPath = invoke(gotoDef, "{\"path\":\"src/App.java\",\"line\":1}");
+    assertTrue(relPath.error());
+    assertTrue(text(relPath).contains("path must be an absolute path: src/App.java"));
 
     EnvironmentCapabilityResult missingFile =
         invoke(
             gotoDef,
-            "{\"path\":\"src/Missing.java\",\"line\":1,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("src/Missing.java").toString())
+                + ",\"line\":1}");
     assertTrue(missingFile.error());
     assertTrue(text(missingFile).contains("path does not exist"));
 
@@ -477,9 +474,9 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityResult blankQuery =
         invoke(
             wsSymbols,
-            "{\"path\":\"src/App.java\",\"query\":\"   \",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("src/App.java").toString())
+                + ",\"query\":\"   \"}");
     assertTrue(blankQuery.error());
     assertTrue(text(blankQuery).contains("query must not be blank"));
 
@@ -488,17 +485,16 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityResult blankTarget =
         invoke(
             decompile,
-            "{\"path\":\"src/App.java\",\"target\":\"   \",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("src/App.java").toString())
+                + ",\"target\":\"   \"}");
     assertTrue(blankTarget.error());
     assertTrue(text(blankTarget).contains("target must not be blank"));
 
     // LspGotoDefinition rejects directory as path
     EnvironmentCapabilityResult dirAsPath =
         invoke(
-            gotoDef,
-            "{\"path\":\"src\",\"line\":1,\"workdir\":" + json(workspaceRoot.toString()) + "}");
+            gotoDef, "{\"path\":" + json(workspaceRoot.resolve("src").toString()) + ",\"line\":1}");
     assertTrue(dirAsPath.error());
     assertTrue(text(dirAsPath).contains("path must be a file"));
 
@@ -506,9 +502,9 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityResult limitTooLarge =
         invoke(
             wsSymbols,
-            "{\"path\":\"src/App.java\",\"query\":\"test\",\"limit\":501,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("src/App.java").toString())
+                + ",\"query\":\"test\",\"limit\":501}");
     assertTrue(limitTooLarge.error());
     assertTrue(text(limitTooLarge).contains("limit must be <= 500"));
   }
@@ -518,8 +514,7 @@ class CodingCapabilitiesEdgeTest {
     Path file = workspaceRoot.resolve("regular.txt");
     Files.writeString(file, "hello");
     assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.workdir(file.toString()));
-    assertThrows(
-        IllegalArgumentException.class, () -> EnvironmentPaths.existing("child.txt", file));
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("child.txt"));
 
     Path unreadable = Files.createDirectory(workspaceRoot.resolve("unreadable-dir"));
     if (unreadable.toFile().setReadable(false)) {
@@ -531,21 +526,23 @@ class CodingCapabilitiesEdgeTest {
       }
     }
 
-    assertEquals(".", EnvironmentPaths.displayPath(workspaceRoot, workspaceRoot, "."));
     assertEquals(
-        "sub/file.txt",
+        workspaceRoot.toString().replace('\\', '/'),
+        EnvironmentPaths.displayPath(workspaceRoot, workspaceRoot.toString()));
+    assertEquals(
+        workspaceRoot.resolve("sub/file.txt").toString().replace('\\', '/'),
         EnvironmentPaths.displayPath(
-            workspaceRoot.resolve("sub/file.txt"), workspaceRoot, "sub/file.txt"));
+            workspaceRoot.resolve("sub/file.txt"),
+            workspaceRoot.resolve("sub/file.txt").toString()));
     assertEquals(
         "/other/path.txt",
-        EnvironmentPaths.displayPath(Path.of("/other/path.txt"), workspaceRoot, "/other/path.txt"));
-    assertEquals("raw.txt", EnvironmentPaths.displayPath(null, workspaceRoot, "raw.txt"));
-    assertEquals(
-        "rel/target.txt", EnvironmentPaths.displayPath(null, workspaceRoot, "rel/target.txt"));
-    assertEquals("a/c", EnvironmentPaths.displayPath(null, workspaceRoot, "a/b/../c"));
-    assertEquals("<missing>", EnvironmentPaths.displayPath(null, workspaceRoot, null));
-    assertEquals("", EnvironmentPaths.displayPath(null, workspaceRoot, ""));
-    assertEquals("\u0000", EnvironmentPaths.displayPath(null, workspaceRoot, "\u0000"));
+        EnvironmentPaths.displayPath(Path.of("/other/path.txt"), "/other/path.txt"));
+    assertEquals("raw.txt", EnvironmentPaths.displayPath(null, "raw.txt"));
+    assertEquals("rel/target.txt", EnvironmentPaths.displayPath(null, "rel/target.txt"));
+    assertEquals("/a/c", EnvironmentPaths.displayPath(null, "/a/b/../c"));
+    assertEquals("<missing>", EnvironmentPaths.displayPath(null, null));
+    assertEquals("", EnvironmentPaths.displayPath(null, ""));
+    assertEquals("\u0000", EnvironmentPaths.displayPath(null, "\u0000"));
 
     assertTrue(SearchFiles.isGitMetadata(Path.of(".git/config")));
     assertFalse(SearchFiles.isGitMetadata(Path.of("src/App.java")));
@@ -564,9 +561,7 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityResult defRes =
         invoke(
             gotoDef,
-            "{\"path\":\"src/App.java\",\"line\":1,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":" + json(workspaceRoot.resolve("src/App.java").toString()) + ",\"line\":1}");
     assertTrue(defRes.error());
     assertTrue(text(defRes).contains("No LSP server configured"));
 
@@ -575,9 +570,9 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityResult wsRes =
         invoke(
             wsSymbols,
-            "{\"path\":\"src/App.java\",\"query\":\"App\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("src/App.java").toString())
+                + ",\"query\":\"App\"}");
     assertTrue(wsRes.error());
     assertTrue(text(wsRes).contains("No LSP server configured"));
   }

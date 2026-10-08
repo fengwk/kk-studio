@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -88,17 +89,16 @@ class EditDiffRenderingTest {
   private EnvironmentCapabilityResult editLines(
       String path, String oldString, String newString, boolean replaceAll) throws Exception {
     EditCapability capability = edit();
+    Path target = Path.of(path).isAbsolute() ? Path.of(path) : workdir.resolve(path);
     String arguments =
         "{\"path\":"
-            + json(path)
+            + json(target.toString())
             + ",\"old_string\":"
             + json(oldString)
             + ",\"new_string\":"
             + json(newString)
             + ",\"replace_all\":"
             + replaceAll
-            + ",\"workdir\":"
-            + json(workdir.toString())
             + "}";
     CountDownLatch latch = new CountDownLatch(1);
     List<EnvironmentCapabilityResult> results = new ArrayList<>(1);
@@ -125,10 +125,17 @@ class EditDiffRenderingTest {
     return results.get(0);
   }
 
-  /** 从成功结果中取出 diff 正文；结果必须成功且包含 diff。 */
+  /** 从成功结果中取出 diff 正文；结果必须成功且包含 diff。外化结果取 durable 全文。 */
   private static String diffOf(EnvironmentCapabilityResult result) {
     assertFalse(result.error(), text(result));
     String body = text(result);
+    try {
+      JsonNode node = MAPPER.readTree(result.detailsJson());
+      if (node.has("textOutput") && node.path("textOutput").has("path")) {
+        body = Files.readString(Path.of(node.path("textOutput").path("path").asText()));
+      }
+    } catch (Exception ignored) {
+    }
     int start = body.indexOf("\n\ndiff:\n");
     assertTrue(start >= 0, "结果应包含 diff 段：" + body);
     return body.substring(start + "\n\ndiff:\n".length());

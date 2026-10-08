@@ -98,47 +98,35 @@ class CodingCapabilitiesTest {
             "skill.sync"),
         registry.descriptors().stream().map(d -> d.id().value()).toList());
     EnvironmentCapability read = registry.find(EnvironmentCapabilityIds.FS_READ).orElseThrow();
+    assertThrows(IllegalArgumentException.class, () -> request(read, "{\"path\":1}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> request(read, "{\"path\":1,\"workdir\":\"" + workspaceRoot + "\"}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            request(
-                read, "{\"path\":\"x\",\"workdir\":\"" + workspaceRoot + "\",\"unknown\":true}"));
-    assertDoesNotThrow(() -> request(read, "{\"path\":\"x\"}"));
+        () -> request(read, "{\"path\":\"/some/abs/x\",\"unknown\":true}"));
+    assertDoesNotThrow(() -> request(read, "{\"path\":\"/some/abs/x\"}"));
   }
 
-  /** 越出 workdir 的相对遍历与符号链接目标都是普通路径：读取照常解析，写入落到符号链接指向的真实目录。 */
+  /** 符号链接目标照常作为普通路径读写：读取照常解析，写入落到符号链接指向的真实目录。 */
   @Test
   void resolvesTraversalAndSymlinkTargetsOutsideWorkdir() throws Exception {
     Files.writeString(externalRoot.resolve("secret.txt"), "secret");
     Files.createSymbolicLink(workspaceRoot.resolve("escape"), externalRoot);
     ReadCapability read = read(config());
     WriteCapability write = write(config());
-    String traversalPath = workspaceRoot.relativize(externalRoot.resolve("secret.txt")).toString();
 
-    EnvironmentCapabilityResult traversal =
-        invoke(
-            read,
-            "{\"path\":"
-                + json(traversalPath)
-                + ",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+    EnvironmentCapabilityResult absoluteRead =
+        invoke(read, "{\"path\":" + json(externalRoot.resolve("secret.txt").toString()) + "}");
     EnvironmentCapabilityResult symlink =
         invoke(
-            read,
-            "{\"path\":\"escape/secret.txt\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
+            read, "{\"path\":" + json(workspaceRoot.resolve("escape/secret.txt").toString()) + "}");
     EnvironmentCapabilityResult writeThroughSymlink =
         invoke(
             write,
-            "{\"path\":\"escape/new.txt\",\"content\":\"x\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(workspaceRoot.resolve("escape/new.txt").toString())
+                + ",\"content\":\"x\"}");
 
-    assertFalse(traversal.error());
-    assertTrue(text(traversal).contains("secret"));
+    assertFalse(absoluteRead.error());
+    assertTrue(text(absoluteRead).contains("secret"));
     assertFalse(symlink.error());
     assertTrue(text(symlink).contains("secret"));
     assertFalse(writeThroughSymlink.error());
@@ -155,17 +143,17 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult duplicate =
         invoke(
             edit,
-            "{\"path\":\"sample.txt\",\"old_string\":\"a\\n\",\"new_string\":\"b\\n\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"old_string\":\"a\\n\",\"new_string\":\"b\\n\"}");
     EnvironmentCapabilityResult replaced =
         invoke(
             edit,
-            "{\"path\":\"sample.txt\",\"old_string\":\"a\\n"
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"old_string\":\"a\\n"
                 + "\",\"new_string\":\"b\\n"
-                + "\",\"replace_all\":true,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+                + "\",\"replace_all\":true}");
 
     assertTrue(text(duplicate).contains("Found 2 exact matches"));
     assertFalse(replaced.error());
@@ -176,17 +164,14 @@ class CodingCapabilitiesTest {
 
   @Test
   void readReportsLspStatus() throws Exception {
-    Files.writeString(workspaceRoot.resolve("lsp-status.txt"), "x\n");
+    Path file = workspaceRoot.resolve("lsp-status.txt");
+    Files.writeString(file, "x\n");
     CodingToolsConfig lspEnabled = TestCodingConfig.withLsp(workspaceRoot);
 
     EnvironmentCapabilityResult disabled =
-        invoke(
-            read(config()),
-            "{\"path\":\"lsp-status.txt\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
+        invoke(read(config()), "{\"path\":" + json(file.toString()) + "}");
     EnvironmentCapabilityResult enabled =
-        invoke(
-            read(lspEnabled),
-            "{\"path\":\"lsp-status.txt\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
+        invoke(read(lspEnabled), "{\"path\":" + json(file.toString()) + "}");
 
     assertFalse(text(disabled).contains("lsp:"));
     assertTrue(text(enabled).contains("lsp: supported"));
@@ -203,21 +188,21 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult overlapping =
         invoke(
             edit,
-            "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(overlap.toString())
+                + ",\"old_string\":\"aa\",\"new_string\":\"b\"}");
     EnvironmentCapabilityResult overlappingAll =
         invoke(
             edit,
-            "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\",\"replace_all\":true,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(overlap.toString())
+                + ",\"old_string\":\"aa\",\"new_string\":\"b\",\"replace_all\":true}");
     EnvironmentCapabilityResult replacedResult =
         invoke(
             edit,
-            "{\"path\":\"replace-all.txt\",\"old_string\":\"ab\",\"new_string\":\"x\",\"replace_all\":true,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(replaced.toString())
+                + ",\"old_string\":\"ab\",\"new_string\":\"x\",\"replace_all\":true}");
 
     assertTrue(text(overlapping).contains("Found 2 exact matches"));
     assertTrue(text(overlappingAll).contains("overlapping exact matches"));
@@ -239,15 +224,15 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult crlfSpelled =
         invoke(
             edit,
-            "{\"path\":\"crlf-noop.txt\",\"old_string\":\"alpha\\r\\n\",\"new_string\":\"alpha\\n\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(crlf.toString())
+                + ",\"old_string\":\"alpha\\r\\n\",\"new_string\":\"alpha\\n\"}");
     EnvironmentCapabilityResult lfSpelled =
         invoke(
             edit,
-            "{\"path\":\"lf-noop.txt\",\"old_string\":\"alpha\\n\",\"new_string\":\"alpha\\r\\n\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(lf.toString())
+                + ",\"old_string\":\"alpha\\n\",\"new_string\":\"alpha\\r\\n\"}");
 
     assertTrue(text(crlfSpelled).contains("No changes to apply"));
     assertTrue(text(crlfSpelled).contains("must differ"));
@@ -271,15 +256,15 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult crResult =
         invoke(
             edit,
-            "{\"path\":\"cr-only.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(cr.toString())
+                + ",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
     EnvironmentCapabilityResult mixedResult =
         invoke(
             edit,
-            "{\"path\":\"mixed.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(mixed.toString())
+                + ",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
 
     // mixed 文件中被替换段内部无行尾（歧义）时，新增换行回退 LF，未修改区域仍原样保留。
     Path ambiguous = workspaceRoot.resolve("mixed-ambiguous.txt");
@@ -287,9 +272,9 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult ambiguousResult =
         invoke(
             edit,
-            "{\"path\":\"mixed-ambiguous.txt\",\"old_string\":\"middle\",\"new_string\":\"left\\nright\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"path\":"
+                + json(ambiguous.toString())
+                + ",\"old_string\":\"middle\",\"new_string\":\"left\\nright\"}");
 
     assertFalse(crResult.error());
     assertFalse(mixedResult.error());
@@ -305,28 +290,25 @@ class CodingCapabilitiesTest {
 
   @Test
   void readReturnsDirectoryWindowAndBinaryResource() throws Exception {
-    Files.writeString(workspaceRoot.resolve("many.txt"), "one\ntwo\nthree\n");
+    Path many = workspaceRoot.resolve("many.txt");
+    Path imageFile = workspaceRoot.resolve("image.png");
+    Path binaryFile = workspaceRoot.resolve("binary.bin");
+    Path dir = workspaceRoot.resolve("directory");
+    Files.writeString(many, "one\ntwo\nthree\n");
     Files.write(
-        workspaceRoot.resolve("image.png"),
-        new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3});
-    Files.write(workspaceRoot.resolve("binary.bin"), new byte[] {1, 0, 2});
-    Files.createDirectory(workspaceRoot.resolve("directory"));
-    Files.writeString(workspaceRoot.resolve("directory/a.txt"), "a");
+        imageFile, new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3});
+    Files.write(binaryFile, new byte[] {1, 0, 2});
+    Files.createDirectory(dir);
+    Files.writeString(dir.resolve("a.txt"), "a");
     ReadCapability read = read(config());
 
     EnvironmentCapabilityResult window =
-        invoke(
-            read,
-            "{\"path\":\"many.txt\",\"limit\":1,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
-    EnvironmentCapabilityResult directory =
-        invoke(read, "{\"path\":\"directory\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
+        invoke(read, "{\"path\":" + json(many.toString()) + ",\"limit\":1}");
+    EnvironmentCapabilityResult directory = invoke(read, "{\"path\":" + json(dir.toString()) + "}");
     EnvironmentCapabilityResult image =
-        invoke(read, "{\"path\":\"image.png\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
+        invoke(read, "{\"path\":" + json(imageFile.toString()) + "}");
     EnvironmentCapabilityResult binary =
-        invoke(
-            read, "{\"path\":\"binary.bin\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
+        invoke(read, "{\"path\":" + json(binaryFile.toString()) + "}");
 
     assertTrue(text(window).contains("truncation_reason: line_limit"));
     assertTrue(text(window).contains("next: 2:1"));
@@ -341,25 +323,22 @@ class CodingCapabilitiesTest {
   @Test
   void serializesConcurrentMutationsOfTheSameFile() throws Exception {
     WriteCapability write = write(config());
+    Path shared = workspaceRoot.resolve("shared.txt");
 
     RecordingListener first =
         invokeAsync(
             write,
-            "{\"path\":\"shared.txt\",\"content\":\"first\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}",
+            "{\"path\":" + json(shared.toString()) + ",\"content\":\"first\"}",
             Duration.ZERO);
     RecordingListener second =
         invokeAsync(
             write,
-            "{\"path\":\"shared.txt\",\"content\":\"second\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}",
+            "{\"path\":" + json(shared.toString()) + ",\"content\":\"second\"}",
             Duration.ZERO);
 
     assertTrue(first.await());
     assertTrue(second.await());
-    String content = Files.readString(workspaceRoot.resolve("shared.txt"));
+    String content = Files.readString(shared);
     assertTrue(content.equals("first") || content.equals("second"));
     assertFalse(first.result.error());
     assertFalse(second.result.error());
@@ -376,15 +355,11 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult grepResult =
         invoke(
             grep,
-            "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":1,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"pattern\":\"needle\",\"path\":" + json(workspaceRoot.toString()) + ",\"limit\":1}");
     EnvironmentCapabilityResult findResult =
         invoke(
             find,
-            "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
+            "{\"pattern\":\"*.txt\",\"path\":" + json(workspaceRoot.toString()) + ",\"limit\":10}");
 
     assertTrue(text(grepResult).contains("results limit reached"));
     assertTrue(text(findResult).contains("visible.txt"));
@@ -800,7 +775,7 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult timed =
         invoke(
             grep(config()),
-            "{\"pattern\":\"a\",\"path\":\".\",\"workdir\":" + json(workspaceRoot.toString()) + "}",
+            "{\"pattern\":\"a\",\"path\":" + json(workspaceRoot.toString()) + "}",
             Duration.ofNanos(1));
     assertTrue(timed.error(), text(timed));
     assertTrue(text(timed).contains("grep timed out"), text(timed));
@@ -809,7 +784,7 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult noDeadline =
         invoke(
             grep(config()),
-            "{\"pattern\":\"a\",\"path\":\".\",\"workdir\":" + json(workspaceRoot.toString()) + "}",
+            "{\"pattern\":\"a\",\"path\":" + json(workspaceRoot.toString()) + "}",
             Duration.ZERO);
     assertFalse(noDeadline.error(), text(noDeadline));
   }

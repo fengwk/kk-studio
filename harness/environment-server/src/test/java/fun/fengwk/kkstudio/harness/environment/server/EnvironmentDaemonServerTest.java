@@ -1069,7 +1069,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
   }
 
-  /** 测试意图：未注册环境的调用立即不可用，descriptor 漂移与非法 workdir/callId 都在发送前拒绝。 */
+  /** 测试意图：未注册环境的调用立即不可用，descriptor 漂移与非法 callId 都在发送前拒绝。 */
   @Test
   void invokeValidatesRequestBeforeWireSend() {
     Fixture fixture = new Fixture();
@@ -1105,7 +1105,7 @@ class EnvironmentDaemonServerTest {
                 new RecordingListener()));
   }
 
-  /** 测试意图：workdir 在 frame send 前按该连接 READY 中冻结的 OS 做词法校验；read 的相对路径要求 workdir，绝对路径则不要求。 */
+  /** 测试意图：必填 workdir（process.exec）在 frame send 前按该连接 READY 中冻结的 OS 做词法校验。 */
   @Test
   void validatesWorkdirAgainstReadyOperatingSystemBeforeFrameSend() {
     Fixture fixture = new Fixture();
@@ -1114,34 +1114,31 @@ class EnvironmentDaemonServerTest {
     // 缺失 workdir / 相对 workdir / Windows drive 形态（该连接冻结的是 LINUX）都在发送前拒绝。
     // 注意 `/srv/../repo` 仍是形状合法的 Unix 绝对路径：词法校验不折叠 `..`，越界事实由 Daemon 自身 Path 与 permission 处理。
     String[] rejectedArguments = {
-      "{\"path\":\"README.md\"}",
-      "{\"workdir\":\"relative/dir\",\"path\":\"README.md\"}",
-      "{\"workdir\":\"C:\\\\repo\",\"path\":\"README.md\"}",
-      "{\"workdir\":\" /srv/repo\",\"path\":\"README.md\"}"
+      "{\"command\":\"ls\"}",
+      "{\"command\":\"ls\",\"workdir\":\"relative/dir\"}",
+      "{\"command\":\"ls\",\"workdir\":\"C:\\\\repo\"}",
+      "{\"command\":\"ls\",\"workdir\":\" /srv/repo\"}"
     };
     for (String arguments : rejectedArguments) {
       assertThrows(
           IllegalArgumentException.class,
           () ->
               fixture.server.invoke(
-                  ENVIRONMENT_ID, requestWith(arguments, CALL_ONE), new RecordingListener()),
+                  ENVIRONMENT_ID,
+                  processExecRequestWith(arguments, CALL_ONE),
+                  new RecordingListener()),
           "必须在发送前拒绝: " + arguments);
     }
     // 全部被拒：通道上除了 WELCOME 没有任何 INVOKE 帧。
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
 
-    // 相对 path + 显式绝对 workdir，以及绝对 path + 省略 workdir 都通过校验并产生 INVOKE 帧。
+    // 显式绝对 workdir 通过校验并产生 INVOKE 帧。
     fixture.server.invoke(
         ENVIRONMENT_ID,
-        requestWith("{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}", CALL_ONE),
-        new RecordingListener());
-    fixture.server.invoke(
-        ENVIRONMENT_ID,
-        requestWith("{\"path\":\"/srv/repo/README.md\"}", CALL_TWO),
+        processExecRequestWith("{\"command\":\"ls\",\"workdir\":\"/srv/repo\"}", CALL_ONE),
         new RecordingListener());
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
-        channel.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
   }
 
   /** 文件/LSP 能力的路径约定必须穿透发送前门禁，不能只在 Daemon 直调用时成立。 */
@@ -1163,23 +1160,25 @@ class EnvironmentDaemonServerTest {
             case "lsp.java-decompile" -> ",\"target\":\"jdt://contents/library/Foo.class\"";
             default -> "";
           };
-      for (String rejected :
-          List.of(
-              "{\"path\":\"src/App.java\"" + fields + "}",
-              "{\"path\":\"/srv/repo/App.java\",\"workdir\":\"relative\"" + fields + "}")) {
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                fixture.server.invoke(
-                    ENVIRONMENT_ID,
-                    new EnvironmentCapabilityExecutionRequest(
-                        descriptor,
-                        new EnvironmentCapabilityCall(CALL_ONE.toString(), rejected),
-                        Duration.ofSeconds(5)),
-                    new RecordingListener()),
-            descriptor.id().value());
-      }
+      // 携带已移除的 workdir 参数在发送前被 Schema 校验拒绝
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.server.invoke(
+                  ENVIRONMENT_ID,
+                  new EnvironmentCapabilityExecutionRequest(
+                      descriptor,
+                      new EnvironmentCapabilityCall(
+                          CALL_ONE.toString(),
+                          "{\"path\":\"/srv/repo/App.java\",\"workdir\":\"relative\""
+                              + fields
+                              + "}"),
+                      Duration.ofSeconds(5)),
+                  new RecordingListener()),
+          descriptor.id().value());
       assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
+
+      // 绝对路径通过校验并产生 INVOKE 帧发往 Daemon
       fixture.server.invoke(
           ENVIRONMENT_ID,
           new EnvironmentCapabilityExecutionRequest(
@@ -1190,6 +1189,28 @@ class EnvironmentDaemonServerTest {
           new RecordingListener());
       assertEquals(
           List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+
+      // 相对路径不做发送前跨 OS 校验，透传产生 INVOKE 帧发往 Daemon，由 Daemon 自身判定并拒绝
+      RecordingListener relativeListener = new RecordingListener();
+      fixture.server.invoke(
+          ENVIRONMENT_ID,
+          new EnvironmentCapabilityExecutionRequest(
+              descriptor,
+              new EnvironmentCapabilityCall(
+                  CALL_TWO.toString(), "{\"path\":\"src/App.java\"" + fields + "}"),
+              Duration.ofSeconds(5)),
+          relativeListener);
+      assertEquals(
+          List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
+          channel.messageTypes());
+      fixture.receive(
+          channel,
+          DaemonMessageType.FAILED,
+          CALL_TWO.toString(),
+          "{\"message\":\"path must be an absolute path: src/App.java\"}");
+      assertInstanceOf(EnvironmentCapabilityFailedException.class, relativeListener.error);
+      assertEquals(
+          "path must be an absolute path: src/App.java", relativeListener.error.getMessage());
     }
   }
 
@@ -2225,10 +2246,15 @@ class EnvironmentDaemonServerTest {
     return EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
   }
 
-  /** 以给定 arguments 构造 fs.read 请求；arguments 原样进入执行请求，用于断言发送前 workdir 校验。 */
-  private static EnvironmentCapabilityExecutionRequest requestWith(String arguments, UUID callId) {
+  private static EnvironmentCapabilityDescriptor processExecDescriptor() {
+    return EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC);
+  }
+
+  /** 以给定 arguments 构造 process.exec 请求；arguments 原样进入执行请求，用于断言发送前 workdir 校验。 */
+  private static EnvironmentCapabilityExecutionRequest processExecRequestWith(
+      String arguments, UUID callId) {
     return new EnvironmentCapabilityExecutionRequest(
-        descriptor(),
+        processExecDescriptor(),
         new EnvironmentCapabilityCall(callId.toString(), arguments),
         Duration.ofSeconds(5));
   }

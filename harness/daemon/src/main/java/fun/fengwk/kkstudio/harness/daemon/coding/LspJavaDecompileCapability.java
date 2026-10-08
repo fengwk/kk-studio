@@ -33,19 +33,14 @@ public final class LspJavaDecompileCapability extends AbstractCodingCapability {
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = optionalWorkdir(args);
-    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
+    Path path = EnvironmentPaths.existing(string(args, "path"));
     String target = string(args, "target");
     if (target.isBlank()) {
       throw new IllegalArgumentException("target must not be blank");
     }
-    if (workdir == null) {
-      LspClient.requireWorkdirForRelativeTarget(target);
-    }
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }
-    return success(
-        request.call().id(), lsp.javaDecompile(path, workdir, target, request.timeout()));
+    return success(request.call().id(), lsp.javaDecompile(path, target, request.timeout()));
   }
 }

@@ -410,12 +410,12 @@ final class LspClient {
   }
 
   /**
-   * 反编译 Java class：{@code jdt://} 目标走 jdtls 的 {@code java/classFileContents}，本地 class 文件走 {@code
-   * java.decompile} 命令。
+   * 反编译 Java class：{@code jdt://} 目标走 jdtls 的 {@code java/classFileContents}，绝对本地 class 文件或 {@code
+   * file:} URI 走 {@code java.decompile} 命令。
    *
    * <p>返回的源码原样透传，不做任何路径改写。
    */
-  String javaDecompile(Path workdir, String target, Duration timeout) throws Exception {
+  String javaDecompile(String target, Duration timeout) throws Exception {
     requireRunning();
     Matcher matcher = JDT_URI.matcher(target);
     if (matcher.find()) {
@@ -429,7 +429,7 @@ final class LspClient {
               JAVA_CLASS_FILE_CONTENTS);
       return requireDecompiledSource(result, target);
     }
-    Path path = resolveLocalTarget(workdir, target);
+    Path path = resolveLocalTarget(target);
     if (!Files.isRegularFile(path)) {
       throw new IllegalArgumentException("target is not a readable class file: " + path);
     }
@@ -454,29 +454,10 @@ final class LspClient {
   }
 
   /**
-   * 缺 workdir 时的前置校验：{@code jdt://}、{@code file:} URI 与绝对 class 路径都不需要 workdir，相对 class 路径必须显式给出
-   * workdir；校验在申请客户端之前完成，因此不会为缺少 workdir 的相对目标启动服务器。
+   * 解析本地 class 目标：完整符号行中的 {@code jdt://} URI 由调用方先行提取；{@code file:} URI 与绝对路径直接使用；
+   * 相对路径一律拒绝，绝不回退到守护进程的 cwd。
    */
-  static void requireWorkdirForRelativeTarget(String target) {
-    String trimmed = target.trim();
-    if (trimmed.startsWith("file:") || JDT_URI.matcher(trimmed).find()) {
-      return;
-    }
-    Path path;
-    try {
-      path = Path.of(trimmed);
-    } catch (RuntimeException ignored) {
-      // 非法目标由真正的解析路径给出更准确的错误。
-      return;
-    }
-    if (!path.isAbsolute()) {
-      throw new IllegalArgumentException(
-          "workdir is required when target is a relative class path: " + target);
-    }
-  }
-
-  /** 解析本地 class 目标：{@code file:} URI 与绝对路径直接使用；相对路径只在调用方显式给出的 workdir 下解析， 绝不回退到守护进程的 cwd。 */
-  private static Path resolveLocalTarget(Path workdir, String target) {
+  private static Path resolveLocalTarget(String target) {
     String trimmed = target.trim();
     if (trimmed.startsWith("file:")) {
       try {
@@ -491,14 +472,11 @@ final class LspClient {
     } catch (RuntimeException error) {
       throw new IllegalArgumentException("invalid class target: " + target, error);
     }
-    if (path.isAbsolute()) {
-      return path.normalize();
-    }
-    if (workdir == null) {
+    if (!path.isAbsolute()) {
       throw new IllegalArgumentException(
-          "workdir is required when target is a relative class path: " + target);
+          "target must be an absolute class path, a file: URI, or a jdt:// URI: " + target);
     }
-    return workdir.resolve(path).normalize();
+    return path.normalize();
   }
 
   /**

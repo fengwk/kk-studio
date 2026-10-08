@@ -27,10 +27,10 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 显式 workdir 语义契约：相对本地路径必须在每次调用 arguments 中携带绝对 workdir；workdir 不是会话状态、不是沙箱，也没有任何默认值。
+ * 路径语义契约：文件工具仅使用绝对路径，拒绝任何相对路径；process.exec (bash) 必须在调用 arguments 中携带绝对存在的 workdir。
  *
- * <p>证明：相对 path 省略 workdir 会拒绝且绝不回退到任何默认目录；相对 path 以该次调用的 workdir 为基准；workdir 之外的绝对路径与
- * 越界相对遍历都是普通路径；非法或不存在的 workdir 在执行前确定性拒绝；每次调用独立解析、互不继承。
+ * <p>证明：文件工具相对 path 会拒绝（必须为绝对路径）；绝对路径不受沙箱限制；process.exec 必须携带绝对存在的 workdir；非法或不存在的 workdir
+ * 在执行前确定性拒绝。
  */
 class WorkdirPathSemanticsTest {
 
@@ -47,9 +47,9 @@ class WorkdirPathSemanticsTest {
     executor.shutdownNow();
   }
 
-  /** 相对 path 省略 workdir 必须在执行期被拒绝，且绝不回退到默认路径；绝对 path 与 Platform URI 的可选 workdir 契约由各自路由处理。 */
+  /** 相对 path 必须在执行期被拒绝，且绝不回退到默认路径。 */
   @Test
-  void omittedWorkdirIsRejectedWithoutDefaultFallback() throws Exception {
+  void relativePathIsRejectedWithoutDefaultFallback() throws Exception {
     Files.writeString(workdir.resolve("local.txt"), "from-explicit-workdir\n");
     Files.writeString(workspaceRoot.resolve("local.txt"), "from-workspace-root\n");
 
@@ -57,23 +57,21 @@ class WorkdirPathSemanticsTest {
         invoke(new ReadCapability(config(), executor), "{\"path\":\"local.txt\"}");
 
     assertTrue(result.error());
-    assertTrue(text(result).contains("workdir"), text(result));
+    assertTrue(text(result).contains("path must be an absolute path: local.txt"), text(result));
     assertFalse(text(result).contains("from-workspace-root"));
     assertFalse(text(result).contains("from-explicit-workdir"));
   }
 
-  /** 非绝对 workdir（相对形态）同样在构造期被 schema 接受形状但随后被词法校验拒绝，不能按 Backend cwd 或任何基准解析。 */
+  /** process.exec (bash) 需要绝对 workdir；相对 workdir 在执行前拒绝。 */
   @Test
   void relativeWorkdirIsRejected() throws Exception {
-    Files.writeString(workdir.resolve("local.txt"), "local\n");
-
-    EnvironmentCapabilityResult read =
+    EnvironmentCapabilityResult bash =
         invoke(
-            new ReadCapability(config(), executor),
-            "{\"path\":\"local.txt\",\"workdir\":\"relative/dir\"}");
+            new BashCapability(config(), executor, scheduler),
+            "{\"command\":\"pwd\",\"workdir\":\"relative/dir\"}");
 
-    assertTrue(read.error());
-    assertTrue(text(read).contains("absolute"), text(read));
+    assertTrue(bash.error());
+    assertTrue(text(bash).contains("workdir must be an absolute path"), text(bash));
   }
 
   /** workdir 必须真实存在且为目录：不存在的路径与普通文件都在执行前被拒绝，也不会被自动创建。 */
@@ -82,36 +80,38 @@ class WorkdirPathSemanticsTest {
     Path missing = workdir.resolve("missing");
     EnvironmentCapabilityResult missingResult =
         invoke(
-            new ReadCapability(config(), executor),
-            "{\"path\":\"local.txt\",\"workdir\":" + json(missing.toString()) + "}");
+            new BashCapability(config(), executor, scheduler),
+            "{\"command\":\"pwd\",\"workdir\":" + json(missing.toString()) + "}");
     assertTrue(missingResult.error());
-    assertTrue(text(missingResult).contains("workdir"), text(missingResult));
+    assertTrue(
+        text(missingResult).contains("workdir must be an existing directory"), text(missingResult));
     assertFalse(Files.exists(missing), "不得自动创建 workdir");
 
     Path file = Files.writeString(workdir.resolve("not-a-directory.txt"), "content");
     EnvironmentCapabilityResult fileResult =
         invoke(
-            new ReadCapability(config(), executor),
-            "{\"path\":\"local.txt\",\"workdir\":" + json(file.toString()) + "}");
+            new BashCapability(config(), executor, scheduler),
+            "{\"command\":\"pwd\",\"workdir\":" + json(file.toString()) + "}");
     assertTrue(fileResult.error());
-    assertTrue(text(fileResult).contains("workdir"), text(fileResult));
+    assertTrue(
+        text(fileResult).contains("workdir must be an existing directory"), text(fileResult));
   }
 
-  /** 相对 path 以本次调用 arguments 中的 workdir 为基准：省略 path 与相对 path 都落在该目录。 */
+  /** 文件工具仅使用绝对路径；process.exec 使用显式 workdir。 */
   @Test
-  void relativePathsResolveFromExplicitWorkdir() throws Exception {
+  void absolutePathsAndProcessWorkdirAreIndependent() throws Exception {
     Files.writeString(workdir.resolve("local.txt"), "local\n");
 
     EnvironmentCapabilityResult read =
         invoke(
             new ReadCapability(config(), executor),
-            "{\"path\":\"local.txt\",\"workdir\":" + json(workdir.toString()) + "}");
+            "{\"path\":" + json(workdir.resolve("local.txt").toString()) + "}");
     EnvironmentCapabilityResult write =
         invoke(
             new WriteCapability(config(), executor),
-            "{\"path\":\"created/local.txt\",\"content\":\"created\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(workdir.resolve("created/local.txt").toString())
+                + ",\"content\":\"created\"}");
     EnvironmentCapabilityResult bash =
         invoke(
             new BashCapability(config(), executor, scheduler),
@@ -124,94 +124,68 @@ class WorkdirPathSemanticsTest {
     assertEquals(workdir.toRealPath().toString(), text(bash).strip());
   }
 
-  /** 每次调用的 workdir 完全独立：同一 capability 连续两次调用各自使用自己的 workdir，互不继承。 */
+  /** 文件工具每次调用独立使用自己的绝对路径。 */
   @Test
-  void eachInvocationUsesItsOwnWorkdir() throws Exception {
+  void eachInvocationUsesItsOwnAbsolutePath() throws Exception {
     Files.writeString(workdir.resolve("first.txt"), "first\n");
     Files.writeString(externalRoot.resolve("second.txt"), "second\n");
 
     EnvironmentCapability first = new ReadCapability(config(), executor);
     EnvironmentCapabilityResult firstResult =
-        invoke(first, "{\"path\":\"first.txt\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(first, "{\"path\":" + json(workdir.resolve("first.txt").toString()) + "}");
     EnvironmentCapabilityResult secondResult =
-        invoke(
-            first, "{\"path\":\"second.txt\",\"workdir\":" + json(externalRoot.toString()) + "}");
+        invoke(first, "{\"path\":" + json(externalRoot.resolve("second.txt").toString()) + "}");
 
     assertFalse(firstResult.error());
     assertTrue(text(firstResult).contains("first"));
     assertFalse(secondResult.error());
     assertTrue(text(secondResult).contains("second"));
-
-    // 反向验证：first.txt 相对 externalRoot 不存在 → 说明没有沿用上一次的 workdir。
-    EnvironmentCapabilityResult crossCheck =
-        invoke(first, "{\"path\":\"first.txt\",\"workdir\":" + json(externalRoot.toString()) + "}");
-    assertTrue(crossCheck.error());
   }
 
-  /** workdir 不是沙箱：绝对路径与越界相对路径都能照常读写与检索。 */
+  /** 文件工具不是沙箱：绝对路径都能照常读写，相对路径直接被拒绝。 */
   @Test
   void workdirIsNotASandbox() throws Exception {
     Files.writeString(externalRoot.resolve("outside.txt"), "needle\n");
     String externalFile = externalRoot.resolve("outside.txt").toString();
     String createdFile = externalRoot.resolve("nested/created.txt").toString();
-    String traversalFile = workdir.relativize(externalRoot.resolve("outside.txt")).toString();
-    String traversalCreated = workdir.relativize(externalRoot.resolve("created.txt")).toString();
 
     EnvironmentCapabilityResult absoluteRead =
-        invoke(
-            new ReadCapability(config(), executor),
-            "{\"path\":" + json(externalFile) + ",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(new ReadCapability(config(), executor), "{\"path\":" + json(externalFile) + "}");
     EnvironmentCapabilityResult absoluteWrite =
         invoke(
             new WriteCapability(config(), executor),
-            "{\"path\":"
-                + json(createdFile)
-                + ",\"content\":\"written\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
-    EnvironmentCapabilityResult traversalRead =
-        invoke(
-            new ReadCapability(config(), executor),
-            "{\"path\":" + json(traversalFile) + ",\"workdir\":" + json(workdir.toString()) + "}");
-    EnvironmentCapabilityResult traversalWrite =
+            "{\"path\":" + json(createdFile) + ",\"content\":\"written\"}");
+    EnvironmentCapabilityResult relativeRead =
+        invoke(new ReadCapability(config(), executor), "{\"path\":\"outside.txt\"}");
+    EnvironmentCapabilityResult relativeWrite =
         invoke(
             new WriteCapability(config(), executor),
-            "{\"path\":"
-                + json(traversalCreated)
-                + ",\"content\":\"written\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":\"created.txt\",\"content\":\"written\"}");
 
     assertFalse(absoluteRead.error());
     assertTrue(text(absoluteRead).contains("needle"));
     assertFalse(absoluteWrite.error());
     assertEquals("written", Files.readString(Path.of(createdFile)));
-    assertFalse(traversalRead.error());
-    assertTrue(text(traversalRead).contains("needle"));
-    assertFalse(traversalWrite.error());
-    assertEquals("written", Files.readString(externalRoot.resolve("created.txt")));
+    assertTrue(relativeRead.error());
+    assertTrue(text(relativeRead).contains("path must be an absolute path: outside.txt"));
+    assertTrue(relativeWrite.error());
+    assertTrue(text(relativeWrite).contains("path must be an absolute path: created.txt"));
   }
 
-  /** 检索工具同样以显式 workdir 为基准，可以检索 workdir 之外的绝对目录。 */
+  /** 检索工具使用绝对路径检索目录。 */
   @Test
-  void searchToolsUseExplicitWorkdir() throws Exception {
+  void searchToolsUseAbsolutePath() throws Exception {
     Files.writeString(externalRoot.resolve("outside.txt"), "needle\n");
 
     EnvironmentCapabilityResult find =
         invoke(
             new FindCapability(config(), executor),
-            "{\"pattern\":\"*.txt\",\"path\":"
-                + json(externalRoot.toString())
-                + ",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"pattern\":\"*.txt\",\"path\":" + json(externalRoot.toString()) + "}");
     EnvironmentCapabilityResult grep =
         invoke(
             new GrepCapability(config(), executor),
             "{\"pattern\":\"needle\",\"path\":"
                 + json(externalRoot.resolve("outside.txt").toString())
-                + ",\"workdir\":"
-                + json(workdir.toString())
                 + "}");
 
     assertFalse(find.error());

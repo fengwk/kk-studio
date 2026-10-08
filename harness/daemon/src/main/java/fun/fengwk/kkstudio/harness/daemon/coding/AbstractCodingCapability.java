@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
-import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -53,7 +52,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
             () -> {
               try {
                 EnvironmentCapabilityResult result = run(request, execution);
-                execution.complete(result);
+                execution.complete(finalizeResult(result));
               } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
                 execution.complete(error(request.call().id(), "Operation cancelled"));
@@ -62,6 +61,23 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
               }
             });
     return execution;
+  }
+
+  /**
+   * 终态外化：把单个超过内联阈值的大文本结果落到本地 durable 全文，并返回有界 head/tail 预览与绝对路径；其它结果原样返回。
+   *
+   * <p>与 {@link #spoolsLargeTextOutput()} 配合：默认启用；{@code read} 的结果本身就是精确有界窗口，覆盖为不启用。
+   */
+  private EnvironmentCapabilityResult finalizeResult(EnvironmentCapabilityResult result) {
+    if (!spoolsLargeTextOutput()) {
+      return result;
+    }
+    return LargeTextResultSpooler.spool(config.textOutputStore(), result);
+  }
+
+  /** 是否把单个大文本终态外化为本地全文；默认启用。 */
+  boolean spoolsLargeTextOutput() {
+    return true;
   }
 
   abstract EnvironmentCapabilityResult run(
@@ -82,15 +98,6 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
   static String optionalString(JsonNode args, String name) {
     JsonNode value = args.get(name);
     return value == null ? null : value.textValue();
-  }
-
-  /**
-   * 解析可选的 workdir：只有调用显式给出时才校验为绝对现存目录，并在路径解析时充当基准；未给出（或为空）时返回 {@code null}， 表示本次调用只接受绝对路径，绝不回退到进程
-   * cwd、HOME 或任何会话默认值。
-   */
-  static Path optionalWorkdir(JsonNode args) {
-    String raw = optionalString(args, "workdir");
-    return raw == null || raw.isBlank() ? null : EnvironmentPaths.workdir(raw);
   }
 
   static int optionalPositiveInt(JsonNode args, String name, int defaultValue, int maximum) {

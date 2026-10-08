@@ -124,14 +124,13 @@ final class EnvironmentDaemonServerTestSupport {
         new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, payload));
   }
 
-  /** 一个通过 READY OS（LINUX）发送前 workdir 校验的 fs.read 请求：frame send 前必须携带显式绝对 workdir。 */
+  /** 一个通过 READY OS（LINUX）发送前校验的 fs.read 请求：携带绝对 path。 */
   static EnvironmentCapabilityExecutionRequest capabilityRequest(UUID callId) {
     EnvironmentCapabilityDescriptor descriptor =
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
     return new EnvironmentCapabilityExecutionRequest(
         descriptor,
-        new EnvironmentCapabilityCall(
-            callId.toString(), "{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}"),
+        new EnvironmentCapabilityCall(callId.toString(), "{\"path\":\"/srv/repo/README.md\"}"),
         Duration.ofSeconds(5));
   }
 

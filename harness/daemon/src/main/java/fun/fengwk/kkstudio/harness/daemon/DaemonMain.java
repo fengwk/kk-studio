@@ -86,7 +86,7 @@ public final class DaemonMain {
     try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(daemonConfig.dataDir())) {
       CodingToolsConfig toolsConfig =
           CodingToolsConfig.fromRuntime(
-              dataDirectory.resources(), daemonConfig.bashExecutable(), daemonConfig.lsp());
+              dataDirectory.tmp(), daemonConfig.bashExecutable(), daemonConfig.lsp());
       DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig, dataDirectory);
       Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));
       runtime.start();

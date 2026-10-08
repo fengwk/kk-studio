@@ -3,11 +3,7 @@
   "properties": {
     "path": {
       "type": "string",
-      "description": "File path to create or intentionally overwrite as a whole file."
-    },
-    "workdir": {
-      "type": "string",
-      "description": "Optional absolute directory used to resolve a relative path. It is never inherited from another call, a session default, cwd, or home directory. Omit it for an absolute path; a relative path without an explicit workdir is rejected. Provide an expanded absolute path (no '~' or environment-variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Absolute path on the target daemon's file system of the text file to create or intentionally overwrite as a whole file. Relative paths are rejected; Windows targets use a drive-rooted or UNC path."
     },
     "content": {
       "type": "string",

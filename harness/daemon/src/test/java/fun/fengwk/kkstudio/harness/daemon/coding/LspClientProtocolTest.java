@@ -141,22 +141,21 @@ class LspClientProtocolTest {
 
     assertEquals(
         FakeLspServer.DECOMPILED_SOURCE,
-        client.javaDecompile(root, classFile.toString(), REQUEST_TIMEOUT));
+        client.javaDecompile(classFile.toString(), REQUEST_TIMEOUT));
     assertEquals(
         FakeLspServer.DECOMPILED_SOURCE,
-        client.javaDecompile(root, classFile.toUri().toString(), REQUEST_TIMEOUT));
+        client.javaDecompile(classFile.toUri().toString(), REQUEST_TIMEOUT));
     assertThrows(
         IllegalArgumentException.class,
-        () -> client.javaDecompile(root, "missing/App.class", REQUEST_TIMEOUT));
+        () -> client.javaDecompile("missing/App.class", REQUEST_TIMEOUT));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> client.javaDecompile(root, "file://", REQUEST_TIMEOUT));
+        IllegalArgumentException.class, () -> client.javaDecompile("file://", REQUEST_TIMEOUT));
 
     LspClient empty = start("empty-decompile");
     IllegalStateException noSource =
         assertThrows(
             IllegalStateException.class,
-            () -> empty.javaDecompile(root, "build/App.class", REQUEST_TIMEOUT));
+            () -> empty.javaDecompile(classFile.toString(), REQUEST_TIMEOUT));
     assertTrue(
         noSource.getMessage().contains("Could not load or decompile"), noSource.getMessage());
   }
@@ -360,9 +359,9 @@ class LspClientProtocolTest {
     assertEquals(2, FakeLspServers.received(transcript, "textDocument/definition").size());
   }
 
-  /** 意图：相对 class target 在没有 workdir 时被拒绝，绝不回退到守护进程 cwd，也不发出任何请求。 */
+  /** 意图：相对 class target 被直接拒绝，绝不发任何请求。 */
   @Test
-  void relativeClassTargetWithoutWorkdirIsRejected() throws Exception {
+  void relativeClassTargetIsRejected() throws Exception {
     LspClient client = start("normal");
     Path file = write("App.java", "class App {}\n");
     Path classFile = Files.createDirectories(root.resolve("build")).resolve("App.class");
@@ -371,16 +370,19 @@ class LspClientProtocolTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> client.javaDecompile(null, "build/App.class", REQUEST_TIMEOUT));
+            () -> client.javaDecompile("build/App.class", REQUEST_TIMEOUT));
     assertTrue(
-        error.getMessage().contains("workdir is required when target is a relative class path"),
+        error
+            .getMessage()
+            .contains(
+                "target must be an absolute class path, a file: URI, or a jdt:// URI: build/App.class"),
         error.getMessage());
     assertTrue(FakeLspServers.received(transcript, "workspace/executeCommand").isEmpty());
 
-    // 绝对 class 路径不需要 workdir。
+    // 绝对 class 路径被接受。
     assertEquals(
         FakeLspServer.DECOMPILED_SOURCE,
-        client.javaDecompile(null, classFile.toString(), REQUEST_TIMEOUT));
+        client.javaDecompile(classFile.toString(), REQUEST_TIMEOUT));
     assertFalse(client.definition(file.toAbsolutePath(), 1, 0, REQUEST_TIMEOUT).isEmpty());
   }
 
