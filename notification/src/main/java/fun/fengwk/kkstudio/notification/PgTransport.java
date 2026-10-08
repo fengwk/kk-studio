@@ -252,6 +252,9 @@ final class PgTransport implements CrossNodeTransport {
             Math.max(
                 1,
                 (int) Math.min(pollMillis, Math.min(100L, limits.reassemblyTimeout().toMillis())));
+        long validationIntervalNanos = pollMillis * 1_000_000L;
+        long nextValidation = System.nanoTime() + validationIntervalNanos;
+        int validationTimeoutSeconds = (int) Math.max(1L, (pollMillis + 999L) / 1000L);
         while (!isClosed()) {
           PGNotification[] notifications = pg.getNotifications(tickMillis);
           if (notifications != null) {
@@ -276,6 +279,13 @@ final class PgTransport implements CrossNodeTransport {
             }
           }
           reassembler.expire();
+          // A timed notification read alone cannot detect an idle half-open TCP connection.
+          if (System.nanoTime() - nextValidation >= 0) {
+            if (!connection.isValid(validationTimeoutSeconds)) {
+              throw new SQLException("notification listener connection is not valid");
+            }
+            nextValidation = System.nanoTime() + validationIntervalNanos;
+          }
         }
       } catch (SQLException | RuntimeException error) {
         if (!isClosed()) {

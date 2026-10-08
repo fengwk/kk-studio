@@ -37,6 +37,8 @@ PG reader 在解析 publisher UUID 后无条件直接丢弃自身回声，不解
 [`PgTransport`](../../notification/src/main/java/fun/fengwk/kkstudio/notification/PgTransport.java)
 每进程只使用一个 LISTEN 连接，监听 `kk_notification` 和 UUID 派生的节点 inbox。
 连接建立与重建先完成 LISTEN，再安排订阅者权威对账。发送接受不表示远端业务已执行。
+监听连接按 `notificationPollMillis` 执行主动 JDBC 存活检查，检查超时取同一间隔向上取整的秒数（至少 1 秒）；
+被动通知读取不能单独检测空闲 TCP 黑洞。检查失败先标记不健康并请求全量对账，再按已有重连节奏重新 LISTEN。
 临时发送失败不自动重试；本地恢复请求和连接健康状态用于暴露不可用。
 
 所有远端消息均使用一种 carrier，包含协议版本、publisher、target、topic、messageId、

@@ -39,9 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Real PostgreSQL boundaries, with transparent SQL counting (not a mocked connection/transport).
- */
+/** Real PostgreSQL boundaries, with SQL counting and controlled connection-failure injection. */
 @Testcontainers
 class NotificationPostgresqlIntegrationTest {
   @Container
@@ -358,6 +356,40 @@ class NotificationPostgresqlIntegrationTest {
               bus.publishBatch(
                   EVENTS, NotificationAddress.broadcast(), Collections.nCopies(9, "x")));
       assertEquals(0, source.notifies.get());
+    }
+  }
+
+  @Test
+  void idleListenerValidationFailureInvalidatesThenRelistensBeforeRecovery() throws Exception {
+    CountingDataSource source = dataSource();
+    BlockingQueue<Boolean> healthAtRecovery = new LinkedBlockingQueue<>();
+    BlockingQueue<String> values = new LinkedBlockingQueue<>();
+    AtomicReference<PgTransport> reference = new AtomicReference<>();
+    UUID node = UUID.randomUUID();
+    try (PgTransport transport =
+        new PgTransport(
+            source,
+            node,
+            smallLimits(8),
+            Duration.ofMillis(20),
+            Duration.ofMillis(10),
+            wire -> values.add(EVENTS.codec().decode(wire.bytes())),
+            ignored -> fail("no topic-level recovery expected"),
+            () -> healthAtRecovery.add(reference.get().healthy()))) {
+      reference.set(transport);
+      transport.start();
+      assertTrue(take(healthAtRecovery), "initial recovery follows successful LISTEN");
+      // No notification arrives: an active, bounded probe must still detect loss.
+      source.failNextValidation.set(true);
+      assertFalse(take(healthAtRecovery), "validation failure invalidates listener health");
+      assertTrue(take(healthAtRecovery), "recovery follows re-established LISTEN");
+      assertEquals(1, source.failedValidationTimeout.get());
+      WireMessage frame = wire(UUID.randomUUID(), node, "after-idle-recovery");
+      sendRaw(
+          new JdbcTemplate(source),
+          PgTransport.inboxChannel(node),
+          Carrier.chunk(frame, 0).encode());
+      assertEquals("after-idle-recovery", take(values));
     }
   }
 
@@ -822,6 +854,8 @@ class NotificationPostgresqlIntegrationTest {
     final DriverManagerDataSource delegate;
     final String applicationName;
     final AtomicInteger notifies = new AtomicInteger();
+    final AtomicBoolean failNextValidation = new AtomicBoolean();
+    final AtomicInteger failedValidationTimeout = new AtomicInteger();
     volatile boolean failNotify;
     volatile CountDownLatch notifyStarted;
     volatile CountDownLatch notifyRelease;
@@ -847,6 +881,10 @@ class NotificationPostgresqlIntegrationTest {
               Connection.class.getClassLoader(),
               new Class<?>[] {Connection.class},
               (proxy, method, args) -> {
+                if (method.getName().equals("isValid") && failNextValidation.getAndSet(false)) {
+                  failedValidationTimeout.set((int) args[0]);
+                  return false;
+                }
                 if (method.getName().equals("prepareStatement")
                     && args[0] instanceof String sql
                     && sql.contains("pg_notify")) {
