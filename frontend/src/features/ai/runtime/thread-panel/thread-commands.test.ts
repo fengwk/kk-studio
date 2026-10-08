@@ -71,6 +71,7 @@ describe('AgentPane command registry', () => {
       'debug',
       'shortcuts',
       'rename-session',
+      'rename-thread',
       'goal',
     ])
     expect(THREAD_COMMANDS.every((command) => command.disabled === undefined)).toBe(true)
@@ -82,7 +83,7 @@ describe('AgentPane command registry', () => {
       .not.toContain('rename-session')
     expect(commandIdsForTarget({ kind: 'NEW_SESSION_DRAFT' }))
       .not.toContain('rename-thread')
-    // NEW_THREAD_DRAFT：可重命名父 Session，但没有持久化 Thread 可重命名。
+    // NEW_THREAD_DRAFT：父 Session 走服务端重命名，Thread 名称只改本地草稿。
     const newThread = {
       kind: 'NEW_THREAD_DRAFT' as const,
       sessionId: 's1',
@@ -90,7 +91,7 @@ describe('AgentPane command registry', () => {
       threadName: 'branch-1',
     }
     expect(commandIdsForTarget(newThread)).toContain('rename-session')
-    expect(commandIdsForTarget(newThread)).not.toContain('rename-thread')
+    expect(commandIdsForTarget(newThread)).toContain('rename-thread')
     // BOUND_THREAD：Session 与 Thread 都已持久化，两者可用。
     const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
     expect(commandIdsForTarget(bound)).toContain('rename-session')

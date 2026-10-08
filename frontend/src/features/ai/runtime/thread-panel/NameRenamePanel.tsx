@@ -2,11 +2,12 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Check } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
 import { useI18n } from '@/shared/i18n'
+import { normalizeThreadName } from '@/features/ai/chat/thread-name'
 
 /**
  * 持久 Session/Thread 实体的单输入重命名面板。
  *
- * 只用于已持久化实体（绝不用于创建前草稿）：initialName 是服务端权威当前名称；
+ * 持久实体与本地 Thread 草稿共用；initialName 是当前目标名称；
  * busy 为真时输入禁用且保存不可用（名称仍在解析）；pending 期间禁用保存与关闭；
  * 提交失败时保留用户输入并就地显示错误；提交成功由父组件卸载本面板。
  */
@@ -52,8 +53,7 @@ export function NameRenamePanel({
     }
   }, [busy])
 
-  const trimmed = name.trim()
-  const canSave = !pending && !busy && trimmed.length > 0
+  const canSave = !pending && !busy && normalizeThreadName(name) != null
 
   return (
     <ThreadInteractionPanel
@@ -81,7 +81,7 @@ export function NameRenamePanel({
           event.preventDefault()
           event.stopPropagation()
           if (canSave) {
-            void onSubmit(trimmed)
+            void onSubmit(name)
           }
         }
       }}
@@ -112,7 +112,7 @@ export function NameRenamePanel({
           type="button"
           className="btn-primary name-rename-save"
           disabled={!canSave}
-          onClick={() => void onSubmit(trimmed)}
+          onClick={() => void onSubmit(name)}
         >
           <Check size={13} aria-hidden="true" />
           {t('ai.runtime.rename.save')}

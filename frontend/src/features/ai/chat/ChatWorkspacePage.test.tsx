@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -57,6 +57,8 @@ vi.mock('@/shared/api/harness-service', () => ({
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
     previewProviderRequest: vi.fn(),
+    renameThread: vi.fn(),
+    renameSession: vi.fn(),
   },
 }))
 
@@ -191,7 +193,8 @@ beforeEach(() => {
     ...snapshot(),
     thread: { ...snapshot().thread, threadId },
   }))
-  vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
+  vi.mocked(harnessService.listSessionEntries).mockReset().mockResolvedValue([])
+  vi.mocked(harnessService.listSessionThreads).mockReset().mockResolvedValue([])
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
 })
@@ -599,8 +602,12 @@ describe('ChatWorkspacePage 新建分支路由', () => {
   }
 
   async function openBranchDialogFromTree(user: ReturnType<typeof userEvent.setup>, paneIndex = 0) {
-    const composers = await screen.findAllByLabelText('给 AI 发送消息')
-    await user.click(composers[paneIndex]!)
+    const composer = await waitFor(() => {
+      const editor = document.querySelector<HTMLElement>(`[data-pane-id="pane-${paneIndex + 1}"] .composer-editor`)
+      expect(editor).not.toBeNull()
+      return editor!
+    })
+    await user.click(composer)
     await user.keyboard('/history{Enter}')
     const rows = await waitFor(() => {
       const found = document.querySelectorAll('.history-tree-entry')
@@ -666,6 +673,209 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       expect(branch?.textContent).toBe('branch-1')
     })
     expect(await screen.findAllByLabelText('给 AI 发送消息')).toHaveLength(3)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getAllByLabelText('给 AI 发送消息')[2]))
+  })
+
+  it('rejects an existing root name but allows a subagent name', async () => {
+    const user = userEvent.setup()
+    const summary = {
+      threadId: 'subagent', parentThreadId: null as string | null, name: 'duplicate',
+      createdAt: null, updatedAt: null, status: 'IDLE', processing: false,
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' }, headMessagePreview: null,
+    }
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([summary])
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    renderWorkspace()
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, ' duplicate ')
+    await chooseDestination(user, 3)
+    await confirmBranch(user)
+    expect(await screen.findByText('此 Session 已有同名 thread 或草稿，请换一个名称。')).toBeInTheDocument()
+    expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{ ...summary, parentThreadId: 'root' }])
+    await confirmBranch(user)
+    await waitFor(() => expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('"threadName":"duplicate"'))
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['session-1', 3, true],
+    ['another-session', 3, false],
+    ['session-1', 9, false],
+  ])('checks hidden local drafts by Session, excluding the target itself (%s -> %i)', async (sessionId, destination, conflict) => {
+    const user = userEvent.setup()
+    localStorage.setItem(paneTargetKey('pane-9'), JSON.stringify({
+      kind: 'NEW_THREAD_DRAFT', sessionId, startEntryId: 'entry-2', threadName: 'local',
+    }))
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    renderWorkspace()
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'local')
+    await chooseDestination(user, destination)
+    await confirmBranch(user)
+    if (conflict) {
+      expect(await screen.findByText('此 Session 已有同名 thread 或草稿，请换一个名称。')).toBeInTheDocument()
+      expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
+    } else {
+      await waitFor(() => expect(document.querySelector('.new-branch-dialog')).toBeNull())
+      expect(localStorage.getItem(paneTargetKey(`pane-${destination}`))).toContain('"sessionId":"session-1"')
+    }
+  })
+
+  it('fails visibly, retries, and discards an old check after changing the destination', async () => {
+    const user = userEvent.setup()
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(harnessService.listSessionThreads).mockRejectedValueOnce(new Error('offline'))
+    renderWorkspace()
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'safe')
+    await chooseDestination(user, 3)
+    await confirmBranch(user)
+    expect(await screen.findByText('无法检查 thread 名称，请重试打开草稿。')).toBeInTheDocument()
+    let resolve!: (threads: []) => void
+    vi.mocked(harnessService.listSessionThreads).mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+    await confirmBranch(user)
+    await chooseDestination(user, 2)
+    await act(async () => resolve([]))
+    expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
+    expect(localStorage.getItem(paneTargetKey('pane-3'))).toBeNull()
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
+    await confirmBranch(user)
+    await waitFor(() => expect(localStorage.getItem(paneTargetKey('pane-2'))).toContain('"threadName":"safe"'))
+  })
+
+  it.each(['close', 'input'])('discards a pending name check when the dialog closes or destination input changes (%s)', async (action) => {
+    const user = userEvent.setup()
+    seedLayout('split-3')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    let resolve!: (threads: []) => void
+    vi.mocked(harnessService.listSessionThreads).mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+    renderWorkspace()
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'waiting')
+    await chooseDestination(user, 3)
+    await confirmBranch(user)
+    // Enter during the same check cannot create a second concurrent request.
+    await user.keyboard('{Enter}')
+    expect(harnessService.listSessionThreads).toHaveBeenCalledTimes(1)
+    if (action === 'close') {
+      await user.click(dialog.querySelector<HTMLButtonElement>('.modal-footer .ghost-btn')!)
+    } else {
+      const destination = screen.getAllByLabelText('给 AI 发送消息')[2]!
+      destination.textContent = 'new destination input'
+      fireEvent.input(destination)
+    }
+    await act(async () => resolve([]))
+    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_SESSION_DRAFT')
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    if (action === 'close') {
+      expect(document.querySelector('.new-branch-dialog')).toBeNull()
+    } else {
+      expect(await screen.findByText('来源或目标已变化，请重新确认草稿。')).toBeInTheDocument()
+      expect(screen.getAllByLabelText('给 AI 发送消息')[2]).toHaveTextContent('new destination input')
+    }
+  })
+
+  it('opens the same naming flow from the real turn footer', async () => {
+    const user = userEvent.setup()
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    renderWorkspace()
+    await user.click(await screen.findByTestId('thread-turn-end-branch'))
+    expect(await screen.findByRole('dialog', { name: '新的 thread 分支' })).toBeInTheDocument()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it.each(['first-send', 'rename'])('keeps a hidden in-flight pane busy until settlement (%s)', async (operation) => {
+    const user = userEvent.setup()
+    seedLayout('split-3')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    let settle!: () => void
+    if (operation === 'first-send') {
+      vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(() => new Promise((resolve) => {
+        settle = () => resolve(acceptedResponse())
+      }))
+    } else {
+      bindPaneThread('pane-3', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+      vi.mocked(harnessService.renameThread).mockImplementationOnce(() => new Promise((resolve) => {
+        settle = () => resolve(thread())
+      }))
+    }
+    renderWorkspace()
+    const editor = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-pane-id="pane-3"] .composer-editor')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    await user.click(editor)
+    if (operation === 'first-send') {
+      await user.type(editor, 'pending hidden message')
+      await user.click(document.querySelector<HTMLButtonElement>('[data-pane-id="pane-3"] button[aria-label="发送消息"]')!)
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalled())
+    } else {
+      await user.keyboard('/rename-thread{Enter}')
+      const name = await screen.findByRole('textbox', { name: '名称' })
+      await user.clear(name)
+      await user.type(name, 'pending rename')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => expect(harnessService.renameThread).toHaveBeenCalled())
+    }
+    await user.click(screen.getByRole('button', { name: '布局' }))
+    await user.click(screen.getByRole('option', { name: '1', exact: true }))
+    expect(document.querySelector('[data-pane-id="pane-3"]')).toHaveAttribute('hidden')
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'not-overwritten')
+    await chooseDestination(user, 3)
+    await confirmBranch(user)
+    expect(await screen.findByText('目标位置正忙，请选择其它位置。')).toBeInTheDocument()
+    expect(localStorage.getItem(paneTargetKey('pane-3'))).not.toContain('not-overwritten')
+    await act(async () => settle())
+    await waitFor(() => expect(document.querySelector('[data-pane-id="pane-3"]')).toBeNull())
+  })
+
+  it.each(['root', 'local', 'subagent', 'cross-session', 'self', 'offline'])('validates in-place draft rename in the workspace namespace (%s)', async (scenario) => {
+    const user = userEvent.setup()
+    localStorage.setItem(paneTargetKey('pane-1'), JSON.stringify({
+      kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1', threadName: 'original',
+    }))
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([ROOT_ENTRY])
+    if (scenario === 'local' || scenario === 'cross-session') {
+      localStorage.setItem(paneTargetKey('pane-9'), JSON.stringify({
+        kind: 'NEW_THREAD_DRAFT', sessionId: scenario === 'local' ? 'session-1' : 'other',
+        startEntryId: 'entry-1', threadName: 'duplicate',
+      }))
+    }
+    if (scenario === 'root' || scenario === 'subagent') {
+      vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
+        threadId: 'existing', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
+        createdAt: null, updatedAt: null, status: 'IDLE', processing: false,
+        model: thread().branchSettings.model, headMessagePreview: null,
+      }])
+    }
+    if (scenario === 'offline') {
+      vi.mocked(harnessService.listSessionThreads).mockRejectedValueOnce(new Error('private network detail'))
+    }
+    renderWorkspace()
+    const editor = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(editor).toHaveAttribute('contenteditable', 'true'))
+    await user.click(editor)
+    await user.keyboard('/rename-thread{Enter}')
+    const name = await screen.findByRole('textbox', { name: '名称' })
+    await user.clear(name)
+    const proposed = scenario === 'self' ? 'original' : 'duplicate'
+    await user.type(name, proposed)
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    if (['root', 'local', 'offline'].includes(scenario)) {
+      expect(await screen.findByRole('alert')).toHaveTextContent(scenario === 'offline'
+        ? '无法检查 thread 名称' : '此 Session 已有同名')
+      expect(name).toHaveValue(proposed)
+      expect(localStorage.getItem(paneTargetKey('pane-1'))).toContain('"threadName":"original"')
+      expect(screen.queryByText('private network detail')).not.toBeInTheDocument()
+    } else {
+      await waitFor(() => expect(screen.queryByRole('textbox', { name: '名称' })).not.toBeInTheDocument())
+      expect(localStorage.getItem(paneTargetKey('pane-1'))).toContain(`"threadName":"${proposed}"`)
+    }
+    expect(harnessService.renameThread).not.toHaveBeenCalled()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
   it('requires a second confirmation before overwriting the destination pane draft', async () => {

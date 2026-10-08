@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { NewBranchDialog } from '@/features/ai/chat/NewBranchDialog'
-import { samePaneTarget, type PaneTarget } from '@/features/ai/runtime/agent-pane'
+import { loadPaneTarget, samePaneTarget, type PaneTarget } from '@/features/ai/runtime/agent-pane'
+import { hasThreadNameConflict } from '@/features/ai/chat/thread-name-conflict'
+import { harnessService } from '@/shared/api/harness-service'
+import { loadPendingAcceptance } from '@/features/ai/runtime/agent-pane'
+import { restoreComposerDraft } from '@/features/ai/composer/composer-draft'
+import { partsKey, trimMessageParts } from '@/features/ai/composer/composer-parts'
 import type { BranchRequestInput, PaneReport } from '@/features/ai/runtime/useRootThreadControl'
 import {
   applyChatLayout,
@@ -97,11 +102,37 @@ function ChatWorkspaceContent({
       ? { [paneState.focusedPaneId]: { kind: 'BOUND_THREAD', threadId: targetThreadId } }
       : {}),
   )
-  const [paneReports, setPaneReports] = useState<Record<string, PaneReport>>({})
   const [branchRequest, setBranchRequest] = useState<BranchRequestInput | null>(null)
   const [branchSourcePaneId, setBranchSourcePaneId] = useState<string | null>(null)
   const [branchFormError, setBranchFormError] = useState<string | null>(null)
   const [overwritePaneId, setOverwritePaneId] = useState<string | null>(null)
+  const [branchChecking, setBranchChecking] = useState(false)
+  const branchCheckId = useRef(0)
+  // Bootstrap hidden local drafts without loading any Thread snapshots. Subsequent
+  // target changes come exclusively through PaneReport (including before unmount).
+  const [storedTargets] = useState(() => Object.fromEntries(
+    paneState.panes.map((pane) => [pane.id, loadPaneTarget({ type: 'CHAT', chatId: chat.id }, pane.id)]),
+  ))
+  const localTargets = useRef<Record<string, PaneTarget>>(storedTargets)
+  const [paneReports, setPaneReports] = useState<Record<string, PaneReport>>(() => Object.fromEntries(
+    paneState.panes.map((pane) => {
+      const target = storedTargets[pane.id]!
+      const parts = target.kind === 'BOUND_THREAD' ? [] : restoreComposerDraft(`agent-pane:CHAT:${chat.id}:${pane.id}`, [])
+      return [pane.id, {
+        target,
+        draftKey: partsKey(parts),
+        pending: loadPendingAcceptance({ type: 'CHAT', chatId: chat.id }, pane.id) != null,
+        hasUnsentDraft: trimMessageParts(parts).length > 0,
+        sessionId: target.kind === 'NEW_THREAD_DRAFT' ? target.sessionId : null,
+        branchName: target.kind === 'NEW_THREAD_DRAFT' ? target.threadName : null,
+      }]
+    }),
+  ))
+  const reportsRef = useRef(paneReports)
+  const pendingTargetsRef = useRef(pendingTargets)
+  useEffect(() => { reportsRef.current = paneReports }, [paneReports])
+  useEffect(() => { pendingTargetsRef.current = pendingTargets }, [pendingTargets])
+  useEffect(() => () => { branchCheckId.current += 1 }, [])
 
   // 每次导航固定目标 pane，清除 query 前的焦点变化不能转移请求。
   if (deepLinkOwner.navigationKey !== location.key) {
@@ -154,14 +185,17 @@ function ChatWorkspaceContent({
   }, [searchParams, setSearchParams])
 
   const handlePaneReport = useCallback((paneId: string, report: PaneReport) => {
+    localTargets.current[paneId] = report.target
     setPaneReports((current) => {
       const previous = current[paneId]
       if (
         previous != null
         && previous.pending === report.pending
         && previous.hasUnsentDraft === report.hasUnsentDraft
+        && previous.draftKey === report.draftKey
         && previous.sessionId === report.sessionId
         && previous.branchName === report.branchName
+        && samePaneTarget(previous.target, report.target)
       ) {
         return current
       }
@@ -170,22 +204,35 @@ function ChatWorkspaceContent({
   }, [])
 
   const handleRequestBranch = useCallback((sourcePaneId: string, request: BranchRequestInput) => {
+    branchCheckId.current += 1
+    setBranchChecking(false)
     setBranchRequest(request)
     setBranchSourcePaneId(sourcePaneId)
     setBranchFormError(null)
     setOverwritePaneId(null)
   }, [])
 
+  const validateDraftName = useCallback(async (paneId: string, sessionId: string, name: string) => {
+    try {
+      const threads = await harnessService.listSessionThreads(sessionId)
+      return hasThreadNameConflict(name, sessionId, paneId, threads, {
+        ...localTargets.current, ...pendingTargetsRef.current,
+      }) ? t('ai.chat.branch.nameConflict') : null
+    } catch {
+      return t('ai.chat.branch.nameCheckFailed')
+    }
+  }, [t])
+
   /**
    * 命名流程的唯一提交点：先按目标 pane 的实时摘要守住在途操作与未发送草稿，
    * 再把 NEW_THREAD_DRAFT 路由到目标 pane（隐藏布局先显露）并把焦点移过去。
    * 创建请求仍由目标 pane 在用户首次输入时原子提交，这里绝不预创建。
    */
-  const handleBranchConfirm = useCallback((input: { name: string; paneId: string }) => {
-    if (branchRequest == null) {
+  const handleBranchConfirm = useCallback(async (input: { name: string; paneId: string }) => {
+    if (branchRequest == null || branchChecking) {
       return
     }
-    const report = paneReports[input.paneId]
+    const report = reportsRef.current[input.paneId]
     if (report?.pending) {
       setBranchFormError(t('ai.chat.branch.destinationBusy'))
       return
@@ -195,21 +242,59 @@ function ChatWorkspaceContent({
       setBranchFormError(null)
       return
     }
-    const nextTarget: PaneTarget = {
-      kind: 'NEW_THREAD_DRAFT',
-      sessionId: branchRequest.sessionId,
-      startEntryId: branchRequest.startEntryId,
-      threadName: input.name,
-    }
-    setPaneState((current) => focusPane(revealChatPane(current, input.paneId), input.paneId))
-    setPendingTargets((current) => ({ ...current, [input.paneId]: nextTarget }))
-    setBranchRequest(null)
-    setBranchSourcePaneId(null)
+    const requestId = ++branchCheckId.current
+    const sourceTarget = branchSourcePaneId == null ? null : localTargets.current[branchSourcePaneId]
+    const destinationTarget = localTargets.current[input.paneId]
+    const destinationDraftKey = report?.draftKey
+    setBranchChecking(true)
     setBranchFormError(null)
-    setOverwritePaneId(null)
-  }, [branchRequest, overwritePaneId, paneReports, t])
+    try {
+      const nameError = await validateDraftName(input.paneId, branchRequest.sessionId, input.name)
+      if (requestId !== branchCheckId.current) {
+        return
+      }
+      if ((sourceTarget != null && branchSourcePaneId != null
+          && !samePaneTarget(sourceTarget, localTargets.current[branchSourcePaneId]))
+        || !samePaneTarget(destinationTarget, localTargets.current[input.paneId])
+        || destinationDraftKey !== reportsRef.current[input.paneId]?.draftKey) {
+        setOverwritePaneId(null)
+        setBranchFormError(t('ai.chat.branch.targetChanged'))
+        return
+      }
+      if (reportsRef.current[input.paneId]?.pending) {
+        setBranchFormError(t('ai.chat.branch.destinationBusy'))
+        return
+      }
+      if (reportsRef.current[input.paneId]?.hasUnsentDraft && overwritePaneId !== input.paneId) {
+        setOverwritePaneId(input.paneId)
+        return
+      }
+      if (nameError != null) {
+        setBranchFormError(nameError)
+        return
+      }
+      const nextTarget: PaneTarget = {
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId: branchRequest.sessionId,
+        startEntryId: branchRequest.startEntryId,
+        threadName: input.name,
+      }
+      setPaneState((current) => focusPane(revealChatPane(current, input.paneId), input.paneId))
+      setPendingTargets((current) => ({ ...current, [input.paneId]: nextTarget }))
+      setBranchRequest(null)
+      setBranchSourcePaneId(null)
+      setBranchFormError(null)
+      setOverwritePaneId(null)
+    } finally {
+      if (requestId === branchCheckId.current) {
+        setBranchChecking(false)
+      }
+    }
+  }, [branchRequest, branchSourcePaneId, branchChecking, overwritePaneId, validateDraftName, t])
 
   const closeBranchDialog = useCallback(() => {
+    branchCheckId.current += 1
+    setBranchChecking(false)
     setBranchRequest(null)
     setBranchSourcePaneId(null)
     setBranchFormError(null)
@@ -220,9 +305,14 @@ function ChatWorkspaceContent({
     const position = chatPanePosition(pane.id)
     const label = position == null ? pane.id : String(position)
     const branchName = paneReports[pane.id]?.branchName
-    return { value: pane.id, label: branchName ? `${label} · ${branchName}` : label }
+    const draft = paneReports[pane.id]?.target.kind === 'NEW_THREAD_DRAFT'
+    return { value: pane.id, label: branchName
+      ? `${label} · ${draft ? `${t('ai.chat.branch.draftLabel')} · ` : ''}${branchName}`
+      : label }
   })
   const visiblePanes = visibleChatPanes(paneState)
+  const visiblePaneIds = new Set(visiblePanes.map((pane) => pane.id))
+  const mountedPanes = paneState.panes.filter((pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending)
   return (
     <section className="chat-workspace screen active">
       <header className="chat-workspace-header">
@@ -274,7 +364,7 @@ function ChatWorkspaceContent({
         </div>
       </header>
       <div className={`chat-pane-grid layout-${paneState.layout}`}>
-        {visiblePanes.map((pane, index) => {
+        {mountedPanes.map((pane, index) => {
           const isFocused = paneState.focusedPaneId === pane.id || (index === 0 && !paneState.focusedPaneId)
           return (
             <ChatWorkspacePane
@@ -284,6 +374,10 @@ function ChatWorkspaceContent({
               environments={environments}
               pane={pane}
               focused={isFocused}
+              hidden={!visiblePaneIds.has(pane.id)}
+              onValidateDraftName={(target, name) => target.kind === 'NEW_THREAD_DRAFT'
+                ? validateDraftName(pane.id, target.sessionId, name)
+                : Promise.resolve(t('ai.chat.branch.targetChanged'))}
               onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
               initialTarget={pendingTargets[pane.id]}
               onTargetConsumed={(consumed) => handleTargetConsumed(pane.id, consumed)}
@@ -298,6 +392,13 @@ function ChatWorkspaceContent({
           destinations={destinations}
           defaultDestination={branchSourcePaneId ?? paneState.focusedPaneId}
           formError={branchFormError}
+          checking={branchChecking}
+          onInputChange={() => {
+            branchCheckId.current += 1
+            setBranchChecking(false)
+            setBranchFormError(null)
+            setOverwritePaneId(null)
+          }}
           overwriteWarning={overwritePaneId == null ? null : t('ai.chat.branch.overwriteDraft')}
           onConfirm={handleBranchConfirm}
           onClose={closeBranchDialog}

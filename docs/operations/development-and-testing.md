@@ -269,7 +269,8 @@ npm --prefix frontend run test:pane
 
 各入口只匹配对应 harness，使用独立构建、报告与 loopback 端口，不访问 Backend、
 共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读、根 Stop，以及新建分支的命名与
-1–9 目标路由、隐藏 pane 显露与 Debug 覆盖返回；tool-card 验证流式日志和阅读锚点；
+1–9 目标路由、隐藏 pane 显露、完整祖先前缀、409 改名恢复与 Debug 覆盖返回，
+并实际断言输入焦点、文字、光标末尾和迟到目标不抢焦点；tool-card 验证流式日志和阅读锚点；
 compaction 验证完整安全正文与外层阅读保护；composer-editor 验证真实 contenteditable、
 IME、Pill 与隐藏根失活。
 

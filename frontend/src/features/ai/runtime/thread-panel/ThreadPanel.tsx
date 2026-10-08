@@ -23,6 +23,9 @@ export interface ThreadPanelTranscriptInput {
   queuedMessages: QueuedThreadMessage[]
   loading: boolean
   error: unknown
+  errorText?: string
+  onRetry?: () => void
+  emptyText?: string
   bodyRef: RefObject<HTMLDivElement | null>
   /** 重新进入 conversation 视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
   initialScrollTop?: number | null
@@ -125,6 +128,9 @@ export function ThreadPanel({ transcript, mainView, controls, activity, slots, h
             messages={transcript.messages}
             loading={transcript.loading}
             error={transcript.error}
+            errorText={transcript.errorText}
+            onRetry={transcript.onRetry}
+            emptyText={transcript.emptyText}
             bodyRef={transcript.bodyRef}
             initialScrollTop={transcript.initialScrollTop}
             resetKey={transcript.resetKey}

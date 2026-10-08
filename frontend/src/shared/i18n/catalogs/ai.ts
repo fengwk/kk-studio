@@ -1047,6 +1047,30 @@ export const aiCatalog = {
     'en-US': 'Open in',
     'zh-CN': '打开位置',
   },
+  'ai.chat.branch.nameConflict': {
+    'en-US': 'This Session already has a thread or draft with this name. Choose another name.',
+    'zh-CN': '此 Session 已有同名 thread 或草稿，请换一个名称。',
+  },
+  'ai.chat.branch.nameCheckFailed': {
+    'en-US': 'Could not check thread names. Retry opening the draft.',
+    'zh-CN': '无法检查 thread 名称，请重试打开草稿。',
+  },
+  'ai.chat.branch.targetChanged': {
+    'en-US': 'The source or destination changed. Confirm the draft again.',
+    'zh-CN': '来源或目标已变化，请重新确认草稿。',
+  },
+  'ai.chat.branch.historyInvalid': {
+    'en-US': 'The selected history is incomplete. Reload it before sending.',
+    'zh-CN': '所选历史不完整，请重新加载后再发送。',
+  },
+  'ai.chat.branch.draftEmpty': {
+    'en-US': 'Thread draft opened. Send a message to start this thread.',
+    'zh-CN': '已打开 thread 草稿，发送消息开始此 thread。',
+  },
+  'ai.chat.branch.draftLabel': {
+    'en-US': 'Thread draft',
+    'zh-CN': 'thread 草稿',
+  },
   'ai.chat.branch.openDraft': {
     'en-US': 'Open thread draft',
     'zh-CN': '打开 thread 草稿',

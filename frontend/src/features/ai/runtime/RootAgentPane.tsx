@@ -54,11 +54,14 @@ export function RootAgentPane({
   capabilities,
   onRequestBranch,
   onReport,
+  onValidateDraftName,
   target,
   setTarget,
   projection,
   navigation,
   covered,
+  focusTarget,
+  onFocusTargetChange,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -71,11 +74,14 @@ export function RootAgentPane({
   capabilities?: AgentPaneCapabilities
   onRequestBranch?: (request: BranchRequestInput) => void
   onReport?: (report: PaneReport) => void
+  onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   target: PaneTarget
   setTarget: (next: PaneTarget) => void
   projection: ThreadProjection
   navigation: ReturnType<typeof useThreadNavigation>
   covered: boolean
+  focusTarget: PaneTarget | null
+  onFocusTargetChange: (target: PaneTarget | null) => void
 }) {
   const { t } = useI18n()
   const pane = useRootThreadControl({
@@ -90,9 +96,13 @@ export function RootAgentPane({
     capabilities,
     onRequestBranch,
     onReport,
+    onValidateDraftName,
     target,
     setTarget,
     projection,
+    covered,
+    focusTarget,
+    onFocusTargetChange,
   })
   const interactionPanel = renderInteractionPanel()
   const onDismissActionError = () => {
@@ -163,11 +173,14 @@ export function RootAgentPane({
       <ThreadPanel
         heading={null}
         transcript={{
-          messages: [],
+          messages: pane.draftTimeline.messages,
           queuedMessages: [],
           bodyRef: pane.controller.bodyRef,
-          loading: false,
-          error: null,
+          loading: pane.draftHistoryLoading,
+          error: pane.draftHistoryError,
+          errorText: pane.draftHistoryErrorText,
+          onRetry: pane.retryDraftHistory,
+          emptyText: pane.target.kind === 'NEW_THREAD_DRAFT' && pane.draftAtRoot ? t('ai.chat.branch.draftEmpty') : undefined,
           initialScrollTop: pane.boundViews.initialConversationScrollTop,
         }}
         mainView={pane.boundViews.mainView}
@@ -175,7 +188,7 @@ export function RootAgentPane({
           <RootThreadControlArea
             rootThreadId={null}
             composer={composer}
-            messages={[]}
+            messages={pane.draftTimeline.messages}
             queuedMessages={[]}
             hidden={debugActive}
           />

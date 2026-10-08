@@ -12,6 +12,10 @@ const CHAT_ID = 'chat-branch-1'
 const THREAD_ID = 'a2000000-0000-4000-8000-0000000000a1'
 const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
+const rootPayload = JSON.stringify({ settings: {
+  agentName: 'assistant', model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+  environmentName: null, goal: null,
+} })
 
 function chat() {
   return {
@@ -31,7 +35,7 @@ function entries(options: { usage?: boolean } = {}) {
     // 已关闭回合的真实 usage 事实：ASSISTANT 的 assistantMetadata + 读取投影 usageCost，
     // 后面紧跟 TURN_END，使 conversation 渲染出带 turnUsage 的回合 footer。
     return [
-      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: '2026-10-01T00:00:00Z' },
+      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: '2026-10-01T00:00:00Z' },
       {
         entryId: 'entry-assistant',
         sessionId: SESSION_ID,
@@ -65,8 +69,13 @@ function entries(options: { usage?: boolean } = {}) {
     ]
   }
   return [
-    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: '2026-10-01T00:00:00Z' },
-    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createTime: '2026-10-01T00:01:00Z' },
+    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: '2026-10-01T00:00:00Z' },
+    {
+      entryId: 'entry-ancestor', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Real selected ancestor' }] } }),
+      createTime: '2026-10-01T00:00:30Z',
+    },
+    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-ancestor', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createTime: '2026-10-01T00:01:00Z' },
     {
       entryId: 'entry-3',
       sessionId: SESSION_ID,
@@ -74,6 +83,11 @@ function entries(options: { usage?: boolean } = {}) {
       entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] } }),
       createTime: '2026-10-01T00:02:00Z',
+    },
+    {
+      entryId: 'entry-sibling', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling must stay hidden' }] } }),
+      createTime: '2026-10-01T00:02:30Z',
     },
   ]
 }
@@ -108,10 +122,11 @@ interface Recorded {
 
 async function installChatApi(
   page: Page,
-  options: { usageEntries?: boolean } = {},
+  options: { usageEntries?: boolean; conflictFirstSend?: boolean } = {},
 ): Promise<Recorded> {
   const entryList = entries({ usage: options.usageEntries })
   const boundThread = thread(options.usageEntries ? 'entry-turn' : 'entry-3')
+  let createdThread: ReturnType<typeof thread> | null = null
   const recorded: Recorded = { commandBatches: [], branchPreviews: [] }
   await page.routeWebSocket(/\/api\/.*events/, () => {})
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
@@ -198,6 +213,14 @@ async function installChatApi(
       await route.fulfill({ json: { status: 200, data: entryList } })
       return
     }
+    if (path === `/api/harness/sessions/${SESSION_ID}/threads`) {
+      await route.fulfill({ json: { status: 200, data: [{
+        threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
+        createdAt: boundThread.createTime, updatedAt: boundThread.updateTime, status: 'IDLE',
+        processing: false, model: boundThread.branchSettings.model, headMessagePreview: 'hello',
+      }] } })
+      return
+    }
     if (path === `/api/harness/sessions/${SESSION_ID}/provider-request-preview` && method === 'POST') {
       // 本地分支草稿预检：只读会话前缀 + 命令，回包是最终请求体预览。
       const body = request.postDataJSON() as {
@@ -221,14 +244,15 @@ async function installChatApi(
       })
       return
     }
-    if (path === `/api/harness/threads/${THREAD_ID}`) {
+    if (path === `/api/harness/threads/${THREAD_ID}` || (createdThread != null && path === `/api/harness/threads/${createdThread.threadId}`)) {
+      const isCreated = createdThread != null && path.endsWith(createdThread.threadId)
       await route.fulfill({
         json: {
           status: 200,
           data: {
             version: '0',
-            thread: boundThread,
-            entries: entryList,
+            thread: isCreated ? createdThread : boundThread,
+            entries: isCreated ? entryList.filter((entry) => ['entry-1', 'entry-ancestor', 'entry-2'].includes(entry.entryId)) : entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
             queuedCommands: [],
             modelInvocation: null,
             toolInvocations: [],
@@ -246,7 +270,16 @@ async function installChatApi(
     }
     if (path.endsWith('/command-batches') && method === 'POST') {
       recorded.commandBatches.push(request.postDataJSON())
-      await route.fulfill({ json: { status: 200, data: { accepted: true, thread: boundThread } } })
+      if (options.conflictFirstSend && recorded.commandBatches.length === 1) {
+        await route.fulfill({ status: 409, json: { status: 409, code: 'THREAD_NAME_CONFLICT', message: 'name conflict', errors: { reason: 'THREAD_NAME_CONFLICT' } } })
+        return
+      }
+      const body = request.postDataJSON() as { target: { threadId: string; threadName: string; startEntryId: string } }
+      createdThread = { ...boundThread, threadId: body.target.threadId, name: body.target.threadName, headEntryId: body.target.startEntryId }
+      await route.fulfill({ json: { status: 200, data: {
+        session: { sessionId: SESSION_ID, name: 'Session One', createdAt: null },
+        rootEntry: entryList[0], thread: createdThread, acceptedCommands: [], replayed: false,
+      } } })
       return
     }
     if (path === '/api/interactions') {
@@ -319,7 +352,7 @@ async function bindFirstPaneToBranchDraft(page: Page, startEntryId: string) {
  */
 test('the local branch draft Debug previews through the session endpoint without creating a Thread', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 720, height: 820 })
   const recorded = await installChatApi(page)
   await bindFirstPaneToBranchDraft(page, 'entry-2')
@@ -333,6 +366,7 @@ test('the local branch draft Debug previews through the session endpoint without
   const palette = page.locator('.thread-command-palette')
   await expect(palette).toBeVisible()
   await palette.getByRole('option', { name: /debug/ }).click()
+  await page.getByRole('tab', { name: '事件', exact: true }).click()
   await expect(page.getByRole('listbox', { name: '事件' })).toBeVisible()
 
   // 整 pane 只读覆盖：控制区保持挂载但真实 display:none，退出入口可见，草稿原样保留。
@@ -353,7 +387,7 @@ test('the local branch draft Debug previews through the session endpoint without
   // 窄 pane 下详情页签自动接管并渲染最终请求体。
   await expect(page.getByTestId('preview-request-body')).toBeVisible()
   await expect(page.getByText('DRAFT_REQUEST_PREVIEW')).toBeVisible()
-  await page.screenshot({ path: '../reports/pane-shots/branch-draft-debug-narrow.png' })
+  await page.screenshot({ path: testInfo.outputPath('branch-draft-debug-narrow.png') })
 
   await back.click()
   await expect(page.getByRole('listbox', { name: '事件' })).toHaveCount(0)
@@ -371,7 +405,7 @@ test('the local branch draft Debug previews through the session endpoint without
  */
 test('the turn footer hover readout uses full usage facts instead of the compact legend', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 720, height: 820 })
   await installChatApi(page, { usageEntries: true })
   await bindFirstPaneToThread(page)
@@ -385,13 +419,13 @@ test('the turn footer hover readout uses full usage facts instead of the compact
   expect(title).toContain('7 tokens')
   expect(title).not.toContain('↑')
   expect(title.split('\n')).toHaveLength(3)
-  await page.screenshot({ path: '../reports/pane-shots/turn-footer-hover-narrow.png' })
+  await page.screenshot({ path: testInfo.outputPath('turn-footer-hover-narrow.png') })
 })
 
 test.describe('新建分支命名与目标路由（真实浏览器）', () => {
   test('routes the /history fork into a hidden pane, reveals it in the real grid and never pre-creates a Thread', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     const recorded = await installChatApi(page)
     await bindFirstPaneToThread(page)
@@ -405,12 +439,12 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     const panel = page.locator('.history-tree-panel')
     await expect(panel).toBeVisible()
     const rows = panel.locator('.history-tree-entry')
-    await expect(rows).toHaveCount(3)
-    // 线性历史同 lane；只有真实分叉才开新 lane。
+    await expect(rows).toHaveCount(5)
+    // Selected ancestry stays in the same lane; the sibling has a separate lane.
     await expect(rows.nth(2)).toHaveAttribute('data-lane', '0')
 
-    await rows.nth(1).click()
-    await expect(rows.nth(1)).toHaveAttribute('data-can-fork', 'true')
+    await rows.nth(2).click()
+    await expect(rows.nth(2)).toHaveAttribute('data-can-fork', 'true')
     await panel.locator('.history-tree-actions .btn-primary').click()
 
     const dialog = page.locator('.new-branch-dialog')
@@ -447,6 +481,12 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     expect(target).toContain('NEW_THREAD_DRAFT')
     expect(target).toContain('browser-branch')
     expect(recorded.commandBatches).toEqual([])
+    const third = page.locator('[data-pane-id="pane-3"]')
+    await expect(third.getByLabel('给 AI 发送消息')).toBeFocused()
+    await expect(third.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+    await expect(third.getByText('hello', { exact: true })).toHaveCount(0)
+    await expect(third.getByText('Sibling must stay hidden', { exact: true })).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath('hidden-pane-history-focus.png') })
   })
 
   test('Debug covers the pane with a real return action and restores the draft on exit', async ({
@@ -473,4 +513,124 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     await expect(controlArea).toBeVisible()
     await expect(page.locator('.thread-debug-back')).toHaveCount(0)
   })
+})
+
+test('409 competition keeps history, text and settings; local rename recovers the first atomic send', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const recorded = await installChatApi(page, { conflictFirstSend: true })
+  await bindFirstPaneToBranchDraft(page, 'entry-2')
+  await page.goto(HARNESS_URL)
+  await expect(page.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  const composer = page.getByLabel('给 AI 发送消息')
+  await composer.click()
+  await composer.pressSequentially('/yolo')
+  await page.keyboard.press('Enter')
+  await composer.pressSequentially('Keep browser text')
+  expect(recorded.commandBatches).toEqual([])
+  await page.getByRole('button', { name: '发送消息' }).click()
+  const name = page.getByRole('textbox', { name: '名称' })
+  await expect(name).toHaveValue('browser-draft')
+  await expect(page.getByRole('alert')).toContainText('此 Session 已有同名')
+  await expect(composer).toHaveText('Keep browser text')
+  await expect(page.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  await name.fill(' renamed   browser ')
+  await page.getByRole('button', { name: '保存' }).click()
+  await expect(composer).toBeFocused()
+  await expect(composer).toHaveText('Keep browser text')
+  // Real Selection points to the end rather than replacing/selecting the existing draft.
+  await expect.poll(() => composer.evaluate((el) => {
+    const range = document.getSelection()?.getRangeAt(0)
+    if (!range?.collapsed || !el.contains(range.endContainer)) return false
+    const prefix = document.createRange()
+    prefix.selectNodeContents(el)
+    prefix.setEnd(range.endContainer, range.endOffset)
+    return prefix.toString() === el.textContent
+  })).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('conflict-renamed-preserved.png') })
+  await page.getByRole('button', { name: '发送消息' }).click()
+  await expect.poll(() => recorded.commandBatches.length).toBe(2)
+  expect(recorded.commandBatches[1]).toMatchObject({
+    target: { type: 'NEW_THREAD', threadName: 'renamed browser', startEntryId: 'entry-2', yoloEnabled: true },
+    commands: [{ type: 'USER_MESSAGE', contents: [{ type: 'TEXT', text: 'Keep browser text' }] }],
+  })
+  await expect(page.locator('[data-breadcrumb="branch"]')).toHaveText('renamed browser')
+  await expect(page.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate((chatId) =>
+    localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`), CHAT_ID)).toContain('BOUND_THREAD')
+})
+
+test('selecting a Thread waits for readiness, preserves its text and never steals focus after another pane is chosen', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const recorded = await installChatApi(page)
+  await page.addInitScript(({ chatId }) => {
+    localStorage.setItem(`kk-studio.chat-pane.${chatId}`, JSON.stringify({
+      layout: 'split-2', focusedPaneId: 'pane-1',
+      panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
+    }))
+  }, { chatId: CHAT_ID })
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  let requested = false
+  await page.route(`**/api/harness/threads/${THREAD_ID}`, async (route) => {
+    requested = true
+    await gate
+    await route.fallback()
+  })
+  await page.goto(HARNESS_URL)
+  const first = page.locator('[data-pane-id="pane-1"]')
+  const second = page.locator('[data-pane-id="pane-2"]')
+  const editor = first.getByLabel('给 AI 发送消息')
+  await editor.click()
+  await editor.pressSequentially('/thread')
+  await page.keyboard.press('Enter')
+  await page.getByRole('option', { name: /Session One/ }).click()
+  await page.getByRole('option', { name: /thread-name/ }).click()
+  await expect.poll(() => requested).toBe(true)
+  await second.getByLabel('给 AI 发送消息').click()
+  await second.getByLabel('给 AI 发送消息').pressSequentially('other pane text')
+  release()
+  await expect(first.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  await expect(second.getByLabel('给 AI 发送消息')).toBeFocused()
+  await expect(second.getByLabel('给 AI 发送消息')).toHaveText('other pane text')
+  await expect(page.locator('.chat-workspace-breadcrumb')).toHaveAttribute('data-focused-pane', 'pane-2')
+  expect(recorded.commandBatches).toEqual([])
+
+  // Select the same existing target again as a fresh user intent.
+  await first.getByLabel('给 AI 发送消息').click()
+  await first.getByLabel('给 AI 发送消息').pressSequentially('/thread')
+  await page.keyboard.press('Enter')
+  await page.getByRole('option', { name: /Session One/ }).click()
+  await page.getByRole('option', { name: /thread-name/ }).click()
+  await expect(first.getByLabel('给 AI 发送消息')).toBeFocused()
+  await first.getByLabel('给 AI 发送消息').pressSequentially('bound draft text')
+  await first.getByRole('button', { name: '打开命令表' }).click()
+  await page.locator('.thread-command-palette').getByRole('option', { name: /^thread/ }).click()
+  await page.getByRole('option', { name: /Session One/ }).click()
+  await page.getByRole('option', { name: /thread-name/ }).click()
+  await expect(first.getByLabel('给 AI 发送消息')).toBeFocused()
+  await expect(first.getByLabel('给 AI 发送消息')).toHaveText('bound draft text')
+  await expect.poll(() => first.getByLabel('给 AI 发送消息').evaluate((el) => {
+    const range = document.getSelection()?.getRangeAt(0)
+    if (!range?.collapsed || !el.contains(range.endContainer)) return false
+    const prefix = document.createRange()
+    prefix.selectNodeContents(el)
+    prefix.setEnd(range.endContainer, range.endOffset)
+    return prefix.toString() === el.textContent
+  })).toBe(true)
+
+  // Freeze the existing focus timer after selection but before its callback.
+  // A later pane choice must cancel this already-scheduled external intent.
+  const frozenTime = new Date('2026-10-08T00:00:00Z')
+  await page.clock.install({ time: frozenTime })
+  await page.clock.pauseAt(frozenTime)
+  await first.getByRole('button', { name: '打开命令表' }).click({ force: true })
+  await page.locator('.thread-command-palette').getByRole('option', { name: /^thread/ }).click({ force: true })
+  await page.getByRole('option', { name: /Session One/ }).click({ force: true })
+  await page.getByRole('option', { name: /thread-name/ }).click({ force: true })
+  await expect(first.getByLabel('给 AI 发送消息')).not.toBeFocused()
+  await second.getByLabel('给 AI 发送消息').click({ force: true })
+  await page.clock.runFor(20)
+  await expect(second.getByLabel('给 AI 发送消息')).toBeFocused()
+  await expect(page.locator('.chat-workspace-breadcrumb')).toHaveAttribute('data-focused-pane', 'pane-2')
+  await expect(first.getByLabel('给 AI 发送消息')).toHaveText('bound draft text')
 })
