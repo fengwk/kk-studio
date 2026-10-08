@@ -100,15 +100,16 @@ it('renders on-demand preview, inspector and history actions and clears history 
     }) })
     const presentation = useThreadPresentation({
       views, projection: { thread: controller.thread ?? null, models: controller.models },
-      threadId: 'thread', selected: true, active: true, onSubagent: vi.fn(),
+      threadId: 'thread', selected: true, active: true,
     })
     return <>
       {presentation.mode === 'debug' ? <button onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>关闭 Debug</button> : null}
+      <button onClick={() => presentation.act(presentation.viewKey, 'debug')}>测试 Debug 命令</button>
       <ThreadPresentationActions view={presentation} />{views.mainView.debug}
     </>
   }
   render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
-  fireEvent.click(screen.getByRole('button', { name: 'Debug', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '测试 Debug 命令' }))
   await waitFor(() => expect(screen.getByText('prompt')).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: /查看当前调用冻结/ }))
   expect(screen.getByTestId('frozen-request-json')).toHaveTextContent('first')

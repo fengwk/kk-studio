@@ -149,7 +149,7 @@ describe('TaskToolRenderer call phase', () => {
         />
       </MemoryRouter>,
     )
-    const threadLink = screen.getByRole('link', { name: '00000000-0000-0000-0000-000000000101' })
+    const threadLink = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(threadLink).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000101')
     expect(screen.getByText('inspect the workspace')).toBeInTheDocument()
     // subagent_type / max_turns 已在 Header 展示，正文不重复。
@@ -189,6 +189,31 @@ describe('TaskToolRenderer call phase', () => {
 })
 
 describe('TaskToolRenderer result phase', () => {
+  it('renders a JSON accepted receipt as a readable link and handles an empty result without inventing one', () => {
+    const { rerender } = render(<MemoryRouter><TaskToolRenderer message={message({
+      phase: 'result', status: 'done',
+      contents: [{ type: 'json', value: { status: 'accepted', thread_id: '00000000-0000-4000-8000-000000000004' } }],
+    })} /></MemoryRouter>)
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
+    rerender(<MemoryRouter><TaskToolRenderer message={message({
+      phase: 'result', status: 'done', contents: [{ type: 'text', text: '   ' }],
+    })} /></MemoryRouter>)
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('preserves user-owned Thread ID text in the prompt while hiding navigation UUID text', () => {
+    const { container } = render(<MemoryRouter><TaskToolRenderer message={message({
+      arguments: JSON.stringify({
+        subagent_type: 'Explorer', thread_id: '00000000-0000-4000-8000-000000000004',
+        prompt: 'Thread ID user-owned-content must remain verbatim',
+      }),
+    })} /></MemoryRouter>)
+    expect(container.textContent).toContain('Thread ID user-owned-content must remain verbatim')
+    expect(container.textContent).not.toContain('00000000-0000-4000-8000-000000000004')
+    expect(container.querySelector('dt')).toBeNull()
+  })
+
   it('shows only the thread link for a valid accepted receipt', () => {
     render(
       <MemoryRouter>
@@ -204,7 +229,7 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    const link = screen.getByRole('link', { name: '00000000-0000-0000-0000-000000000202' })
+    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000202')
     // 受理收据既不重复打印，也不宣称子任务完成。
     expect(screen.queryByText(/"status":"accepted"/)).not.toBeInTheDocument()

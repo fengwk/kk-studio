@@ -12,16 +12,6 @@
   display: none;
 }
 
-.workspace-read-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.workspace-read-actions[hidden] {
-  display: none;
-}
-
 .thread-acceptance-retry[hidden] {
   display: none;
 }

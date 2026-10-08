@@ -1,17 +1,26 @@
 import { test, expect } from '@playwright/test'
 
-for (const width of [900, 360]) {
+for (const width of [900, 360, 320]) {
   test(`shared readonly rows and full history at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 })
     await page.goto('/browser-tests/subagent-tree-harness.html')
     const history = page.getByRole('region', { name: 'subagent 执行' })
     // section with accessible name has implicit region semantics.
     await expect(history.locator('li')).toHaveCount(5)
-    await expect(history.locator('[data-thread-id="deep"]')).toHaveAttribute('data-depth', '2')
+    await expect(history.locator('[data-depth], .thread-tree-connectors')).toHaveCount(0)
     await expect(history.locator('[data-thread-id="failed"]')).toContainText('失败')
     const deep = history.locator('[data-thread-id="deep"] a')
     await expect(deep).toContainText('turns: 7 · tools: 12')
-    await expect(history.locator('[data-thread-id="deep"] .thread-tree-connectors > span')).toHaveCount(3)
+    await expect(history.locator('[data-thread-id="root"]')).toHaveCount(0)
+    await history.focus()
+    await page.keyboard.press('ArrowUp')
+    await expect(history.locator('[data-thread-id="worker"] a')).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect(deep).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(page.getByLabel('selected')).toHaveText('deep')
+    expect(await history.evaluate((element) => getComputedStyle(element).borderTopColor)).toBe('rgba(0, 0, 0, 0)')
+    expect(await deep.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('0px')
     await history.locator('[data-thread-id="failed"] a').click()
     await expect(page.getByLabel('selected')).toHaveText('failed')
     await expect(history.locator('[data-thread-id="failed"]')).toHaveAttribute('aria-current', 'true')

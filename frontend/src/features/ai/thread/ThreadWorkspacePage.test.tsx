@@ -306,12 +306,12 @@ describe('ThreadWorkspacePage', () => {
     await screen.findByRole('heading', { name: 'researcher', level: 1 })
     expect(document.querySelector('.workspace-view-identity')).toHaveTextContent('researcher · minimax/MiniMax')
     expect(screen.queryByText('main', { exact: true })).toBeNull()
-    expect(screen.getByRole('link', { name: '返回父 agent' })).toHaveAttribute('href', `/threads/${rootId}`)
-    await user.click(screen.getByRole('button', { name: 'Debug', exact: true }))
-    await screen.findByRole('button', { name: '关闭 Debug' })
+    expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', `/threads/${rootId}`)
+    expect(screen.queryByRole('button', { name: 'Debug', exact: true })).toBeNull()
+    expect(screen.queryByRole('link', { name: '回到对话' })).toBeNull()
     await user.click(screen.getByRole('button', { name: '打开另一个 Thread' }))
     expect(screen.queryByRole('button', { name: '关闭 Debug' })).toBeNull()
-    expect(screen.queryByRole('link', { name: '返回父 agent' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '回到父 agent' })).toBeNull()
     expect(screen.queryByRole('heading', { name: 'researcher' })).toBeNull()
     await act(async () => resolveNext({
       ...snapshotFor(OTHER_CHILD_THREAD_ID), toolInvocations: [],
@@ -489,12 +489,12 @@ describe('ThreadWorkspacePage', () => {
       expect(screen.getAllByText('Waiting Parent').length).toBeGreaterThan(0)
     })
     expect(screen.queryByText('只读查看')).not.toBeInTheDocument()
-    const backToRoot = screen.getByRole('link', { name: '返回父 agent' })
+    const backToRoot = screen.getByRole('link', { name: '回到父 agent' })
     expect(backToRoot).toHaveAttribute('href', `/threads/${rootId}`)
     // 独立子线程地址同样把返回入口放在顶部标题区，排在 transcript 之前。
     expect(backToRoot.closest('.chat-workspace-header')).not.toBeNull()
     expect(document.querySelector('.agent-pane-thread-heading')).toBeNull()
-    expect(screen.getByRole('button', { name: '查看 subagent 执行' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
     const transcript = document.querySelector('[role="log"]') as HTMLElement
     expect(
       backToRoot.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -564,7 +564,7 @@ describe('ThreadWorkspacePage', () => {
     ])
 
     renderPage(`/threads/${CHILD_THREAD_ID}`)
-    await screen.findByRole('link', { name: '返回父 agent' })
+    await screen.findByRole('link', { name: '回到父 agent' })
     expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
     // 只读子视图不查询执行树，也不提供任何写入口。
     expect(harnessService.getThreadTree).not.toHaveBeenCalled()

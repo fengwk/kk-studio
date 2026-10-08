@@ -9,7 +9,7 @@ export function paneTargetViewKey(target: PaneTarget): string {
       ? `branch:${target.sessionId}:${target.startEntryId}:${target.threadName}` : ''
 }
 
-export type PresentationAction = 'debug' | 'close-debug' | 'restore-focus' | 'subagent' | 'parent'
+export type PresentationAction = 'debug' | 'close-debug' | 'restore-focus' | 'parent'
 
 /** 临时查看层报告；与根的路由/草稿/busy 摘要分离，不缓存 controller 或节点。 */
 export interface ThreadPresentation {
@@ -40,7 +40,7 @@ export function threadIdentity(projection: Pick<ThreadProjection, 'thread' | 'mo
 
 /** 动作稳定但只使用 commit 后最新查看层；过期身份和隐藏层不能执行。 */
 export function useThreadPresentation({
-  views, projection, threadId, selected, active, onReport, onSubagent, onParent, onRestoreFocus,
+  views, projection, threadId, selected, active, onReport, onParent, onRestoreFocus,
 }: {
   views: Pick<ReturnType<typeof useBoundThreadPanelViews>, 'viewKey' | 'mode' | 'switchMode'>
   projection: Pick<ThreadProjection, 'thread' | 'models'>
@@ -48,11 +48,10 @@ export function useThreadPresentation({
   selected: boolean
   active: boolean
   onReport?: (report: ThreadPresentation) => void
-  onSubagent: () => void
   onParent?: (parentThreadId: string) => void
   onRestoreFocus?: () => void
 }) {
-  const latest = useRef({ views, projection, threadId, selected, active, onSubagent, onParent, onRestoreFocus })
+  const latest = useRef({ views, projection, threadId, selected, active, onParent, onRestoreFocus })
   const returnFocus = useRef<HTMLElement | null>(null)
   const returnFocusKey = useRef<string | null>(null)
   const restoreFocus = useRef(false)
@@ -69,7 +68,7 @@ export function useThreadPresentation({
       returnFocus.current = null
       returnFocusKey.current = null
     }
-    latest.current = { views, projection, threadId, selected, active, onSubagent, onParent, onRestoreFocus }
+    latest.current = { views, projection, threadId, selected, active, onParent, onRestoreFocus }
   })
   const act = useCallback((viewKey: string, action: PresentationAction, trigger?: HTMLElement) => {
     const current = latest.current
@@ -100,8 +99,6 @@ export function useThreadPresentation({
         returnFocusKey.current = viewKey
         current.views.switchMode('debug')
       }
-    } else if (thread && action === 'subagent') {
-      current.onSubagent()
     } else if (thread?.parentThreadId && action === 'parent') {
       current.onParent?.(thread.parentThreadId)
     }

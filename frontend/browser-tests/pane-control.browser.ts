@@ -303,7 +303,7 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await treeRow.click()
 
   await expect(page.getByText('只读查看')).toBeVisible()
-  const backToRootLayer = await expectBackEntryOnTop(page, '返回父 agent')
+  const backToRootLayer = await expectBackEntryOnTop(page, '回到父 agent')
   await expect(backToRootLayer).toBeVisible()
   expect(new URL(page.url()).pathname).toBe(HARNESS_URL)
   // 上传注册表没有被卸载释放：没有 DELETE，也没有第二次 reserve。
@@ -315,11 +315,10 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await expect(hiddenRoot.locator('.composer-editor')).toContainText('根草稿要保留')
   await expectAttachmentAlive(page)
 
-  // 同一个只读子层进入/退出 Debug，隐藏根上传注册表不能释放或重建。
-  await page.getByRole('button', { name: 'Debug', exact: true }).click()
-  await expect(page.getByRole('button', { name: '关闭 Debug', exact: true })).toHaveCount(1)
+  // 只读子层无命令或顶栏入口，隐藏根上传注册表不能释放或重建。
+  await expect(page.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '查看 subagent 执行' })).toHaveCount(0)
   await expect(composer).toBeHidden()
-  await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
   expect(recorded.uploadCalls).toEqual(['reserve', 'complete'])
   expect(recorded.deletedUploads).toEqual([])
   await expectAttachmentAlive(page)
@@ -329,6 +328,16 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await expect(composer).toBeVisible()
   await expect(editor).toContainText('根草稿要保留')
   await expectAttachmentAlive(page)
+  expect(recorded.deletedUploads).toEqual([])
+  // 根仍从命令进入 Debug；挂起/恢复不重建上传注册表，也不丢草稿。
+  await page.getByRole('button', { name: '打开命令表' }).click()
+  await page.getByRole('option', { name: /debug/ }).click()
+  await expect(page.getByRole('button', { name: '关闭 Debug', exact: true })).toHaveCount(1)
+  await expect(composer).toBeHidden()
+  await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+  await expect(editor).toContainText('根草稿要保留')
+  await expectAttachmentAlive(page)
+  expect(recorded.uploadCalls).toEqual(['reserve', 'complete'])
   expect(recorded.deletedUploads).toEqual([])
 })
 
@@ -340,7 +349,7 @@ test('the hidden inert root ignores Escape and cannot be clicked', async ({ page
   await editor.fill('根草稿要保留')
 
   await page.locator('.active-thread-tree').getByRole('link', { name: /worker child/ }).click()
-  await expect(page.getByRole('button', { name: '返回父 agent' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '回到父 agent' })).toBeVisible()
 
   const hiddenLayer = page.locator('.chat-pane-layer[hidden]')
   await expect(hiddenLayer).toHaveCount(1)
@@ -368,7 +377,7 @@ test('the hidden inert root ignores Escape and cannot be clicked', async ({ page
   await expect(hiddenLayer.locator('.composer-editor')).toContainText('根草稿要保留')
 
   // 返回后根层重新可交互：焦点回到可见层，输入继续落在根草稿上。
-  await page.getByRole('button', { name: '返回父 agent' }).click()
+  await page.getByRole('button', { name: '回到父 agent' }).click()
   await expect(composer).toBeVisible()
   expect(await page.evaluate(() => document.activeElement?.closest('[hidden]') == null)).toBe(true)
   await editor.click()
@@ -386,11 +395,14 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'worker child', level: 1 })).toBeVisible()
   await expect(page.locator('.chat-workspace-header .workspace-view-identity')).toContainText('minimax/VeryLongModelName')
   await expect(page.getByText('只读查看')).toHaveCount(0)
-  const backToRoot = await expectBackEntryOnTop(page, '返回父 agent', 'link')
+  const backToRoot = await expectBackEntryOnTop(page, '回到父 agent', 'link')
   await expect(backToRoot).toBeVisible()
   await expect(backToRoot).toHaveAttribute('href', '/threads/' + ROOT_ID)
   await expect(page.locator('.thread-composer')).toHaveCount(0)
   await expect(page.getByRole('textbox')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '回到对话' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Debug', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '查看 subagent 执行' })).toHaveCount(0)
   expect(recorded.uploadCalls).toEqual([])
   expect(recorded.commandRequests).toEqual([])
   expect(recorded.stopRequests).toEqual([])

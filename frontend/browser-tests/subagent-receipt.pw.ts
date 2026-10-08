@@ -21,6 +21,18 @@ test.describe('Subagent receipt card', () => {
       await expect(cards.nth(index).locator('.thread-subagent-receipt-detail')).toHaveCount(0)
       await expect(cards.nth(index).getByRole('button', { expanded: false })).toHaveCount(1)
       await expect(cards.nth(index).locator('.thread-system-message-header')).toHaveCount(0)
+      const order = await cards.nth(index).evaluate((element) => {
+        const summary = element.querySelector('.thread-subagent-receipt-summary')!
+        const link = summary.querySelector('a')!
+        const toggle = summary.querySelector('button')!
+        return {
+          last: summary.lastElementChild === toggle,
+          separate: !toggle.contains(link),
+          ordered: link.getBoundingClientRect().right <= toggle.getBoundingClientRect().left,
+          returnedVisible: summary.textContent?.includes('已返回'),
+        }
+      })
+      expect(order).toEqual({ last: true, separate: true, ordered: true, returnedVisible: false })
     }
 
     const card = cards.nth(0)
@@ -103,9 +115,9 @@ test.describe('Subagent receipt card', () => {
     await page.keyboard.press(' ')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
-    // 摘要按钮之后的下一个 Tab 落在独立的来源链接上。
+    // DOM 顺序与视觉一致：链接在最后的展开按钮之前。
     await toggle.focus()
-    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
     const focused = await page.evaluate(() => ({
       tag: document.activeElement?.tagName ?? '',
       href: document.activeElement?.getAttribute('href') ?? '',
@@ -114,8 +126,9 @@ test.describe('Subagent receipt card', () => {
     expect(focused.href).toBe('/threads/child-thread-2')
   })
 
-  test('stays inside the pane on a narrow viewport with a long agent name', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 360, height: 800 })
+  for (const width of [360, 320]) {
+  test(`stays inside the pane at ${width}px with a long agent name`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 800 })
     await page.goto(HARNESS_URL)
 
     const cards = page.locator('.thread-subagent-receipt')
@@ -136,6 +149,7 @@ test.describe('Subagent receipt card', () => {
         agentText: agent.textContent ?? '',
         agentRight: agent.getBoundingClientRect().right,
         sourceRight: source.getBoundingClientRect().right,
+        sourceWidth: source.getBoundingClientRect().width,
         previewOverflow: getComputedStyle(preview).overflow,
         previewTextOverflow: getComputedStyle(preview).textOverflow,
       }
@@ -146,8 +160,10 @@ test.describe('Subagent receipt card', () => {
     expect(geometry.agentText).toContain('long-subagent-identity-name-that-must-wrap-inside-the-card')
     expect(geometry.agentRight).toBeLessThanOrEqual(geometry.cardRight + 1)
     expect(geometry.sourceRight).toBeLessThanOrEqual(geometry.cardRight + 1)
+    expect(geometry.sourceWidth).toBeGreaterThan(100)
     expect(geometry.previewOverflow).toBe('hidden')
     expect(geometry.previewTextOverflow).toBe('ellipsis')
+    await testInfo.attach('geometry', { body: JSON.stringify({ width, geometry }, null, 2), contentType: 'application/json' })
 
     // 任何回执与整页都不产生横向滚动。
     for (let index = 0; index < 5; index += 1) {
@@ -160,6 +176,7 @@ test.describe('Subagent receipt card', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1))
       .toBe(true)
 
-    await page.screenshot({ path: testInfo.outputPath('subagent-receipt-narrow.png') })
+    await page.screenshot({ path: testInfo.outputPath(`subagent-receipt-${width}.png`) })
   })
+  }
 })

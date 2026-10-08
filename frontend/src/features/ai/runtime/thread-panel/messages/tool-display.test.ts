@@ -35,14 +35,15 @@ describe('tool display', () => {
     )
   })
 
-  it('keeps task thread_id and prompt out of the header (small params only)', () => {
-    // thread_id 与 prompt 在正文出现，Header 只保留 subagent_type / max_turns。
+  it('keeps task thread_id in the same options and the user prompt out of the header', () => {
     expect(formatToolCallSummary('task', JSON.stringify({
       subagent_type: 'explorer',
       thread_id: 'child-1',
       max_turns: 12,
       prompt: 'inspect the repository',
-    })).text).toBe('task explorer [max_turns=12]')
+    })).text).toBe('task explorer [max_turns=12 thread_id=child-1]')
+    expect(formatToolCallSummary('task', '{"subagent_type":"Explorer","max_turns":4}').text)
+      .toBe('task Explorer [max_turns=4]')
   })
 
   it('keeps the ask_user question out of the header', () => {

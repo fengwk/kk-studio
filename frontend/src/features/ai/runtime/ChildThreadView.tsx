@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type ReactNode } from 'react'
+import { useLayoutEffect, type ReactNode } from 'react'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import { ThreadPane } from '@/features/ai/runtime/ThreadPane'
 import {
@@ -6,8 +6,6 @@ import {
   type ThreadProjection,
 } from '@/features/ai/runtime/useThreadProjection'
 import { useBoundThreadPanelViews } from '@/features/ai/runtime/useBoundThreadPanelViews'
-import { useActiveThreadTree } from './useActiveThreadTree'
-import { SubagentTreePanel } from './SubagentTreePanel'
 import { useThreadPresentation, type ThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
@@ -56,13 +54,9 @@ export function BoundThreadView({
     historyError: projection.messagesError ? t('ai.chat.history.loadFailed') : null,
     onRetryHistory: () => { void projection.snapshotQuery.refetch() },
   })
-  const [treeOpen, setTreeOpen] = useState(false)
-  const rootThreadId = projection.thread?.yoloPolicy.rootThreadId
-    ?? (projection.thread?.parentThreadId == null ? threadId : null)
-  const tree = useActiveThreadTree(treeOpen ? rootThreadId : null)
   const presentation = useThreadPresentation({
     views, projection, threadId, selected, active, onReport: onPresentation,
-    onSubagent: () => setTreeOpen(true), onParent,
+    onParent,
   })
   useLayoutEffect(() => {
     if (onPresentation == null && presentation.mode === 'conversation') {
@@ -82,12 +76,11 @@ export function BoundThreadView({
     {onPresentation == null ? <header className="agent-pane-thread-heading">
       {views.mode === 'debug' ? <Button variant="ghost" onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
         {t('ai.runtime.debug.close')}
-      </Button> : navigation}
+      </Button> : presentation.parentThreadId ? <ThreadPresentationActions view={presentation} /> : navigation}
       {views.mode !== 'debug' ? <>
         {presentation.name ? <h2 className="agent-pane-thread-title" title={presentation.name}>{presentation.name}</h2> : null}
         {readOnly ? <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span> : null}
       </> : null}
-      <ThreadPresentationActions view={presentation} />
     </header> : null}
     <ThreadPane
       projection={projection}
@@ -98,8 +91,6 @@ export function BoundThreadView({
         initialConversationScrollTop: views.initialConversationScrollTop,
       }}
     />
-    {treeOpen && views.mode !== 'debug' ? <SubagentTreePanel tree={tree} currentThreadId={threadId}
-      onClose={() => setTreeOpen(false)} /> : null}
     </div>
   )
 }

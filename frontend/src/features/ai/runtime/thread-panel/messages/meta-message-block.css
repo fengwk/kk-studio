@@ -1,6 +1,14 @@
 /*
  * 回合分叉入口与统计文本同一行垂直居中。
  */
+.thread-block-meta.kind-turn_usage .thread-meta-row {
+  align-items: center;
+}
+
+.thread-block-meta.kind-turn_usage .thread-meta-icon {
+  margin-top: 0;
+}
+
 .thread-meta-row .thread-meta-branch-btn {
   align-self: center;
   width: 24px;

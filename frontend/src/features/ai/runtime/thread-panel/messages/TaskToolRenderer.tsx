@@ -23,16 +23,9 @@ function TaskToolCall({ message }: { message: ToolRendererMessage }) {
   return (
     <div className="task-tool-renderer">
       {args.threadId != null ? (
-        <div className="task-tool-fields">
-          <div className="task-tool-field">
-            <dt>{threadLabel()}</dt>
-            <dd>
-              <ThreadLink threadId={args.threadId} className="task-tool-thread-link">
-                {args.threadId}
-              </ThreadLink>
-            </dd>
-          </div>
-        </div>
+        <ThreadLink threadId={args.threadId} className="task-tool-thread-link">
+          {translate('ai.runtime.notification.entry.viewSubagentExecution')}
+        </ThreadLink>
       ) : null}
       {args.prompt != null ? (
         <ToolOutputViewport followKey={args.prompt}>{args.prompt}</ToolOutputViewport>
@@ -61,7 +54,7 @@ function TaskToolResult({ message }: { message: ToolRendererMessage }) {
   return (
     <div className="task-tool-renderer">
       <ThreadLink threadId={receipt.threadId} className="task-tool-thread-link">
-        {receipt.threadId}
+        {translate('ai.runtime.notification.entry.viewSubagentExecution')}
       </ThreadLink>
     </div>
   )
@@ -77,8 +70,4 @@ function resultJson(message: ToolRendererMessage): string | null {
     }
   }
   return null
-}
-
-function threadLabel(): string {
-  return translate('ai.runtime.task.thread')
 }

@@ -84,14 +84,20 @@ AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投
 活跃数量不含纯层级祖先。根面板不重复绘制根节点。每代理一行，稳定顺序，节点过多时滚动，
 无活跃后代时不留空壳。根本地空闲不能停止查询后代；查询失败不伪装成最新数据。
 
-树行、task Thread ID 和系统回执链接共享 `ThreadLink` 导航。普通点击在当前 pane 查看，
+树行、task 执行链接和系统回执链接共享 `ThreadLink` 导航。普通点击在当前 pane 查看，
 保留原始执行绑定；Ctrl/Cmd、中键和复制地址保持浏览器行为。返回导航基于当前快照的直属父
 `parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开直接父 Agent，
 不使用浏览栈 `goBack`；独立子线程地址则直接链接至真实 `/threads/{parentId}`。
-已绑定根支持 `/subagent` 命令，只读顶栏提供“查看 subagent 执行”动作，打开轻量面板展示排除根的完整
-`historyRows`（含嵌套后代与 resume 计数），未绑定草稿禁用该命令。导航状态不复制 Snapshot、执行状态或编辑草稿。
+已绑定根通过 `/subagent` 命令打开轻量扁平卡片列表，展示排除执行根的完整 `historyRows`
+（含嵌套后代与 resume 计数），不绘制父子连线。查询只使用当前绑定根/branch 的 GET 执行树与现有
+推送失效回读，不跨到同 Session 的兄弟根，不创建关系或额外轮询。未绑定草稿禁用该命令；
+只读子视图没有 Composer，也没有 subagent 面板或 Debug 的顶部入口。根和草稿的 Debug 由现有
+`/debug` 命令进入。导航状态不复制 Snapshot、执行状态或编辑草稿。
 
-返回导航由工作区顶栏动作区承载，底部不留下输入区或操作栏。根面板查看期间保留草稿与上传，
+选择器支持 ArrowUp/ArrowDown 移动、Enter 查看选中执行、Escape 关闭；选择以 threadId 保持，
+实时排序变化不会串目标。输入法组合键不触发选择或关闭，关闭后归还焦点，草稿和附件原样保留。
+
+子视图最左的“回到父 agent”由工作区顶栏承载，不显示“回到对话”，底部不留下输入区或操作栏。根面板查看期间保留草稿与上传，
 隐藏层同时使用 `hidden/inert` 与 Composer 的失活状态，不能响应输入快捷键或抢焦点。返回恢复阅读位置、
 展开状态和合理焦点。子代理完成不自动退出查看；加载失败也必须能返回。
 
@@ -111,7 +117,7 @@ Debug。展示不改变模型正文、Provider 协议、资源安全边界或既
 | write | Header 和写入正文；正文过长滚动 |
 | edit | Header 和执行前 diff；长 diff 滚动 |
 | bash | Header 和输出滚动窗口 |
-| task | Header、prompt、可点击 Thread ID |
+| task | Header、prompt、可读执行链接 |
 | ask_user | 只读问题/回答记录；人工操作在根交互区 |
 | 其他工具/MCP | Header 内紧凑参数 JSON；结果默认折叠 |
 
@@ -125,12 +131,17 @@ Debug。展示不改变模型正文、Provider 协议、资源安全边界或既
 
 宿主统一状态、展开和外壳；工具组件只优化必要内容部位。默认值可随首次结果类型确定，
 用户主动选择优先，刷新与流式到终态不能重置选择。失败摘要、取消、未知结果及人工等待
-不能被默认折叠完全隐藏。task 受理仅显示 Thread 链接，不代表子任务完成。
+不能被默认折叠完全隐藏。task Header 使用 `task Explorer [max_turns=4 thread_id=xxx]`，
+thread_id 仅在作为参数传入时出现；prompt 保持原文。调用正文不重复 Thread ID 字段，调用目标和
+accepted 收据都使用“查看 subagent 执行”链接，字体与正文一致，不突出裸 UUID，也不代表子任务完成。
+常规状态只保留状态色、data 属性、accessible label/title 与 aria-busy，不显示重复状态文字或图标；
+环境等待等实际阻塞保留文字，审批、问卷动作与错误详情不受影响。
 展开按钮固定在第一行最右侧；能否展开只看是否存在有意义正文，默认展开由工具身份与当前结果事实
 推导（错误结果、write/edit/bash/task/ask_user，以及权威 MIME 解析完成后的 read 图片默认展开，
 未知/MCP 成功结果默认折叠），用户选择一旦产生就不再被流式转终态或重渲染重置。
 失败摘要只在正文未完整呈现同一失败文本时出现，durable 结果到达后旧 partial 错误不再展示，
-失败文案一律来自真实 payload，没有通用兜底。长内容与持续日志只在唯一有界 mono 视口内滚动，
+失败文案一律来自真实 payload，没有通用兜底。长内容与持续日志只在唯一有界视口内滚动，
+工具代码和日志使用 mono，task 的提示与链接沿用正文文字，
 `overscroll-behavior: auto` 让滚轮在内部触底/顶后自然链到外层 transcript，不做 JS 滚轮路由。
 
 ## Session 树与命名分支
@@ -173,6 +184,9 @@ Debug。展示不改变模型正文、Provider 协议、资源安全边界或既
 子代理回执固定 XML 信封正确转义，保留模型所需完整历史任务及说明；用户卡片展示来源、
 Thread 链接和结果/错误/partial，不重复铺开 task prompt。信封只分段，正文用安全 Markdown。
 格式非法明确提示，未知 kind 不假定为子代理结果，不执行原始 HTML。
+回执默认折叠，摘要顺序为 agent、真实状态图标、任务预览、执行链接、最后的展开箭头；
+链接和展开按钮独立，点击链接不展开。已返回无可见文字，图标保留 aria-label/title；
+展开后完整 task/result/error/partial 内容保持不变。
 
 ## 压缩摘要系统卡片
 
