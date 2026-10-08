@@ -35,8 +35,8 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
   }
 
   @Override
-  public boolean setBlobIdIfNull(UUID id, UUID blobId, Instant now) {
-    return uploadMapper.setBlobIdIfNull(id, blobId, now) == 1;
+  public boolean setBlobIdIfNull(UUID id, UUID blobId, Instant expiryCutoff) {
+    return uploadMapper.setBlobIdIfNull(id, blobId, expiryCutoff) == 1;
   }
 
   @Override
@@ -45,8 +45,8 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
   }
 
   @Override
-  public List<UUID> listCleanupCandidateIds(int limit, Instant now) {
-    return uploadMapper.listCleanupCandidateIds(limit, now);
+  public List<UUID> listCleanupCandidateIds(int limit, Instant now, Instant expiryCutoff) {
+    return uploadMapper.listCleanupCandidateIds(limit, now, expiryCutoff);
   }
 
   @Override
@@ -81,7 +81,7 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
     target.setDeclaredMediaType(upload.getDeclaredMediaType());
     target.setDeclaredSize(upload.getDeclaredSize());
     target.setDeclaredSha256(upload.getDeclaredSha256());
-    target.setExpiresAt(upload.getExpiresAt());
+    target.setCreateTime(upload.getCreateTime());
     target.setCleanupRequestedAt(upload.getCleanupRequestedAt());
     target.setCleanupToken(upload.getCleanupToken());
     target.setCleanupUntil(upload.getCleanupUntil());
@@ -100,7 +100,6 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
     target.setDeclaredMediaType(row.getDeclaredMediaType());
     target.setDeclaredSize(row.getDeclaredSize());
     target.setDeclaredSha256(row.getDeclaredSha256());
-    target.setExpiresAt(row.getExpiresAt());
     target.setCleanupRequestedAt(row.getCleanupRequestedAt());
     target.setCleanupToken(row.getCleanupToken());
     target.setCleanupUntil(row.getCleanupUntil());

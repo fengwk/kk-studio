@@ -54,10 +54,10 @@ public class StorageIntegrationSupport {
     return storageUploadService.complete(UUID.fromString(pending.getId())).getBlobId();
   }
 
+  /** 把上传创建时间回拨到默认 TTL（86400s）之外，使其在当下 policy 下已过期。 */
   public void backdateUpload(String uploadId) {
     jdbc.update(
-        "update storage_upload set created_at = expires_at - interval '2 hours',"
-            + " expires_at = current_timestamp - interval '1 minute' where id = ?",
+        "update storage_upload set created_at = current_timestamp - interval '2 days' where id = ?",
         UUID.fromString(uploadId));
   }
 

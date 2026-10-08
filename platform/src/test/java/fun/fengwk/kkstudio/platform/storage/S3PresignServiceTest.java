@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 
 import java.net.URI;
@@ -149,6 +150,37 @@ public class S3PresignServiceTest {
       assertTrue(
           delta >= defaultExpiresMillis - 30_000L && delta <= defaultExpiresMillis + 30_000L,
           "default expiry delta out of range: " + delta);
+    }
+  }
+
+  /** 测试意图：每次签名都现读 {@link SystemSettingsSnapshot}；修改 presign 默认值只影响之后新签发的 URL，已签发 URL 不追溯。 */
+  @Test
+  public void testPresignReadsLiveSnapshotOnEverySigning() {
+    S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, false);
+    SystemSettingsSnapshot snapshot = snapshotWith(SystemSettings.StorageMedia.DEFAULT);
+    try (TestContext context = new TestContext(props, snapshot)) {
+      long before = System.currentTimeMillis();
+      S3PresignedUrl first = context.service.presignDownload("docs/live.md", null);
+      long firstDelta = Instant.parse(first.getExpiresAt()).toEpochMilli() - before;
+      assertTrue(
+          firstDelta >= 1_800_000L - 30_000L && firstDelta <= 1_800_000L + 30_000L,
+          "default 1800s window, got delta " + firstDelta);
+
+      // 热更新默认有效期为 900s：下一次签名立即生效。
+      snapshot.replace(
+          settingsWith(new SystemSettings.StorageMedia(86_400L, 900L, 3_600L, 30_000L, 512, 80)));
+      long secondBefore = System.currentTimeMillis();
+      S3PresignedUrl second = context.service.presignDownload("docs/live.md", null);
+      long secondDelta = Instant.parse(second.getExpiresAt()).toEpochMilli() - secondBefore;
+      assertTrue(
+          secondDelta >= 900_000L - 30_000L && secondDelta <= 900_000L + 30_000L,
+          "updated 900s window, got delta " + secondDelta);
+
+      // 已签发 URL 不被追溯改写：其到期时刻仍落在最初的 1800s 窗口。
+      long firstRemaining = Instant.parse(first.getExpiresAt()).toEpochMilli() - secondBefore;
+      assertTrue(
+          firstRemaining > 900_000L,
+          "an already-issued URL must keep its original validity, got " + firstRemaining);
     }
   }
 
@@ -295,6 +327,21 @@ public class S3PresignServiceTest {
         newS3Properties(PUBLIC_ENDPOINT, false), SystemSettings.StorageMedia.DEFAULT);
   }
 
+  private static SystemSettingsSnapshot snapshotWith(SystemSettings.StorageMedia storageMedia) {
+    return new SystemSettingsSnapshot(settingsWith(storageMedia));
+  }
+
+  private static SystemSettings settingsWith(SystemSettings.StorageMedia storageMedia) {
+    return new SystemSettings(
+        SystemSettings.DEFAULT.tool(),
+        SystemSettings.DEFAULT.aiRuntime(),
+        SystemSettings.DEFAULT.environment(),
+        SystemSettings.DEFAULT.network(),
+        SystemSettings.DEFAULT.integrations(),
+        storageMedia,
+        SystemSettings.DEFAULT.advanced());
+  }
+
   private static S3StorageProperties newS3Properties(
       String publicEndpoint, boolean publicEndpointBlank) {
     S3StorageProperties properties = new S3StorageProperties();
@@ -315,6 +362,10 @@ public class S3PresignServiceTest {
     final S3Presigner presigner;
 
     TestContext(S3StorageProperties properties, SystemSettings.StorageMedia storageMedia) {
+      this(properties, snapshotWith(storageMedia));
+    }
+
+    TestContext(S3StorageProperties properties, SystemSettingsSnapshot snapshot) {
       this.presigner =
           S3Presigner.builder()
               .endpointOverride(URI.create(properties.getEffectivePublicEndpoint()))
@@ -325,7 +376,7 @@ public class S3PresignServiceTest {
                           properties.getAccessKey(), properties.getSecretKey())))
               .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
               .build();
-      this.service = new S3PresignServiceImpl(properties, presigner, storageMedia);
+      this.service = new S3PresignServiceImpl(properties, presigner, snapshot);
     }
 
     @Override
