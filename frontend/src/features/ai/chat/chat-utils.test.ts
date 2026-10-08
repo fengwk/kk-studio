@@ -191,19 +191,38 @@ describe('formatBackendDate', () => {
     expect(formatBackendDate([2026])).toBe('2026-01-01 00:00')
   })
 
-  it('returns a placeholder for null, empty arrays and non-finite years', () => {
+  it('returns a placeholder for empty and invalid dates without throwing', () => {
     expect(formatBackendDate(null)).toBe('-')
     expect(formatBackendDate([])).toBe('-')
     expect(formatBackendDate([Number.NaN])).toBe('-')
+    expect(formatBackendDate([2026, Number.NaN])).toBe('-')
+    expect(formatBackendDate([2026, 13])).toBe('-')
+    expect(formatBackendDate('')).toBe('-')
+    expect(formatBackendDate('not-a-date')).toBe('-')
+    expect(formatBackendDate(Number.NaN)).toBe('-')
+    expect(formatBackendDate(Number.POSITIVE_INFINITY)).toBe('-')
+    expect(formatBackendDate(1e20)).toBe('-')
   })
 
-  it('converts numeric timestamps distinguishing seconds from milliseconds', () => {
+  it('formats equivalent instants in local time independently of the host timezone', () => {
+    // Intl is an independent local-time oracle; fixed timezone browser cases cover the wire paths.
+    const milliseconds = Date.parse('2026-10-08T13:15:00Z')
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(milliseconds)
+    const fields = Object.fromEntries(parts.map(({ type, value }) => [type, value]))
+    const expected = `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute}`
     expect(formatBackendDate(0)).toBe('-')
-    expect(formatBackendDate(1_782_000_000)).toBe('2026-06-21 00:00')
-    expect(formatBackendDate(1_782_000_000_000)).toBe('2026-06-21 00:00')
+    for (const value of [
+      milliseconds / 1000, milliseconds, '2026-10-08T13:15:00Z',
+      '2026-10-08T21:15:00+08:00', '2026-10-08T09:15:00-0400',
+    ]) {
+      expect(formatBackendDate(value)).toBe(expected)
+    }
   })
 
-  it('normalizes ISO-like string timestamps to the first 16 characters', () => {
+  it('preserves local wall-clock strings without timezone conversion', () => {
     expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
     expect(formatBackendDate('2026-06-20 02:01:00')).toBe('2026-06-20 02:01')
   })

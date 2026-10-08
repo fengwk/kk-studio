@@ -107,16 +107,34 @@ export function formatBackendDate(value: BackendDateTime | InstantTimestamp): st
   }
   if (Array.isArray(value)) {
     const [year, month = 1, day = 1, hour = 0, minute = 0] = value
-    if (!Number.isFinite(year)) {
+    if (
+      ![year, month, day, hour, minute].every(Number.isFinite)
+      || month < 1 || month > 12
+      || day < 1 || day > 31
+      || hour < 0 || hour > 23
+      || minute < 0 || minute > 59
+    ) {
       return '-'
     }
     return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(
       day,
     ).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
   }
-  if (typeof value === 'number') {
-    const milliseconds = Math.abs(value) < 100_000_000_000 ? value * 1000 : value
-    return new Date(milliseconds).toISOString().replace('T', ' ').slice(0, 16)
+  const date = new Date(
+    typeof value === 'number'
+      ? (Math.abs(value) < 100_000_000_000 ? value * 1000 : value)
+      : value,
+  )
+  if (!Number.isFinite(date.getTime())) {
+    return '-'
   }
-  return value.replace('T', ' ').slice(0, 16)
+  // 无时区字符串与数组是本地 wall-clock；有时区字符串和 epoch 才代表瞬时。
+  if (typeof value === 'string' && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+    return value.replace('T', ' ').slice(0, 16)
+  }
+  return `${String(date.getFullYear()).padStart(4, '0')}-${String(
+    date.getMonth() + 1,
+  ).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(
+    date.getHours(),
+  ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
