@@ -13,6 +13,11 @@ import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadSta
 import { ThinkingBlock } from '@/features/ai/runtime/thread-panel/messages/ThinkingBlock'
 import { UserMessageBlock } from '@/features/ai/runtime/thread-panel/messages/UserMessageBlock'
 import { MetaMessageBlock } from '@/features/ai/runtime/thread-panel/messages/MetaMessageBlock'
+import { MessageList } from '@/features/ai/runtime/thread-panel/messages/MessageList'
+import { EntryBranchContext } from '@/features/ai/runtime/thread-panel/entry-branch-context'
+import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import { Button } from '@/shared/ui/controls/Button'
 import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type {
   MetaDialogueMessage,
@@ -235,7 +240,66 @@ export function ChatLayoutHarnessApp() {
   )
 }
 
+/** 离线持久 Entry 经过真实 timeline 和消息分派，不手写 footer 或错误卡片。 */
+function TurnUsageHarness() {
+  const [forkEntryId, setForkEntryId] = useState('')
+  const [readOnly, setReadOnly] = useState(false)
+  const entries: HarnessSessionEntryDTO[] = []
+  const append = (
+    entryId: string,
+    entryType: HarnessSessionEntryDTO['entryType'],
+    payload: Record<string, unknown>,
+  ) => {
+    entries.push({
+      entryId,
+      entryType,
+      sessionId: 'usage-session',
+      parentEntryId: entries.at(-1)?.entryId ?? null,
+      payloadJson: JSON.stringify(payload),
+      createTime: '2026-07-28T10:00:00Z',
+    })
+  }
+  const settings = {
+    agentName: 'coding',
+    model: { providerName: 'offline', modelName: 'fixture', variant: 'default' },
+    environmentName: null,
+  }
+  for (const withUsage of [false, true]) {
+    const id = withUsage ? 'with-usage' : 'no-usage'
+    append(`start-${id}`, 'TURN_START', { reason: 'USER_MESSAGE', settings })
+    if (withUsage) {
+      append('assistant-with-usage', 'MESSAGE', {
+        message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '已生成的回答' }] },
+        assistantMetadata: { usage: { inputTokens: 10, outputTokens: 20 } },
+      })
+    }
+    append(`error-${id}`, 'ASSISTANT_ERROR', {
+      error: { code: 'OFFLINE_FAILURE', message: `离线失败：${id}` },
+      attempt: { attempt: 1, sequence: 0, text: '', thinking: '' },
+    })
+    append(`end-${id}`, 'TURN_END', { outcome: 'FAILED', continueModel: false })
+  }
+  const timeline = buildThreadTimeline(entries, [], [])
+  return (
+    <main style={{ padding: 24, maxWidth: 720 }}>
+      <Button variant="ghost" onClick={() => setReadOnly((value) => !value)}>
+        {readOnly ? '启用分支' : '只读子代理'}
+      </Button>
+      <output data-testid="fork-entry-id">{forkEntryId}</output>
+      <div data-testid="turn-usage-timeline">
+        <EntryBranchContext.Provider value={readOnly ? null : setForkEntryId}>
+          <MessageList messages={timeline.messages} />
+        </EntryBranchContext.Provider>
+      </div>
+    </main>
+  )
+}
+
 const rootElement = document.getElementById('root')
 if (rootElement) {
-  createRoot(rootElement).render(<ChatLayoutHarnessApp />)
+  createRoot(rootElement).render(
+    new URLSearchParams(window.location.search).get('scenario') === 'turn-usage'
+      ? <TurnUsageHarness />
+      : <ChatLayoutHarnessApp />,
+  )
 }
