@@ -82,7 +82,7 @@ const ACTIVITY_FIELDS = [
 ]
 
 /** ProjectSnapshotDTO / ProjectIssueSnapshotDTO 精确字段集合：快照不再聚合依赖图。 */
-const SNAPSHOT_FIELDS = ['project', 'issues']
+const SNAPSHOT_FIELDS = ['project', 'issues', 'referencedStateCodes']
 const SNAPSHOT_ISSUE_FIELDS = ['issue', 'currentOrLatestRun']
 
 const RESERVED_STATES = ['INIT', 'BLOCKED', 'DONE']
@@ -139,12 +139,35 @@ function assertHumanActivity(activity, { issueId, kind, body }) {
   return activity
 }
 
+/**
+ * 断言 Project Snapshot 的引用状态集合：所有未归档及归档 Issue 的当前状态与阻塞恢复目标，去重并按字符串自然序。
+ * 期望值由调用方按明确的 Issue 事实给出，而不是从快照自身反推，避免把实现细节当成不变量。
+ */
+export function assertReferencedStateCodes(actual, expected, label = 'referencedStateCodes') {
+  assert(Array.isArray(actual), `${label} must be an array: ${JSON.stringify(actual)}`)
+  assert(
+    actual.every((code) => typeof code === 'string' && code.trim().length > 0),
+    `${label} must contain only non-empty string state codes: ${JSON.stringify(actual)}`,
+  )
+  // TreeSet<String> 的自然序即默认字符串排序；去重与排序都是读取面的契约，不是可选项。
+  const canonical = [...new Set(actual)].sort()
+  assert(
+    actual.length === canonical.length && actual.every((code, index) => code === canonical[index]),
+    `${label} must be de-duplicated and naturally sorted: ${JSON.stringify(actual)}`,
+  )
+  assert(
+    JSON.stringify(actual) === JSON.stringify([...expected].sort()),
+    `${label} must equal the referenced states: ${JSON.stringify({ actual, expected })}`,
+  )
+  return actual
+}
+
 registerCase({
   id: 'project.issue_lifecycle',
   level: 'L1',
   title: 'Project workflow/Issue 状态机与 Activity 事实流',
   docs:
-    '免费 L1：Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、pause(UNKNOWN)/resolve-unknown/resume 门禁与 400 约定、无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
+    '免费 L1：Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、pause(UNKNOWN)/resolve-unknown/resume 门禁与 400 约定、无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（含去重排序的 referencedStateCodes 引用状态全集）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
@@ -553,6 +576,15 @@ registerCase({
           && current.version === '7',
         JSON.stringify(current),
       )
+      // 阻塞中的引用状态集合必须同时含当前状态 BLOCKED、阻塞恢复目标 WORK 与另一 Issue 的 INIT，且去重排序。
+      const blockedSnapshot = envelopeData(
+        (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json,
+      )
+      assertReferencedStateCodes(
+        blockedSnapshot.referencedStateCodes,
+        ['BLOCKED', 'INIT', 'WORK'],
+        'blocked project snapshot referencedStateCodes',
+      )
       await expectHttpError(
         () =>
           ctx.call('POST', `/api/issues/${issue.id}/block`, {
@@ -760,6 +792,8 @@ registerCase({
           && snapshotIssue.currentOrLatestRun === null,
         JSON.stringify(snapshot),
       )
+      // 未归档集合的引用状态是去重排序后的当前状态全集：primary=WORK、dependency=INIT。
+      assertReferencedStateCodes(snapshot.referencedStateCodes, ['INIT', 'WORK'])
 
       // 归档/恢复归档只切换可编辑性，不删除历史；删除后不存在。
       current = envelopeData(
@@ -770,6 +804,20 @@ registerCase({
         ).json,
       )
       assert(current.archivedAt != null, JSON.stringify(current))
+      // 归档 Issue 的内容不进入 issues，但其状态仍必须贡献引用集合：已归档 primary(WORK) 与 dependency(INIT) 并列。
+      const archivedSnapshot = envelopeData(
+        (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json,
+      )
+      assert(
+        archivedSnapshot.issues.length === 1
+          && archivedSnapshot.issues[0].issue.id === dependency.id,
+        JSON.stringify(archivedSnapshot.issues),
+      )
+      assertReferencedStateCodes(
+        archivedSnapshot.referencedStateCodes,
+        ['INIT', 'WORK'],
+        'archived project snapshot referencedStateCodes',
+      )
       current = envelopeData(
         (
           await ctx.call('POST', `/api/issues/${issue.id}/unarchive`, {
@@ -788,6 +836,8 @@ registerCase({
         remaining.issues.length === 1 && remaining.issues[0].issue.id === dependency.id,
         JSON.stringify(remaining.issues),
       )
+      // 删除 primary 后引用集合只剩 dependency 的 INIT，证明删除不会遗留状态引用。
+      assertReferencedStateCodes(remaining.referencedStateCodes, ['INIT'])
 
       project = envelopeData(
         (

@@ -31,6 +31,24 @@ export function assertDecimalVersion(value, label = 'version') {
   )
 }
 
+/** Instant 的数字 wire 值为 epoch 秒；字符串时间必须是带时区的 ISO instant。 */
+export function instantEpochMillis(value, label = 'instant') {
+  if (typeof value === 'number') {
+    assert(
+      Number.isFinite(value * 1000) && value >= 0,
+      `${label} must be a non-negative epoch-second number, got ${JSON.stringify(value)}`,
+    )
+    return Math.round(value * 1000)
+  }
+  assert(
+    typeof value === 'string'
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+      && Number.isFinite(Date.parse(value)) && Date.parse(value) >= 0,
+    `${label} must be an ISO instant or epoch-second number, got ${JSON.stringify(value)}`,
+  )
+  return Date.parse(value)
+}
+
 export async function httpJson(
   baseUrl,
   method,
