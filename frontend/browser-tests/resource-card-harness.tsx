@@ -9,8 +9,10 @@ import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
 import { emptyAgentDraft, emptyModelDraft, emptyProviderDraft } from '@/features/ai/catalog/ai-resource-draft-codecs'
 import { setLocale } from '@/shared/i18n'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { PluginsTab } from '@/features/ai/plugins/PluginsTab'
 
-setLocale('zh-CN')
+setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
 const LONG_TITLE =
   'a-very-long-resource-name-that-must-be-truncated-with-the-full-name-kept-available'
@@ -95,8 +97,12 @@ export function ResourceCardHarnessApp() {
 
 const rootEl = document.getElementById('root')
 if (rootEl) {
-  createRoot(rootEl).render(new URLSearchParams(location.search).has('forms')
-    ? <ResourceFormsHarness /> : <ResourceCardHarnessApp />)
+  const params = new URLSearchParams(location.search)
+  createRoot(rootEl).render(params.has('plugins')
+    ? <QueryClientProvider client={new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })}><main style={{ padding: 16 }}><PluginsTab /></main></QueryClientProvider>
+    : params.has('forms') ? <ResourceFormsHarness /> : <ResourceCardHarnessApp />)
 }
 
 function ResourceFormsHarness() {

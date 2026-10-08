@@ -62,6 +62,7 @@ import type {
   IssueEvidenceDTO,
   ProjectWorkflowDTO,
 } from '../types'
+import './issue-detail-alerts.css'
 
 export interface IssueDetailModalProps {
   isOpen: boolean
@@ -1090,19 +1091,10 @@ export function IssueDetailModal({
         {/* 存储读取异常警告条 */}
         {storageLoadError && (
           <div
-            className="form-error-banner"
+            className="form-error-banner issue-detail-alert issue-detail-alert-danger"
             role="alert"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              margin: '8px 20px 0 20px',
-              backgroundColor: 'var(--bg-danger-subtle, #330000)',
-              borderColor: 'var(--border-danger, #ef4444)',
-              color: 'var(--fg)',
-            }}
           >
-            <AlertTriangle size={16} color="#ef4444" aria-hidden="true" />
+            <AlertTriangle size={16} aria-hidden="true" />
             <span>{t('projects.issue.storageLoadError', { error: storageLoadError })}</span>
           </div>
         )}
@@ -1110,31 +1102,22 @@ export function IssueDetailModal({
         {/* 损坏挂起记录警告条 */}
         {corruptActionInfo && (
           <div
-            className="form-error-banner"
+            className="form-error-banner issue-detail-alert issue-detail-alert-warning"
             role="alert"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              margin: '8px 20px 0 20px',
-              backgroundColor: 'var(--bg-warning-subtle, #2d2600)',
-              borderColor: 'var(--border-warning, #eab308)',
-              color: 'var(--fg)',
-            }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <AlertTriangle size={16} color="#eab308" aria-hidden="true" />
-              <strong style={{ color: '#eab308' }}>{t('projects.issue.corruptActionTitle')}</strong>
+            <div className="issue-detail-alert-heading">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <strong>{t('projects.issue.corruptActionTitle')}</strong>
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+            <div className="issue-detail-alert-detail">
               {t('projects.issue.corruptActionDetail', { error: corruptActionInfo.error })}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+            <div className="issue-detail-alert-actions">
               <Button
                 danger
                 onClick={handleDiscardCorruptAction}
                 disabled={isActionPending}
-                style={{ fontSize: '12px', padding: '4px 12px' }}
+                size="compact"
               >
                 {t('projects.issue.discardCorruptAction')}
               </Button>
@@ -1145,32 +1128,23 @@ export function IssueDetailModal({
         {/* 未决写操作未知状态警告条 (I07) */}
         {pendingUnknownAction && (
           <div
-            className="form-error-banner"
+            className="form-error-banner issue-detail-alert issue-detail-alert-warning"
             role="alert"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              margin: '8px 20px 0 20px',
-              backgroundColor: 'var(--bg-warning-subtle, #2d2600)',
-              borderColor: 'var(--border-warning, #eab308)',
-              color: 'var(--fg)',
-            }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <AlertTriangle size={16} color="#eab308" aria-hidden="true" />
-              <strong style={{ color: '#eab308' }}>{t('projects.issue.unknownPending')}</strong>
+            <div className="issue-detail-alert-heading">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <strong>{t('projects.issue.unknownPending')}</strong>
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+            <div className="issue-detail-alert-detail">
               {t('projects.issue.pendingActionKind')} <code>{pendingUnknownAction.kind}</code> |
               {t('projects.issue.pendingRequestKey')} <code>{pendingUnknownAction.requestKey}</code> |
               {t('projects.issue.pendingExpectedVersion')} <code>{pendingUnknownAction.expectedVersion}</code>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+            <div className="issue-detail-alert-actions">
               <Button
                 onClick={() => void handleRetryPendingAction()}
                 disabled={isActionPending}
-                style={{ fontSize: '12px', padding: '4px 12px' }}
+                size="compact"
               >
                 {isActionPending ? t('projects.issue.retrying') : t('projects.issue.retryOriginalAction')}
               </Button>
@@ -1180,27 +1154,27 @@ export function IssueDetailModal({
                   danger
                   onClick={() => setIsDiscardConfirmOpen(true)}
                   disabled={isActionPending}
-                  style={{ fontSize: '12px', padding: '4px 12px' }}
+                  size="compact"
                 >
                   {t('projects.issue.discardPending')}
                 </Button>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--danger)' }}>
+                <div className="issue-detail-alert-actions">
+                  <span className="issue-detail-alert-discard">
                     {t('projects.issue.discardWarning')}
                   </span>
                   <Button
                     danger
                     onClick={handleDiscardPendingAction}
                     disabled={isActionPending}
-                    style={{ fontSize: '12px', padding: '2px 8px' }}
+                    size="compact"
                   >
                     {t('projects.issue.confirmDiscard')}
                   </Button>
                   <Button
                     variant="ghost"
                     onClick={() => setIsDiscardConfirmOpen(false)}
-                    style={{ fontSize: '12px', padding: '2px 8px' }}
+                    size="compact"
                   >
                     {t('projects.cancel')}
                   </Button>
@@ -1213,15 +1187,14 @@ export function IssueDetailModal({
         {/* 冲突与错误提示横幅 */}
         {conflictDetail && (
           <div
-            className="form-error-banner"
+            className="form-error-banner issue-detail-alert issue-detail-alert-conflict"
             role="alert"
-            style={{ margin: '8px 20px 0 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="issue-detail-alert-heading">
               <AlertTriangle size={16} aria-hidden="true" />
               <span>{conflictDetail}</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="issue-detail-alert-actions">
               {isEditingSpec && detail?.issue && detail.issue.version !== specVersion && (
                 <Button
                   onClick={() => {
@@ -1231,7 +1204,7 @@ export function IssueDetailModal({
                     }
                   }}
                   disabled={isWriteBlocked}
-                  style={{ fontSize: '12px', whiteSpace: 'nowrap', padding: '2px 8px' }}
+                  size="compact"
                   title={t('projects.issue.confirmOverwriteRiskTitle')}
                 >
                   {t('projects.issue.confirmOverwriteRisk')}
@@ -1240,7 +1213,7 @@ export function IssueDetailModal({
               <Button
                 variant="ghost"
                 onClick={() => void handleReloadFreshData()}
-                style={{ fontSize: '12px', whiteSpace: 'nowrap' }}
+                size="compact"
               >
                 <RefreshCw size={12} aria-hidden="true" />
                 <span>{t('projects.issue.refreshAndKeepDraft')}</span>
@@ -1250,7 +1223,7 @@ export function IssueDetailModal({
         )}
 
         {displayError && (
-          <div className="form-error-banner" role="alert" style={{ margin: '8px 20px 0 20px' }}>
+          <div className="form-error-banner issue-detail-alert" role="alert">
             <AlertTriangle size={16} aria-hidden="true" />
             <span>{displayError}</span>
           </div>
@@ -1564,7 +1537,7 @@ export function IssueDetailModal({
                             {r.nextState && (
                               <div className="run-detail-row">
                                 <span>{t('projects.issue.handoverTargetLabel')}</span>
-                                <strong style={{ color: 'var(--primary)' }}>{r.nextState}</strong>
+                                <strong style={{ color: 'var(--accent)' }}>{r.nextState}</strong>
                               </div>
                             )}
                             {r.error && (
@@ -1616,7 +1589,7 @@ export function IssueDetailModal({
                             </div>
                             <div>
                               <span>{t('projects.issue.remainingRunsLabel')}</span>
-                              <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                              <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--green-primary)' : 'var(--danger)' }}>
                                 {b.remainingRuns}
                               </strong>
                             </div>
