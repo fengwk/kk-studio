@@ -45,7 +45,7 @@ DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 
 export DAEMON_ENV_ROOT
 
-BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.8.jar"}
+BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.9.jar"}
 DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}
 
 step() { echo "==> $*"; }
