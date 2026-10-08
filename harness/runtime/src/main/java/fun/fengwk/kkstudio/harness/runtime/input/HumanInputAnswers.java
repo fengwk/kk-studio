@@ -10,15 +10,9 @@ import java.util.Set;
  * 一份已校验并规范化的人工输入答案：按问题位置对应的答案列表，或明确的拒答。
  *
  * <p>答案本身是工具结果：{@code {"answers":[["1080P"],["成片","字幕"]]}} 或 {@code {"declined":true}}。归一化保证仅选择顺序不同
- * 的提交比较相等：去重、去首尾空白，并按选项 label 的问卷顺序排列（自定义文本固定最后）。拒答是明确的成功结果，绝不虚构默认答案。
+ * 的提交比较相等：去重、去首尾空白，并按选项 label 的问卷顺序排列（自定义文本固定最后）。拒答是明确的成功结果，绝不虚构默认答案。答案文本不设业务字符上限。
  */
 public record HumanInputAnswers(boolean declined, List<List<String>> answers) {
-
-  /** 单个回答文本的字符上限。 */
-  public static final int MAX_ANSWER_CHARACTERS = 4096;
-
-  /** 单次提交全部回答文本的字符上限，保证规范化答案作为工具结果始终小于 ToolResult 的 details 上限。 */
-  public static final int MAX_TOTAL_ANSWER_CHARACTERS = 64 * 1024;
 
   public HumanInputAnswers {
     Objects.requireNonNull(answers, "answers");
@@ -27,7 +21,7 @@ public record HumanInputAnswers(boolean declined, List<List<String>> answers) {
       Objects.requireNonNull(questionAnswers, "answers[]");
       List<String> entries = new ArrayList<>(questionAnswers.size());
       for (String answer : questionAnswers) {
-        entries.add(HumanInputTexts.requireText(answer, "answer", MAX_ANSWER_CHARACTERS));
+        entries.add(HumanInputTexts.requireText(answer, "answer"));
       }
       if (entries.isEmpty()) {
         throw new IllegalArgumentException("each question requires at least one answer");
@@ -75,18 +69,9 @@ public record HumanInputAnswers(boolean declined, List<List<String>> answers) {
               + submitted.size());
     }
     List<List<String>> normalized = new ArrayList<>(submitted.size());
-    int totalCharacters = 0;
     for (int index = 0; index < submitted.size(); index++) {
-      List<String> entries =
-          normalizeAnswer(index, questionnaire.questions().get(index), submitted.get(index));
-      for (String entry : entries) {
-        totalCharacters += entry.length();
-      }
-      normalized.add(entries);
-    }
-    if (totalCharacters > MAX_TOTAL_ANSWER_CHARACTERS) {
-      throw new IllegalArgumentException(
-          "a submission must not exceed " + MAX_TOTAL_ANSWER_CHARACTERS + " characters");
+      normalized.add(
+          normalizeAnswer(index, questionnaire.questions().get(index), submitted.get(index)));
     }
     return new HumanInputAnswers(false, normalized);
   }
@@ -110,10 +95,6 @@ public record HumanInputAnswers(boolean declined, List<List<String>> answers) {
       String normalized = answer.strip();
       if (normalized.isEmpty()) {
         throw new IllegalArgumentException(subject + " requires a non-blank answer");
-      }
-      if (normalized.length() > MAX_ANSWER_CHARACTERS) {
-        throw new IllegalArgumentException(
-            "an answer must be <= " + MAX_ANSWER_CHARACTERS + " characters");
       }
       deduped.add(normalized);
     }

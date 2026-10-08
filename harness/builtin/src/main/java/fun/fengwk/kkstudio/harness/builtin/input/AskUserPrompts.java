@@ -16,7 +16,7 @@ final class AskUserPrompts {
 
   private AskUserPrompts() {}
 
-  /** 工具说明：何时提问、问卷形状与冻结限制，不携带 Parameters 段（字段说明由 schema 提供）。 */
+  /** 工具说明：何时提问、问卷形状与冻结语义，不携带 Parameters 段（字段说明由 schema 提供）。 */
   static String instructions() {
     return template("ask_user.md").render(Map.of());
   }
