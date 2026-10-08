@@ -10,6 +10,8 @@ import {
 } from '@/features/ai/chat/history-tree'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import '@/features/ai/chat/history-tree.css'
 
 const KIND_LABEL_KEYS: Record<HistoryEntryKind, string> = {
@@ -111,7 +113,7 @@ export function HistoryTree({
       controls={(
         <label className="history-tree-search">
           <span className="sr-only">{t('ai.chat.history.search')}</span>
-          <input
+          <TextInput
             ref={searchRef}
             type="search"
             value={searchQuery}
@@ -135,18 +137,16 @@ export function HistoryTree({
             </span>
           ) : null}
           <div className="history-tree-actions">
-            <button type="button" className="ghost-btn" onClick={onClose}>
+            <Button variant="ghost" onClick={onClose}>
               {t('ai.chat.history.cancel')}
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
+            </Button>
+            <Button
               disabled={loading || selectedRow?.canFork !== true}
               title={selectedRow?.canFork === false ? t('ai.chat.branch.notBoundary') : undefined}
               onClick={() => selectedRow?.canFork && onFork(selectedRow.entry)}
             >
               {t('ai.chat.branch.fromHere')}
-            </button>
+            </Button>
           </div>
         </div>
       )}

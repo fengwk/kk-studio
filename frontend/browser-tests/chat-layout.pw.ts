@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const REPORTS_DIR = path.resolve(__dirname, '../../reports/layout')
+const REPORTS_DIR = process.env.KK_LAYOUT_REPORTS_DIR ?? path.resolve(__dirname, '../../reports/layout')
 
 async function selectLayoutOption(page: Page, value: string, label: string) {
   const trigger = page.locator('#chat-layout-select')

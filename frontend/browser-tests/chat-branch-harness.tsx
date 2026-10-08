@@ -36,7 +36,7 @@ export function ChatBranchHarnessApp() {
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
         <MemoryRouter initialEntries={[`/chats/${HARNESS_CHAT_ID}`]}>
-          <div data-testid="scenario" data-scenario={scenario}>
+          <div className="chat-branch-harness-frame" data-testid="scenario" data-scenario={scenario}>
             <Routes>
               <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
             </Routes>

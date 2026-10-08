@@ -7,6 +7,7 @@ import type {
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import { useI18n } from '@/shared/i18n'
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
+import { Button } from '@/shared/ui/controls/Button'
 
 function envBadge(support: 'NONE' | 'OPTIONAL' | 'REQUIRED'): string {
   switch (support) {
@@ -123,9 +124,9 @@ export function ThreadModelRequestDebug({
           <span>{t('ai.runtime.debug.inspectActions')}</span>
         </div>
         <div className="thread-debug-preview-actions">
-          <button
-            type="button"
-            className="ghost-inline-btn thread-debug-preview-action"
+          <Button
+            variant="inline"
+            className="thread-debug-preview-action"
             disabled={previewDisabled || previewLoading || onPreview == null}
             aria-label={
               previewLoading
@@ -147,18 +148,17 @@ export function ThreadModelRequestDebug({
               <LoaderCircle size={12} className="preview-icon spin" aria-hidden="true" />
             ) : null}
             {previewTitle}
-          </button>
+          </Button>
           {debug.frozenInvocation ? (
-            <button
-              type="button"
-              className="ghost-inline-btn"
+            <Button
+              variant="inline"
               title={t('ai.runtime.debug.requestSnapshotTitle')}
               aria-label={t('ai.runtime.debug.requestSnapshotTitle')}
               onClick={() => onSelectInspector({ type: 'request' })}
             >
               <Eye size={12} aria-hidden="true" />
               {t('ai.runtime.debug.requestSnapshot')}
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>

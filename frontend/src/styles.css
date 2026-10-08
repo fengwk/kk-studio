@@ -3295,34 +3295,6 @@ div.is-error {
   white-space: nowrap;
 }
 
-.thread-interaction-close {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-
-.thread-interaction-close:hover:not(:disabled) {
-  background: var(--stage-dot);
-  color: var(--fg);
-}
-
-.thread-interaction-close:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.thread-interaction-close svg {
-  width: 15px;
-  height: 15px;
-}
-
 .thread-interaction-controls {
   flex: 0 0 auto;
   display: flex;
@@ -5241,18 +5213,6 @@ select.settings-input option {
 
 .name-rename-body input {
   width: 100%;
-  box-sizing: border-box;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--fg);
-  font-size: 13px;
-}
-
-.name-rename-body input:focus {
-  border-color: var(--green-border);
-  outline: none;
 }
 
 .name-rename-error {
@@ -6385,23 +6345,6 @@ select.settings-input option {
 
 .interaction-custom-input {
   width: 100%;
-  padding: 8px 12px;
-  font-size: 13px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--fg);
-  box-sizing: border-box;
-}
-
-.interaction-custom-input::placeholder {
-  color: var(--fg-dim);
-}
-
-.interaction-custom-input:focus {
-  outline: none;
-  border-color: var(--green-primary);
-  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .interaction-actions-bar {

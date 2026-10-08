@@ -8,6 +8,8 @@ import {
   type RefObject,
 } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { ThreadModelRequestDebug } from '@/features/ai/runtime/thread-panel/ThreadModelRequestDebug'
 import {
@@ -43,6 +45,9 @@ const TAB_KEYS: DebugViewTab[] = ['preview', 'events', 'detail']
 
 export interface ThreadEventViewProps {
   events: ThreadEventRecord[]
+  historyLoading?: boolean
+  historyError?: string | null
+  onRetryHistory?: () => void
   selectedEventId: string | null
   onSelectedEventIdChange: (eventId: string | null) => void
   initialScrollTop?: number | null
@@ -76,6 +81,9 @@ export interface ThreadEventViewProps {
  */
 export function ThreadEventView({
   events,
+  historyLoading = false,
+  historyError = null,
+  onRetryHistory,
   selectedEventId,
   onSelectedEventIdChange,
   initialScrollTop = null,
@@ -210,6 +218,9 @@ export function ThreadEventView({
       return
     }
     if (event.key === 'Escape') {
+      if (historicalPreview != null) {
+        return
+      }
       if (selectedEventId != null) {
         event.preventDefault()
         event.stopPropagation()
@@ -305,11 +316,16 @@ export function ThreadEventView({
 
   // Pane 容器级局部 Escape 拦截，防止逃逸污染其他 Pane 或底层窗口
   function handleContainerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229
+      || shouldDeferToBlockingModal(event.currentTarget)) {
       return
     }
     if (event.key === 'Escape') {
-      if (selectedEventId != null || debugSelection != null) {
+      if (historicalPreview != null) {
+        event.preventDefault()
+        event.stopPropagation()
+        onDismissHistoricalPreview?.()
+      } else if (selectedEventId != null || debugSelection != null) {
         event.preventDefault()
         event.stopPropagation()
         handleCloseDetail()
@@ -391,6 +407,7 @@ export function ThreadEventView({
           aria-label={isWide ? t('ai.runtime.debug.tabPreview') : undefined}
           className="thread-debug-col thread-debug-col-preview"
         >
+          {previewError && !debug ? <div role="alert" className="thread-debug-placeholder">{previewError}</div> : null}
           {debug ? (
             <ThreadModelRequestDebug
               debug={debug}
@@ -449,7 +466,11 @@ export function ThreadEventView({
             }
             onKeyDown={handleListboxKeyDown}
           >
-            {events.length === 0 ? (
+            {historyLoading ? <div role="status">{t('ai.runtime.thread.loading')}</div> : null}
+            {historyError ? <div role="alert"><p>{historyError}</p>
+              {onRetryHistory ? <Button variant="ghost" onClick={onRetryHistory}>{t('ai.runtime.agentTree.retry')}</Button> : null}
+            </div> : null}
+            {!historyLoading && !historyError && events.length === 0 ? (
               <div className="thread-empty">
                 <p>{t('ai.runtime.event.empty')}</p>
               </div>

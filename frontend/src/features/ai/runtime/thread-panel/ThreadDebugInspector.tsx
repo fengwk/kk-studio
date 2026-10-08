@@ -9,6 +9,7 @@ import type {
 } from '@/features/ai/runtime/thread-timeline-types'
 import { formatFileSize } from '@/features/ai/composer'
 import { useI18n } from '@/shared/i18n'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 
 export type DebugInspectorSelection =
   | { type: 'tool'; tool: ThreadModelRequestDebugTool }
@@ -139,15 +140,14 @@ export function ThreadDebugInspector({
     >
       <header className="thread-event-detail-header">
         <h3>{title}</h3>
-        <button
+        <IconButton
           ref={resolvedCloseBtnRef}
-          type="button"
-          className="thread-interaction-close"
-          aria-label={t('ai.runtime.debug.inspectorClose')}
+          size="compact"
+          label={t('ai.runtime.debug.inspectorClose')}
           onClick={onClose}
         >
           <X aria-hidden="true" />
-        </button>
+        </IconButton>
       </header>
 
       {selection.type === 'tool' && (

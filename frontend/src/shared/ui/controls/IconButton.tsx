@@ -1,7 +1,8 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import './controls.css'
 
 export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  ref?: Ref<HTMLButtonElement>
   /** 图标按钮没有可见文本，必须提供无障碍名称。 */
   label: string
   /** danger 用于破坏性图标动作。 */

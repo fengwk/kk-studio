@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from './fixture'
+import type { WebSocketRoute } from '@playwright/test'
 
 /**
  * 新建分支流程真实浏览器回归（独立基座、独立端口 5184）。
@@ -10,6 +11,8 @@ import { expect, test, type Page, type Route } from './fixture'
 
 const CHAT_ID = 'chat-branch-1'
 const THREAD_ID = 'a2000000-0000-4000-8000-0000000000a1'
+const CHILD_ID = 'a2000000-0000-4000-8000-0000000000c1'
+const GRANDCHILD_ID = 'a2000000-0000-4000-8000-0000000000d1'
 const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
 const rootPayload = JSON.stringify({ settings: {
@@ -118,17 +121,54 @@ function thread(headEntryId = 'entry-3') {
 interface Recorded {
   commandBatches: unknown[]
   branchPreviews: Array<{ startEntryId: string; commands: Array<Record<string, unknown>> }>
+  treeReads: number
+  completeGrandchild: () => void
 }
 
 async function installChatApi(
   page: Page,
-  options: { usageEntries?: boolean; conflictFirstSend?: boolean } = {},
+  options: { usageEntries?: boolean; conflictFirstSend?: boolean; longHistory?: boolean } = {},
 ): Promise<Recorded> {
   const entryList = entries({ usage: options.usageEntries })
-  const boundThread = thread(options.usageEntries ? 'entry-turn' : 'entry-3')
+  if (options.longHistory) {
+    entryList.push(...Array.from({ length: 24 }, (_, index) => ({
+      entryId: `scroll-${index}`, sessionId: SESSION_ID,
+      parentEntryId: index === 0 ? 'entry-3' : `scroll-${index - 1}`, entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{
+        type: 'text', text: `Scroll marker ${index}\n${Array(12).fill('Reading position is retained.').join('\n')}`,
+      }] } }),
+      createTime: `2026-10-01T00:03:${String(index).padStart(2, '0')}Z`,
+    })))
+  }
+  const boundThread = thread(options.longHistory ? 'scroll-23' : options.usageEntries ? 'entry-turn' : 'entry-3')
   let createdThread: ReturnType<typeof thread> | null = null
-  const recorded: Recorded = { commandBatches: [], branchPreviews: [] }
-  await page.routeWebSocket(/\/api\/.*events/, () => {})
+  let grandCompleted = false
+  const sockets: WebSocketRoute[] = []
+  const recorded: Recorded = {
+    commandBatches: [], branchPreviews: [], treeReads: 0,
+    completeGrandchild: () => {
+      grandCompleted = true
+      for (const socket of sockets) {
+        socket.send(JSON.stringify({
+          version: 1, type: 'event', resource: { kind: 'thread', id: GRANDCHILD_ID },
+          name: 'version', data: { version: '1' }, cursor: '1',
+        }))
+        socket.send(JSON.stringify({
+          version: 1, type: 'event', resource: { kind: 'tree', id: THREAD_ID },
+          name: 'changed', data: {},
+        }))
+      }
+    },
+  }
+  await page.routeWebSocket(/\/api\/.*events/, (socket) => {
+    sockets.push(socket)
+    socket.onMessage((message) => {
+      const frame = JSON.parse(String(message))
+      if (frame.type === 'subscribe') {
+        socket.send(JSON.stringify({ version: 1, type: 'subscribed', resource: frame.resource, cursor: '0' }))
+      }
+    })
+  })
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -189,12 +229,19 @@ async function installChatApi(
             results: [{
               providerName: 'minimax',
               name: 'MiniMax',
+              modelId: 'MiniMax-upstream',
               description: null,
               config: {
                 limit: { context: 128000, output: 8192 },
-                abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+                abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
                 defaultVariant: 'default',
-                variants: [{ id: 'default' }],
+                variants: [{ id: 'default' }, { id: 'deep', reasoningEffort: 'high' }],
+                pricing: {
+                  currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
+                  version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
+                  cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
+                  cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
+                },
               },
               version: '1',
               createTime: null,
@@ -244,6 +291,35 @@ async function installChatApi(
       })
       return
     }
+    if (path === `/api/harness/threads/${CHILD_ID}` || path === `/api/harness/threads/${GRANDCHILD_ID}`) {
+      const grandchild = path.endsWith(GRANDCHILD_ID)
+      await route.fulfill({ json: { status: 200, data: {
+        version: grandchild && grandCompleted ? '1' : '0',
+        thread: { ...boundThread,
+          threadId: grandchild ? GRANDCHILD_ID : CHILD_ID,
+          name: grandchild ? 'main' : 'direct parent',
+          version: grandchild && grandCompleted ? '1' : '0',
+          status: grandchild && !grandCompleted ? 'MODEL_STREAM' : 'IDLE',
+          processing: grandchild && !grandCompleted,
+          headEntryId: grandchild && grandCompleted ? 'entry-background' : boundThread.headEntryId,
+          parentThreadId: grandchild ? CHILD_ID : THREAD_ID,
+          yoloPolicy: { mode: 'FOLLOW', rootThreadId: THREAD_ID },
+          branchSettings: { ...boundThread.branchSettings, agentName: grandchild ? 'researcher' : 'worker',
+            model: { providerName: 'minimax', modelName: 'MiniMax', variant: grandchild ? 'deep' : 'default' } },
+        },
+        entries: [
+          ...entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
+          ...(grandchild && grandCompleted ? [{
+            entryId: 'entry-background', sessionId: SESSION_ID, parentEntryId: boundThread.headEntryId, entryType: 'MESSAGE',
+            payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'Background completion persisted' }] } }),
+            createTime: '2026-10-01T00:04:00Z',
+          }] : []),
+        ], queuedCommands: [],
+        modelInvocation: null, toolInvocations: [], modelAttemptFailures: [],
+        manualCompaction: { available: false, disabledReason: 'readonly' }, stopReceipts: [],
+      } } })
+      return
+    }
     if (path === `/api/harness/threads/${THREAD_ID}` || (createdThread != null && path === `/api/harness/threads/${createdThread.threadId}`)) {
       const isCreated = createdThread != null && path.endsWith(createdThread.threadId)
       await route.fulfill({
@@ -265,7 +341,19 @@ async function installChatApi(
       return
     }
     if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
-      await route.fulfill({ json: { status: 200, data: [] } })
+      recorded.treeReads += 1
+      await route.fulfill({ json: { status: 200, data: [
+        { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
+          model: boundThread.branchSettings.model, status: 'IDLE', processing: false,
+          turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updateTime: '2026-10-01T00:00:00Z' },
+        { threadId: CHILD_ID, parentThreadId: THREAD_ID, name: 'direct parent', agentName: 'worker',
+          model: boundThread.branchSettings.model, status: 'IDLE', processing: false,
+          turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updateTime: '2026-10-01T00:01:00Z' },
+        { threadId: GRANDCHILD_ID, parentThreadId: CHILD_ID, name: 'nested grandchild', agentName: 'researcher',
+          model: { ...boundThread.branchSettings.model, variant: 'deep' },
+          status: grandCompleted ? 'IDLE' : 'MODEL_STREAM', processing: !grandCompleted,
+          turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updateTime: '2026-10-01T00:02:00Z' },
+      ] } })
       return
     }
     if (path.endsWith('/command-batches') && method === 'POST') {
@@ -283,7 +371,7 @@ async function installChatApi(
       return
     }
     if (path === '/api/interactions') {
-      await route.fulfill({ json: { status: 200, data: { items: [], nextCursor: null } } })
+      await route.fulfill({ json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } } })
       return
     }
     if (path === '/api/harness/threads/model-request-debug' || path.endsWith('/model-request-debug')) {
@@ -373,7 +461,7 @@ test('the local branch draft Debug previews through the session endpoint without
   const controlArea = page.locator('.thread-control-area').first()
   await expect(controlArea).toBeHidden()
   expect(await controlArea.evaluate((el) => window.getComputedStyle(el).display)).toBe('none')
-  const back = page.locator('.thread-debug-back')
+  const back = page.getByRole('button', { name: '关闭 Debug', exact: true })
   await expect(back).toBeVisible()
   await expect(composer).toContainText('branch draft preview')
 
@@ -506,9 +594,9 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     const controlArea = page.locator('.thread-control-area').first()
     await expect(controlArea).toBeHidden()
     expect(await controlArea.evaluate((el) => window.getComputedStyle(el).display)).toBe('none')
-    await expect(page.locator('.thread-debug-back')).toBeVisible()
+    await expect(page.getByRole('button', { name: '关闭 Debug', exact: true })).toBeVisible()
 
-    await page.locator('.thread-debug-back').click()
+    await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
     await expect(page.getByRole('listbox', { name: '事件' })).toHaveCount(0)
     await expect(controlArea).toBeVisible()
     await expect(page.locator('.thread-debug-back')).toHaveCount(0)
@@ -531,6 +619,7 @@ test('409 competition keeps history, text and settings; local rename recovers th
   const name = page.getByRole('textbox', { name: '名称' })
   await expect(name).toHaveValue('browser-draft')
   await expect(page.getByRole('alert')).toContainText('此 Session 已有同名')
+  await page.screenshot({ path: testInfo.outputPath('shared-name-rename-error.png') })
   await expect(composer).toHaveText('Keep browser text')
   await expect(page.getByText('Real selected ancestor', { exact: true })).toBeVisible()
   await name.fill(' renamed   browser ')
@@ -634,3 +723,141 @@ test('selecting a Thread waits for readiness, preserves its text and never steal
   await expect(page.locator('.chat-workspace-breadcrumb')).toHaveAttribute('data-focused-pane', 'pane-2')
   await expect(first.getByLabel('给 AI 发送消息')).toHaveText('bound draft text')
 })
+
+test('Debug preserves an open root subagent panel without queuing hidden-composer focus', async ({ page }) => {
+  const recorded = await installChatApi(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.addInitScript(({ chatId, threadId }) => {
+    localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`, JSON.stringify({ kind: 'BOUND_THREAD', threadId }))
+  }, { chatId: CHAT_ID, threadId: THREAD_ID })
+  await page.goto(HARNESS_URL)
+  const editor = page.getByRole('textbox', { name: '给 AI 发送消息' })
+  await expect(editor).toBeEditable()
+  await editor.fill('root panel draft')
+  const header = page.locator('.chat-workspace-header')
+  await header.getByRole('button', { name: '查看 subagent 执行' }).click()
+  const tree = page.locator('.subagent-tree-panel')
+  await expect(tree).toBeFocused()
+  const savedTree = await tree.elementHandle()
+  for (const event of [{ key: 'Escape', repeat: true }, { key: 'Escape', keyCode: 229 }]) {
+    await tree.dispatchEvent('keydown', event)
+    await expect(tree).toBeVisible()
+  }
+  await header.getByRole('button', { name: 'Debug', exact: true }).click()
+  await expect(tree).toBeHidden()
+  for (const target of [page.locator('.chat-pane:not([hidden])'), page.locator('.chat-workspace')]) {
+    for (const event of [{ key: 'Escape', repeat: true }, { key: 'Escape', keyCode: 229 }]) {
+      await target.dispatchEvent('keydown', event)
+      await expect(header.getByRole('button', { name: '关闭 Debug', exact: true })).toBeVisible()
+    }
+  }
+  await header.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+  await expect(tree).toBeVisible()
+  expect(await savedTree?.evaluate((element) => element.isConnected)).toBe(true)
+  await expect(header.getByRole('button', { name: 'Debug', exact: true })).toBeFocused()
+  await expect(editor).toBeHidden()
+  await tree.focus()
+  await page.keyboard.press('Escape')
+  await expect(tree).toHaveCount(0)
+  await expect(editor).toBeFocused()
+  await expect(editor).toContainText('root panel draft')
+  expect(recorded.commandBatches).toEqual([])
+})
+
+for (const layout of ['split-3', 'grid-4']) {
+  test(`readonly grandchild Debug exclusively occupies ${layout} from non-first pane and restores drafts`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const recorded = await installChatApi(page, { longHistory: true })
+    const writes: string[] = []
+    page.on('request', (request) => {
+      if (request.url().includes('/api/') && request.method() !== 'GET') {
+        writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
+      }
+    })
+    await page.addInitScript(({ chatId, threadId, layout }) => {
+      localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-2`, JSON.stringify({ kind: 'BOUND_THREAD', threadId }))
+      localStorage.setItem(`kk-studio.chat-pane.${chatId}`, JSON.stringify({
+        layout, focusedPaneId: 'pane-2', panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
+      }))
+    }, { chatId: CHAT_ID, threadId: THREAD_ID, layout })
+    await page.goto(HARNESS_URL)
+    const first = page.locator('.chat-pane[data-pane-id="pane-1"]')
+    const source = page.locator('.chat-pane[data-pane-id="pane-2"]')
+    const firstEditor = first.getByRole('textbox', { name: '给 AI 发送消息' })
+    await expect(firstEditor).toBeEditable()
+    await firstEditor.fill('background pane draft')
+    const savedEditor = await firstEditor.elementHandle()
+    const sourceEditor = source.getByRole('textbox', { name: '给 AI 发送消息' })
+    await expect(sourceEditor).toBeEditable()
+    await sourceEditor.fill('root source draft')
+    const rootLog = source.getByRole('log')
+    await expect(rootLog).toContainText('Scroll marker 23')
+    const rootScroll = await rootLog.evaluate((element) => {
+      element.scrollTop = 180
+      return element.scrollTop
+    })
+    expect(rootScroll).toBeGreaterThan(0)
+    await source.getByRole('button', { name: '打开命令表' }).click()
+    await source.getByRole('option', { name: /subagent/ }).click()
+    const tree = source.locator('.subagent-tree-panel')
+    await expect(tree.locator('.thread-tree-row')).toHaveCount(2)
+    await expect(tree.locator(`[data-thread-id="${GRANDCHILD_ID}"]`)).toContainText('turns: 4 · tools: 5')
+    // 从根直接点开孙执行，返回必须先落在实际直属父，而非浏览栈的根。
+    await tree.locator(`[data-thread-id="${GRANDCHILD_ID}"] a`).click()
+    const header = page.locator('.chat-workspace-header')
+    await expect(header.getByText('main', { exact: true })).toHaveCount(0)
+    await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · minimax/MiniMax · high')
+    await expect(source.locator('.chat-pane-layer:not([hidden]) .thread-composer')).toHaveCount(0)
+    const childLog = source.locator('.chat-pane-layer:not([hidden])').getByRole('log')
+    await expect(childLog).toContainText('Scroll marker 23')
+    const childScroll = await childLog.evaluate((element) => {
+      element.scrollTop = 240
+      return element.scrollTop
+    })
+    expect(childScroll).toBeGreaterThan(0)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    const debugTrigger = await header.getByRole('button', { name: 'Debug', exact: true }).elementHandle()
+    await header.getByRole('button', { name: 'Debug', exact: true }).click()
+    await expect(page.locator('.chat-pane-grid')).toHaveClass(/layout-single/)
+    await expect(page.locator('.chat-pane:not([hidden])')).toHaveCount(1)
+    await expect(source).toBeVisible()
+    await expect(first).toBeHidden()
+    await expect(first).toHaveAttribute('inert', '')
+    expect(await savedEditor?.evaluate((element) => element.isConnected)).toBe(true)
+    await expect(page.locator('.thread-events-shell:visible')).toHaveCount(1)
+    const treeReads = recorded.treeReads
+    recorded.completeGrandchild()
+    await expect(source.getByRole('option', { name: /Background completion persisted/ })).toBeVisible()
+    await expect.poll(() => recorded.treeReads).toBeGreaterThan(treeReads)
+    await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · minimax/MiniMax · high')
+    await expect(page.locator('.thread-composer:visible, .thread-status-footer:visible, .thread-widget-stack:visible')).toHaveCount(0)
+    await expect(page.locator('.agent-pane-thread-heading:visible')).toHaveCount(0)
+    await expect(page.getByRole('combobox', { name: '布局' })).toHaveCount(0)
+    await expect(header.getByRole('button', { name: '关闭 Debug', exact: true })).toBeVisible()
+    await expect(page.locator('.thread-debug-back')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath(`${layout}-readonly-grandchild-debug.png`) })
+    // 第一层 Escape 只关闭已初选的检查详情；下一次才退出 workspace Debug。
+    await page.getByRole('listbox', { name: '事件', exact: true }).focus()
+    await page.keyboard.press('Escape')
+    await expect(header.getByRole('button', { name: '关闭 Debug', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.chat-pane-grid')).toHaveClass(new RegExp(`layout-${layout}`))
+    await expect(firstEditor).toContainText('background pane draft')
+    expect(await savedEditor?.evaluate((element) => element.isConnected)).toBe(true)
+    expect(await debugTrigger?.evaluate((element) => element.isConnected)).toBe(true)
+    await expect(header.getByRole('button', { name: 'Debug', exact: true })).toBeFocused()
+    await expect.poll(() => childLog.evaluate((element) => element.scrollTop)).toBe(childScroll)
+    await header.getByRole('button', { name: '返回父 agent' }).click()
+    await expect(header).toContainText('direct parent')
+    await expect(header.locator('.workspace-view-identity')).toHaveText('worker · minimax/MiniMax')
+    await header.getByRole('button', { name: '返回父 agent' }).click()
+    await expect(sourceEditor).toBeVisible()
+    await expect(sourceEditor).toContainText('root source draft')
+    await expect.poll(() => rootLog.evaluate((element) => element.scrollTop)).toBe(rootScroll)
+    expect(recorded.commandBatches).toEqual([])
+    expect(writes).toEqual([])
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await savedEditor?.dispose()
+    await debugTrigger?.dispose()
+  })
+}

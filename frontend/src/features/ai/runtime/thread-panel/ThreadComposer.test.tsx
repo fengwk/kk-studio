@@ -117,6 +117,7 @@ describe('ThreadComposer and commands', () => {
       'new',
       'upload',
       'debug',
+      'subagent',
       'shortcuts',
       'compact',
       'rename-session',
@@ -141,6 +142,7 @@ describe('ThreadComposer and commands', () => {
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'history')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'debug')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'subagent')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'compact')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'rename-session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'rename-thread')?.disabled).toBe(true)

@@ -864,8 +864,9 @@ describe('AgentPane orchestration', () => {
     await user.keyboard('/debug{Enter}')
     expect(await screen.findByRole('listbox', { name: '事件' })).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    await user.click(composer)
-    await user.keyboard('/debug{Enter}')
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(composer.isConnected).toBe(true)
+    await user.click(screen.getByRole('button', { name: '关闭 Debug', exact: true }))
     expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
   })
 
@@ -2374,13 +2375,13 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     renderPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
-    await user.keyboard('/debug{Enter}')
-    await screen.findByRole('listbox', { name: '事件' })
-    await user.click(composer)
     await user.type(composer, 'draft kept across debug')
-
-    expect(document.querySelector('.thread-debug-back')).not.toBeNull()
-    await user.click(document.querySelector<HTMLButtonElement>('.thread-debug-back')!)
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(screen.getByRole('option', { name: /debug/ }))
+    await screen.findByRole('listbox', { name: '事件' })
+    expect(document.querySelector('.thread-debug-back')).toBeNull()
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '关闭 Debug', exact: true }))
 
     // 回到会话视图：Debug chrome 与事件列表消失，草稿、pane 绑定原地保留。
     expect(document.querySelector('.thread-debug-back')).toBeNull()
@@ -2797,6 +2798,11 @@ async function uploadAttachment(
 
 /** 用真实的 Composer 权限菜单改变 branch draft 设置，消息草稿一个字都不动。 */
 async function toggleYolo(user: ReturnType<typeof userEvent.setup>) {
+  const closeDebug = screen.queryByRole('button', { name: '关闭 Debug', exact: true })
+  if (closeDebug) {
+    // 设置不属于 Debug；退出后修改，迟到预览仍必须被原身份门禁拦截。
+    await user.click(closeDebug)
+  }
   await user.click(screen.getByRole('button', { name: '权限模式' }))
   await user.click(await screen.findByRole('option', { name: 'YOLO' }))
   // 权限控件读的就是 activeDraft：文案翻转即证明 branch draft 真的变了
@@ -3497,9 +3503,9 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const composer = await openBranchDraftDebugView(user)
       await user.click(composer)
       await user.type(composer, 'draft kept across branch debug')
-      const permissionBefore = screen.getByRole('button', { name: '权限模式' }).textContent
+      const permissionBefore = document.querySelector('[aria-label="权限模式"]')?.textContent
 
-      await user.click(document.querySelector<HTMLButtonElement>('.thread-debug-back')!)
+      await user.click(screen.getByRole('button', { name: '关闭 Debug', exact: true }))
 
       expect(document.querySelector('.thread-debug-back')).toBeNull()
       expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
@@ -3532,6 +3538,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await user.click(screen.getByRole('button', { name: '预览当前草稿' }))
       await waitFor(() => expect(harnessService.previewBranchRequest).toHaveBeenCalledTimes(1))
 
+      await user.click(screen.getByRole('button', { name: '关闭 Debug', exact: true }))
       await user.click(screen.getByRole('button', { name: '权限模式' }))
       await user.click(await screen.findByRole('option', { name: 'YOLO' }))
       await waitFor(() =>
@@ -4602,11 +4609,11 @@ describe('AgentPane root control and child observation', () => {
     expect(screen.getByText('只读查看')).toBeInTheDocument()
     // 返回入口在查看层顶部标题区（名称/只读标识旁），不是 transcript 与 widget 之后的底部控制区。
     expect(back.closest('.agent-pane-thread-heading')).not.toBeNull()
-    const childLayer = back.closest('.chat-pane-layer') as HTMLElement
+    const paneSection = back.closest('.chat-pane') as HTMLElement
+    const childLayer = paneSection.querySelector('.chat-pane-layer:not([hidden])') as HTMLElement
     const childTranscript = childLayer.querySelector('[role="log"]') as HTMLElement
-    expect(childLayer.querySelector('.thread-child-return-bar')).toContainElement(back)
     // 标题区是主列的首个元素（顶部非滚动区），transcript 在其之后。
-    expect((back.closest('.chat-main') as HTMLElement).firstElementChild)
+    expect(paneSection.firstElementChild)
       .toBe(back.closest('.agent-pane-thread-heading'))
     expect(
       back.compareDocumentPosition(childTranscript) & Node.DOCUMENT_POSITION_FOLLOWING,

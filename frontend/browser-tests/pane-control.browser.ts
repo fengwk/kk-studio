@@ -114,12 +114,15 @@ function interactionItems() {
         sessionId: 'b1000000-0000-4000-8000-0000000000b1',
         owner: { type: 'CHAT', chatId: 'chat-pane-harness', issueId: null, agentName: null },
         toolCallId: 'call-pane-1',
+        type: 'APPROVAL',
         toolName: 'bash',
         argumentsJson: JSON.stringify({ command: 'npm test' }),
         approvalJson: JSON.stringify({ required: true, reason: '需要确认' }),
         createTime: '2026-10-05T09:57:00Z',
       },
     ],
+    total: 1,
+    freshnessAt: '2026-10-05T09:57:00Z',
     nextCursor: null,
   }
 }
@@ -239,9 +242,8 @@ async function expectBackEntryOnTop(page: Page, name: string, role: 'button' | '
   expect(transcriptBox).not.toBeNull()
   expect(box!.y + box!.height).toBeLessThanOrEqual(transcriptBox!.y)
   expect(await back.evaluate((node) => (
-    node.closest('header.agent-pane-thread-heading') != null
-      && (node.closest('.chat-main') as HTMLElement).firstElementChild
-        === node.closest('header.agent-pane-thread-heading')
+    node.closest('.chat-workspace-header, .agent-pane-thread-heading') != null
+      && node.closest('.chat-log, .thread-transcript') == null
   ))).toBe(true)
   // 标题区不随 transcript 滚动：返回入口与滚动容器之间没有滚动祖先。
   expect(await back.evaluate((node) => {
@@ -313,6 +315,15 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await expect(hiddenRoot.locator('.composer-editor')).toContainText('根草稿要保留')
   await expectAttachmentAlive(page)
 
+  // 同一个只读子层进入/退出 Debug，隐藏根上传注册表不能释放或重建。
+  await page.getByRole('button', { name: 'Debug', exact: true }).click()
+  await expect(page.getByRole('button', { name: '关闭 Debug', exact: true })).toHaveCount(1)
+  await expect(composer).toBeHidden()
+  await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+  expect(recorded.uploadCalls).toEqual(['reserve', 'complete'])
+  expect(recorded.deletedUploads).toEqual([])
+  await expectAttachmentAlive(page)
+
   // 4. 逐层返回后根层重新可见，草稿与附件都还在。
   await backToRootLayer.click()
   await expect(composer).toBeVisible()
@@ -373,8 +384,9 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
   await page.goto(`${HARNESS_URL}?scenario=thread-child`)
 
   await expect(page.getByRole('heading', { name: 'worker child', level: 1 })).toBeVisible()
-  await expect(page.getByText('只读查看')).toBeVisible()
-  const backToRoot = await expectBackEntryOnTop(page, '返回执行根', 'link')
+  await expect(page.locator('.chat-workspace-header .workspace-view-identity')).toContainText('minimax/VeryLongModelName')
+  await expect(page.getByText('只读查看')).toHaveCount(0)
+  const backToRoot = await expectBackEntryOnTop(page, '返回父 agent', 'link')
   await expect(backToRoot).toBeVisible()
   await expect(backToRoot).toHaveAttribute('href', '/threads/' + ROOT_ID)
   await expect(page.locator('.thread-composer')).toHaveCount(0)

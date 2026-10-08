@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
 import '@/features/ai/runtime/thread-panel/debug-view-toolbar.css'
 import {
   ThreadEventView,
@@ -35,6 +36,9 @@ export interface BoundThreadPreviewOptions {
   previewDisabled?: boolean
   previewDisabledReason?: string | null
   previewError?: string | null
+  historyLoading?: boolean
+  historyError?: string | null
+  onRetryHistory?: () => void
 }
 
 export function useBoundThreadPanelViews(
@@ -143,18 +147,11 @@ export function useBoundThreadPanelViews(
       mode === 'debug' ? (
         <>
           {/* 控制区保持挂载但隐藏；退出只切换视图，不修改草稿或 pane 绑定。 */}
-          <div className="thread-debug-toolbar">
-            <button
-              type="button"
-              className="ghost-btn thread-debug-back"
-              onClick={() => switchMode('conversation')}
-            >
-              {t('ai.runtime.debug.backToConversation')}
-            </button>
-            {draftPreviewTrigger ? (
-              <button
-                type="button"
-                className="ghost-btn thread-debug-preview"
+          {draftPreviewTrigger ? <div className="thread-debug-toolbar">
+              <Button
+                variant="ghost"
+                size="compact"
+                className="thread-debug-preview"
                 disabled={
                   previewOptions?.previewDisabled
                   || previewOptions?.previewLoading
@@ -165,11 +162,13 @@ export function useBoundThreadPanelViews(
                 onClick={() => previewOptions?.onPreview?.()}
               >
                 <span>{previewTitle}</span>
-              </button>
-            ) : null}
-          </div>
+              </Button>
+          </div> : null}
           <ThreadEventView
             events={controller.events}
+            historyLoading={previewOptions?.historyLoading}
+            historyError={previewOptions?.historyError}
+            onRetryHistory={previewOptions?.onRetryHistory}
             selectedEventId={selectedEventId}
             onSelectedEventIdChange={(id) => {
               if (id != null) {
@@ -207,6 +206,7 @@ export function useBoundThreadPanelViews(
       ) : undefined,
   }
   return {
+    viewKey,
     mode,
     switchMode,
     selectedEventId,

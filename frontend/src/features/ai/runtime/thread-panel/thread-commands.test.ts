@@ -18,6 +18,7 @@ describe('AgentPane command registry', () => {
       'new',
       'upload',
       'debug',
+      'subagent',
       'shortcuts',
       'compact',
       'rename-session',
@@ -75,6 +76,15 @@ describe('AgentPane command registry', () => {
       'goal',
     ])
     expect(THREAD_COMMANDS.every((command) => command.disabled === undefined)).toBe(true)
+  })
+
+  it('enables subagent only for bound targets, including readonly, and autocompletes the read command', () => {
+    const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
+    expect(threadCommandsForTarget(bound, { readOnly: true }).find((command) => command.id === 'subagent')?.disabled).toBe(false)
+    expect(threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' }).find((command) => command.id === 'subagent')?.disabled).toBe(true)
+    expect(threadCommandsForTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 's', startEntryId: 'e', threadName: 'n' })
+      .find((command) => command.id === 'subagent')?.disabled).toBe(true)
+    expect(filterThreadCommands('/sub', THREAD_COMMANDS).map((command) => command.id)).toEqual(['subagent'])
   })
 
   it('limits rename commands by the durable target state', () => {

@@ -84,8 +84,10 @@ import { normalizeThreadName } from '@/features/ai/chat/thread-name'
 import { threadDraftPath } from '@/features/ai/chat/thread-draft-path'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline'
 import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
+import { paneTargetViewKey } from './thread-presentation'
 
 export type PaneInteraction =
+  | 'subagent'
   | 'agent'
   | 'shortcuts'
   | 'history'
@@ -267,11 +269,7 @@ export function useRootThreadControl({
   // 视图身份与预览作用域同源：绑定 Thread 用 threadId，本地分支草稿用
   // sessionId:startEntryId:name（新建 Session 草稿没有身份可言，固定为空串）。
   // 身份变化即作废在途预览，并重置该 Pane 的本地视图状态（Debug 模式/滚动/检查器选中）。
-  const previewScope = isBoundTarget(target)
-    ? `thread:${target.threadId}`
-    : isNewThreadTarget(target)
-      ? `branch:${target.sessionId}:${target.startEntryId}:${target.threadName}`
-      : ''
+  const previewScope = paneTargetViewKey(target)
   useEffect(() => {
     previewRequestIdRef.current += 1
     previewInFlightRef.current = false
@@ -1343,6 +1341,11 @@ export function useRootThreadControl({
           boundViews.switchMode(boundViews.mode === 'debug' ? 'conversation' : 'debug')
         }
         return
+      case 'subagent':
+        if (isBoundTarget(target)) {
+          setInteraction('subagent')
+        }
+        return
       case 'shortcuts':
         setInteraction('shortcuts')
         return
@@ -1621,6 +1624,10 @@ export function useRootThreadControl({
   } : controller, {
     // 本地草稿没有 threadId：视图状态按目标身份隔离，API 预览仍按真实 threadId/会话。
     viewKey: previewScope,
+    historyLoading: isNewThreadTarget(target) ? treeEntriesQuery.isLoading : controller.messagesLoading,
+    historyError: (isNewThreadTarget(target) ? treeEntriesQuery.error ?? draftHistory.error : controller.messagesError)
+      ? t('ai.chat.history.loadFailed') : null,
+    onRetryHistory: () => { void (isNewThreadTarget(target) ? treeEntriesQuery.refetch() : controller.snapshotQuery.refetch()) },
     onPreview: canExposePreview ? () => void handlePreview() : undefined,
     previewLoading,
     previewDisabled,
@@ -1800,6 +1807,7 @@ export function useRootThreadControl({
     submitGoal,
     clearGoal,
     composer,
+    restoreComposerFocus: () => setFocusIntent(target),
     pendingAcceptance,
     pendingMessage: isBoundTarget(target) ? controller.pendingMessage : null,
     draftRestoreError: isBoundTarget(target) ? controller.draftRestoreError : null,
