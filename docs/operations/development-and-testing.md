@@ -290,6 +290,10 @@ tool-card 验证流式日志和阅读锚点；
 compaction 验证完整安全正文与外层阅读保护；composer-editor 验证真实 contenteditable、
 IME、Pill 与隐藏根失活。
 
+绑定 Thread 的草稿以 IndexedDB 为权威源，按 Thread 保存编辑内容、Goal 与已合并的 Stop 回执身份；
+E2E 以只读事务核验持久化结果。未编辑的历史回溯不能覆盖草稿，发送后只清空 composer parts，
+保留 Goal 与回执元数据。未绑定 Thread 的新对话草稿仍按 pane 隔离保存在 localStorage。
+
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
 case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
 
@@ -309,6 +313,8 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 payload 只含 settings、不物化任何委派运行树元数据。
 受理卡片与回执的 Thread 链接在当前 pane 只读查看子代理，并保留根草稿；返回取查看快照的直接
 `parentThreadId`，孙层先回直接父，再回根。修饰键或独立地址进入 `/threads/:threadId`。
+链接展示 Thread 名称，身份取规范 href；UI 回归还从真实快照核验子 Thread 的直接父关系与 Agent，
+不以名称或任意格式正确的 UUID 代替执行关系。
 独立根提供人工控制，独立子代理只读并可定点返回 `/threads/{parentId}`，
 不依赖 Chat 归属。消息、设置、Goal、预览和 Stop 只允许执行根；根面板汇聚后代审批和问卷，
 操作写回原始调用 Thread；
@@ -426,8 +432,9 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `canvas.command_revision_contract` / `canvas.command_conflict_contract`：11 种 typed
   command、`revision` 坐标与 patch 变化集、批量前置条件过期时整批 409 不写入。
 - `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
-  `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
-  物化门禁；该 case 需要 `host-mock`，不是 `requires=-`。
+  `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与物化门禁；
+  同时核验 `INPUT` 类型、来源 Chat 与执行根的 ID/名称、环境等待字段置空，以及同一过滤下的
+  `total` 与时间驱动的 `freshnessAt`。该 case 需要 `host-mock`，不是 `requires=-`。
 - `thread_tree.query_contract` / `thread_tree.invalid_and_unknown_thread`：
   `GET /api/harness/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
   查询不改变 head 或版本；非法 UUID 为 400，缺失 Thread 为 404。
@@ -542,6 +549,9 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 栈，并在适用 case 上启用 L5；它完全免费，不读取宿主真实 Provider 凭据，也不改变默认单实例路径。
 栈的手工命令、端口、故障注入与清理语义见
 [部署与运行](deployment.md#deploydistributed双节点零-app-to-app-网络栈)。
+
+分布式故障演练与 UI 矩阵应作为两条独立命令串行执行；`--distributed` 不能与 `--ui` 同次启用。
+容器断网与重连可能触发浏览器网络变更，干扰 Vite 动态导入，不应以盲目重试掩盖相互干扰。
 
 L5 通知 case 使用两节点真实 `/api/events/v1` WebSocket：Projects 双向 CRUD/CAS 的提交可见性与
 逐提交去重、Canvas revision 与 Environment 跨 topic 隔离及失败事务静默、订阅释放与重连新基线、
