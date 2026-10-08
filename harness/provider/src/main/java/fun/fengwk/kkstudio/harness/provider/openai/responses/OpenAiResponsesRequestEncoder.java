@@ -746,12 +746,37 @@ final class OpenAiResponsesRequestEncoder {
               }
               // opaque summary 块（除 type/text 外还有成员）仍按原生事实原样保留
               String summaryText = s.get("text").textValue();
-              replayThinking.append(summaryText);
               if (!summaryText.isBlank()) {
                 itemHasUsableSummary = true;
               }
             }
           }
+          if (item.has("content")) {
+            JsonNode content = item.get("content");
+            if (!content.isArray()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "replay reasoning content must be an array");
+            }
+            for (JsonNode block : content) {
+              if (!block.isObject()) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    "replay reasoning content block must be an object");
+              }
+              if (!block.path("type").isTextual()
+                  || !"reasoning_text".equals(block.get("type").textValue())) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    "replay reasoning content block type must be 'reasoning_text'");
+              }
+              if (!block.path("text").isTextual()) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    "replay reasoning content block must have string text");
+              }
+            }
+          }
+          replayThinking.append(OpenAiResponsesReasoningText.read(item));
           reasoningItemCount++;
           if (!itemHasEncrypted
               && !hasFieldOutside(item, REASONING_ITEM_FIELDS)

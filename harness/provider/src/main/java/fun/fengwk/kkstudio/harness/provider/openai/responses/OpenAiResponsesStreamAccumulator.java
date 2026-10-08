@@ -628,8 +628,6 @@ final class OpenAiResponsesStreamAccumulator {
         nextToolOrdinal = 0;
         textBuffer.setLength(0);
         thinkingBuffer.setLength(0);
-        boolean terminalReasoningItemSeen = false;
-        boolean terminalUsableSummarySeen = false;
         for (JsonNode itemNode : outputNode) {
           if (!itemNode.isObject()) {
             rawOutputItems.add(itemNode.deepCopy());
@@ -647,39 +645,9 @@ final class OpenAiResponsesStreamAccumulator {
             syncToolFromItem(item);
           } else if ("message".equals(itemType)) {
             appendMessageContent(item.get("content"));
-          } else if ("reasoning".equals(itemType)) {
-            terminalReasoningItemSeen = true;
-            JsonNode summary = item.get("summary");
-            if (summary != null) {
-              if (summary.isArray()) {
-                for (JsonNode s : summary) {
-                  if (s.isObject() && "summary_text".equals(s.path("type").asText())) {
-                    String summaryText = s.path("text").asText("");
-                    thinkingBuffer.append(summaryText);
-                    if (!summaryText.isBlank()) {
-                      terminalUsableSummarySeen = true;
-                    }
-                  }
-                }
-              } else if (summary.isTextual()) {
-                String summaryText = summary.asText();
-                thinkingBuffer.append(summaryText);
-                if (!summaryText.isBlank()) {
-                  terminalUsableSummarySeen = true;
-                }
-              }
-            }
           }
         }
-        // 终态声明了 reasoning 却没有任何可用摘要文本时（例如 MiniMax 的 summary:[] 占位符），流式思考是唯一可得的
-        // 语义表示，必须保留给 durable 消息；非空的权威终态摘要仍然优先，未被终态声明的思考仍按既有语义清除。
-        if (terminalReasoningItemSeen
-            && !terminalUsableSummarySeen
-            && !priorStreamedThinking.isBlank()) {
-          // 丢弃终态给出的纯空白摘要，避免与流式思考拼接出额外空白。
-          thinkingBuffer.setLength(0);
-          thinkingBuffer.append(priorStreamedThinking);
-        }
+        rebuildThinkingFromItems(priorStreamedThinking);
       }
     }
   }
@@ -712,17 +680,9 @@ final class OpenAiResponsesStreamAccumulator {
           if (content != null && textBuffer.isEmpty()) {
             appendMessageContent(content);
           }
-        } else if ("reasoning".equals(itemType)) {
-          JsonNode summary = item.get("summary");
-          if (summary != null && summary.isArray() && thinkingBuffer.isEmpty()) {
-            for (JsonNode s : summary) {
-              if ("summary_text".equals(s.path("type").asText())) {
-                thinkingBuffer.append(s.path("text").asText(""));
-              }
-            }
-          }
         }
       }
+      rebuildThinkingFromItems(thinkingBuffer.toString());
     }
 
     if (stopReason == GenerationStopReason.FILTERED) {
@@ -852,6 +812,23 @@ final class OpenAiResponsesStreamAccumulator {
 
     finishedCompletion = new ProviderCompletion(response, replayState);
     return finishedCompletion;
+  }
+
+  /** 权威 item 按顺序聚合；全部无可比文本时保留流式思考，绝不混入草稿。 */
+  private void rebuildThinkingFromItems(String streamedThinking) {
+    boolean reasoningSeen = false;
+    thinkingBuffer.setLength(0);
+    for (JsonNode item : rawOutputItems) {
+      if ("reasoning".equals(item.path("type").asText())) {
+        reasoningSeen = true;
+        thinkingBuffer.append(OpenAiResponsesReasoningText.read(item));
+      }
+    }
+    if (thinkingBuffer.isEmpty()
+        && (reasoningSeen || !explicitTerminalOutputProcessed)
+        && !streamedThinking.isBlank()) {
+      thinkingBuffer.append(streamedThinking);
+    }
   }
 
   ProviderResponse response() {
@@ -1149,6 +1126,10 @@ final class OpenAiResponsesStreamAccumulator {
         continue;
       }
       reasoningItemSeen = true;
+      // content 是独立原生事实，即使无可读文本也不是空 reasoning 占位符。
+      if (item.has("content")) {
+        return false;
+      }
       if (!item.path("encrypted_content").asText("").isBlank()) {
         return false;
       }

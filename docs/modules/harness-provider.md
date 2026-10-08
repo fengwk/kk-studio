@@ -63,7 +63,9 @@ Catalog API 与持久化 variant 使用 **`protocolOptionsJson` 字符串**，�
 
 原位回放只由 `format`、`affinity`（是否等于当前 `ProviderDescriptor.affinity(requestedModel)`）与 payload 结构/durable 一致性决定，不存在前缀哈希或字节级比对。payload 结构非法、与 durable 事实矛盾或违反协议不变量时 fail closed 为 `INVALID_REQUEST`；`format` / `affinity` 失配或 durable 语义已被改写（压缩、编辑）时回退语义编码，能证明可重建的原生附加字段按 durable 语义投影，签名、密文、未知 item 等只有原生回放才能保真的事实随回退被丢弃，不会假装保真。回放 payload 不被改写（仅移除值为 JSON null 的已知可空字段）。因此缓存标记、JSON 字段顺序与 system 前缀都不参与回放判定。
 
-OpenAI Responses 流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留；而当终态 `reasoning` 只给出空占位符（`summary: []` 且无密文）时，流式累积的思考是唯一可得的语义表示，会被保留用于展示，但该 replay 不承载原生推理，在重建时退回语义编码（非空的权威终态摘要仍优先）。私有推理文本只以 `summary` / durable thinking 的形式暴露，`encrypted_content` 绝不当作文本外泄。
+OpenAI Responses 的 durable thinking 与 replay 一致性校验逐个 reasoning item 使用相同规则：终态非空白 `summary[].summary_text` 优先；没有可用摘要时读取 `content[].reasoning_text`，两者绝不拼接，再按 item 顺序聚合。有摘要时，即使 content 文本不同也仍以摘要为准，原生 content 无损保留。仅当终态存在 reasoning 且全部没有可比较纯文本时，保留已有流式思考；空占位符（无密文、无可用摘要、无 content 或其他附加事实）不冻结 native replay，重建时退回语义编码。content 的 array/object/type/text 形状严格校验，真实文本矛盾即使 affinity 失配也以 `INVALID_REQUEST` 拒绝；encrypted-only replay 没有可比较纯文本而 durable 有 thinking 时仍严格拒绝。
+
+流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留，密文绝不当作 semantic thinking 外泄。同 affinity 原生回放保留 content、id 与密文等协议事实；切换 provider、wire 模型或连接 generation 后，校验成功才回退语义编码，保留 durable 思考和正文，不携带源 id 或密文。
 
 OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 随 replay payload 保留：`reasoning_content` 与 durable thinking 逐字校验一致，`reasoning_details` 只做类型校验。回放只受 `affinity` 门控——同一 provider、连接 generation 与 wire 模型内原样回传（[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`），跨 provider、连接 generation 或模型转移时回退语义编码并丢弃思考；`annotations` 与非法形态的 `audio` 以 `INVALID_REQUEST` 拒绝。
 
