@@ -298,6 +298,98 @@ describe('useAgentThreadController draft restore', () => {
     restoreThreadGoalTextMock.mockReset()
   })
 
+  it.each([false, true])(
+    'restores the persisted record after initial mount (StrictMode=%s)',
+    async (strict) => {
+      // StrictMode 在挂载时会执行 setup -> cleanup -> setup：第二次 setup 必须重新发起加载，
+      // 否则首次加载被 cleanup 取消后草稿恢复将永远消失，编辑区停在空态。
+      const gate = deferred<ThreadDraftRecord | null>()
+      // 两次 setup 都必须命中同一权威记录，而不是第二次拿到未决或空结果。
+      loadThreadDraftMock.mockReturnValue(gate.promise)
+
+      const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+        wrapper: clientWrapper(testClient()),
+        reactStrictMode: strict,
+      })
+      await waitFor(() => expect(result.current.disabled).toBe(false))
+
+      await act(async () => {
+        gate.resolve({
+          ...recordOf(THREAD_ID, [createTextPart('persisted draft')], ['persisted-stop']),
+          goalText: 'persisted goal',
+        })
+        await gate.promise
+      })
+
+      await waitFor(() => {
+        expect(partsToText(result.current.draft)).toBe('persisted draft')
+        expect(result.current.goalDraft).toBe('persisted goal')
+      })
+
+      // 恢复出的 Stop generation 必须随后续写入落到存储层，用于拒绝陈旧覆盖写。
+      act(() => result.current.setDraft([createTextPart('persisted draft edited')]))
+      await waitFor(() =>
+        expect(saveThreadDraftPartsMock).toHaveBeenLastCalledWith(
+          THREAD_ID,
+          [expect.objectContaining({ type: 'text', text: 'persisted draft edited' })],
+          ['persisted-stop'],
+        ))
+      act(() => result.current.setGoalDraft('persisted goal edited'))
+      await waitFor(() =>
+        expect(saveThreadGoalTextMock).toHaveBeenLastCalledWith(
+          THREAD_ID,
+          'persisted goal edited',
+          ['persisted-stop'],
+        ))
+    },
+  )
+
+  it('surfaces a draft load failure under StrictMode instead of showing a stale editor', async () => {
+    // StrictMode 重放的两次 setup 都必须把存储不可用暴露给用户，不能因首次加载被取消而静默。
+    loadThreadDraftMock.mockRejectedValue(new Error('IndexedDB open failed'))
+
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+      wrapper: clientWrapper(testClient()),
+      reactStrictMode: true,
+    })
+
+    await waitFor(() => expect(result.current.actionError).toBe(t('ai.runtime.action.draftLoadFailed')))
+  })
+
+  it('keeps pre-load user edits under StrictMode when the record arrives late', async () => {
+    // 记录尚未到达时用户已编辑 composer 与 Goal：晚到的记录不得覆盖任一字段，且必须提示冲突
+    // 等待已有回执通道合并；generation 不得在未采纳内容时推进。
+    const gate = deferred<ThreadDraftRecord | null>()
+    loadThreadDraftMock.mockReturnValue(gate.promise)
+
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+      wrapper: clientWrapper(testClient()),
+      reactStrictMode: true,
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('typed before load')]))
+    act(() => result.current.setGoalDraft('goal typed before load'))
+
+    await act(async () => {
+      gate.resolve({
+        ...recordOf(THREAD_ID, [createTextPart('cancelled\n\nrestored')], ['stop-before-load']),
+        goalText: 'restored goal',
+      })
+      await gate.promise
+    })
+
+    await waitFor(() =>
+      expect(result.current.draftRestoreError).toBe(t('ai.runtime.action.draftWriteConflict')))
+    expect(partsToText(result.current.draft)).toBe('typed before load')
+    expect(result.current.goalDraft).toBe('goal typed before load')
+    expect(saveThreadDraftPartsMock).toHaveBeenLastCalledWith(
+      THREAD_ID,
+      [expect.objectContaining({ type: 'text', text: 'typed before load' })],
+      [],
+    )
+  })
+
   it('never writes a late receipt merge into a thread bound after the Stop started', async () => {
     const gate = deferred<StopReceiptMergeResult>()
     applyStopReceiptMock.mockReturnValue(gate.promise)

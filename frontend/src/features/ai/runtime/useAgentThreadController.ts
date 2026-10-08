@@ -211,7 +211,6 @@ export function useAgentThreadController(
   }, [pendingMessage])
   const replayPending = pendingMessage != null
 
-  const initializedReplayThreadRef = useRef<string | null>(null)
   const pendingStopRef = useRef<PendingStopOperation | null>(null)
   // 当含混的 Stop 操作尚待重试或失效时为 true：切换 Thread 时面板
   // 绝不能悄悄丢弃这次精确重试。
@@ -228,11 +227,6 @@ export function useAgentThreadController(
   const bound = projection.bound
 
   useEffect(() => {
-    if (initializedReplayThreadRef.current === threadId) {
-      return
-    }
-    initializedReplayThreadRef.current = threadId
-
     // 重绑必须丢弃上一 Thread 的全部本地状态：草稿、Goal 文本、编辑修订与回执重试记录。
     draftRef.current = initialPartsRef.current
     setDraftState(initialPartsRef.current)
