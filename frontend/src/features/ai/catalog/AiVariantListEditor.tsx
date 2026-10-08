@@ -1,5 +1,8 @@
 import { useId } from 'react'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { Button } from '@/shared/ui/controls/Button'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { TextArea } from '@/shared/ui/controls/TextArea'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { blankVariant } from '@/features/ai/catalog/ai-resource-form-drafts'
@@ -53,10 +56,10 @@ export function VariantListEditor({
       <div className="structured-section-head">
         <h3>{label}</h3>
         <div className="structured-section-actions">
-          <button className="ghost-inline-btn" type="button" onClick={addVariant}>
+          <Button variant="inline" onClick={addVariant}>
             <Plus aria-hidden="true" />
             {t('ai.catalog.form.addVariant')}
-          </button>
+          </Button>
         </div>
       </div>
       <p className="inline-hint" id={reasoningHintId}>
@@ -71,7 +74,7 @@ export function VariantListEditor({
             <div className="editor-grid editor-grid-2">
               <label className="form-group">
                 <FieldLabel required>{t('ai.catalog.form.variantId')}</FieldLabel>
-                <input
+                <TextInput
                   aria-label={`${t('ai.catalog.form.variantId')} ${index + 1}`}
                   value={variant.id}
                   onChange={(event) => updateVariant(index, { id: event.target.value })}
@@ -81,7 +84,7 @@ export function VariantListEditor({
               </label>
               <label className="form-group">
                 <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
-                <input
+                <TextInput
                   aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
                   aria-describedby={!reasoning ? reasoningHintId : undefined}
                   disabled={!reasoning}
@@ -97,7 +100,7 @@ export function VariantListEditor({
 
             <label className="form-group">
               <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
-              <textarea
+              <TextArea
                 className="code-textarea"
                 aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
                 value={variant.protocolOptionsJson}
@@ -112,15 +115,15 @@ export function VariantListEditor({
             </label>
 
             <div className="variant-editor-actions">
-              <button
-                className="ghost-inline-btn danger"
-                type="button"
+              <Button
+                variant="inline"
+                danger
                 onClick={() => removeVariant(index)}
                 disabled={variants.length <= 1}
               >
                 <Trash2 aria-hidden="true" />
                 {t('ai.catalog.form.deleteVariant')}
-              </button>
+              </Button>
             </div>
           </div>
         ))}

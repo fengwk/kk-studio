@@ -1,4 +1,5 @@
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { providerTypes } from '@/features/ai/catalog/ai-console-types'
 import type { AgentProviderType } from '@/shared/api/contracts/ai-catalog'
@@ -22,7 +23,8 @@ export function ProviderForm({
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
-        <input
+        <TextInput
+          invalid={Boolean(fieldErrors.name)}
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
           placeholder="minimax"
@@ -33,7 +35,7 @@ export function ProviderForm({
       </label>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.apiKeyOptional')}</FieldLabel>
-        <input
+        <TextInput
           type="password"
           autoComplete="off"
           value={draft.credential}
@@ -52,7 +54,7 @@ export function ProviderForm({
       </label>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
-        <input
+        <TextInput
           value={draft.description}
           onChange={(event) => onChange({ ...draft, description: event.target.value })}
           placeholder={t('ai.catalog.form.descriptionPlaceholder')}
@@ -72,12 +74,12 @@ export function ProviderForm({
       </label>
       <label className={`form-group${fieldErrors.baseUrl ? ' is-error' : ''}`}>
         <FieldLabel>{t('ai.catalog.form.baseUrl')}</FieldLabel>
-        <input value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
+        <TextInput invalid={Boolean(fieldErrors.baseUrl)} value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
         {fieldErrors.baseUrl ? <span className="field-error">{fieldErrors.baseUrl}</span> : null}
       </label>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.modelCallTimeout')}</FieldLabel>
-        <input
+        <TextInput
           value={draft.modelCallTimeoutMillis}
           onChange={(event) => onChange({ ...draft, modelCallTimeoutMillis: event.target.value })}
           placeholder="1800000"
@@ -86,7 +88,7 @@ export function ProviderForm({
       </label>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.modelCallIdleTimeout')}</FieldLabel>
-        <input
+        <TextInput
           value={draft.modelCallIdleTimeoutMillis}
           onChange={(event) => onChange({ ...draft, modelCallIdleTimeoutMillis: event.target.value })}
           placeholder="120000"
