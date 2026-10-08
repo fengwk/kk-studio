@@ -313,15 +313,14 @@ class ProcessScopeTest {
             List.of(
                 "sh",
                 "-c",
-                "echo $$ >> '"
-                    + pidFile
-                    + "'; trap 'printf term > \""
+                "trap 'printf term > \""
                     + marker
-                    + "\"; exit 0' TERM; while true; do sleep 0.05; done"));
+                    + "\"; exit 0' TERM; echo $$ >> '"
+                    + pidFile
+                    + "'; while true; do sleep 0.05; done"));
     try {
+      // pid 文件在 trap 安装后才发布，出现即证明命令已准备好处理 TERM。
       awaitFile(pidFile);
-      // 等命令真正进入事件循环，避免 TERM 早于 trap 安装而走默认处理。
-      Thread.sleep(300);
       assertTrue(scope.terminate(), "终止后整组必须由内核确认收敛");
       assertEquals("term", Files.readString(marker), "命令必须先收到 SIGTERM 并执行自己的清理");
     } finally {
