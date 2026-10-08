@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -34,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -213,7 +213,8 @@ public final class ThreadProcessor {
     return switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
         // 锁序 Thread -> Commands -> Model：判断 pre-existing queued message 必须在 lock Model 前加载。
-        boolean hasQueuedMessage = hasQueuedDemand(tx.loadQueuedCommands(thread.id()));
+        boolean hasQueuedMessage =
+            ThreadInputDemand.hasQueuedDemand(tx.loadQueuedCommands(thread.id()));
         ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
         if (locked == null) {
           throw new ClaimLostSignal();
@@ -261,7 +262,7 @@ public final class ThreadProcessor {
         }
         // 压缩判断完成后，已关闭 turn 是安全边界：有序消费完整输入快照，
         // 让预算提醒、用户 steering 与 child completion 不必等自动续作彻底停止。
-        if (hasInputDemand(tx, thread)) {
+        if (ThreadInputDemand.hasInputDemand(tx, thread)) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
         }
         yield planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
@@ -269,7 +270,7 @@ public final class ThreadProcessor {
       case ThreadContext.IdleOrHistorical ignored -> {
         // 已物化但位于输入水位之后的系统通知仍需普通输入处理：需求只按本 Thread 自己的 Command 判定（fork 不继承源邮箱，
         // 压缩改写 head 也不会丢失该需求）。
-        boolean userDemand = hasInputDemand(tx, thread);
+        boolean userDemand = ThreadInputDemand.hasInputDemand(tx, thread);
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
             automaticCompactionPlanner.plan(
@@ -284,43 +285,6 @@ public final class ThreadProcessor {
         yield null;
       }
     };
-  }
-
-  /**
-   * queued 快照中是否存在需要驱动 turn 的输入（USER_MESSAGE、USER CUSTOM_MESSAGE 或系统 NOTIFICATION）；SET_* 不构成 turn
-   * 需求。
-   */
-  private static boolean hasQueuedDemand(List<ThreadCommand> queued) {
-    for (ThreadCommand command : queued) {
-      if (command.type().isMessage() || command.type().isNotification()) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * 本 Thread 输入需求：QUEUED 输入，或已物化但尚未被 INPUT 接纳（sequence &gt; inputThroughSequence）的 APPLIED
-   * NOTIFICATION。后者只按本 Thread 自己的 Command 判定，绝不从共享/继承历史推断。
-   */
-  private static boolean hasInputDemand(HarnessStore.Transaction tx, ThreadState thread) {
-    if (hasQueuedDemand(tx.loadQueuedCommands(thread.id()))) {
-      return true;
-    }
-    return hasUnconsumedNotification(
-        tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
-  }
-
-  private static boolean hasUnconsumedNotification(
-      List<ThreadCommand> commands, long inputThroughSequence) {
-    for (ThreadCommand command : commands) {
-      if (command.sequence() > inputThroughSequence
-          && command.state() == ThreadCommandState.APPLIED
-          && command.type().isNotification()) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /** blocker / idle 完成：final fence 后 completeWork；fence 失败抛内部信号回滚（零 mutation 的 LOST）。 */
@@ -590,7 +554,7 @@ public final class ThreadProcessor {
     // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
     boolean pendingNotificationInput =
         reason == TurnStartReason.INPUT
-            && hasUnconsumedNotification(
+            && ThreadInputDemand.hasUnconsumedNotification(
                 tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
     return planBuilder.build(
         thread.id(),

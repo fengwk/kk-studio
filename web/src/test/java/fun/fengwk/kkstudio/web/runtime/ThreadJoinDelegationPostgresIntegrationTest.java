@@ -699,8 +699,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 三层执行树：结果沿不可变 parent 链逐级传递——孙执行的报告先交付给子执行，子执行的下一次报告因此包含孙身份，最终父收到子的报告； 执行关系由 parent 链表达，而不是混入
-   * Session 对话历史，父级状态只由自身 durable 执行控制表达。
+   * 三层执行树：结果沿不可变 parent 链逐级传递——孙执行的报告先交付给子执行，子执行只有在消费该报告之后的终态才向父结算自己的上游 Join， 因此父收到的是包含孙报告的新
+   * final，而不是子执行仍在等孙时产生的过早 final；执行关系由 parent 链表达，父级状态只由自身 durable 执行控制表达。
    */
   @Test
   void threeLevelTreePropagatesResultsUpTheParentChain() {
@@ -744,14 +744,14 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
     awaitTrue(
         () -> runtime.projectJoinReceipt(childInvocationId).isPresent(),
-        "child must freeze its own first final");
+        "child must freeze its own final");
     ThreadJoinReceipt childReceipt = receiptOf(childInvocationId);
     assertEquals(ThreadJoinOutcome.COMPLETED, childReceipt.outcome());
-    // 首个 final 冻结 child 自己的报告；后续孙报告不得改写该旧 final。
-    assertEquals("ACK:child work", childReceipt.report());
-    assertFalse(
+    // 子执行的上游 final 来自消费孙报告之后的新回合：报告携带孙身份与孙报告，证明结果自底向上传播；
+    // 子执行在仍欠孙 Join 时产生的过早 final 绝不作为委派回执交付给父。
+    assertTrue(
         childReceipt.report().contains(grandChildThreadId.toString()), childReceipt.report());
-    assertFalse(childReceipt.report().contains("ACK:grandchild work"), childReceipt.report());
+    assertTrue(childReceipt.report().contains("ACK:grandchild work"), childReceipt.report());
 
     // 执行树事实来自不可变 parent 链（head-to-root，包含自身）。
     assertEquals(
