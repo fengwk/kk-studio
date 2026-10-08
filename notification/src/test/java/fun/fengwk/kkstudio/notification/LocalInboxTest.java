@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -262,18 +263,36 @@ class LocalInboxTest {
   }
 
   @Test
-  void inboxCloseWithInterruptedThreadReportsExceptionAndRestoresInterrupt() {
+  void inboxCloseWithInterruptedThreadReportsExceptionAndRestoresInterrupt() throws Exception {
     LocalInbox inbox = new LocalInbox(smallLimits(2));
-    CountDownLatch release = new CountDownLatch(1);
-    inbox.subscribe(EVENTS, value -> hold(release), () -> {});
-    inbox.accept(notification("hold"), 5);
-    Thread.currentThread().interrupt();
+    CountDownLatch running = new CountDownLatch(1);
+    CompletableFuture<Void> release = new CompletableFuture<>();
+    AtomicReference<Thread> consumerThread = new AtomicReference<>();
+    inbox.subscribe(
+        EVENTS,
+        value -> {
+          consumerThread.set(Thread.currentThread());
+          running.countDown();
+          // 保持 worker 存活，避免 shutdown 的中断使 join 在等待前就结束。
+          release.join();
+        },
+        () -> {});
     try {
-      assertThrows(IllegalStateException.class, inbox::close);
+      inbox.accept(notification("hold"), 5);
+      await(running);
+      Thread.currentThread().interrupt();
+      IllegalStateException error = assertThrows(IllegalStateException.class, inbox::close);
+      assertInstanceOf(InterruptedException.class, error.getCause());
       assertTrue(Thread.currentThread().isInterrupted());
     } finally {
       Thread.interrupted();
-      release.countDown();
+      release.complete(null);
+      inbox.close();
+      Thread worker = consumerThread.get();
+      if (worker != null) {
+        worker.join(1000);
+        assertFalse(worker.isAlive());
+      }
     }
   }
 
