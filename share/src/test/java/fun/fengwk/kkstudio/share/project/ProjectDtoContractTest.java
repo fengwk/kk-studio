@@ -123,7 +123,9 @@ class ProjectDtoContractTest {
             "state", "name", "agent", "environment", "instructions", "maxRuns", "enabled", "next"),
         getInstanceFieldNames(ProjectWorkflowStateDTO.class));
 
-    assertEquals(Set.of("project", "issues"), getInstanceFieldNames(ProjectSnapshotDTO.class));
+    assertEquals(
+        Set.of("project", "issues", "referencedStateCodes"),
+        getInstanceFieldNames(ProjectSnapshotDTO.class));
 
     assertEquals(
         Set.of("issue", "currentOrLatestRun"),
@@ -389,6 +391,20 @@ class ProjectDtoContractTest {
     assertNull(readState2.getInstructions());
     assertNull(readState2.getMaxRuns());
     assertEquals(Boolean.FALSE, readState2.getEnabled());
+  }
+
+  /** 引用集合独立于可见 Issue 列表；空集合也必须以数组进入快照协议。 */
+  @Test
+  void projectSnapshotReferencedStatesRoundTrip() throws Exception {
+    for (List<String> references : List.of(List.<String>of(), List.of("BUILD", "REVIEW"))) {
+      ProjectSnapshotDTO snapshot =
+          ProjectSnapshotDTO.builder().issues(List.of()).referencedStateCodes(references).build();
+      String json = objectMapper.writeValueAsString(snapshot);
+      assertTrue(objectMapper.readTree(json).get("referencedStateCodes").isArray());
+      ProjectSnapshotDTO decoded = objectMapper.readValue(json, ProjectSnapshotDTO.class);
+      assertEquals(references, decoded.getReferencedStateCodes());
+      assertEquals(List.of(), decoded.getIssues());
+    }
   }
 
   /**
