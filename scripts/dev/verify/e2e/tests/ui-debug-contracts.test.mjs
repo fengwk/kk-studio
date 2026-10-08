@@ -16,7 +16,8 @@ test('conversation switch uses the sole host exit while its composer remains mou
   assert.match(section, /composer\.count\(\).*composer\.isVisible\(\)/)
   assert.match(section, /#chat-layout-select/)
   assert.ok(section.indexOf('composer.fill(draft)') < section.indexOf("const listbox ="))
-  assert.match(section, /await expectStorage\(page, draftKey, draft\)/)
+  assert.equal((section.match(/await expectThreadDraft\(page, fixture\.threadId, draft\)/g) ?? []).length, 3)
+  assert.doesNotMatch(section, /expectStorage/)
   assert.doesNotMatch(section, /thread-debug-back|thread-debug-toolbar/)
 })
 

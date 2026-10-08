@@ -5,6 +5,7 @@ import {
   acceptCommandBatch,
   assertRootYoloPolicy,
   branchSettingsOf,
+  canonicalUuid,
   chatOwner,
   createChat,
   getThreadSnapshot,
@@ -494,8 +495,26 @@ export async function runWorkspaceContractMatrix(ui) {
           const link = taskCard.locator('.task-tool-thread-link')
           await link.waitFor({ state: 'visible', timeout: 10_000 })
           const href = await link.getAttribute('href')
-          const childThreadId = (await link.innerText()).trim()
+          // 回执链接的可见身份是 canonical href `/threads/{id}`，不是链接文本：
+          // 严格解析 UUID 后必须与真实 child snapshot 的执行父子关系与 Agent 命名一致。
+          assert(
+            typeof href === 'string' && href.startsWith('/threads/'),
+            `unexpected thread link href: ${href}`,
+          )
+          const childThreadId = canonicalUuid(href.slice('/threads/'.length), 'task child thread id')
           assert(href === `/threads/${childThreadId}`, `unexpected thread link href: ${href}`)
+
+          const childSnapshot = await getThreadSnapshot(apiCtx, childThreadId)
+          assert(
+            childSnapshot.thread.parentThreadId === fixture.threadId,
+            `task child parent ${JSON.stringify(childSnapshot.thread.parentThreadId)}`
+              + ` != ${fixture.threadId}`,
+          )
+          assert(
+            childSnapshot.thread.branchSettings?.agentName === fixture.childAgent.name,
+            `task child agent ${JSON.stringify(childSnapshot.thread.branchSettings?.agentName)}`
+              + ` != ${fixture.childAgent.name}`,
+          )
 
           let resolveApproval
           const approvalPromise = new Promise((resolve) => {

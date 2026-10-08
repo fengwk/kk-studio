@@ -500,9 +500,20 @@ async function main(argv) {
     expectNoFatal(pageErrors, consoleErrors)
     await expectVisibleText(page, '新建 Agent')
     await expectVisibleText(page, 'default-assistant')
-    await page.getByRole('button', { name: '编辑 default-assistant' }).click()
-    const agentModal = page.locator('form.modal-card-form')
+    const editTrigger = page.getByRole('button', { name: '编辑 default-assistant' })
+    await editTrigger.click()
+    const agentDialog = page.getByRole('dialog', { name: '编辑 Agent' })
+    await agentDialog.waitFor({ state: 'visible', timeout: 10_000 })
+    // Dialog 头部（含关闭按钮）由共享 Dialog 提供且位于 form 之外；form 只承载字段。
+    const agentModal = agentDialog.locator('form.modal-card-form')
     await agentModal.waitFor({ state: 'visible', timeout: 10_000 })
+    assert(
+      await agentDialog.locator('.modal-header').count() === 1
+        && await agentModal.locator('.modal-header').count() === 0,
+      'agent modal header/close button must live outside the resource form',
+    )
+    const closeButton = agentDialog.getByRole('button', { name: '关闭', exact: true })
+    assert(await closeButton.count() === 1, 'agent modal must expose exactly one header close button')
     const detailedOptions = agentModal.locator('.capability-option-detailed')
     await detailedOptions.first().waitFor({ state: 'visible', timeout: 10_000 })
     const capabilityContainers = agentModal.locator('.capability-options')
@@ -544,8 +555,13 @@ async function main(argv) {
     }
     assert(detailedOptionCount > 0, 'default-assistant edit modal has no detailed capability options')
     await shot(caseArt, 'agent-capability-modal')
-    await agentModal.getByRole('button', { name: '关闭' }).click()
-    await agentModal.waitFor({ state: 'detached', timeout: 10_000 })
+    await closeButton.click()
+    await agentDialog.waitFor({ state: 'detached', timeout: 10_000 })
+    // 关闭后焦点必须归还给触发编辑的按钮。
+    assert(
+      await editTrigger.evaluate((element) => element.ownerDocument.activeElement === element),
+      'focus was not returned to the edit trigger after closing the agent modal',
+    )
   })
 
   await run('ui.providers.page_loads', 'Providers 页可打开', async (caseArt) => {
