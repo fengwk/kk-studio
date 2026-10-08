@@ -72,7 +72,9 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `local draft ${stamp}`
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = composerDraftStorageKey(
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
+          )
           await composer.fill(draft)
           await expectStorage(page, draftKey, draft)
 
@@ -243,7 +245,9 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           let composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = composerDraftStorageKey(
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
+          )
           await composer.fill(originalDraft)
           await composer.press('ArrowUp')
           await expectComposerText(page, historicalMessage)
@@ -326,7 +330,9 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `palette scratch ${stamp}`
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = composerDraftStorageKey(
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
+          )
           await composer.fill(draft)
           await page.getByRole('button', { name: '打开命令表' }).click()
           const palette = page.getByRole('listbox', { name: '命令表' })
@@ -386,7 +392,9 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = composerDraftStorageKey(
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
+          )
           await composer.fill(draft)
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^thread/ }).click()
@@ -627,7 +635,9 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = composerDraftStorageKey(
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
+          )
           await composer.fill(draft)
           await expectStorage(page, draftKey, draft)
 
@@ -684,7 +694,9 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = composerDraftStorageKey(
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
+          )
           await composer.fill(submitted)
           await expectStorage(page, draftKey, submitted)
           await page.getByRole('button', { name: '发送消息' }).click()
@@ -779,10 +791,10 @@ export async function runComposerMatrix(ui) {
 
             await shot(caseArt, 'composer-attachment-previews')
             await imageItem.locator('button.attachment-reference-preview').click()
-            const lightbox = page.locator('.resource-media-lightbox')
+            const lightbox = page.locator('.media-lightbox-card')
             await lightbox.waitFor({ state: 'visible', timeout: 5_000 })
             assert(
-              await lightbox.locator('.resource-media-lightbox-content img').count() === 1,
+              await lightbox.locator('.media-lightbox-content img').count() === 1,
               'image attachment lightbox lacks the full image',
             )
             await shot(caseArt, 'composer-attachment-lightbox')
@@ -811,7 +823,9 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `debug draft ${stamp}`
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = composerDraftStorageKey(
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
+          )
 
           // plus 命令保留已写草稿；Debug 中 Composer 挂载但完全失活。
           await composer.fill(draft)
@@ -1597,21 +1611,15 @@ async function deleteCatalogResource(apiCtx, requestPath) {
 async function clearBrowserFixtureState(page, fixture) {
   if (!fixture.chat?.id) return
   await page.evaluate(
-    ({ paneKey, blankDraftKey, threadDraftKey }) => {
+    ({ paneKey, blankDraftKey }) => {
       localStorage.removeItem(paneKey)
       localStorage.removeItem(blankDraftKey)
-      if (threadDraftKey) {
-        localStorage.removeItem(threadDraftKey)
-      }
     },
     {
       paneKey: `${CHAT_PANE_STORAGE_PREFIX}${fixture.chat.id}`,
       blankDraftKey: composerDraftStorageKey(
         `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
       ),
-      threadDraftKey: fixture.threadId
-        ? composerDraftStorageKey(`thread:${fixture.threadId}`)
-        : null,
     },
   ).catch(() => undefined)
 }

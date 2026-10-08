@@ -255,7 +255,7 @@ async function selectCustomOption(page, trigger, optionName) {
 }
 
 async function resourceCardTitle(page, name) {
-  const title = page.locator('.info-card h3').filter({ hasText: name }).first()
+  const title = page.locator('.resource-card-title').filter({ hasText: name }).first()
   await title.waitFor({ state: 'visible', timeout: 20_000 })
   const text = (await title.textContent())?.trim()
   assert(text, `resource card title is empty for ${name}`)
@@ -501,7 +501,7 @@ async function main(argv) {
     await expectVisibleText(page, '新建 Agent')
     await expectVisibleText(page, 'default-assistant')
     await page.getByRole('button', { name: '编辑 default-assistant' }).click()
-    const agentModal = page.locator('form.resource-modal-card')
+    const agentModal = page.locator('form.modal-card-form')
     await agentModal.waitFor({ state: 'visible', timeout: 10_000 })
     const detailedOptions = agentModal.locator('.capability-option-detailed')
     await detailedOptions.first().waitFor({ state: 'visible', timeout: 10_000 })
@@ -1193,8 +1193,8 @@ async function main(argv) {
     // 关闭可能残留的模态
     await page.keyboard.press('Escape')
     await page.waitForTimeout(200)
-    await page.locator('.cards-grid').getByText('新建 Model', { exact: true }).click()
-    await page.locator('form.modal-card, .modal-card').first().waitFor({ state: 'visible', timeout: 10_000 })
+    await page.locator('.resource-grid').getByText('新建 Model', { exact: true }).click()
+    await page.locator('form.modal-card-form').first().waitFor({ state: 'visible', timeout: 10_000 })
     const nameInput = page.getByRole('textbox', { name: 'Name', exact: true })
     await nameInput.fill('')
     await page.getByRole('button', { name: '确认创建' }).click()
@@ -1212,7 +1212,7 @@ async function main(argv) {
     const name = `e2e-ui-provider-${stamp}`
     await goto('/providers')
     await page.keyboard.press('Escape')
-    await page.locator('.cards-grid').getByText('新建 Provider', { exact: true }).click()
+    await page.locator('.resource-grid').getByText('新建 Provider', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
     await page.getByLabel('Base URL').fill('https://example.com/v1')
     await page.getByLabel('API Key（可选）').fill('sk-e2e-ui-test')
