@@ -59,6 +59,10 @@ Java 客户端按项目根、server ID 和配置指纹复用，去重并发初�
 
 task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 在原历史上继续，允许切换 Agent，采用目标配置和权限。继续由子 Thread 的持久父发起，以不可变父子关系验证身份，并复验父 head 与停止边界。向仍执行的子追加输入会排队，等下一次 turn 边界。max_turns 是阶段汇报软预算：达到后由 Runtime 以 `TASK_BUDGET` 通知注入提醒。
 
+忙时继续不打断当前模型或工具调用，也不覆盖其冻结请求；目标 settings 与新 prompt 一起入队，在后续 INPUT 边界消费。若同一子 Thread 上有多条尚未结算的委派，它们可以在整体收敛后共用同一个最终回答，各按自己的 invocation 身份和任务原文交付一次；这不是每个 prompt 独立产出报告的保证。
+
+从历史边界 fork 的 Thread 是独立执行根，只共享边界之前的 Entry 路径，不继承源 Thread 的待处理命令、子执行或 Join 订阅。原有子任务之后的回执仍交给原父 Thread；新分支不能通过旧 thread_id 接管原有子执行。已在分叉前进入共享历史的回执仍可见。
+
 持久接受后返回 JSON `{"thread_id":"...","status":"accepted"}`，不等待结果。即时回执不重复 prompt；tool_result 的 details 带 `kind=task.accepted` 供 UI 识别，其 thread_id / status 与回执一致，另附会话与幂等元数据。
 
 完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
@@ -72,8 +76,9 @@ Thread 的空闲只描述自身：无待处理命令、无本地适用 Invocatio
 内部以工具 invocation ID 标识本次委派，join 记录父子 Thread、源命令、冻结的终态/最终回答 Entry 与投递坐标；固定归属与每次执行身份分开。执行由 Session/Thread/Entry/Command/Work 的统一生命周期推进。
 
 子 Thread 终态、join 冻结与父通知交付在同一数据库事务内完成。接受与结果交付使用工具 invocation ID
-作为稳定幂等身份；同一子 Thread 可以接受多个 join，并发额度按仍有未结算 parent Join 的不同子 Thread 计，
-root ticket 不占子任务名额。Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢失；
+作为稳定幂等身份；并发额度按尚未冻结终态的子 Join 计，同一子 Thread 上的多条未完成 join 各占一份，
+root ticket 不占子任务名额。忙时继续仍需通过单父与全局额度准入，额度已满则明确拒绝。
+Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢失；
 父为 `STOPPED` 时通知只固化、不唤醒。
 
 失败、取消有明确结果路径。未知副作用不能自动重跑；停止未确认不能当作已经安全停止。父停止向后代传播，迟到通知不能绕过停止门禁。父的执行恢复与产品收尾只按自身持久事实与 root Join 冻结回执判定，不按子树空闲反查业务门禁；底层 live/historical 分类只描述本地历史适用性。

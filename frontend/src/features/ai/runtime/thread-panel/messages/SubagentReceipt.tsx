@@ -34,7 +34,7 @@ const STATE_ICONS: Record<SubagentReceiptState, LucideIcon> = {
 }
 
 /**
- * SUBAGENT_RESULT 专属轻量信息卡：浅青蓝 info 染色 + 细边框 + 小回执图标。
+ * SUBAGENT_RESULT 专属轻量信息卡：浅青蓝 info 染色 + 细边框 + 状态图标。
  *
  * <p>默认折叠，摘要展示 agent、真实终态图标、任务短预览；最后的箭头负责展开，来源跳转是独立的
  * ThreadLink，与展开动作语义分开且各自键盘可达。展开后按安全 Markdown 展示完整

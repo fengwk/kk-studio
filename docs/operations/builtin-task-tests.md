@@ -43,10 +43,10 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dtest='SubagentTaskRunnerTest,AgentBranchSettingsMaterializerTest,AgentPromptComposerTest,HarnessOneShotServiceTest,DatabaseTurnResolverTest,BuiltinHarnessContributorConfigurationTest,SystemSettingsTest,SessionDeletionOrchestratorTest,HarnessOwnerQueryServiceTest,IssueReconcilerIntegrationTest'
 
-# PostgreSQL 事务、全局准入锁、树锁、回滚与停止/交付竞争，以及委派收敛的原子窗口
+# PostgreSQL 事务、准入与树锁、忙时继续、分支隔离、停止/交付竞争与委派收敛
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/infra -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dtest='PostgresqlJoinAcceptanceRollbackTest,PostgresqlParentStopChildJoinConcurrencyTest,PostgresqlJoinQuiescenceConcurrencyTest,PostgresqlJoinTest'
+  -Dtest='PostgresqlJoinAcceptanceRollbackTest,PostgresqlParentStopChildJoinConcurrencyTest,PostgresqlJoinQuiescenceConcurrencyTest,PostgresqlSubagentContinuationTest,PostgresqlJoinTest'
 
 # Runtime + dispatcher/Processor + PostgreSQL 执行链路，以及公开状态投影
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl web -am test \
@@ -78,14 +78,21 @@ Docker 不可用时的跳过不算数据库事务已验证。
 收敛，在下一次 turn 边界消费；`busyChildAcceptsAdditionalPromptWithoutPriorDeliveryAndWithFixedPrefix`、
 `resumeCursorConflictRetriesWithFreshSnapshot` 与数据库集成测试固定这条行为。
 
+[`PostgresqlSubagentContinuationTest`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlSubagentContinuationTest.java)
+通过真实独立子 Session 和 RUNNING 模型验证完整 SET_* + prompt batch 排队，不中断或覆盖当前请求；
+旧 final 不提前交付，后续 INPUT 消费后，两条未完成 Join 在最新收敛终态各交付一次，重放不重复。
+另一个用例验证 ROOT fork 为独立执行根：原有子执行与回执仍属于原父，新分支的命令和历史不受后续交付影响，
+从新分支向旧子执行添加 Join 因直接父不匹配原子拒绝。
+
 ## 额度与事务回滚
 
 `SubagentConfigTest`、`BuiltinHarnessContributorConfigurationTest` 与 `SystemSettingsTest`
 固定 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency`、`maxTurns` 四个设置：
 全局 `maxTotalConcurrency=0` 表示不限，其余核心预算必须为正。
 
-`HarnessRuntimeJoinAcceptanceTest` 与 `HarnessStoreJoinContract` 验证深度、父直接活跃孩子和
-跨所有根的全局活跃子 Thread 上限；根不计入，同一忙碌子多个 join 不重复占额。
+`HarnessRuntimeJoinAcceptanceTest` 与 `HarnessStoreJoinContract` 验证深度、单父未完成子 Join 和
+跨所有根的全局未完成子 Join 上限；root ticket 不计入，同一忙碌子多个未匹配 join 各占一份额度。
+`busyChildDuplicateJoinsQuotaCountsEachUnmatchedJoinNotThreadState` 固定该计数与 Thread 自身执行状态无关。
 `PostgresqlJoinAcceptanceRollbackTest` 验证并发全局准入锁、树锁和失败回滚：
 源命令、关系、join、Work 必须一起提交或全部回滚。
 创建子必须附带 join，父与 expected head 一致，父 STOPPED 时拒绝新委派；
