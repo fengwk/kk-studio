@@ -2991,6 +2991,10 @@ export const aiCatalog = {
     'en-US': 'Process User',
     'zh-CN': '进程用户',
   },
+  'ai.environment.daemonVersion': {
+    'en-US': 'Daemon Version',
+    'zh-CN': 'Daemon 版本',
+  },
   'ai.environment.manage': {
     'en-US': 'Manage',
     'zh-CN': '管理',
@@ -3002,6 +3006,10 @@ export const aiCatalog = {
   'ai.environment.runtime.title': {
     'en-US': 'Host Information',
     'zh-CN': '宿主信息',
+  },
+  'ai.environment.runtime.daemonVersion': {
+    'en-US': 'Daemon Version',
+    'zh-CN': 'Daemon 版本',
   },
   'ai.environment.runtime.operatingSystem': {
     'en-US': 'Operating System',

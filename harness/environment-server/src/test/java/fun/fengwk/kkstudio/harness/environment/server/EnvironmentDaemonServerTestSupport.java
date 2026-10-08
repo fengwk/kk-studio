@@ -56,6 +56,9 @@ final class EnvironmentDaemonServerTestSupport {
   /** 另一个 Daemon 进程的实例身份：出现即意味着旧进程已不可能再提供终态。 */
   static final String OTHER_INSTANCE_ID = "44444444-4444-4444-4444-444444444444";
 
+  /** 测试 Daemon 上报的构建版本。 */
+  static final String DAEMON_VERSION = "1.0.9";
+
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
   private static final DaemonCapabilityResultCodec RESULT_CODEC = new DaemonCapabilityResultCodec();
@@ -63,6 +66,7 @@ final class EnvironmentDaemonServerTestSupport {
   static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
+          DAEMON_VERSION,
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "note"));
 
@@ -113,6 +117,8 @@ final class EnvironmentDaemonServerTestSupport {
         + token
         + "\",\"capabilityCatalogVersion\":\""
         + EnvironmentCapabilityCatalog.version()
+        + "\",\"daemonVersion\":\""
+        + DAEMON_VERSION
         + "\",\"daemonInstanceId\":\""
         + daemonInstanceId
         + "\"}";

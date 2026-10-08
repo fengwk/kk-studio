@@ -104,6 +104,7 @@ describe('EnvironmentsPage', () => {
         statusExpiresAt: '2026-07-20T01:03:03.000Z',
         lastSeen: '2026-07-20T01:02:03.000Z',
         capabilities: [{ id: 'process.exec', version: '2' }],
+        daemonVersion: '1.2.3',
         version: '1',
         createTime: '2026-07-20T00:00:00.000Z',
         updateTime: '2026-07-20T00:00:00.000Z',
@@ -118,6 +119,7 @@ describe('EnvironmentsPage', () => {
         statusExpiresAt: null,
         lastSeen: '2026-07-19T00:00:00.000Z',
         capabilities: [],
+        daemonVersion: 'development',
         version: '1',
         createTime: '2026-07-19T00:00:00.000Z',
         updateTime: '2026-07-19T00:00:00.000Z',
@@ -146,6 +148,10 @@ describe('EnvironmentsPage', () => {
     // 卡片展示最近一次 READY 的宿主进程用户，且不再展示任何 Root 路径。
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('ops-user')).toBeInTheDocument()
+    // 卡片展示实际 daemon 构建版本；development 如实展示而不是伪装成发布版本。
+    expect(screen.getAllByText('Daemon 版本')).toHaveLength(2)
+    expect(screen.getByText('1.2.3')).toBeInTheDocument()
+    expect(screen.getByText('development')).toBeInTheDocument()
     expect(screen.queryByText('/workspace/local-dev')).toBeNull()
     expect(screen.queryByText('Root 路径')).toBeNull()
     // 卡片不展示 skills 字段

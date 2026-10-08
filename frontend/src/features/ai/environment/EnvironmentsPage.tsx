@@ -231,6 +231,9 @@ export function EnvironmentsPage() {
             const lastSeen = formatTimestamp(environment.lastSeen, locale)
 
             const rows: ResourceCardMetaRow[] = []
+            if (environment.daemonVersion) {
+              rows.push([t('ai.environment.daemonVersion'), environment.daemonVersion])
+            }
             if (environment.userName) {
               rows.push([t('ai.environment.userName'), environment.userName])
             }

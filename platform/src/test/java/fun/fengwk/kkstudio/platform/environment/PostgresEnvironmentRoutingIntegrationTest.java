@@ -63,6 +63,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
+          "1.0.9",
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment."));
 
@@ -411,7 +412,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
                 + DaemonProtocol.VERSION
                 + ",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"registrationToken\":\""
+                + "\",\"daemonVersion\":\"1.0.9\""
+                + ",\"registrationToken\":\""
                 + token
                 + "\",\"daemonInstanceId\":\""
                 + DAEMON_INSTANCE_ID

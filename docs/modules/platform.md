@@ -183,7 +183,9 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 
 Card 的 name 不可变，UUID 用于路由；`environment_connection` 以
 `environmentId + ownerNodeId + leaseToken` 围栏保存当前路由和租约。
-READY 更新宿主 OS、时区、进程用户、HOME 与 note，断线保留最后已接受的 metadata。
+READY 更新宿主 OS、时区、进程用户、HOME、note 与**实际 daemon 构建版本**（`daemonVersion`，取自运行中
+JAR manifest，未打包时为 `development`），断线保留最后已接受的 metadata；`daemonVersion`
+与 Card 的 CAS 配置版本是两个不同事实。
 Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去敏事件。
 
 Platform 适配注册、租约和资源票据；会话代际、在途调用和重连裁决由

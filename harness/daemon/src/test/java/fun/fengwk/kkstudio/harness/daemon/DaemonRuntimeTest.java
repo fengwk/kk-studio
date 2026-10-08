@@ -254,14 +254,16 @@ class DaemonRuntimeTest {
     assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
         EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, hello.path("daemonVersion").asText());
     assertTrue(hello.path("toolCatalogVersion").isMissingNode());
     DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
     DaemonEnvironmentInfo firstEnvironment =
         capabilitiesCodec.decode(handshake.get(1).payloadJson()).environment();
     assertEquals("Custom & stable environment.", firstEnvironment.note());
     JsonNode ready = codec.readPayload(handshake.get(1));
-    assertEquals(2, ready.size());
+    assertEquals(3, ready.size());
     assertEquals(DaemonCapabilities.VERSION, ready.path("version").asInt());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, ready.path("daemonVersion").asText());
     assertEquals(expectedProcessUserName(), ready.path("environment").path("userName").asText());
     assertEquals(
         expectedProcessHomeDirectory(), ready.path("environment").path("homeDirectory").asText());
@@ -1823,13 +1825,14 @@ class DaemonRuntimeTest {
     assertMessageTypes(handshake, HELLO, READY);
 
     JsonNode payload = codec.readPayload(handshake.get(1));
-    assertEquals(2, payload.size());
+    assertEquals(3, payload.size());
     assertFalse(payload.has("tools"));
     assertFalse(payload.has("skills"));
     assertFalse(payload.has("skillSources"));
     assertFalse(payload.has("sourceSetVersion"));
     assertFalse(payload.has("mcpServers"));
     assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, payload.path("daemonVersion").asText());
     JsonNode environment = payload.path("environment");
     assertEquals(5, environment.size());
     assertTrue(environment.path("operatingSystem").isTextual());
