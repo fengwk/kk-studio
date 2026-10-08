@@ -96,6 +96,7 @@ test('repository structure guard verifies root and harness POM module lists', ()
   const rootModules = [...rootPom.matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map((m) => m[1])
   assert.deepEqual(rootModules, [
     'share',
+    'notification',
     'schema',
     'canvas',
     'project',
