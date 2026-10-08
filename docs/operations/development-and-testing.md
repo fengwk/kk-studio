@@ -537,6 +537,13 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 栈的手工命令、端口、故障注入与清理语义见
 [部署与运行](deployment.md#deploydistributed双节点零-app-to-app-网络栈)。
 
+L5 通知 case 使用两节点真实 `/api/events/v1` WebSocket：Projects 双向 CRUD/CAS 的提交可见性与
+逐提交去重、Canvas revision 与 Environment 跨 topic 隔离及失败事务静默、订阅释放与重连新基线、
+DB 网络断开后的 fail-closed 和权威 resync。先等待 `subscribed`，保存全部帧，并在收到通知时
+立即读取权威 API；去重与静默断言使用 400ms 有界稳定窗。Environment v1 全局事件不携带实体 ID，
+因此只按 topic 验证独占变更窗口，不宣称实体级过滤；重连不宣称旧事件回放。仅 `--distributed`
+启用这些 case，精确 case ID 和描述由 `--list` / `--docs` 输出。
+
 ## 可靠性
 
 ### 确定性回归
