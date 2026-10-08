@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Download, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
 import {
-  environmentEventLevelClass,
   filterEnvironments,
   formatTimestamp,
   timestampMillis,
@@ -230,8 +229,6 @@ export function EnvironmentsPage() {
               .map((capability) => capability.id)
               .filter(Boolean)
             const lastSeen = formatTimestamp(environment.lastSeen, locale)
-            const lastEvent = environment.lastEvent
-            const lastEventTime = lastEvent ? formatTimestamp(lastEvent.time, locale) : ''
 
             const rows: ResourceCardMetaRow[] = []
             if (environment.userName) {
@@ -318,24 +315,6 @@ export function EnvironmentsPage() {
                   <p className="inline-hint" title={lastSeen}>
                     {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
                   </p>
-                ) : null}
-                {lastEvent ? (
-                  <div className={`env-last-event ${environmentEventLevelClass(lastEvent.level)}`}>
-                    <div className="env-last-event-header">
-                      <span
-                        className={`env-event-level ${environmentEventLevelClass(lastEvent.level)}`}
-                      >
-                        {lastEvent.level}
-                      </span>
-                      <span className="env-event-type">{lastEvent.type}</span>
-                      {lastEventTime ? (
-                        <span className="env-event-time">{lastEventTime}</span>
-                      ) : null}
-                    </div>
-                    <p className="env-last-event-message" title={lastEvent.message}>
-                      {lastEvent.message}
-                    </p>
-                  </div>
                 ) : null}
               </ResourceCard>
             )

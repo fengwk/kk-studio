@@ -39,7 +39,7 @@ public interface EnvironmentService {
   /**
    * 按时间正序返回该 Environment 最近 200 条以内的连接与 Skill 同步运维事件。
    *
-   * <p>事件与 Card 的 {@code lastEvent} 同源：都是连接行保留的可重建投影，不是实时协议。
+   * <p>事件是连接行保留的可重建投影，只在此端点暴露；Card 不再内嵌历史事件。
    */
   List<EnvironmentEventDTO> listEvents(EnvironmentId id);
 

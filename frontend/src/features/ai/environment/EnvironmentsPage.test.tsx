@@ -18,6 +18,7 @@ vi.mock('@/shared/api/environment-service', () => ({
     getRegistrationToken: vi.fn(),
     rotateToken: vi.fn(),
     deleteEnvironment: vi.fn(),
+    listEnvironmentEvents: vi.fn(),
   },
 }))
 
@@ -49,7 +50,6 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
     capabilities: [],
     userName: null,
     homeDirectory: null,
-    lastEvent: null,
     version: '1',
     createTime: '2026-07-20T00:00:00.000Z',
     updateTime: '2026-07-20T00:00:00.000Z',
@@ -452,43 +452,42 @@ describe('EnvironmentsPage', () => {
   })
 
   /**
-   * 测试意图：验证环境卡片在存在 lastEvent 时呈现其级别、类型、时间与说明，
-   * 且在没有 lastEvent 时不呈现多余的事件信息。
+   * 测试意图：卡片只呈现当前状态，不内嵌历史事件；同一环境的历史 WARN 与后续 READY 事件
+   * 只在管理弹窗的 Events 列表中可见，不以删除事件让卡片干净。
    */
-  it('surfaces lastEvent when present and renders nothing extra when absent', async () => {
+  it('renders only the current status on the card and keeps event history in the management modal', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({
-        id: 'env-with-event',
-        name: 'error-box',
-        lastEvent: {
-          time: '2026-07-20T01:02:03.000Z',
-          level: 'ERROR',
-          type: 'SKILL_SYNC_FAILED',
-          message: 'Failed to synchronize skill package git repo',
-        },
-      }),
-      environment({
-        id: 'env-without-event',
-        name: 'clean-box',
-        lastEvent: null,
-      }),
+      environment({ id: 'env-recovered', name: 'recovered-box', status: 'READY', ready: true }),
+    ])
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([
+      {
+        time: '2026-07-20T00:00:00.000Z',
+        level: 'WARN',
+        type: 'DISCONNECTED',
+        message: 'daemon connection lost',
+      },
+      {
+        time: '2026-07-20T00:01:00.000Z',
+        level: 'INFO',
+        type: 'READY',
+        message: 'environment ready',
+      },
     ])
     renderPage()
 
-    expect(await screen.findByText('error-box')).toBeInTheDocument()
-    expect(screen.getByText('clean-box')).toBeInTheDocument()
+    expect(await screen.findByText('recovered-box')).toBeInTheDocument()
 
-    // 含有 lastEvent 的卡片呈现 level / type / time / message
-    expect(screen.getByText('ERROR')).toBeInTheDocument()
-    expect(screen.getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
-    expect(screen.getByText('Failed to synchronize skill package git repo')).toBeInTheDocument()
+    // 卡片只显示当前 READY 状态，不再内嵌任何历史事件区域。
+    const card = screen.getByRole('heading', { name: 'recovered-box' }).closest('article')!
+    expect(within(card).getByText('READY')).toBeInTheDocument()
+    expect(card.querySelector('.env-last-event')).toBeNull()
+    expect(within(card).queryByText('daemon connection lost')).not.toBeInTheDocument()
 
-    // 检查卡片，验证 clean-box 不呈现 lastEvent 区域，而 error-box 呈现 lastEvent
-    const errorCard = screen.getByRole('heading', { name: 'error-box' }).closest('article')!
-    const cleanCard = screen.getByRole('heading', { name: 'clean-box' }).closest('article')!
-    expect(within(errorCard).getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
-    expect(within(cleanCard).queryByText('SKILL_SYNC_FAILED')).not.toBeInTheDocument()
-    expect(within(cleanCard).queryByText('ERROR')).not.toBeInTheDocument()
+    // 打开管理弹窗后仍可见完整历史：历史 WARN 与后续 READY 都被保留。
+    const user = userEvent.setup()
+    await user.click(within(card).getByRole('button', { name: /管理/ }))
+    expect(await screen.findByText('daemon connection lost')).toBeInTheDocument()
+    expect(screen.getByText('environment ready')).toBeInTheDocument()
   })
 
   /**

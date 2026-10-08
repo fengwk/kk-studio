@@ -76,17 +76,6 @@ public record EnvironmentConnection(
         .map(EnvironmentSkillState::localPath);
   }
 
-  /** 最近一条 WARN/ERROR 运维事件；没有此类事件时为空。 */
-  public Optional<EnvironmentEvent> lastAlert() {
-    for (int index = recentEvents.size() - 1; index >= 0; index--) {
-      EnvironmentEvent event = recentEvents.get(index);
-      if (event.isAlert()) {
-        return Optional.of(event);
-      }
-    }
-    return Optional.empty();
-  }
-
   public boolean isReady(Instant now, Duration heartbeatTimeout) {
     Instant current = now != null ? now : Instant.now();
     return status == LiveEnvironmentStatus.READY

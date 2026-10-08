@@ -5652,39 +5652,6 @@ select.settings-input option {
   line-height: 1.4;
 }
 
-.env-last-event {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-raised);
-}
-
-.env-last-event.is-warn {
-  border-color: var(--warning-border);
-}
-
-.env-last-event.is-error {
-  border-color: var(--danger-border);
-}
-
-.env-last-event-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.env-last-event-message {
-  margin: 0;
-  font-size: 11px;
-  color: var(--fg-dim);
-  line-height: 1.35;
-  word-break: break-word;
-}
-
 .env-source-modal-card {
   width: min(520px, 100%);
 }

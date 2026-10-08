@@ -51,32 +51,24 @@ class EnvironmentDtoContractTest {
         String.class, EnvironmentCardDTO.class.getDeclaredField("homeDirectory").getType());
   }
 
-  /** 意图：验证 Card 只携带最近一条 WARN/ERROR 事件，而完整事件列表是有界的四项事实。 */
+  /** 意图：验证 Card 不再携带历史事件；完整事件列表是有界的四项事实，只在 events 端点暴露。 */
   @Test
-  void environmentCardCarriesLatestEventAndEventsStayBoundedFacts() throws Exception {
-    assertEquals(
-        EnvironmentEventDTO.class,
-        EnvironmentCardDTO.class.getDeclaredField("lastEvent").getType());
+  void environmentCardCarriesNoEventAndEventsStayBoundedFacts() throws Exception {
+    assertThrows(
+        NoSuchFieldException.class, () -> EnvironmentCardDTO.class.getDeclaredField("lastEvent"));
+    assertThrows(
+        NoSuchMethodException.class, () -> EnvironmentCardDTO.class.getMethod("getLastEvent"));
+    assertThrows(
+        NoSuchMethodException.class,
+        () -> EnvironmentCardDTO.class.getMethod("setLastEvent", EnvironmentEventDTO.class));
     assertEquals(
         List.of("time", "level", "type", "message"),
         List.of(EnvironmentEventDTO.class.getDeclaredFields()).stream()
             .map(Field::getName)
             .toList());
 
-    // 事件时间在 wire 上是 Instant（Web 层按数值时间戳序列化），序列化往返只覆盖文本事实。
+    // 事件时间在 wire 上是 Instant（Web 层按数值时间戳序列化）。
     assertEquals(Instant.class, EnvironmentEventDTO.class.getDeclaredField("time").getType());
-    EnvironmentEventDTO event = new EnvironmentEventDTO();
-    event.setLevel("ERROR");
-    event.setType("SKILL_SYNC_FAILED");
-    event.setMessage("fetch failed");
-    EnvironmentCardDTO card = new EnvironmentCardDTO();
-    card.setLastEvent(event);
-    assertEquals(
-        "SKILL_SYNC_FAILED",
-        MAPPER
-            .readValue(MAPPER.writeValueAsString(card), EnvironmentCardDTO.class)
-            .getLastEvent()
-            .getType());
   }
 
   /** 意图：验证 EnvironmentRotateTokenDTO 能正确反序列化 expectedVersion，且在携带未知字段时报错。 */
