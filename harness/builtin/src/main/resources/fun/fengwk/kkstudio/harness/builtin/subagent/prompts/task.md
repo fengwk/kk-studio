@@ -9,7 +9,7 @@ Usage:
 - When work can be decomposed into independent parts such as `X + Y + Z`, split it into multiple `task` calls and emit them in the same message so they run concurrently.
 
 Acceptance:
-- `task` returns as soon as the delegation is accepted durably. The receipt is the JSON `{"thread_id":"...","status":"accepted"}` and does not repeat your prompt.
+- `task` returns as soon as the delegation is accepted durably. The receipt opens with `Task accepted. thread_id: <uuid>.` and explains that the subagent runs asynchronously, may complete, fail, or be cancelled, that you should keep doing independent work or yield if none remains, and that you continue it with `task(thread_id, subagent_type, prompt)`. It does not repeat your prompt.
 - Do not wait for the child in the same turn and do not poll for it. The child's result arrives later as a separate message in this conversation, with the task prompt reproduced as historical reference, the agent name, the final status, and the report (or the separated error and partial result).
 - You remain responsible for the final review of the child's report. A child can complete, fail, or be cancelled; a cancelled or failed child keeps its session for continuation.
 

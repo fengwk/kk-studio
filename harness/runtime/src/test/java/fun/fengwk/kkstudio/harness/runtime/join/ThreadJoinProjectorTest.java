@@ -123,7 +123,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T0);
+            T0,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -150,7 +152,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -210,7 +214,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -253,7 +259,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -311,7 +319,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -392,7 +402,9 @@ class ThreadJoinProjectorTest {
             finalAssistant,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -460,7 +472,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T0);
+            T0,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -550,7 +564,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -619,7 +635,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -692,7 +710,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -764,7 +784,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -853,7 +875,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -917,7 +941,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -1006,7 +1032,9 @@ class ThreadJoinProjectorTest {
             assistant2,
             null,
             T1,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -1073,7 +1101,9 @@ class ThreadJoinProjectorTest {
             assistant1,
             null,
             T0,
-            T0);
+            T0,
+            JoinPurpose.TASK,
+            null);
 
     // 子线程后续继续执行了第 2 轮并推进了 head (T2)
     store.transaction(
@@ -1231,7 +1261,9 @@ class ThreadJoinProjectorTest {
                   assistant,
                   null,
                   T0,
-                  T0);
+                  T0,
+                  JoinPurpose.TASK,
+                  null);
           ThreadJoin joinCustom =
               new ThreadJoin(
                   id(92),
@@ -1246,7 +1278,9 @@ class ThreadJoinProjectorTest {
                   assistant,
                   null,
                   T0,
-                  T0);
+                  T0,
+                  JoinPurpose.TASK,
+                  null);
           ThreadJoin joinGoal =
               new ThreadJoin(
                   id(93),
@@ -1261,7 +1295,9 @@ class ThreadJoinProjectorTest {
                   assistant,
                   null,
                   T0,
-                  T0);
+                  T0,
+                  JoinPurpose.TASK,
+                  null);
 
           ThreadJoinReceipt receiptUser =
               ThreadJoinProjector.INSTANCE.project(tx, joinUser).orElseThrow();
@@ -1339,7 +1375,9 @@ class ThreadJoinProjectorTest {
             assistant,
             null,
             T0,
-            T0);
+            T0,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -1388,7 +1426,9 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0,
-            T0);
+            T0,
+            JoinPurpose.TASK,
+            null);
 
     store.transaction(
         tx -> {
@@ -1520,6 +1560,8 @@ class ThreadJoinProjectorTest {
         null,
         null,
         T0,
-        T0);
+        T0,
+        JoinPurpose.TASK,
+        null);
   }
 }

@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -978,7 +979,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(childThreadId, "childThreadId");
       return state.joins.values().stream()
-          .filter(join -> join.childThreadId().equals(childThreadId) && !join.matched())
+          .filter(
+              join ->
+                  join.childThreadId().equals(childThreadId)
+                      && !join.matched()
+                      && join.supersededByInvocationId() == null)
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
                   .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
@@ -994,7 +999,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
               join ->
                   parentThreadId.equals(join.parentThreadId())
                       && join.matched()
-                      && join.deliveryCommandSequence() == null)
+                      && join.deliveryCommandSequence() == null
+                      && join.purpose() == JoinPurpose.TASK
+                      && join.supersededByInvocationId() == null)
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
                   .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
@@ -1007,7 +1014,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(parentThreadId, "parentThreadId");
       return (int)
           state.joins.values().stream()
-              .filter(join -> parentThreadId.equals(join.parentThreadId()) && !join.matched())
+              .filter(
+                  join ->
+                      parentThreadId.equals(join.parentThreadId())
+                          && !join.matched()
+                          && join.supersededByInvocationId() == null
+                          && join.purpose() == JoinPurpose.TASK)
               .count();
     }
 
@@ -1030,7 +1042,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       return (int)
           state.joins.values().stream()
-              .filter(join -> join.parentThreadId() != null && !join.matched())
+              .filter(
+                  join ->
+                      join.parentThreadId() != null
+                          && !join.matched()
+                          && join.supersededByInvocationId() == null
+                          && join.purpose() == JoinPurpose.TASK)
               .count();
     }
 
@@ -1269,10 +1286,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
               .filter(j -> j.childThreadId().equals(childThreadId))
               .toList();
       for (ThreadJoin join : childJoins) {
+        if (join.supersededByInvocationId() != null) {
+          // 已被后续续接 supersede 的 join 永远不会交付，可安全删除。
+          continue;
+        }
         if (!join.matched()) {
           throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
         }
-        if (join.parentThreadId() != null && join.deliveryCommandSequence() == null) {
+        if (join.purpose() != JoinPurpose.COMPACTION
+            && join.parentThreadId() != null
+            && join.deliveryCommandSequence() == null) {
           throw new IllegalArgumentException(
               "cannot delete join pending delivery " + join.invocationId());
         }
@@ -1333,7 +1356,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         boolean parentAlsoDeleted =
             join.parentThreadId() == null || deleting.contains(join.parentThreadId());
-        if (!parentAlsoDeleted && (!join.matched() || join.deliveryCommandSequence() == null)) {
+        if (!parentAlsoDeleted
+            && join.supersededByInvocationId() == null
+            && (!join.matched()
+                || (join.purpose() != JoinPurpose.COMPACTION
+                    && join.deliveryCommandSequence() == null))) {
           throw new IllegalArgumentException(
               "cannot delete join pending delivery " + join.invocationId());
         }

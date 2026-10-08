@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -221,7 +222,8 @@ public class IssueRunServiceImpl implements IssueRunService {
     List<NewThreadCommand> commands = buildRunCommands(settings, scope, stage.environment());
     NewThreadCommand taskInput = commands.getLast();
     ThreadJoinRequest join =
-        new ThreadJoinRequest(runId, null, null, taskInput.requestHash(), agentName, null, 1, 1, 1);
+        new ThreadJoinRequest(
+            runId, null, null, taskInput.requestHash(), agentName, null, 1, 1, 1, JoinPurpose.TASK);
     AcceptedCommands accepted =
         requireRuntime()
             .acceptCommandsAndJoin(

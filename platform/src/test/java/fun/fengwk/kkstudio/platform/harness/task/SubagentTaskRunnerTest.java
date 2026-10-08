@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -604,7 +605,9 @@ class SubagentTaskRunnerTest {
         null,
         null,
         NOW,
-        NOW);
+        NOW,
+        JoinPurpose.TASK,
+        null);
   }
 
   private static ThreadSnapshot child(UUID childThreadId, UUID parentThreadId, long nextSequence) {

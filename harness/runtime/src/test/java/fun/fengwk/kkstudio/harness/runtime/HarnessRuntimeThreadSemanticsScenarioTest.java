@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -196,7 +197,9 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   null,
                   null,
                   T0,
-                  T0);
+                  T0,
+                  JoinPurpose.TASK,
+                  null);
           // terminalEntryId 指向已存在的 Entry；仅验证冻结结果不被 Stop 改写。
           tx.insertJoin(join);
           tx.updateJoin(join.match(terminalEntryId, null, T0));
@@ -222,7 +225,9 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   null,
                   null,
                   T0,
-                  T0));
+                  T0,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
   }

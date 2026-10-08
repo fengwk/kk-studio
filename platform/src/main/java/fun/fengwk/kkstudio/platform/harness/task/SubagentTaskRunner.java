@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -116,7 +117,10 @@ public class SubagentTaskRunner implements SubagentRunner {
                 joinRequest(request, parent, requestHash, maxTurns),
                 AcceptancePreflight.IDENTITY);
         return new SubagentTaskAcceptance(
-            accepted.session().id(), accepted.thread().id(), accepted.replayed());
+            accepted.session().id(),
+            accepted.thread().id(),
+            accepted.replayed(),
+            accepted.joinReplaced());
       } catch (HarnessRuntimeNotFoundException notFound) {
         throw reject("subagent task parent thread no longer exists", notFound);
       } catch (RuntimeException failure) {
@@ -144,7 +148,8 @@ public class SubagentTaskRunner implements SubagentRunner {
         || (request.maxTurns() != null && !request.maxTurns().equals(existing.maxTurns()))) {
       throw reject("subagent task invocation was already accepted for a different delegation");
     }
-    return new SubagentTaskAcceptance(sessionIdOf(runtime, childThreadId), childThreadId, true);
+    return new SubagentTaskAcceptance(
+        sessionIdOf(runtime, childThreadId), childThreadId, true, false);
   }
 
   /** 新建子 Session：一次性携带 root settings、父关系与源 prompt。 */
@@ -225,7 +230,8 @@ public class SubagentTaskRunner implements SubagentRunner {
         maxTurns,
         config.maxDepth(),
         config.maxConcurrency(),
-        config.maxTotalConcurrency() == 0 ? Integer.MAX_VALUE : config.maxTotalConcurrency());
+        config.maxTotalConcurrency() == 0 ? Integer.MAX_VALUE : config.maxTotalConcurrency(),
+        JoinPurpose.TASK);
   }
 
   /** 校验父调用仍是当前冻结的 tool invocation，并冻结其允许的 subagent 与 settings 事实。 */

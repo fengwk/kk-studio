@@ -53,11 +53,12 @@ class ThreadJoinCompletionRendererTest {
     assertTrue(message.contains("<result>\ndone!\n</result>"), message);
     assertFalse(message.contains("<partial_result>"), message);
     assertFalse(message.contains("<error>"), message);
+    assertFalse(message.contains("<resume>"), message);
   }
 
   @Test
   void rendersFailedMessageWithSeparatedErrorAndPartial() {
-    // 测试意图：验证 ERROR 消息把 error 与 partial_result 分开，且保留 task 原文。
+    // 测试意图：验证 ERROR 消息把 error 与 partial_result 分开，且保留 task 原文与具体 task(...) 恢复方式。
     String message =
         ThreadJoinCompletionRenderer.render(
             CHILD_THREAD_ID,
@@ -72,6 +73,13 @@ class ThreadJoinCompletionRendererTest {
     assertTrue(message.contains("<error>\nprovider failed\n</error>"), message);
     assertTrue(message.contains("<partial_result>\nhalf a report\n</partial_result>"), message);
     assertFalse(message.contains("<result>"), message);
+    assertTrue(message.contains("<resume>\n"), message);
+    assertTrue(
+        message.contains(
+            "task(thread_id=&quot;"
+                + CHILD_THREAD_ID
+                + "&quot;, subagent_type=&quot;explorer&quot;"),
+        message);
   }
 
   @Test
