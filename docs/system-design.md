@@ -163,8 +163,9 @@ Turn 也可能观察到发布或同步后的内容。安装和发布细节见 [P
 
 Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join 身份持久接受后立即
 返回 `{"thread_id":"...","status":"accepted"}`；父 Thread 可以继续工作，root Join 在子执行
-首次到达终态（`COMPLETED` / `ERROR` / `CANCELLED`）时冻结 `terminalEntryId` / `finalAnswerEntryId`，
-再以 `NOTIFICATION` 交付给直接派发的父 Thread，不等待其永久子树 idle。
+收敛到终态（`COMPLETED` / `ERROR`，且没有未完成的直接子 Join、未送达的子回执或待处理输入）时冻结
+`terminalEntryId` / `finalAnswerEntryId`；显式 Stop 不受收敛条件限制，以停止边界强制结算。
+结果再以 `NOTIFICATION` 交付给直接派发的父 Thread，不等待其整个永久子树进入静态 idle。
 后代审批和问卷归属人工控制根，但不会改变 Join 的直接父订阅。继续委派使用 `thread_id` 并复验父子归属；
 深度、单父并发与全局并发额度由 Runtime 裁决。子 Agent 使用自身默认 Model，
 `inheritParentEnvironment` 决定是否继承父调用冻结的 Environment。完整契约见

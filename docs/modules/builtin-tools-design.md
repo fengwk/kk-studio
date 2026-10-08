@@ -63,11 +63,11 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
 
-完成结果不是原 `task` 调用返回的第二个结果：`task` 只返回接受回执，子 Thread 在源输入应用后的首次最终回答、不可继续失败或 Stop 时冻结 `terminalEntryId` / `finalAnswerEntryId` 结算 join，再以一条 `NOTIFICATION` 命令进入父的下一安全轮次。父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史，接受新任务输入后才继续模型。多条结果可以合并处理，父仍负责最终验收。
+完成结果不是原 `task` 调用返回的第二个结果：`task` 只返回接受回执，子 Thread 在源输入应用后、且没有未完成直接子 Join / 未送达子回执 / 待处理输入时，以最终回答或不可继续失败冻结 `terminalEntryId` / `finalAnswerEntryId` 结算 join；Stop 强制结算不受上述收敛条件限制。结算结果再以一条 `NOTIFICATION` 命令进入父的下一安全轮次。父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史，接受新任务输入后才继续模型。多条结果可以合并处理，父仍负责最终验收。
 
 ### 持久义务与交付
 
-Thread 的空闲只描述自身：无待处理命令、无本地适用 Invocation、无 continuation 或到期压缩义务。等待审批或人工输入仍属于适用 Invocation；等待子 Join 不影响父自身的 `IDLE`，也不空转模型或保留等待线程。子任务按各自终态逐层结算并通知父。
+Thread 的空闲只描述自身：无待处理命令、无本地适用 Invocation、无 continuation 或到期压缩义务。等待审批或人工输入仍属于适用 Invocation；等待子 Join 不影响父自身的 `IDLE`，也不空转模型或保留等待线程。子任务按各自收敛终态逐层结算并通知父：源输入已应用且没有未完成的直接子 Join、未送达的子回执或待处理输入时，本地终态才作为委派收敛点向上回执，本地 `IDLE` 本身不足以保证整次委派可交付。
 
 内部以工具 invocation ID 标识本次委派，join 记录父子 Thread、源命令、冻结的终态/最终回答 Entry 与投递坐标；固定归属与每次执行身份分开。执行由 Session/Thread/Entry/Command/Work 的统一生命周期推进。
 

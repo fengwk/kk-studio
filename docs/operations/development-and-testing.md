@@ -287,7 +287,7 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。
 这些用例只操作测试 Catalog，不调用真实模型；执行仍需可用的隔离 Backend、数据库与 S3。
 
-异步 `task` 的工具结果只表示已接受；完成结果由 Runtime 在子 Thread 到达首个终态边界结算 join 后，
+异步 `task` 的工具结果只表示已接受；完成结果由 Runtime 在子 Thread 到达收敛终态边界结算 join 后，
 作为父 Thread 的一条 `NOTIFICATION`（`NotificationKind.SUBAGENT_RESULT`）命令交付——wire 是系统通知
 而不是用户输入，其消息正文为 `<subagent_result thread_id agent state>`；父为 `STOPPED` 时通知只
 固化进历史、不唤醒模型。`real.task_delegation` 分别验证 JSON 受理收据与同一子 Thread 的完成通知，
