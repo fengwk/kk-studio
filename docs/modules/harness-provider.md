@@ -63,13 +63,15 @@ Catalog API 与持久化 variant 使用 **`protocolOptionsJson` 字符串**，�
 
 原位回放只由 `format`、`affinity`（是否等于当前 `ProviderDescriptor.affinity(requestedModel)`）与 payload 结构/durable 一致性决定，不存在前缀哈希或字节级比对。payload 结构非法、与 durable 事实矛盾或违反协议不变量时 fail closed 为 `INVALID_REQUEST`；`format` / `affinity` 失配或 durable 语义已被改写（压缩、编辑）时回退语义编码，能证明可重建的原生附加字段按 durable 语义投影，签名、密文、未知 item 等只有原生回放才能保真的事实随回退被丢弃，不会假装保真。回放 payload 不被改写（仅移除值为 JSON null 的已知可空字段）。因此缓存标记、JSON 字段顺序与 system 前缀都不参与回放判定。
 
-OpenAI Responses 的 durable thinking 与 replay 一致性校验逐个 reasoning item 使用相同规则：终态非空白 `summary[].summary_text` 优先；没有可用摘要时读取 `content[].reasoning_text`，两者绝不拼接，再按 item 顺序聚合。有摘要时，即使 content 文本不同也仍以摘要为准，原生 content 无损保留。仅当终态存在 reasoning 且全部没有可比较纯文本时，保留已有流式思考；空占位符（无密文、无可用摘要、无 content 或其他附加事实）不冻结 native replay，重建时退回语义编码。content 的 array/object/type/text 形状在流式捕获阶段以 `INVALID_RESPONSE` 拒绝、在回放校验中以 `INVALID_REQUEST` 拒绝，真实文本矛盾即使 affinity 失配也以 `INVALID_REQUEST` 拒绝；encrypted-only replay 没有可比较纯文本而 durable 有 thinking 时仍严格拒绝。
+OpenAI Responses 的 durable thinking 与 replay 一致性校验逐个 reasoning item 使用相同规则：终态非空白 `summary[].summary_text` 优先；没有可用摘要时读取 `content[].reasoning_text`，两者绝不拼接，再按 item 顺序聚合。有摘要时，即使 content 文本不同也仍以摘要为准，原生 content 无损保留。仅当终态存在 reasoning 且全部没有可比较纯文本时，保留已有流式思考；空占位符（无密文、无可用摘要、无 content 或其他附加事实）不冻结 native replay，重建时退回语义编码。content 的 array/object/type/text 形状在流式捕获阶段以 `INVALID_RESPONSE` 拒绝、在回放校验中以 `INVALID_REQUEST` 拒绝，真实文本矛盾即使 affinity 失配也以 `INVALID_REQUEST` 拒绝。携带 `encrypted_content` 而没有可比可读文本的 reasoning 是原生推理的权威事实：durable 有可读思考时不再拒绝，原位回放保留密文，并把缺失的 durable 可读思考作为普通 assistant 文本 item 附带（不伪造 reasoning summary）；affinity 失配时回退语义编码，可读思考由 reasoning summary 承载。
 
 流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留，密文绝不当作 semantic thinking 外泄。同 affinity 原生回放保留 content、id 与密文等协议事实；切换 provider、wire 模型或连接 generation 后，校验成功才回退语义编码，保留 durable 思考和正文，不携带源 id 或密文。
 
-OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 随 replay payload 保留：`reasoning_content` 与 durable thinking 逐字校验一致，`reasoning_details` 只做类型校验。回放只受 `affinity` 门控——同一 provider、连接 generation 与 wire 模型内原样回传（[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`），跨 provider、连接 generation 或模型转移时回退语义编码并丢弃思考；`annotations` 与非法形态的 `audio` 以 `INVALID_REQUEST` 拒绝。
+OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 随 replay payload 保留：`reasoning_content` 与 durable thinking 逐字校验一致，`reasoning_details` 只做类型校验。回放只受 `affinity` 门控——同一 provider、连接 generation 与 wire 模型内原样回传（[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`），跨 provider、连接 generation 或模型转移时回退语义编码，可读思考以带 `<thinking>`/`</thinking>` 来源标记的普通文本保留，与 final text 明确分隔；`annotations` 与非法形态的 `audio` 以 `INVALID_REQUEST` 拒绝。
 
-工具绑定或 Environment 变化时，无 replay 的历史工具调用可投影为普通上下文。携带 replay 的助手消息若需降级，Runtime 在启动 Gateway 前以 INVALID_REQUEST 拒绝，保留原生签名与密文。恢复使用原工具绑定/环境，或在新上下文中显式提供摘要。模型切换与前缀编辑由编码器按 affinity 校验；压缩是摘要重建的有损边界。
+工具绑定或 Environment 变化时，无 replay 的历史工具调用可投影为普通上下文。携带 replay 的助手消息若需降级，Runtime 放弃该消息不兼容的 opaque replay 并改用语义投影（调用与结果仍按既有规则配对，绝不把原生 payload 附着到被改写的内容上），不因存在 replay 就拒绝请求。模型切换与前缀编辑由编码器按 affinity 校验；压缩是摘要重建的有损边界。
+
+语义回退把 assistant 的 `ProviderJsonBlock` 诊断（如 `tool_call_diagnostic`）投影为普通文本，四协议都不再以 `INVALID_REQUEST` 拒绝：Anthropic/Gemini 各为独立 `text` 块/part，OpenAI Chat 并回 assistant `content`，OpenAI Responses 为 `output_text`。
 
 媒体能力由 [`ProviderMediaCapabilities`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderMediaCapabilities.java) 按用户内容与工具结果分别声明；Platform 把它与模型 `inputModalities` 取交集，把 durable Blob 引用转换成 attempt-only 的 Base64 data URI。编码器不访问 Blob 存储，也不生成私网地址或预签名 URL，未声明的 adapter 默认为 `NONE`。
 

@@ -398,6 +398,12 @@ final class OpenAiResponsesRequestEncoder {
         if (replayState != null
             && canReplay(replayState, descriptor, model.modelId(), msg.contents())) {
           ArrayNode outputArray = extractOutputArray(replayState.payload());
+          // 密文 reasoning 没有可比可读文本时，原生回放会丢失 durable 可读思考：绝不能静默丢弃，
+          // 把缺失的可读思考作为普通 assistant 文本附在原生 item 之前（不伪造 reasoning summary/signature）。
+          String missingReadableThinking = missingReadableThinking(outputArray, msg.contents());
+          if (missingReadableThinking != null) {
+            appendAssistantTextMessage(inputItems, missingReadableThinking);
+          }
           for (JsonNode item : outputArray) {
             inputItems.add(item.deepCopy());
           }
@@ -470,6 +476,9 @@ final class OpenAiResponsesRequestEncoder {
         textBuf.append(textBlock.text());
       } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
         thinkBuf.append(thinkingBlock.thinking());
+      } else if (block instanceof ProviderJsonBlock jsonBlock) {
+        // assistant JSON 诊断（如 tool_call_diagnostic）降级为普通文本。
+        textBuf.append(jsonBlock.json());
       } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
         toolCalls.add(toolCallBlock);
       } else {
@@ -507,6 +516,43 @@ final class OpenAiResponsesRequestEncoder {
       fc.put("name", tc.name());
       fc.put("arguments", tc.argumentsJson());
     }
+  }
+
+  /** 普通 assistant 文本 item（output_text），用于承载原生回放无法表达的可读思考。 */
+  private static void appendAssistantTextMessage(ArrayNode inputItems, String text) {
+    ObjectNode msg = inputItems.addObject();
+    msg.put("type", "message");
+    msg.put("role", "assistant");
+    ObjectNode contentBlock = msg.putArray("content").addObject();
+    contentBlock.put("type", "output_text");
+    contentBlock.put("text", text);
+  }
+
+  /**
+   * 判断原位回放是否缺失 durable 可读思考，返回需要作为普通 assistant 文本附带的文本，否则返回 {@code null}。
+   *
+   * <p>仅当 durable 有可读思考、而 replay 的全部 reasoning item 都没有可比可读文本（例如仅携带 {@code
+   * encrypted_content}）时成立；此时原生回放无法表达该可读文本，必须显式附带而不是静默丢弃。
+   */
+  private static String missingReadableThinking(
+      ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
+    StringBuilder durableThinking = new StringBuilder();
+    for (ProviderContentBlock block : durableContents) {
+      if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        durableThinking.append(thinkingBlock.thinking());
+      }
+    }
+    if (durableThinking.isEmpty()) {
+      return null;
+    }
+    StringBuilder replayThinking = new StringBuilder();
+    for (JsonNode item : outputArray) {
+      if ("reasoning".equals(item.path("type").asText())) {
+        replayThinking.append(
+            OpenAiResponsesReasoningText.read(item, ProviderErrorKind.INVALID_REQUEST));
+      }
+    }
+    return replayThinking.isEmpty() ? durableThinking.toString() : null;
   }
 
   /**
@@ -567,9 +613,10 @@ final class OpenAiResponsesRequestEncoder {
   /**
    * 判断 durable replay 是否可在本轮原位回放。
    *
-   * <p>先严格校验 payload 与 durable 语义的一致性（结构损坏或与 durable 文本/思考/工具调用矛盾在此抛出 {@code INVALID_REQUEST}，与
+   * <p>先严格校验 payload 与 durable 语义的一致性（结构损坏或与 durable 文本/工具调用矛盾在此抛出 {@code INVALID_REQUEST}，与
    * affinity 是否匹配无关）；随后 affinity 匹配时原位回放 payload 的全部 output item，否则回退语义编码。 opaque / native item
-   * 本身从不导致拒绝：affinity 匹配即原样回放，失配则随语义回退被丢弃。
+   * 本身从不导致拒绝：affinity 匹配即原样回放，失配则随语义回退被丢弃。携带 opaque 密文、没有可比可读文本的 reasoning 是原生推理的 权威事实：原位回放保留密文，
+   * 缺失的 durable 可读思考由调用方作为普通 assistant 文本附带。
    */
   private static boolean canReplay(
       ProviderReplayState replayState,
@@ -617,6 +664,9 @@ final class OpenAiResponsesRequestEncoder {
    *
    * <p>无 {@code encrypted_content}、无可用摘要文本、也没有超出 {@code type/id/status/summary} 成员的 reasoning item
    * 是上游“原生推理不可用”的合法空占位符：当 payload 只由这类占位符构成时不承载原生推理，返回 {@code true} 由调用方回退语义编码， 而不是判为损坏请求。
+   *
+   * <p>带 {@code encrypted_content} 且没有可比可读文本的 reasoning item 是原生推理的权威事实：即便 durable 有可读思考也不
+   * 判为矛盾（该可读文本无法在 payload 内表达），放行原位回放；真实可读文本矛盾或纯文本占位符仍需回退或拒绝。
    */
   private static boolean declinesReplay(
       ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
@@ -625,6 +675,7 @@ final class OpenAiResponsesRequestEncoder {
     List<ProviderToolCall> replayToolCalls = new ArrayList<>();
     int reasoningItemCount = 0;
     int emptyReasoningPlaceholderCount = 0;
+    boolean replayHasOpaqueReasoning = false;
 
     for (JsonNode item : outputArray) {
       if (!item.isObject()) {
@@ -755,6 +806,9 @@ final class OpenAiResponsesRequestEncoder {
           replayThinking.append(
               OpenAiResponsesReasoningText.read(item, ProviderErrorKind.INVALID_REQUEST));
           reasoningItemCount++;
+          if (itemHasEncrypted) {
+            replayHasOpaqueReasoning = true;
+          }
           if (!itemHasEncrypted
               && !hasFieldOutside(item, REASONING_ITEM_FIELDS)
               && !itemHasUsableSummary) {
@@ -837,11 +891,16 @@ final class OpenAiResponsesRequestEncoder {
     boolean replayIsEmptyPlaceholderOnly =
         reasoningItemCount > 0 && emptyReasoningPlaceholderCount == reasoningItemCount;
     if (!replayIsEmptyPlaceholderOnly) {
+      boolean replayHasNoComparableThinking = replayThinking.isEmpty();
       if (!durableThinking.isEmpty()
           && !replayThinking.toString().equals(durableThinking.toString())) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "replay thinking content mismatch with durable message thinking");
+        if (!(replayHasNoComparableThinking && replayHasOpaqueReasoning)) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "replay thinking content mismatch with durable message thinking");
+        }
+        // 携带 opaque 密文且没有可比可读文本的 reasoning 是原生推理的权威事实：durable 可读思考无法在 payload 内表达，
+        // 但也不能据此拒绝。原位回放保留密文原生事实；编码器会把缺失的可读思考作为普通 assistant 文本附带，不猜测、不改写密文。
       } else if (durableThinking.isEmpty() && !replayThinking.isEmpty()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
