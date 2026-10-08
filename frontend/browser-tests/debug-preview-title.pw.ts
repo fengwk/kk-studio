@@ -1,7 +1,8 @@
 import { resolve } from 'node:path'
 import { expect, test, type Page } from './fixture'
 
-const reportsDir = resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
+const reportsDir = process.env.KK_LAYOUT_REPORTS_DIR
+  ?? resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 
 const THREAD_ID = 'f0000000-0000-0000-0000-00000000f001'
 const DRAFT = '复核下一次请求预览入口'
@@ -348,13 +349,13 @@ async function openCommandPalette(page: Page) {
 async function enterDebugView(page: Page) {
   const palette = await openCommandPalette(page)
   await palette.locator('button', { hasText: /^debug/ }).click()
-  await expect(page.locator('.thread-debug-toolbar')).toBeVisible()
+  await expect(page.getByRole('button', { name: '关闭 Debug', exact: true })).toBeVisible()
 }
 
-/** 退出 Debug 回到会话：唯一稳定入口是 Debug 工具条的「返回会话」，退出不修改草稿。 */
+/** 单顶栏关闭 Debug，不修改草稿，也不创建第二行返回 header。 */
 async function exitDebugView(page: Page) {
-  await page.locator('.thread-debug-toolbar .thread-debug-back').click()
-  await expect(page.locator('.thread-debug-toolbar')).toHaveCount(0)
+  await page.getByRole('button', { name: '关闭 Debug', exact: true }).click()
+  await expect(page.getByRole('button', { name: '关闭 Debug', exact: true })).toHaveCount(0)
   await expect(page.locator('.thread-composer .composer-editor')).toBeVisible()
 }
 

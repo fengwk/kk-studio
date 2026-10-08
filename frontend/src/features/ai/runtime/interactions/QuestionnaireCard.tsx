@@ -7,6 +7,8 @@ import { interactionService } from '@/shared/api/interaction-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
+import { Button } from '@/shared/ui/controls/Button'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import {
   interactionDraftStore,
   useInteractionDraft,
@@ -275,7 +277,7 @@ export function QuestionnaireCard({
 
               {/* 固定提供的自定义输入框 */}
               <div className="interaction-custom-input-wrap">
-                <input
+                <TextInput
                   type="text"
                   className="interaction-custom-input"
                   placeholder={t('ai.interaction.customInputPlaceholder')}
@@ -301,35 +303,33 @@ export function QuestionnaireCard({
       ) : null}
 
       <div className="interaction-actions-bar">
-        <button
-          type="button"
-          className="ghost-btn interaction-decline-btn"
+        <Button
+          variant="ghost"
+          className="interaction-decline-btn"
           disabled={draft.isSubmitting || draft.isNonRecoverable}
           onClick={handleDecline}
         >
           {t('ai.interaction.decline')}
-        </button>
+        </Button>
 
         <div className="interaction-actions-right">
           {!draft.isNonRecoverable && draft.error && draft.frozenSubmissionId ? (
-            <button
-              type="button"
-              className="btn-primary interaction-retry-btn"
+            <Button
+              className="interaction-retry-btn"
               disabled={draft.isSubmitting}
               onClick={handleRetry}
             >
               <RotateCw size={14} className={draft.isSubmitting ? 'animate-spin' : ''} />
               <span>{t('ai.interaction.retry')}</span>
-            </button>
+            </Button>
           ) : (
-            <button
-              type="button"
-              className="btn-primary interaction-submit-btn"
+            <Button
+              className="interaction-submit-btn"
               disabled={!canSubmit}
               onClick={handleSubmit}
             >
               {draft.isSubmitting ? t('ai.interaction.submitting') : t('ai.interaction.submit')}
-            </button>
+            </Button>
           )}
         </div>
       </div>

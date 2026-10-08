@@ -122,7 +122,7 @@ export function ThreadPanel({ transcript, mainView, controls, activity, slots, h
     <section className="chat-shell thread-panel">
       {slots?.sidebar}
       <main className="chat-main thread-panel-main">
-        {heading}
+        {mainView?.debug == null ? heading : null}
         {mainView?.debug ?? (
           <ThreadConversationView
             messages={transcript.messages}
@@ -137,18 +137,18 @@ export function ThreadPanel({ transcript, mainView, controls, activity, slots, h
             eventCount={transcript.eventCount}
           />
         )}
-        <ThreadWidgetStack
+        {mainView?.debug == null ? <ThreadWidgetStack
           working={activity.working}
           workingLabel={activity.workingLabel}
           queuedMessages={transcript.queuedMessages}
         >
           {activity.widgets}
-        </ThreadWidgetStack>
-        {activity.actionError ? (
+        </ThreadWidgetStack> : null}
+        {mainView?.debug == null && activity.actionError ? (
           <ThreadErrorPanel message={activity.actionError} onDismiss={activity.onDismissActionError} />
         ) : null}
         {controls}
-        {slots?.footer}
+        {mainView?.debug == null ? slots?.footer : null}
       </main>
     </section>
   )

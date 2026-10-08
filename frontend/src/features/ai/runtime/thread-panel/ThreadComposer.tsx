@@ -115,6 +115,7 @@ export interface ThreadComposerProps {
   focusOnEscape?: boolean
   /** false 时由同一 Composer 区域的 interaction panel 接管；组件保持挂载以保留上传状态。 */
   active?: boolean
+  restoreOnActivate?: boolean
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
   settings?: ThreadComposerSettingsInput
   scope?: string
@@ -150,6 +151,7 @@ export function ThreadComposer({
   hashFile,
   focusOnEscape = false,
   active = true,
+  restoreOnActivate = true,
   settings,
   scope,
   onPreviewReadinessChange,
@@ -290,6 +292,7 @@ export function ThreadComposer({
     containerRef,
     disabled,
     active,
+    restoreOnActivate,
     focusOnEscape,
     pending,
     closeOverlay,

@@ -10,6 +10,7 @@ function Harness({
   disabled = false,
   active = true,
   focusOnEscape = false,
+  restoreOnActivate = true,
   pending = false,
   closeOverlay = vi.fn(),
   onLeaveRegion,
@@ -18,6 +19,7 @@ function Harness({
   disabled?: boolean
   active?: boolean
   focusOnEscape?: boolean
+  restoreOnActivate?: boolean
   pending?: boolean
   closeOverlay?: () => boolean | void
   onLeaveRegion?: () => void
@@ -31,6 +33,7 @@ function Harness({
     disabled,
     active,
     focusOnEscape,
+    restoreOnActivate,
     pending,
     closeOverlay,
     onLeaveRegion,
@@ -68,6 +71,23 @@ function expectCaretAtEnd(editor: HTMLElement) {
 }
 
 describe('useComposerFocus', () => {
+  it('does not let a background pane steal focus when the workspace reveals it', () => {
+    vi.useFakeTimers()
+    try {
+      const view = render(<Harness active={false} restoreOnActivate={false} />)
+      const outside = screen.getByRole('button', { name: 'outside' })
+      outside.focus()
+      view.rerender(<Harness restoreOnActivate={false} />)
+      expect(outside).toHaveFocus()
+      view.rerender(<Harness pending restoreOnActivate={false} />)
+      view.rerender(<Harness restoreOnActivate={false} />)
+      expect(outside).toHaveFocus()
+      vi.runAllTimers()
+      expect(outside).toHaveFocus()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   it('cancels an external focus already queued before another pane becomes focused', () => {
     vi.useFakeTimers()
     try {

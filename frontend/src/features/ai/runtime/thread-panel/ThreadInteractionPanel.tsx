@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import type { KeyboardEventHandler, ReactNode } from 'react'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 
 /**
  * Composer 区域的轻量交互面板外壳。
@@ -54,15 +55,14 @@ export function ThreadInteractionPanel({
     >
       <header className="thread-interaction-header">
         <h2>{title}</h2>
-        <button
-          type="button"
-          className="thread-interaction-close"
-          aria-label={t('shared.close')}
+        <IconButton
+          size="compact"
+          label={t('shared.close')}
           disabled={closeDisabled}
           onClick={onClose}
         >
           <X aria-hidden="true" />
-        </button>
+        </IconButton>
       </header>
       {controls == null ? null : (
         <div className="thread-interaction-controls">{controls}</div>

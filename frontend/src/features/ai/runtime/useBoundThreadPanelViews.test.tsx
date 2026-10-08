@@ -11,6 +11,8 @@ import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { BoundThreadPanelController } from '@/features/ai/runtime/useBoundThreadPanelViews'
 import type { HarnessModelRequestDebugDTO } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
+import { useThreadPresentation } from './thread-presentation'
+import { ThreadPresentationActions } from './ThreadPresentationActions'
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: { getModelRequestDebug: vi.fn(), previewHistoricalRequest: vi.fn() },
@@ -96,10 +98,17 @@ it('renders on-demand preview, inspector and history actions and clears history 
         bodyByteSize: 2, bodyJson: '{}', sourceHeadEntryId: 'head', generatedAt: 'now',
       },
     }) })
-    return <><button onClick={() => views.switchMode('debug')}>debug</button>{views.mainView.debug}</>
+    const presentation = useThreadPresentation({
+      views, projection: { thread: controller.thread ?? null, models: controller.models },
+      threadId: 'thread', selected: true, active: true, onSubagent: vi.fn(),
+    })
+    return <>
+      {presentation.mode === 'debug' ? <button onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>关闭 Debug</button> : null}
+      <ThreadPresentationActions view={presentation} />{views.mainView.debug}
+    </>
   }
   render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
-  fireEvent.click(screen.getByText('debug'))
+  fireEvent.click(screen.getByRole('button', { name: 'Debug', exact: true }))
   await waitFor(() => expect(screen.getByText('prompt')).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: /查看当前调用冻结/ }))
   expect(screen.getByTestId('frozen-request-json')).toHaveTextContent('first')
@@ -117,7 +126,7 @@ it('renders on-demand preview, inspector and history actions and clears history 
   fireEvent.click(screen.getByRole('button', { name: '预览当前草稿' }))
   expect(screen.getByTestId('preview-request-body')).toHaveTextContent('{}')
   expect(screen.getByText(/点击时的设置与草稿输入只读物化/)).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '返回会话' }))
+  fireEvent.click(screen.getByRole('button', { name: '关闭 Debug' }))
   expect(screen.queryByTestId('preview-request-body')).toBeNull()
 })
 

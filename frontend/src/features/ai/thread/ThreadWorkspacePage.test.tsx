@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -287,6 +287,40 @@ describe('ThreadWorkspacePage', () => {
     expect(chatService.getChat).not.toHaveBeenCalled()
   })
 
+  it('uses actual identity for a default-main child and clears its actions immediately on route change', async () => {
+    // 真实只读组件与延迟下一条路由快照共同锁定：旧查看层不能借新地址继续显示/接收动作。
+    const user = userEvent.setup()
+    const rootId = '00000000-0000-4000-8000-000000000010'
+    const current = {
+      ...snapshotFor(CHILD_THREAD_ID), toolInvocations: [],
+      thread: thread({ name: 'main', parentThreadId: rootId, branchSettings: {
+        ...thread().branchSettings, agentName: 'researcher',
+      } }),
+    }
+    let resolveNext!: (value: HarnessThreadSnapshotDTO) => void
+    const next = new Promise<HarnessThreadSnapshotDTO>((resolve) => { resolveNext = resolve })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((id) => (
+      id === OTHER_CHILD_THREAD_ID ? next : Promise.resolve(current)
+    ))
+    renderPage(`/threads/${CHILD_THREAD_ID}`)
+    await screen.findByRole('heading', { name: 'researcher', level: 1 })
+    expect(document.querySelector('.workspace-view-identity')).toHaveTextContent('researcher · minimax/MiniMax')
+    expect(screen.queryByText('main', { exact: true })).toBeNull()
+    expect(screen.getByRole('link', { name: '返回父 agent' })).toHaveAttribute('href', `/threads/${rootId}`)
+    await user.click(screen.getByRole('button', { name: 'Debug', exact: true }))
+    await screen.findByRole('button', { name: '关闭 Debug' })
+    await user.click(screen.getByRole('button', { name: '打开另一个 Thread' }))
+    expect(screen.queryByRole('button', { name: '关闭 Debug' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '返回父 agent' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'researcher' })).toBeNull()
+    await act(async () => resolveNext({
+      ...snapshotFor(OTHER_CHILD_THREAD_ID), toolInvocations: [],
+      thread: thread({ threadId: OTHER_CHILD_THREAD_ID, name: 'Fresh root', status: 'IDLE', processing: false }),
+    }))
+    await screen.findByRole('heading', { name: 'Fresh root', level: 1 })
+    expect(screen.queryByRole('button', { name: '关闭 Debug' })).toBeNull()
+  })
+
   it('renders error state when harnessService returns error (e.g. 404)', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockRejectedValue(new Error('404 Not Found'))
 
@@ -454,11 +488,13 @@ describe('ThreadWorkspacePage', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Waiting Parent').length).toBeGreaterThan(0)
     })
-    expect(screen.getByText('只读查看')).toBeInTheDocument()
-    const backToRoot = screen.getByRole('link', { name: '返回执行根' })
+    expect(screen.queryByText('只读查看')).not.toBeInTheDocument()
+    const backToRoot = screen.getByRole('link', { name: '返回父 agent' })
     expect(backToRoot).toHaveAttribute('href', `/threads/${rootId}`)
     // 独立子线程地址同样把返回入口放在顶部标题区，排在 transcript 之前。
-    expect(backToRoot.closest('.agent-pane-thread-heading')).not.toBeNull()
+    expect(backToRoot.closest('.chat-workspace-header')).not.toBeNull()
+    expect(document.querySelector('.agent-pane-thread-heading')).toBeNull()
+    expect(screen.getByRole('button', { name: '查看 subagent 执行' })).toBeEnabled()
     const transcript = document.querySelector('[role="log"]') as HTMLElement
     expect(
       backToRoot.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -528,7 +564,7 @@ describe('ThreadWorkspacePage', () => {
     ])
 
     renderPage(`/threads/${CHILD_THREAD_ID}`)
-    await screen.findByText('只读查看')
+    await screen.findByRole('link', { name: '返回父 agent' })
     expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
     // 只读子视图不查询执行树，也不提供任何写入口。
     expect(harnessService.getThreadTree).not.toHaveBeenCalled()

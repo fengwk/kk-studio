@@ -269,8 +269,11 @@ npm --prefix frontend run test:pane
 
 各入口只匹配对应 harness，使用独立构建、报告与 loopback 端口，不访问 Backend、
 共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读、根 Stop，以及新建分支的命名与
-1–9 目标路由、隐藏 pane 显露、完整祖先前缀、409 改名恢复与 Debug 覆盖返回，
-并实际断言输入焦点、文字、光标末尾和迟到目标不抢焦点；tool-card 验证流式日志和阅读锚点；
+1–9 目标路由、隐藏 pane 显露、完整祖先前缀与 409 改名恢复。Debug 回归从 split-3/grid-4 非首
+pane 的只读孙层进入工作区独占视图，验证单顶栏退出、隐藏层 inert、嵌套 Esc 消费，以及原布局、
+草稿、上传、滚动和焦点恢复；期间以合法 HTTP/WS 数据验证后台回读与零写入。
+`/subagent` 与只读顶栏入口验证完整执行树和直接父导航；迟到目标不能抢焦点。
+tool-card 验证流式日志和阅读锚点；
 compaction 验证完整安全正文与外层阅读保护；composer-editor 验证真实 contenteditable、
 IME、Pill 与隐藏根失活。
 
@@ -291,8 +294,9 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 不能将受理当作完成；
 它还断言子 Thread 的不可变执行父关系指回发起方（`HarnessThreadDTO.parentThreadId`），且子 ROOT
 payload 只含 settings、不物化任何委派运行树元数据。
-受理卡片与回执的 Thread 链接在当前 pane 只读查看子代理，并保留根草稿与逐层返回路径；
-修饰键或独立地址进入 `/threads/:threadId`。独立根提供人工控制，独立子代理只读并可返回根，
+受理卡片与回执的 Thread 链接在当前 pane 只读查看子代理，并保留根草稿；返回取查看快照的直接
+`parentThreadId`，孙层先回直接父，再回根。修饰键或独立地址进入 `/threads/:threadId`。
+独立根提供人工控制，独立子代理只读并可定点返回 `/threads/{parentId}`，
 不依赖 Chat 归属。消息、设置、Goal、预览和 Stop 只允许执行根；根面板汇聚后代审批和问卷，
 操作写回原始调用 Thread；
 已有 Thread 的命令使用 `/api/harness/threads/{threadId}/command-batches`，body 不带 owner/target，
@@ -300,7 +304,8 @@ payload 只含 settings、不物化任何委派运行树元数据。
 同一 tool batch 中，某个调用已经成功而另一个仍在等待审批时，成功调用按其自身结果展示，
 等待审批的调用保持未决；durable 工具结果到达后只保留这一权威结果。
 [`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
-通过真实组件验证根/子代理身份分流、子代理零控制入口，以及非法 ID、加载失败与返回根入口；
+通过真实组件验证根/子代理身份分流、子代理零写控制入口、实际查看身份与只读树/Debug 动作，
+以及非法 ID、加载失败、直接父入口和换路由时旧身份/动作立即失效；
 这些是 jsdom 回归，不替代真实浏览器验证。
 
 真实 `read` 工具的 L4 用例 `tool.read_turn` 需要 `--real --with-tools --with-canvas-storage`，

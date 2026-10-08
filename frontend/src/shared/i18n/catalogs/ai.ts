@@ -1487,10 +1487,6 @@ export const aiCatalog = {
     'en-US': 'Back to parent agent',
     'zh-CN': '返回父 agent',
   },
-  'ai.runtime.childThread.backToRoot': {
-    'en-US': 'Back to execution root',
-    'zh-CN': '返回执行根',
-  },
   'ai.runtime.agentTree.panel': {
     'en-US': 'Active subagents',
     'zh-CN': '活跃子代理',
@@ -2235,9 +2231,13 @@ export const aiCatalog = {
     'en-US': 'Historical request preview is not supported for this record',
     'zh-CN': '当前记录不支持历史请求预览',
   },
-  'ai.runtime.debug.backToConversation': {
-    'en-US': 'Back to conversation',
-    'zh-CN': '返回会话',
+  'ai.runtime.command.subagentLabel': {
+    'en-US': 'View subagent executions',
+    'zh-CN': '查看 subagent 执行',
+  },
+  'ai.runtime.command.subagent': {
+    'en-US': 'View the full subagent execution tree',
+    'zh-CN': '查看完整 subagent 执行树',
   },
   'ai.runtime.debug.inspectorClose': {
     'en-US': 'Close inspector',

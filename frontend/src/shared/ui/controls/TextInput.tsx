@@ -1,7 +1,8 @@
-import type { InputHTMLAttributes } from 'react'
+import type { InputHTMLAttributes, Ref } from 'react'
 import './controls.css'
 
 export interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'aria-invalid'> {
+  ref?: Ref<HTMLInputElement>
   /** 校验失败：同时给出 aria-invalid 与 danger 边框语义。 */
   invalid?: boolean
 }

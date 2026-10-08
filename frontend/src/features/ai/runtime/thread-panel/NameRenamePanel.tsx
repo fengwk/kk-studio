@@ -3,6 +3,8 @@ import { Check } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
 import { useI18n } from '@/shared/i18n'
 import { normalizeThreadName } from '@/features/ai/chat/thread-name'
+import { Button } from '@/shared/ui/controls/Button'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 
 /**
  * 持久 Session/Thread 实体的单输入重命名面板。
@@ -90,7 +92,7 @@ export function NameRenamePanel({
         <label className="name-rename-field" htmlFor={inputId}>
           <span>{t('ai.runtime.rename.nameLabel')}</span>
         </label>
-        <input
+        <TextInput
           id={inputId}
           ref={inputRef}
           type="text"
@@ -105,18 +107,17 @@ export function NameRenamePanel({
         ) : null}
       </div>
       <div className="name-rename-actions">
-        <button type="button" className="ghost-btn" onClick={onClose} disabled={pending || busy}>
+        <Button variant="ghost" onClick={onClose} disabled={pending || busy}>
           {t('shared.cancel')}
-        </button>
-        <button
-          type="button"
-          className="btn-primary name-rename-save"
+        </Button>
+        <Button
+          className="name-rename-save"
           disabled={!canSave}
           onClick={() => void onSubmit(name)}
         >
           <Check size={13} aria-hidden="true" />
           {t('ai.runtime.rename.save')}
-        </button>
+        </Button>
       </div>
     </ThreadInteractionPanel>
   )

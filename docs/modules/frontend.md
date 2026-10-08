@@ -85,10 +85,12 @@ Invocation 与 attempt failure 投影为时间线记录。`processing` 等价于
 
 ### Thread Debug
 
-Debug 是全 pane 的只读视图：接管主滚动区时输入、审批、分支控制与活跃树整体隐藏
-（保持挂载并置为 inert），退出后立即恢复，草稿、上传、阅读位置与 pane 绑定原地保留。
-主区域包含下一次请求预览、事件与详情：宽 Pane 三列，窄 Pane 页签切换，
-选择/关闭详情保留焦点返回路径。Tool、Skill、Subagent 和 Cache 检查器展示结构化事实。
+Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，原 layout 保持不变，
+其他原可见 pane 保持稳定挂载且置为 hidden 与 inert，输入控制区挂起，上传注册表保持挂载；
+单顶栏左上角提供“关闭 Debug”，不导航 `/chats`，不渲染会话返回行并隐藏布局选择器；
+退出时完整恢复原 layout、可见 pane、阅读滚动与焦点。主区域包含下一次请求预览、事件与详情：
+宽 Pane 三列，窄 Pane 页签切换，选择/关闭详情保留焦点返回路径；Escape 优先由内部检查器或
+弹层消费，未消费时才触发外层退出 Debug。Tool、Skill、Subagent 和 Cache 检查器展示结构化事实。
 诊断 GET 区分 NEXT_REQUEST_PREVIEW 与活动 FROZEN_INVOCATION，
 包含发送/过滤工具、稳定 Skill 路径与冻结请求，排除 credential、认证 header 和 Base64 正文。
 
@@ -110,11 +112,11 @@ Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A
 
 Session 的完整 Entry 历史是一棵树，Thread 只是树上一条已命名的分支；pane 自身只保存
 view 绑定（PaneTarget）与布局，不复制 Thread、draft 或执行状态。
-`/tree` 打开当前 Session 的历史树：每个真实 Entry 恰好一行，按 Git commit lanes 画节点与连线，
+`/history` 打开当前 Session 的历史树：每个真实 Entry 恰好一行，按 Git commit lanes 画节点与连线，
 线性链始终留在同一列，只有真实 sibling 分叉才开新列；只有 ROOT 与已关闭 TURN_END 是可手工
 分叉的边界。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写任何 Thread 状态。
 
-命名分支有两个等价入口并汇入同一次命名与目标选择：`/tree` 面板底部对选中行的“从此处分支”，
+命名分支有两个等价入口并汇入同一次命名与目标选择：`/history` 面板底部对选中行的“从此处分支”，
 以及对话中已关闭 TURN_END 回合 footer 的分支按钮。弹窗要求一个按后端规则规范化的名称，
 并选择目标位置 1..9；确认只把 `NEW_THREAD_DRAFT` 路由到目标 pane（隐藏位置先扩展布局显露、
 焦点随之移动），名称是创建 target 的必需事实，此处不预创建 Thread。目标有在途操作时拒绝路由，
@@ -150,7 +152,9 @@ PaneTarget 只有三种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）�
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
 配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
 前缀发送，YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
-根面板与草稿 pane 不再渲染自身标题，只读子代理视图仍保留标题与返回执行根入口。
+根面板与草稿 pane 不再渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
+其真实身份（agent 名称、provider/model，以及变体定义的真实 reasoningEffort；默认 main
+不作为独立身份）与只读动作直接汇入工作区顶栏，并提供返回直属父 Agent 入口。
 
 命令批在发送前冻结 idempotency keys、payload、顺序和 cursor，连同本地草稿写入 pending storage；
 写入失败中止发送。容器创建用带 owner/target 的 `kk-studio.agent-pane-acceptance` 记录，
@@ -168,7 +172,8 @@ IndexedDB 在同一事务保存草稿与已合并的回执身份；响应和 sna
 NOTIFICATION 使用系统样式展示，不进入人类消息队列、上下键历史或草稿。
 审批复用 decisionId，操作者由服务端解析；切换 ALLOW/DENY 生成新身份。
 `/threads/:threadId` 按执行身份分流：根 Thread 提供人工输入与控制，子代理只读取
-Snapshot、Debug 和 usage，并在顶部提供返回执行根入口；身份未确认时不挂载控制 Hook。
+Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属父 Agent 入口（直接导航到
+`/threads/{parentId}`）；身份未确认时不挂载控制 Hook。
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
 
@@ -179,8 +184,11 @@ Snapshot、Debug 和 usage，并在顶部提供返回执行根入口；身份未
 
 根面板自动查询执行树，在 Widget 区以单行节点展示 processing 后代及其必要祖先；
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
-树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；
-查看栈逐层返回，根层保持挂载但隐藏且 inert，草稿、上传和阅读位置不被重建。
+树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；返回导航基于当前快照的
+直属父 `parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开父级，不依赖浏览栈
+`goBack`，根层保持挂载但隐藏且 inert，草稿、上传和阅读位置不被重建。已绑定根通过 `/subagent` 命令、
+只读顶栏通过“查看 subagent 执行”动作打开轻量执行树面板，展示包含嵌套与 resume 计数且排除根的完整
+`historyRows`，未绑定草稿禁用该命令。
 修饰键与中键保留独立 Thread 地址的浏览器行为。刷新失败明确提示，不伪造最新树。
 输入编排由 `ThreadComposer` 持有，DOM、光标、IME 与 Pill 由 `ComposerEditor` 隔离。
 控制、投影和阅读规则见 [Thread 控制与展示](thread-control-and-presentation.md)。
