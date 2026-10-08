@@ -68,6 +68,21 @@ function expectCaretAtEnd(editor: HTMLElement) {
 }
 
 describe('useComposerFocus', () => {
+  it('cancels an external focus already queued before another pane becomes focused', () => {
+    vi.useFakeTimers()
+    try {
+      const view = render(<Harness focusOnEscape />)
+      fireEvent.click(screen.getByRole('button', { name: 'focus composer' }))
+      expect(vi.getTimerCount()).toBe(1)
+      view.rerender(<Harness focusOnEscape={false} />)
+      const outside = screen.getByRole('button', { name: 'outside' })
+      outside.focus()
+      vi.runAllTimers()
+      expect(outside).toHaveFocus()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   it('clears pending focus timers on unmount', () => {
     vi.useFakeTimers()
     try {

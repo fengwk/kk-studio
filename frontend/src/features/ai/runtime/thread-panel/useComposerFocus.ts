@@ -109,6 +109,15 @@ export function useComposerFocus({
     }
   }, [])
 
+  // A routed focus may still be queued when workspace focus moves elsewhere.
+  // Cancel in layout phase, before the existing timer can focus the old pane.
+  useLayoutEffect(() => {
+    if (!focusOnEscape) {
+      clearFocusTimer()
+      restoreFocusRef.current = false
+    }
+  }, [focusOnEscape, clearFocusTimer])
+
   const blurComposer = useCallback(() => {
     clearFocusTimer()
     restoreFocusRef.current = false

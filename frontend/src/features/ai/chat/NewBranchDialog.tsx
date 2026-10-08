@@ -24,6 +24,8 @@ export function NewBranchDialog({
   destinations,
   defaultDestination,
   pending = false,
+  checking = false,
+  onInputChange,
   formError = null,
   overwriteWarning = null,
   onConfirm,
@@ -33,6 +35,8 @@ export function NewBranchDialog({
   /** 默认目标 pane（通常是触发分支的 pane）。 */
   defaultDestination: string
   pending?: boolean
+  checking?: boolean
+  onInputChange?: () => void
   formError?: string | null
   /** 非空表示目标位置有未发送草稿，需要再次确认覆盖。 */
   overwriteWarning?: string | null
@@ -59,9 +63,12 @@ export function NewBranchDialog({
   }, [defaultDestination, destinations])
 
   function submit() {
+    if (pending || checking) {
+      return
+    }
     const normalized = normalizeThreadName(name)
     if (normalized == null) {
-      setNameError(name.trim().length === 0
+      setNameError(name.replace(/\p{White_Space}/gu, '').length === 0
         ? t('ai.chat.branch.nameRequired')
         : t('ai.chat.branch.nameTooLong'))
       return
@@ -101,6 +108,7 @@ export function NewBranchDialog({
               invalid={nameError != null}
               disabled={pending}
               onChange={(event) => {
+                onInputChange?.()
                 setName(event.target.value)
                 setNameError(null)
               }}
@@ -113,7 +121,10 @@ export function NewBranchDialog({
               aria-label={t('ai.chat.branch.destination')}
               value={paneId}
               options={destinations}
-              onChange={setPaneId}
+              onChange={(next) => {
+                onInputChange?.()
+                setPaneId(next)
+              }}
             />
           </label>
           {overwriteWarning ? (
@@ -124,7 +135,7 @@ export function NewBranchDialog({
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             {t('shared.cancel')}
           </Button>
-          <Button type="submit" disabled={pending || paneId === ''}>
+          <Button type="submit" disabled={pending || checking || paneId === ''}>
             {overwriteWarning ? t('ai.chat.branch.confirmOverwrite') : t('ai.chat.branch.openDraft')}
           </Button>
         </div>

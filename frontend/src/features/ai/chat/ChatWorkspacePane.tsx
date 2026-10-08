@@ -12,6 +12,8 @@ export function ChatWorkspacePane({
   environments = [],
   pane,
   focused,
+  hidden = false,
+  onValidateDraftName,
   onFocus,
   initialTarget,
   onTargetConsumed,
@@ -23,6 +25,8 @@ export function ChatWorkspacePane({
   environments?: EnvironmentCardDTO[]
   pane: { id: string }
   focused: boolean
+  hidden?: boolean
+  onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   onFocus: () => void
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
@@ -42,6 +46,8 @@ export function ChatWorkspacePane({
         yoloEnabled: chat.yoloEnabled,
       }}
       focused={focused}
+      hidden={hidden}
+      onValidateDraftName={onValidateDraftName}
       onFocus={onFocus}
       initialTarget={initialTarget}
       onTargetConsumed={onTargetConsumed}

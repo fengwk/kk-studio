@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { isCanonicalThreadName, normalizeThreadName } from '@/features/ai/chat/thread-name'
 
 describe('Thread name normalization', () => {
+  it('matches Java Unicode White_Space without folding FEFF, case or compatibility characters', () => {
+    expect(normalizeThreadName('\u0085a\u0085\u2028b\u3000')).toBe('a b')
+    expect(normalizeThreadName('\u0085')).toBeNull()
+    expect(normalizeThreadName(' \uFEFFa\uFEFF ')).toBe('\uFEFFa\uFEFF')
+    expect(normalizeThreadName('\uFEFF')).toBe('\uFEFF')
+    expect(normalizeThreadName('Ａ Main')).toBe('Ａ Main')
+    expect(normalizeThreadName(null)).toBeNull()
+  })
   it('trims outer whitespace and rejects blank input', () => {
     // 名称是创建 target 的必需事实：空白输入没有可持久化的规范形式。
     expect(normalizeThreadName('  branch-1  ')).toBe('branch-1')

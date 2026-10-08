@@ -82,6 +82,7 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'debug',
     'shortcuts',
     'rename-session',
+    'rename-thread',
     'goal',
   ],
   BOUND_THREAD: THREAD_COMMANDS.map((item) => item.id),
