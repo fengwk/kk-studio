@@ -501,6 +501,10 @@ final class OpenAiResponsesStreamAccumulator {
     }
     if ("function_call".equals(itemType)) {
       syncToolFromItem(item);
+    } else if ("reasoning".equals(itemType)) {
+      // content 是已知语义输入：捕获阶段即拒绝已知坏形状，避免冻结出下一轮必然失败的 replay。
+      OpenAiResponsesReasoningText.requireValidContent(
+          item.get("content"), ProviderErrorKind.INVALID_RESPONSE);
     }
     rawOutputItems.add(item.deepCopy());
   }
@@ -638,6 +642,9 @@ final class OpenAiResponsesStreamAccumulator {
           String itemType = item.path("type").asText();
           if ("reasoning".equals(itemType)) {
             retainStreamedReasoningEncryptedContent(item, priorStreamedItems);
+            // content 是已知语义输入：捕获阶段即拒绝已知坏形状，避免冻结出下一轮必然失败的 replay。
+            OpenAiResponsesReasoningText.requireValidContent(
+                item.get("content"), ProviderErrorKind.INVALID_RESPONSE);
           }
 
           rawOutputItems.add(item);
@@ -821,7 +828,8 @@ final class OpenAiResponsesStreamAccumulator {
     for (JsonNode item : rawOutputItems) {
       if ("reasoning".equals(item.path("type").asText())) {
         reasoningSeen = true;
-        thinkingBuffer.append(OpenAiResponsesReasoningText.read(item));
+        thinkingBuffer.append(
+            OpenAiResponsesReasoningText.read(item, ProviderErrorKind.INVALID_RESPONSE));
       }
     }
     if (thinkingBuffer.isEmpty()
