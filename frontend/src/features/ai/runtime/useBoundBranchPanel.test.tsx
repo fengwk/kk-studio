@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBoundBranchPanel } from '@/features/ai/runtime/useBoundBranchPanel'
@@ -7,8 +8,11 @@ import { createTextPart } from '@/features/ai/composer/composer-parts'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { ApiError } from '@/shared/api/client'
 import type {
+  AgentCommandBatchResponseDTO,
   HarnessBranchSettingsDTO,
+  HarnessCommandCreateDTO,
   HarnessModelSelectionDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
@@ -122,6 +126,66 @@ function queuedSettingCommand(
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
     createTime: null,
+  }
+}
+
+/** busy Thread：模型/工具/排队阶段都视为运行中，选择应立即提交而不是留作草稿。 */
+function busyThreadFixture(
+  threadId: string,
+  overrides: Partial<HarnessThreadDTO> = {},
+): HarnessThreadDTO {
+  return threadFixture(threadId, { status: 'MODEL_STREAM', processing: true, ...overrides })
+}
+
+function acceptedCommandPayload(command: HarnessCommandCreateDTO): Record<string, unknown> {
+  switch (command.type) {
+    case 'SET_AGENT':
+      return { agentName: command.agentName }
+    case 'SET_MODEL':
+      return { model: command.model }
+    case 'SET_ENVIRONMENT':
+      return { environmentName: command.environmentName }
+    default:
+      return {}
+  }
+}
+
+/** 接受响应中 durable 的 SET 命令投影：state 恒为 QUEUED，payloadJson 与请求一致。 */
+function acceptedSettingCommand(
+  threadId: string,
+  sequence: string,
+  command: HarnessCommandCreateDTO,
+): HarnessThreadCommandDTO {
+  return {
+    threadId,
+    sequence,
+    type: command.type,
+    state: 'QUEUED',
+    idempotencyKey: command.idempotencyKey,
+    payloadJson: JSON.stringify(acceptedCommandPayload(command)),
+    cancelledAt: null,
+    createTime: null,
+  }
+}
+
+function acceptedResponse(
+  thread: HarnessThreadDTO,
+  commands: HarnessCommandCreateDTO[],
+): AgentCommandBatchResponseDTO {
+  return {
+    session: { sessionId: thread.sessionId, name: 'session-name', createdAt: null },
+    rootEntry: {
+      entryId: 'e-root',
+      sessionId: thread.sessionId,
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    },
+    thread,
+    acceptedCommands: commands.map((command, index) =>
+      acceptedSettingCommand(thread.threadId, String(index + 1), command)),
+    replayed: false,
   }
 }
 
@@ -259,6 +323,17 @@ function createClient() {
   return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+}
+
+/** StrictMode 包装：强制 React 在开发构建下重复执行 render 与 effect，暴露重复副作用。 */
+function strictClientWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <StrictMode>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      </StrictMode>
+    )
+  }
 }
 
 async function send(result: { current: ReturnType<typeof useBoundBranchPanel> }) {
@@ -1063,4 +1138,347 @@ describe('useBoundBranchPanel', () => {
     })
     expect(result.current.dirty).toBe(false)
   })
+
+  it('immediately submits a standalone SET-only batch when the thread is busy and shows pending', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      Promise.resolve(
+        acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+      ),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      expect(result.current.selectAgent('writer')).toBe(true)
+    })
+
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+    const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
+    // busy 立即提交纯设置批次：固定顺序的 SET_*，绝不伪造 USER_MESSAGE/GOAL 终止输入。
+    expect(request.commands.map((command) => command.type)).toEqual(['SET_AGENT', 'SET_MODEL'])
+    expect(request.expectedHeadEntryId).toBe('e-assistant')
+    expect(request.expectedNextCommandSequence).toBe('1')
+
+    // 选择即时反映为待生效，而不是本地草稿。
+    expect(result.current.draft?.agentName).toBe('writer')
+    await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('keeps idle and stopped threads as drafts without an immediate submit', async () => {
+    for (const status of ['IDLE', 'STOPPED']) {
+      vi.clearAllMocks()
+      vi.mocked(agentService.listAgents).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: agents.length,
+        results: agents,
+      })
+      vi.mocked(agentService.listModels).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 2,
+        results: [modelEntry, claudeModelEntry],
+      })
+      vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+        snapshotOf(threadFixture(THREAD_ID, { status, processing: false })),
+      )
+      vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
+        [] as unknown as AgentCommandBatchResponseDTO,
+      )
+      const { result, unmount } = renderHook(
+        () => useBoundBranchPanel({ threadId: THREAD_ID }),
+        { wrapper: clientWrapper(createClient()) },
+      )
+      await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+      act(() => {
+        expect(result.current.selectAgent('coder')).toBe(true)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // 静止 Thread 不立即提交：选择保持草稿，随下一条输入一起提交。
+      expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
+      expect(result.current.draft?.agentName).toBe('coder')
+      expect(result.current.settingsStatus).toBe('draft')
+      unmount()
+    }
+  })
+
+  it('serializes consecutive busy selections and reuses the advanced accepted cursor (latest intent wins)', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    const releases: Array<() => void> = []
+    const calls: Array<{ commands: string[]; headEntryId: string; nextCommandSequence: string }> = []
+    let version = 0
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) => {
+      version += 1
+      const responseVersion = String(version)
+      calls.push({
+        commands: request.commands.map((command) => command.type),
+        headEntryId: request.expectedHeadEntryId,
+        nextCommandSequence: request.expectedNextCommandSequence,
+      })
+      return new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+        releases.push(() =>
+          resolve(
+            acceptedResponse(
+              busyThreadFixture(threadId, {
+                version: responseVersion,
+                // 明显区别于初始快照的 cursor，证明后续提交复用接受响应推进后的权威 cursor。
+                nextCommandSequence: String(version + 1),
+              }),
+              request.commands,
+            ),
+          ))
+      })
+    })
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('writer')
+      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+    })
+    // 串行且合并：第二个请求必须等第一个返回后才发出（latest intent 只保留最后目标）。
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.commands).toEqual(['SET_AGENT', 'SET_MODEL'])
+
+    await act(async () => {
+      releases[0]!()
+    })
+    await waitFor(() => expect(calls).toHaveLength(2))
+    // 第二个请求复用接受响应推进后的 cursor，且只携带相对已提交 overlay 的最小 diff。
+    expect(calls[1]!.headEntryId).toBe('e-assistant')
+    expect(calls[1]!.nextCommandSequence).toBe('2')
+    expect(calls[1]!.commands).toEqual(['SET_MODEL'])
+
+    await act(async () => {
+      releases[1]!()
+    })
+    await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
+    expect(result.current.draft?.model.modelName).toBe('GPT-5')
+  })
+
+  it('does not re-carry a just-submitted setting when a message is sent before the snapshot re-read', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      Promise.resolve(
+        acceptedResponse(
+          busyThreadFixture(threadId, { version: '1', nextCommandSequence: '2' }),
+          request.commands,
+        ),
+      ),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+    // 等待 overlay 装入 effective base：状态同步后 buildBatch 才携带已提交的 SET 差异。
+    await waitFor(() => expect(result.current.effectiveBase?.agentName).toBe('coder'))
+
+    await send(result)
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
+    const [, messageBatch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]!
+    // snapshot 尚未回读时，已提交的 SET_AGENT 由 overlay 提供 effective base，绝不重复携带。
+    expect(messageBatch.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+  })
+
+  it('preserves the selection as a draft and surfaces the error when the immediate submit fails', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
+      new Error('request rejected'),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    await waitFor(() => expect(result.current.settingsError).toContain('request rejected'))
+
+    // 失败保输入：选择留在 draft（随下一条输入提交），绝不被静默丢弃。
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.settingsStatus).toBe('draft')
+    act(() => {
+      result.current.dismissSettingsError()
+    })
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('retries once through an authoritative snapshot read on STALE_COMMAND_CURSOR', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    const fresh = busyThreadFixture(THREAD_ID, {
+      version: '5',
+      nextCommandSequence: '9',
+      headEntryId: 'e-fresh',
+    })
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshotOf(busy))
+      .mockResolvedValue(snapshotOf(fresh))
+    vi.mocked(harnessService.acceptThreadCommandBatch)
+      .mockRejectedValueOnce(new ApiError('stale cursor', 409, 'CONFLICT', {
+        reason: 'STALE_COMMAND_CURSOR',
+      }))
+      .mockImplementationOnce((threadId, request) =>
+        Promise.resolve(
+          acceptedResponse(busyThreadFixture(threadId, { version: '6' }), request.commands),
+        ))
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+    })
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
+
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
+    const [, retry] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]!
+    // cursor 由权威回读重建，绝不沿用已失效的旧 cursor。
+    expect(retry.expectedHeadEntryId).toBe('e-fresh')
+    expect(retry.expectedNextCommandSequence).toBe('9')
+  })
+
+  it('ignores a late immediate-submit response after navigating to another thread', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(
+        snapshotOf(threadId === THREAD_ID ? busy : threadFixture(THREAD_ID_2)),
+      ))
+    let release: (() => void) | null = null
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+        release = () =>
+          resolve(
+            acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+          )
+      }))
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      {
+        initialProps: { threadId: THREAD_ID },
+        wrapper: clientWrapper(createClient()),
+      },
+    )
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('writer')
+    })
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+
+    // 导航到另一个 Thread：旧 Thread 的迟到响应必须整体失效。
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.controller.thread?.threadId).toBe(THREAD_ID_2))
+    await act(async () => {
+      release!()
+      await Promise.resolve()
+    })
+
+    expect(result.current.draft?.agentName).toBe('assistant')
+    expect(result.current.settingsStatus).toBeNull()
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('submits exactly one standalone SET batch under StrictMode double render/effect', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      Promise.resolve(
+        acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+      ))
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: strictClientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      expect(result.current.selectAgent('writer')).toBe(true)
+    })
+
+    // 重复 render/effect 绝不触发第二次写：一次选择对应恰好一个 standalone SET 批次。
+    await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
+    expect(result.current.draft?.agentName).toBe('writer')
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('does not lose a newer selection made after rebinding away from an in-flight submit', async () => {
+    const busyA = busyThreadFixture(THREAD_ID)
+    const busyB = busyThreadFixture(THREAD_ID_2, { headEntryId: 'e-b' })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(snapshotOf(threadId === THREAD_ID ? busyA : busyB)))
+    let releaseA: (() => void) | null = null
+    const calls: Array<{ threadId: string; commands: string[] }> = []
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) => {
+      calls.push({ threadId, commands: request.commands.map((command) => command.type) })
+      if (threadId === THREAD_ID) {
+        // Thread A 的提交悬停在途，期间用户重绑到 Thread B 并产生更新选择。
+        return new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+          releaseA = () =>
+            resolve(
+              acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+            )
+        })
+      }
+      return Promise.resolve(
+        acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+      )
+    })
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      {
+        initialProps: { threadId: THREAD_ID },
+        wrapper: clientWrapper(createClient()),
+      },
+    )
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('writer')
+    })
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]!.threadId).toBe(THREAD_ID)
+
+    // 重绑到 Thread B：旧 Thread 的 drain 仍在途，A 的迟到响应必须整体失效。
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.controller.thread?.threadId).toBe(THREAD_ID_2))
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    // 新 Thread 上的更新选择绝不能因 drain 被占用而丢失。
+    act(() => {
+      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+    })
+    await act(async () => {
+      releaseA!()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(calls).toHaveLength(2))
+    expect(calls[1]!.threadId).toBe(THREAD_ID_2)
+    expect(calls[1]!.commands).toEqual(['SET_MODEL'])
+    expect(result.current.draft?.model.modelName).toBe('GPT-5')
+    expect(result.current.settingsStatus).toBe('pending')
+  })
 })
+

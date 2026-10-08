@@ -1167,6 +1167,22 @@ export const aiCatalog = {
     'en-US': 'Variant options',
     'zh-CN': 'Variant 选项',
   },
+  'ai.runtime.composer.settingsDraftLabel': {
+    'en-US': 'Draft',
+    'zh-CN': '草稿',
+  },
+  'ai.runtime.composer.settingsDraftTitle': {
+    'en-US': 'This selection is a draft and takes effect when you send your next message.',
+    'zh-CN': '当前选择为草稿，发送下一条消息时生效。',
+  },
+  'ai.runtime.composer.settingsPendingLabel': {
+    'en-US': 'Pending',
+    'zh-CN': '待生效',
+  },
+  'ai.runtime.composer.settingsPendingTitle': {
+    'en-US': 'This selection was submitted and is waiting to take effect.',
+    'zh-CN': '当前选择已提交，等待生效。',
+  },
   'ai.runtime.composer.strip': {
     'en-US': 'Attachments',
     'zh-CN': '附件',

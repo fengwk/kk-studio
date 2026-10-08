@@ -2888,6 +2888,23 @@ div.is-error {
   max-width: min(100%, 200px);
 }
 
+.thread-composer-settings-status {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.thread-composer-settings-status[data-settings-status='pending'] {
+  border-color: var(--border-hover);
+  color: var(--fg);
+}
+
 .thread-composer-model-control {
   max-width: min(100%, 420px);
 }

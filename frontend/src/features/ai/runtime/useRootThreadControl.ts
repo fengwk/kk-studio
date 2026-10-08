@@ -202,6 +202,8 @@ export function useRootThreadControl({
     ? `agent-pane:${ownerKey}:${paneId}`
     : `agent-pane:thread:${paneId}`
   const [localDraft, setLocalDraft] = useState<BranchDraft | null>(null)
+  // 未创建分支草稿是否被用户真的改过：只有存在 diff 才展示 draft 状态，默认不做常驻噪声。
+  const [localDraftEdited, setLocalDraftEdited] = useState(false)
   const [parts, setPartsState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(composerScope, []),
   )
@@ -757,6 +759,7 @@ export function useRootThreadControl({
       setTarget(next)
       setFocusIntent(next)
       setLocalDraft(draft == null ? null : cloneDraft(draft))
+      setLocalDraftEdited(false)
       setInteraction(null)
       setActionError(null)
       setConflict(null)
@@ -1397,6 +1400,7 @@ export function useRootThreadControl({
         return
       }
       setLocalDraft(nextDraft)
+      setLocalDraftEdited(true)
     }
     setInteraction(null)
     setActionError(null)
@@ -1698,10 +1702,14 @@ export function useRootThreadControl({
       yoloEnabled: activeDraft.yoloEnabled,
       environmentName: activeDraft.environmentName,
       environments,
+      status: isBoundTarget(target)
+        ? branchPanel.settingsStatus
+        : localDraftEdited ? 'draft' : null,
       onModelChange: (model) => {
         if (isBoundTarget(target)) {
           branchPanel.selectModel(model)
         } else {
+          setLocalDraftEdited(true)
           setLocalDraft((current) => (current ? { ...current, model } : current))
         }
       },
@@ -1709,6 +1717,7 @@ export function useRootThreadControl({
         if (isBoundTarget(target)) {
           branchPanel.setYoloEnabled(enabled)
         } else {
+          setLocalDraftEdited(true)
           setLocalDraft((current) => (current ? { ...current, yoloEnabled: enabled } : current))
         }
       },
@@ -1716,6 +1725,7 @@ export function useRootThreadControl({
         if (isBoundTarget(target)) {
           branchPanel.selectEnvironment(environmentName)
         } else {
+          setLocalDraftEdited(true)
           setLocalDraft((current) => (current ? { ...current, environmentName } : current))
         }
       },
@@ -1751,7 +1761,9 @@ export function useRootThreadControl({
         ? boundEnvCard.ready
         : false
   const error = actionError
-    ?? (isBoundTarget(target) ? branchPanel.yoloError ?? controller.actionError : null)
+    ?? (isBoundTarget(target)
+      ? branchPanel.settingsError ?? branchPanel.yoloError ?? controller.actionError
+      : null)
   const combinedConflict = conflict ?? controller.conflict ?? branchPanel.conflict
 
   return {
@@ -1826,6 +1838,8 @@ export function useRootThreadControl({
     dismissActionError: () => {
       setActionError(null)
       setPreviewError(null)
+      branchPanel.dismissSettingsError()
+      branchPanel.dismissYoloError()
     },
     conflict: combinedConflict,
     dismissConflict: () => {
