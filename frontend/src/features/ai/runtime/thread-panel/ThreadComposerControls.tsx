@@ -27,12 +27,19 @@ export interface ThreadComposerEnvironmentOption {
   name: string
 }
 
+/**
+ * 设置选择的状态：draft=本地草稿，将随下一条消息一起生效；pending=已提交，等待安全点生效；
+ * null=无需要展示的差异（已生效或未编辑）。applied 不做常驻提示。
+ */
+export type ThreadComposerSettingsStatus = 'draft' | 'pending' | null
+
 export interface ThreadComposerSettingsInput {
   model: ThreadComposerModelSelection
   models: readonly ThreadComposerModelOption[]
   yoloEnabled: boolean
   environmentName: string | null
   environments: readonly ThreadComposerEnvironmentOption[]
+  status?: ThreadComposerSettingsStatus
   onModelChange: (model: ThreadComposerModelSelection) => void
   onYoloChange: (enabled: boolean) => void
   onEnvironmentChange: (environmentName: string | null) => void
@@ -293,6 +300,7 @@ export function ThreadComposerControls({
     settings.model.providerName && settings.model.modelName
       ? `${settings.model.providerName}/${settings.model.modelName} · ${settings.model.variant}`
       : t('ai.runtime.composer.model')
+  const settingsStatus = settings.status ?? null
 
   return (
     <div ref={hostRef} className="thread-composer-controls">
@@ -322,6 +330,21 @@ export function ThreadComposerControls({
           <span>{environmentLabel}</span>
           <ChevronDown aria-hidden="true" />
         </button>
+        {settingsStatus == null ? null : (
+          <span
+            className="thread-composer-settings-status"
+            data-settings-status={settingsStatus}
+            title={
+              settingsStatus === 'pending'
+                ? t('ai.runtime.composer.settingsPendingTitle')
+                : t('ai.runtime.composer.settingsDraftTitle')
+            }
+          >
+            {settingsStatus === 'pending'
+              ? t('ai.runtime.composer.settingsPendingLabel')
+              : t('ai.runtime.composer.settingsDraftLabel')}
+          </span>
+        )}
       </div>
       <div className="thread-composer-controls-right">
         <button
