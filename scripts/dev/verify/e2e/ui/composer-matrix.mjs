@@ -11,6 +11,7 @@ import {
   sleep,
 } from '../lib/http.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
+import { expectThreadDraft } from '../lib/browser-state.mjs'
 import { assertReadOnlyZeroFooter } from './assertions.mjs'
 import { runWorkspaceContractMatrix } from './workspace-contracts.mjs'
 import {
@@ -72,11 +73,8 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `local draft ${stamp}`
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
 
           for (const expected of [
             `queued 2 ${stamp}`,
@@ -87,7 +85,7 @@ export async function runComposerMatrix(ui) {
           ]) {
             await composer.press('ArrowUp')
             await expectComposerText(page, expected)
-            await expectStorage(page, draftKey, draft)
+            await expectThreadDraft(page, fixture.threadId, draft)
           }
           for (const expected of [
             `durable history ${stamp}`,
@@ -98,7 +96,7 @@ export async function runComposerMatrix(ui) {
           ]) {
             await composer.press('ArrowDown')
             await expectComposerText(page, expected)
-            await expectStorage(page, draftKey, draft)
+            await expectThreadDraft(page, fixture.threadId, draft)
           }
 
           await shot(caseArt, 'composer-history-order-boundaries')
@@ -245,15 +243,12 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           let composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
           await composer.fill(originalDraft)
           await composer.press('ArrowUp')
           await expectComposerText(page, historicalMessage)
           await page.keyboard.type(' edited')
           await expectComposerText(page, editedDraft)
-          await expectStorage(page, draftKey, editedDraft)
+          await expectThreadDraft(page, fixture.threadId, editedDraft)
 
           await composer.press('ArrowUp')
           await expectComposerText(page, historicalMessage)
@@ -263,7 +258,7 @@ export async function runComposerMatrix(ui) {
           await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
           composer = await waitForComposer(page)
           await expectComposerText(page, editedDraft)
-          await expectStorage(page, draftKey, editedDraft)
+          await expectThreadDraft(page, fixture.threadId, editedDraft)
           await shot(caseArt, 'composer-history-edited-recalled')
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -330,9 +325,6 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `palette scratch ${stamp}`
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
           await composer.fill(draft)
           await page.getByRole('button', { name: '打开命令表' }).click()
           const palette = page.getByRole('listbox', { name: '命令表' })
@@ -346,7 +338,7 @@ export async function runComposerMatrix(ui) {
             `ArrowDown did not move the active command: ${activeBefore}`,
           )
           await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
           await composer.press('ArrowUp')
           await expectComposerText(page, draft)
           await composer.press('Escape')
@@ -365,7 +357,7 @@ export async function runComposerMatrix(ui) {
           await composer.press('Escape')
           await palette.waitFor({ state: 'hidden', timeout: 10_000 })
           await expectComposerText(page, '/sto')
-          await expectStorage(page, draftKey, '/sto')
+          await expectThreadDraft(page, fixture.threadId, '/sto')
 
           await shot(caseArt, 'composer-command-palette-precedence')
           expectNoFatal(pageErrors, consoleErrors)
@@ -392,9 +384,6 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
           await composer.fill(draft)
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^thread/ }).click()
@@ -483,7 +472,7 @@ export async function runComposerMatrix(ui) {
             { timeout: 10_000 },
           )
           await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
 
           // 再次打开 Thread picker，Enter 直接切换到同 Session sibling；旧 Thread
           // 草稿按 per-thread scope 保留，不再使用已删除的 discard modal。
@@ -522,7 +511,7 @@ export async function runComposerMatrix(ui) {
             await page.getByRole('alertdialog').count() === 0,
             'Thread selection unexpectedly opened a discard dialog',
           )
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
 
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^tree/ }).click()
@@ -614,7 +603,7 @@ export async function runComposerMatrix(ui) {
             { timeout: 10_000 },
           )
           await expectComposerText(page, '')
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
           expectNoFatal(pageErrors, consoleErrors)
         },
       )
@@ -635,11 +624,8 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
 
           const transcriptMessage = page.getByText(historicalMessage, { exact: true }).first()
           await transcriptMessage.waitFor({ state: 'visible', timeout: 10_000 })
@@ -667,7 +653,7 @@ export async function runComposerMatrix(ui) {
             { timeout: 10_000 },
           )
           await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
           const metrics = await composerMetrics(composer)
           assert(
             metrics.focused && metrics.selectionCollapsed && metrics.selectionAtEnd,
@@ -694,15 +680,12 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
           await composer.fill(submitted)
-          await expectStorage(page, draftKey, submitted)
+          await expectThreadDraft(page, fixture.threadId, submitted)
           await page.getByRole('button', { name: '发送消息' }).click()
 
           await expectComposerText(page, '')
-          await expectStorage(page, draftKey, null)
+          await expectThreadDraft(page, fixture.threadId, null)
           await page.getByText(submitted, { exact: true }).first().waitFor({
             state: 'visible',
             timeout: 15_000,
@@ -823,13 +806,10 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `debug draft ${stamp}`
-          const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-          )
 
           // plus 命令保留已写草稿；Debug 中 Composer 挂载但完全失活。
           await composer.fill(draft)
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^debug/ }).click()
           const listbox = page.getByRole('listbox', { name: '事件' })
@@ -844,7 +824,7 @@ export async function runComposerMatrix(ui) {
           assert((await composer.count()) === 1 && !(await composer.isVisible()), 'debug composer is not mounted and hidden')
           assert(!(await page.locator('#chat-layout-select').isVisible()), 'debug exposes the layout selector')
           assert((await page.getByRole('button', { name: '关闭 Debug', exact: true }).count()) === 1, 'debug must have one header exit')
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
 
           // 点击 USER 消息事件：只读 detail widget 展示原始 payload JSON。
           const userOption = listbox.getByRole('option').filter({ hasText: historicalMessage }).first()
@@ -865,7 +845,7 @@ export async function runComposerMatrix(ui) {
             'debug view stayed mounted while the conversation is open',
           )
           await expectComposerText(page, draft)
-          await expectStorage(page, draftKey, draft)
+          await expectThreadDraft(page, fixture.threadId, draft)
 
           await shot(caseArt, 'debug-detail-and-switch')
           expectNoFatal(pageErrors, consoleErrors)
