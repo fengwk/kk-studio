@@ -623,16 +623,14 @@ textarea::placeholder {
 .form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input),
 .form-group.is-error select,
 .form-group.is-error textarea:not(.ui-textarea),
-.form-group.is-error .form-select .form-select-control,
-.form-group.is-error .price-input {
+.form-group.is-error .form-select .form-select-control {
   border-color: var(--danger, #ff7b7b) !important;
   box-shadow: 0 0 0 1px rgba(255, 96, 96, 0.35);
 }
 
 .form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):focus,
 .form-group.is-error select:focus,
-.form-group.is-error textarea:not(.ui-textarea):focus,
-.form-group.is-error .price-input:focus-within {
+.form-group.is-error textarea:not(.ui-textarea):focus {
   border-color: var(--danger, #ff7b7b) !important;
   box-shadow: 0 0 0 3px rgba(255, 96, 96, 0.22);
 }
@@ -5957,16 +5955,8 @@ select.settings-input option {
 .price-input {
   display: flex;
   align-items: center;
-  height: 38px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.price-input:focus-within {
-  border-color: var(--green-primary);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  gap: 8px;
+  min-width: 0;
 }
 
 .price-affix,
@@ -5978,28 +5968,9 @@ select.settings-input option {
   user-select: none;
 }
 
-.price-affix {
-  padding-left: 12px;
-}
-
-.price-suffix {
-  padding-right: 12px;
-}
-
 .price-input input {
   flex: 1 1 auto;
   min-width: 0;
-  height: 100%;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding: 0 8px !important;
-}
-
-.price-input input:focus {
-  outline: none;
-  box-shadow: none !important;
 }
 
 /* number 输入：保留语义但弱化浏览器默认 spinner 视觉干扰 */
@@ -6199,18 +6170,22 @@ select.settings-input option {
 .interactions-page-content {
   flex: 1;
   overflow-y: auto;
-}
-
-.interactions-loading-state,
-.interactions-empty-state,
-.interactions-error-state {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 280px;
   gap: 12px;
-  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.interactions-page-content > .btn-primary {
+  align-self: flex-start;
+}
+
+.interactions-page-layout .interaction-item-meta > .ghost-inline-btn {
+  height: auto;
+  min-height: 32px;
+  max-width: 100%;
+  flex-wrap: wrap;
+  text-align: left;
 }
 
 .interactions-list {

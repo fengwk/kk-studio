@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { interactionService } from '@/shared/api/interaction-service'
+import { harnessService } from '@/shared/api/harness-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { projectsApi } from '@/features/projects/projects-api'
@@ -55,6 +56,20 @@ describe('InteractionsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('暂无待处理项')).toBeInTheDocument()
     })
+  })
+
+  it('shows loading feedback and disables refresh until the initial read completes', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof interactionService.listInteractions>>) => void
+    vi.spyOn(interactionService, 'listInteractions').mockReturnValue(new Promise((done) => {
+      resolve = done
+    }))
+    render(<InteractionsPage />, { wrapper })
+
+    expect(screen.getByText('正在加载资源')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '刷新' })).toBeDisabled()
+    resolve({ items: [], nextCursor: null, total: 0, freshnessAt: null })
+    expect(await screen.findByText('暂无待处理项')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled()
   })
 
   it('renders error state and retries on button click', async () => {
@@ -182,6 +197,35 @@ describe('InteractionsPage', () => {
     await waitFor(() => {
       expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=root-th-2')
     })
+    // 审批仍写原始调用并只移除完成的条目，不影响问卷。
+    const decision = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
+      id: 'int-2',
+      modelInvocationId: 'model-2',
+      assistantEntryId: 'entry-2',
+      callIndex: 0,
+      status: 'PENDING',
+      attempt: 1,
+      toolCallId: 'call-2',
+      toolName: 'write',
+      rendererKey: 'raw',
+      environmentId: null,
+      requiredEnvironmentId: null,
+      waitingForEnvironment: false,
+      requiredEnvironmentName: null,
+      environmentWaitFreshnessAt: null,
+      argumentsJson: '{"path":"main.ts"}',
+      approvalJson: '{"decision":"ALLOWED"}',
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-09-27T10:05:00Z',
+      updateTime: '2026-09-27T10:06:00Z',
+    })
+    fireEvent.click(screen.getByRole('button', { name: '允许', exact: true }))
+    await waitFor(() => expect(screen.queryByText('write')).not.toBeInTheDocument())
+    expect(decision).toHaveBeenCalledWith('th-2', 'int-2', {
+      decision: 'ALLOW', reason: null, decisionId: expect.any(String),
+    })
+    expect(screen.getByText('你选择哪个？')).toBeInTheDocument()
   })
 
   it('navigates to /projects when getIssue fails', async () => {
@@ -232,7 +276,7 @@ describe('InteractionsPage', () => {
 
   it('supports refresh and load more, and renders environment waits read-only without raw fallback', async () => {
     let listCount = 0
-    vi.spyOn(interactionService, 'listInteractions').mockImplementation(async (_cursor, _limit) => {
+    const listSpy = vi.spyOn(interactionService, 'listInteractions').mockImplementation(async () => {
       listCount++
       if (listCount === 1) {
         return {
@@ -293,6 +337,9 @@ describe('InteractionsPage', () => {
           freshnessAt: null,
         }
       }
+      if (listCount === 2) {
+        throw new Error('Next page unavailable')
+      }
       return {
         items: [
           {
@@ -337,15 +384,19 @@ describe('InteractionsPage', () => {
     // 卡片主体不得出现任何可操作入口（来源跳转按钮属于导航，不在主体内）。
     expect(environmentWaitCard?.querySelector('.interaction-item-body button')).toBeNull()
 
-    // Click refresh button in header
-    const refreshBtn = screen.getByRole('button', { name: '刷新' })
-    fireEvent.click(refreshBtn)
-
-    // Click load more
-    const loadMoreBtn = screen.getByText('加载更多')
-    fireEvent.click(loadMoreBtn)
+    // 分页失败不能用错误态替换已加载卡片；恢复动作仍可用。
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
+    expect(await screen.findByText('Next page unavailable')).toBeInTheDocument()
+    expect(screen.getByText('3 个工具调用等待 archlinux 上线')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
+    expect(listSpy).toHaveBeenLastCalledWith(null, 'cursor-2', 20)
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
     await waitFor(() => {
       expect(screen.getByText('More Q')).toBeInTheDocument()
     })
+    expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.queryByText('Next page unavailable')).not.toBeInTheDocument())
+    expect(listSpy).toHaveBeenLastCalledWith(null, null, 20)
   })
 })

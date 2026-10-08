@@ -1,13 +1,7 @@
 import type { Route } from '@playwright/test'
 import { expect, test, type Page } from './fixture'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { InteractionDTO } from '../src/shared/api/contracts/ai-interaction'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const REPORTS_DIR = path.resolve(__dirname, '../../reports/layout')
 const HARNESS_URL = '/browser-tests/interactions-harness.html'
 
 const APPROVAL_INTERACTION_ID = 'int-approval'
@@ -39,10 +33,15 @@ interface PendingApiOptions {
   submissions?: RecordedRequest[]
   /** 首次列表请求返回 500，用于验证错误态与重试恢复。 */
   failFirstList?: boolean
+  listFailureMessage?: string
   /** 审批决策返回的状态码，用于验证过期冲突文案。 */
   approvalStatus?: number
   /** 前 N 次审批决策返回 500，用于验证同 decisionId 的精确重试。 */
   approvalFailures?: number
+  listGate?: Promise<void>
+  empty?: boolean
+  paginate?: boolean
+  failFirstNextPage?: boolean
 }
 
 interface PendingApiState {
@@ -147,6 +146,7 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
     answeredQuestionnaires: new Set(),
   }
   let approvalFailuresLeft = options.approvalFailures ?? 0
+  let nextPageFailed = false
 
   await page.route(
     (url) => new URL(url).pathname.startsWith('/api/'),
@@ -162,20 +162,29 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
       }
 
       if (requestPath === '/api/interactions' && method === 'GET') {
+        await options.listGate
         state.listCalls += 1
         if (options.failFirstList && state.listCalls === 1) {
           await route.fulfill({
             status: 500,
-            json: { status: 500, message: '服务暂时不可用' },
+            json: { status: 500, message: options.listFailureMessage ?? '服务暂时不可用' },
           })
           return
         }
-        const items = buildItems().filter((item) => item.type === 'ENVIRONMENT_WAIT'
+        const allItems = (options.empty ? [] : buildItems()).filter((item) => item.type === 'ENVIRONMENT_WAIT'
           || (!state.decidedApprovals.has(item.interactionId)
           && !state.answeredQuestionnaires.has(item.interactionId)))
+        const cursor = new URL(request.url()).searchParams.get('cursor')
+        if (cursor && options.failFirstNextPage && !nextPageFailed) {
+          nextPageFailed = true
+          await route.fulfill({ status: 500, json: { status: 500, message: '下一页暂时不可用' } })
+          return
+        }
+        const items = options.paginate ? (cursor ? allItems.slice(1) : allItems.slice(0, 1)) : allItems
+        const nextCursor = options.paginate && !cursor ? 'page-2' : null
         // total 是同一过滤条件下的真实可见待处理总数，与游标分页位置无关。
         await route.fulfill({
-          json: { status: 200, data: { items, nextCursor: null, total: items.length,
+          json: { status: 200, data: { items, nextCursor, total: allItems.length,
             freshnessAt: '2026-10-05T10:00:00Z' } },
         })
         return
@@ -336,7 +345,6 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
   test('approval and questionnaire cards use the current dark tokens with readable text at 1280/390/320', async ({
     page,
   }) => {
-    fs.mkdirSync(REPORTS_DIR, { recursive: true })
     await mockPendingApi(page)
 
     for (const viewport of [
@@ -446,7 +454,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       await expectNoHorizontalOverflow(page)
 
       await page.screenshot({
-        path: path.join(REPORTS_DIR, `interactions-pending-${viewport.name}.png`),
+        path: test.info().outputPath(`interactions-pending-${viewport.name}.png`),
         fullPage: false,
       })
     }
@@ -466,7 +474,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
     await expect(card.locator('.interaction-allow-btn, .interaction-deny-btn, .interaction-submit-btn')).toHaveCount(0)
     await expect(card.getByRole('textbox')).toHaveCount(0)
-    await expect(card.locator('.interaction-source-link')).toContainText('环境执行根')
+    await expect(card.getByTitle('打开对话')).toContainText('环境执行根')
     const refresh = page.getByRole('button', { name: '刷新', exact: true })
     const refreshed = page.waitForResponse((response) =>
       new URL(response.url()).pathname === '/api/interactions'
@@ -486,7 +494,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').first().locator('.interaction-source-link')
+    const source = page.locator('.interaction-feed-item').first().getByTitle('打开对话')
     await expect(source).toContainText('迁移审批')
     await expect(source).toContainText('审批执行根')
     await source.click()
@@ -501,7 +509,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').nth(1).locator('.interaction-source-link')
+    const source = page.locator('.interaction-feed-item').nth(1).getByTitle('打开任务对话')
     await expect(source).toContainText('迁移策略')
     await expect(source).toContainText('问卷执行根')
     await expect(source).toContainText('architect')
@@ -618,7 +626,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
     await expectNoHorizontalOverflow(page)
     await page.screenshot({
-      path: path.join(REPORTS_DIR, 'interactions-questionnaire-390.png'),
+      path: test.info().outputPath('interactions-questionnaire-390.png'),
       fullPage: false,
     })
 
@@ -645,6 +653,49 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(page.getByText('服务暂时不可用')).toBeVisible()
     await page.getByRole('button', { name: '重试' }).click()
     await expect(page.locator('.interaction-approval-tool-name')).toHaveText('bash')
+  })
+
+  for (const width of [1280, 320]) {
+    test(`shared loading, empty and error feedback fits ${width}px and retains retry`, async ({ page }) => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      const failureMessage = `服务暂时不可用：${'long-diagnostic-context/'.repeat(12)}`
+      await mockPendingApi(page, { listGate: gate, empty: true, failFirstList: true, listFailureMessage: failureMessage })
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(HARNESS_URL)
+      await expect(page.locator('.state-block')).toHaveText('正在加载资源')
+      await expect(page.getByRole('button', { name: '刷新', exact: true })).toBeDisabled()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({ path: test.info().outputPath(`interactions-loading-${width}.png`) })
+      release()
+      const error = page.locator('.state-block.danger')
+      await expect(error).toHaveText(failureMessage)
+      await expect(error).toHaveCSS('color', await resolveToken(page, '--danger'))
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({ path: test.info().outputPath(`interactions-error-${width}.png`) })
+      await page.getByRole('button', { name: '重试', exact: true }).click()
+      await expect(page.locator('.state-block')).toHaveText('暂无待处理项')
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({ path: test.info().outputPath(`interactions-empty-${width}.png`) })
+    })
+  }
+
+  test('pagination failure keeps loaded items visible and refresh retry restores the authoritative list', async ({ page }) => {
+    await mockPendingApi(page, { paginate: true, failFirstNextPage: true })
+    await page.setViewportSize({ width: 320, height: 900 })
+    await page.goto(HARNESS_URL)
+    await expect(page.locator('.interaction-feed-item')).toHaveCount(1)
+    await page.getByRole('button', { name: '加载更多', exact: true }).click()
+    await expect(page.locator('.state-block.danger')).toHaveText('下一页暂时不可用')
+    await expect(page.locator('.interaction-approval-tool-name')).toHaveText('bash')
+    await expectNoHorizontalOverflow(page)
+    await page.getByRole('button', { name: '重试', exact: true }).click()
+    await expect(page.locator('.state-block.danger')).toHaveCount(0)
+    await expect(page.locator('.interaction-feed-item')).toHaveCount(1)
+    await page.getByRole('button', { name: '加载更多', exact: true }).click()
+    await expect(page.locator('.interaction-feed-item')).toHaveCount(3)
+    await expect(page.getByRole('button', { name: '加载更多', exact: true })).toHaveCount(0)
+    await expectNoHorizontalOverflow(page)
   })
 
   test('a stale approval explains the change instead of claiming it is unrecoverable', async ({ page }) => {
