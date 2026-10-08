@@ -24,6 +24,8 @@ export interface ComposerFocusOptions {
   active: boolean
   /** 当前交互作用域是否允许全局 Escape 把焦点恢复到此 Composer。 */
   focusOnEscape: boolean
+  /** workspace 非焦点 pane 显露/结算时不得自动抢焦点；独立 Composer 默认恢复。 */
+  restoreOnActivate?: boolean
   /** 提交在途标记：true -> false 且可编辑时自动恢复键入焦点。 */
   pending: boolean
   /**
@@ -66,6 +68,7 @@ export function useComposerFocus({
   disabled,
   active,
   focusOnEscape,
+  restoreOnActivate = true,
   pending,
   closeOverlay,
   onLeaveRegion,
@@ -274,9 +277,12 @@ export function useComposerFocus({
     }
     if (restoreFocusRef.current && !disabled) {
       restoreFocusRef.current = false
-      focusComposer(true)
+      // workspace 重新显露多个 pane 时，只有当前焦点 pane 可以恢复键入焦点。
+      if (restoreOnActivate) {
+        focusComposer(true)
+      }
     }
-  }, [active, clearFocusTimer, disabled, focusComposer])
+  }, [active, clearFocusTimer, disabled, focusComposer, restoreOnActivate])
 
   // 全局 Escape：Modal/alertdialog/lightbox 保留自己的 Escape 语义；
   // 仅负责未聚焦且当前活动 pane 处于 focusOnEscape 时，恢复焦点到编辑器末尾。
@@ -318,12 +324,12 @@ export function useComposerFocus({
     if (wasPendingRef.current && !pending) {
       if (!active) {
         restoreFocusRef.current = true
-      } else if (!disabled) {
+      } else if (!disabled && restoreOnActivate) {
         focusComposer()
       }
     }
     wasPendingRef.current = pending
-  }, [active, disabled, focusComposer, pending])
+  }, [active, disabled, focusComposer, pending, restoreOnActivate])
 
   // 卸载清理：取消尚未执行的延迟聚焦。
   useEffect(() => () => clearFocusTimer(), [clearFocusTimer])

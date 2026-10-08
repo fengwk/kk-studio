@@ -7,6 +7,7 @@ import type { ThreadPanelComposerInput } from '@/features/ai/runtime/thread-pane
 import { InteractionCardBody } from '@/features/ai/runtime/interactions/InteractionCardBody'
 import { useInteractionsController } from '@/features/ai/runtime/interactions/useInteractionsController'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
 import { interactionIdentity, manualInteractions } from '@/shared/lib/interactions'
 import type {
   DialogueMessage,
@@ -93,8 +94,9 @@ export function RootThreadControlArea({
         onSubmitGoal={onSubmitGoal}
         onCommand={onCommand}
         commands={commands}
-        focusOnEscape={focusOnEscape && !interactionOpen}
-        active={!interactionOpen && !suspended}
+        focusOnEscape={focusOnEscape && !interactionOpen && !hidden && !suspended}
+        active={!interactionOpen && !suspended && !hidden}
+        restoreOnActivate={focusOnEscape !== false && !suspended}
         historicalUserMessages={historicalUserMessages}
         queuedUserMessages={queuedUserMessages}
         settings={settings}
@@ -143,14 +145,13 @@ function RootInteractionList({
       {isError ? (
         <div className="thread-root-interactions-state is-error" role="alert">
           <span>{t('ai.interaction.loadFailed')}</span>
-          <button
-            type="button"
-            className="ghost-btn"
+          <Button
+            variant="ghost"
             disabled={isLoading}
             onClick={() => void refresh()}
           >
             {t('ai.interaction.retry')}
-          </button>
+          </Button>
         </div>
       ) : null}
       {manualItems.map((item) => {
@@ -187,14 +188,14 @@ function RootInteractionList({
         )
       })}
       {hasMore ? (
-        <button
-          type="button"
-          className="ghost-btn thread-root-interactions-more"
+        <Button
+          variant="ghost"
+          className="thread-root-interactions-more"
           disabled={isFetchingMore}
           onClick={() => void loadMore()}
         >
           {t('ai.interaction.loadMore')}
-        </button>
+        </Button>
       ) : null}
     </section>
   )

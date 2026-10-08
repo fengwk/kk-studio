@@ -28,8 +28,8 @@ Thread 持久化 `ThreadYoloPolicy`：
 
 Thread 查询 DTO 的 `yoloPolicy` 为 `{mode, rootThreadId}`，根的 `rootThreadId` 为 null。
 该字段取代 Thread 查询投影的 `yoloEnabled`。新根创建请求、产品默认值和根开关命令仍可
-使用 boolean，因为这些输入不表达 Follow。只读子面板根据 Follow 目标提供返回执行根入口，
-不提供独立开关；根开关显示根的权威策略。
+使用 boolean，因为这些输入不表达 Follow。只读子面板不提供独立开关，根开关显示根的权威策略；
+返回导航基于当前快照的不可变直接父 `parentThreadId` 定点打开父级，不依赖 Follow 根目标。
 
 ## 人工交互与产品边界
 
@@ -56,15 +56,19 @@ ThreadJoin 的订阅方持有，结果通知与执行唤醒仍交给直接派发
 ```text
 AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投影
   -> RootAgentPane（仅草稿或已确认的根）：useRootThreadControl
-     -> ThreadPane -> ThreadPanel：对话/Debug、Widget、Footer（标题只留在只读子代理视图）
+     -> ThreadPane -> ThreadPanel：对话/Debug、Widget、Footer
         -> RootThreadControlArea：Composer、Stop、审批、问卷
   -> BoundThreadView（只读子代理）：ThreadPane -> ThreadPanel，无控制区
 ```
 
 只读子代理不初始化编辑草稿、上传注册表和人工执行 Hook。Thread 身份未加载完成前不能
-暴露控制区。Debug 是只读查看入口：进入后输入、审批、分支控制与活跃树整体隐藏并失活，
-只切换视图，不改草稿或 pane 绑定，退出即恢复。根面板与草稿 pane 不自渲染标题，
-身份由顶栏面包屑承载。资源解析和 Footer 由 ThreadPane 组装，不增加重复参数转发层。
+暴露控制区。Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，原 layout 保持不变，
+其他原可见 pane 保持稳定挂载且置为 hidden 与 inert，输入控制区挂起，上传注册表保持挂载；
+单顶栏左上角提供“关闭 Debug”，不导航 `/chats`，不渲染会话返回行；退出即完整恢复原 layout、
+可见 pane、滚动与焦点。Escape 优先由内部检查器或弹层消费，未消费时才触发外层退出 Debug。
+根面板与草稿 pane 不自渲染标题，工作区内子代理同样不渲染第二层标题栏或只读 badge，
+真实身份（agent/provider/model 及变体定义的真实 reasoningEffort；默认 main 不作身份）汇入顶栏。
+资源解析和 Footer 由 ThreadPane 组装，不增加重复参数转发层。
 
 `ThreadComposer` 保留 `contenteditable + ComposerPart[]` 的输入协议，负责附件注册、
 上传、输入历史和提交生命周期；`ComposerEditor` 只负责 DOM、光标、IME、换行和 Pill 编辑。
@@ -81,10 +85,13 @@ AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投
 无活跃后代时不留空壳。根本地空闲不能停止查询后代；查询失败不伪装成最新数据。
 
 树行、task Thread ID 和系统回执链接共享 `ThreadLink` 导航。普通点击在当前 pane 查看，
-保留原始执行绑定；Ctrl/Cmd、中键和复制地址保持浏览器行为。逐层进入可逐层返回，独立
-子线程地址提供返回执行根入口。导航状态不复制 Snapshot、执行状态或编辑草稿。
+保留原始执行绑定；Ctrl/Cmd、中键和复制地址保持浏览器行为。返回导航基于当前快照的直属父
+`parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开直接父 Agent，
+不使用浏览栈 `goBack`；独立子线程地址则直接链接至真实 `/threads/{parentId}`。
+已绑定根支持 `/subagent` 命令，只读顶栏提供“查看 subagent 执行”动作，打开轻量面板展示排除根的完整
+`historyRows`（含嵌套后代与 resume 计数），未绑定草稿禁用该命令。导航状态不复制 Snapshot、执行状态或编辑草稿。
 
-返回导航位于子面板顶部标题区，底部不留下输入区或操作栏。根面板查看期间保留草稿与上传，
+返回导航由工作区顶栏动作区承载，底部不留下输入区或操作栏。根面板查看期间保留草稿与上传，
 隐藏层同时使用 `hidden/inert` 与 Composer 的失活状态，不能响应输入快捷键或抢焦点。返回恢复阅读位置、
 展开状态和合理焦点。子代理完成不自动退出查看；加载失败也必须能返回。
 
@@ -128,12 +135,12 @@ Debug。展示不改变模型正文、Provider 协议、资源安全边界或既
 
 ## Session 树与命名分支
 
-`/tree` 是当前 Session 的只读历史树，与根面板的活跃执行树是两份不同投影：前者按真实 Entry
+`/history` 是当前 Session 的只读历史树，与根面板的活跃执行树是两份不同投影：前者按真实 Entry
 画 Git commit lanes（`●` 节点、`│` 连线，线性链同一列，只有真实 sibling 分叉才开新列），
 每行一个 Entry，只有 ROOT 与已关闭 TURN_END 可手工分叉；后者按执行父子关系展示 processing
 后代。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写 Thread 状态。
 
-命名分支有两个呈现入口并汇入同一命名流程：`/tree` 面板底部对选中 ROOT 或已关闭 TURN_END 的
+命名分支有两个呈现入口并汇入同一命名流程：`/history` 面板底部对选中 ROOT 或已关闭 TURN_END 的
 “从此处分支”，以及对话中已关闭 TURN_END 回合 footer 的分支按钮（即使该回合没有 usage 文本也
 照常展示）。弹窗要求规范化名称并选择目标位置 1..9；确认只把草稿目标路由到目标 pane，
 不预创建 Thread，隐藏位置先扩展布局显露并移动焦点，在途目标被拒绝，覆盖未发送草稿需二次确认；

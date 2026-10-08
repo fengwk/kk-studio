@@ -60,7 +60,7 @@ export function ThreadPane({
   projection: ThreadProjection
   environments: EnvironmentCardDTO[]
   heading?: ReactNode
-  /** 输入与控制区：只有根面板传入根控制区；只读视图的返回入口在标题区（`navigation`）。 */
+  /** 输入与控制区：仅根面板传入；只读身份与导航由宿主单一顶栏呈现。 */
   controls?: ReactNode
   activity: ThreadPaneActivityInput
   views: ThreadPaneViews

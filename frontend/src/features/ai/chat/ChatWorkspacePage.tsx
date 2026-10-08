@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
@@ -32,6 +32,10 @@ import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
+import { Button } from '@/shared/ui/controls/Button'
+import { ThreadPresentationActions } from '@/features/ai/runtime/ThreadPresentationActions'
+import type { ThreadPresentation } from '@/features/ai/runtime/thread-presentation'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/ai/chat/chat-workspace.css'
 
 const LAYOUTS: Array<{ value: ChatLayout; label: string }> = [
@@ -92,6 +96,26 @@ function ChatWorkspaceContent({
   const { t } = useI18n()
   const location = useLocation()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chat.id))
+  const [presentations, setPresentations] = useState<Record<string, ThreadPresentation | null>>({})
+  const [debugSource, setDebugSource] = useState<{ paneId: string; viewKey: string } | null>(null)
+  const paneStateRef = useRef(paneState)
+  useLayoutEffect(() => { paneStateRef.current = paneState }, [paneState])
+  const handlePresentation = useCallback((paneId: string, report: ThreadPresentation | null) => {
+    setPresentations((current) => current[paneId] === report ? current : { ...current, [paneId]: report })
+    setDebugSource((current) => {
+      if (current != null) {
+        if (current.paneId !== paneId) {
+          return current
+        }
+        return report?.mode === 'debug' && report.viewKey === current.viewKey
+          && (!report.viewKey.startsWith('thread:') || report.threadId != null) ? current : null
+      }
+      return report?.mode === 'debug' && paneStateRef.current.focusedPaneId === paneId
+        && visibleChatPanes(paneStateRef.current).some((pane) => pane.id === paneId)
+        && (!report.viewKey.startsWith('thread:') || report.threadId != null)
+        ? { paneId, viewKey: report.viewKey } : null
+    })
+  }, [])
   const [deepLinkOwner, setDeepLinkOwner] = useState(() => ({
     navigationKey: location.key,
     paneId: paneState.focusedPaneId,
@@ -313,11 +337,28 @@ function ChatWorkspaceContent({
   const visiblePanes = visibleChatPanes(paneState)
   const visiblePaneIds = new Set(visiblePanes.map((pane) => pane.id))
   const mountedPanes = paneState.panes.filter((pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending)
+  const currentView = presentations[debugSource?.paneId ?? paneState.focusedPaneId] ?? null
+  const focusedPaneVisible = visiblePaneIds.has(paneState.focusedPaneId)
+  useLayoutEffect(() => {
+    if (debugSource == null && currentView?.mode === 'conversation' && focusedPaneVisible) {
+      currentView.act(currentView.viewKey, 'restore-focus')
+    }
+  }, [currentView, debugSource, focusedPaneVisible])
+  const closeDebug = () => currentView?.act(debugSource?.viewKey ?? currentView.viewKey, 'close-debug')
   return (
-    <section className="chat-workspace screen active">
+    <section className="chat-workspace screen active" onKeyDown={(event) => {
+      if (debugSource && event.key === 'Escape' && !event.defaultPrevented
+        && !event.repeat && !event.nativeEvent.isComposing && event.keyCode !== 229
+        && !shouldDeferToBlockingModal(event.currentTarget)) {
+        event.preventDefault()
+        closeDebug()
+      }
+    }}>
       <header className="chat-workspace-header">
         <div className="chat-workspace-title">
-          <Link
+          {debugSource ? <Button variant="ghost" size="compact" onClick={closeDebug}>
+            {t('ai.runtime.debug.close')}
+          </Button> : <Link
             className="chat-workspace-back"
             to="/chats"
             title={t('ai.chat.backToConversation')}
@@ -325,14 +366,14 @@ function ChatWorkspaceContent({
           >
             <ArrowLeft aria-hidden="true" />
             <span>{t('ai.chat.backToConversation')}</span>
-          </Link>
+          </Link>}
           <nav
             className="chat-workspace-breadcrumb"
             aria-label={t('ai.chat.branch.breadcrumb')}
             data-focused-pane={paneState.focusedPaneId}
           >
             <h1 className="chat-workspace-breadcrumb-item" data-breadcrumb="chat">{chat.title || chat.id}</h1>
-            {focusedSessionId != null ? (
+            {currentView?.parentThreadId == null && focusedSessionId != null ? (
               <>
                 <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
                 <span
@@ -344,26 +385,27 @@ function ChatWorkspaceContent({
                 </span>
               </>
             ) : null}
-            {focusedReport?.branchName ? (
+            {(currentView?.parentThreadId ? currentView.name : focusedReport?.branchName) ? (
               <>
                 <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
                 <span className="chat-workspace-breadcrumb-item" data-breadcrumb="branch">
-                  {focusedReport.branchName}
+                  {currentView?.parentThreadId ? currentView.name : focusedReport?.branchName}
                 </span>
               </>
             ) : null}
           </nav>
+          <ThreadPresentationActions view={currentView} />
         </div>
         <div className="chat-workspace-actions">
-          <ChatLayoutSelector
+          {debugSource == null ? <ChatLayoutSelector
             layout={paneState.layout}
             onChange={(nextLayout) => {
               setPaneState((current) => applyChatLayout(current, nextLayout))
             }}
-          />
+          /> : null}
         </div>
       </header>
-      <div className={`chat-pane-grid layout-${paneState.layout}`}>
+      <div className={`chat-pane-grid layout-${debugSource ? 'single' : paneState.layout}`}>
         {mountedPanes.map((pane, index) => {
           const isFocused = paneState.focusedPaneId === pane.id || (index === 0 && !paneState.focusedPaneId)
           return (
@@ -374,7 +416,7 @@ function ChatWorkspaceContent({
               environments={environments}
               pane={pane}
               focused={isFocused}
-              hidden={!visiblePaneIds.has(pane.id)}
+              hidden={!visiblePaneIds.has(pane.id) || (debugSource != null && debugSource.paneId !== pane.id)}
               onValidateDraftName={(target, name) => target.kind === 'NEW_THREAD_DRAFT'
                 ? validateDraftName(pane.id, target.sessionId, name)
                 : Promise.resolve(t('ai.chat.branch.targetChanged'))}
@@ -383,6 +425,7 @@ function ChatWorkspaceContent({
               onTargetConsumed={(consumed) => handleTargetConsumed(pane.id, consumed)}
               onRequestBranch={handleRequestBranch}
               onPaneReport={handlePaneReport}
+              onPresentation={handlePresentation}
             />
           )
         })}

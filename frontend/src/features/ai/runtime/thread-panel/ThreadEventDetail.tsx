@@ -2,6 +2,8 @@ import { useEffect, useRef, type KeyboardEvent, type Ref, type RefObject } from 
 import { Eye, LoaderCircle, X } from 'lucide-react'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 
 /**
  * 只读 Event 详情视图：位于 Debug 视图详情列。
@@ -76,15 +78,14 @@ export function ThreadEventDetail({
     >
       <header className="thread-event-detail-header">
         <h3>{record.title}</h3>
-        <button
+        <IconButton
           ref={resolvedCloseBtnRef}
-          type="button"
-          className="thread-interaction-close"
-          aria-label={t('ai.runtime.event.closeDetail')}
+          size="compact"
+          label={t('ai.runtime.event.closeDetail')}
           onClick={onClose}
         >
           <X aria-hidden="true" />
-        </button>
+        </IconButton>
       </header>
       {record.details.length > 0 ? (
         <dl className="thread-event-detail-rows">
@@ -98,9 +99,8 @@ export function ThreadEventDetail({
       ) : null}
       {canPreviewHistoricalRequest ? (
         <div className="thread-event-detail-actions">
-          <button
-            type="button"
-            className="ghost-inline-btn"
+          <Button
+            variant="inline"
             data-testid="historical-request-preview"
             title={t('ai.runtime.debug.historicalRequestHint')}
             aria-label={t('ai.runtime.debug.historicalRequestHint')}
@@ -113,7 +113,7 @@ export function ThreadEventDetail({
               <Eye size={12} aria-hidden="true" />
             )}
             <span>{t('ai.runtime.debug.historicalRequest')}</span>
-          </button>
+          </Button>
         </div>
       ) : null}
       {historicalPreviewUnsupported ? (

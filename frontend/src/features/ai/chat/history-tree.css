@@ -21,17 +21,6 @@
 .history-tree-search input {
   flex: 1;
   min-width: 0;
-  height: 34px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg);
-  outline: 0;
-  padding: 0 12px;
-}
-
-.history-tree-search input:focus-visible {
-  border-color: var(--border-hover);
 }
 
 .history-tree-no-match {
