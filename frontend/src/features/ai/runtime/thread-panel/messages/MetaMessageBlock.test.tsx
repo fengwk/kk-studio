@@ -50,7 +50,7 @@ describe('MetaMessageBlock', () => {
       id: 'meta-msg-nousage',
       role: 'meta',
       kind: 'turn_usage',
-      text: '',
+      text: '-',
       endEntryId: 'end-nousage',
       createdAt: 1000,
     }
@@ -58,24 +58,26 @@ describe('MetaMessageBlock', () => {
     render(<MetaMessageBlock message={message} />)
 
     const block = document.querySelector('.thread-meta-text')
+    expect(block).toHaveTextContent('-')
     expect(block).not.toHaveAttribute('title')
     expect(document.querySelector('.thread-block-meta'))
       .toHaveAttribute('data-turn-end', 'end-nousage')
   })
 
-  // 意图：绑定真实 TURN_END 的回合 footer 即使没有 usage 文本也必须渲染结束信息与分支入口。
-  it('renders the turn-end footer with a branch entry even without usage text', () => {
+  // 意图：缺失用量占位仍可分支，并且只请求真正关闭回合的 TURN_END。
+  it('renders a usage placeholder with a working branch entry', () => {
+    const request = vi.fn()
     const message: MetaDialogueMessage = {
       id: 'meta-end-1',
       role: 'meta',
       kind: 'turn_usage',
-      text: '',
+      text: '-',
       endEntryId: 'end-1',
       createdAt: 2000,
     }
 
     render(
-      <EntryBranchContext.Provider value={vi.fn()}>
+      <EntryBranchContext.Provider value={request}>
         <MetaMessageBlock message={message} />
       </EntryBranchContext.Provider>,
     )
@@ -83,6 +85,9 @@ describe('MetaMessageBlock', () => {
     expect(screen.getByTestId('thread-turn-end-branch')).toBeInTheDocument()
     const section = document.querySelector('.thread-block-meta')
     expect(section).toHaveAttribute('data-turn-end', 'end-1')
+    expect(screen.getByText('-')).not.toHaveAttribute('title')
+    fireEvent.click(screen.getByTestId('thread-turn-end-branch'))
+    expect(request).toHaveBeenCalledExactlyOnceWith('end-1')
   })
 
   // 意图：没有 TURN_END 绑定的普通 usage 摘要不应出现分支入口。
@@ -133,7 +138,7 @@ describe('MetaMessageBlock', () => {
       id: 'meta-end-3',
       role: 'meta',
       kind: 'turn_usage',
-      text: '',
+      text: '-',
       endEntryId: 'end-9',
       createdAt: 2000,
     }

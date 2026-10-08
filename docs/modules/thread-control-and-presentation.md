@@ -225,8 +225,10 @@ archlinux ∣ ctx 245k/272k ∣ ↑1.4k · ↓1.8k · R244k · $0.055 · cache 9
 [Frontend](frontend.md#用量与状态-footer)。
 
 这是 pane 底部的只读事实条，不承载任何 Agent/Model/Permission 交互。对话内另有一种回合
-footer：已关闭 TURN_END 在正常时间线留下结束信息与“从此处分支”入口，即使该回合没有 usage
-文本也照常展示，两者不可混为一条。
+footer：已关闭 TURN_END 在正常时间线展示本轮真实用量与“从此处分支”入口；没有可用 usage
+时只以 ASCII `-` 占位，不显示 FAILED、STOPPED 或 COMPLETED 等状态，也不生成用量明细。
+错误仍由单独错误卡片展示，分支入口仍绑定真实 TURN_END；只读子代理不显示分支入口。
+两种 footer 不可混为一条。
 
 ## 验证与存储边界
 

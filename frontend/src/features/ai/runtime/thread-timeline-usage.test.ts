@@ -221,6 +221,43 @@ describe('Turn usage after TURN_END', () => {
       'end-1',
       'end-2',
     ])
+    expect(metas.map((message) => message.text)).toEqual(['-', '-'])
+    for (const meta of metas) {
+      expect(meta).not.toHaveProperty('turnUsage')
+      expect(meta).not.toHaveProperty('details')
+    }
+    expect(timeline.messages).toContainEqual(expect.objectContaining({
+      id: 'error-1', role: 'assistant', status: 'error', text: 'boom',
+    }))
+  })
+
+  it.each(['FAILED', 'STOPPED', 'COMPLETED'])('uses a placeholder without usage for %s', (outcome) => {
+    const timeline = buildThreadTimeline([turnStart(), turnEnd('end-1', outcome)], [], [])
+    expect(timeline.messages.at(-1)).toMatchObject({
+      text: '-', endEntryId: 'end-1', kind: 'turn_usage',
+    })
+    expect(timeline.messages.at(-1)).not.toHaveProperty('turnUsage')
+  })
+
+  // 失败不抹掉本轮已经发生的真实用量，也不把真实零读数变成缺失占位。
+  it.each([[10, 20], [0, 0]])('retains actual usage for a failed turn (%i, %i)', (input, output) => {
+    const timeline = buildThreadTimeline([
+      turnStart(),
+      {
+        ...assistant('assistant-1', 'partial', usageMetadata(input, output)),
+        usageCost: { currency: 'USD', amount: '0' },
+      },
+      entry('error-1', 'ASSISTANT_ERROR', { error: { message: 'boom' } }),
+      turnEnd('failed-end', 'FAILED'),
+    ], [], [])
+    const footer = timeline.messages.at(-1)
+    expect(footer).toMatchObject({
+      endEntryId: 'failed-end',
+      turnUsage: { input, output, cost: { currency: 'USD', amount: '0' } },
+    })
+    expect(footer?.text).toContain(`↑${input}`)
+    expect(footer?.text).toContain(`↓${output}`)
+    expect(footer?.text).not.toContain('FAILED')
   })
 
   it('does not leak usage from an unclosed turn into the next TURN_END', () => {

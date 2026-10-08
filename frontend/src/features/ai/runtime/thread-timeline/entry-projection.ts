@@ -68,7 +68,7 @@ export function projectDurableEntry(
       // 无论该回合是否有 usage，TURN_END 都必须产出一条携带真实 TURN_END Entry id 的
       // 结束 meta：回合 footer 的“从此处分支”只以这个 id 分叉（未消费 usage 的回合、
       // 以及作为 head 的最新回合同样可用）。
-      messages.push(turnEndMeta(summary, entry, getString(payload.outcome)))
+      messages.push(turnEndMeta(summary, entry))
     } else {
       // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
       context.pendingTurnSummary = null
@@ -248,19 +248,12 @@ export function projectDurableEntry(
   messages.push(projectUnsupportedMessageEntry(entry, role))
 }
 
-/**
- * 回合结束 meta 一定携带真实 TURN_END Entry id。
- *
- * `endEntryId` 字段由 usage-owner 在 `MetaDialogueMessage` 上新增（本切片不修改该共享
- * 类型文件，父合并时可直接删除此交叉类型）；meta-projection 的“可空 usage + endEntryId”
- * 工厂落地后，这里改用其工厂，字段语义不变。
- */
+/** 回合页脚只展示用量；缺失时以 '-' 占位，分支始终绑定真实 TURN_END Entry id。 */
 type TurnEndMeta = MetaDialogueMessage & { endEntryId: string }
 
 function turnEndMeta(
   summary: MetaDialogueMessage | null,
   entry: HarnessSessionEntryDTO,
-  outcome: string,
 ): TurnEndMeta {
   if (summary != null) {
     return { ...summary, endEntryId: entry.entryId }
@@ -270,7 +263,7 @@ function turnEndMeta(
     role: 'meta',
     kind: 'turn_usage',
     subjectEntryId: entry.entryId,
-    text: outcome,
+    text: '-',
     createdAt: entry.createTime,
     status: 'done',
     endEntryId: entry.entryId,
