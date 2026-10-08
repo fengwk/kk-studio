@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BoundThreadView,
   ChildThreadBackBar,
@@ -42,6 +42,8 @@ export function AgentPane({
   environments = [],
   defaults = {},
   focused = false,
+  hidden = false,
+  onValidateDraftName,
   onFocus,
   initialTarget,
   onTargetConsumed,
@@ -55,6 +57,8 @@ export function AgentPane({
   environments?: EnvironmentCardDTO[]
   defaults?: AgentPaneDefaults
   focused?: boolean
+  hidden?: boolean
+  onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   onFocus?: () => void
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
@@ -66,6 +70,19 @@ export function AgentPane({
 }) {
   const paneSectionRef = useRef<HTMLElement | null>(null)
   const { target, targetRef, setTarget } = usePaneTarget({ owner, paneId, initialTarget })
+  const [focusTarget, setFocusTarget] = useState<PaneTarget | null>(initialTarget ?? null)
+  const lastRoutedTarget = useRef(initialTarget)
+  useEffect(() => {
+    if (initialTarget != null && initialTarget !== lastRoutedTarget.current) {
+      setFocusTarget(initialTarget)
+    }
+    lastRoutedTarget.current = initialTarget
+  }, [initialTarget])
+  useEffect(() => {
+    if (!focused) {
+      setFocusTarget(null)
+    }
+  }, [focused])
   const boundThreadId = isBoundTarget(target) ? target.threadId : ''
   // 唯一的只读投影：身份判定、只读子视图与根控制面共用同一份订阅。
   const projection = useThreadProjection(boundThreadId)
@@ -111,14 +128,16 @@ export function AgentPane({
       return
     }
     readOnlyReportRef.current?.({
+      target,
+      draftKey: '',
       pending: false,
       hasUnsentDraft: false,
       sessionId: readOnlySessionId,
       branchName: readOnlyBranchName,
     })
-  }, [needsControl, readOnlyBranchName, readOnlySessionId])
+  }, [needsControl, readOnlyBranchName, readOnlySessionId, target])
 
-  const covered = navigation.layers.length > 0
+  const covered = hidden || navigation.layers.length > 0
   const childRootThreadId = projection.thread?.yoloPolicy.rootThreadId ?? null
   const topLayerIndex = navigation.layers.length - 1
 
@@ -130,6 +149,8 @@ export function AgentPane({
         tabIndex={-1}
         className={`chat-pane ${focused ? 'focused' : ''}`}
         data-pane-id={paneId}
+        hidden={hidden}
+        inert={hidden}
         onMouseDown={onFocus}
       >
         {/* 被覆盖的根层保持挂载但完全惰性：不可聚焦、不可点、不参与无障碍树。 */}
@@ -147,11 +168,14 @@ export function AgentPane({
               capabilities={capabilities}
               onRequestBranch={onRequestBranch}
               onReport={onReport}
+              onValidateDraftName={onValidateDraftName}
               target={target}
               setTarget={setTarget}
               projection={projection}
               navigation={navigation}
               covered={covered}
+              focusTarget={focusTarget}
+              onFocusTargetChange={setFocusTarget}
             />
           ) : (
             <BoundThreadView

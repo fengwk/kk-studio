@@ -119,8 +119,28 @@ view 绑定（PaneTarget）与布局，不复制 Thread、draft 或执行状态�
 并选择目标位置 1..9；确认只把 `NEW_THREAD_DRAFT` 路由到目标 pane（隐藏位置先扩展布局显露、
 焦点随之移动），名称是创建 target 的必需事实，此处不预创建 Thread。目标有在途操作时拒绝路由，
 已有未发送草稿时要求二次确认覆盖，用户输入的本地草稿按 pane 作用域持久化。
+目标列表明确区分 thread 草稿与已持久化 Thread。隐藏位置的在途接受、重命名或队列
+保持控制层挂载且惰性，直到结算才卸载；隐藏布局不解除 busy 门禁。
+打开前按需读取 Session 的 Thread 摘要，只对执行根名称查重，同时检查同 Session 的本地草稿
+（包含隐藏位置和待消费目标，排除当前目标自身）。名称按 Unicode White_Space 折叠为单空格、
+去除首尾 ASCII 空格，最多 256 码点；大小写与兼容字符保持原值。读取失败留在弹窗中供重试，
+关闭、修改名称/目标或来源/目标变化会作废旧检查，等待期间的新输入不能被旧返回覆盖。
+
+草稿复用完整 Session Entries，只沿 parentEntryId 显示 ROOT 到 startEntryId 的闭合祖先路径；
+设置回放、Conversation 与 Debug events 消费同一路径，不混入兄弟、后续消息或源 Thread 的
+queued/live invocation。缺节点、循环、跨 Session 和非 ROOT 终点明确失败，提供加载重试，
+并禁止首次发送与预览；从 ROOT 打开的草稿有明确空态。
 首次发送才在一次原子命令批里创建该命名 Thread（`NEW_THREAD` = settings diff + `USER_MESSAGE`），
-随后 pane 绑定到返回的 Thread。pane 与布局的存储键分别以 owner 身份和 pane 隔离，
+随后 pane 绑定到返回的 Thread，在权威 Snapshot 就绪前保留同一历史前缀，不重写历史。
+`THREAD_NAME_CONFLICT` 409 保留起点、输入、附件和设置，打开既有名称面板供本地改名；
+`/rename-thread` 也可修改此草稿名称，不预创建 Thread、不自动添加后缀。服务端仍裁决并发竞争。
+草稿改名复用 workspace 的根名称与本地/pending 草稿检查，失败保留旧名和编辑输入；
+关闭宿主或更换目标使迟到校验失效。
+选择 Thread 或路由草稿记录一次目标身份的输入焦点意图，等可编辑且 pane 仍 focused、
+未被只读层或 Debug 覆盖时复用 Composer 聚焦并把光标放在既有文字末尾；选择其他 pane
+会作废迟到意图，后台 Snapshot 更新不会再次抢焦点。
+已计划但尚未执行的 Composer 聚焦也在 pane 失去 workspace 焦点时取消。
+pane 与布局的存储键分别以 owner 身份和 pane 隔离，
 ISSUE_AGENT 与独立地址不落 Chat target 存储。
 
 PaneTarget 只有三种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、

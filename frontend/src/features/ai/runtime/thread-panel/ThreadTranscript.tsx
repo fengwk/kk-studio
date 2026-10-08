@@ -10,26 +10,37 @@ export function ThreadTranscript({
   messages,
   loading,
   error,
+  errorText,
+  onRetry,
+  emptyText,
   bodyRef,
 }: {
   messages: DialogueMessage[]
   loading: boolean
   error: unknown
+  errorText?: string
+  onRetry?: () => void
+  emptyText?: string
   bodyRef: RefObject<HTMLDivElement | null>
 }) {
   const { t } = useI18n()
   const hasError = Boolean(error)
   const visibleMessages = messages.filter(isVisibleDialogueMessage)
-  const empty = !loading && !hasError && visibleMessages.length === 0
+  const empty = !loading && !hasError && (visibleMessages.length === 0 || emptyText != null)
 
   return (
     <div className="thread-dialogue" ref={bodyRef} role="log" aria-label={t('ai.runtime.thread.transcript')} aria-busy={loading}>
       {loading && <div className="thread-state">{t('ai.runtime.thread.loading')}</div>}
-      {hasError && <div className="thread-state danger">{t('ai.runtime.thread.loadFailed')}</div>}
+      {hasError && (
+        <div className="thread-state danger" role="alert">
+          {errorText ?? t('ai.runtime.thread.loadFailed')}
+          {onRetry ? <button type="button" className="ghost-btn" onClick={onRetry}>{t('shared.conflict.retry')}</button> : null}
+        </div>
+      )}
       {empty && (
         <div className="thread-empty">
           <MessageSquare aria-hidden="true" />
-          <p>{t('ai.runtime.thread.empty')}</p>
+          <p>{emptyText ?? t('ai.runtime.thread.empty')}</p>
           <small>{t('ai.runtime.thread.keyboardHint')}</small>
         </div>
       )}

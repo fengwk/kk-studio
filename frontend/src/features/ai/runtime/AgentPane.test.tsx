@@ -400,6 +400,195 @@ function approvalInteraction(threadId: string) {
 }
 
 describe('AgentPane orchestration', () => {
+  const historyRoot: HarnessSessionEntryDTO = {
+    entryId: 'draft-root', sessionId: 'session-1', parentEntryId: null, entryType: 'ROOT',
+    payloadJson: JSON.stringify({ settings: {
+      agentName: 'assistant', model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' }, environmentName: null,
+    } }), createTime: null,
+  }
+  const historyMessage: HarnessSessionEntryDTO = {
+    ...historyRoot, entryId: 'draft-message', parentEntryId: 'draft-root', entryType: 'MESSAGE',
+    payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Selected ancestor text' }] } }),
+  }
+  const historyEnd: HarnessSessionEntryDTO = {
+    ...historyRoot, entryId: 'draft-end', parentEntryId: 'draft-message', entryType: 'TURN_END', payloadJson: '{"outcome":"COMPLETED"}',
+  }
+  const historyEntries = [historyRoot, historyMessage, historyEnd, {
+    ...historyMessage, entryId: 'future', parentEntryId: 'draft-end',
+    payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Future hidden text' }] } }),
+  }, {
+    ...historyMessage, entryId: 'sibling', parentEntryId: 'draft-root',
+    payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling hidden text' }] } }),
+  }]
+  function seedHistoryDraft(startEntryId = 'draft-end') {
+    localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`, JSON.stringify({
+      kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId, threadName: 'draft-name',
+    }))
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(historyEntries)
+  }
+
+  it('renders the complete selected prefix, including Debug events, without any command writes', async () => {
+    const user = userEvent.setup()
+    seedHistoryDraft()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    expect(await screen.findByText('Selected ancestor text')).toBeInTheDocument()
+    expect(screen.queryByText('Future hidden text')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sibling hidden text')).not.toBeInTheDocument()
+    const composer = screen.getByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/debug{Enter}')
+    const events = await screen.findByRole('listbox', { name: '事件' })
+    expect(events.querySelectorAll('[role="option"]')).toHaveLength(3)
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it('propagates history load errors and retry; ROOT is a genuine draft empty state', async () => {
+    const user = userEvent.setup()
+    seedHistoryDraft('draft-root')
+    vi.mocked(harnessService.listSessionEntries).mockRejectedValueOnce(new Error('offline'))
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await screen.findByRole('alert')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('已打开 thread 草稿，发送消息开始此 thread。')).toBeInTheDocument()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid prefix rather than allowing first send or preview', async () => {
+    seedHistoryDraft('missing')
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    expect(await screen.findByRole('alert')).toHaveTextContent('所选历史不完整，请重新加载后再发送。')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(screen.queryByText('已打开 thread 草稿，发送消息开始此 thread。')).not.toBeInTheDocument()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it.each(['error', 'missing'])('keeps unresolved Session rename failures visible without losing the draft (%s)', async (failure) => {
+    const user = userEvent.setup()
+    seedHistoryDraft()
+    if (failure === 'error') {
+      vi.mocked(chatService.listChatSessions).mockRejectedValueOnce(new Error('Session summaries offline'))
+    } else {
+      vi.mocked(chatService.listChatSessions).mockResolvedValueOnce([])
+    }
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await screen.findByText('Selected ancestor text')
+    const composer = screen.getByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/rename-session{Enter}')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(failure === 'error' ? 'Session summaries offline' : 'Session')
+    expect(screen.getByRole('textbox', { name: '名称' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByText('Selected ancestor text')).toBeInTheDocument()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it('selects an existing Thread through the picker and keeps inline rename cancellation local', async () => {
+    const user = userEvent.setup()
+    vi.mocked(chatService.listChatSessions).mockResolvedValue([{
+      sessionId: 'session-1', name: 'Session One', createdAt: null, lastActivityAt: null,
+      firstMessagePreview: null, threadCount: 1,
+    }])
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
+      threadId: THREAD_ID, parentThreadId: null, name: 'thread-name',
+      createdAt: null, updatedAt: null, status: 'IDLE', processing: false,
+      model: thread().branchSettings.model, headMessagePreview: null,
+    }])
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    await user.click(await screen.findByRole('option', { name: /Session One/ }))
+    const row = await screen.findByRole('option', { name: /thread-name/ })
+    await user.click(row.parentElement!.querySelector('.thread-selection-rename') as HTMLElement)
+    expect(await screen.findByRole('textbox', { name: '名称' })).toHaveValue('thread-name')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await user.click(await screen.findByRole('option', { name: /thread-name/ }))
+    await waitFor(() => expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toContain('BOUND_THREAD'))
+    expect(harnessService.renameThread).not.toHaveBeenCalled()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it('resolves the parent Session name from a bound root without changing its draft', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`, JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }))
+    vi.mocked(chatService.listChatSessions).mockResolvedValue([{
+      sessionId: 'session-1', name: 'Parent Session', createdAt: null, lastActivityAt: null,
+      firstMessagePreview: null, threadCount: 1,
+    }])
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const editor = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(editor)
+    await user.keyboard('/rename-session{Enter}')
+    const name = await screen.findByRole('textbox', { name: '名称' })
+    await waitFor(() => expect(name).toHaveValue('Parent Session'))
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(harnessService.renameSession).not.toHaveBeenCalled()
+  })
+
+  it.each(['missing-host', 'unmounted'])('fails closed or discards late draft rename validation (%s)', async (scenario) => {
+    const user = userEvent.setup()
+    seedHistoryDraft()
+    let resolve!: (error: string | null) => void
+    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID }, [], scenario === 'missing-host'
+      ? null : () => new Promise((done) => { resolve = done }))
+    await screen.findByText('Selected ancestor text')
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await user.click(editor)
+    await user.keyboard('/rename-thread{Enter}')
+    const name = await screen.findByRole('textbox', { name: '名称' })
+    await user.clear(name)
+    await user.type(name, 'late-name')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    if (scenario === 'missing-host') {
+      expect(await screen.findByRole('alert')).toHaveTextContent('无法检查 thread 名称')
+      expect(name).toHaveValue('late-name')
+    } else {
+      view.unmount()
+      await act(async () => resolve(null))
+    }
+    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toContain('"threadName":"draft-name"')
+    expect(harnessService.renameThread).not.toHaveBeenCalled()
+  })
+
+  it('restores input and settings after name competition, locally renames, and seeds the same prefix while binding', async () => {
+    const user = userEvent.setup()
+    seedHistoryDraft()
+    vi.mocked(harnessService.acceptCommandBatch)
+      .mockRejectedValueOnce(new ApiError('name conflict', 409, 'THREAD_NAME_CONFLICT'))
+      .mockResolvedValueOnce(acceptedResponse())
+    // Keep the newly bound snapshot in flight: the accepted local prefix must not flash empty.
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(() => new Promise(() => undefined))
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await screen.findByText('Selected ancestor text')
+    const composer = screen.getByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/yolo{Enter}')
+    await user.type(composer, 'Keep my message')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    const name = await screen.findByRole('textbox', { name: '名称' })
+    expect(name).toHaveValue('draft-name')
+    expect(composer).toHaveTextContent('Keep my message')
+    expect(screen.getByText('Selected ancestor text')).toBeInTheDocument()
+    await user.clear(name)
+    await user.type(name, ' recovered\u0085name ')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(harnessService.renameThread).not.toHaveBeenCalled()
+    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toContain('"threadName":"recovered name"')
+    expect(composer).toHaveTextContent('Keep my message')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+    const requests = vi.mocked(harnessService.acceptCommandBatch).mock.calls.map(([request]) => request)
+    expect(requests[1]!.target).toMatchObject({ type: 'NEW_THREAD', startEntryId: 'draft-end', threadName: 'recovered name' })
+    const commandContents = (request: typeof requests[number]) => request.commands.map(({ idempotencyKey: _key, ...command }) => command)
+    expect(commandContents(requests[1]!)).toEqual(commandContents(requests[0]!))
+    expect(requests[1]!.target).toMatchObject({ yoloEnabled: true })
+    await waitFor(() => expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toContain('BOUND_THREAD'))
+    expect(screen.getByText('Selected ancestor text')).toBeInTheDocument()
+  })
+
   it('sends NEW_SESSION as one atomic command-batches request', async () => {
     const user = userEvent.setup()
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -417,6 +606,10 @@ describe('AgentPane orchestration', () => {
 
   it('sends a NEW_THREAD target with zero settings writes when the draft is unchanged', async () => {
     const user = userEvent.setup()
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
+      entryId: 'entry-1', sessionId: 'session-1', parentEntryId: null,
+      entryType: 'ROOT', payloadJson: '{}', createTime: null,
+    }])
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({
@@ -1557,7 +1750,7 @@ describe('AgentPane orchestration', () => {
 
     await waitFor(() => expect(harnessService.renameSession).toHaveBeenCalledWith(
       'session-1',
-      { name: 'renamed   session' },
+      { name: 'renamed session' },
     ))
     // 面板关闭返回 Session picker：行标题立即显示服务端权威规范化名称
     //（大写化 + 单空格），而不是用户输入的原始字符串。
@@ -1600,7 +1793,7 @@ describe('AgentPane orchestration', () => {
 
     await waitFor(() => expect(harnessService.renameThread).toHaveBeenCalledWith(
       THREAD_ID,
-      { name: 'new   thread name' },
+      { name: 'new thread name' },
     ))
     // 面板立即采用服务端规范化响应（patch cache，无需等待失效后的重新拉取）。
     await waitFor(() => expect(cachedName()).toBe('NEW THREAD NAME'))
@@ -2012,6 +2205,7 @@ function threadFixture(threadId: string, overrides: Partial<HarnessThreadDTO> = 
 function renderPane(
   owner: { type: 'CHAT'; chatId: string },
   environments: EnvironmentCardDTO[] = [],
+  validateDraftName: ((target: PaneTarget, name: string) => Promise<string | null>) | null = async () => null,
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -2025,6 +2219,7 @@ function renderPane(
           agents={agents}
           environments={environments}
           focused
+          onValidateDraftName={validateDraftName ?? undefined}
         />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -2261,7 +2456,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
    */
   it('replays environment changes sequentially along the entry path', () => {
     const entries: HarnessSessionEntryDTO[] = [
-      createEntry({ settings: { agentName: 'a1', environmentName: 'env-1' } }, 'root', null),
+      { ...createEntry({ settings: { agentName: 'a1', environmentName: 'env-1' } }, 'root', null), entryType: 'ROOT' },
       createEntry({ settings: { agentName: 'a2' } }, 'child-1', 'root'),
       createEntry({ settings: { environmentName: null } }, 'child-2', 'child-1'),
     ]
@@ -3234,6 +3429,24 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await screen.findByRole('listbox', { name: '事件' })
       return composer
     }
+
+    it('keeps local preview failure readable and permits a manual retry without writing commands', async () => {
+      const user = userEvent.setup()
+      bindBranchDraftTarget()
+      vi.mocked(harnessService.previewBranchRequest)
+        .mockRejectedValueOnce(new Error('Preview offline'))
+        .mockResolvedValueOnce(previewResponse())
+      const composer = await openBranchDraftDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'retry preview draft')
+      await user.click(screen.getByRole('button', { name: '预览当前草稿' }))
+      await screen.findAllByText('请求预览失败')
+      expect(screen.queryByText('Preview offline')).not.toBeInTheDocument()
+      expect(composer).toHaveTextContent('retry preview draft')
+      await user.click(screen.getByRole('button', { name: '预览当前草稿' }))
+      expect(await screen.findByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    })
 
     it('opens the branch draft Debug view, previews through the session endpoint and never creates a Thread', async () => {
       // 测试意图：本地分支草稿同样能进入 Debug 并触发真实预检；预检只走会话级

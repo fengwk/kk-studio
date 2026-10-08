@@ -80,6 +80,10 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import { parsePayload } from '@/features/ai/runtime/payload-json'
+import { normalizeThreadName } from '@/features/ai/chat/thread-name'
+import { threadDraftPath } from '@/features/ai/chat/thread-draft-path'
+import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline'
+import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
 
 export type PaneInteraction =
   | 'agent'
@@ -133,6 +137,8 @@ export interface BranchRequestInput {
  * 不参与任何持久化，也不是跨 pane 的 storage sidechannel。
  */
 export interface PaneReport {
+  target: PaneTarget
+  draftKey: string
   pending: boolean
   hasUnsentDraft: boolean
   sessionId: string | null
@@ -146,6 +152,9 @@ export interface UseRootThreadControlOptions {
   environments: EnvironmentCardDTO[]
   defaults: AgentPaneDefaults
   focused: boolean
+  covered?: boolean
+  focusTarget?: PaneTarget | null
+  onFocusTargetChange?: (target: PaneTarget | null) => void
   onFocus?: () => void
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
@@ -154,6 +163,7 @@ export interface UseRootThreadControlOptions {
   onRequestBranch?: (request: BranchRequestInput) => void
   /** 面板运行时摘要上报；缺失时不产生任何跨 pane 通信。 */
   onReport?: (report: PaneReport) => void
+  onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   /** 由父面板持有的 Pane 绑定目标；本 Hook 只读取并请求切换。 */
   target: PaneTarget
   setTarget: (next: PaneTarget) => void
@@ -171,12 +181,16 @@ export function useRootThreadControl({
   environments,
   defaults,
   focused,
+  covered = false,
+  focusTarget: focusIntent = null,
+  onFocusTargetChange,
   onFocus,
   initialTarget,
   onTargetConsumed,
   capabilities,
   onRequestBranch,
   onReport,
+  onValidateDraftName,
 }: UseRootThreadControlOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -238,6 +252,9 @@ export function useRootThreadControl({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const composerRef = useRef<ThreadComposerHandle | null>(null)
+  const setFocusIntent = useCallback((next: PaneTarget | null) => {
+    onFocusTargetChange?.(next)
+  }, [onFocusTargetChange])
   const [composerReadiness, setComposerReadiness] = useState<ComposerPreviewReadiness>({
     canPreview: false,
     reason: 'EMPTY_DRAFT',
@@ -406,32 +423,50 @@ export function useRootThreadControl({
     enabled: interaction === 'thread-threads' && threadNavigationSessionId != null,
   })
   const treeEntriesQuery = useQuery({
-    queryKey: ['agent-pane', 'entries', threadNavigationSessionId ?? currentSessionId],
-    queryFn: () => harnessService.listSessionEntries(threadNavigationSessionId ?? currentSessionId!),
+    queryKey: ['agent-pane', 'entries', isNewThreadTarget(target) ? target.sessionId : threadNavigationSessionId ?? currentSessionId],
+    queryFn: () => harnessService.listSessionEntries(isNewThreadTarget(target) ? target.sessionId : threadNavigationSessionId ?? currentSessionId!),
     enabled:
       (interaction === 'history' || isNewThreadTarget(target))
       && (threadNavigationSessionId ?? currentSessionId) != null,
   })
 
+  const draftHistory = useMemo(() => {
+    if (!isNewThreadTarget(target) || treeEntriesQuery.data == null || treeEntriesQuery.isError) {
+      return { entries: [], error: null }
+    }
+    try {
+      return { entries: threadDraftPath(treeEntriesQuery.data, target.sessionId, target.startEntryId), error: null }
+    } catch {
+      return { entries: [], error: new Error(t('ai.chat.branch.historyInvalid')) }
+    }
+  }, [target, treeEntriesQuery.data, treeEntriesQuery.isError, t])
+  const draftHistoryReady = !isNewThreadTarget(target)
+    || (treeEntriesQuery.data != null && !treeEntriesQuery.isError && draftHistory.error == null)
+  const draftTimeline = useMemo(() => buildThreadTimeline(draftHistory.entries, [], []), [draftHistory.entries])
+  const draftEvents = useMemo(() => buildThreadEventTimeline({
+    entries: draftHistory.entries,
+    modelInvocation: null,
+    toolInvocations: [],
+    modelAttemptFailures: [],
+    modelStream: null,
+    toolStreams: null,
+  }), [draftHistory.entries])
+
   const entryBaseDraft = useMemo(() => {
     if (!isNewThreadTarget(target)) {
       return activeDraft
     }
-    if (treeEntriesQuery.data == null) {
-      return activeDraft
+    if (!draftHistoryReady) {
+      return null
     }
-    return branchDraftFromEntryPath(
-      treeEntriesQuery.data,
-      target.startEntryId,
-      activeDraft,
-    )
-  }, [activeDraft, target, treeEntriesQuery.data])
+    return draftHistory.entries.reduce<BranchDraft | null>((draft, entry) => branchDraftFromEntry(entry, draft), activeDraft)
+  }, [activeDraft, target, draftHistory, draftHistoryReady])
 
   useEffect(() => {
     if (!isNewThreadTarget(target) || treeEntriesQuery.data == null || entryBaseDraft == null) {
       return
     }
-    const identity = `${target.sessionId}:${target.startEntryId}:${target.threadName}`
+    const identity = `${target.sessionId}:${target.startEntryId}`
     if (initializedEntryDraftRef.current === identity) {
       return
     }
@@ -479,11 +514,11 @@ export function useRootThreadControl({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t 是稳定 useCallback。
   }, [renameTarget, sessionsQuery.data, sessionsQuery.isError, sessionsLoadFailed])
 
-  function setParts(next: ComposerPart[]) {
+  const setParts = useCallback((next: ComposerPart[]) => {
     partsRef.current = next
     storeComposerDraft(composerScope, next)
     setPartsState(next)
-  }
+  }, [composerScope])
 
   /** 打开指定 kind 的单输入重命名面板。name 为空/未知时为 null（解析态）。 */
   function openRename(
@@ -501,6 +536,9 @@ export function useRootThreadControl({
   /** 当前 target 可重命名的实体；不可用返回 null（矩阵保证可达才调用）。 */
   function renameTargetOf(kind: RenameKind): { id: string; name: string | null } | null {
     if (kind === 'thread') {
+      if (isNewThreadTarget(target)) {
+        return { id: target.sessionId, name: target.threadName }
+      }
       if (isBoundTarget(target) && controller.thread?.threadId === target.threadId) {
         return { id: target.threadId, name: controller.thread.name }
       }
@@ -533,6 +571,9 @@ export function useRootThreadControl({
   }
 
   function closeRename(): void {
+    if (renamePendingRef.current) {
+      return
+    }
     const backTo = renameTarget?.backTo ?? null
     renameTargetRef.current = null
     renamePendingRef.current = false
@@ -547,8 +588,8 @@ export function useRootThreadControl({
     if (renameTarget == null || renamePendingRef.current || hasPendingOperation()) {
       return
     }
-    const trimmed = name.trim()
-    if (!trimmed) {
+    const trimmed = normalizeThreadName(name)
+    if (trimmed == null) {
       setRenameError(t('ai.runtime.rename.nameRequired'))
       return
     }
@@ -558,6 +599,31 @@ export function useRootThreadControl({
     const current = renameTarget
     renameTargetRef.current = current
     try {
+      if (current.kind === 'thread' && isNewThreadTarget(target)) {
+        const frozenTarget = target
+        const nameError = onValidateDraftName == null
+          ? t('ai.chat.branch.nameCheckFailed')
+          : await onValidateDraftName(frozenTarget, trimmed)
+        if (!isMountedRef.current || renameTargetRef.current !== current
+          || !samePaneTarget(targetRef.current, frozenTarget)) {
+          return
+        }
+        if (nameError != null) {
+          renamePendingRef.current = false
+          setRenamePending(false)
+          setRenameError(nameError)
+          return
+        }
+        const next = { ...target, threadName: trimmed }
+        targetRef.current = next
+        setTarget(next)
+        generationRef.current += 1
+        renamePendingRef.current = false
+        closeRename()
+        setActionError(null)
+        setFocusIntent(next)
+        return
+      }
       if (current.kind === 'session') {
         const renamed = await harnessService.renameSession(current.id, { name: trimmed })
         if (renameTargetRef.current !== current) {
@@ -572,6 +638,7 @@ export function useRootThreadControl({
         patchThreadNameCache(current.id, renamed)
       }
       await invalidateAfterRename(current)
+      renamePendingRef.current = false
       closeRename()
     } catch (error) {
       if (renameTargetRef.current !== current) {
@@ -687,15 +754,17 @@ export function useRootThreadControl({
         return false
       }
       generationRef.current += 1
+      initializedEntryDraftRef.current = null
       targetRef.current = next
       setTarget(next)
+      setFocusIntent(next)
       setLocalDraft(draft == null ? null : cloneDraft(draft))
       setInteraction(null)
       setActionError(null)
       setConflict(null)
       return true
     },
-    [activeDraft, hasPendingOperation, owner, setTarget, t],
+    [activeDraft, hasPendingOperation, owner, setTarget, setFocusIntent, t],
   )
 
   /**
@@ -712,7 +781,7 @@ export function useRootThreadControl({
       }
       return true
     },
-    [changeTarget],
+    [changeTarget, setParts],
   )
 
   useEffect(() => {
@@ -806,7 +875,7 @@ export function useRootThreadControl({
     }
     const effectiveBase = entryBaseDraft
     const draft = activeDraft
-    if (!draft || !effectiveBase) {
+    if (!draft || !effectiveBase || !draftHistoryReady) {
       setActionError(t('ai.runtime.action.threadNotLoaded'))
       return
     }
@@ -848,9 +917,8 @@ export function useRootThreadControl({
   /**
    * 验收成功后、切目标之前把权威 Thread 状态放进 snapshot 缓存。
    *
-   * 新接受的 Thread 一定没有 Entry（命令刚进队列），因此空 entries 就是当前真相，
-   * 随后 invalidate 会拉到完整快照。已有缓存的 Thread（重放）保持原样，不用空数据
-   * 覆盖已加载的 Entry。
+   * 新 Session 没有历史；新 Thread 沿用已验证的闭合前缀，直到 invalidate 取回
+   * 权威快照。已有缓存的 Thread（重放）保持原样，不覆盖已加载的 Entry。
    */
   function seedAcceptedThreadSnapshot(
     client: QueryClient,
@@ -863,7 +931,7 @@ export function useRootThreadControl({
     client.setQueryData<HarnessThreadSnapshotDTO>(key, {
       version: response.thread.version,
       thread: response.thread,
-      entries: [],
+      entries: isNewThreadTarget(targetRef.current) ? draftHistory.entries : [],
       queuedCommands: response.acceptedCommands,
       modelInvocation: null,
       toolInvocations: [],
@@ -932,7 +1000,10 @@ export function useRootThreadControl({
       setParts(prependFrozenComposerParts(pending.composerParts, partsRef.current))
       setLocalDraft(preserveCurrentBranchDraft(pending.branchDraft, localDraftRef.current))
       const presented = presentConflict(error)
-      if (presented != null) {
+      if (presented?.reason === 'THREAD_NAME_CONFLICT' && isNewThreadTarget(targetRef.current)) {
+        openRename('thread', targetRef.current.sessionId, targetRef.current.threadName)
+        setRenameError(t('ai.chat.branch.nameConflict'))
+      } else if (presented != null) {
         setConflict(presented)
       } else {
         setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
@@ -978,7 +1049,7 @@ export function useRootThreadControl({
       !hasMessageContent(payload)
       || slashQueryOf(payload) != null
       || activeDraft == null
-      || (isNewThreadTarget(target) && treeEntriesQuery.data == null)
+      || !draftHistoryReady
       || entryBaseDraft == null
     ) {
       return
@@ -1013,7 +1084,7 @@ export function useRootThreadControl({
     const frozenTarget = target
     const frozenBranchDraft = activeDraft ? cloneDraft(activeDraft) : null
     const frozenBase = entryBaseDraft ? cloneDraft(entryBaseDraft) : null
-    if (!frozenBranchDraft || !frozenBase) {
+    if (!frozenBranchDraft || !frozenBase || !draftHistoryReady) {
       return
     }
     const requestId = ++previewRequestIdRef.current
@@ -1405,6 +1476,8 @@ export function useRootThreadControl({
   const unsentDraft = isBoundTarget(target)
     ? trimMessageParts(controller.draft).length > 0
     : trimMessageParts(parts).length > 0
+  const reportDraftKey = partsKey(isBoundTarget(target) ? controller.draft : parts)
+  const reportPending = pending || renamePending || controller.queuedCommands.length > 0
   const reportSessionId = currentSessionId
   const reportBranchName = isBoundTarget(target)
     ? boundThreadName
@@ -1415,21 +1488,16 @@ export function useRootThreadControl({
   })
   useEffect(() => {
     onReportRef.current?.({
-      pending,
+      target,
+      draftKey: reportDraftKey,
+      pending: reportPending,
       hasUnsentDraft: unsentDraft,
       sessionId: reportSessionId,
       branchName: reportBranchName,
     })
-  }, [pending, reportBranchName, reportSessionId, unsentDraft])
-  // 卸载时清除本 pane 的摘要，避免 workspace 依据陈旧状态路由。
-  useEffect(() => () => {
-    onReportRef.current?.({
-      pending: false,
-      hasUnsentDraft: false,
-      sessionId: null,
-      branchName: null,
-    })
-  }, [])
+  }, [reportPending, reportBranchName, reportSessionId, unsentDraft, target, reportDraftKey])
+  // Workspace keeps busy hidden panes mounted until settlement. Unmount must
+  // never erase their last reported gate or uncommitted target identity.
 
   const canExposePreview = isBoundTarget(target) || isNewThreadTarget(target)
 
@@ -1453,7 +1521,7 @@ export function useRootThreadControl({
           previewDisabledReason: t('ai.runtime.debug.previewDisabled.busy'),
         }
       }
-      if (treeEntriesQuery.data == null || activeDraft == null || entryBaseDraft == null) {
+      if (!draftHistoryReady || activeDraft == null || entryBaseDraft == null) {
         return {
           previewDisabled: true,
           previewDisabledReason: t('ai.runtime.debug.previewDisabled.unsupported'),
@@ -1543,12 +1611,14 @@ export function useRootThreadControl({
     target,
     activeDraft,
     entryBaseDraft,
-    treeEntriesQuery.data,
+    draftHistoryReady,
     branchPanel.branchState,
     branchPanel.effectiveBase,
   ])
 
-  const boundViews = useBoundThreadPanelViews(boundThreadId, controller, {
+  const boundViews = useBoundThreadPanelViews(boundThreadId, isNewThreadTarget(target) ? {
+    ...controller, events: draftEvents, sessionId: target.sessionId,
+  } : controller, {
     // 本地草稿没有 threadId：视图状态按目标身份隔离，API 预览仍按真实 threadId/会话。
     viewKey: previewScope,
     onPreview: canExposePreview ? () => void handlePreview() : undefined,
@@ -1592,16 +1662,16 @@ export function useRootThreadControl({
 
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
+  const composerDisabled = Boolean(capabilities?.readOnly)
+    || pending
+    || (isBoundTarget(target)
+      ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
+      : activeDraft == null || !draftHistoryReady)
   const composer: ThreadPanelComposerInput = {
     scope: composerScope,
     parts: composerDraft,
     pending,
-    disabled:
-      Boolean(capabilities?.readOnly)
-      || pending
-      || (isBoundTarget(target)
-        ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
-        : activeDraft == null || (isNewThreadTarget(target) && treeEntriesQuery.data == null)),
+    disabled: composerDisabled,
     onPartsChange: isBoundTarget(target) ? controller.setDraft : setParts,
     onHistoryPartsChange: isBoundTarget(target)
       ? (next) => controller.setDraft(next, 'history')
@@ -1644,6 +1714,19 @@ export function useRootThreadControl({
       },
     },
   }
+  useEffect(() => {
+    if (focusIntent == null) {
+      return
+    }
+    if (!focused || !samePaneTarget(focusIntent, target)) {
+      setFocusIntent(null)
+      return
+    }
+    if (!composerDisabled && !covered && interaction == null && boundViews.mode === 'conversation') {
+      composerRef.current?.focus()
+      setFocusIntent(null)
+    }
+  }, [focusIntent, focused, target, composerDisabled, covered, interaction, boundViews.mode, setFocusIntent])
   const activeDraftEnvironmentName = activeDraft?.environmentName ?? null
   const boundEnvCard = activeDraftEnvironmentName
     ? environments.find((env) => env.name === activeDraftEnvironmentName) ?? null
@@ -1662,13 +1745,18 @@ export function useRootThreadControl({
         : false
   const error = actionError
     ?? (isBoundTarget(target) ? branchPanel.yoloError ?? controller.actionError : null)
-    ?? (isNewThreadTarget(target) && treeEntriesQuery.error
-      ? errorMessage(treeEntriesQuery.error, t('ai.chat.history.loadFailed'))
-      : null)
   const combinedConflict = conflict ?? controller.conflict ?? branchPanel.conflict
 
   return {
     target,
+    draftTimeline,
+    draftAtRoot: draftHistoryReady && draftHistory.entries.length === 1,
+    draftHistoryLoading: isNewThreadTarget(target) && treeEntriesQuery.isLoading,
+    draftHistoryError: treeEntriesQuery.error ?? draftHistory.error,
+    draftHistoryErrorText: draftHistory.error != null
+      ? t('ai.chat.branch.historyInvalid')
+      : treeEntriesQuery.error != null ? t('ai.chat.history.loadFailed') : undefined,
+    retryDraftHistory: () => void treeEntriesQuery.refetch(),
     activeDraft,
     currentSessionId,
     interaction,
@@ -1819,21 +1907,9 @@ export function branchDraftFromEntryPath(
   if (fallback == null) {
     return null
   }
-  const byId = new Map(entries.map((entry) => [entry.entryId, entry]))
-  const path: HarnessSessionEntryDTO[] = []
-  const visited = new Set<string>()
-  let cursor: string | null = targetEntryId
-  while (cursor != null && !visited.has(cursor)) {
-    visited.add(cursor)
-    const entry = byId.get(cursor)
-    if (entry == null) {
-      break
-    }
-    path.push(entry)
-    cursor = entry.parentEntryId
-  }
+  const path = threadDraftPath(entries, entries.find((entry) => entry.entryId === targetEntryId)?.sessionId ?? '', targetEntryId)
   let draft = cloneDraft(fallback)
-  for (const entry of path.reverse()) {
+  for (const entry of path) {
     draft = branchDraftFromEntry(entry, draft) ?? draft
   }
   return draft
