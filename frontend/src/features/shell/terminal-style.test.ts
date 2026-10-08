@@ -7,6 +7,7 @@ import {
   indexedPaletteRgb,
   rgbFromPacked,
   slotDecoration,
+  slotStyleKey,
   type SlotStyle,
 } from './terminal-style'
 
@@ -74,5 +75,15 @@ describe('terminal style projection', () => {
     expect(
       slotDecoration(style({ underline: true, strikethrough: true })).textDecoration,
     ).toBe('underline line-through')
+  })
+
+  // 等价键用于合并相邻同样式绘制段：结构相同同键，任一字段不同则不同键。
+  it('builds a stable style key for run merging', () => {
+    expect(slotStyleKey(style({}))).toBe(slotStyleKey({ ...DEFAULT_SLOT_STYLE }))
+    expect(slotStyleKey(style({ bold: true }))).not.toBe(slotStyleKey(style({})))
+    expect(slotStyleKey(style({ fg: indexedColor(4) }))).not.toBe(
+      slotStyleKey(style({ fg: { kind: 'rgb', r: 1, g: 2, b: 3 } })),
+    )
+    expect(slotStyleKey(style({ fg: indexedColor(4) }))).toBe(slotStyleKey(style({ fg: indexedColor(4) })))
   })
 })

@@ -1,11 +1,11 @@
 /**
  * 虚拟槽选择模型与纯文本复制。
  *
- * 选择端点直接落在镜像的槽坐标（行号 + 槽下标）上，不经过 DOM 的 Range 或浏览器
- * 字符度量，因此 DWC、FEFF、孤立代理的列语义与镜像完全一致。
+ * 选择端点落在镜像的槽坐标（行号 + 槽下标）上，不经过 DOM Range 或浏览器字符度量，
+ * 因此 DWC、FEFF、孤立代理的列语义与镜像一致。越界端点按当前镜像 clamp。
  */
 
-import { cursorLineIndex, type TerminalGrid } from './terminal-grid'
+import type { TerminalGrid } from './terminal-grid'
 
 /** 槽端点：`line` 为镜像中的绝对行号，`x` 为槽下标（0..cols）。 */
 export interface GridPoint {
@@ -13,7 +13,7 @@ export interface GridPoint {
   readonly x: number
 }
 
-/** 选择：anchor 为起点，focus 为终点，两者都是槽端点。 */
+/** 选择：anchor 为起点，focus 为终点。 */
 export interface GridSelection {
   readonly anchor: GridPoint
   readonly focus: GridPoint
@@ -43,25 +43,34 @@ export function normalizeSelection(selection: GridSelection): GridSelection {
 
 /** 选择是否为空（同一槽端点）。 */
 export function isSelectionEmpty(selection: GridSelection): boolean {
-  return (
-    selection.anchor.line === selection.focus.line && selection.anchor.x === selection.focus.x
-  )
+  return selection.anchor.line === selection.focus.line && selection.anchor.x === selection.focus.x
 }
 
-/** 选择覆盖的行区间列表，供高亮或复制使用。空选择返回空数组。 */
-export function selectionRanges(
-  grid: TerminalGrid,
-  selection: GridSelection,
-): SelectionRange[] {
-  if (isSelectionEmpty(selection)) {
+function clampPoint(grid: TerminalGrid, point: GridPoint): GridPoint {
+  const lastLine = Math.max(0, grid.lines.length - 1)
+  const line = Math.min(Math.max(point.line, 0), lastLine)
+  const x = Math.min(Math.max(point.x, 0), grid.cols)
+  return { line, x }
+}
+
+/** 选择覆盖的行区间列表；端点被 clamp 到当前镜像，空选择返回空数组。 */
+export function selectionRanges(grid: TerminalGrid, selection: GridSelection): SelectionRange[] {
+  if (grid.lines.length === 0) {
     return []
   }
-  const { anchor: start, focus: end } = normalizeSelection(selection)
+  const { anchor, focus } = normalizeSelection(selection)
+  const start = clampPoint(grid, anchor)
+  const end = clampPoint(grid, focus)
+  if (comparePoint(start, end) >= 0 && isSelectionEmpty({ anchor: start, focus: end })) {
+    return []
+  }
   const ranges: SelectionRange[] = []
   for (let line = start.line; line <= end.line; line += 1) {
-    const xFrom = line === start.line ? start.x : 0
-    const xTo = line === end.line ? end.x : grid.cols
-    ranges.push({ line, xFrom, xTo })
+    ranges.push({
+      line,
+      xFrom: line === start.line ? start.x : 0,
+      xTo: line === end.line ? end.x : grid.cols,
+    })
   }
   return ranges
 }
@@ -69,8 +78,8 @@ export function selectionRanges(
 /**
  * 把一行区间投影为文本。
  *
- * 规则来自槽 kind：DWC 不输出字；EMPTY 与 NUL 输出空格；其余 unit 原样输出
- * （保留 FEFF 与孤立代理）。行尾由 EMPTY 填充产生的空格被裁掉，避免把布局填充当内容。
+ * DWC 不输出字；EMPTY 与 NUL 输出空格；其余 unit 原样输出（保留 FEFF 与孤立代理）。
+ * 行尾由 EMPTY 填充产生的空格被裁掉，避免把布局填充当内容。
  */
 function segmentText(grid: TerminalGrid, line: number, xFrom: number, xTo: number): string {
   const slots = grid.lines[line].slots
@@ -102,12 +111,19 @@ function segmentText(grid: TerminalGrid, line: number, xFrom: number, xTo: numbe
 /**
  * 从镜像按槽端点构造纯文本。
  *
- * 软换行（wrapped）的行之间不加 LF，硬换行加 LF。这不是任意 OS 剪贴板的孤代理可逆承诺：
- * text/plain 只保证与结构化镜像的槽一致。
+ * 软换行（wrapped）的行之间不加 LF，硬换行加 LF。端点越界时 clamp 到当前镜像；
+ * 尾部落在下一行行首的空区间被丢弃，不产生幻影 LF。
  */
 export function copySelectedText(grid: TerminalGrid, selection: GridSelection): string {
   const ranges = selectionRanges(grid, selection)
-  if (ranges.length === 0 && isSelectionEmpty(selection)) {
+  while (ranges.length > 0) {
+    const last = ranges[ranges.length - 1]
+    if (last.xFrom < last.xTo) {
+      break
+    }
+    ranges.pop()
+  }
+  if (ranges.length === 0) {
     return ''
   }
   const parts: string[] = []
@@ -119,27 +135,4 @@ export function copySelectedText(grid: TerminalGrid, selection: GridSelection): 
     }
   }
   return parts.join('')
-}
-
-/** 选择整行的便捷端点。 */
-export function lineStart(line: number): GridPoint {
-  return { line, x: 0 }
-}
-
-export function lineEnd(grid: TerminalGrid, line: number): GridPoint {
-  return { line, x: grid.cols }
-}
-
-/** 覆盖从 `from` 到 `to` 的整行（含端点）的选择。 */
-export function wholeLinesSelection(
-  grid: TerminalGrid,
-  from: number,
-  to: number,
-): GridSelection {
-  return { anchor: lineStart(from), focus: lineEnd(grid, to) }
-}
-
-/** 光标所在的绝对行号，便于调用方构造选择。 */
-export function cursorSelectionLine(grid: TerminalGrid): number {
-  return cursorLineIndex(grid)
 }
