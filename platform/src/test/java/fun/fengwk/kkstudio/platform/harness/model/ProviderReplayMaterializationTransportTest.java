@@ -58,6 +58,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector.ProjectedMessage;
+import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -184,7 +185,7 @@ class ProviderReplayMaterializationTransportTest {
     assertEquals(THINKING, firstCompletion.response().thinking());
     // 第一轮已发生物化：wire 上不再出现 durable blob 引用，且尚无 assistant replay。
     assertTrue(
-        requestBodies.get(0).contains("blobId: " + BLOB_ID),
+        requestBodies.get(0).contains("uri: " + SessionResourceUri.format(BLOB_ID)),
         "Resource 必须在 wire 前被物化: " + requestBodies.get(0));
     assertFalse(requestBodies.get(0).contains("reasoning_content"), requestBodies.get(0));
 

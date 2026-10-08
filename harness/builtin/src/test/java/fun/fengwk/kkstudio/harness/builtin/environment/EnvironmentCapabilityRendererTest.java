@@ -39,7 +39,7 @@ class EnvironmentCapabilityRendererTest {
     return new ToolHistoryRenderRequest(call, null);
   }
 
-  /** 验证 FS_READ 动作渲染：保留 path 与 workdir 作用域，并省略 offset、limit 等结果窗口参数。 */
+  /** 验证 FS_READ 动作渲染：保留 path，省略 offset、limit 等结果窗口参数，且绝不追加任何 workdir 后缀。 */
   @Test
   void fsReadRendersPathAndOmitsExecutionControlParameters() {
     EnvironmentCapabilityRenderer renderer =
@@ -53,10 +53,10 @@ class EnvironmentCapabilityRendererTest {
             request(
                 "fs_read",
                 "{\"path\":\"src/App.java\",\"offset\":10,\"limit\":50,\"workdir\":\"/tmp\"}"));
-    assertEquals(Optional.of("read src/App.java from /tmp"), actionWithControls);
+    assertEquals(Optional.of("read src/App.java"), actionWithControls);
   }
 
-  /** 验证 FS_WRITE 动作渲染：保留 path 与 workdir 作用域，并省略已由结果确认的 content。 */
+  /** 验证 FS_WRITE 动作渲染：保留 path，省略已由结果确认的 content，且绝不追加任何 workdir 后缀。 */
   @Test
   void fsWriteRendersPathAndOmitsExecutionControlParameters() {
     EnvironmentCapabilityRenderer renderer =
@@ -70,7 +70,7 @@ class EnvironmentCapabilityRendererTest {
             request(
                 "fs_write",
                 "{\"path\":\"docs/README.md\",\"content\":\"# Hello\",\"workdir\":\"/tmp\"}"));
-    assertEquals(Optional.of("write docs/README.md from /tmp"), actionWithControls);
+    assertEquals(Optional.of("write docs/README.md"), actionWithControls);
   }
 
   /**
@@ -263,6 +263,52 @@ class EnvironmentCapabilityRendererTest {
             request(
                 "lsp_java_decompile",
                 "{\"target\":\"" + target + "\",\"path\":\"src/App.java\"}")));
+  }
+
+  /** 验证所有文件与 LSP 能力渲染时绝不追加任何 workdir 后缀，即使 arguments 中包含 workdir。 */
+  @Test
+  void fileAndLspRenderersOmitWorkdirEvenWhenPresentInArguments() {
+    EnvironmentCapabilityRenderer edit =
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_EDIT);
+    assertEquals(
+        Optional.of("edit src/Main.java"),
+        edit.render(request("fs_edit", "{\"path\":\"src/Main.java\",\"workdir\":\"/tmp\"}")));
+
+    EnvironmentCapabilityRenderer grep =
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_GREP);
+    assertEquals(
+        Optional.of("search for TODO"),
+        grep.render(request("fs_grep", "{\"pattern\":\"TODO\",\"workdir\":\"/tmp\"}")));
+
+    EnvironmentCapabilityRenderer find =
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_FIND);
+    assertEquals(
+        Optional.of("find *.ts under src"),
+        find.render(
+            request("fs_find", "{\"pattern\":\"*.ts\",\"path\":\"src\",\"workdir\":\"/tmp\"}")));
+
+    EnvironmentCapabilityRenderer gotoDef =
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION);
+    assertEquals(
+        Optional.of("go to the definition at src/App.java"),
+        gotoDef.render(
+            request("lsp_goto_definition", "{\"path\":\"src/App.java\",\"workdir\":\"/tmp\"}")));
+
+    EnvironmentCapabilityRenderer sym =
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS);
+    assertEquals(
+        Optional.of("search workspace symbols for UserService"),
+        sym.render(
+            request("lsp_workspace_symbols", "{\"query\":\"UserService\",\"workdir\":\"/tmp\"}")));
+
+    EnvironmentCapabilityRenderer decompile =
+        EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+    assertEquals(
+        Optional.of("decompile jdt://contents/demo/MyClass.class"),
+        decompile.render(
+            request(
+                "lsp_java_decompile",
+                "{\"target\":\"jdt://contents/demo/MyClass.class\",\"workdir\":\"/tmp\"}")));
   }
 
   /** 验证在非 null environmentName 存在时，动作末尾必须追加 " in environment " + environmentName；为 null 时不追加。 */

@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
+import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -330,7 +331,7 @@ class ProviderResourceMaterializerTest {
                 ALL_MEDIA);
     ProviderTextBlock text =
         assertInstanceOf(ProviderTextBlock.class, unsupportedModality.get(0).contents().get(0));
-    assertTrue(text.text().contains("blobId: " + BLOB_ID), text.text());
+    assertTrue(text.text().contains("uri: " + SessionResourceUri.format(BLOB_ID)), text.text());
     verify(contentService, never()).readBlobContent(any(), anyLong());
   }
 
@@ -770,9 +771,18 @@ class ProviderResourceMaterializerTest {
         assertInstanceOf(ProviderTextBlock.class, result.get(0).contents().get(0));
     assertTrue(
         text.text()
-            .contains("complete output has been saved as a downloadable user attachment: demo.txt"),
+            .contains(
+                "The complete output is available as a session resource:\n"
+                    + SessionResourceUri.format(BLOB_ID)),
         text.text());
+    assertTrue(text.text().contains("Name: demo.txt"), text.text());
     assertTrue(text.text().contains("Size: 12345 bytes, 100 lines"), text.text());
+    assertTrue(
+        text.text()
+            .contains(
+                "Use the read tool with this resource URI and offset/limit to page through the"
+                    + " complete output."),
+        text.text());
     verify(blobManager, never()).getBlob(any());
     verify(contentService, never()).readBlobContent(any(), anyLong());
     verify(blobManager, never()).presignOriginalUrl(any());
@@ -986,7 +996,9 @@ class ProviderResourceMaterializerTest {
     assertSame(before, materialized.contents().get(0));
     assertEquals(
         "[Resource: scan.txt]\n"
-            + "blobId: 00000000-0000-0000-0000-000000000001\n"
+            + "uri: "
+            + SessionResourceUri.format(BLOB_ID)
+            + "\n"
             + "mediaType: text/plain\n"
             + "size: 42\n"
             + "preview: tiny preview",

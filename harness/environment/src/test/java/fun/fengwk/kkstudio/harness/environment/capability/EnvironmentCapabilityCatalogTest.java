@@ -82,10 +82,70 @@ class EnvironmentCapabilityCatalogTest {
             .inputSchema()
             .required());
     assertEquals(
+        Set.of("path", "content"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("path", "old_string", "new_string"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("path", "pattern"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("path", "pattern"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("path", "line"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("path", "query"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("path", "target"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("command", "workdir"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC)
+            .inputSchema()
+            .required());
+    assertEquals(
         Set.of("packageName", "repositoryUrl", "branch", "targetCommit"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC)
             .inputSchema()
             .required());
+
+    List<EnvironmentCapabilityId> fileAndLspCapabilities =
+        List.of(
+            EnvironmentCapabilityIds.FS_READ,
+            EnvironmentCapabilityIds.FS_WRITE,
+            EnvironmentCapabilityIds.FS_EDIT,
+            EnvironmentCapabilityIds.FS_GREP,
+            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
+            EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+    for (EnvironmentCapabilityId id : fileAndLspCapabilities) {
+      EnvironmentCapabilityDescriptor descriptor = EnvironmentCapabilityCatalog.require(id);
+      assertFalse(
+          descriptor.inputSchema().properties().containsKey("workdir"),
+          id.value() + " must not declare workdir in properties");
+      assertFalse(
+          descriptor.inputSchema().required().contains("workdir"),
+          id.value() + " must not declare workdir in required");
+    }
   }
 
   /** descriptor 是 execution 的唯一事实源；可通过 find 与 require 查询。 */
@@ -117,6 +177,58 @@ class EnvironmentCapabilityCatalogTest {
           descriptor.defaultTimeout().isZero(),
           id);
       assertFalse(descriptor.defaultTimeout().isNegative(), id);
+    }
+  }
+
+  /** process.exec 缺少必填 workdir 时在 Capability 调用参数校验边界抛出异常。 */
+  @Test
+  void processExecRequiresWorkdirAtValidationBoundary() {
+    EnvironmentCapabilityDescriptor processExec =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC);
+    EnvironmentCapabilityCall callWithoutWorkdir =
+        new EnvironmentCapabilityCall("c1", "{\"command\":\"echo hi\"}");
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class, () -> callWithoutWorkdir.validateFor(processExec));
+    assertTrue(error.getMessage().contains("workdir is required"), error.getMessage());
+  }
+
+  /** 文件与 LSP 能力不接受 workdir；携带 workdir 时在调用参数校验边界抛出异常。 */
+  @Test
+  void fileAndLspCapabilitiesRejectWorkdirAtValidationBoundary() {
+    List<EnvironmentCapabilityId> fileAndLspCapabilities =
+        List.of(
+            EnvironmentCapabilityIds.FS_READ,
+            EnvironmentCapabilityIds.FS_WRITE,
+            EnvironmentCapabilityIds.FS_EDIT,
+            EnvironmentCapabilityIds.FS_GREP,
+            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
+            EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+    for (EnvironmentCapabilityId id : fileAndLspCapabilities) {
+      EnvironmentCapabilityDescriptor descriptor = EnvironmentCapabilityCatalog.require(id);
+      String validArgs =
+          switch (id.value()) {
+            case "fs.read" -> "{\"path\":\"/app/file.txt\"}";
+            case "fs.write" -> "{\"path\":\"/app/file.txt\",\"content\":\"hello\"}";
+            case "fs.edit" -> "{\"path\":\"/app/file.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}";
+            case "fs.grep" -> "{\"pattern\":\"foo\",\"path\":\"/app\"}";
+            case "fs.find" -> "{\"pattern\":\"*.java\",\"path\":\"/app\"}";
+            case "lsp.goto-definition" -> "{\"path\":\"/app/file.ts\",\"line\":1}";
+            case "lsp.workspace-symbols" -> "{\"path\":\"/app/file.ts\",\"query\":\"sym\"}";
+            case "lsp.java-decompile" -> "{\"path\":\"/app/A.java\",\"target\":\"cls\"}";
+            default -> throw new AssertionError("unexpected id: " + id);
+          };
+      new EnvironmentCapabilityCall("call-ok", validArgs).validateFor(descriptor);
+
+      String withWorkdir = validArgs.replaceFirst("\\{", "{\"workdir\":\"/tmp\",");
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> new EnvironmentCapabilityCall("call-bad", withWorkdir).validateFor(descriptor),
+              id.value() + " should reject workdir");
+      assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
     }
   }
 }

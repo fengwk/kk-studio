@@ -258,9 +258,7 @@ class LspClientTest {
 
     String source =
         client.javaDecompile(
-            root,
-            "String (Class) - jdt://contents/java.base/java/lang/String.class",
-            REQUEST_TIMEOUT);
+            "String (Class) - jdt://contents/java.base/java/lang/String.class", REQUEST_TIMEOUT);
 
     assertEquals(FakeLspServer.DECOMPILED_SOURCE, source);
     JsonNode request = FakeLspServers.received(transcript, "java/classFileContents").getFirst();
@@ -287,18 +285,18 @@ class LspClientTest {
             IllegalStateException.class,
             () ->
                 client.javaDecompile(
-                    root, "jdt://contents/java.base/java/lang/String.class", REQUEST_TIMEOUT));
+                    "jdt://contents/java.base/java/lang/String.class", REQUEST_TIMEOUT));
     assertTrue(error.getMessage().contains("only supported by jdtls"), error.getMessage());
   }
 
-  /** 意图：本地 class 目标按 workdir 解析为 file URI，并通过 jdtls 的 java.decompile 命令请求。 */
+  /** 意图：绝对 class 目标转换为 file URI，并通过 jdtls 的 java.decompile 命令请求。 */
   @Test
   void javaDecompileLocalClassUsesExecuteCommand() throws Exception {
     LspClient client = start("normal");
     Path classFile = Files.createDirectories(root.resolve("build")).resolve("Foo.class");
     Files.write(classFile, new byte[] {0x1});
 
-    String source = client.javaDecompile(root, "build/Foo.class", REQUEST_TIMEOUT);
+    String source = client.javaDecompile(classFile.toString(), REQUEST_TIMEOUT);
 
     assertEquals(FakeLspServer.DECOMPILED_SOURCE, source);
     JsonNode request =

@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
+import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -36,8 +37,8 @@ import java.util.Set;
  *
  * <p>模态判定取三个条件的交集：所选 model 的 {@code inputModalities}、当前 adapter 针对该位置的用户/工具结果能力，以及 Blob 权威
  * MIME。支持映射为 IMAGE/AUDIO/VIDEO 三种媒体块，DOCUMENT 只接受 {@code application/pdf} 并生成 {@link
- * ProviderDocumentBlock}；其余媒体类型、非 ACTIVE/缺失 Blob、外部化文本与能力不匹配都生成确定性文本回退（含
- * name/blobId/mediaType/size/preview），绝不读取或签名存储内容。
+ * ProviderDocumentBlock}；其余媒体类型、非 ACTIVE/缺失 Blob、外部化文本与能力不匹配都生成确定性文本回退（含 name/稳定 Session 资源
+ * URI/mediaType/size/preview），绝不读取或签名存储内容。
  *
  * <p>内联受应用安全上限约束（单文件原始字节与单次 request 全部 data URI 字符总量，重复与嵌套引用同样计入），由 {@link
  * ProviderInlineBlobReader} 执行有界读取、校验与缓存；供应商侧能力与请求体积约束由各 adapter 独立负责。
@@ -284,19 +285,30 @@ public final class ProviderResourceMaterializer {
     return null;
   }
 
+  /**
+   * 外部化文本的模型声明：稳定 Session 资源 URI、名字、总量、不完整预览，以及用 read 分页读取完整输出的指引。
+   *
+   * <p>URI 由 {@link SessionResourceUri#format} 从 blobId 派生，只暴露规范 {@code
+   * kkstudio:/resources/<blobId>}，绝不包含 S3 object key、上传 id 或任何宿主路径；URI 只是标识，实际读取仍走原有 Session Blob
+   * 鉴权。
+   */
   private static String formatExternalizedText(ProviderResourceBlock resource) {
     StringBuilder sb = new StringBuilder();
     sb.append(
         "[Output externalized. The preview below is incomplete; do not treat it as the full"
             + " result.\n\n");
-    sb.append("The complete output has been saved as a downloadable user attachment: ")
-        .append(resource.name())
+    sb.append("The complete output is available as a session resource:\n")
+        .append(SessionResourceUri.format(resource.blobId()))
         .append("\n");
+    sb.append("Name: ").append(resource.name()).append("\n");
     sb.append("Size: ")
         .append(resource.totalBytes())
         .append(" bytes, ")
         .append(resource.totalLines())
-        .append(" lines]");
+        .append(" lines\n");
+    sb.append(
+        "Use the read tool with this resource URI and offset/limit to page through the complete"
+            + " output.]");
     sb.append("\n\n--- preview ---");
     if (resource.preview() != null && !resource.preview().isEmpty()) {
       sb.append("\n").append(resource.preview());
@@ -304,10 +316,13 @@ public final class ProviderResourceMaterializer {
     return sb.toString();
   }
 
-  /** 确定性文本回退：始终包含 name/blobId；durable preview 非空时始终附带；mediaType/size 只在存在 ACTIVE storage 事实时附带。 */
+  /**
+   * 确定性文本回退：始终包含 name 与可读 Session 资源 URI；durable preview 非空时始终附带；mediaType/size 只在存在 ACTIVE storage
+   * 事实时附带。
+   */
   private static String fallbackText(ProviderResourceBlock resource, StorageBlob blob) {
     StringBuilder text = new StringBuilder("[Resource: ").append(resource.name()).append("]");
-    text.append("\nblobId: ").append(resource.blobId());
+    text.append("\nuri: ").append(SessionResourceUri.format(resource.blobId()));
     if (blob != null && blob.getState() == StorageBlobState.ACTIVE) {
       if (blob.getMediaType() != null && !blob.getMediaType().isBlank()) {
         text.append("\nmediaType: ").append(blob.getMediaType());

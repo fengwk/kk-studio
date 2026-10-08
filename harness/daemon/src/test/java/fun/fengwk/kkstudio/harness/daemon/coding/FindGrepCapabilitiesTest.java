@@ -91,7 +91,15 @@ class FindGrepCapabilitiesTest {
     return "\"" + str.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
   }
 
-  /** 验证 FindCapability 匹配 basename 和 path glob pattern，以及确定性排序与工作区相对路径。 */
+  private String p(String relative) {
+    try {
+      return workdir.toRealPath().resolve(relative).toString().replace('\\', '/');
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  /** 验证 FindCapability 匹配 basename 和 path glob pattern，以及确定性排序与绝对路径。 */
   @Test
   void findMatchesBasenameAndPathGlobPatternsDeterministically() throws Exception {
     Path src = Files.createDirectories(workdir.resolve("src"));
@@ -106,41 +114,31 @@ class FindGrepCapabilitiesTest {
 
     // Basename matching: *.java matches across all directories
     EnvironmentCapabilityResult res1 =
-        invoke(
-            find,
-            "{\"pattern\":\"*.java\",\"path\":\".\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(find, "{\"pattern\":\"*.java\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res1.error());
-    assertEquals("src/Helper.java\nsrc/Main.java\nsrc/sub/Deep.java", text(res1));
+    assertEquals(
+        p("src/Helper.java") + "\n" + p("src/Main.java") + "\n" + p("src/sub/Deep.java"),
+        text(res1));
 
     // Path matching with slash: src/*.java does NOT match src/sub/Deep.java (* does not cross /)
     EnvironmentCapabilityResult res2 =
-        invoke(
-            find,
-            "{\"pattern\":\"src/*.java\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(find, "{\"pattern\":\"src/*.java\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res2.error());
-    assertEquals("src/Helper.java\nsrc/Main.java", text(res2));
+    assertEquals(p("src/Helper.java") + "\n" + p("src/Main.java"), text(res2));
 
     // ** matches across directories
     EnvironmentCapabilityResult res3 =
-        invoke(
-            find,
-            "{\"pattern\":\"src/**/*.java\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(find, "{\"pattern\":\"src/**/*.java\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res3.error());
-    assertEquals("src/Helper.java\nsrc/Main.java\nsrc/sub/Deep.java", text(res3));
+    assertEquals(
+        p("src/Helper.java") + "\n" + p("src/Main.java") + "\n" + p("src/sub/Deep.java"),
+        text(res3));
 
     // ? matches single char
     EnvironmentCapabilityResult res4 =
-        invoke(
-            find,
-            "{\"pattern\":\"dat?.txt\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(find, "{\"pattern\":\"dat?.txt\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res4.error());
-    assertEquals("src/sub/data.txt", text(res4));
+    assertEquals(p("src/sub/data.txt"), text(res4));
   }
 
   /** 验证 FindCapability 在无匹配项时返回预期的提示。 */
@@ -150,11 +148,7 @@ class FindGrepCapabilitiesTest {
     FindCapability find = new FindCapability(config(), executor);
 
     EnvironmentCapabilityResult res =
-        invoke(
-            find,
-            "{\"pattern\":\"*.nonexistent\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(find, "{\"pattern\":\"*.nonexistent\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     assertEquals("No files found matching pattern", text(res));
   }
@@ -180,9 +174,7 @@ class FindGrepCapabilitiesTest {
 
     FindCapability find = new FindCapability(config(), executor);
     EnvironmentCapabilityResult res =
-        invoke(
-            find,
-            "{\"pattern\":\"*.txt\",\"path\":\".\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(find, "{\"pattern\":\"*.txt\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     String out = text(res);
     assertTrue(out.contains("visible.txt"));
@@ -205,9 +197,7 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult res =
         invoke(
             find,
-            "{\"pattern\":\"file_*.txt\",\"path\":\".\",\"limit\":2,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"pattern\":\"file_*.txt\",\"limit\":2,\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     String out = text(res);
     assertTrue(out.contains("file_1.txt"));
@@ -228,9 +218,7 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult res =
         invoke(
             find,
-            "{\"pattern\":\"f_*.txt\",\"path\":\".\",\"limit\":2500,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"pattern\":\"f_*.txt\",\"limit\":2500,\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     assertEquals(1, res.contents().size());
     assertInstanceOf(TextResultContent.class, res.contents().getFirst());
@@ -245,7 +233,7 @@ class FindGrepCapabilitiesTest {
     assertTrue(published.isAbsolute());
     assertTrue(out.contains(published.toString()), "预览必须内联绝对路径");
     assertEquals(2005, Files.readAllLines(published).size(), "durable 全文必须保留全部结果行");
-    assertTrue(Files.readAllLines(published).contains("many/f_2004.txt"));
+    assertTrue(Files.readAllLines(published).contains(p("many/f_2004.txt")));
   }
 
   /** 验证 GrepCapability 使用 RE2/J 并拒绝非法的正则语法（lookaround、backreference）。 */
@@ -256,29 +244,19 @@ class FindGrepCapabilitiesTest {
 
     // Valid RE2: \d+
     EnvironmentCapabilityResult valid =
-        invoke(
-            grep,
-            "{\"pattern\":\"\\\\d+\",\"path\":\".\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(grep, "{\"pattern\":\"\\\\d+\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(valid.error());
     assertTrue(text(valid).contains("test.txt:1:hello 123 world"));
 
     // Invalid RE2: lookahead (?=world)
     EnvironmentCapabilityResult lookahead =
-        invoke(
-            grep,
-            "{\"pattern\":\"hello (?=world)\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"hello (?=world)\",\"path\":" + json(workdir.toString()) + "}");
     assertTrue(lookahead.error());
     assertTrue(text(lookahead).contains("Invalid regex:"));
 
     // Invalid RE2: backreference \1
     EnvironmentCapabilityResult backref =
-        invoke(
-            grep,
-            "{\"pattern\":\"(hello)\\\\1\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"(hello)\\\\1\",\"path\":" + json(workdir.toString()) + "}");
     assertTrue(backref.error());
     assertTrue(text(backref).contains("Invalid regex:"));
   }
@@ -292,7 +270,7 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult res =
         invoke(
             grep,
-            "{\"pattern\":\"list[0].length()\",\"literal\":true,\"path\":\".\",\"workdir\":"
+            "{\"pattern\":\"list[0].length()\",\"literal\":true,\"path\":"
                 + json(workdir.toString())
                 + "}");
     assertFalse(res.error());
@@ -301,9 +279,7 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult res2 =
         invoke(
             grep,
-            "{\"pattern\":\"a.*b\",\"literal\":true,\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"pattern\":\"a.*b\",\"literal\":true,\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res2.error());
     assertTrue(text(res2).contains("a.*b"));
   }
@@ -321,7 +297,7 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult res =
         invoke(
             grep,
-            "{\"pattern\":\"mytargetclass\",\"ignore_case\":true,\"include\":\"*.java\",\"path\":\".\",\"workdir\":"
+            "{\"pattern\":\"mytargetclass\",\"ignore_case\":true,\"include\":\"*.java\",\"path\":"
                 + json(workdir.toString())
                 + "}");
     assertFalse(res.error());
@@ -339,7 +315,7 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult res =
         invoke(
             grep,
-            "{\"pattern\":\"first.*\\\\nsecond\",\"multiline\":true,\"path\":\".\",\"workdir\":"
+            "{\"pattern\":\"first.*\\\\nsecond\",\"multiline\":true,\"path\":"
                 + json(workdir.toString())
                 + "}");
     assertFalse(res.error());
@@ -364,11 +340,7 @@ class FindGrepCapabilitiesTest {
     GrepCapability grep = new GrepCapability(config(), executor);
 
     EnvironmentCapabilityResult resStart =
-        invoke(
-            grep,
-            "{\"pattern\":\"TARGET_START\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"TARGET_START\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(resStart.error());
     String outStart = text(resStart);
     assertTrue(outStart.contains("TARGET_START"));
@@ -376,11 +348,7 @@ class FindGrepCapabilitiesTest {
     assertTrue(outStart.codePointCount(0, outStart.length()) < 550);
 
     EnvironmentCapabilityResult resMid =
-        invoke(
-            grep,
-            "{\"pattern\":\"TARGET_MID\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"TARGET_MID\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(resMid.error());
     String outMid = text(resMid);
     assertTrue(outMid.contains("TARGET_MID"));
@@ -388,11 +356,7 @@ class FindGrepCapabilitiesTest {
     assertTrue(outMid.contains("line truncated to 500 chars"));
 
     EnvironmentCapabilityResult resEnd =
-        invoke(
-            grep,
-            "{\"pattern\":\"TARGET_END\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"TARGET_END\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(resEnd.error());
     String outEnd = text(resEnd);
     assertTrue(outEnd.contains("TARGET_END"));
@@ -409,11 +373,7 @@ class FindGrepCapabilitiesTest {
 
     // Direct text file
     EnvironmentCapabilityResult res =
-        invoke(
-            grep,
-            "{\"pattern\":\"matching\",\"path\":\"direct.txt\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"matching\",\"path\":" + json(textFile.toString()) + "}");
     assertFalse(res.error());
     assertTrue(text(res).contains("direct.txt:1:matching content"));
 
@@ -421,11 +381,7 @@ class FindGrepCapabilitiesTest {
     Path binFile = workdir.resolve("binary.bin");
     Files.write(binFile, new byte[] {0, 1, 2, 3});
     EnvironmentCapabilityResult binRes =
-        invoke(
-            grep,
-            "{\"pattern\":\"matching\",\"path\":\"binary.bin\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"matching\",\"path\":" + json(binFile.toString()) + "}");
     assertTrue(binRes.error());
     assertTrue(text(binRes).contains("appears to be binary"));
 
@@ -434,11 +390,7 @@ class FindGrepCapabilitiesTest {
     Path gitFile = gitDir.resolve("config");
     Files.writeString(gitFile, "matching content\n");
     EnvironmentCapabilityResult gitRes =
-        invoke(
-            grep,
-            "{\"pattern\":\"matching\",\"path\":\".git/config\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(grep, "{\"pattern\":\"matching\",\"path\":" + json(gitFile.toString()) + "}");
     assertFalse(gitRes.error());
     assertEquals("No matches found", text(gitRes));
   }
@@ -451,9 +403,7 @@ class FindGrepCapabilitiesTest {
 
     GrepCapability grep = new GrepCapability(config(), executor);
     EnvironmentCapabilityResult res =
-        invoke(
-            grep,
-            "{\"pattern\":\"target\",\"path\":\".\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(grep, "{\"pattern\":\"target\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     String out = text(res);
     assertTrue(out.contains("valid.txt:1:target needle"));
@@ -473,10 +423,7 @@ class FindGrepCapabilitiesTest {
     GrepCapability grep = new GrepCapability(config(), executor);
     EnvironmentCapabilityResult res =
         invoke(
-            grep,
-            "{\"pattern\":\"needle\",\"limit\":2,\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            grep, "{\"pattern\":\"needle\",\"limit\":2,\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     String out = text(res);
     assertTrue(out.contains("line 1 needle"));
@@ -493,10 +440,7 @@ class FindGrepCapabilitiesTest {
 
     EnvironmentCapabilityResult res =
         invoke(
-            grep,
-            "{\"pattern\":\"nonexistent_string\",\"path\":\".\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            grep, "{\"pattern\":\"nonexistent_string\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     assertEquals("No matches found", text(res));
   }
@@ -514,7 +458,7 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult res =
         invoke(
             grep,
-            "{\"pattern\":\"match_line\",\"limit\":2500,\"path\":\".\",\"workdir\":"
+            "{\"pattern\":\"match_line\",\"limit\":2500,\"path\":"
                 + json(workdir.toString())
                 + "}");
     assertFalse(res.error());
@@ -532,6 +476,22 @@ class FindGrepCapabilitiesTest {
     assertEquals(2005, Files.readAllLines(published).size(), "durable 全文必须保留全部匹配行");
   }
 
+  /** 验证 Find 和 Grep 拒绝相对 path。 */
+  @Test
+  void findAndGrepRejectRelativePath() throws Exception {
+    FindCapability find = new FindCapability(config(), executor);
+    EnvironmentCapabilityResult findRes =
+        invoke(find, "{\"pattern\":\"*.txt\",\"path\":\"relative\"}");
+    assertTrue(findRes.error());
+    assertTrue(text(findRes).contains("path must be an absolute path: relative"));
+
+    GrepCapability grep = new GrepCapability(config(), executor);
+    EnvironmentCapabilityResult grepRes =
+        invoke(grep, "{\"pattern\":\"test\",\"path\":\"relative\"}");
+    assertTrue(grepRes.error());
+    assertTrue(text(grepRes).contains("path must be an absolute path: relative"));
+  }
+
   /** 验证 SearchFiles 遍历不跟随符号链接，并校验目录参数。 */
   @Test
   void searchFilesIgnoresSymlinksAndValidatesDirectory() throws Exception {
@@ -547,9 +507,7 @@ class FindGrepCapabilitiesTest {
 
     FindCapability find = new FindCapability(config(), executor);
     EnvironmentCapabilityResult res =
-        invoke(
-            find,
-            "{\"pattern\":\"*.txt\",\"path\":\".\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(find, "{\"pattern\":\"*.txt\",\"path\":" + json(workdir.toString()) + "}");
     assertFalse(res.error());
     String out = text(res);
     assertTrue(out.contains("real/inside.txt"));
@@ -559,11 +517,7 @@ class FindGrepCapabilitiesTest {
     Path notDir = workdir.resolve("file.txt");
     Files.writeString(notDir, "content");
     EnvironmentCapabilityResult findFileRes =
-        invoke(
-            find,
-            "{\"pattern\":\"*.txt\",\"path\":\"file.txt\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(find, "{\"pattern\":\"*.txt\",\"path\":" + json(notDir.toString()) + "}");
     assertTrue(findFileRes.error());
     assertTrue(text(findFileRes).contains("path must be a directory"));
   }
@@ -577,11 +531,7 @@ class FindGrepCapabilitiesTest {
 
     FindCapability find = new FindCapability(config(), executor);
     EnvironmentCapabilityResult res =
-        invoke(
-            find,
-            "{\"pattern\":\"*.txt\",\"path\":\"ignored-folder\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(find, "{\"pattern\":\"*.txt\",\"path\":" + json(ignoredFolder.toString()) + "}");
     assertFalse(res.error());
     assertEquals("No files found matching pattern", text(res));
   }
