@@ -1,0 +1,26 @@
+.plugin-connect-step {
+  margin-bottom: 16px;
+}
+
+.plugin-connect-login {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.plugin-connect-region {
+  flex: 1;
+  min-width: 80px;
+}
+
+.plugin-connect-hint {
+  display: block;
+  margin-top: 4px;
+}
+
+.plugin-connect-footer {
+  margin-top: 20px;
+  padding: 0;
+}
