@@ -11,7 +11,7 @@ import {
   sleep,
 } from '../lib/http.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
-import { expectThreadDraft } from '../lib/browser-state.mjs'
+import { expectThreadDraft, readThreadDraft } from '../lib/browser-state.mjs'
 import { assertReadOnlyZeroFooter } from './assertions.mjs'
 import { runWorkspaceContractMatrix } from './workspace-contracts.mjs'
 import {
@@ -514,7 +514,7 @@ export async function runComposerMatrix(ui) {
           await expectThreadDraft(page, fixture.threadId, draft)
 
           await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^tree/ }).click()
+          await page.getByRole('option', { name: /^history/ }).click()
           const historyPanel = page.getByRole('region', { name: '历史分支' })
           await historyPanel.waitFor({ state: 'visible', timeout: 10_000 })
           assert(
@@ -806,10 +806,16 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `debug draft ${stamp}`
+          const composerEditor = page.locator('.composer-editor')
+          await composerEditor.waitFor({ state: 'visible', timeout: 10_000 })
 
-          // plus 命令保留已写草稿；Debug 中 Composer 挂载但完全失活。
+          // plus 命令保留已写草稿；Debug 中根控制面挂载为 debug-hidden + inert，Composer 完全失活。
           await composer.fill(draft)
           await expectThreadDraft(page, fixture.threadId, draft)
+          const draftRecordBefore = (await readThreadDraft(page, fixture.threadId)).record
+          const composerHandle = await composerEditor.elementHandle()
+          assert(composerHandle, 'root composer editor handle missing before Debug')
+
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^debug/ }).click()
           const listbox = page.getByRole('listbox', { name: '事件' })
@@ -821,7 +827,45 @@ export async function runComposerMatrix(ui) {
           const optionCount = await listbox.getByRole('option').count()
           assert(optionCount >= 2, `debug list is too short: ${optionCount}`)
 
-          assert((await composer.count()) === 1 && !(await composer.isVisible()), 'debug composer is not mounted and hidden')
+          // Root 控制面在 Debug 期间保持挂载：隐藏的 textbox 被 getByRole 默认排除，
+          // 因此用 DOM locator 精确断言「挂载 1 个且不可见」，并校验 inert 祖先与失活状态。
+          assert(
+            await composerEditor.count() === 1,
+            'debug must keep exactly one mounted root composer editor',
+          )
+          assert(!(await composerEditor.isVisible()), 'debug composer must stay hidden')
+          const controlArea = page.locator('.thread-control-area')
+          assert(await controlArea.count() === 1, 'debug must keep exactly one root control area')
+          assert(
+            await controlArea.evaluate((element) =>
+              element.hasAttribute('inert') && element.classList.contains('debug-hidden')),
+            'debug root control area must be inert and debug-hidden',
+          )
+          const composerState = await composerEditor.evaluate((element) => ({
+            activeWithin: element.contains(
+              element.ownerDocument.activeElement ?? element.ownerDocument.body,
+            ),
+            hiddenAncestor: element.closest('[hidden], [inert]') !== null,
+          }))
+          assert(
+            (await page.getByRole('textbox', { name: '给 AI 发送消息' }).count()) === 0,
+            'debug must remove the hidden composer from the accessibility tree',
+          )
+          assert(
+            !composerState.activeWithin,
+            `focus entered the debug-hidden composer: ${JSON.stringify(composerState)}`,
+          )
+          assert(
+            composerState.hiddenAncestor,
+            `debug composer lost its hidden/inert ancestor: ${JSON.stringify(composerState)}`,
+          )
+          assert(
+            await composerEditor.evaluate(
+              (element, previous) => element.isSameNode(previous),
+              composerHandle,
+            ),
+            'debug switch must keep the same root composer DOM identity',
+          )
           assert(!(await page.locator('#chat-layout-select').isVisible()), 'debug exposes the layout selector')
           assert((await page.getByRole('button', { name: '关闭 Debug', exact: true }).count()) === 1, 'debug must have one header exit')
           await expectThreadDraft(page, fixture.threadId, draft)
@@ -846,6 +890,20 @@ export async function runComposerMatrix(ui) {
           )
           await expectComposerText(page, draft)
           await expectThreadDraft(page, fixture.threadId, draft)
+          // 返回后同一挂载实例恢复可编辑，草稿记录逐字不变。
+          assert(
+            await composerEditor.evaluate(
+              (element, previous) => element.isSameNode(previous),
+              composerHandle,
+            ),
+            'debug exit must keep the same root composer DOM identity',
+          )
+          assert(await composerEditor.isVisible(), 'root composer did not become visible after Debug exit')
+          assert(
+            JSON.stringify((await readThreadDraft(page, fixture.threadId)).record)
+              === JSON.stringify(draftRecordBefore),
+            'debug switch must not rewrite the thread draft record',
+          )
 
           await shot(caseArt, 'debug-detail-and-switch')
           expectNoFatal(pageErrors, consoleErrors)

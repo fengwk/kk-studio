@@ -10,10 +10,17 @@ const caseSource = (id) => {
 }
 
 // 守住真实服务 UI runner 的接线；渲染、焦点和滚动语义另由离线 Chromium 验证。
-test('conversation switch uses the sole host exit while its composer remains mounted and hidden', () => {
+test('conversation switch keeps the mounted root composer hidden as inert without rewriting the draft', () => {
   const section = caseSource('ui.chat.debug.conversation_switch')
   assert.match(section, /name: '关闭 Debug', exact: true.*\.click\(\)/)
-  assert.match(section, /composer\.count\(\).*composer\.isVisible\(\)/)
+  // Debug 期间根控制面挂载为 debug-hidden + inert：隐藏的 textbox 不进 role 查询，
+  // 改用 DOM locator 精确断言挂载 1 个且不可见，并校验 inert 祖先与失活状态。
+  assert.match(section, /composerEditor\.count\(\) === 1/)
+  assert.match(section, /composerEditor\.isVisible\(\)/)
+  assert.match(section, /thread-control-area/)
+  assert.match(section, /debug-hidden/)
+  assert.match(section, /getByRole\('textbox'/)
+  assert.match(section, /isSameNode\(previous\)/)
   assert.match(section, /#chat-layout-select/)
   assert.ok(section.indexOf('composer.fill(draft)') < section.indexOf("const listbox ="))
   assert.equal((section.match(/await expectThreadDraft\(page, fixture\.threadId, draft\)/g) ?? []).length, 3)

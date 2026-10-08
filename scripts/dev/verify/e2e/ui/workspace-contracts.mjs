@@ -11,6 +11,7 @@ import {
   getThreadSnapshot,
   createNewSession,
   listEnvironments,
+  listSessionThreads,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
@@ -25,6 +26,7 @@ import {
   envelopeData,
   sleep,
 } from '../lib/http.mjs'
+import { expectThreadDraft, readThreadDraft } from '../lib/browser-state.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
 
@@ -476,34 +478,17 @@ export async function runWorkspaceContractMatrix(ui) {
 
   await run(
     'ui.chat.task_status.async_thread_approval',
-    'Task tool 卡片呈现 accepted 回执并链接至 /threads/:threadId，进入子 Thread 可进行独立审批',
+    '根面板聚合子 Thread 审批：子视图只读，审批回写原始子 Thread 与 canonical payload，返回保留草稿',
     async (caseArt) => {
       await withUiFixture(
         page,
         () => createActiveTaskFixture(apiCtx, stamp),
         async (fixture) => {
-          await bindThreadComposer(page, goto, fixture)
+          // task 先启动：子 Thread 由真实执行创建，浏览器绑定前即可拿到它的真实身份。
           await fixture.start()
-
-          const taskCard = page.locator('.thread-tool-surface').filter({
-            has: page.locator('.thread-tool-name', { hasText: 'task' }),
-          }).last()
-          await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
-          // 回执链接必须打开正确的 child thread，并保留后续审批子流程。
-          await taskCard.getByText('查看 subagent 执行').waitFor({ state: 'visible', timeout: 15_000 })
-
-          const link = taskCard.locator('.task-tool-thread-link')
-          await link.waitFor({ state: 'visible', timeout: 10_000 })
-          const href = await link.getAttribute('href')
-          // 回执链接的可见身份是 canonical href `/threads/{id}`，不是链接文本：
-          // 严格解析 UUID 后必须与真实 child snapshot 的执行父子关系与 Agent 命名一致。
-          assert(
-            typeof href === 'string' && href.startsWith('/threads/'),
-            `unexpected thread link href: ${href}`,
-          )
-          const childThreadId = canonicalUuid(href.slice('/threads/'.length), 'task child thread id')
-          assert(href === `/threads/${childThreadId}`, `unexpected thread link href: ${href}`)
-
+          const childThreadId = await resolveTaskChildThread(apiCtx, fixture)
+          // 真实子 Thread snapshot 是只读视图的唯一数据源：真实父子关系与 Agent 命名，
+          // 不需要也不允许再挂 mock 快照路由；运行中边界由真实执行提供。
           const childSnapshot = await getThreadSnapshot(apiCtx, childThreadId)
           assert(
             childSnapshot.thread.parentThreadId === fixture.threadId,
@@ -516,79 +501,216 @@ export async function runWorkspaceContractMatrix(ui) {
               + ` != ${fixture.childAgent.name}`,
           )
 
-          let resolveApproval
-          const approvalPromise = new Promise((resolve) => {
-            resolveApproval = resolve
-          })
-
-          const snapshotMatcher = (url) => url.pathname === `/api/harness/threads/${childThreadId}`
-          const snapshotHandler = async (route) => {
-            await route.fulfill({
-              status: 200,
-              contentType: 'application/json',
-              body: JSON.stringify({
-                status: 200,
-                data: childSnapshotWithPendingTool(childThreadId, fixture.threadId),
-              }),
-            })
-          }
-
-          const approvalMatcher = (url) =>
-            url.pathname.startsWith(`/api/harness/threads/${childThreadId}/tool-invocations/`)
-            && url.pathname.endsWith('/approval')
-          const approvalHandler = async (route) => {
-            const request = route.request()
-            resolveApproval({
-              target: request.url(),
-              body: request.postDataJSON(),
-            })
+          // 审批只在根面板聚合：拦截根作用域的待处理查询，注入指向原始子 Thread 调用的
+          // wire 完整 APPROVAL 项；提交仍必须回写原始子 Thread 的原始调用 id。
+          const invocationId = cid()
+          const decisions = []
+          let approvalPending = true
+          const interactionsMatcher = (url) =>
+            url.pathname === '/api/interactions'
+            && url.searchParams.get('rootThreadId') === fixture.threadId
+          const interactionsHandler = async (route) => {
             await route.fulfill({
               status: 200,
               contentType: 'application/json',
               body: JSON.stringify({
                 status: 200,
                 data: {
-                  id: 'inv-bash-1',
-                  status: 'RUNNING',
+                  items: approvalPending ? [pendingApprovalInteraction({
+                    childThreadId,
+                    childSessionId: childSnapshot.thread.sessionId,
+                    invocationId,
+                    rootThreadId: fixture.threadId,
+                    chat: fixture.chat,
+                    agentName: fixture.parentAgent.name,
+                  })] : [],
+                  nextCursor: null,
+                  total: approvalPending ? 1 : 0,
+                  freshnessAt: null,
                 },
               }),
             })
           }
-
-          await page.route(snapshotMatcher, snapshotHandler)
+          const approvalMatcher = (url) =>
+            url.pathname === `/api/harness/threads/${childThreadId}`
+              + `/tool-invocations/${invocationId}/approval`
+          const approvalHandler = async (route) => {
+            const request = route.request()
+            decisions.push({
+              method: request.method(),
+              target: request.url(),
+              body: request.postDataJSON(),
+            })
+            approvalPending = false
+            await route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                status: 200,
+                data: { id: invocationId, status: 'RUNNING' },
+              }),
+            })
+          }
+          await page.route(interactionsMatcher, interactionsHandler)
           await page.route(approvalMatcher, approvalHandler)
 
+          const writes = []
+          const watchWrites = (request) => {
+            const path = new URL(request.url()).pathname
+            if (path.startsWith('/api/') && request.method() !== 'GET') {
+              writes.push(`${request.method()} ${path}`)
+            }
+          }
           try {
+            const composer = await bindThreadComposer(page, goto, fixture)
+            const chatUrl = page.url()
+            const draft = `async approval draft ${stamp}`
+            await composer.fill(draft)
+            await expectThreadDraft(page, fixture.threadId, draft)
+            const draftRecordBefore = (await readThreadDraft(page, fixture.threadId)).record
+            const composerHandle = await page.locator('.composer-editor').elementHandle()
+            assert(composerHandle, 'root composer handle missing before entering the child view')
+
+            const taskCard = page.locator('.thread-tool-surface').filter({
+              has: page.locator('.thread-tool-name', { hasText: 'task' }),
+            }).last()
+            await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
+            // 受理回执必须指向真实创建的唯一子 Thread，不显示完成暗示。
+            await taskCard.getByText('查看 subagent 执行').waitFor({ state: 'visible', timeout: 15_000 })
+            const link = taskCard.locator('.task-tool-thread-link')
+            await link.waitFor({ state: 'visible', timeout: 10_000 })
+            const href = await link.getAttribute('href')
+            assert(typeof href === 'string', `unexpected thread link href: ${href}`)
+            const linkedThreadId = canonicalUuid(href.slice('/threads/'.length), 'task child thread id')
+            assert(
+              linkedThreadId === childThreadId && href === `/threads/${childThreadId}`,
+              `task receipt link ${href} != /threads/${childThreadId}`,
+            )
+
+            // 根面板审批卡：来源身份与原始调用坐标来自由根作用域聚合的 APPROVAL 项。
+            const approvalCard = page.locator(
+              '.thread-root-interactions .interaction-approval-card',
+            ).first()
+            await approvalCard.waitFor({ state: 'visible', timeout: 15_000 })
+            assert(
+              (await approvalCard.locator('.interaction-approval-tool-name').innerText()).trim() === 'bash',
+              'root approval card lost the original tool identity',
+            )
+            const allowButton = approvalCard.getByRole('button', { name: '允许', exact: true })
+            assert(await allowButton.count() === 1, 'root approval card missing the allow control')
+            assert(
+              await approvalCard.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              'root approval card missing the deny control',
+            )
+
+            // 子 Thread 视图：同 pane 只读覆盖层，没有任何写入口（无 Composer、无审批 CTA）。
+            page.on('request', watchWrites)
             await link.click()
-            await page.waitForURL(`**/threads/${childThreadId}`)
-            const approval = page.locator('.thread-tool-approval')
-            await approval.waitFor({ state: 'visible', timeout: 15_000 })
+            await page.waitForFunction(
+              () => document.querySelectorAll('.chat-pane-layer').length === 2,
+              undefined,
+              { timeout: 15_000 },
+            )
+            const paneLayers = page.locator('.chat-pane-layer')
             assert(
-              await approval.getByRole('button', { name: '允许', exact: true }).count() === 1
-              && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
-              'child thread approval controls missing',
+              await paneLayers.count() === 2,
+              `child view must overlay exactly one read-only layer: ${await paneLayers.count()}`,
+            )
+            const visibleLayer = page.locator('.chat-pane-layer:not([hidden])')
+            assert(
+              await visibleLayer.count() === 1,
+              'exactly one pane layer must stay visible while viewing the child',
+            )
+            assert(
+              await page.locator('.chat-pane-layer[hidden][inert]').count() === 1,
+              'the covered root layer must stay hidden and inert',
+            )
+            await visibleLayer.locator('.bound-thread-view').waitFor({ state: 'visible', timeout: 15_000 })
+            await page.waitForFunction(
+              (name) => document.querySelector('[data-breadcrumb="branch"]')?.textContent?.trim() === name,
+              childSnapshot.thread.name,
+              { timeout: 15_000 },
+            )
+            assert(page.url() === chatUrl, `child navigation must stay in the chat URL: ${page.url()}`)
+            assert(!(await page.locator('.composer-editor').isVisible()), 'child view must not expose the composer')
+            assert(
+              await visibleLayer.locator('.composer-editor, .thread-control-area, .thread-root-interactions').count() === 0,
+              'the child layer must not mount root write controls',
+            )
+            assert(
+              await visibleLayer.getByLabel('会话状态').getByRole('button').count() === 0,
+              'the child footer must stay read-only',
+            )
+            assert(
+              (await page.getByRole('button', { name: '允许', exact: true }).count()) === 0
+              && (await page.getByRole('button', { name: '拒绝', exact: true }).count()) === 0,
+              'child view must not expose approval controls',
+            )
+            page.off('request', watchWrites)
+            assert(
+              writes.length === 0,
+              `read-only child view issued writes: ${JSON.stringify(writes)}`,
             )
 
-            await approval.getByRole('button', { name: '允许', exact: true }).click()
-            const { target: approvalTarget, body: approvalBody } = await Promise.race([
-              approvalPromise,
-              sleep(10_000).then(() => {
-                throw new Error('child thread approval request timed out')
-              }),
-            ])
+            // 回到父 agent：单父返回按钮收起查看层，URL、根 DOM 与草稿元数据全部保留。
+            await page.getByRole('button', { name: '回到父 agent', exact: true }).click()
+            await page.waitForFunction(
+              () => document.querySelectorAll('.chat-pane-layer').length === 1,
+              undefined,
+              { timeout: 10_000 },
+            )
+            await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
             assert(
-              approvalTarget.includes(`/threads/${childThreadId}/tool-invocations/inv-bash-1/approval`),
-              `approval did not target the child thread: ${approvalTarget}`,
+              await page.locator('.chat-pane-layer').count() === 1,
+              'returning to the parent must collapse the read-only layer',
+            )
+            assert(page.url() === chatUrl, `returning to the parent must stay in the chat URL: ${page.url()}`)
+            assert(
+              await page.locator('.composer-editor').evaluate(
+                (element, previous) => element.isSameNode(previous),
+                composerHandle,
+              ),
+              'root composer must keep the same mounted DOM identity across child navigation',
             )
             assert(
-              approvalBody?.decision === 'ALLOW',
-              `unexpected approval payload: ${JSON.stringify(approvalBody)}`,
+              (await page.locator('.composer-editor').innerText()).includes(draft),
+              'returning to the parent lost the composer text',
+            )
+            await expectThreadDraft(page, fixture.threadId, draft)
+            assert(
+              JSON.stringify((await readThreadDraft(page, fixture.threadId)).record)
+                === JSON.stringify(draftRecordBefore),
+              'child navigation must not rewrite draft metadata',
             )
 
-            await shot(caseArt, 'child-thread-approval-routed')
+            await allowButton.click()
+            const decision = await waitForDecision(decisions)
+            assert(
+              decision.method === 'PUT',
+              `approval must be submitted as PUT: ${JSON.stringify(decision)}`,
+            )
+            assert(
+              new URL(decision.target).pathname
+                === `/api/harness/threads/${childThreadId}/tool-invocations/${invocationId}/approval`,
+              `approval did not target the original child invocation: ${decision.target}`,
+            )
+            assert(
+              Object.keys(decision.body).sort().join(',') === 'decision,decisionId,reason',
+              `approval payload must carry exactly decision/decisionId/reason: ${JSON.stringify(decision.body)}`,
+            )
+            assert(
+              decision.body.decision === 'ALLOW' && decision.body.reason === null,
+              `unexpected approval payload: ${JSON.stringify(decision.body)}`,
+            )
+            canonicalUuid(decision.body.decisionId, 'approval decisionId')
+            await approvalCard.waitFor({ state: 'detached', timeout: 10_000 })
+            assert(decisions.length === 1, `approval must issue exactly one decision: ${decisions.length}`)
+
+            await shot(caseArt, 'root-aggregated-child-approval')
             expectNoFatal(pageErrors, consoleErrors)
           } finally {
-            await page.unroute(snapshotMatcher, snapshotHandler).catch(() => undefined)
+            page.off('request', watchWrites)
+            await page.unroute(interactionsMatcher, interactionsHandler).catch(() => undefined)
             await page.unroute(approvalMatcher, approvalHandler).catch(() => undefined)
           }
         },
@@ -946,80 +1068,76 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   }
 }
 
-function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
-  const toolEntry = {
-    entryId: 'entry-tool-1',
-    sessionId: 'session-child',
-    parentEntryId: null,
-    entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
-      message: {
-        role: 'ASSISTANT',
-        contents: [
-          {
-            type: 'tool_call',
-            toolCallId: 'call-bash-1',
-            toolName: 'bash',
-            rendererKey: 'bash',
-            argumentsJson: '{"command":"rm -rf /tmp/test"}',
-          },
-        ],
-      },
-    }),
+/**
+ * 根作用域待处理审批的 wire 完整 APPROVAL 项：来源身份与原始调用坐标都属于真实子 Thread，
+ * 只用于在根面板聚合展示；提交时浏览器仍以原始 threadId/interactionId 回写。
+ */
+function pendingApprovalInteraction({
+  childThreadId,
+  childSessionId,
+  invocationId,
+  rootThreadId,
+  chat,
+  agentName,
+}) {
+  return {
+    type: 'APPROVAL',
+    interactionId: invocationId,
+    status: 'WAITING_APPROVAL',
+    threadId: childThreadId,
+    sessionId: childSessionId,
+    rootThreadId,
+    owner: {
+      type: 'CHAT',
+      chatId: chat.id,
+      chatTitle: chat.title ?? null,
+      issueId: null,
+      issueTitle: null,
+      agentName,
+      rootThreadName: null,
+    },
+    toolCallId: 'call-bash-1',
+    toolName: 'bash',
+    argumentsJson: '{"command":"rm -rf /tmp/test"}',
+    approvalJson: '{"required":true,"decision":null,"decisionId":null,'
+      + '"reason":"Dangerous shell command execution"}',
+    environmentId: null,
+    environmentName: null,
+    waitingCount: null,
     createTime: '2026-07-28T10:00:01Z',
   }
+}
 
-  return {
-    thread: {
-      threadId: targetThreadId,
-      name: 'Child Worker Thread',
-      sessionId: 'session-child',
-      headEntryId: 'entry-tool-1',
-      // task 委派产生的是真实子代理：执行父关系指向父 Thread，YOLO policy 恒为 FOLLOW 真实执行根。
-      parentThreadId: rootThreadId,
-      yoloPolicy: { mode: 'FOLLOW', rootThreadId },
-      nextCommandSequence: '1',
-      version: '1',
-      status: 'TOOL_WAITING_APPROVAL',
-      processing: false,
-      branchSettings: {
-        agentName: 'worker',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-        environmentName: null,
-      },
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
-    },
-    entries: [toolEntry],
-    queuedCommands: [],
-    toolInvocations: [
-      {
-        id: 'inv-bash-1',
-        modelInvocationId: 'm-1',
-        assistantEntryId: 'entry-tool-1',
-        callIndex: 0,
-        status: 'WAITING_APPROVAL',
-        attempt: 1,
-        toolCallId: 'call-bash-1',
-        toolName: 'bash',
-        rendererKey: 'bash',
-        environmentId: null,
-        argumentsJson: '{"command":"rm -rf /tmp/test"}',
-        approvalJson: JSON.stringify({
-          required: true,
-          decision: null,
-          decisionId: null,
-          reason: 'Dangerous shell command execution',
-        }),
-        resultJson: null,
-        errorJson: null,
-        createTime: '2026-07-28T10:00:01Z',
-        updateTime: '2026-07-28T10:00:01Z',
-      },
-    ],
-    modelInvocation: null,
-    modelAttemptFailures: [],
+/** 会话内由 task 委派真实创建的唯一子 Thread：执行父关系与 Agent 命名都由真实执行给出。 */
+async function resolveTaskChildThread(apiCtx, fixture, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs
+  let children = []
+  for (;;) {
+    const threads = await listSessionThreads(apiCtx, fixture.sessionId)
+    children = threads.filter((thread) => thread.parentThreadId === fixture.threadId)
+    if (children.length > 0 || Date.now() >= deadline) {
+      break
+    }
+    await sleep(100)
   }
+  assert(
+    children.length === 1,
+    'task must materialize exactly one child Thread in the session: '
+      + `${JSON.stringify(children.map((child) => child.threadId))}`,
+  )
+  return canonicalUuid(children[0].threadId, 'task child thread id')
+}
+
+/** 等待审批回写请求到达：根面板聚合卡提交必须回写原始子 Thread 的原始调用。 */
+async function waitForDecision(decisions, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (decisions.length > 0) {
+      return decisions[0]
+    }
+    await sleep(50)
+  }
+  throw new Error('root approval decision request did not reach the harness')
 }
 
 async function createActiveTaskFixture(apiCtx, stamp) {
