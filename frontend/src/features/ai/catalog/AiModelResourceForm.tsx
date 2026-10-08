@@ -9,6 +9,7 @@ import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
@@ -125,7 +126,8 @@ export function ModelForm({
 
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
-        <input
+        <TextInput
+          invalid={Boolean(fieldErrors.name)}
           aria-label={t('ai.catalog.form.name')}
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
@@ -138,7 +140,8 @@ export function ModelForm({
 
       <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.modelId')}</FieldLabel>
-        <input
+        <TextInput
+          invalid={Boolean(fieldErrors.modelId)}
           aria-label={t('ai.catalog.form.modelId')}
           value={draft.modelId}
           onChange={(event) => onChange({ ...draft, modelId: event.target.value })}
@@ -151,7 +154,7 @@ export function ModelForm({
 
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
-        <input
+        <TextInput
           value={draft.description}
           onChange={(event) => onChange({ ...draft, description: event.target.value })}
           placeholder={t('ai.catalog.form.modelDescriptionPlaceholder')}
@@ -254,8 +257,9 @@ export function ModelForm({
                 <span className="price-affix" aria-hidden="true">
                   $
                 </span>
-                <input
+                <TextInput
                   type="number"
+                  invalid={Boolean(fieldErrors.pricing)}
                   inputMode="decimal"
                   min={0}
                   step="any"

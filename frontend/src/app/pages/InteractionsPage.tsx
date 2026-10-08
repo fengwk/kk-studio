@@ -1,12 +1,12 @@
 import {
-  AlertCircle,
   ExternalLink,
-  Inbox,
   MessageSquare,
   RotateCw,
   Workflow,
 } from 'lucide-react'
 import { useNavigate } from 'react-router'
+import { Button } from '@/shared/ui/controls/Button'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
@@ -44,9 +44,8 @@ export function InteractionsPage() {
     const owner = item.owner
     if (owner.type === 'CHAT' && owner.chatId) {
       return (
-        <button
-          type="button"
-          className="interaction-source-link"
+        <Button
+          variant="inline"
           onClick={() => navigate(`/chats/${encodeURIComponent(owner.chatId!)}?thread=${encodeURIComponent(item.rootThreadId)}`)}
           title={t('ai.interaction.openChatSource')}
         >
@@ -54,15 +53,14 @@ export function InteractionsPage() {
           <span>{owner.chatTitle ?? t('ai.interaction.viewSource')}</span>
           {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
           <ExternalLink size={12} aria-hidden="true" />
-        </button>
+        </Button>
       )
     }
 
     if (owner.type === 'ISSUE_AGENT' && owner.issueId) {
       return (
-        <button
-          type="button"
-          className="interaction-source-link"
+        <Button
+          variant="inline"
           onClick={() => void handleOpenIssueSource(owner.issueId!, item.rootThreadId)}
           title={t('ai.interaction.openIssueSource')}
         >
@@ -73,7 +71,7 @@ export function InteractionsPage() {
             <span className="interaction-agent-badge">{owner.agentName}</span>
           ) : null}
           <ExternalLink size={12} aria-hidden="true" />
-        </button>
+        </Button>
       )
     }
 
@@ -89,43 +87,40 @@ export function InteractionsPage() {
           </h1>
           <span className="interactions-count-badge">{items.length}</span>
         </div>
-        <button
-          type="button"
-          className="ghost-btn interactions-refresh-btn"
+        <Button
+          variant="ghost"
           disabled={isLoading || isFetchingMore}
           onClick={() => void refresh()}
         >
           <RotateCw size={14} className={isLoading ? 'animate-spin' : ''} />
           <span>{t('ai.interaction.refresh')}</span>
-        </button>
+        </Button>
       </header>
 
       <main className="interactions-page-content">
         {isLoading && items.length === 0 ? (
-          <div className="interactions-loading-state">
-            <RotateCw size={24} className="animate-spin text-muted" />
-          </div>
+          <StateBlock title={t('ai.common.loadingResources')} />
         ) : isError && items.length === 0 ? (
-          <div className="interactions-error-state">
-            <AlertCircle size={28} className="text-danger" />
-            <p className="interactions-error-message">
-              {error?.message || t('ai.common.operationFailed')}
-            </p>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void refresh()}
-            >
+          <>
+            <StateBlock tone="danger" title={error?.message || t('ai.common.operationFailed')} />
+            <Button onClick={() => void refresh()}>
               {t('ai.interaction.retry')}
-            </button>
-          </div>
+            </Button>
+          </>
         ) : items.length === 0 ? (
-          <div className="interactions-empty-state">
-            <Inbox size={40} className="text-muted" />
-            <p className="interactions-empty-text">{t('ai.interaction.empty')}</p>
-          </div>
+          <StateBlock title={t('ai.interaction.empty')} />
         ) : (
           <div className="interactions-list">
+            {isError ? (
+              <>
+                <StateBlock tone="danger" title={error?.message || t('ai.common.operationFailed')} />
+                <div>
+                  <Button onClick={() => void refresh()} disabled={isFetchingMore}>
+                    {t('ai.interaction.retry')}
+                  </Button>
+                </div>
+              </>
+            ) : null}
             {items.map((item) => (
               <div key={interactionIdentity(item)} className="interaction-feed-item">
                 <header className="interaction-item-header">
@@ -146,9 +141,8 @@ export function InteractionsPage() {
 
             {hasMore ? (
               <div className="interactions-load-more-row">
-                <button
-                  type="button"
-                  className="ghost-btn interactions-load-more-btn"
+                <Button
+                  variant="ghost"
                   disabled={isFetchingMore}
                   onClick={() => void loadMore()}
                 >
@@ -157,7 +151,7 @@ export function InteractionsPage() {
                     className={isFetchingMore ? 'animate-spin' : ''}
                   />
                   <span>{t('ai.interaction.loadMore')}</span>
-                </button>
+                </Button>
               </div>
             ) : null}
           </div>

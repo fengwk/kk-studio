@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -81,6 +81,30 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
 }
 
 describe('AgentForm current contracts', () => {
+  it('preserves multiline description and prompt through controlled edits and serialization', () => {
+    let latest = { ...emptyAgentDraft(modelWithVariants()), name: 'assistant' }
+    function Harness() {
+      const [draft, setDraft] = useState(latest)
+      return <AgentForm draft={draft} models={[modelWithVariants()]} onChange={(next) => {
+        latest = next
+        setDraft(next)
+      }} />
+    }
+    render(<Harness />)
+    fireEvent.change(screen.getByPlaceholderText('default-assistant'), { target: { value: 'edited-assistant' } })
+    const description = screen.getByPlaceholderText('用途说明')
+    const prompt = screen.getByPlaceholderText('系统提示词')
+    fireEvent.change(description, { target: { value: '第一行\n第二行' } })
+    fireEvent.change(prompt, { target: { value: '保留上下文\n  保留缩进' } })
+    expect(description).toHaveValue('第一行\n第二行')
+    expect(prompt).toHaveValue('保留上下文\n  保留缩进')
+    expect(toEditableAgent(latest)).toMatchObject({
+      name: 'edited-assistant',
+      description: '第一行\n第二行',
+      systemPrompt: '保留上下文\n  保留缩进',
+    })
+  })
+
   it('selects model/variant and selects skills as SkillRefDTO[]', async () => {
     const user = userEvent.setup()
     const longDescription =

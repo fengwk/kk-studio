@@ -1,4 +1,7 @@
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { Button } from '@/shared/ui/controls/Button'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { TextArea } from '@/shared/ui/controls/TextArea'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import {
   buildSkillCandidates,
@@ -109,7 +112,8 @@ export function AgentForm({
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
-        <input
+        <TextInput
+          invalid={Boolean(fieldErrors.name)}
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
           placeholder="default-assistant"
@@ -121,7 +125,7 @@ export function AgentForm({
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
         {/* 多行描述：内部换行必须原样保留在 draft 与提交 payload 中。 */}
-        <textarea
+        <TextArea
           value={draft.description}
           onChange={(event) => onChange({ ...draft, description: event.target.value })}
           placeholder={t('ai.catalog.form.descriptionPlaceholder')}
@@ -165,7 +169,7 @@ export function AgentForm({
       </label>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.systemPrompt')}</FieldLabel>
-        <textarea
+        <TextArea
           value={draft.systemPrompt}
           onChange={(event) => onChange({ ...draft, systemPrompt: event.target.value })}
           placeholder={t('ai.catalog.form.systemPromptPlaceholder')}
@@ -234,9 +238,9 @@ export function AgentForm({
         </div>
       )}
       {models.length > 0 && !draft.model && (
-        <button className="ghost-inline-btn" type="button" onClick={() => onChange(emptyAgentDraft(models[0]))}>
+        <Button variant="inline" onClick={() => onChange(emptyAgentDraft(models[0]))}>
           {t('ai.catalog.form.fillFirstModel')}
-        </button>
+        </Button>
       )}
     </>
   )

@@ -1,10 +1,16 @@
 import { createRoot } from 'react-dom/client'
+import { useState } from 'react'
 import { Bot, Pencil, Trash2 } from 'lucide-react'
 import '@/styles.css'
 import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { Button } from '@/shared/ui/controls/Button'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
+import { emptyAgentDraft, emptyModelDraft, emptyProviderDraft } from '@/features/ai/catalog/ai-resource-draft-codecs'
+import { setLocale } from '@/shared/i18n'
+
+setLocale('zh-CN')
 
 const LONG_TITLE =
   'a-very-long-resource-name-that-must-be-truncated-with-the-full-name-kept-available'
@@ -89,5 +95,29 @@ export function ResourceCardHarnessApp() {
 
 const rootEl = document.getElementById('root')
 if (rootEl) {
-  createRoot(rootEl).render(<ResourceCardHarnessApp />)
+  createRoot(rootEl).render(new URLSearchParams(location.search).has('forms')
+    ? <ResourceFormsHarness /> : <ResourceCardHarnessApp />)
+}
+
+function ResourceFormsHarness() {
+  const [provider, setProvider] = useState({ ...emptyProviderDraft(), name: 'demo-provider' })
+  const [model, setModel] = useState({
+    ...emptyModelDraft({ name: 'demo-provider' }),
+    name: 'demo-model',
+    modelId: 'wire-model',
+  })
+  const [agent, setAgent] = useState({ ...emptyAgentDraft(), name: 'demo-agent' })
+  return (
+    <main style={{ padding: 16, maxWidth: 840, margin: '0 auto' }}>
+      <section aria-label="Provider form">
+        <ProviderForm draft={provider} mode="edit" fieldErrors={{ baseUrl: '地址无效' }} onChange={setProvider} />
+      </section>
+      <section aria-label="Model form">
+        <ModelForm draft={model} mode="edit" providers={[]} onChange={setModel} />
+      </section>
+      <section aria-label="Agent form">
+        <AgentForm draft={agent} mode="edit" models={[]} onChange={setAgent} />
+      </section>
+    </main>
+  )
 }

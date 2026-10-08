@@ -41,6 +41,8 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Provider Type')).toHaveAttribute('data-value', 'anthropic')
     expect(screen.getByDisplayValue('https://proxy.example/v1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('secret')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('secret')).toHaveAttribute('type', 'password')
+    expect(screen.getByDisplayValue('secret')).toHaveAttribute('autocomplete', 'off')
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
     expect(screen.getByDisplayValue('3000')).toBeInTheDocument()
     expect(screen.getByText('留空会以无 Authorization 方式请求 OpenAI-compatible 端点。')).toBeInTheDocument()
@@ -51,6 +53,7 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByText('留空会保留已配置的 API Key；密钥不会回显。')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('留空保留当前密钥')).toHaveValue('')
+    expect(screen.getByPlaceholderText('minimax')).toHaveAttribute('readonly')
     const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
     expect(labels[0]).toMatch(/^Name(?: \*)?$/)
     expect(labels[1]).toBe('API Key（可选）')
@@ -377,6 +380,15 @@ describe('AiResourceForms', () => {
     expect(outputPrice).toHaveValue(4.56)
   })
 
+  it('avoids duplicate generated variant ids and keeps the final variant undeletable', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+    fireEvent.change(screen.getByLabelText('Variant ID 1'), { target: { value: 'variant-2' } })
+    expect(screen.getByRole('button', { name: '删除 Variant' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    expect(screen.getByLabelText('Variant ID 2')).toHaveValue('variant-3')
+  })
+
   it('keeps the default variant unchanged when renaming a non-default variant', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
@@ -433,6 +445,8 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByText('请选择 Provider')).toBeInTheDocument()
     expect(screen.getByText('请填写 Model 名称')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Name', exact: true })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('Input USD per million tokens')).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByText('上下文窗口无效')).toBeInTheDocument()
     expect(screen.getByText('最大输出长度无效')).toBeInTheDocument()
     expect(screen.getByText('请至少选择一种输入类型')).toBeInTheDocument()
