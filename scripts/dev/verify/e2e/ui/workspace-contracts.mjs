@@ -627,9 +627,21 @@ export async function runWorkspaceContractMatrix(ui) {
               'the covered root layer must stay hidden and inert',
             )
             await visibleLayer.locator('.bound-thread-view').waitFor({ state: 'visible', timeout: 15_000 })
+            await page.getByRole('button', { name: '回到父 agent', exact: true })
+              .waitFor({ state: 'visible', timeout: 10_000 })
+            // 子代理的默认 main 名称不进入面包屑；顶栏身份必须来自当前子代理，而非尚未卸下的根报告。
             await page.waitForFunction(
-              (name) => document.querySelector('[data-breadcrumb="branch"]')?.textContent?.trim() === name,
-              childSnapshot.thread.name,
+              ({ name, identity }) => {
+                const branch = document.querySelector('[data-breadcrumb="branch"]')
+                const childIdentity = document.querySelector('.workspace-view-identity')
+                return (name == null ? branch === null : branch?.textContent?.trim() === name)
+                  && childIdentity?.textContent?.trim() === identity
+                  && document.querySelector('[data-breadcrumb="session"]') === null
+              },
+              {
+                name: childSnapshot.thread.name === 'main' ? null : childSnapshot.thread.name,
+                identity: `${fixture.childAgent.name} · ${fixture.model.providerName}/${fixture.model.name}`,
+              },
               { timeout: 15_000 },
             )
             assert(page.url() === chatUrl, `child navigation must stay in the chat URL: ${page.url()}`)
