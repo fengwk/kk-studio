@@ -375,11 +375,11 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
             EnvironmentEvent.TYPE_DISCONNECTED),
         eventTypes(offline.recentEvents()));
     assertEquals(EnvironmentEvent.LEVEL_WARN, offline.recentEvents().get(3).level());
-    // 保留事实：断线不清空宿主 metadata、Skill 投影与事件窗口。
+    // 保留事实：断线不清空宿主 metadata、Skill 投影与事件窗口；历史 WARN 事件仍留在窗口内。
     assertNotNull(offline.daemonCapabilities());
     assertEquals(1, offline.skillState().size());
     assertEquals("/home/dev/skills/dev", offline.installedSkillRoot("dev", COMMIT).orElseThrow());
-    assertTrue(offline.lastAlert().isPresent());
+    assertTrue(offline.recentEvents().stream().anyMatch(EnvironmentEvent::isAlert));
   }
 
   /**

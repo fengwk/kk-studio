@@ -88,8 +88,6 @@ export interface EnvironmentCardDTO {
   timeZone?: string | null
   /** 节点备注/说明。 */
   note?: string | null
-  /** 最近一条 WARN/ERROR 运维事件；没有任何此类事件时为 null。 */
-  lastEvent?: EnvironmentEventDTO | null
   /** CAS 版本。 */
   version: CatalogVersion
   createTime: InstantTimestamp

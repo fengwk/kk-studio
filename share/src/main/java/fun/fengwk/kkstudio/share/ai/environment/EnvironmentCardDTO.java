@@ -52,9 +52,6 @@ public class EnvironmentCardDTO {
   /** 支持的原子能力列表。 */
   private List<LiveEnvironmentCapabilityDTO> capabilities;
 
-  /** 最近一条 WARN/ERROR 运维事件；没有任何此类事件时为 null。完整 200 条走 events 端点。 */
-  private EnvironmentEventDTO lastEvent;
-
   /** CAS 版本。 */
   private String version;
 
