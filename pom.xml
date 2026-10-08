@@ -5,7 +5,7 @@
 
     <groupId>fun.fengwk.kk-studio</groupId>
     <artifactId>kk-studio-parent</artifactId>
-    <version>1.0.8</version>
+    <version>1.0.9</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -23,7 +23,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>utf-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>utf-8</project.reporting.outputEncoding>
-        <kk-studio.version>1.0.8</kk-studio.version>
+        <kk-studio.version>1.0.9</kk-studio.version>
         <spring-boot.version>4.0.8</spring-boot.version>
         <mybatis-spring-boot-starter.version>4.0.1</mybatis-spring-boot-starter.version>
         <jackson.version>2.22.3</jackson.version>
