@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -46,6 +47,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -143,10 +147,25 @@ class PostgresqlSubagentContinuationTest {
     AcceptedCommands accepted =
         runtime.acceptCommandsAndJoin(resume, request, AcceptancePreflight.IDENTITY);
     assertEquals(2L, accepted.acceptedCommands().getFirst().sequence());
+    assertEquals(5L, accepted.acceptedCommands().getLast().sequence());
     ThreadSnapshot queued = snapshot(childId);
-    assertEquals(1, queued.queuedCommands().size());
-    ThreadCommand secondInput = queued.queuedCommands().getFirst();
-    assertEquals(ThreadCommandState.QUEUED, secondInput.state());
+    List<ThreadCommand> pendingBatch = queued.queuedCommands();
+    assertEquals(4, pendingBatch.size());
+    assertEquals(accepted.acceptedCommands(), pendingBatch);
+    assertEquals(
+        List.of(2L, 3L, 4L, 5L), pendingBatch.stream().map(ThreadCommand::sequence).toList());
+    BranchSettings settings = running.entryPath().baseSettings();
+    assertEquals(
+        List.of(
+            new SetAgentCommandPayload(settings.agentName()),
+            new SetModelCommandPayload(settings.model()),
+            new SetEnvironmentCommandPayload(settings.environmentName()),
+            new CustomMessageCommandPayload(AgentMessage.user("second task"))),
+        pendingBatch.stream().map(ThreadCommand::payload).toList());
+    for (ThreadCommand command : pendingBatch) {
+      assertEquals(ThreadCommandState.QUEUED, command.state());
+    }
+    ThreadCommand secondInput = pendingBatch.getLast();
     assertEquals(ThreadCommandType.CUSTOM_MESSAGE, secondInput.type());
     assertEquals(
         new CustomMessageCommandPayload(AgentMessage.user("second task")), secondInput.payload());
@@ -166,13 +185,14 @@ class PostgresqlSubagentContinuationTest {
     UUID earlyTerminal = firstFinal.thread().headEntryId();
     assertInstanceOf(TurnEndPayload.class, firstFinal.entryPath().head().payload());
     assertEquals(1L, firstFinal.thread().inputThroughSequence());
-    assertEquals(List.of(secondInput), firstFinal.queuedCommands());
+    assertEquals(pendingBatch, firstFinal.queuedCommands());
     assertUnmatchedWithoutReceipts(delegation, secondJoin);
 
     processNext(childId);
     ThreadSnapshot secondTurn = snapshot(childId);
     assertEquals(ThreadRuntimeStatus.MODEL_READY, secondTurn.runtimeStatus());
-    assertEquals(2L, secondTurn.thread().inputThroughSequence());
+    assertEquals(5L, secondTurn.thread().inputThroughSequence());
+    assertEquals(settings, secondTurn.entryPath().baseSettings());
     assertTrue(secondTurn.queuedCommands().isEmpty());
     assertNotEquals(running.model().id(), secondTurn.model().id());
     assertTrue(
@@ -193,7 +213,7 @@ class PostgresqlSubagentContinuationTest {
     assertTrue(first.matched());
     assertTrue(second.matched());
     assertEquals(1L, first.sourceCommandSequence());
-    assertEquals(2L, second.sourceCommandSequence());
+    assertEquals(5L, second.sourceCommandSequence());
     assertNotEquals(earlyTerminal, first.terminalEntryId());
     assertEquals(latest.thread().headEntryId(), first.terminalEntryId());
     assertEquals(first.terminalEntryId(), second.terminalEntryId());
@@ -319,10 +339,19 @@ class PostgresqlSubagentContinuationTest {
   }
 
   private AcceptCommandsCommand resume(UUID childId, NewThreadCommand prompt) {
-    ThreadState child = snapshot(childId).thread();
+    ThreadSnapshot snapshot = snapshot(childId);
+    ThreadState child = snapshot.thread();
+    BranchSettings settings = snapshot.entryPath().baseSettings();
+    // 与 SubagentTaskRunner.appendCommand 一致：无条件发送完整 SET_* 前缀，再追加任务输入。
     return new AcceptCommandsCommand(
         new AcceptCommandsTarget.Thread(childId, child.headEntryId(), child.nextCommandSequence()),
-        List.of(prompt));
+        List.of(
+            new NewThreadCommand(
+                new SetAgentCommandPayload(settings.agentName()), UUID.randomUUID()),
+            new NewThreadCommand(new SetModelCommandPayload(settings.model()), UUID.randomUUID()),
+            new NewThreadCommand(
+                new SetEnvironmentCommandPayload(settings.environmentName()), UUID.randomUUID()),
+            prompt));
   }
 
   private ThreadJoinRequest joinRequest(UUID invocation, UUID parentId) {
