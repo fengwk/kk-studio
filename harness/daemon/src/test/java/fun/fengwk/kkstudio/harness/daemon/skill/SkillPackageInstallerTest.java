@@ -13,12 +13,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** {@link SkillPackageInstaller} 的原子安装、回滚、自愈与安全隔离测试。 */
 class SkillPackageInstallerTest {
@@ -30,7 +33,6 @@ class SkillPackageInstallerTest {
 
   private Path remoteRepoDir;
   private Path skillsRoot;
-  private Path cacheRoot;
   private Path stagingRoot;
   private Path backupRoot;
   private SkillPackageInstaller installer;
@@ -39,10 +41,9 @@ class SkillPackageInstallerTest {
   void setUp() {
     remoteRepoDir = tempDir.resolve("remote-repo");
     skillsRoot = tempDir.resolve("skills");
-    cacheRoot = tempDir.resolve("cache");
     stagingRoot = tempDir.resolve("staging");
     backupRoot = tempDir.resolve("backup");
-    installer = new SkillPackageInstaller(skillsRoot, cacheRoot, stagingRoot, backupRoot, executor);
+    installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, executor);
   }
 
   @AfterEach
@@ -398,8 +399,141 @@ class SkillPackageInstallerTest {
       assertEquals("INVALID_BRANCH", error.code());
     }
 
-    // 确认 cacheRoot 没有生成任何文件
-    assertDirectoryEmpty(cacheRoot);
+    // 确认 staging 与 backup 没有生成任何文件
+    assertDirectoryEmpty(stagingRoot);
+    assertDirectoryEmpty(backupRoot);
+  }
+
+  /** 验证物化后 swap/原子替换失败时能够自动回滚并保留已有安装，staging 与 backup 均无残留。 */
+  @Test
+  void publishSwapFailurePreservesPreviousInstall() throws Exception {
+    String commit1Id;
+    String commit2Id;
+    try (Git git = Git.init().setDirectory(remoteRepoDir.toFile()).call()) {
+      Path skillDir = remoteRepoDir.resolve("swap-skill");
+      Files.createDirectories(skillDir);
+      Files.writeString(skillDir.resolve("SKILL.md"), "# Version 1\n");
+      git.add().addFilepattern(".").call();
+      commit1Id = git.commit().setMessage("v1").call().getId().name();
+
+      Files.writeString(skillDir.resolve("SKILL.md"), "# Version 2\n");
+      git.add().addFilepattern(".").call();
+      commit2Id = git.commit().setMessage("v2").call().getId().name();
+    }
+
+    String remoteUrl = remoteRepoDir.toUri().toString();
+    installer.install("swap-pkg", remoteUrl, "master", commit1Id);
+    Path pkgDir = skillsRoot.resolve("swap-pkg");
+    assertEquals("# Version 1\n", Files.readString(pkgDir.resolve("swap-skill/SKILL.md")));
+    assertEquals(commit1Id + "\n", Files.readString(pkgDir.resolve(".kkstudio-commit")));
+
+    // 构造一个在 staging -> packageDir 移动时模拟故障的 swapper
+    AtomicBoolean failSwap = new AtomicBoolean(true);
+    SkillPackageInstaller faultyInstaller =
+        new SkillPackageInstaller(
+            skillsRoot,
+            stagingRoot,
+            backupRoot,
+            1000,
+            1000,
+            executor,
+            (source, target) -> {
+              if (failSwap.get() && source.startsWith(stagingRoot) && target.equals(pkgDir)) {
+                throw new IOException("simulated atomic swap failure");
+              }
+              try {
+                Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+              } catch (AtomicMoveNotSupportedException error) {
+                Files.move(source, target);
+              }
+            });
+
+    SkillSyncException error =
+        assertThrows(
+            SkillSyncException.class,
+            () -> faultyInstaller.install("swap-pkg", remoteUrl, "master", commit2Id));
+    assertEquals("INSTALL_FAILED", error.code());
+
+    // 验证先前安装 byte-for-byte 得到回滚与保留
+    assertTrue(Files.exists(pkgDir.resolve("swap-skill/SKILL.md")));
+    assertEquals("# Version 1\n", Files.readString(pkgDir.resolve("swap-skill/SKILL.md")));
+    assertEquals(commit1Id + "\n", Files.readString(pkgDir.resolve(".kkstudio-commit")));
+
+    // 验证 staging 与 backup 无残留
+    assertDirectoryEmpty(stagingRoot);
+    assertDirectoryEmpty(backupRoot);
+  }
+
+  /** 验证认证失败被分类为 GIT_AUTHENTICATION_FAILED，保留已有安装，且错误信息与异常链不泄漏 URL 或凭据。 */
+  @Test
+  void authenticationFailureSurfacesCodedErrorWithoutEchoingSecretOrUrl() throws Exception {
+    String commitId;
+    try (Git git =
+        Git.init().setDirectory(remoteRepoDir.toFile()).setInitialBranch("main").call()) {
+      Path skillDir = remoteRepoDir.resolve("auth-skill");
+      Files.createDirectories(skillDir);
+      Files.writeString(skillDir.resolve("SKILL.md"), "# Auth Skill\n");
+      git.add().addFilepattern(".").call();
+      commitId = git.commit().setMessage("initial").call().name();
+    }
+
+    String remoteUrl = remoteRepoDir.toUri().toString();
+    installer.install("auth-pkg", remoteUrl, "main", commitId);
+    Path pkgDir = skillsRoot.resolve("auth-pkg");
+    assertTrue(Files.exists(pkgDir.resolve("auth-skill/SKILL.md")));
+
+    String secretCredential = "ghp_super_secret_token_1234567890";
+    try (LocalGitHttpServer server =
+        new LocalGitHttpServer(remoteRepoDir.resolve(".git"), commitId)) {
+      server.rejectUnauthorized = true;
+
+      SkillSyncException error =
+          assertThrows(
+              SkillSyncException.class,
+              () ->
+                  installer.install("auth-pkg", server.url(), "main", commitId, secretCredential));
+      assertEquals("GIT_AUTHENTICATION_FAILED", error.code());
+      assertFalse(error.getMessage().contains(secretCredential));
+      assertFalse(error.getMessage().contains(server.url()));
+
+      // 验证先前安装完好保留
+      assertTrue(Files.exists(pkgDir.resolve("auth-skill/SKILL.md")));
+      assertEquals("# Auth Skill\n", Files.readString(pkgDir.resolve("auth-skill/SKILL.md")));
+      assertEquals(commitId + "\n", Files.readString(pkgDir.resolve(".kkstudio-commit")));
+
+      assertDirectoryEmpty(stagingRoot);
+      assertDirectoryEmpty(backupRoot);
+    }
+  }
+
+  /** 验证携带有效凭据安装能物化预期的目录树与元数据。 */
+  @Test
+  void exactCommitInstallWithCredentialProducesExpectedTreeAndMetadata() throws Exception {
+    String commitId;
+    try (Git git = Git.init().setDirectory(remoteRepoDir.toFile()).call()) {
+      Path skillDir = remoteRepoDir.resolve("cred-skill");
+      Files.createDirectories(skillDir);
+      Files.writeString(skillDir.resolve("SKILL.md"), "# Credential Skill\n");
+      git.add().addFilepattern(".").call();
+      commitId = git.commit().setMessage("initial with cred").call().getId().name();
+    }
+
+    String remoteUrl = remoteRepoDir.toUri().toString();
+    InstalledSkillPackage installed =
+        installer.install("cred-package", remoteUrl, "master", commitId, "valid-access-token-123");
+
+    assertEquals("cred-package", installed.packageName());
+    assertEquals(commitId, installed.installedCommit());
+    Path expectedPackageRoot = skillsRoot.resolve("cred-package");
+    assertEquals(expectedPackageRoot.toString(), installed.localPath());
+
+    Path skillFile = expectedPackageRoot.resolve("cred-skill/SKILL.md");
+    assertTrue(Files.isRegularFile(skillFile));
+    assertEquals("# Credential Skill\n", Files.readString(skillFile));
+
+    Path commitFile = expectedPackageRoot.resolve(".kkstudio-commit");
+    assertTrue(Files.isRegularFile(commitFile));
+    assertEquals(commitId + "\n", Files.readString(commitFile));
   }
 
   private static void assertDirectoryEmpty(Path dir) {

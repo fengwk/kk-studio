@@ -342,7 +342,7 @@ class PlatformReadToolExecutorTest {
     assertFalse(captor.getValue().error());
     assertTrue(firstText(captor.getValue()).contains("1|exact-file"));
     assertFalse(firstText(captor.getValue()).contains("1|root"));
-    verify(gitCache).ensureCommit("pkg", "https://example.com/repo.git", "c1");
+    verify(gitCache).ensureCommit("pkg", "https://example.com/repo.git", "c1", null);
     verify(gitCache).readFile("pkg", "c1", "dev/" + relativePath);
     verifyNoMoreInteractions(gitCache);
   }

@@ -65,7 +65,8 @@ public class ConfigSyncApplier {
           skill.repositoryUrl(),
           skill.branch(),
           skill.currentCommit(),
-          skill.manifest());
+          skill.manifest(),
+          skill.token());
     }
     for (ConfigSyncPlan.McpImport mcp : plan.mcpServers()) {
       mcpServerService.importServer(

@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.sun.net.httpserver.HttpServer;
-import org.eclipse.jgit.api.errors.RefNotAdvertisedException;
 import org.eclipse.jgit.transport.Transport;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.transport.http.HttpConnection;
@@ -17,7 +16,6 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InterruptedIOException;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -91,7 +89,7 @@ class GitHttpConnectionFactoryTest {
     }
   }
 
-  /** 意图：连接与读取失败有稳定、不同的分类并释放连接；超时绝不能进入 exact commit 回退。 */
+  /** 意图：连接与读取失败有稳定、不同的分类并释放连接；超时是终态，绝不重试。 */
   @Test
   void classifiesFailuresAndNeverRetriesTimeouts() throws Exception {
     HttpURLConnection raw = mock(HttpURLConnection.class);
@@ -101,7 +99,6 @@ class GitHttpConnectionFactoryTest {
       doThrow(new SocketTimeoutException("connect")).when(raw).connect();
       IOException connect = assertThrows(IOException.class, connection::getResponseCode);
       assertEquals("GIT_CONNECT_TIMEOUT", GitHttpConnectionFactory.failureCode(connect));
-      assertFalse(GitHttpConnectionFactory.canFallback(connect));
       doNothing().when(raw).connect();
       when(raw.getResponseCode()).thenThrow(new SocketTimeoutException("headers"));
       IOException headers = assertThrows(IOException.class, connection::getResponseCode);
@@ -124,16 +121,6 @@ class GitHttpConnectionFactoryTest {
         assertThrows(SocketTimeoutException.class, () -> input.read(new byte[8]));
       }
       verify(raw, atLeast(6)).disconnect();
-      assertTrue(GitHttpConnectionFactory.canFallback(new RefNotAdvertisedException("exact")));
-      assertTrue(GitHttpConnectionFactory.canFallback(new IOException("not our ref")));
-      assertTrue(GitHttpConnectionFactory.canFallback(new IOException("unadvertised object")));
-      assertTrue(
-          GitHttpConnectionFactory.canFallback(
-              new IOException("want " + "a".repeat(40) + " not valid")));
-      assertFalse(GitHttpConnectionFactory.canFallback(new IOException("authentication failed")));
-      assertFalse(
-          GitHttpConnectionFactory.canFallback(
-              new IOException("not our ref", new InterruptedIOException("cancelled"))));
       assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(new IOException()));
       assertEquals(
           "UNSUPPORTED_REPOSITORY_SCHEME",

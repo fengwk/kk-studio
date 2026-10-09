@@ -28,6 +28,7 @@ final class LocalGitHttpServer implements AutoCloseable {
   private final CountDownLatch release = new CountDownLatch(1);
   volatile boolean stall;
   volatile boolean slow;
+  volatile boolean rejectUnauthorized;
 
   LocalGitHttpServer(Path gitDirectory, String commit) throws IOException {
     this.gitDirectory = gitDirectory;
@@ -44,6 +45,12 @@ final class LocalGitHttpServer implements AutoCloseable {
 
   private void serve(HttpExchange exchange) throws IOException {
     requests.incrementAndGet();
+    if (rejectUnauthorized) {
+      exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=\"git\"");
+      exchange.sendResponseHeaders(401, -1);
+      exchange.close();
+      return;
+    }
     String path = exchange.getRequestURI().getPath();
     byte[] body;
     if (path.equals("/info/refs")) {

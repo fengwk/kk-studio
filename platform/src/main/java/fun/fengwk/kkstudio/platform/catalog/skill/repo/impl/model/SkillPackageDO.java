@@ -20,6 +20,9 @@ public class SkillPackageDO {
   /** {@code skills} jsonb 列的文本形式（JSON array，元素为 {@code {name, description}}）。 */
   private String skillsJson;
 
+  /** {@code encrypted_token} 列的 AES-GCM 密文；null 表示匿名访问。 */
+  private byte[] encryptedToken;
+
   private Long version;
   private Instant createTime;
   private Instant updateTime;

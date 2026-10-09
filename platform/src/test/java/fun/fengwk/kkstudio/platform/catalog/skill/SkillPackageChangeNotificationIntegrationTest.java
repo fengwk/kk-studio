@@ -146,7 +146,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
   /** 外层 NOT_SUPPORTED + 内层 REQUIRES_NEW：Create 的通知必须落在内层实际写事务内并在提交后投递。 */
   @Test
   void createPackagePublishesInsideInnerRequiresNewTransaction() throws Exception {
-    when(skillGitCache.resolveBranchHead(REPOSITORY_URL, "main")).thenReturn(COMMIT);
+    when(skillGitCache.resolveBranchHead(REPOSITORY_URL, "main", null)).thenReturn(COMMIT);
     when(skillGitCache.scanManifest(PACKAGE, COMMIT))
         .thenReturn(List.of(new SkillManifestEntry("dev", "developer skill")));
 

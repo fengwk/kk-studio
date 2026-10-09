@@ -291,17 +291,18 @@ public final class ConfigSyncParser {
     String repositoryUrl = entry.reqString("repositoryUrl");
     String branch = entry.reqString("branch");
     String currentCommit = entry.reqString("currentCommit");
-    // 唯一业务校验入口：SkillCatalogService.validateImport 同时校验 canonical 包名、描述、URL、branch 与 commit。
+    String token = entry.optString("token");
+    // 唯一业务校验入口：SkillCatalogService.validateImport 同时校验 canonical 包名、描述、URL、branch、commit 与令牌。
     validateEntry(
         ConfigSyncKind.SKILL_PACKAGES,
         packageName,
         () ->
             skillCatalogService.validateImport(
-                packageName, description, repositoryUrl, branch, currentCommit));
+                packageName, description, repositoryUrl, branch, currentCommit, token));
     if (skipUnknown(entry, ConfigSyncKind.SKILL_PACKAGES, packageName, skipped)) {
       return null;
     }
-    return new SkillSpec(packageName, description, repositoryUrl, branch, currentCommit);
+    return new SkillSpec(packageName, description, repositoryUrl, branch, currentCommit, token);
   }
 
   private EnvironmentSpec parseEnvironment(
@@ -462,7 +463,8 @@ public final class ConfigSyncParser {
       String description,
       String repositoryUrl,
       String branch,
-      String currentCommit) {}
+      String currentCommit,
+      String token) {}
 
   public record EnvironmentSpec(
       String name, String registrationToken, EnvironmentInstallConfigDTO installConfig) {}

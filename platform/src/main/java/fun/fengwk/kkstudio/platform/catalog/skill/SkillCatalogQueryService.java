@@ -18,9 +18,11 @@ import java.util.Objects;
 public class SkillCatalogQueryService {
 
   private final SkillPackageRepository repository;
+  private final SkillTokenCipher tokenCipher;
 
-  public SkillCatalogQueryService(SkillPackageRepository repository) {
+  public SkillCatalogQueryService(SkillPackageRepository repository, SkillTokenCipher tokenCipher) {
     this.repository = Objects.requireNonNull(repository, "repository");
+    this.tokenCipher = Objects.requireNonNull(tokenCipher, "tokenCipher");
   }
 
   /** 按 {@code package_name asc} 列出全部 Package。 */
@@ -46,5 +48,17 @@ public class SkillCatalogQueryService {
       return null;
     }
     return repository.lockPackageForShare(packageName);
+  }
+
+  /**
+   * 解析 Package 已配置的私有仓库访问令牌明文，供 Git 鉴权与受信任通道使用；未配置时返回 null。
+   *
+   * <p>这不是对外投影的一部分：REST 读取只暴露 {@code hasToken}。明文只在内存中短暂存在，调用方不得写入日志、Prompt 或模型上下文。
+   */
+  public String resolveAccessToken(SkillPackage skillPackage) {
+    if (skillPackage == null || skillPackage.getEncryptedToken() == null) {
+      return null;
+    }
+    return tokenCipher.decrypt(skillPackage.getPackageName(), skillPackage.getEncryptedToken());
   }
 }

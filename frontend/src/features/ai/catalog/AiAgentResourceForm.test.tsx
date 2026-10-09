@@ -54,6 +54,7 @@ function skillPackage(
     description: null,
     repositoryUrl: 'https://example.com/repo.git',
     branch: 'main',
+    hasToken: false,
     currentCommit: '1111111111111111111111111111111111111111',
     observedHeadCommit: null,
     headCheckedAt: null,
