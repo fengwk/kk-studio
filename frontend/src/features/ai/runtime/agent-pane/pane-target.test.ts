@@ -6,6 +6,8 @@ import {
   isBoundPendingMessageValue,
   isBoundTarget,
   isCommandContent,
+  isDraftHistoryTarget,
+  isForkSessionTarget,
   isImageTier,
   isNewThreadTarget,
   isNewSessionTarget,
@@ -52,6 +54,12 @@ describe('PaneTarget durable-local FSM', () => {
       startEntryId: 'e1',
       threadName: 'branch-1',
     })).toBe(true)
+    expect(isPaneTarget({
+      kind: 'FORK_SESSION_DRAFT',
+      sessionId: 's1',
+      sourceThreadId: 't-source',
+      startEntryId: 'e1',
+    })).toBe(true)
     expect(isPaneTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
     expect(isPaneTarget({ kind: 'unknown' })).toBe(false)
     expect(normalizePaneTarget(null)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
@@ -66,6 +74,17 @@ describe('PaneTarget durable-local FSM', () => {
       startEntryId: 'e1',
       threadName: 'branch-1',
     })
+    expect(normalizePaneTarget({
+      kind: 'FORK_SESSION_DRAFT',
+      sessionId: ' s1 ',
+      sourceThreadId: ' t-source ',
+      startEntryId: ' e1 ',
+    })).toEqual({
+      kind: 'FORK_SESSION_DRAFT',
+      sessionId: 's1',
+      sourceThreadId: 't-source',
+      startEntryId: 'e1',
+    })
     expect(normalizePaneTarget({ kind: 'BOUND_THREAD', threadId: '' }))
       .toEqual({ kind: 'NEW_SESSION_DRAFT' })
     expect(isNewSessionTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
@@ -75,6 +94,25 @@ describe('PaneTarget durable-local FSM', () => {
       startEntryId: 'e1',
       threadName: 'branch-1',
     })).toBe(true)
+    expect(isForkSessionTarget({
+      kind: 'FORK_SESSION_DRAFT',
+      sessionId: 's1',
+      sourceThreadId: 't-source',
+      startEntryId: 'e1',
+    })).toBe(true)
+    expect(isDraftHistoryTarget({
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 's1',
+      startEntryId: 'e1',
+      threadName: 'branch-1',
+    })).toBe(true)
+    expect(isDraftHistoryTarget({
+      kind: 'FORK_SESSION_DRAFT',
+      sessionId: 's1',
+      sourceThreadId: 't-source',
+      startEntryId: 'e1',
+    })).toBe(true)
+    expect(isDraftHistoryTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(false)
     expect(isBoundTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
   })
 
@@ -90,6 +128,9 @@ describe('PaneTarget durable-local FSM', () => {
       { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: '  spaced  ' },
       { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: 'x'.repeat(257) },
       { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: 'ok', name: 'hidden' },
+      { kind: 'FORK_SESSION_DRAFT', sessionId: 's1', startEntryId: 'e1' },
+      { kind: 'FORK_SESSION_DRAFT', sessionId: 's1', sourceThreadId: '', startEntryId: 'e1' },
+      { kind: 'FORK_SESSION_DRAFT', sessionId: 's1', sourceThreadId: 't1', startEntryId: 'e1', threadName: 'forbidden' },
       { kind: 'BOUND_THREAD', threadId: 't1', name: 'hidden' },
       { kind: 'BOUND_THREAD', threadId: 't1', sessionName: 'hidden' },
       { kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e1' },
@@ -110,6 +151,15 @@ describe('PaneTarget durable-local FSM', () => {
     // 同一个 start entry 但不同名称是不同的本地草稿目标。
     expect(samePaneTarget(draft, { ...draft, threadName: 'branch-2' })).toBe(false)
     expect(targetIdentity(draft)).toBe('thread-draft:s1:e1:branch-1')
+    const forkDraft: PaneTarget = {
+      kind: 'FORK_SESSION_DRAFT',
+      sessionId: 's1',
+      sourceThreadId: 't-source',
+      startEntryId: 'e1',
+    }
+    expect(samePaneTarget(forkDraft, { ...forkDraft })).toBe(true)
+    expect(samePaneTarget(forkDraft, { ...forkDraft, startEntryId: 'e2' })).toBe(false)
+    expect(targetIdentity(forkDraft)).toBe('fork-session-draft:s1:t-source:e1')
   })
 
   it('persists only target, while PendingAcceptance remains a separate sidecar', () => {
@@ -169,6 +219,45 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     clearPaneTarget(owner, 'pane-1', storage)
     expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
+
+    const forkPending: PendingAcceptance = {
+      ...pending,
+      target: {
+        kind: 'FORK_SESSION_DRAFT',
+        sessionId: 'source-session',
+        sourceThreadId: 'source-thread',
+        startEntryId: 'cut-entry',
+      },
+      request: {
+        owner,
+        target: {
+          type: 'NEW_FORKED_SESSION',
+          sourceThreadId: 'source-thread',
+          startEntryId: 'cut-entry',
+          sessionId: 'forked-session',
+          threadId: 'forked-thread',
+          yoloEnabled: false,
+        },
+        commands: pending.request.commands,
+      },
+    }
+    savePendingAcceptance(owner, 'pane-1', forkPending, storage)
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toEqual(forkPending)
+    // NEW_FORKED_SESSION 绝不接受 rootSettings 或 threadName 等越界字段。
+    storage.setItem(
+      'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1',
+      JSON.stringify({
+        ...forkPending,
+        request: {
+          ...forkPending.request,
+          target: {
+            ...forkPending.request.target,
+            threadName: 'forbidden',
+          },
+        },
+      }),
+    )
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
   })
 
   it('isolates ISSUE_AGENT target storage by issue and agent', () => {

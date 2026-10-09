@@ -137,6 +137,44 @@ describe('AgentPane acceptance pipeline', () => {
       threadName: 'branch-1',
     })
 
+    // 会话 fork（FORK_SESSION_DRAFT -> NEW_FORKED_SESSION）：携带来源执行根与切点，
+    // 预分配客户端新 sessionId/threadId 以支撑未知结果重试幂等，且不携带 rootSettings / threadName。
+    let forkIdIndex = 0
+    const forked = buildAcceptanceRequest({
+      owner: { type: 'CHAT', chatId: 'chat-1' },
+      target: {
+        kind: 'FORK_SESSION_DRAFT',
+        sessionId: 'source-session',
+        sourceThreadId: 'source-thread-1',
+        startEntryId: 'cut-entry-1',
+      },
+      draft,
+      base: baseDraft,
+      parts: [createTextPart('fork into new session')],
+      createId: () => `fork-id-${forkIdIndex++}`,
+    })
+    expect(forked.request.owner).toEqual({ type: 'CHAT', chatId: 'chat-1' })
+    expect(forked.request.target).toMatchObject({
+      type: 'NEW_FORKED_SESSION',
+      sourceThreadId: 'source-thread-1',
+      startEntryId: 'cut-entry-1',
+      sessionId: expect.any(String),
+      threadId: expect.any(String),
+      yoloEnabled: true,
+    })
+    expect(Object.keys(forked.request.target).sort()).toEqual([
+      'sessionId',
+      'sourceThreadId',
+      'startEntryId',
+      'threadId',
+      'type',
+      'yoloEnabled',
+    ])
+    expect(forked.request.commands.map((command) => command.type)).toEqual([
+      'SET_AGENT',
+      'USER_MESSAGE',
+    ])
+
     // 既有 Thread 不再伪造创建批次，必须走无 owner/target 的 thread command batch 契约。
     expect(() => buildAcceptanceRequest({
       owner: { type: 'CHAT', chatId: 'chat-1' },
@@ -281,10 +319,11 @@ describe('AgentPane acceptance pipeline', () => {
     expect(restored).not.toBe(baseDraft)
   })
 
-  it('projects one command matrix for Chat and Canvas across all three targets', () => {
+  it('projects one command matrix for Chat and Canvas across all four targets', () => {
     const expected = {
       NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts'],
       NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'rename-session', 'rename-thread', 'goal'],
+      FORK_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'goal'],
       BOUND_THREAD: THREAD_COMMANDS.map((command) => command.id),
     } as const
     for (const kind of Object.keys(expected) as Array<keyof typeof expected>) {
@@ -292,7 +331,9 @@ describe('AgentPane acceptance pipeline', () => {
         ? { kind }
         : kind === 'NEW_THREAD_DRAFT'
           ? { kind, sessionId: 's1', startEntryId: 'e1', threadName: 'branch-1' }
-          : { kind, threadId: thread.threadId }
+          : kind === 'FORK_SESSION_DRAFT'
+            ? { kind, sessionId: 's1', sourceThreadId: 't1', startEntryId: 'e1' }
+            : { kind, threadId: thread.threadId }
       const commands = threadCommandsForTarget(target)
       expect(commands.filter((command) => !command.disabled).map((command) => command.id))
         .toEqual(expected[kind])

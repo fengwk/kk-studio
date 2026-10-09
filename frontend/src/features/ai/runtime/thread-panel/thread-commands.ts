@@ -87,6 +87,20 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'rename-thread',
     'goal',
   ],
+  // 会话 fork 草稿：新 Session/Thread 尚未创建，也没有用户可见名称，因此不提供任何重命名；
+  // 其余草稿能力（设置、历史、预览、Goal）与新建 Thread 分支保持一致。
+  FORK_SESSION_DRAFT: [
+    'thread',
+    'agent',
+    'yolo',
+    'models',
+    'history',
+    'new',
+    'upload',
+    'debug',
+    'shortcuts',
+    'goal',
+  ],
   BOUND_THREAD: THREAD_COMMANDS.map((item) => item.id),
 }
 

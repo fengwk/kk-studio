@@ -47,6 +47,7 @@ describe('visible thread presentation', () => {
     expect(paneTargetViewKey({ kind: 'NEW_SESSION_DRAFT' })).toBe('')
     expect(paneTargetViewKey({ kind: 'BOUND_THREAD', threadId: 'child' })).toBe('thread:child')
     expect(paneTargetViewKey({ kind: 'NEW_THREAD_DRAFT', sessionId: 's', startEntryId: 'e', threadName: 'n' })).toBe('branch:s:e:n')
+    expect(paneTargetViewKey({ kind: 'FORK_SESSION_DRAFT', sessionId: 's', sourceThreadId: 't', startEntryId: 'e' })).toBe('fork-session:s:t:e')
   })
 
   it('only reports real matching model reasoning effort, never the variant id', () => {

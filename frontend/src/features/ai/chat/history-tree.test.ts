@@ -258,4 +258,18 @@ describe('History tree search', () => {
     expect(rows[0]!.preview).not.toBe('')
     expect(rows[0]!.searchText).toBe('')
   })
+
+  it('exposes FORK entries with the fixed English notice preview while keeping them non-forkable', () => {
+    const rows = buildHistoryTree([
+      entry('root', 'ROOT'),
+      entry('fork-1', 'FORK', {
+        parentEntryId: 'root',
+        payload: { mode: 'BRANCH', sourceEntryId: 'root', sourceThreadId: null },
+      }),
+    ])
+    const forkRow = rows[1]!
+    expect(forkRow.canFork).toBe(false)
+    expect(forkRow.preview).toContain('This thread was forked.')
+    expect(historyRowMatches(forkRow, historySearchTokens('forked subagent'))).toBe(true)
+  })
 })

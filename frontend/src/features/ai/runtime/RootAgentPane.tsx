@@ -197,7 +197,11 @@ export function RootAgentPane({
           error: pane.draftHistoryError,
           errorText: pane.draftHistoryErrorText,
           onRetry: pane.retryDraftHistory,
-          emptyText: pane.target.kind === 'NEW_THREAD_DRAFT' && pane.draftAtRoot ? t('ai.chat.branch.draftEmpty') : undefined,
+          emptyText: pane.target.kind === 'NEW_THREAD_DRAFT' && pane.draftAtRoot
+            ? t('ai.chat.branch.draftEmpty')
+            : pane.target.kind === 'FORK_SESSION_DRAFT' && pane.draftAtRoot
+              ? t('ai.chat.branch.forkSessionDraftEmpty')
+              : undefined,
           initialScrollTop: pane.boundViews.initialConversationScrollTop,
         }}
         mainView={pane.boundViews.mainView}
@@ -377,7 +381,7 @@ export function RootAgentPane({
           headEntryId={
             pane.target.kind === 'BOUND_THREAD'
               ? pane.controller.thread?.headEntryId ?? null
-              : pane.target.kind === 'NEW_THREAD_DRAFT'
+              : pane.target.kind === 'NEW_THREAD_DRAFT' || pane.target.kind === 'FORK_SESSION_DRAFT'
                 ? pane.target.startEntryId
                 : null
           }
@@ -385,6 +389,7 @@ export function RootAgentPane({
           queryError={pane.treeEntriesError}
           onClose={pane.closeInteraction}
           onFork={pane.requestBranchFromEntry}
+          onForkSession={pane.canForkSession ? pane.requestSessionForkFromEntry : undefined}
         />
       )
     }

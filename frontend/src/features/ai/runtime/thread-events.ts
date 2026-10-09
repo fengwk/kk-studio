@@ -41,6 +41,7 @@ export type ThreadEventKind =
   | 'TOOL_CALL'
   | 'TOOL_RESULT'
   | 'NOTIFICATION'
+  | 'FORK'
   | 'MODEL_ATTEMPT_FAILURE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
@@ -549,6 +550,30 @@ function projectEntryRecord(
               label: translate('ai.runtime.notification.entry.source'),
               value: getString(payload.sourceThreadId),
             }]
+            : []),
+        ], entry.createTime),
+      }
+    }
+    case 'FORK': {
+      const mode = getString(payload.mode)
+      const sourceEntryId = getString(payload.sourceEntryId)
+      const sourceThreadId = getString(payload.sourceThreadId)
+      return {
+        ...base,
+        kind: 'FORK',
+        status: 'completed',
+        title: kindTitle('FORK'),
+        summary: [mode, sourceEntryId].filter(Boolean).join(' · '),
+        details: withTime([
+          ...base.details,
+          ...(mode
+            ? [{ label: translate('ai.runtime.event.detail.forkMode'), value: mode }]
+            : []),
+          ...(sourceEntryId
+            ? [{ label: translate('ai.runtime.event.detail.sourceEntryId'), value: sourceEntryId }]
+            : []),
+          ...(sourceThreadId
+            ? [{ label: translate('ai.runtime.notification.entry.source'), value: sourceThreadId }]
             : []),
         ], entry.createTime),
       }

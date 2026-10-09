@@ -18,6 +18,7 @@ export type EntryEventKind =
   | 'settings_change'
   | 'invalid_settings'
   | 'notification'
+  | 'fork'
   | 'compaction'
   | 'empty_message'
   | 'unsupported_message'
@@ -196,6 +197,16 @@ export interface EntryNotification {
 }
 
 /**
+ * FORK Entry 的来源事实：mode 为 BRANCH 或 SESSION，sourceEntryId 为切点 Entry，
+ * sourceThreadId 仅在 SESSION fork 时非 null。
+ */
+export interface EntryFork {
+  mode: string
+  sourceEntryId: string | null
+  sourceThreadId: string | null
+}
+
+/**
  * 持久 Entry 的独立投影，其语义并非对话回合。
  *
  * 让该形态独立于 Harness DTO，可被任何能提供稳定 timeline 契约的调用方复用 transcript。
@@ -207,6 +218,8 @@ export interface EntryEventDialogueMessage extends BaseDialogueMessage {
   text: string
   /** 仅 NOTIFICATION Entry 携带的 kind 与来源；原始 payload 不再进入会话时间线。 */
   notification?: EntryNotification
+  /** 仅 FORK Entry 携带的真实来源事实。 */
+  fork?: EntryFork
 }
 
 export type DialogueMessage =
