@@ -16,6 +16,7 @@ import {
 import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
 import {
   projectEmptyMessageEntry,
+  projectForkEntry,
   projectInvalidSettings,
   projectRootSettings,
   projectSettingsChanges,
@@ -146,6 +147,10 @@ export function projectDurableEntry(
   }
   if (entryType === 'NOTIFICATION') {
     messages.push(projectNotificationEntry(entry, payload))
+    return
+  }
+  if (entryType === 'FORK') {
+    messages.push(projectForkEntry(entry, payload))
     return
   }
   if (entryType !== 'MESSAGE' && entryType !== 'CUSTOM_MESSAGE') {

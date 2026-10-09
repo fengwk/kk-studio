@@ -25,7 +25,7 @@ import type {
 
 /**
  * Harness runtime 客户端调用统一收敛：
- * - POST /harness/command-batches（仅 NEW_SESSION / NEW_THREAD 创建）
+ * - POST /harness/command-batches（NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 创建）
  * - POST /harness/threads/{id}/command-batches（既有 Thread 的通用写入口）
  * - GET /harness/sessions/{id}/threads
  * - GET /harness/sessions/{id}/entries
