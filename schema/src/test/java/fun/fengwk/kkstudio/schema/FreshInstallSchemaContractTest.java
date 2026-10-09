@@ -40,7 +40,8 @@ import java.util.regex.Pattern;
  *   <li>public schema 的表集合恰好是保留的共享表加 16 张目标业务表，旧业务对象、旧函数、旧触发器与任何 sequence 都不存在；
  *   <li>共享（Harness/Catalog/Chat/Environment/Storage/Settings）表的列、约束、索引与触发器与生成并提交的快照一致，即重写 V1
  *       只带入了声明的共享表变更（Harness Thread 复合唯一键、ToolInvocation WAITING_INPUT/input_receipt/pending 索引、
- *       chat.archived_at 与 chat_session 关联）；
+ *       chat.archived_at 与 chat_session 关联、ThreadJoin purpose/superseded
+ *       契约、skill_package.encrypted_token 以及新增的 environment_update_operation 表）；
  *   <li>SQL 探针（{@code fresh-install-probes.sql}）逐条验证目标约束与非法写入的拒绝路径。
  * </ul>
  *
@@ -60,7 +61,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 167;
+  private static final int PROBE_ASSERTION_COUNT = 181;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -77,6 +78,7 @@ class FreshInstallSchemaContractTest {
           "chat",
           "environment",
           "environment_connection",
+          "environment_update_operation",
           "harness_entry",
           "harness_model_invocation",
           "harness_session",
@@ -201,13 +203,20 @@ class FreshInstallSchemaContractTest {
           "harness_thread.uk_harness_thread_session",
           "harness_thread_command.applied_entry_id",
           "harness_thread_join.ck_harness_thread_join_final_answer",
+          "harness_thread_join.ck_harness_thread_join_purpose",
+          "harness_thread_join.ck_harness_thread_join_superseded",
           "harness_thread_join.fk_harness_thread_join_source_command",
+          "harness_thread_join.fk_harness_thread_join_superseded_by",
           "harness_thread_join.idx_harness_thread_join_child_pending",
           "harness_thread_join.idx_harness_thread_join_parent_pending",
+          "harness_thread_join.purpose",
+          "harness_thread_join.superseded_by_invocation_id",
           "harness_tool_invocation.input_receipt",
           "harness_tool_invocation.ck_harness_tool_input_receipt",
           "harness_tool_invocation.ck_harness_tool_waiting_input",
-          "harness_tool_invocation.idx_harness_tool_invocation_pending");
+          "harness_tool_invocation.idx_harness_tool_invocation_pending",
+          "skill_package.ck_skill_package_encrypted_token",
+          "skill_package.encrypted_token");
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =
