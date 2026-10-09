@@ -11,8 +11,9 @@ from pathlib import Path
 
 CODING_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.coding."
 PROCESS_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.process."
+TERMINAL_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.terminal."
 
-# 进程基座类已经整体迁到 daemon.process；其余被选中的类仍在 daemon.coding。
+# 进程基座类已经整体迁到 daemon.process；终端内核与 launch 规格在 daemon.terminal；其余被选中的类仍在 daemon.coding。
 PROCESS_PACKAGE_CLASSES = frozenset(
     {
         "ProcessScopeTest",
@@ -29,10 +30,66 @@ PROCESS_PACKAGE_CLASSES = frozenset(
     }
 )
 
+TERMINAL_PACKAGE_CLASSES = frozenset(
+    {
+        "TerminalKernelTest",
+        "TerminalKernelSchedulingTest",
+        "TerminalSnapshotProjectorTest",
+        "HeadlessTerminalDisplayTest",
+        "TerminalLaunchSpecTest",
+    }
+)
+
 
 def package_of(class_name: str) -> str:
-    return PROCESS_PACKAGE if class_name in PROCESS_PACKAGE_CLASSES else CODING_PACKAGE
+    if class_name in PROCESS_PACKAGE_CLASSES:
+        return PROCESS_PACKAGE
+    if class_name in TERMINAL_PACKAGE_CLASSES:
+        return TERMINAL_PACKAGE
+    return CODING_PACKAGE
 
+
+# 终端基座的核心验收：单 owner JediTerm 内核的调度/预算/满队列/关闭、数值投影与按宿主 OS 解析的 launch 规格都是纯逻辑
+# 或注入宿主 OS 的确定性用例，没有平台前置条件，因此三平台都必须真跑且不得跳过。
+TERMINAL_KERNEL_REQUIRED_CASES = {
+    # 数值投影与模式版本：槽位拓扑、模式变更与 resize 碰撞都必须落到确定结果。
+    "asciiProjectsNumericSlotsAndPaddedEmptyTail",
+    "inputModesAndRevisionTrackOnlyModeOrSizeChanges",
+    "resizingHashCollisionDimensionsStillAdvancesRevision",
+}
+
+TERMINAL_KERNEL_SCHEDULING_REQUIRED_CASES = {
+    # 分块 CSI/OSC 与 UTF-8 尾部跨快照/resize 边界不能被截断。
+    "snapshotBeforePartialCsiSuffixThenSuffixStillApplies",
+    "snapshotCompletesBeforePartialOscSuffix",
+    "utf8TrailingBytesSurviveControlAndResizeBoundaries",
+    # 满队列、读预算与关闭路径都必须显式失败或收敛，不能静默丢弃。
+    "fullEventQueueRejectsExplicitly",
+    "readBudgetOverrunFailsExplicitlyIncludingSynchronizedOutput",
+    "closeOnEmptyReadTerminatesAndKeepsExecutorOwnedByCaller",
+}
+
+TERMINAL_PROJECTOR_REQUIRED_CASES = {
+    # 数值投影的拓扑、样式与每个公开显示模式都必须逐项投影，不重命名不丢值。
+    "styledNulStaysUnitAndMissingTailIsDefaultEmpty",
+    "loneSurrogateIsPreservedAsNumericUnit",
+    "dwcContinuationAndOverflowTruncationAreExplicit",
+    "styleProjectionMapsColorsOptionsAndNull",
+    "everyPublicDisplayModeProjectsWithoutRenamingOrDroppingValues",
+}
+
+HEADLESS_DISPLAY_REQUIRED_CASES = {
+    # headless Display 必须记录显示状态并忽略 GUI 操作。
+    "recordsDisplayStateAndIgnoresHeadlessOperations",
+}
+
+TERMINAL_LAUNCH_REQUIRED_CASES = {
+    # launch 规格解析：显式值优先、默认 shell 只选一次、失败关闭且不泄露命令或 argv。
+    "resolvesExplicitSpecAndPreservesArgvExactly",
+    "unixDefaultsToResolvableShellThenSh",
+    "unresolvedExecutableFailsClosedWithoutEchoingCommand",
+    "windowsSelectsFirstResolvableShellWithoutRuntimeFallback",
+}
 
 # 核心验收：只用 JDK 夹具造真实进程层级，任何平台都没有跳过它们的理由。
 REQUIRED_CASES = {
@@ -45,6 +102,11 @@ REQUIRED_CASES = {
         "duplexStdioCarriesInputAndKeepsStderrSeparate",
         "duplexStdioConvergesLiveChildrenAfterNaturalExit",
     },
+    TERMINAL_PACKAGE + "TerminalKernelTest": TERMINAL_KERNEL_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "TerminalKernelSchedulingTest": TERMINAL_KERNEL_SCHEDULING_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "TerminalSnapshotProjectorTest": TERMINAL_PROJECTOR_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "HeadlessTerminalDisplayTest": HEADLESS_DISPLAY_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "TerminalLaunchSpecTest": TERMINAL_LAUNCH_REQUIRED_CASES,
 }
 
 # Windows 腿仍然要有「用真正的 Git Bash 跑通命令执行」的实证：BashCapabilityTest 自己显式定位 Git Bash（runner 上就是
@@ -124,6 +186,11 @@ SELECTED_CLASSES = (
     "CodingCapabilitiesEdgeTest",
     "WindowsCommandLineTest",
     "WindowsJobScopeTest",
+    "TerminalKernelTest",
+    "TerminalKernelSchedulingTest",
+    "TerminalSnapshotProjectorTest",
+    "HeadlessTerminalDisplayTest",
+    "TerminalLaunchSpecTest",
 )
 
 

@@ -13,7 +13,8 @@ from pathlib import Path
 
 PACKAGE = "fun.fengwk.kkstudio.harness.daemon.coding"
 PROCESS_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.process"
-# 进程基座类已经整体迁到 daemon.process；其余被选中的类仍在 daemon.coding。
+TERMINAL_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.terminal"
+# 进程基座类已经整体迁到 daemon.process；终端内核与 launch 规格在 daemon.terminal；其余被选中的类仍在 daemon.coding。
 PROCESS_CLASSES = frozenset(
     {
         "ProcessScopeTest",
@@ -29,10 +30,23 @@ PROCESS_CLASSES = frozenset(
         "WindowsJobScopeTest",
     }
 )
+TERMINAL_CLASSES = frozenset(
+    {
+        "TerminalKernelTest",
+        "TerminalKernelSchedulingTest",
+        "TerminalSnapshotProjectorTest",
+        "HeadlessTerminalDisplayTest",
+        "TerminalLaunchSpecTest",
+    }
+)
 
 
 def package_of(class_name):
-    return PROCESS_PACKAGE if class_name in PROCESS_CLASSES else PACKAGE
+    if class_name in PROCESS_CLASSES:
+        return PROCESS_PACKAGE
+    if class_name in TERMINAL_CLASSES:
+        return TERMINAL_PACKAGE
+    return PACKAGE
 
 
 REQUIRED_CASES = (
@@ -58,6 +72,11 @@ SELECTED_CLASSES = (
     "CodingCapabilitiesEdgeTest",
     "WindowsCommandLineTest",
     "WindowsJobScopeTest",
+    "TerminalKernelTest",
+    "TerminalKernelSchedulingTest",
+    "TerminalSnapshotProjectorTest",
+    "HeadlessTerminalDisplayTest",
+    "TerminalLaunchSpecTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -101,6 +120,35 @@ SIGNAL_ORDER_CASES = (
 WINDOWS_REQUIRED_BASH_CASES = (
     "closesStdinSoCommandsWaitingForEofFinishNaturally",
     "unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout",
+)
+# 终端基座的核心用例：内核数值投影/模式版本、分块调度/预算/满队列/关闭、数值投影、headless Display 与 launch 规格
+# 解析都是确定性用例，三平台都必须真跑且不得跳过。
+TERMINAL_KERNEL_CASES = (
+    "asciiProjectsNumericSlotsAndPaddedEmptyTail",
+    "inputModesAndRevisionTrackOnlyModeOrSizeChanges",
+    "resizingHashCollisionDimensionsStillAdvancesRevision",
+)
+TERMINAL_SCHEDULING_CASES = (
+    "snapshotBeforePartialCsiSuffixThenSuffixStillApplies",
+    "snapshotCompletesBeforePartialOscSuffix",
+    "utf8TrailingBytesSurviveControlAndResizeBoundaries",
+    "fullEventQueueRejectsExplicitly",
+    "readBudgetOverrunFailsExplicitlyIncludingSynchronizedOutput",
+    "closeOnEmptyReadTerminatesAndKeepsExecutorOwnedByCaller",
+)
+TERMINAL_PROJECTOR_CASES = (
+    "styledNulStaysUnitAndMissingTailIsDefaultEmpty",
+    "loneSurrogateIsPreservedAsNumericUnit",
+    "dwcContinuationAndOverflowTruncationAreExplicit",
+    "styleProjectionMapsColorsOptionsAndNull",
+    "everyPublicDisplayModeProjectsWithoutRenamingOrDroppingValues",
+)
+HEADLESS_DISPLAY_CASES = ("recordsDisplayStateAndIgnoresHeadlessOperations",)
+TERMINAL_LAUNCH_CASES = (
+    "resolvesExplicitSpecAndPreservesArgvExactly",
+    "unixDefaultsToResolvableShellThenSh",
+    "unresolvedExecutableFailsClosedWithoutEchoingCommand",
+    "windowsSelectsFirstResolvableShellWithoutRuntimeFallback",
 )
 CORE_CLASSES = (
     "ProcessScope",
@@ -179,6 +227,16 @@ def write_complete_reports(
             cases = ("realKernelReportsMissingExecutableWorkdirAndJobName",)
         elif class_name == "PosixProcessSessionTest":
             cases = MACOS_CASES
+        elif class_name == "TerminalKernelTest":
+            cases = TERMINAL_KERNEL_CASES + ("someOtherKernelCase",)
+        elif class_name == "TerminalKernelSchedulingTest":
+            cases = TERMINAL_SCHEDULING_CASES + ("someOtherSchedulingCase",)
+        elif class_name == "TerminalSnapshotProjectorTest":
+            cases = TERMINAL_PROJECTOR_CASES + ("someOtherProjectorCase",)
+        elif class_name == "HeadlessTerminalDisplayTest":
+            cases = HEADLESS_DISPLAY_CASES
+        elif class_name == "TerminalLaunchSpecTest":
+            cases = TERMINAL_LAUNCH_CASES + ("someOtherLaunchCase",)
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -448,6 +506,61 @@ class AssertSurefireReportsTest(unittest.TestCase):
             result = run_script("assert-surefire-reports.py", reports, "test-os")
             self.assertEqual(1, result.returncode)
             self.assertIn("missing surefire report", result.stdout)
+
+    def test_every_platform_requires_the_terminal_reports(self):
+        """终端内核、投影、headless Display 与 launch 的报告在每条矩阵腿都必须存在：缺失即失败。"""
+        for class_name in sorted(TERMINAL_CLASSES):
+            for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
+                with self.subTest(class_name=class_name, os_label=os_label):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        (reports / f"TEST-{package_of(class_name)}.{class_name}.xml").unlink()
+                        result = run_script("assert-surefire-reports.py", reports, os_label)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(
+                            f"{class_name}: missing surefire report on {os_label}",
+                            result.stdout,
+                        )
+
+    def test_fails_when_a_terminal_kernel_case_is_skipped(self):
+        """终端基座核心用例没有平台前置条件，被跳过即失败。"""
+        for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            with self.subTest(os_label=os_label):
+                with tempfile.TemporaryDirectory() as tmp:
+                    reports = Path(tmp)
+                    write_complete_reports(reports)
+                    write_surefire_report(
+                        reports,
+                        "TerminalKernelSchedulingTest",
+                        TERMINAL_SCHEDULING_CASES + ("someOtherSchedulingCase",),
+                        skipped=1,
+                        skipped_cases=(TERMINAL_SCHEDULING_CASES[0],),
+                    )
+                    result = run_script("assert-surefire-reports.py", reports, os_label)
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    self.assertIn(
+                        "TerminalKernelSchedulingTest: must not skip any case on " + os_label,
+                        result.stdout,
+                    )
+
+    def test_fails_when_a_terminal_critical_name_is_wrongly_reordered(self):
+        """数量对但关键用例名被改成乱序变体时必须失败：门禁核对的是精确用例名集合。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            reports = Path(tmp)
+            write_complete_reports(reports)
+            scrambled = TERMINAL_SCHEDULING_CASES[1:] + (
+                TERMINAL_SCHEDULING_CASES[0][::-1],
+            )
+            write_surefire_report(
+                reports,
+                "TerminalKernelSchedulingTest",
+                scrambled + ("someOtherSchedulingCase",),
+            )
+            result = run_script("assert-surefire-reports.py", reports, "ubuntu-latest")
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn("required cases did not run", result.stdout)
+            self.assertIn(TERMINAL_SCHEDULING_CASES[0], result.stdout)
 
 
 class CollectCoverageInputsTest(unittest.TestCase):

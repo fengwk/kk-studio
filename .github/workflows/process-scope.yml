@@ -2,8 +2,10 @@
 #
 # OS 级执行范围（POSIX 会话 / Windows Job Object）只用一个平台验证不完：Linux 覆盖 POSIX
 # 分支，macOS 覆盖同一套代码在另一种 POSIX 实现上的行为，Windows 覆盖 kernel32 的 Job 语义与
-# 命令行拼装。矩阵只跑与执行范围直接相关的测试，全部是本机进程行为，不需要外部服务、凭证或
-# 模型（真模型/L1 API 回归另见 `scripts/dev/verify/e2e/run.sh`）。
+# 命令行拼装。终端基座同样纳入这个矩阵：单 owner JediTerm 内核、数值投影与按宿主 OS 解析的
+# launch 规格必须在每条原生平台上真跑，而不是只由一套 Linux 结论证明。矩阵只跑与执行范围及
+# 终端基座直接相关的测试，全部是本机进程行为，不需要外部服务、凭证或模型（真模型/L1 API 回归
+# 另见 `scripts/dev/verify/e2e/run.sh`）。
 name: process-scope
 
 on:
@@ -70,9 +72,10 @@ jobs:
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
               -Dkk-studio.process-scope.helper-coverage=true
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            # macOS 跑执行范围相关的全部类：POSIX shell 语义由系统 bash 承担，编码能力的边界用例因此同样有证据。
+            # macOS 跑执行范围与终端基座相关的全部类：POSIX shell 语义由系统 bash 承担，编码能力的边界用例因此同样有证据；
+            # 终端内核、数值投影与 launch 规格也在这里真跑。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest,TerminalKernelTest,TerminalKernelSchedulingTest,TerminalSnapshotProjectorTest,HeadlessTerminalDisplayTest,TerminalLaunchSpecTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           else
@@ -80,9 +83,10 @@ jobs:
             # bash 作为命令，按 CreateProcess 的搜索顺序只会命中 System32 的 WSL 转发程序，因此它们不属于 Windows 腿的
             # 执行范围：它们仍由 Linux 完整套件与 macOS 覆盖。执行范围自己的原生用例、以及显式定位 Git Bash 的
             # BashCapabilityTest 照常在 Windows 上验收（它按平台前置条件跳过的 12 条是它自己的既有约定，断言脚本另外点名
-            # 要求其中两条在 Windows 上必须真跑）。helper 覆盖率同样打开：helper 的平台分支只有在对应平台上才会被执行。
+            # 要求其中两条在 Windows 上必须真跑）。终端内核、数值投影与 launch 规格同属本腿范围，也在此真跑。helper
+            # 覆盖率同样打开：helper 的平台分支只有在对应平台上才会被执行。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest,TerminalKernelTest,TerminalKernelSchedulingTest,TerminalSnapshotProjectorTest,HeadlessTerminalDisplayTest,TerminalLaunchSpecTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           fi
