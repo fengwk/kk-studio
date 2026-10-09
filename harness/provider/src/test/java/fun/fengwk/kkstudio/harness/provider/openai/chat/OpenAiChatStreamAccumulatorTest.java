@@ -46,6 +46,8 @@ class OpenAiChatStreamAccumulatorTest {
 
   private static final String MSG_CONFLICTING_FINISH_REASON =
       "conflicting finish_reason after finalized choice";
+  private static final String MSG_INVALID_CHOICE_INDEX =
+      "choice index must be a non-negative integer";
   private static final String MSG_SEMANTIC_DELTA_AFTER_FINALIZE =
       "semantic delta received after finalized choice";
 
@@ -250,6 +252,33 @@ class OpenAiChatStreamAccumulatorTest {
     ProviderCompletion completion = filtered.finish();
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
     assertNull(completion.replayState());
+  }
+
+  /**
+   * 测试意图：index 缺失视为主 choice 默认 0；一旦显式提供，畸形形态（显式 null/字符串/布尔/小数/负数/超 int）在首次 冻结与重复终止标记两条路径都必须 fail
+   * closed 且不回显原始值；缺失 index 与 index:0 视为同一 choice 仍接受。
+   */
+  @Test
+  void rejectsMalformedChoiceIndexOnFreezeAndRepeat() {
+    for (String index : List.of("null", "\"abc\"", "true", "1.5", "-1", "4294967296")) {
+      assertInvalidAfterFinalize(
+          createAccumulator(),
+          "{\"choices\":[{\"index\":" + index + ",\"finish_reason\":\"stop\"}]}",
+          MSG_INVALID_CHOICE_INDEX);
+      OpenAiChatStreamAccumulator repeated = createAccumulator();
+      repeated.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+      assertInvalidAfterFinalize(
+          repeated,
+          "{\"choices\":[{\"index\":" + index + ",\"finish_reason\":\"stop\"}]}",
+          MSG_INVALID_CHOICE_INDEX);
+    }
+
+    // 缺失 index 与显式 index:0 都视为主 choice，冗余重复标记依旧幂等接受
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"choices\":[{\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("[DONE]");
+    assertEquals(GenerationStopReason.COMPLETE, accumulator.finish().response().stopReason());
   }
 
   /** 测试意图：finish_reason 的非字符串形态绝不被 asText 静默吞掉；null 与空白字符串仍是合法无语义尾帧。 */
