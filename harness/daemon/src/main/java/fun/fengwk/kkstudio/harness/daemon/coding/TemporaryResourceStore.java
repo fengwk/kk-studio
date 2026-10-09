@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileVisitResult;
@@ -15,6 +17,7 @@ import java.time.Clock;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -33,6 +36,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * resources}/日志都不在本根下，天然不参与清扫。
  */
 final class TemporaryResourceStore {
+
+  private static final Logger LOG = System.getLogger(TemporaryResourceStore.class.getName());
 
   private static final String WORKSPACES = "workspaces";
   private static final String CREATED_AT_FILE = "created-at";
@@ -98,7 +103,7 @@ final class TemporaryResourceStore {
       try {
         writeCreatedAt(directory);
       } catch (IOException error) {
-        deleteRecursivelyQuietly(directory);
+        deleteOnRegistrationFailure(directory, error);
         throw error;
       }
       leases.put(id, new AtomicInteger(1));
@@ -135,7 +140,12 @@ final class TemporaryResourceStore {
     } finally {
       lock.unlock();
     }
-    return () -> release(id);
+    AtomicBoolean released = new AtomicBoolean();
+    return () -> {
+      if (released.compareAndSet(false, true)) {
+        release(id);
+      }
+    };
   }
 
   /**
@@ -151,6 +161,7 @@ final class TemporaryResourceStore {
     int removed = 0;
     lock.lock();
     try {
+      requireControlledRoot();
       try (DirectoryStream<Path> entries = Files.newDirectoryStream(root)) {
         for (Path entry : entries) {
           if (!isControlledWorkspace(entry)) {
@@ -184,6 +195,26 @@ final class TemporaryResourceStore {
           id, (key, counter) -> counter.decrementAndGet() <= 0 ? null : counter);
     } finally {
       lock.unlock();
+    }
+  }
+
+  /**
+   * 受控根必须是真实目录：被删除、或被人替换成符号链接/reparse 时立即失败，绝不跟随链接扫描根外内容。
+   *
+   * <p>这是对本类自身根的直接事实校验，不是通用防护框架；只覆盖「root 被替换后仍被当作受控根使用」这一条边界。
+   */
+  private void requireControlledRoot() {
+    if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
+      throw new IllegalStateException("temporary workspace root is not a real directory: " + root);
+    }
+  }
+
+  /** 登记失败后的清理：清理自身失败必须作为 suppressed 附加，绝不吞掉第二个故障。 */
+  private static void deleteOnRegistrationFailure(Path directory, IOException failure) {
+    try {
+      deleteTree(directory);
+    } catch (IOException cleanupError) {
+      failure.addSuppressed(cleanupError);
     }
   }
 
@@ -222,67 +253,58 @@ final class TemporaryResourceStore {
     }
   }
 
+  /**
+   * 唯一的递归删除实现：本类所有 workspace 清理都走这一处遍历，避免重复实现漂移。
+   *
+   * <p>删除失败以 {@link IOException} 抛出，由调用方按语义决定处理方式（warn、suppressed 或忽略），本方法自身绝不吞掉故障。
+   */
+  private static void deleteTree(Path directory) throws IOException {
+    Files.walkFileTree(
+        directory,
+        new SimpleFileVisitor<>() {
+          @Override
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
+              throws IOException {
+            Files.deleteIfExists(file);
+            return FileVisitResult.CONTINUE;
+          }
+
+          @Override
+          public FileVisitResult postVisitDirectory(Path dir, IOException error)
+              throws IOException {
+            if (error != null) {
+              throw error;
+            }
+            Files.deleteIfExists(dir);
+            return FileVisitResult.CONTINUE;
+          }
+        });
+  }
+
+  /** 清扫路径的删除：失败记录具体 workspace 路径的 warn，保留资源待下轮收敛。 */
   private static boolean deleteRecursively(Path directory) {
     try {
-      Files.walkFileTree(
-          directory,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
-                throws IOException {
-              Files.deleteIfExists(file);
-              return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException error)
-                throws IOException {
-              if (error != null) {
-                throw error;
-              }
-              Files.deleteIfExists(dir);
-              return FileVisitResult.CONTINUE;
-            }
-          });
+      deleteTree(directory);
       return true;
     } catch (IOException error) {
-      // 删除失败不外抛：workspace 仍是受控且未租用状态，下一轮清扫会重新尝试收敛。
+      LOG.log(
+          Level.WARNING,
+          "cannot delete expired temporary workspace " + directory + ": " + error.getMessage());
       return false;
     }
   }
 
-  private static void deleteRecursivelyQuietly(Path directory) {
-    try {
-      Files.walkFileTree(
-          directory,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
-                throws IOException {
-              Files.deleteIfExists(file);
-              return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException error)
-                throws IOException {
-              if (error != null) {
-                throw error;
-              }
-              Files.deleteIfExists(dir);
-              return FileVisitResult.CONTINUE;
-            }
-          });
-    } catch (IOException ignored) {
-      // 分配失败后的清理是尽力而为；残留空目录由后续清扫收敛。
-    }
-  }
-
-  /** 活动 workspace 句柄：持有 in-use lease，{@link #close()} 明确释放。 */
+  /**
+   * 活动 workspace 句柄：持有 in-use lease，{@link #close()} 释放且保证恰好一次。
+   *
+   * <p>句柄关闭必须原子一次：`create` 的租约与读者 {@code acquire} 的租约共享同一计数，重复 close 若各递减一次会提前清空计数，让清扫误删仍在读取的
+   * workspace。
+   */
   final class Workspace implements AutoCloseable {
 
     private final UUID id;
     private final Path directory;
+    private final AtomicBoolean released = new AtomicBoolean();
 
     private Workspace(UUID id, Path directory) {
       this.id = id;
@@ -297,16 +319,24 @@ final class TemporaryResourceStore {
       return directory;
     }
 
-    /** 释放 in-use lease；重复调用无副作用。 */
+    /** 释放 in-use lease；原子一次，重复调用无副作用。 */
     @Override
     public void close() {
-      release(id);
+      if (released.compareAndSet(false, true)) {
+        release(id);
+      }
     }
   }
 
-  /** 删除一个已不再需要的中转 workspace（含创建登记）：发布失败/取消后 best-effort 立即收敛，失败由后续清扫兜底。 */
+  /** 删除一个已不再需要的中转 workspace（含创建登记）：发布失败/取消后 best-effort 立即收敛，失败记录路径 warn 并由后续清扫兜底。 */
   void deleteWorkspace(Path directory) {
-    deleteRecursivelyQuietly(directory);
+    try {
+      deleteTree(directory);
+    } catch (IOException error) {
+      LOG.log(
+          Level.WARNING,
+          "cannot delete temporary workspace " + directory + ": " + error.getMessage());
+    }
   }
 
   /** 当前是否仍有活动租约；仅用于测试断言。 */

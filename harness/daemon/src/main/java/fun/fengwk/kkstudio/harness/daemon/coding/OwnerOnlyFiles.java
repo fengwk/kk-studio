@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
@@ -25,7 +26,28 @@ import java.util.Set;
  */
 final class OwnerOnlyFiles {
 
+  /** 受控目录的 owner-only 权限：0700。 */
+  private static final Set<PosixFilePermission> OWNER_ONLY_DIRECTORY_PERMISSIONS =
+      Set.of(
+          PosixFilePermission.OWNER_READ,
+          PosixFilePermission.OWNER_WRITE,
+          PosixFilePermission.OWNER_EXECUTE);
+
+  /** 受控文件的 owner-only 权限：0600。 */
+  private static final Set<PosixFilePermission> OWNER_ONLY_FILE_PERMISSIONS =
+      Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+
   private OwnerOnlyFiles() {}
+
+  /** 目录创建属性（0700），可让创建与权限收敛在同一次系统调用里完成。 */
+  private static FileAttribute<Set<PosixFilePermission>> ownerOnlyDirectoryAttribute() {
+    return PosixFilePermissions.asFileAttribute(OWNER_ONLY_DIRECTORY_PERMISSIONS);
+  }
+
+  /** 文件创建属性（0600）。 */
+  private static FileAttribute<Set<PosixFilePermission>> ownerOnlyFileAttribute() {
+    return PosixFilePermissions.asFileAttribute(OWNER_ONLY_FILE_PERMISSIONS);
+  }
 
   /** 创建（必要时）owner-only 目录并返回其绝对规范化路径；可信根之下出现符号链接或非目录分量时失败关闭。 */
   static Path ensureOwnerOnlyDirectory(Path trustedRoot, Path directory) throws IOException {
@@ -34,13 +56,26 @@ final class OwnerOnlyFiles {
       if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
         throw new IOException("path exists but is not a directory: " + directory);
       }
-      Files.createDirectories(directory);
+      createOwnerOnlyDirectories(directory);
     }
     if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
       throw new IOException("path must be a directory: " + directory);
     }
     applyOwnerOnlyDirectoryPermissions(directory);
     return directory;
+  }
+
+  /**
+   * 创建缺失的目录链：POSIX 上把 0700 作为创建属性提交给每个新目录，父级新目录与末级同样安全，不存在“先建后改权限”的可见窗口。
+   *
+   * <p>非 POSIX 只能先创建再收紧（{@link #applyOwnerOnlyDirectoryPermissions}），失败即失败关闭。
+   */
+  private static void createOwnerOnlyDirectories(Path directory) throws IOException {
+    if (isPosix()) {
+      Files.createDirectories(directory, ownerOnlyDirectoryAttribute());
+      return;
+    }
+    Files.createDirectories(directory);
   }
 
   /**
@@ -51,13 +86,7 @@ final class OwnerOnlyFiles {
   static void createOwnerOnlyDirectory(Path trustedRoot, Path directory) throws IOException {
     rejectSymlinkedPathComponents(trustedRoot, directory);
     if (isPosix()) {
-      Files.createDirectory(
-          directory,
-          PosixFilePermissions.asFileAttribute(
-              Set.of(
-                  PosixFilePermission.OWNER_READ,
-                  PosixFilePermission.OWNER_WRITE,
-                  PosixFilePermission.OWNER_EXECUTE)));
+      Files.createDirectory(directory, ownerOnlyDirectoryAttribute());
       return;
     }
     Files.createDirectory(directory);
@@ -72,8 +101,7 @@ final class OwnerOnlyFiles {
           FileChannel.open(
               candidate,
               Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-              PosixFilePermissions.asFileAttribute(
-                  Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)))) {
+              ownerOnlyFileAttribute())) {
         // 只创建：句柄由 try-with-resources 关闭。
       }
       return;
@@ -92,12 +120,7 @@ final class OwnerOnlyFiles {
   /** 收敛目录权限：支持 POSIX 时显式 0700；否则退回 {@link File} 的 owner-only 视图，失败即抛出。 */
   static void applyOwnerOnlyDirectoryPermissions(Path directory) throws IOException {
     if (isPosix()) {
-      Files.setPosixFilePermissions(
-          directory,
-          Set.of(
-              PosixFilePermission.OWNER_READ,
-              PosixFilePermission.OWNER_WRITE,
-              PosixFilePermission.OWNER_EXECUTE));
+      Files.setPosixFilePermissions(directory, OWNER_ONLY_DIRECTORY_PERMISSIONS);
       return;
     }
     applyOwnerOnly(directory, true);
@@ -105,8 +128,7 @@ final class OwnerOnlyFiles {
 
   private static void applyOwnerOnlyFilePermissions(Path file) throws IOException {
     if (isPosix()) {
-      Files.setPosixFilePermissions(
-          file, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+      Files.setPosixFilePermissions(file, OWNER_ONLY_FILE_PERMISSIONS);
       return;
     }
     applyOwnerOnly(file, false);
