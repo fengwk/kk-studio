@@ -1,4 +1,4 @@
-Read a text file, directory, or supported image by path.
+Read a text file, directory, or supported media resource by path.
 
 Usage:
 - Use `read` before editing an existing text file.
@@ -14,7 +14,7 @@ Usage:
 - To continue, call `read` again with that next position (`offset` is its line, and `column_offset` is its column when it is not 1).
 - Use `read` on directories instead of `bash ls`. Directories keep their own listing format, also paged by `offset`/`limit`.
 - `path` is an absolute path on the target Environment's file system, or one of exactly two complete `kkstudio:` URI forms:
-  - `kkstudio:/resources/<blobId>`: a session resource, for example an externalized tool output. Read it with `read` and `offset`/`limit`; `grep` accepts local paths only and does not resolve `kkstudio:` URIs.
+  - `kkstudio:/resources/<blobId>`: a session resource, for example an externalized tool output. Read it with `read`; `offset`/`limit` apply only when it is returned as a text window, and `grep` accepts local paths only and does not resolve `kkstudio:` URIs. A supported media resource (image, audio, video, or PDF) may be returned to you as the actual media content when the current model and provider protocol allow it; when it cannot be delivered, the call fails with an explicit error instead of returning a path or a description.
   - `kkstudio:/skills/<package>/<skill>/<relativePath>`: a published skill file.
 - Local paths must be absolute. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project` or `//server/share/project`.
 
