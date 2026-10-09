@@ -9,7 +9,11 @@ import {
   makeSettingsDto,
   makeSettingsSchema,
 } from '@/test-support/settings-test-fixtures'
-import { settingsSectionsToDraft } from '@/features/settings/system-settings-draft'
+import {
+  settingsSectionsToDraft,
+  assembleSettingsUpdate,
+  type SystemSettingsSectionsDraft,
+} from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
 import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import type { SystemSettingsSchemaDTO } from '@/shared/api/contracts/system-settings'
@@ -122,6 +126,7 @@ describe('system settings schema renderer', () => {
       'aiRuntime.subagentMaxConcurrency',
       'aiRuntime.subagentMaxTotalConcurrency',
       'aiRuntime.subagentMaxTurns',
+      'aiRuntime.modelHttpRetryStatusCodes',
     ])
     // 顺序与 server schema 一致。
     expect(paths![0]).toBe('aiRuntime.retryMaxRetries')
@@ -375,5 +380,52 @@ describe('system settings schema renderer', () => {
     })
     await chooseSelectOption(user, '模型', '不使用回退')
     expect(savedDrafts.at(-1)!.aiRuntime.compactionFallbackModel).toBeNull()
+  })
+
+  it('supports roundtrip editing of INTEGER_LIST field via TagInput and serializes into settings update', async () => {
+    const schema = makeSettingsSchema()
+    const draft = settingsSectionsToDraft(makeSettingsDto())
+    const section = renderSection(schema, 'aiRuntime')
+    const savedDrafts: SystemSettingsSectionsDraft[] = []
+
+    function StatefulHarness() {
+      const [current, setCurrent] = useState(draft)
+      return (
+        <SystemSettingsSchemaRenderer
+          schema={{ sections: [section] }}
+          draft={current}
+          onChange={(next) => {
+            savedDrafts.push(next)
+            setCurrent(next)
+          }}
+        />
+      )
+    }
+
+    renderRenderer(<StatefulHarness />)
+    const user = userEvent.setup()
+
+    // Status code chips are initially rendered
+    expect(screen.getByText('408')).toBeInTheDocument()
+    expect(screen.getByText('429')).toBeInTheDocument()
+    expect(screen.getByText('500')).toBeInTheDocument()
+
+    // Remove 502
+    const remove502 = screen.getByLabelText('Remove 502')
+    await user.click(remove502)
+
+    const updatedDraft1 = savedDrafts.at(-1)!
+    expect(updatedDraft1.aiRuntime.modelHttpRetryStatusCodes).toEqual([408, 429, 500, 503, 504])
+
+    // Add 520 via keyboard input
+    const tagInputField = screen.getByLabelText('重试 HTTP 状态码')
+    await user.type(tagInputField, '520{enter}')
+
+    const updatedDraft2 = savedDrafts.at(-1)!
+    expect(updatedDraft2.aiRuntime.modelHttpRetryStatusCodes).toEqual([408, 429, 500, 503, 504, 520])
+
+    // Assemble settings update roundtrip
+    const update = assembleSettingsUpdate(updatedDraft2, '0')
+    expect(update.aiRuntime.modelHttpRetryStatusCodes).toEqual([408, 429, 500, 503, 504, 520])
   })
 })

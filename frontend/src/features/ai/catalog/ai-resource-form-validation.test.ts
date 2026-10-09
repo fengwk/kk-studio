@@ -288,4 +288,80 @@ describe('ai-resource-form-validation', () => {
       setLocale('zh-CN')
     })
   })
+
+  describe('provider http retry policy validation', () => {
+    it('accepts inherit (null), disabled ([]), and valid custom status codes', () => {
+      // Inherit
+      const inheritResult = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: null },
+          modelDraft: draft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(inheritResult.ok).toBe(true)
+
+      // Disabled ([])
+      const disabledResult = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [] },
+          modelDraft: draft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(disabledResult.ok).toBe(true)
+
+      // Custom valid list
+      const customResult = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: {
+            ...providerDraft(),
+            name: 'valid-provider',
+            modelHttpRetryStatusCodes: [408, 429, 500, 502, 503, 504],
+          },
+          modelDraft: draft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(customResult.ok).toBe(true)
+    })
+
+    it('blocks save when invalid status codes are staged in provider draft', () => {
+      // Out of range (< 400 or > 599)
+      const outOfRangeResult = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [200] },
+          modelDraft: draft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(outOfRangeResult.ok).toBe(false)
+
+      // Non-integer string
+      const nonIntResult = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [429, 'xyz'] },
+          modelDraft: draft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(nonIntResult.ok).toBe(false)
+
+      // Duplicate
+      const dupResult = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [429, 429] },
+          modelDraft: draft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(dupResult.ok).toBe(false)
+    })
+  })
 })

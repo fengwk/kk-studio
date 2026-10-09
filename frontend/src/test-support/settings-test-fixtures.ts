@@ -9,6 +9,11 @@ import type {
 export const DEFAULT_MAX_RESOURCE_BYTES = '16777216'
 
 /**
+ * 默认模型 HTTP 重试状态码列表。
+ */
+export const DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES = [408, 429, 500, 502, 503, 504]
+
+/**
  * 测试基座：与 share DTO / V1 默认行一致的完整 GET {@code /api/settings} 响应形状。
  *
  * 仅用于前端测试验证「严格契约字段映射 / 聚合 hydration / 完整聚合 CAS PUT」，
@@ -38,6 +43,7 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       subagentMaxConcurrency: 10,
       subagentMaxTotalConcurrency: 0,
       subagentMaxTurns: 50,
+      modelHttpRetryStatusCodes: [...DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES],
     },
     environment: {
       maxResourceBytes: DEFAULT_MAX_RESOURCE_BYTES,
@@ -261,6 +267,25 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 nullable: false,
                 min: 1,
                 max: null,
+                options: null,
+              },
+            ],
+          },
+          {
+            key: 'aiRuntime.httpErrors',
+            labelKey: 'settings.section.aiRuntime.httpErrors.title',
+            descriptionKey: 'settings.section.aiRuntime.httpErrors.description',
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
+            fields: [
+              {
+                path: 'aiRuntime.modelHttpRetryStatusCodes',
+                labelKey: 'settings.field.aiRuntime.modelHttpRetryStatusCodes',
+                hintKey: 'settings.field.aiRuntime.modelHttpRetryStatusCodes.hint',
+                type: 'INTEGER_LIST',
+                nullable: false,
+                min: 400,
+                max: 599,
                 options: null,
               },
             ],

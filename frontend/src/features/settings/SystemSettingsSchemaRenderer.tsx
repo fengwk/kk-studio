@@ -1,6 +1,7 @@
 import { useI18n } from '@/shared/i18n'
 import {
   SettingsCard,
+  SettingsIntegerListField,
   SettingsNumberField,
   SettingsSelectField,
   SettingsSwitchRow,
@@ -167,6 +168,19 @@ function SchemaField({
           labelKey={field.labelKey}
           hint={hint ?? null}
           nullable={field.nullable}
+          onChange={update}
+        />
+      )
+    case 'INTEGER_LIST':
+      return (
+        <SettingsIntegerListField
+          fieldPath={field.path}
+          nullable={field.nullable}
+          label={label}
+          value={value as (number | string)[]}
+          min={field.min ?? undefined}
+          max={field.max ?? undefined}
+          hint={hint}
           onChange={update}
         />
       )

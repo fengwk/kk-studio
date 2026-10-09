@@ -159,6 +159,18 @@ describe('system settings schema validation', () => {
     )
   })
 
+  it('validates INTEGER_LIST field type against array draft values', () => {
+    const schema = makeSettingsSchema()
+    const testDraft = settingsSectionsToDraft(makeSettingsDto())
+    expect(validateSystemSettingsSchema(schema, testDraft)).toBeNull()
+
+    // Non-array value for INTEGER_LIST should fail
+    ;(testDraft.aiRuntime as Record<string, unknown>).modelHttpRetryStatusCodes = 'not-an-array'
+    expect(validateSystemSettingsSchema(schema, testDraft)).toMatch(
+      /settings schema type does not match draft: aiRuntime\.modelHttpRetryStatusCodes/,
+    )
+  })
+
   it('rejects a duplicate field path', () => {
     const schema = makeSettingsSchema()
     // 复制 retryMaxDelayMillis（LONG，draft 值为 '60000'）两次：第二次命中重复路径检查。

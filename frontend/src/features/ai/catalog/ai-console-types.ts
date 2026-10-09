@@ -13,6 +13,7 @@ export interface ProviderDraft {
   credential: string
   modelCallTimeoutMillis: string
   modelCallIdleTimeoutMillis: string
+  modelHttpRetryStatusCodes?: (number | string)[] | null
 }
 
 /**
