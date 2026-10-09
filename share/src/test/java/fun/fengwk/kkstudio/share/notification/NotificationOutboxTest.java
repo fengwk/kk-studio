@@ -133,9 +133,13 @@ class NotificationOutboxTest {
     assertEquals(1, outbox.pendingMessages());
     assertEquals(18000, outbox.pendingBytes());
 
-    for (int index = 0; index < 3; index++) {
+    for (int index = 0; index < 2; index++) {
       assertTrue(outbox.complete(outbox.pollBatch().orElseThrow(), true));
     }
+    NotificationOutbox.Batch last = outbox.pollBatch().orElseThrow();
+    assertEquals(1, outbox.pendingMessages());
+    assertEquals(18000, outbox.pendingBytes(), "最后 native batch 未完成仍保留整包额度");
+    assertTrue(outbox.complete(last, true));
     assertEquals(0, outbox.pendingMessages());
     assertEquals(0, outbox.pendingBytes());
   }
@@ -146,11 +150,19 @@ class NotificationOutboxTest {
     assertTrue(capacity.offer(packet(UUID.randomUUID(), self, "a")));
     assertFalse(capacity.offer(packet(UUID.randomUUID(), self, "b")));
     assertEquals(1, capacity.pendingMessages());
+    NotificationOutbox.Batch capacityActive = capacity.pollBatch().orElseThrow();
+    assertFalse(capacity.offer(packet(UUID.randomUUID(), self, "c")), "在途计入项数限额");
+    assertTrue(capacity.complete(capacityActive, true));
+    assertTrue(capacity.offer(packet(UUID.randomUUID(), self, "c")));
 
     NotificationOutbox bytes = new NotificationOutbox(limits(100, 150, 4, 1));
     assertTrue(bytes.offer(packet(UUID.randomUUID(), self, "x".repeat(100))));
     assertFalse(bytes.offer(packet(UUID.randomUUID(), self, "y".repeat(100))));
     assertEquals(100, bytes.pendingBytes());
+    NotificationOutbox.Batch bytesActive = bytes.pollBatch().orElseThrow();
+    assertFalse(bytes.offer(packet(UUID.randomUUID(), self, "z".repeat(51))), "在途计入字节限额");
+    assertTrue(bytes.complete(bytesActive, true));
+    assertTrue(bytes.offer(packet(UUID.randomUUID(), self, "z".repeat(100))));
 
     NotificationOutbox perMessage = new NotificationOutbox(limits(50, 1000, 4, 1));
     assertFalse(perMessage.offer(packet(UUID.randomUUID(), self, "z".repeat(51))));

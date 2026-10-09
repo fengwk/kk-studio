@@ -49,7 +49,8 @@ index/count 和逻辑总字节数。`count=1` 也遵守同一校验。carrier �
 数据按字节分片，仅在完整重组后调用领域 codec。重复片必须一致，矛盾、缺片、超时与资源溢出
 丢弃整包并请求恢复。瞬态发送按有界分片批次轮转，大消息不能独占发送队列。
 分片、重组与有界公平发送游标是 Share 的公共纯 JDK 原语 [`NotificationCarrier` / `NotificationReassembler` / `NotificationOutbox`](../../share/src/main/java/fun/fengwk/kkstudio/share/notification/)，
-PG 与两条 WS 通道直接复用同一算法，不复制第二套实现；公共 carrier/packet/outbox 深不可变、错误只描述字段或规则且不回显输入。
+不依赖具体承载，PG 瞬态发送直接使用同一套有界游标算法；
+carrier、packet 与 outbox batch 深不可变，outbox 自身是线程安全的可变队列，错误不回显输入。
 
 默认预算由 `NotificationLimits.defaults()` 提供：单逻辑消息 8 MiB、发送/Inbox 各 32 MiB、重组 32 MiB、8 条并发重组及 5 秒截止；
 生产负载的最终预算仍需依据基准结果锁定。PG NOTIFY 队列有容量上限，可使用临时磁盘；
