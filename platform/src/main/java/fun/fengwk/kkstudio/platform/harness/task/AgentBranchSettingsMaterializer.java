@@ -77,6 +77,10 @@ public final class AgentBranchSettingsMaterializer {
 
   private BranchSettings materialize(
       String agentName, AgentDefinition agent, String environmentName) {
+    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+      // 未配置模型的内置 Agent（如 compaction）不能被普通调用当作路由来源：明确拒绝，不猜测或回退。
+      throw new IllegalArgumentException("agent model is not configured: " + agentName);
+    }
     AgentModel model =
         modelRepository.getByProviderNameAndName(
             agent.getModelProviderName(), agent.getModelName());

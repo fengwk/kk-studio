@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
 /**
@@ -31,20 +32,32 @@ public final class AgentDefinitionMutationFactory {
     this.configCodec = configCodec;
   }
 
-  /** 与写入共用字段和 config 校验，不写数据库。 */
+  /** 与写入共用字段和 config 校验，不写数据库；导入的 Agent 一律是用户类型，模型必填。 */
   public void validateImport(String name, AgentDefinitionEditablePropertiesDTO properties) {
-    newMutation(name, properties);
+    newMutation(name, properties, true);
   }
 
-  AgentDefinition newAgent(String name, AgentDefinitionEditablePropertiesDTO properties) {
-    Mutation mutation = newMutation(name, properties);
+  AgentDefinition newUserAgent(String name, AgentDefinitionEditablePropertiesDTO properties) {
+    Mutation mutation = newMutation(name, properties, true);
     AgentDefinition definition = new AgentDefinition();
+    definition.setType(AgentDefinitionType.USER);
+    apply(definition, mutation);
+    return definition;
+  }
+
+  /** 内置 Agent 允许显式未配置模型：model 为 null/空白表示未配置，variant 也必须为 null。 */
+  AgentDefinition newBuiltinAgent(String name, AgentDefinitionEditablePropertiesDTO properties) {
+    Mutation mutation = newMutation(name, properties, false);
+    AgentDefinition definition = new AgentDefinition();
+    definition.setType(AgentDefinitionType.BUILTIN);
     apply(definition, mutation);
     return definition;
   }
 
   void update(AgentDefinition definition, AgentDefinitionEditablePropertiesDTO properties) {
-    apply(definition, newMutation(definition.getName(), properties));
+    // 内置 Agent 允许保持/清空未配置模型；用户 Agent 仍要求模型。
+    boolean modelRequired = definition.getType() != AgentDefinitionType.BUILTIN;
+    apply(definition, newMutation(definition.getName(), properties, modelRequired));
   }
 
   private void apply(AgentDefinition definition, Mutation mutation) {
@@ -57,7 +70,8 @@ public final class AgentDefinitionMutationFactory {
     definition.setConfigJson(mutation.configJson());
   }
 
-  private Mutation newMutation(String name, AgentDefinitionEditablePropertiesDTO properties) {
+  private Mutation newMutation(
+      String name, AgentDefinitionEditablePropertiesDTO properties, boolean modelRequired) {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
@@ -75,11 +89,14 @@ public final class AgentDefinitionMutationFactory {
     if (normalizedName.indexOf('/') >= 0) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
     }
-    ModelRef modelRef = parseModelRef(properties.getModel());
+    ModelRef modelRef = parseModelRef(properties.getModel(), modelRequired);
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
     // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant。
     String variant = editableSupport.trimToNull(properties.getVariant());
+    if (modelRef == null && variant != null) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " variant requires a configured model");
+    }
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "variant", variant, VARIANT_MAX_LENGTH);
     AgentDefinitionConfigDTO config = properties.getConfig();
@@ -96,13 +113,17 @@ public final class AgentDefinitionMutationFactory {
         normalizedName,
         description,
         systemPrompt,
-        modelRef.providerName(),
-        modelRef.modelName(),
+        modelRef == null ? null : modelRef.providerName(),
+        modelRef == null ? null : modelRef.modelName(),
         variant,
         configJson);
   }
 
-  private static ModelRef parseModelRef(String raw) {
+  /** {@code required} 为 false 时 null/空白表示显式未配置模型，返回 null；其余情况严格解析。 */
+  private static ModelRef parseModelRef(String raw, boolean required) {
+    if (!required && (raw == null || raw.isBlank())) {
+      return null;
+    }
     try {
       return ModelRef.parse(raw);
     } catch (IllegalArgumentException error) {
