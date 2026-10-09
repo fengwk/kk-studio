@@ -3,8 +3,10 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -111,6 +113,118 @@ class GlobalStorageToolResultHistoryMaterializerTest {
                 "preview",
                 null)
             .imageTier());
+  }
+
+  /** 意图：平台 read 已授权的 Session Blob 作为 durable 工具结果媒体复用，不重新上传、不读对象存储，图片冻结默认档位。 */
+  @Test
+  void reusesAuthorizedSessionBlobWithoutUpload() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    StorageUploadService uploadService = mock(StorageUploadService.class);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
+    stubBlob(blobManager, blobId, "image/png", 9L);
+    GlobalStorageToolResultHistoryMaterializer materializer =
+        materializer(uploadService, blobManager, refManager);
+    ResourceResultContent sessionResource = sessionResource(blobId, "image/png", 9L, "preview");
+
+    ResourceMessageContent content =
+        assertInstanceOf(
+            ResourceMessageContent.class,
+            materializer
+                .materialize(
+                    sessionId,
+                    "read",
+                    new ToolResult("call", List.of(sessionResource), false, "{}"))
+                .getFirst());
+
+    assertEquals(blobId, content.blobId());
+    assertEquals(blobId.toString(), content.name());
+    assertEquals(ImageInputTier.P720, content.imageTier());
+    assertNull(content.totalBytes());
+    verify(refManager).retainRef(sessionId, blobId);
+    // 复用不产生任何上传副作用：既不锁定、也不删除上传行。
+    verifyNoInteractions(uploadService);
+  }
+
+  /** 意图：ref 声明的 MIME 与权威 blob 不一致（事实被篡改）时拒绝，不产生 history 也不 retain。 */
+  @Test
+  void rejectsSessionResourceWithMismatchedMetadata() {
+    UUID blobId = UUID.randomUUID();
+    StorageUploadService uploadService = mock(StorageUploadService.class);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
+    stubBlob(blobManager, blobId, "audio/mpeg", 9L);
+    GlobalStorageToolResultHistoryMaterializer materializer =
+        materializer(uploadService, blobManager, refManager);
+    ResourceResultContent sessionResource = sessionResource(blobId, "image/png", 9L, "preview");
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer.materialize(
+                    UUID.randomUUID(),
+                    "read",
+                    new ToolResult("call", List.of(sessionResource), false, "{}")));
+    assertEquals("session resource failed integrity validation", error.getMessage());
+    verifyNoInteractions(refManager, uploadService);
+  }
+
+  /** 意图：Session 资源只接受可送达模型的媒体类型；任意其它文件（如 CSV）一律拒绝。 */
+  @Test
+  void rejectsSessionResourceOfNonModelMediaType() {
+    UUID blobId = UUID.randomUUID();
+    StorageUploadService uploadService = mock(StorageUploadService.class);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
+    stubBlob(blobManager, blobId, "text/csv", 9L);
+    GlobalStorageToolResultHistoryMaterializer materializer =
+        materializer(uploadService, blobManager, refManager);
+    ResourceResultContent sessionResource = sessionResource(blobId, "text/csv", 9L, "preview");
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer.materialize(
+                    UUID.randomUUID(),
+                    "read",
+                    new ToolResult("call", List.of(sessionResource), false, "{}")));
+    assertEquals("session resource is not a supported model media type", error.getMessage());
+    verifyNoInteractions(refManager, uploadService);
+  }
+
+  private static GlobalStorageToolResultHistoryMaterializer materializer(
+      StorageUploadService uploadService,
+      StorageBlobManager blobManager,
+      SessionBlobRefManager refManager) {
+    return new GlobalStorageToolResultHistoryMaterializer(
+        uploadService, blobManager, refManager, 1024);
+  }
+
+  private static void stubBlob(
+      StorageBlobManager blobManager, UUID blobId, String mediaType, long sizeBytes) {
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setState(StorageBlobState.ACTIVE);
+    blob.setMediaType(mediaType);
+    blob.setSizeBytes(sizeBytes);
+    blob.setSha256(SHA256);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+  }
+
+  private static ResourceResultContent sessionResource(
+      UUID blobId, String mediaType, long sizeBytes, String preview) {
+    return new ResourceResultContent(
+        new ResourceRef(
+            ResourceRef.sessionResourceUri(blobId),
+            mediaType,
+            blobId.toString(),
+            sizeBytes,
+            SHA256),
+        preview,
+        null);
   }
 
   private static ResourceMessageContent materialize(

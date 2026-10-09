@@ -77,11 +77,15 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
       } else if (content instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
       } else if (content instanceof ResourceResultContent resource) {
-        if (resource.resource().blobUploadId() == null) {
+        if (resource.resource().sessionBlobId() != null) {
+          contents.add(reuseSessionResource(sessionId, resource));
+        } else if (resource.resource().blobUploadId() != null) {
+          contents.add(consumeUploadedResource(sessionId, resource));
+        } else {
           throw new IllegalArgumentException(
-              "tool resource must be staged before history materialization");
+              "tool resource must be staged or an authorized session resource before history"
+                  + " materialization");
         }
-        contents.add(consumeUploadedResource(sessionId, resource));
       } else {
         throw new IllegalArgumentException(
             "unsupported tool content kind for history materialization: "
@@ -156,5 +160,49 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
   /** 图片工具结果的默认输入档位；非 image/* 媒体不携带档位。 */
   private static ImageInputTier defaultImageTier(String mediaType) {
     return mediaType != null && mediaType.startsWith("image/") ? ImageInputTier.P720 : null;
+  }
+
+  /**
+   * 复用一个已授权的 Session Blob 作为 durable 工具结果资源。
+   *
+   * <p>只按权威 blob 事实复核 {@code ref} 的媒体类型/体积/摘要与终态声明完全一致，并复用既有 Session 引用（{@link
+   * SessionBlobRefManager#retainRef} 对同一 Session/Blob 幂等），绝不读取或写入对象存储、绝不重新上传。只接受可送达模型的媒体类型 （{@code
+   * image/*}、{@code audio/*}、{@code video/*} 与 {@code application/pdf}），任意其它文件一律拒绝。
+   */
+  private ResourceMessageContent reuseSessionResource(
+      UUID sessionId, ResourceResultContent resource) {
+    ResourceRef ref = resource.resource();
+    UUID blobId = ref.sessionBlobId();
+    if (ref.size() == null || ref.sha256() == null) {
+      throw new IllegalArgumentException("session resource must declare size and sha256");
+    }
+    if (resource.textMetadata() != null) {
+      throw new IllegalArgumentException("session media resource must not declare text metadata");
+    }
+    StorageBlob blob = blobManager.getBlob(blobId);
+    if (blob == null
+        || blob.getState() != StorageBlobState.ACTIVE
+        || !ref.mediaType().equals(blob.getMediaType())
+        || ref.size() != blob.getSizeBytes()
+        || !ref.sha256().equals(blob.getSha256())) {
+      throw new IllegalArgumentException("session resource failed integrity validation");
+    }
+    if (!isSupportedReadMedia(blob.getMediaType())) {
+      throw new IllegalArgumentException("session resource is not a supported model media type");
+    }
+    refManager.retainRef(sessionId, blobId);
+    return ResourceMessageContent.media(
+        blobId, ref.name(), resource.preview(), defaultImageTier(blob.getMediaType()));
+  }
+
+  /** 可作为模型输入的媒体类型：图片、音频、视频与 PDF 文档。 */
+  private static boolean isSupportedReadMedia(String mediaType) {
+    if (mediaType == null) {
+      return false;
+    }
+    return mediaType.startsWith("image/")
+        || mediaType.startsWith("audio/")
+        || mediaType.startsWith("video/")
+        || "application/pdf".equals(mediaType);
   }
 }

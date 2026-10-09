@@ -13,10 +13,14 @@ import java.util.regex.Pattern;
  * 不可变的规范 Resource URI 引用。
  *
  * <p>只允许 {@code data} / {@code file} / {@code s3} / {@code https} / {@code http} / {@code
- * blob-upload} 六种 scheme；构造时执行全部 域约束与规范校验（含 data URI 解码与 size/sha 验证），保证 codec 反序列化与直接构造得到同样的严格结果。
+ * blob-upload} / {@code kkstudio} 七种 scheme；构造时执行全部 域约束与规范校验（含 data URI 解码与 size/sha 验证），保证 codec
+ * 反序列化与直接构造得到同样的严格结果。
  *
  * <p>{@code blob-upload:<uploadId>} 是 Environment Daemon 上传的瞬时引用：字节已由 Daemon 直传对象存储，Platform 只持有 全局
  * Blob 上传行 id。它必须携带非空 size/sha，并且只在一个 Tool 调用终态到 durable history 插入之间短暂存在。
+ *
+ * <p>{@code kkstudio:/resources/<blobId>} 是 Platform 已授权 Session 资源的 durable 引用：字节已在全局对象存储且已由当前
+ * Session 引用，消费方只能按 Session 引用权限与 Blob 状态核验后复用同一 blob，绝不重新上传或解引用为 URL。它同样必须携带非空 size/sha。
  *
  * <p>非 base64 data 载荷使用 frozen 表示：percent 解码后按字节重新编码并精确相等——原始 ASCII 只能是 RFC unreserved 与原始 {@code
  * '/'}，其余任何可表示字节都必须是大写 {@code %XX}（原始逗号/分号/冒号/问号/井号被拒绝，其编码形式被接受； 编码 slash/NUL
@@ -50,6 +54,17 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
   private static final Pattern BLOB_UPLOAD_PATTERN =
       Pattern.compile(
           BLOB_UPLOAD_SCHEME + ":([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
+
+  /** 平台 Session 资源 scheme 名：指向已授权、durable 的全局 Blob。 */
+  public static final String SESSION_RESOURCE_SCHEME = "kkstudio";
+
+  /** 规范 Session 资源前缀。 */
+  public static final String SESSION_RESOURCE_URI_PREFIX = "kkstudio:/resources/";
+
+  /** 完整 {@code kkstudio:/resources/<canonical-uuid>} 形态：固定前缀加规范小写 UUID，无任何其它成分。 */
+  private static final Pattern SESSION_RESOURCE_PATTERN =
+      Pattern.compile(
+          "kkstudio:/resources/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
 
   public ResourceRef {
     if (uri == null) {
@@ -114,6 +129,36 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
   /** 本引用是否为 {@code blob-upload} 瞬态引用。 */
   public UUID blobUploadId() {
     return blobUploadId(uri);
+  }
+
+  /** 构造规范 {@code kkstudio:/resources/<blobId>} Session 资源引用 URI。 */
+  public static String sessionResourceUri(UUID blobId) {
+    return SESSION_RESOURCE_URI_PREFIX + Objects.requireNonNull(blobId, "blobId");
+  }
+
+  /**
+   * 严格解析 {@code kkstudio:/resources/<blobId>} 引用，返回其 blob id；不是该规范形态时返回 {@code null}。
+   *
+   * <p>只有完整且规范的形态才被识别：任何近似但非法的形态都在这里返回 {@code null}，需要拒绝时由调用方按自己的协议语义报错，而不是被误判为有效引用。
+   */
+  public static UUID sessionBlobId(String uri) {
+    if (uri == null) {
+      return null;
+    }
+    Matcher matcher = SESSION_RESOURCE_PATTERN.matcher(uri);
+    if (!matcher.matches()) {
+      return null;
+    }
+    try {
+      return UUID.fromString(matcher.group(1));
+    } catch (IllegalArgumentException error) {
+      return null;
+    }
+  }
+
+  /** 本引用是否为 {@code kkstudio:/resources/<blobId>} Session 资源引用。 */
+  public UUID sessionBlobId() {
+    return sessionBlobId(uri);
   }
 
   /** 严格计算 UTF-8 字节数；拒绝 Java String 中未配对的代理项，避免静默替换后突破协议边界。 */

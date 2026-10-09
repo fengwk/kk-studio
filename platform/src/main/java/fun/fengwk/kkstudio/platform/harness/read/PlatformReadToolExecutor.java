@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
 
 import java.util.List;
 import java.util.Objects;
@@ -218,11 +220,27 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
     }
 
     try {
-      String text =
-          resourceReader.readResourceText(
-              context.threadId(), blobId, offset, limit, columnOffset, path);
-      listener.onComplete(
-          new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}"));
+      ResourceRead read =
+          resourceReader.readResource(
+              context.threadId(),
+              context.invocationId(),
+              callId,
+              blobId,
+              offset,
+              limit,
+              columnOffset,
+              path);
+      ToolResult result =
+          switch (read) {
+            case ResourceRead.Text text -> new ToolResult(
+                callId, List.of(new TextResultContent(text.text())), false, "{}");
+            case ResourceRead.Media media -> new ToolResult(
+                callId,
+                List.of(new ResourceResultContent(media.resource(), media.preview())),
+                false,
+                "{}");
+          };
+      listener.onComplete(result);
     } catch (PlatformReadException e) {
       listener.onComplete(ToolResult.error(callId, e.getMessage()));
     } catch (Exception e) {

@@ -216,6 +216,16 @@ public final class ToolResultFinalizer {
           throw new IllegalArgumentException(
               "resource at index " + index + " must declare size and sha256");
         }
+        if (ref.sessionBlobId() != null) {
+          // 已授权的 Session Blob durable 引用：字节已在全局对象存储且已按 Session 引用鉴权，本阶段只做形状校验并原样透传，
+          // 绝不读取宿主 ResourceStore、绝不重新 staging 或上传。
+          if (res.textMetadata() != null) {
+            throw new IllegalArgumentException(
+                "session resource at index " + index + " must not declare text metadata");
+          }
+          resourcePieces.add(new ResourcePiece(index, res));
+          continue;
+        }
         if (ref.size() > resourceMaxBytes) {
           throw new OutputTooLargeException(
               "content at index "
