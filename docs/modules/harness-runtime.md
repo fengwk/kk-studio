@@ -31,7 +31,7 @@ Stop 的本地取消在提交后执行：`stop` 把取消登记在 [`HarnessStor
 advisory 围栏先于业务行锁，行锁守卫维护六级 rank。
 同级集合排序及树内 Command 交付例外见 [Harness Infra](harness-infra.md#事务边界与锁序)。
 
-task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一子 Thread 上的多个未完成 Join 各占一份。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
+task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的有效子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一父/子对至多一个有效未完成 Join（新续接 supersede 旧等待，旧 Join 不占额度、不再产生独立交付）。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
 创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一允许只锁单条 Work 的调度事务，且它们不得制造新的业务 wake。
 
@@ -107,7 +107,7 @@ Platform 的请求预览有三个只读入口：`POST /api/harness/threads/{thre
 | `PREVIEW_ATTACHMENT_NOT_READY` | 附件上传未就绪或不可用 |
 | `PREVIEW_PLANNING_FAILED` | 草稿无法规划 |
 | `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
-| `PREVIEW_UNSUPPORTED` | adapter 未覆写 `encodeRequestBody`，无法生成请求体预览 |
+| `PREVIEW_UNSUPPORTED` | 父 COMPACTION 回合没有 ModelInvocation，或 adapter 未覆写 `encodeRequestBody`，无法生成请求体预览 |
 | `PREVIEW_ENCODING_FAILED` | 请求体编码失败 |
 
 收到 `PREVIEW_STALE_CURSOR` 后应重新读取快照，再用新游标请求预览；这不会绕过 queued、空闲、压缩、附件与归属校验。规划详情、连接凭据与异常原因链不进入错误响应。请求形状或归属错误仍为 400，缺失 Thread 仍为 404。
@@ -211,7 +211,7 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 
 ```text
 父 TURN_START(COMPACTION) -> COMPACTION(summaryText) -> TURN_END
-子 TURN_START(INPUT)      -> ModelInvocation（compaction Agent 的 systemInstruction + USER 摘要命令）-> COMPACTION(summaryText) -> TURN_END
+子 TURN_START(INPUT)      -> ModelInvocation（compaction Agent 的 systemInstruction + USER 摘要命令）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
 
 父在 durable wait 中等待 Join 结算，不持长事务、不阻塞 `Future`；冻结的输入范围、Goal、设置与子身份不受后来排队输入污染。COMPACTION Join 只唤醒 owner，不产生公开 `SUBAGENT_RESULT` 通知；压缩子执行树内禁止再次创建压缩子线程，所有 compactor 请求 cache hint 固定 `NONE`（不承诺关闭厂商自动缓存）。
@@ -249,15 +249,16 @@ Stop 在树锁与有序行锁内校验目标 version 和 `stopRequestId`，按�
 
 [`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java)
 按有序规则产出 Allow / Ask / Deny 候选：规则键是全局 `*` 或合法模型可见 tool name，
-按全局到具体工具的顺序求值，数组声明顺序即求值顺序；文件路径只按该次调用显式
-`arguments.workdir` 词法解析为相对 POSIX 路径，再交给 JGit gitignore 语义匹配，不读取
-Backend 的 cwd 或 HOME。没有 `workdir` 语义的 Platform/MCP 工具不会获得隐藏默认目录。
+按全局到具体工具的顺序求值，数组声明顺序即求值顺序；文件路径按该次调用显式绝对
+`path` 的 filesystem-root 坐标（Unix 去掉 root 前缀、Windows 保留 root-qualified）交给 JGit gitignore 语义匹配，
+不读取 Backend 的 cwd 或 HOME；非绝对 `path`（例如 `kkstudio:` 资源 URI）回落 wildcard 规则。
+文件工具、`task` 与 MCP 工具都不携带 `workdir`，不会获得隐藏默认目录。
 这里只生成策略候选，真实文件边界、符号链接检查与进程隔离由 Environment Daemon 在
 执行入口落实。
 
 ### 子智能体委派与 Join
 
-内部 `task` 工具只做一次持久接受：Platform 的 `SubagentTaskRunner` 把本轮调用归一化为 `ThreadJoinRequest`，用 `acceptCommandsAndJoin` 在同一事务接受源 prompt、建立或沿用子 Thread、写入 join 凭据并请求 Work；`TaskTool` 立即用一次成功 tool_result 回执唯一 JSON `{"thread_id":"…","status":"accepted"}`，不阻塞、没有第二个 tool_result。子结果不经过工具返回，而是由运行时在子执行**收敛后**的终态边界结算 join，并作为父 Thread 的一条独立系统通知交付；子执行仍有未完成的直接子 Join、未送达的子回执或待处理输入时，本地 final 不是委派收敛点，不向上结算。
+内部 `task` 工具只做一次持久接受：Platform 的 `SubagentTaskRunner` 把本轮调用归一化为 `ThreadJoinRequest`，用 `acceptCommandsAndJoin` 在同一事务接受源 prompt、建立或沿用子 Thread、写入 join 凭据并请求 Work；`TaskTool` 立即用一次成功 tool_result 回执可读英文接受说明 `Task accepted. thread_id: <uuid>.`（含异步完成/失败/取消、继续独立工作或让出、以及 `task(thread_id, subagent_type, prompt)` 续做指引），不阻塞、没有第二个 tool_result；结构化元数据只在 details 中。子结果不经过工具返回，而是由运行时在子执行**收敛后**的终态边界结算 join，并作为父 Thread 的一条独立系统通知交付；子执行仍有未完成的直接子 Join、未送达的子回执或待处理输入时，本地 final 不是委派收敛点，不向上结算。
 
 join 的持久事实是 `harness_thread_join` 的一行，只记凭据、不复制任何对话内容：
 
@@ -276,7 +277,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 
 结果固定在源命令 `appliedEntryId` 到 `terminalEntryId` 的历史范围：子树后续继续推进也绝不改写旧回执；`finalAnswerEntryId` 是该终态内的最终回答入口（可空），绝不借用源输入之前的回答；源命令在执行前就被取消时单独投影为取消，不会误拾取更早的回答；同一 turn 的多条输入可以共享同一个结果。只读入口是 `findJoin`（固定 join 事实）、`projectJoinReceipt`（按 `invocationId` 投影回执）与 `findAncestorChain`（head-to-root 祖先链）。
 
-普通结算发生在子执行「源输入已应用、且本 Thread 收敛后的 final 回答 / 不可继续失败终态边界」——收敛要求没有未完成的直接子 Join、没有未送达的子回执、也没有待处理输入，因此结算既不等于首次本地 Idle，也不等待永久子树全部静止；Stop 的强制结算以停止边界收尾且不受收敛判据限制。同一终态可以同时结算多个 join。结算与父通知入队（或父已停止时直接物化进历史）在同一事务内完成，不存在假 Idle 窗口。完成消息是 `NotificationPayload` 形态的系统通知（历史 JSON `{notificationId,kind,sourceThreadId,message}`，`kind=SUBAGENT_RESULT`；`message` 是 `<subagent_result thread_id agent state>` 包裹的 USER 内容，内含本次任务原文 `<task>` 与 `<result>` / `<error>` / `<partial_result>`），渲染是 `runtime.join` 的纯函数，绝不读取子线程的当前 head；它不与人类输入共用队列或草稿。
+普通结算发生在子执行「源输入已应用、且本 Thread 收敛后的 final 回答 / 不可继续失败终态边界」——收敛要求没有未完成的直接子 Join、没有未送达的子回执、也没有待处理输入，因此结算既不等于首次本地 Idle，也不等待永久子树全部静止；Stop 的强制结算以停止边界收尾且不受收敛判据限制。同一终态只结算该子线程上仍有效（未被 supersede）的 Join；同一父/子对至多一个有效未完成 join，因此实际只交付最新一次委派的一份汇总结果。结算与父通知入队（或父已停止时直接物化进历史）在同一事务内完成，不存在假 Idle 窗口。完成消息是 `NotificationPayload` 形态的系统通知（历史 JSON `{notificationId,kind,sourceThreadId,message}`，`kind=SUBAGENT_RESULT`；`message` 是 `<subagent_result thread_id agent state>` 包裹的 USER 内容，内含本次任务原文 `<task>` 与 `<result>` / `<error>` / `<partial_result>`），渲染是 `runtime.join` 的纯函数，绝不读取子线程的当前 head；它不与人类输入共用队列或草稿。
 
 显式停止的父不会被自动唤醒：已结算的通知直接物化进父历史，不请求 THREAD Work；
 父接受新的任务输入后恢复 `RUNNABLE`，由 INPUT 消费尚未越过输入水位的通知，重放不产生第二次交付。

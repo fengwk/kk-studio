@@ -24,15 +24,15 @@ id / version / inputSchema / defaultTimeout
 
 | capabilityId | 默认超时 | `workdir` | 模型映射 |
 | --- | --- | --- | --- |
-| `fs.read` | 1 分钟 | 相对 path 时需要 | `read` |
-| `fs.write` | 1 分钟 | 相对 path 时需要 | `write` |
-| `fs.edit` | 1 分钟 | 相对 path 时需要 | `edit` |
+| `fs.read` | 1 分钟 | 无 | `read` |
+| `fs.write` | 1 分钟 | 无 | `write` |
+| `fs.edit` | 1 分钟 | 无 | `edit` |
 | `process.exec` | 5 分钟 | 必填 | `bash` |
-| `fs.grep` | 1 分钟 | 相对 path 时需要 | `grep` |
-| `fs.find` | 1 分钟 | 相对 path 时需要 | `find` |
-| `lsp.goto-definition` | 2 分钟 | 相对 path 时需要 | `lsp_goto_definition` |
-| `lsp.workspace-symbols` | 2 分钟 | 相对 path 时需要 | `lsp_workspace_symbols` |
-| `lsp.java-decompile` | 2 分钟 | 相对 path 或 target 时需要 | `lsp_java_decompile` |
+| `fs.grep` | 1 分钟 | 无 | `grep` |
+| `fs.find` | 1 分钟 | 无 | `find` |
+| `lsp.goto-definition` | 2 分钟 | 无 | `lsp_goto_definition` |
+| `lsp.workspace-symbols` | 2 分钟 | 无 | `lsp_workspace_symbols` |
+| `lsp.java-decompile` | 2 分钟 | 无 | `lsp_java_decompile` |
 | `skill.sync` | 不设总时限 | 无 | 内部控制面 |
 
 `skill.sync` 由 Platform 内部调用，其余 9 项由 Contributor 映射为模型工具。
@@ -43,9 +43,9 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力只在给出的 path
-（`lsp.java-decompile` 还包括 `target`）相对时要求它，绝对路径可直接执行；`skill.sync` 不接受
-workdir。提供 `workdir` 时它仍必须是目标 Daemon 文件系统上的绝对现存目录，
+`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的 `path`
+（`lsp.java-decompile` 还包括 `target`）必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`；
+`skill.sync` 不接受 `workdir`。`process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 
 能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据相同的能力标识与版本注册本地实现。能力标识未知或版本不匹配都是确定性的协议错误，没有回退路径。
@@ -61,7 +61,7 @@ EnvironmentCapabilityExecutionHandle execute(
     EnvironmentCapabilityExecutionListener listener);
 ```
 
-[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）和 timeout，构造时按 descriptor schema 归一化并严格校验。workdir 属于具体 arguments；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
+[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）和 timeout，构造时按 descriptor schema 归一化并严格校验。`workdir` 只属于具体工具的 arguments（仅 `process.exec`）；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
 
 [`EnvironmentCapabilityTransport`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java) 是调用方的传输窄端口：
 
@@ -202,7 +202,7 @@ Tool，READY 与 Package 发布后的同步由 Platform 发起。
 网络读取空闲超时 180 秒；持续收到数据时不因累计时长终止。`skill.sync` 的 timeout 为 0，
 没有外层总期限，但断线、关闭和取消仍会收尾在途任务。其他 capability 的默认超时不变。
 
-## workdir 词法契约
+## workdir 词法契约（`process.exec`）
 
 [`DaemonWorkdirSyntax`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntax.java) 的 `requireAbsolute(workdir, operatingSystem)` 是发送前的纯文本校验：
 

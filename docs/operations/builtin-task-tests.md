@@ -9,7 +9,7 @@
 ```text
 父 task 调用
   -> 同事务接受源命令、不可变父子关系、join 凭据与 Work
-  -> 立即 tool_result {"thread_id":"…","status":"accepted"}
+  -> 立即 tool_result「Task accepted. thread_id: <uuid>.」
 子执行到达收敛终态边界（源输入已应用，且无未完成直接子 Join / 未送达子回执 / 待处理输入）
   -> 同事务冻结 terminal/final-answer 回执、向父入队 SUBAGENT_RESULT NOTIFICATION
   -> 父 RUNNABLE 时唤醒；父 STOPPED 时通知只固化进历史
@@ -80,7 +80,7 @@ Docker 不可用时的跳过不算数据库事务已验证。
 
 [`PostgresqlSubagentContinuationTest`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlSubagentContinuationTest.java)
 通过真实独立子 Session 和 RUNNING 模型验证完整 SET_* + prompt batch 排队，不中断或覆盖当前请求；
-旧 final 不提前交付，后续 INPUT 消费后，两条未完成 Join 在最新收敛终态各交付一次，重放不重复。
+旧 final 不提前交付，后续 INPUT 消费后，旧 join 被最新续接 supersede、不再产生独立交付，只有最新一次委派在收敛终态交付一份汇总结果，重放不重复。
 另一个用例验证 ROOT fork 为独立执行根：原有子执行与回执仍属于原父，新分支的命令和历史不受后续交付影响，
 从新分支向旧子执行添加 Join 因直接父不匹配原子拒绝。
 
@@ -91,8 +91,8 @@ Docker 不可用时的跳过不算数据库事务已验证。
 全局 `maxTotalConcurrency=0` 表示不限，其余核心预算必须为正。
 
 `HarnessRuntimeJoinAcceptanceTest` 与 `HarnessStoreJoinContract` 验证深度、单父未完成子 Join 和
-跨所有根的全局未完成子 Join 上限；root ticket 不计入，同一忙碌子多个未匹配 join 各占一份额度。
-`busyChildDuplicateJoinsQuotaCountsEachUnmatchedJoinNotThreadState` 固定该计数与 Thread 自身执行状态无关。
+跨所有根的全局未完成子 Join 上限；root ticket 不计入，额度按尚未冻结终态且未被 supersede 的子 Join 计数（同一父/子对实际至多一个有效未完成 join）。
+`busyChildDuplicateJoinsQuotaCountsEachUnmatchedJoinNotThreadState` 直接在 store 层挂载多条未匹配 join，固定该计数与 Thread 自身执行状态无关。
 `PostgresqlJoinAcceptanceRollbackTest` 验证并发全局准入锁、树锁和失败回滚：
 源命令、关系、join、Work 必须一起提交或全部回滚。
 创建子必须附带 join，父与 expected head 一致，父 STOPPED 时拒绝新委派；

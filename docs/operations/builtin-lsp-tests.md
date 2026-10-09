@@ -45,12 +45,12 @@ Daemon 不自动选择 JDK、安装服务器或注入 jdtls `-data`；服务器�
 
 | 输入边界 | 证据 |
 | --- | --- |
-| 绝对 path 不需要 workdir；相对 path 必须有显式绝对 workdir | `absolutePathsNeedNoWorkdir`、`relativePathsRequireAnExplicitWorkdir`，拒绝时不启动服务器 |
+| 本地 `path` 必须绝对，相对 path 直接拒绝、不接受 workdir | `absolutePathsNeedNoWorkdir`、`relativePathsRequireAnExplicitWorkdir`，拒绝时不启动服务器 |
 | line 必填且正整数，character 缺省为 0、不可为负 | `argumentValidationRunsBeforeAnyServerProcess` |
-| symbol limit 不可为负或超过 500，target 不可空白 | `argumentValidationRunsBeforeAnyServerProcess`；`CodingCapabilitiesEdgeTest.lspCapabilitiesRequireValidAbsoluteWorkdirAndFile` 固定上界 |
-| 相对 class target 只按显式 workdir 解析，绝不回退 Daemon cwd | `workspaceSymbolsAndDecompileShareOneClient`、`LspClientProtocolTest.relativeClassTargetWithoutWorkdirIsRejected` |
+| symbol limit 不可为负或超过 500，target 不可空白 | `argumentValidationRunsBeforeAnyServerProcess`；`CodingCapabilitiesEdgeTest.lspCapabilitiesRequireValidAbsolutePathAndFile` 固定上界 |
+| 相对 class target 直接拒绝，绝不回退 Daemon cwd | `workspaceSymbolsAndDecompileShareOneClient`、`LspClientProtocolTest.relativeClassTargetIsRejected` |
 
-schema 的 required 不恒要求 workdir，但能力层仍校验相对路径所需的解析基准。
+`lsp.*` schema 不含 `workdir`；`path` 与相对 class target 由能力层校验为绝对路径。
 `path` 是文件系统路径；不把 goto-definition 的 `file://` 输入当作普通路径归一化。
 反编译可接受提取出的 `jdt://`、`file://` 或本地 class 目标，相关转换和失败由
 `localClassTargetVariantsAndEmptySource`、`javaDecompileLocalClassUsesExecuteCommand` 验证。

@@ -108,7 +108,7 @@ reportedAt: 毫秒截断
 内建工具通过 `Tool.historyRenderer()` 暴露历史动作映射：
 [`BuiltinHistoryRenderers`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHistoryRenderers.java)
 覆盖 `task` 与 2 个 Goal 工具，[`EnvironmentCapabilityRenderer`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityRenderer.java)
-按能力语义生成「动作 + 目标 + workdir 作用域 + 环境名」短语。渲染省略 timeout、
+按能力语义生成「动作 + 目标（+ bash 的 workdir）+ 环境名」短语。渲染省略 timeout、
 limit、offset 与列分页等执行控制参数，保留会改变动作解释的检索、编辑标志。它们都是
 确定性纯函数，无法形成有意义动作时返回 absent，由 Runtime 回退到逐字 arguments 的
 中性描述。
@@ -118,7 +118,7 @@ limit、offset 与列分页等执行控制参数，保留会改变动作解释�
 当 Agent 配置至少一个 Skill 时，Platform 自动保证 `read` 位于本次模型工具面，并在
 System Prompt 中给出每个 Skill 的 name、description 与稳定 path。`read` 对
 `kkstudio:/skills/<package>/<skill>/...` 读取 Platform 当前发布 commit；对绝对本地
-路径委托当前 Daemon，相对本地路径另需绝对 `workdir`。`kkstudio:/resources/<blobId>`
+路径委托当前 Daemon（本地 `path` 必须是绝对路径，相对路径直接拒绝），`kkstudio:/resources/<blobId>`
 通过本次执行 context 的 `threadId` 解析 Session，并检查该 Session 是否引用 Blob；拿到另一
 Session 的 UUID 不授予读取权限，缺少 context 直接失败。`kkstudio:` URI 不接受 `workdir`，
 URI 的支持范围由读取器显式校验。Skill 读取使用 read 的路由、权限与超时。
@@ -127,9 +127,9 @@ URI 的支持范围由读取器显式校验。Skill 读取使用 read 的路由�
 
 [`SubagentRunner`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java) 是只有「接受」没有「等待」的端口：实现必须在同一事务内完成子 Thread 的命令接受与 join 凭据写入，然后立即返回子身份，绝不能阻塞到子执行结束。Platform 的实现把请求组装为 [`ThreadJoinRequest`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinRequest.java) 并调用 `acceptCommandsAndJoin`，深度与并发限额也在该事务内由 Runtime 校验。Runner 以 [`SubagentTaskRequest.invocationId`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java) 为幂等键：同一次 Tool 调用重试返回同一个子 Thread，不会重复开启执行。
 
-接受成功后 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 立即返回成功 tool_result JSON `{"thread_id":"...","status":"accepted"}`（[`SubagentTaskMessages.accepted`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)）。执行结果在子 Thread 到达收敛终态边界（源输入已应用、且无未完成直接子 Join / 未送达子回执 / 待处理输入时的最终回答 `TURN_END`、不可继续 `FAILED`，或 Stop 强制收尾）结算 join 后，由 Runtime 作为父 Thread 的 `NOTIFICATION` 命令交付（父 `STOPPED` 时只固化、不唤醒）；完成消息的 XML 编码与转义由 runtime.join 纯函数处理，见 [Harness Runtime](harness-runtime.md)。
+接受成功后 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 立即返回成功 tool_result 的可读英文接受说明 `Task accepted. thread_id: <uuid>.`（[`SubagentTaskMessages.accepted`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)，非裸 JSON，结构化元数据在 details）。执行结果在子 Thread 到达收敛终态边界（源输入已应用、且无未完成直接子 Join / 未送达子回执 / 待处理输入时的最终回答 `TURN_END`、不可继续 `FAILED`，或 Stop 强制收尾）结算 join 后，由 Runtime 作为父 Thread 的 `NOTIFICATION` 命令交付（父 `STOPPED` 时只固化、不唤醒）；完成消息的 XML 编码与转义由 runtime.join 纯函数处理，见 [Harness Runtime](harness-runtime.md)。
 
-[`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。单父与全局额度均按尚未冻结终态的子 Join 计数，全局范围跨所有执行树；root ticket 不计入，同一忙碌子上的多个未完成 join 各占一份，继续委派也需要额度准入。判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
+[`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。单父与全局额度均按尚未冻结终态且未被 supersede 的子 Join 计数，全局范围跨所有执行树；root ticket 不计入，同一父/子对至多一个有效未完成 join（新续接 supersede 旧等待，旧 join 不占额度、不再产生独立交付），继续委派也需要额度准入。判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
 
 委派的完整契约见 [内置工具与异步委派](builtin-tools-design.md)，逐用例对照见 [Builtin Task 测试映射](../operations/builtin-task-tests.md)。
 

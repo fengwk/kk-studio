@@ -147,8 +147,8 @@ kkstudio:/skills/<package>/<skill>/...
 kkstudio:/resources/<blobId>
 ```
 
-本地相对路径要求显式绝对 `workdir`；本地读取要求绑定 Environment。Platform URI
-要求省略非空 `workdir`。Resource 读取从执行 Thread 解析 Session，再校验该 Session 的
+本地文件与 LSP 路径必须是绝对路径，相对路径直接拒绝；本地读取要求绑定 Environment。`kkstudio:` URI
+不接受 `workdir`；只有 `process.exec`（bash）要求显式绝对 `workdir`。Resource 读取从执行 Thread 解析 Session，再校验该 Session 的
 Blob 引用；未授权访问拒绝。`read` 不执行网络获取；网络访问由各自具备该能力的工具
 按自己的地址、响应预算与凭据约束承担。
 路径与读取契约见 [内置工具设计](modules/builtin-tools-design.md)。
@@ -162,7 +162,7 @@ Turn 也可能观察到发布或同步后的内容。安装和发布细节见 [P
 与 [Harness Daemon](modules/harness-daemon.md)。
 
 Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join 身份持久接受后立即
-返回 `{"thread_id":"...","status":"accepted"}`；父 Thread 可以继续工作，root Join 在子执行
+返回可读英文接受说明 `Task accepted. thread_id: <uuid>.`（异步回报、继续独立工作或让出、按 thread_id 续做；结构化元数据在 details）；父 Thread 可以继续工作，root Join 在子执行
 收敛到终态（`COMPLETED` / `ERROR`，且没有未完成的直接子 Join、未送达的子回执或待处理输入）时冻结
 `terminalEntryId` / `finalAnswerEntryId`；显式 Stop 不受收敛条件限制，以停止边界强制结算。
 结果再以 `NOTIFICATION` 交付给直接派发的父 Thread，不等待其整个永久子树进入静态 idle。
@@ -331,7 +331,7 @@ Environment 按数据类型使用四条路径：
 - Provider、MCP、Daemon 与 Plugin 凭据经受控入口写入，普通 DTO、日志和 Debug 保持脱敏。
   Plugin credential 以部署级主密钥加密存入 PostgreSQL。
 - registration token 和主密钥文件要求 owner-only 权限。主机 user/home 用于描述环境，
-  路径操作要求显式路径与 workdir。
+  路径操作要求显式绝对路径；只有进程执行要求显式绝对 workdir。
 - Skill 安装内容由人工确认的 exact commit 决定，branch 检查只提供候选更新。
 - 生产变更需经过审批并准备可恢复备份；备份同时覆盖 PostgreSQL 与 S3 数据及部署密钥。
 

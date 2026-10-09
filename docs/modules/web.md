@@ -64,7 +64,7 @@ Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入�
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 
 Harness mapper 校验 canonical UUID、可放入 long 的规范十进字符串，
-以及创建型 target 各自互斥字段（`NEW_SESSION`/`NEW_CHILD_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
+以及创建型 target 各自互斥字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
 `NEW_FORKED_SESSION` 必填 `sourceThreadId` 且禁止 `rootSettings`/`threadName`）与续写面的精确 cursor。
 产品命令批为 SET_AGENT → SET_MODEL → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL；
 `CUSTOM_MESSAGE`、`NOTIFICATION` 与 `SET_CONTRIBUTOR_STATE` 不在产品 HTTP 面。
@@ -93,7 +93,7 @@ GET model-request-debug 返回下一次结构化预览与可空的活动冻结�
 不消费上传、不推进游标、不调用 transport；历史入口只接受普通 assistant 输出，压缩结果以 `PREVIEW_UNSUPPORTED` 拒绝（父回合没有 ModelInvocation）。
 `kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表点击时快照、
 不等于原始发送字节。`PREVIEW_*` reason 区分 stale cursor、queued、busy、compaction、attachment、
-planning、provider、unsupported（仅 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
+planning、provider、unsupported（父压缩回合无 ModelInvocation，或 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
 
 Canvas commands 返回 patch，Function start 返回 202。
 UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。

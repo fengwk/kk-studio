@@ -180,7 +180,7 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
 
-全局与根交互区共用 InteractionCardBody/ApprovalCard。审批保留一次完整 `argumentsJson`（含 workdir），
+全局与根交互区共用 InteractionCardBody/ApprovalCard。审批保留一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
 来源名称来自 owner 或既有根执行树，不逐卡获取 Snapshot；无名称用“查看来源”，
 后代入口用“查看 subagent 执行”，名称与跳转目标一致，不显示裸 UUID，也不改变审批/问卷的原始来源身份。

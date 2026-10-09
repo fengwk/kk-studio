@@ -295,7 +295,7 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 
 `extensions` 必须带前导点，匹配不区分大小写，同一后缀由先声明的服务器负责。项目根从目标文件
 向上查找：优先最靠上的 `rootMarkers` 命中，其次最近的 `firstMatchMarkers`，否则用文件父目录；
-不越过最近的 `.git` 目录或 gitfile。服务器在该项目根启动，调用 `workdir` 只解析相对文件路径。
+不越过最近的 `.git` 目录或 gitfile。服务器在该项目根启动；文件 `path` 必须为绝对路径，不用 `workdir` 解析。
 
 程序基名识别为 jdtls 后才提供 `java/classFileContents`，`jdt://` 反编译不能在其它服务器上使用。
 客户端连接按项目复用，调用超时或取消只取消请求并发送 `$/cancelRequest`，不杀掉其它调用共享的
@@ -358,7 +358,7 @@ Platform Skill URI。
 伪造所有权标记**；标记只用于识别管理归属，不能通过手工补标记授权接管。
 
 同一 OS 用户只允许一个受管 Daemon；它继承启动用户的文件与命令权限，没有文件系统沙箱。
-只把 Environment 开放给可信的 Studio 用户和 Agent；`workdir` 是调用目录，不是权限边界，
+只把 Environment 开放给可信的 Studio 用户和 Agent；`process.exec` 的 `workdir` 是调用目录，不是权限边界，
 HOME 也不是默认工作目录。
 
 ## 改配置、轮换 token 与更新
@@ -409,10 +409,10 @@ SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 
 引用，并按需手动清理。
 
 数据目录持有 `daemon.lock`，同一目录只允许一个 Daemon。`tmp/workspaces/<uuid>` 保存命令与检索的大文本
-全文（`*.part` 中转后原子发布 `*.log`），模型历史可能仍引用其绝对路径；它不会隐式删除，只在超过当前保留期
-（默认 3 天）且未被使用时由定时清扫（默认 30 分钟一次）回收。`skills` 保存已安装包，`skill-work` 保存 Git
-缓存及安装中间产物。启动不再清理遗留 `.part`，技能安装器恢复或清理 staging/backup，但保留发布后
-的全文与技能。
+全文（`*.part` 中转后原子发布 `*.log`），模型历史可能仍引用其绝对路径。定时清扫（默认 30 分钟一次）
+只回收超过当前保留期（默认 3 天）且未被使用的 workspace，历史引用的全文因此在保留期后可能被自动回收。
+`skills` 保存已安装包，`skill-work` 保存 Git 缓存及安装中间产物；安装器负责恢复或清理 staging/backup，
+并保留已发布的全文与技能。
 
 ## 参数与排错
 
