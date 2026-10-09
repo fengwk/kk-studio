@@ -16,6 +16,7 @@
 | `fun.fengwk.kkstudio.harness.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |
 | `fun.fengwk.kkstudio.harness.common.skill` | Skill 名称、package name/version、描述与正文的 canonical 文本规则 | 只定义跨层共享的纯文本约束；Catalog、Git I/O 与 Daemon 安装由外层承接 |
 | `fun.fengwk.kkstudio.harness.common.text` | 字符流文本窗口核心：分页投影、正文码点预算、行/列 `long` 计数与截断元数据 | 只做 JDK 字符流的窗口投影与 BOM 邻接策略；编码嗅探、输入流打开、超时与异常映射由调用方适配 |
+| `fun.fengwk.kkstudio.harness.common.tool` | 模型可见工具错误的三段式英文文案与执行事实枚举 | 只提供固定措辞与拼接；具体错误的语义、校验与执行状态由各执行层判定 |
 
 ## Prompt 模板
 
@@ -81,6 +82,7 @@
 - Schema：[`InputSchema.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java)、[`InputValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)
 - Skill：[`SkillNames.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/skill/SkillNames.java)
 - 文本窗口：[`TextReadWindowTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/text/TextReadWindowTest.java) 覆盖分页、码点边界、续读坐标、BOM 与读取检查点。
+- 工具错误文案：[`ToolErrorGuidance.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/tool/ToolErrorGuidance.java)，[`ToolErrorGuidanceTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/tool/ToolErrorGuidanceTest.java) 锁定执行事实句子与重复包装判定。
 - 改动前先跑 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 确认依赖方向未破；[`ResourceRefTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRefTest.java) 覆盖六类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码，[`PromptTemplateTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateTest.java) 锁定精确变量匹配；同包 `BoundedOutputStreamTest` 与 `BoundedJsonWriterTest` 覆盖中文与 emoji 的 UTF-8 字节边界、只计数不保留字节与超限早停。
 
 ---

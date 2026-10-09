@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
@@ -302,14 +304,23 @@ public final class BashCapability implements EnvironmentCapability {
    *
    * <p>已捕获输出优先保留：有内容时按捕获事实收尾，失败原因只作为终态说明追加；完全没有输出时才退回纯错误结果，绝不谎称捕获过内容。
    */
-  private static EnvironmentCapabilityResult captureFailure(
+  private EnvironmentCapabilityResult captureFailure(
       EnvironmentCapabilityExecutionRequest request,
       BashHandle handle,
       OutputSpool output,
       Exception error) {
     String reason = error.getMessage() == null ? error.toString() : error.getMessage();
     if (output == null || output.totalBytes() == 0) {
-      return AbstractCodingCapability.error(request.call().id(), reason);
+      // 没有捕获到任何输出时的纯错误结果：命令尚未启动（scope 未建立）说明校验/启动前失败、未执行；
+      // 已经启动则结果无法确认，绝不能声称未执行。
+      ExecutionFact fact =
+          handle.scope == null ? ExecutionFact.NOT_EXECUTED : ExecutionFact.UNCERTAIN;
+      return AbstractCodingCapability.error(
+          request.call().id(),
+          ToolErrorGuidance.message(
+              failureReason(handle, error),
+              fact,
+              "Review the command and the reported process state before deciding what to do next"));
     }
     EnvironmentCapabilityResult captured = output.finish(true, "[" + reason + "]");
     ObjectNode details = parseDetails(captured.detailsJson());
@@ -319,6 +330,20 @@ public final class BashCapability implements EnvironmentCapability {
     }
     return new EnvironmentCapabilityResult(
         captured.callId(), captured.contents(), true, details.toString());
+  }
+
+  /**
+   * 终态说明只取受控来源：派发前参数/路径拒绝的字段说明，或配置里显式的 shell 可执行文件。已启动后的异常不回显其 message（进程启动与读取的 IO 异常可能内联可执行文件与参数）。
+   */
+  private String failureReason(BashHandle handle, Exception error) {
+    if (error instanceof ToolInputRejectedException) {
+      return error.getMessage();
+    }
+    if (handle.scope == null) {
+      return "the shell could not be started: " + config.bashExecutable();
+    }
+    // 已启动后的异常不回显其 message（进程启动与读取的 IO 异常可能内联可执行文件与参数）：诊断改用显式的 shell 名。
+    return "the command failed after it started (shell: " + config.bashExecutable() + ")";
   }
 
   /** 关闭子进程 stdin：命令以参数传入、不读 stdin，写端未关闭会让等待 EOF 的命令一直阻塞到超时。 */

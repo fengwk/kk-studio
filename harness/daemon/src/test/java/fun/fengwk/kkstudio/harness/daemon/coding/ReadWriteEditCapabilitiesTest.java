@@ -159,7 +159,7 @@ class ReadWriteEditCapabilitiesTest {
 
     EnvironmentCapabilityResult relative = invoke(read, "{\"path\":\"absolute.txt\"}");
     assertTrue(relative.error());
-    assertTrue(text(relative).contains("path must be an absolute path: absolute.txt"));
+    assertTrue(text(relative).contains("path must be an absolute path"));
   }
 
   /** 验证 ReadCapability 读取目录的分页、边界越界提示与展示格式。 */

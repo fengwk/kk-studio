@@ -29,7 +29,7 @@ final class TextFileCodec {
       return decodeStrict(bytes, 2, StandardCharsets.UTF_16BE);
     }
     if (isBinary(bytes)) {
-      throw new IllegalArgumentException("file appears to be binary");
+      throw new ToolRunFailureException("file appears to be binary");
     }
     return decodeStrict(bytes, 0, StandardCharsets.UTF_8);
   }
@@ -47,7 +47,7 @@ final class TextFileCodec {
     try {
       encoded = encoder.encode(CharBuffer.wrap(text));
     } catch (CharacterCodingException error) {
-      throw new IllegalArgumentException(
+      throw new ToolRunFailureException(
           "text cannot be losslessly encoded in charset " + charset.name(), error);
     }
 
@@ -90,11 +90,11 @@ final class TextFileCodec {
     try {
       chars = decoder.decode(buffer);
     } catch (CharacterCodingException error) {
-      throw new IllegalArgumentException("file appears to be binary: invalid text encoding", error);
+      throw new ToolRunFailureException("file appears to be binary: invalid text encoding", error);
     }
     String text = chars.toString();
     if (text.indexOf('\u0000') >= 0) {
-      throw new IllegalArgumentException("file appears to be binary: contains NUL character");
+      throw new ToolRunFailureException("file appears to be binary: contains NUL character");
     }
     return new Decoded(text, charset, bomLength);
   }

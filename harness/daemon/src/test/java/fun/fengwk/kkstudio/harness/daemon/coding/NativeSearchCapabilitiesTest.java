@@ -702,7 +702,7 @@ class NativeSearchCapabilitiesTest {
           invoke(capability, "{\"pattern\":\"needle\",\"path\":\"local.txt\"}");
 
       assertTrue(result.error(), text(result));
-      assertTrue(text(result).contains("path must be an absolute path: local.txt"), text(result));
+      assertTrue(text(result).contains("path must be an absolute path"), text(result));
       assertFalse(text(result).contains("local.txt:1"), text(result));
     }
   }
@@ -715,14 +715,12 @@ class NativeSearchCapabilitiesTest {
     EnvironmentCapabilityResult relativeGrep =
         invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\"keep.txt\"}");
     assertTrue(relativeGrep.error(), text(relativeGrep));
-    assertTrue(
-        text(relativeGrep).contains("path must be an absolute path: keep.txt"), text(relativeGrep));
+    assertTrue(text(relativeGrep).contains("path must be an absolute path"), text(relativeGrep));
 
     EnvironmentCapabilityResult relativeFind =
         invoke(find(config()), "{\"pattern\":\"*\",\"path\":\"keep.txt\"}");
     assertTrue(relativeFind.error(), text(relativeFind));
-    assertTrue(
-        text(relativeFind).contains("path must be an absolute path: keep.txt"), text(relativeFind));
+    assertTrue(text(relativeFind).contains("path must be an absolute path"), text(relativeFind));
   }
 
   /** 绝对 path 检索始终以绝对路径展示命中项。 */

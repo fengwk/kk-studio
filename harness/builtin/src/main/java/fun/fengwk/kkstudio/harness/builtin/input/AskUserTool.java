@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.builtin.input;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
@@ -59,8 +61,11 @@ public final class AskUserTool implements Tool {
     listener.onComplete(
         ToolResult.error(
             request.call().id(),
-            "ask_user is answered by the user in the conversation surface; it is never executed"
-                + " as a tool"));
+            ToolErrorGuidance.message(
+                "ask_user waits for the user's answer in the conversation surface and is never"
+                    + " executed as a tool",
+                ExecutionFact.NOT_EXECUTED,
+                "Submit the questionnaire as a frozen call and wait for the user's answer")));
     return CompletedToolExecutionHandle.INSTANCE;
   }
 }

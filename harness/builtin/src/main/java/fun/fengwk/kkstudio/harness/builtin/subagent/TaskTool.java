@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
@@ -38,6 +40,11 @@ public final class TaskTool implements Tool {
 
   public static final String NAME = "task";
   public static final String RENDERER_KEY = "task";
+
+  /** task 失败的统一下一步：明确列继续既有子线程所需的 thread_id/subagent_type/prompt，不构成重试倾向建议。 */
+  private static final String TASK_CONTINUATION_NEXT_ACTION =
+      "Call task with subagent_type and prompt; add the subagent's thread_id to continue an"
+          + " existing subagent";
 
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
@@ -85,14 +92,26 @@ public final class TaskTool implements Tool {
           parseArguments(
               request.context().invocationId(), request.context().threadId(), request.call());
     } catch (TaskRejectedException rejected) {
-      listener.onComplete(error(callId, rejected.getMessage()));
+      // 参数被拒是派发前确定性结果：父线程保留，明确未执行并给出继续参数。
+      listener.onComplete(
+          error(
+              callId,
+              ToolErrorGuidance.message(
+                  rejected.getMessage(),
+                  ExecutionFact.NOT_EXECUTED,
+                  TASK_CONTINUATION_NEXT_ACTION)));
       return CompletedToolExecutionHandle.INSTANCE;
     }
     try {
       SubagentTaskAcceptance acceptance = runner.accept(taskRequest);
       listener.onComplete(accepted(callId, taskRequest.subagentType(), acceptance));
     } catch (RuntimeException failure) {
-      listener.onComplete(error(callId, message(failure)));
+      // 接受是原子持久操作：提交结果不确定时绝不能声称「未创建」。
+      listener.onComplete(
+          error(
+              callId,
+              ToolErrorGuidance.message(
+                  message(failure), ExecutionFact.UNCERTAIN, TASK_CONTINUATION_NEXT_ACTION)));
     }
     return CompletedToolExecutionHandle.INSTANCE;
   }

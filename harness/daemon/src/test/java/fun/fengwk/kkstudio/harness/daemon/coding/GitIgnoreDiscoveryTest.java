@@ -122,7 +122,7 @@ class GitIgnoreDiscoveryTest {
     EnvironmentCapabilityResult relativeGrep =
         invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\"sub\"}");
     assertTrue(relativeGrep.error());
-    assertTrue(text(relativeGrep).contains("path must be an absolute path: sub"));
+    assertTrue(text(relativeGrep).contains("path must be an absolute path"));
 
     String absoluteGrep =
         text(
@@ -136,7 +136,7 @@ class GitIgnoreDiscoveryTest {
     EnvironmentCapabilityResult relativeFind =
         invoke(find(config()), "{\"pattern\":\"*.txt\",\"path\":\"sub\"}");
     assertTrue(relativeFind.error());
-    assertTrue(text(relativeFind).contains("path must be an absolute path: sub"));
+    assertTrue(text(relativeFind).contains("path must be an absolute path"));
 
     String absoluteFind =
         text(

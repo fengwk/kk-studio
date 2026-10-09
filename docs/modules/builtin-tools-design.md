@@ -83,6 +83,16 @@ Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢�
 
 失败、取消有明确结果路径。未知副作用不能自动重跑；停止未确认不能当作已经安全停止。父停止向后代传播，迟到通知不能绕过停止门禁。父的执行恢复与产品收尾只按自身持久事实与 root Join 冻结回执判定，不按子树空闲反查业务门禁；底层 live/historical 分类只描述本地历史适用性。
 
+## 失败与纠正指引
+
+模型可见的失败统一为三段式英文文案：发生了什么、执行事实、下一步。执行事实只有三种，且必须与真实状态一致：
+
+- 派发前校验拒绝（参数/schema、未知工具、权限、未绑定 Environment、路径或 `workdir` 不合法）声明 `The tool was not executed.`；
+- 已进入执行后的确定失败声明 `The tool ran but failed; side effects may have occurred.`；
+- 超时、取消、提交不明或远程断开声明 `Whether the tool took effect cannot be confirmed.`，不得声称未执行；bash 的取消与超时仍保留真实的进程终态事实（`EXITED` / `TIMED_OUT` / `CANCELLED`）。
+
+文案只陈述事实与恢复动作，不包含自动重试倾向；字段错误不回显含凭据的原始参数，异常路径只暴露安全描述而不是异常栈。未知工具列出当前冻结绑定的允许工具名并要求改用其中之一。路径与 `workdir` 校验在执行前完成并要求绝对路径（bash 的 `workdir` 必须绝对、存在且为目录）。`task` 的参数拒绝在文案中给出续用或新建所需的 `subagent_type`、`prompt` 与 `thread_id`，不打断既有 Thread。
+
 ## 测试入口
 
 逐用例的来源、适用性与对应测试维护在 [内置 Read 测试映射](../operations/builtin-read-tests.md)、[内置 Bash 测试映射](../operations/builtin-bash-tests.md)、[内置检索测试映射](../operations/builtin-search-tests.md)、[内置 LSP 测试映射](../operations/builtin-lsp-tests.md)、[内置 Task 测试映射](../operations/builtin-task-tests.md) 与 [内置文件变更测试映射](../operations/builtin-mutation-tests.md)。

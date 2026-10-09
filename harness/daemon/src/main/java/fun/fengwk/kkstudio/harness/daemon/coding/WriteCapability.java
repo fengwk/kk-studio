@@ -49,17 +49,17 @@ public final class WriteCapability extends AbstractCodingCapability {
       int bomLength = 0;
       if (existed) {
         if (Files.isDirectory(path)) {
-          throw new IllegalArgumentException("path is a directory: " + displayPath);
+          throw new ToolInputRejectedException("path is a directory: " + displayPath);
         }
         if (!Files.isRegularFile(path)) {
-          throw new IllegalArgumentException("path is not a regular file: " + displayPath);
+          throw new ToolInputRejectedException("path is not a regular file: " + displayPath);
         }
         TextFileCodec.Decoded existing = TextFileCodec.decode(Files.readAllBytes(path));
         charset = existing.charset();
         bomLength = existing.bomLength();
       } else if (Files.isSymbolicLink(path)) {
         // 悬空符号链接不是待创建的新文件：替换它会静默丢掉链接本身。
-        throw new IllegalArgumentException("path is a symbolic link: " + displayPath);
+        throw new ToolInputRejectedException("path is a symbolic link: " + displayPath);
       }
 
       byte[] encoded = TextFileCodec.encode(content, charset, bomLength);

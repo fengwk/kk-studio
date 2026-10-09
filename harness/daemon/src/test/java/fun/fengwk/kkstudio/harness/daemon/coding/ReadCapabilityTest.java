@@ -677,8 +677,7 @@ class ReadCapabilityTest {
             new ReadCapability(TestCodingConfig.withoutLsp(workdir), executor),
             "{\"path\":\"relative.txt\"}");
     assertTrue(relative.error());
-    assertTrue(
-        text(relative).contains("path must be an absolute path: relative.txt"), text(relative));
+    assertTrue(text(relative).contains("path must be an absolute path"), text(relative));
   }
 
   /** 意图：read 结果无论是否超过内联阈值都不再外置落盘（details 无 textOutput 且 tmp/text 目录为空）。 */

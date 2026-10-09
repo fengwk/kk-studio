@@ -426,7 +426,9 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", failed.failure().error().kind());
-    assertEquals("tool blew up", failed.failure().error().message());
+    assertTrue(failed.failure().error().message().contains("tool blew up"));
+    // 已执行的确定性失败：不得声称未执行。
+    assertTrue(failed.failure().error().message().contains("side effects may have occurred"));
     assertFalse(failed.failure().retryable());
   }
 
@@ -447,7 +449,9 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", unknown.error().kind());
-    assertTrue(unknown.error().message().contains("bad arguments"));
+    // unclassified 失败只给稳定分类，绝不把底层 Throwable.message 回显到模型可见文本。
+    assertTrue(unknown.error().message().contains("unclassified reason"));
+    assertFalse(unknown.error().message().contains("bad arguments"));
   }
 
   @Test
@@ -478,7 +482,8 @@ class ToolExecutionGatewayCallbackTest {
       ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
           (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
       assertEquals("EXECUTION_FAILED", unknown.error().kind());
-      assertTrue(unknown.error().message().contains("init failed"));
+      assertTrue(unknown.error().message().contains("unclassified reason"));
+      assertFalse(unknown.error().message().contains("init failed"));
     } finally {
       executor.shutdownNow();
     }
@@ -604,7 +609,9 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_PARTIAL", failed.failure().error().kind());
-    assertEquals("partial must not be null", failed.failure().error().message());
+    assertTrue(failed.failure().error().message().contains("partial must not be null"));
+    // partial 到达说明工具已开始执行：只能声明结果未确认。
+    assertTrue(failed.failure().error().message().contains("cannot be confirmed"));
     assertFalse(failed.failure().retryable());
   }
 
@@ -614,7 +621,7 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
-    assertEquals("terminal result must not be null", failed.failure().error().message());
+    assertTrue(failed.failure().error().message().contains("terminal result must not be null"));
     assertFalse(failed.failure().retryable());
   }
 
@@ -691,7 +698,9 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("UNAVAILABLE", failed.failure().error().kind());
-    assertEquals("Tool is unavailable.", failed.failure().error().message());
+    assertTrue(failed.failure().error().message().contains("Tool is unavailable"));
+    // transport 契约：unavailable 时调用肯定未执行。
+    assertTrue(failed.failure().error().message().contains("The tool was not executed."));
     assertTrue(failed.failure().retryable());
   }
 
@@ -702,8 +711,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", unknown.error().kind());
-    assertEquals(
-        "unclassified tool failure; outcome cannot be confirmed", unknown.error().message());
+    assertTrue(unknown.error().message().contains("unclassified reason"));
+    assertTrue(unknown.error().message().contains("cannot be confirmed"));
   }
 
   @Test
@@ -1189,8 +1198,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_PARTIAL", failed.failure().error().kind());
-    assertEquals(
-        "partial toolCallId does not match the request call", failed.failure().error().message());
+    assertTrue(failed.failure().error().message().contains("partial toolCallId does not match"));
+    assertTrue(failed.failure().error().message().contains("cannot be confirmed"));
     assertFalse(failed.failure().retryable());
     assertTrue(
         store.puts.isEmpty(),
@@ -1255,9 +1264,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
-    assertEquals(
-        "terminal result toolCallId does not match the request call",
-        failed.failure().error().message());
+    assertTrue(
+        failed.failure().error().message().contains("terminal result toolCallId does not match"));
     assertFalse(failed.failure().retryable());
     assertTrue(
         listener.store.puts.isEmpty(),
