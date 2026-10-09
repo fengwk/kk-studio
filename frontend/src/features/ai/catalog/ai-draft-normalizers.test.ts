@@ -68,6 +68,7 @@ function provider(id: string, name: string): AgentProviderDTO {
     version: '1',
     createTime: null,
     updateTime: null,
+    modelHttpRetryStatusCodes: null,
   }
 }
 

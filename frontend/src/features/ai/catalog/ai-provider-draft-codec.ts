@@ -64,10 +64,8 @@ export function toEditableProviderUpdate(draft: ProviderDraft): AgentProviderEdi
     modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
     modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
     modelHttpRetryStatusCodes:
-      draft.modelHttpRetryStatusCodes === undefined
-        ? undefined
-        : (draft.modelHttpRetryStatusCodes === null
-            ? null
-            : assembleHttpStatusCodeList(draft.modelHttpRetryStatusCodes)),
+      draft.modelHttpRetryStatusCodes === null
+        ? null
+        : assembleHttpStatusCodeList(draft.modelHttpRetryStatusCodes),
   }
 }

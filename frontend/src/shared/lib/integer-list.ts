@@ -52,6 +52,27 @@ export interface ValidateIntegerListOptions {
   max?: number
 }
 
+export function splitTagInputDraft(value: unknown): {
+  committed: number[]
+  pending: string | null
+} {
+  if (!Array.isArray(value)) {
+    return { committed: [], pending: null }
+  }
+  const committed: number[] = []
+  let pending: string | null = null
+
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i]
+    if (typeof item === 'number') {
+      committed.push(item)
+    } else if (typeof item === 'string') {
+      pending = item
+    }
+  }
+  return { committed, pending }
+}
+
 export function validateIntegerListTokens(
   tokens: string[],
   existing: (number | string)[],
@@ -61,10 +82,16 @@ export function validateIntegerListTokens(
   const seen = new Set<number>()
 
   for (const item of existing) {
-    if (typeof item === 'number') {
+    if (typeof item === 'number' && Number.isSafeInteger(item)) {
       seen.add(item)
-    } else if (typeof item === 'string' && /^\d+$/u.test(item.trim())) {
-      seen.add(parseInt(item.trim(), 10))
+    } else if (typeof item === 'string') {
+      const trimmed = item.trim()
+      if (/^-?\d+$/u.test(trimmed)) {
+        const num = Number(trimmed)
+        if (Number.isSafeInteger(num)) {
+          seen.add(num)
+        }
+      }
     }
   }
 
@@ -80,7 +107,7 @@ export function validateIntegerListTokens(
         }),
       }
     }
-    if (!/^\d+$/u.test(trimmed)) {
+    if (!/^-?\d+$/u.test(trimmed)) {
       return {
         valid: [],
         error: new IntegerListValidationError('notInteger', {
@@ -90,7 +117,17 @@ export function validateIntegerListTokens(
         }),
       }
     }
-    const num = parseInt(trimmed, 10)
+    const num = Number(trimmed)
+    if (!Number.isSafeInteger(num)) {
+      return {
+        valid: [],
+        error: new IntegerListValidationError('notInteger', {
+          token: trimmed,
+          min: options?.min,
+          max: options?.max,
+        }),
+      }
+    }
     if (options?.min != null && num < options.min) {
       return {
         valid: [],
@@ -140,16 +177,20 @@ export function assembleIntegerList(
   for (const item of items) {
     let num: number
     if (typeof item === 'number') {
-      if (!Number.isInteger(item) || !Number.isFinite(item)) {
+      if (!Number.isSafeInteger(item)) {
         throw new IntegerListValidationError('notInteger', { token: item })
       }
       num = item
     } else if (typeof item === 'string') {
       const trimmed = item.trim()
-      if (trimmed === '' || !/^\d+$/u.test(trimmed)) {
+      if (trimmed === '' || !/^-?\d+$/u.test(trimmed)) {
         throw new IntegerListValidationError('notInteger', { token: item })
       }
-      num = parseInt(trimmed, 10)
+      const parsed = Number(trimmed)
+      if (!Number.isSafeInteger(parsed)) {
+        throw new IntegerListValidationError('notInteger', { token: item })
+      }
+      num = parsed
     } else {
       throw new IntegerListValidationError('notInteger')
     }

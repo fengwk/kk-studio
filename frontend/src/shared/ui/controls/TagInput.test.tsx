@@ -1,81 +1,249 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { TagInput } from './TagInput'
 
 describe('TagInput', () => {
-  it('renders existing tags and allows removing a tag', async () => {
+  it('renders committed chips and allows removing a chip while preserving pending text', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<TagInput value={[408, 429, 500]} onChange={onChange} ariaLabel="HTTP status codes" />)
+    render(
+      <TagInput
+        value={[408, 429, '500']}
+        onChange={onChange}
+        min={400}
+        max={599}
+        ariaLabel="HTTP status codes"
+      />,
+    )
 
     expect(screen.getByText('408')).toBeInTheDocument()
     expect(screen.getByText('429')).toBeInTheDocument()
-    expect(screen.getByText('500')).toBeInTheDocument()
+    // The input displays the pending text
+    expect(screen.getByRole('textbox')).toHaveValue('500')
 
-    const removeBtn = screen.getByLabelText('Remove 429')
+    const removeBtn = screen.getByLabelText('移除 429')
     await user.click(removeBtn)
 
-    expect(onChange).toHaveBeenCalledWith([408, 500])
+    // Removing 429 preserves pending text '500'
+    expect(onChange).toHaveBeenCalledWith([408, '500'])
   })
 
-  it('adds tags via Enter and comma', async () => {
+  it('immediately propagates staged input on every keystroke without Enter', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<TagInput value={[429]} onChange={onChange} ariaLabel="HTTP status codes" />)
+    render(
+      <TagInput
+        value={[408]}
+        onChange={onChange}
+        min={400}
+        max={599}
+        ariaLabel="HTTP status codes"
+      />,
+    )
 
     const input = screen.getByRole('textbox')
-    await user.type(input, '500{enter}')
-    expect(onChange).toHaveBeenCalledWith([429, 500])
-
-    onChange.mockClear()
-    await user.type(input, '502,')
-    expect(onChange).toHaveBeenCalledWith([429, 502])
+    await user.type(input, '2')
+    expect(onChange).toHaveBeenCalledWith([408, '2'])
   })
 
-  it('parses pasted tokens with mixed commas and whitespace', async () => {
-    const onChange = vi.fn()
-    render(<TagInput value={[429]} onChange={onChange} ariaLabel="HTTP status codes" />)
+  it('types invalid then corrects and presses enter to commit', async () => {
+    const user = userEvent.setup()
 
+    function ControlledTagInput() {
+      const [value, setValue] = useState<(number | string)[]>([408])
+      return (
+        <TagInput
+          value={value}
+          onChange={setValue}
+          min={400}
+          max={599}
+          ariaLabel="HTTP status codes"
+        />
+      )
+    }
+
+    render(<ControlledTagInput />)
     const input = screen.getByRole('textbox')
+
+    // Type invalid status code 200 and press Enter
+    await user.type(input, '200{enter}')
+    expect(screen.getByRole('alert')).toHaveTextContent('200')
+    // Chips still only 408; 200 stays in the input
+    expect(screen.getByText('408')).toBeInTheDocument()
+    expect(input).toHaveValue('200')
+
+    // Correct to 500 and press Enter
+    await user.clear(input)
+    await user.type(input, '500{enter}')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('500')).toBeInTheDocument()
+    expect(input).toHaveValue('')
+  })
+
+  it('detects duplicate on commit and keeps pending raw text with error', async () => {
+    const user = userEvent.setup()
+
+    function ControlledTagInput() {
+      const [value, setValue] = useState<(number | string)[]>([429])
+      return (
+        <TagInput
+          value={value}
+          onChange={setValue}
+          min={400}
+          max={599}
+          ariaLabel="HTTP status codes"
+        />
+      )
+    }
+
+    render(<ControlledTagInput />)
+    const input = screen.getByRole('textbox')
+
+    // Type duplicate 429 and press Enter
+    await user.type(input, '429{enter}')
+    expect(screen.getByRole('alert')).toHaveTextContent('429')
+    expect(input).toHaveValue('429')
+  })
+
+  it('commits single valid input on blur and handles paste batch all-or-nothing', async () => {
+    const user = userEvent.setup()
+
+    function ControlledTagInput() {
+      const [value, setValue] = useState<(number | string)[]>([408])
+      return (
+        <TagInput
+          value={value}
+          onChange={setValue}
+          min={400}
+          max={599}
+          ariaLabel="HTTP status codes"
+        />
+      )
+    }
+
+    render(<ControlledTagInput />)
+    const input = screen.getByRole('textbox')
+
+    // Type 429 and blur
+    await user.type(input, '429')
+    fireEvent.blur(input)
+    expect(screen.getByText('429')).toBeInTheDocument()
+    expect(input).toHaveValue('')
+
+    // Paste invalid batch containing 600 (out of range) -> all-or-nothing: none committed
     fireEvent.paste(input, {
       clipboardData: {
-        getData: () => '500, 502   503,504',
+        getData: () => '500, 600',
       },
     })
-
-    expect(onChange).toHaveBeenCalledWith([429, 500, 502, 503, 504])
-  })
-
-  it('rejects duplicate status codes and flags invalid tag', async () => {
-    const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<TagInput value={[429]} onChange={onChange} ariaLabel="HTTP status codes" />)
-
-    const input = screen.getByRole('textbox')
-    await user.type(input, '429{enter}')
-    expect(onChange).toHaveBeenCalledWith([429, '429'])
     expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByText('500')).toBeNull()
+    expect(input).toHaveValue('500, 600')
+
+    // Paste valid batch -> all committed
+    await user.clear(input)
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: () => '500, 502, 503',
+      },
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('500')).toBeInTheDocument()
+    expect(screen.getByText('502')).toBeInTheDocument()
+    expect(screen.getByText('503')).toBeInTheDocument()
+    expect(input).toHaveValue('')
   })
 
-  it('rejects out-of-range status codes and flags invalid tag', async () => {
+  it('resets input value and clears error upon external value reset', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<TagInput value={[]} onChange={onChange} min={400} max={599} ariaLabel="HTTP status codes" />)
 
+    function ResettableHarness() {
+      const [value, setValue] = useState<(number | string)[]>([408])
+      return (
+        <>
+          <button type="button" onClick={() => setValue([408, 429])}>
+            Reset
+          </button>
+          <TagInput
+            value={value}
+            onChange={setValue}
+            min={400}
+            max={599}
+            ariaLabel="HTTP status codes"
+          />
+        </>
+      )
+    }
+
+    render(<ResettableHarness />)
     const input = screen.getByRole('textbox')
+
+    // Trigger an error
     await user.type(input, '200{enter}')
-    expect(onChange).toHaveBeenCalledWith(['200'])
     expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(input).toHaveValue('200')
+
+    // Click external reset
+    await user.click(screen.getByText('Reset'))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(input).toHaveValue('')
+    expect(screen.getByText('408')).toBeInTheDocument()
+    expect(screen.getByText('429')).toBeInTheDocument()
   })
 
-  it('removes the last tag on backspace when input is empty', async () => {
+  it('clears pending text when input is cleared or whitespace is committed', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<TagInput value={[429, 500]} onChange={onChange} ariaLabel="HTTP status codes" />)
+    render(
+      <TagInput
+        value={[408, '500']}
+        onChange={onChange}
+        min={400}
+        max={599}
+        ariaLabel="HTTP status codes"
+      />,
+    )
 
     const input = screen.getByRole('textbox')
+    // Clear the input
+    await user.clear(input)
+    expect(onChange).toHaveBeenCalledWith([408])
+
+    // Commit empty spaces
+    onChange.mockClear()
+    render(
+      <TagInput
+        value={[408, '   ']}
+        onChange={onChange}
+        min={400}
+        max={599}
+        ariaLabel="HTTP status codes"
+      />,
+    )
+    const inputs = screen.getAllByRole('textbox')
+    const secondInput = inputs[1]!
+    await user.type(secondInput, '{enter}')
+    expect(onChange).toHaveBeenCalledWith([408])
+  })
+
+  it('removes the last committed chip on backspace when input is empty', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(
+      <TagInput
+        value={[408, 429]}
+        onChange={onChange}
+        min={400}
+        max={599}
+        ariaLabel="HTTP status codes"
+      />,
+    )
+
+    const input = screen.getByRole('textbox')
+    expect(input).toHaveValue('')
     await user.type(input, '{backspace}')
-    expect(onChange).toHaveBeenCalledWith([429])
+    expect(onChange).toHaveBeenCalledWith([408])
   })
 })
