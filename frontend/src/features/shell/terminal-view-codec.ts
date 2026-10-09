@@ -3,7 +3,7 @@
  *
  * 严格按照权威协议与 Java TerminalViewUpdateCodec 规范解码 RESET 与 PATCH 消息。
  * 输入为已经过基础结构反序列化的应用帧对象（trusted app frame value），非 raw JSON string。
- * 执行全量严格校验：字段白名单、UUID 规范、数值边界、安全整数、8 色位/flags 字典 Canonical First-Seen 顺序。
+ * 执行全量严格校验：字段白名单、UUID 规范、数值边界、安全整数、flags 8 个样式位与字典 Canonical First-Seen 顺序。
  */
 
 import {
@@ -165,21 +165,6 @@ const MOUSE_FORMATS = new Set<MouseFormat>([
 
 const SCREEN_ROW_FIELDS = new Set(['row', 'line'])
 
-/** 递归深度冻结对象与数组。 */
-export function deepFreeze<T>(obj: T): Readonly<T> {
-  if (obj === null || typeof obj !== 'object' || Object.isFrozen(obj)) {
-    return obj
-  }
-  Object.freeze(obj)
-  for (const key of Object.keys(obj)) {
-    const val = (obj as Record<string, unknown>)[key]
-    if (val !== null && typeof val === 'object' && !Object.isFrozen(val)) {
-      deepFreeze(val)
-    }
-  }
-  return obj
-}
-
 function rejectUnknownAndRequireFields(
   obj: Record<string, unknown>,
   allowed: Set<string>,
@@ -212,10 +197,10 @@ function decodeColor(value: number): CellColor | null {
     return null
   }
   if (value <= -2 && value >= -257) {
-    return indexedColor(-2 - value)
+    return Object.freeze(indexedColor(-2 - value))
   }
   if (value >= 0 && value <= 0xffffff) {
-    return rgbFromPacked(value)
+    return Object.freeze(rgbFromPacked(value))
   }
   throw new TerminalViewError(TERMINAL_VIEW_INVALID_MESSAGE)
 }
@@ -648,5 +633,5 @@ export function decodeTerminalViewUpdate(value: unknown): TerminalViewUpdate {
     screenRows: Object.freeze(screenRows),
   }
 
-  return deepFreeze(update)
+  return Object.freeze(update)
 }

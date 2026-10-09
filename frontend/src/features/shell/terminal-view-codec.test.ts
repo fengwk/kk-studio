@@ -1,13 +1,4 @@
-/**
- * TerminalViewUpdateCodec 单元测试。
- *
- * 覆盖：
- * 1. Java 权威测试固件等价性（reset-update.json / patch-update.json / patch-metadata.json）
- * 2. 数值保真：UTF-16 单元、NUL、FEFF、代理项、DWC 槽
- * 3. 颜色模型：默认颜色（-1）、256 色索引（-2..-257 -> 0..255）、RGB 真彩极值（0..16777215）
- * 4. 样式字典：Canonical First-Seen 顺序校验、单例复用、无冗余项、预算前置校验
- * 5. 全字段与边界严格校验：未知字段、缺失字段、非规范 UUID、越界安全整数、行 ID 唯一性
- */
+/** TerminalViewUpdateCodec 单元测试：固件对齐、逐槽样式与代际协议解码校验。 */
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -141,7 +132,7 @@ describe('terminal-view-codec', () => {
       expect(decoded.screenRows[1].row).toBe(1)
       expect(decoded.screenRows[1].line.id).toBe(12)
 
-      // 深度冻结检验
+      // 深度冻结检验（含逐槽 CellColor 颜色对象）
       expect(Object.isFrozen(decoded)).toBe(true)
       expect(Object.isFrozen(decoded.inputModes)).toBe(true)
       expect(Object.isFrozen(decoded.historyAppend)).toBe(true)
@@ -149,6 +140,31 @@ describe('terminal-view-codec', () => {
       expect(Object.isFrozen(historyLine.slots)).toBe(true)
       expect(Object.isFrozen(historyLine.slots[0])).toBe(true)
       expect(Object.isFrozen(historyLine.slots[0].style)).toBe(true)
+      expect(Object.isFrozen(historyLine.slots[2].style.fg)).toBe(true)
+      expect(Object.isFrozen(historyLine.slots[3].style.bg)).toBe(true)
+      expect(Object.isFrozen(historyLine.slots[4].style.fg)).toBe(true)
+      expect(Object.isFrozen(historyLine.slots[4].style.bg)).toBe(true)
+
+      // 尝试修改冻结颜色抛出 TypeError，保持不可变
+      expect(() => {
+        ;(historyLine.slots[2].style.fg as Record<string, unknown>).r = 999
+      }).toThrow(TypeError)
+      expect(() => {
+        ;(historyLine.slots[3].style.bg as Record<string, unknown>).index = 999
+      }).toThrow(TypeError)
+
+      // 复用字典样式的槽引用同一冻结颜色对象
+      expect(decoded.screenRows[0].line.slots[0].style.fg).toBe(historyLine.slots[2].style.fg)
+    })
+
+    it('源输入对象后续修改不影响已解码的终端更新', () => {
+      const input = clone(resetFixture) as Record<string, unknown>
+      const decoded = decodeTerminalViewUpdate(input)
+      input.cols = 99
+      input.styles = []
+      ;((input.historyAppend as unknown[][])[0])[0] = 9999
+      expect(decoded.cols).toBe(6)
+      expect(decoded.historyAppend[0].id).toBe(10)
     })
 
     it('patch-update.json 解码与增量语义一致', () => {

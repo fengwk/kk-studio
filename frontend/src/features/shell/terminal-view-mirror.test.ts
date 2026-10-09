@@ -1,15 +1,4 @@
-/**
- * TerminalViewMirror 单元测试。
- *
- * 覆盖：
- * 1. 代际流栅栏与显式 beginStream / clear 边界；
- * 2. 初始仅接受 RESET，后序匹配流仅接受严格递增版本及单调 inputModeRevision；
- * 3. PATCH 增量严格状态机：baseVersion 对齐、尺寸/alternate 一致、历史算式校验；
- * 4. 全局活动行 ID 碰撞拒绝（跨历史与屏幕行、相同空白行 ID vs 不同空白行 ID）；
- * 5. 未触及行对象引用保持（toBe 恒等性）；
- * 6. 拓扑位移 vs 局流行替换 vs 纯元数据 PATCH 的精确 dirtyRows 计算；
- * 7. 失败操作原子性：异常时不修改已有状态与引用。
- */
+/** TerminalViewMirror 单元测试：代际流栅栏、行对象引用保持与原子状态机校验。 */
 
 import { describe, expect, it } from 'vitest'
 import resetFixture from './__fixtures__/reset-update.json'
