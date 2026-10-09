@@ -144,10 +144,17 @@ TERMINAL_WRITER_REQUIRED_CASES = {
 # 预算、writer/输入围栏与 snapshot 失败路径都是确定性或用真实 PTY 的用例，没有任何平台前置条件，因此三平台都必须
 # 真跑且不得跳过。
 TERMINAL_COORDINATOR_REQUIRED_CASES = {
-    # 单例启动与迟到 runtime 收敛。
+    # 单例启动与迟到 runtime 收敛：owner 不可用后仍存在的迟到活 runtime、以及已 handIn 的迟到 runtime，都必须被停止并汇合。
     "openStartsSingleSessionAndAttaches",
     "lateReturnedTerminatedRuntimeStillConverges",
     "shutdownDuringHandedInStartStopsRuntimeAndConverges",
+    "ownerFatalThenLiveRuntimeReturnsStopsWithoutOwnerCallback",
+    # 真实 PTY 与生产入口必须在每条腿真跑：输入送达命令并回传、自然退出保留屏幕与退出码、断开后 shell 存活并可重连、
+    # 生产构造器真正拉起 runtime。
+    "realPtyInputReachesCommandAndOutputReturns",
+    "realPtyNaturalExitPreservesExitCodeAndFinalScreen",
+    "realPtyDisconnectKeepsShellAliveAndReattaches",
+    "productionConstructorStartsRealRuntime",
     # owner 失效与不同 environment 的重绑。
     "ownerRejectionAfterAttachFailsCoordinatorAndReleasesStreams",
     "bindDifferentEnvironmentStopsOldSessionAndRebinds",
