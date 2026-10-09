@@ -171,7 +171,9 @@ export function validateResourceDraft(
         fields: { name: translate('ai.catalog.validation.name') },
       }
     }
-    if (!drafts.agentDraft.model.trim()) {
+    // BUILTIN 支持显式未配置模型；USER 仍要求已选择 Model。
+    const builtin = modal.mode === 'edit' && modal.type === 'BUILTIN'
+    if (!builtin && !drafts.agentDraft.model.trim()) {
       return {
         ok: false,
         message: translate('ai.catalog.validation.agentModel'),
@@ -179,7 +181,7 @@ export function validateResourceDraft(
       }
     }
     if (modal.mode === 'edit') {
-      toEditableAgentUpdate(drafts.agentDraft)
+      toEditableAgentUpdate(drafts.agentDraft, builtin)
     } else {
       toEditableAgent(drafts.agentDraft)
     }

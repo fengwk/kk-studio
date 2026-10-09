@@ -99,6 +99,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: null,
       systemPrompt: null,
+      type: 'USER',
       model: 'minimax/model',
       variant: 'quality',
       config: {
@@ -219,6 +220,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant-true',
       description: null,
       systemPrompt: null,
+      type: 'USER',
       model: 'minimax/model',
       variant: null,
       config: {
@@ -248,5 +250,34 @@ describe('ai-agent-draft-codec', () => {
     expect(falseDraft.inheritParentEnvironment).toBe(false)
     expect(toEditableAgent(falseDraft).config.inheritParentEnvironment).toBe(false)
     expect(toEditableAgentUpdate(falseDraft).config.inheritParentEnvironment).toBe(false)
+  })
+
+  it('projects an unconfigured built-in model as empty and only BUILTIN may write null without leaking type', () => {
+    const builtin: AgentDefinitionDTO = {
+      name: 'compaction',
+      description: null,
+      systemPrompt: null,
+      type: 'BUILTIN',
+      model: null,
+      variant: null,
+      config: {
+        inheritParentEnvironment: true,
+        tools: [],
+        skills: [],
+        subagents: [],
+      },
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    }
+
+    // 未配置模型投影为空字符串，绝不回退到父/第一个 model。
+    expect(toAgentDraft(builtin).model).toBe('')
+
+    // USER 路径仍要求模型：默认允许空模型导致抛错，且请求体从不包含 type。
+    expect(() => toEditableAgentUpdate(toAgentDraft(builtin))).toThrow(/model/)
+    const builtinUpdate = toEditableAgentUpdate(toAgentDraft(builtin), true)
+    expect(builtinUpdate.model).toBeNull()
+    expect(builtinUpdate).not.toHaveProperty('type')
   })
 })

@@ -34,4 +34,23 @@ describe('ResourceCardLayout', () => {
     expect(onStart).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: '删除 resource' })).toBeDisabled()
   })
+
+  it('renders a badge and disables the delete button when deleteDisabled is set', () => {
+    const onDelete = vi.fn()
+    render(
+      <ResourceCardLayout
+        icon="agent"
+        title="builtin-agent"
+        subtitle="detail"
+        badge={<span className="status-pill is-neutral">内置</span>}
+        rows={[]}
+        onEdit={vi.fn()}
+        onDelete={onDelete}
+        deletePending={false}
+        deleteDisabled
+      />,
+    )
+    expect(screen.getByText('内置')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除 builtin-agent' })).toBeDisabled()
+  })
 })

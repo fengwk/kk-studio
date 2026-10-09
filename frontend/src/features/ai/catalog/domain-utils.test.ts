@@ -289,6 +289,7 @@ describe('AI domain utilities', () => {
         name: 'assistant',
         description: 'Cloud agent',
         systemPrompt: null,
+        type: 'USER' as const,
         model: 'minimax/MiniMax-M2.7',
         variant: 'default',
         config: {
@@ -436,6 +437,7 @@ describe('AI domain utilities', () => {
         name: 'fallback-agent',
         description: null,
         systemPrompt: null,
+        type: 'USER',
         model: 'openai/gpt-5.4',
         variant: 'default',
         config: {

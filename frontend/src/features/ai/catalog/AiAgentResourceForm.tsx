@@ -21,6 +21,7 @@ import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-va
 import { Select } from '@/shared/ui/controls/Select'
 import type {
   AgentDefinitionDTO,
+  AgentDefinitionType,
   SkillPackageDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
@@ -33,6 +34,7 @@ function toggleValue(items: string[], value: string): string[] {
 export function AgentForm({
   draft,
   mode = 'create',
+  agentType = 'USER',
   models,
   toolCatalog = [],
   agents = [],
@@ -44,6 +46,8 @@ export function AgentForm({
 }: {
   draft: AgentDraft
   mode?: 'create' | 'edit'
+  /** 系统持有的 Agent 类型；BUILTIN 允许未配置模型，USER 保持必填。 */
+  agentType?: AgentDefinitionType
   models: AgentModelView[]
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDefinitionDTO[]
@@ -54,21 +58,27 @@ export function AgentForm({
   onChange: (draft: AgentDraft) => void
 }) {
   const { t } = useI18n()
+  const builtin = agentType === 'BUILTIN'
   const selectedModel = models.find((model) => modelRef(model) === draft.model)
   const modelUnavailable =
     mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
+  const modelUnconfigured = builtin && !draft.model.trim()
   const variantOptions = variantOptionsFromModel(selectedModel)
   const selectedVariant = draft.variant.trim()
-  const modelOptions = modelUnavailable
-    ? [
-        {
-          value: draft.model,
-          label: `${draft.model} (${t('ai.catalog.form.unavailable')})`,
-          disabled: true,
-        },
-        ...models.map((model) => ({ value: modelRef(model), label: modelRef(model) })),
-      ]
-    : models.map((model) => ({ value: modelRef(model), label: modelRef(model) }))
+  const modelOptions = [
+    // BUILTIN 的显式未配置状态：空值选项让 Select 直接呈现“未配置”，绝不静默回退父/第一个 model。
+    ...(builtin ? [{ value: '', label: t('ai.catalog.form.modelUnconfigured') }] : []),
+    ...(modelUnavailable
+      ? [
+          {
+            value: draft.model,
+            label: `${draft.model} (${t('ai.catalog.form.unavailable')})`,
+            disabled: true,
+          },
+        ]
+      : []),
+    ...models.map((model) => ({ value: modelRef(model), label: modelRef(model) })),
+  ]
   const variantSelectOptions = [
     { value: '', label: t('ai.catalog.form.useModelDefault') },
     ...(modelUnavailable && selectedVariant
@@ -133,18 +143,29 @@ export function AgentForm({
         />
       </label>
       <label className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>
-        <FieldLabel required>{t('ai.catalog.form.defaultModel')}</FieldLabel>
+        <FieldLabel required={!builtin}>{t('ai.catalog.form.defaultModel')}</FieldLabel>
         <Select
           aria-label={t('ai.catalog.form.defaultModel')}
-          aria-describedby={modelUnavailable ? 'agent-model-identity-status' : undefined}
+          aria-describedby={
+            modelUnavailable
+              ? 'agent-model-identity-status'
+              : modelUnconfigured
+                ? 'agent-model-unconfigured-status'
+                : undefined
+          }
           value={draft.model}
-          required
+          required={!builtin}
           options={modelOptions}
           onChange={(model) => onChange(applyAgentModelSelection(draft, model, models))}
         />
         {modelUnavailable ? (
           <span id="agent-model-identity-status" className="inline-hint" role="status">
             {t('ai.catalog.form.unavailableIdentityHint')}
+          </span>
+        ) : null}
+        {modelUnconfigured ? (
+          <span id="agent-model-unconfigured-status" className="inline-hint" role="status">
+            {t('ai.catalog.form.modelUnconfiguredHint')}
           </span>
         ) : null}
         {fieldErrors.model ? <span className="field-error">{fieldErrors.model}</span> : null}
@@ -237,7 +258,7 @@ export function AgentForm({
           {t('ai.catalog.form.needModel')}
         </div>
       )}
-      {models.length > 0 && !draft.model && (
+      {models.length > 0 && !draft.model && !builtin && (
         <Button variant="inline" onClick={() => onChange(emptyAgentDraft(models[0]))}>
           {t('ai.catalog.form.fillFirstModel')}
         </Button>
