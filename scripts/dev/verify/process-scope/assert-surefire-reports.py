@@ -38,6 +38,8 @@ TERMINAL_PACKAGE_CLASSES = frozenset(
         "HeadlessTerminalDisplayTest",
         "TerminalLaunchSpecTest",
         "TerminalViewStreamTest",
+        "TerminalRuntimeDeterministicTest",
+        "TerminalRuntimeRealPtyTest",
     }
 )
 
@@ -105,6 +107,24 @@ TERMINAL_VIEW_STREAM_REQUIRED_CASES = {
     "closeAfterAckReleasesBaselineAndKeepsVersionHistory",
 }
 
+TERMINAL_RUNTIME_REQUIRED_CASES = {
+    "staleInputModeIsRejectedWithoutWritingAndWithoutEndingTheSession",
+    "partialWriteIsOutcomeUnknownAndEndsTheSession",
+    "writeTimeoutIsOutcomeUnknownAndEndsTheSession",
+    "closeIsIdempotentTerminatesPendingOperationsAndLeavesExecutorsRunning",
+    "deadlineThatFiresBeforeNativeAdmissionKeepsTheFrameUnwritten",
+    "cancelWinningBeforeNativeAdmissionKeepsTheFrameUnwritten",
+    "closeWinningBeforeNativeAdmissionKeepsTheFrameUnwritten",
+    "splitUtf8AndCsiChunksKeepSnapshotAndResizeResponsive",
+}
+
+TERMINAL_RUNTIME_PTY_REQUIRED_CASES = {
+    "userWriteReachesTheCommandAndItsOutputReturnsThroughTheKernel",
+    "naturalExitPreservesFinalViewAndExitCode",
+    "startDeclaresTermAndTrueColorToTheCommand",
+    "repeatedCloseIsIdempotentAfterNaturalExit",
+}
+
 # 核心验收：只用 JDK 夹具造真实进程层级，任何平台都没有跳过它们的理由。
 REQUIRED_CASES = {
     "fun.fengwk.kkstudio.harness.daemon.process.ProcessScopeCrossPlatformTest": {
@@ -122,6 +142,8 @@ REQUIRED_CASES = {
     TERMINAL_PACKAGE + "HeadlessTerminalDisplayTest": HEADLESS_DISPLAY_REQUIRED_CASES,
     TERMINAL_PACKAGE + "TerminalLaunchSpecTest": TERMINAL_LAUNCH_REQUIRED_CASES,
     TERMINAL_PACKAGE + "TerminalViewStreamTest": TERMINAL_VIEW_STREAM_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "TerminalRuntimeDeterministicTest": TERMINAL_RUNTIME_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "TerminalRuntimeRealPtyTest": TERMINAL_RUNTIME_PTY_REQUIRED_CASES,
 }
 
 # Windows 腿仍然要有「用真正的 Git Bash 跑通命令执行」的实证：BashCapabilityTest 自己显式定位 Git Bash（runner 上就是
@@ -207,6 +229,8 @@ SELECTED_CLASSES = (
     "HeadlessTerminalDisplayTest",
     "TerminalLaunchSpecTest",
     "TerminalViewStreamTest",
+    "TerminalRuntimeDeterministicTest",
+    "TerminalRuntimeRealPtyTest",
 )
 
 

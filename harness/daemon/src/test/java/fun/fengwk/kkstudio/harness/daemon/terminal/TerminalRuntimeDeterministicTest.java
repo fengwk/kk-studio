@@ -706,14 +706,12 @@ class TerminalRuntimeDeterministicTest {
       try {
         CompletableFuture<Void> write = runtime.writeInput(bytes("hello"), 1L);
         assertTrue(scheduler.awaitEntered(WAIT_SECONDS, TimeUnit.SECONDS), "写任务必须已停在调度窗口");
-        Thread closer = new Thread(runtime::close, "close-winner");
-        closer.start();
+        CompletableFuture<Void> closer = CompletableFuture.runAsync(runtime::close, ioExecutor());
         // offer 已拒绝即为「关闭已赢」的证据；此时再放行 scheduler，准入必须拒绝 native。
         awaitTrue(
             () -> runtime.writeInput(bytes("z"), 1L).isCompletedExceptionally(), WAIT_SECONDS);
         scheduler.release();
-        closer.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS));
-        assertFalse(closer.isAlive(), "close 必须在 scheduler 放行后完成");
+        closer.get(WAIT_SECONDS, TimeUnit.SECONDS);
         assertEquals("", output.capturedAsString(), "关闭先赢时不得进入 native 写");
         assertTrue(write.isCompletedExceptionally(), "在途写不得遗留 pending");
         assertTrue(runtime.termination().isDone(), "关闭必须收敛");

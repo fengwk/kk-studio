@@ -21,10 +21,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@link TerminalRuntime} 的真实跨平台 PTY 验收：命令输出经伪终端进入唯一内核、用户写入到达命令、查询应答经唯一 writer 回传、自然退出
- * 保留末屏与退出码、终端声明 TERM/COLORTERM。
+ * {@link TerminalRuntime} 的真实跨平台 PTY 验收：命令输出经伪终端进入唯一内核、用户写入到达命令、自然退出 保留末屏与退出码、终端声明 TERM/COLORTERM。
  *
- * <p>全部使用自己的 JDK 夹具 argv（不经过 shell、不设置平台 assume），因此这三条事实在 Linux/macOS/Windows 上用同一段断言验证。
+ * <p>全部使用自己的 JDK 夹具 argv（不经过 shell、不设置平台 assume），在 Linux/macOS/Windows 上使用相同断言验证。
  */
 class TerminalRuntimeRealPtyTest {
 

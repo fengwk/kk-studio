@@ -38,6 +38,8 @@ TERMINAL_CLASSES = frozenset(
         "HeadlessTerminalDisplayTest",
         "TerminalLaunchSpecTest",
         "TerminalViewStreamTest",
+        "TerminalRuntimeDeterministicTest",
+        "TerminalRuntimeRealPtyTest",
     }
 )
 
@@ -79,6 +81,8 @@ SELECTED_CLASSES = (
     "HeadlessTerminalDisplayTest",
     "TerminalLaunchSpecTest",
     "TerminalViewStreamTest",
+    "TerminalRuntimeDeterministicTest",
+    "TerminalRuntimeRealPtyTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -163,6 +167,22 @@ TERMINAL_VIEW_STREAM_CASES = (
     "realKernelScrollProducesBoundedPatchesWithTrim",
     "decreasingInputModeRevisionIsRejected",
     "closeAfterAckReleasesBaselineAndKeepsVersionHistory",
+)
+TERMINAL_RUNTIME_CASES = (
+    "staleInputModeIsRejectedWithoutWritingAndWithoutEndingTheSession",
+    "partialWriteIsOutcomeUnknownAndEndsTheSession",
+    "writeTimeoutIsOutcomeUnknownAndEndsTheSession",
+    "closeIsIdempotentTerminatesPendingOperationsAndLeavesExecutorsRunning",
+    "deadlineThatFiresBeforeNativeAdmissionKeepsTheFrameUnwritten",
+    "cancelWinningBeforeNativeAdmissionKeepsTheFrameUnwritten",
+    "closeWinningBeforeNativeAdmissionKeepsTheFrameUnwritten",
+    "splitUtf8AndCsiChunksKeepSnapshotAndResizeResponsive",
+)
+TERMINAL_RUNTIME_PTY_CASES = (
+    "userWriteReachesTheCommandAndItsOutputReturnsThroughTheKernel",
+    "naturalExitPreservesFinalViewAndExitCode",
+    "startDeclaresTermAndTrueColorToTheCommand",
+    "repeatedCloseIsIdempotentAfterNaturalExit",
 )
 CORE_CLASSES = (
     "ProcessScope",
@@ -253,6 +273,10 @@ def write_complete_reports(
             cases = TERMINAL_LAUNCH_CASES + ("someOtherLaunchCase",)
         elif class_name == "TerminalViewStreamTest":
             cases = TERMINAL_VIEW_STREAM_CASES
+        elif class_name == "TerminalRuntimeDeterministicTest":
+            cases = TERMINAL_RUNTIME_CASES
+        elif class_name == "TerminalRuntimeRealPtyTest":
+            cases = TERMINAL_RUNTIME_PTY_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -545,6 +569,8 @@ class AssertSurefireReportsTest(unittest.TestCase):
             ("TerminalKernelTest", TERMINAL_KERNEL_CASES, TERMINAL_KERNEL_CASES[-2:]),
             ("TerminalSnapshotProjectorTest", TERMINAL_PROJECTOR_CASES, TERMINAL_PROJECTOR_CASES[-2:]),
             ("TerminalViewStreamTest", TERMINAL_VIEW_STREAM_CASES, TERMINAL_VIEW_STREAM_CASES),
+            ("TerminalRuntimeDeterministicTest", TERMINAL_RUNTIME_CASES, TERMINAL_RUNTIME_CASES),
+            ("TerminalRuntimeRealPtyTest", TERMINAL_RUNTIME_PTY_CASES, TERMINAL_RUNTIME_PTY_CASES),
         )
         for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
             for class_name, all_cases, required_cases in selected:

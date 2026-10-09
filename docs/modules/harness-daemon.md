@@ -115,7 +115,7 @@ helper 命令行只携带固定入口与私有状态目录；工作目录和 arg
 
 收敛只有一个执行者：构造时先在阻塞 I/O executor 上预留 lifecycle 任务，read failure、kernel failure、native 超时、自然退出与显式 `close()` 都只设置失败原因并唤醒它，绝不在 reader/writer/VT owner/scheduler 上就地收敛；读写任务被调用方提前中断时同样只发停止信号，避免 termination 悬挂与 interrupt 忙循环。所有任务先停在启动闸门上，任务与 kernel 终止钩子登记完成后才放行；任一 executor 拒绝都会先收敛已预留的任务与 native 范围再失败。自然退出时排空 PTY 到真正 EOF、有界读取退出码、捕获一份有界末屏，再释放 PTY 与内核；退出后 `snapshot()` 仍返回该末屏。`close()` 幂等、统一有界，收敛失败或等待超时都显式报告，绝不静默宣称资源已释放。
 
-真实跨平台 PTY 的输入回传、查询应答与自然退出末屏由 [`TerminalRuntimeRealPtyTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeRealPtyTest.java) 验证；过期模式、队列与字节预算、排队取消、整帧复制与不交叉、native 前后失败、截止时间先于 native 获胜或不可用、迟到截止时间、读写任务被提前中断、无法收尾任务的释放失败、无法解析的可执行程序与执行器拒绝等确定性边界由 [`TerminalRuntimeDeterministicTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeDeterministicTest.java) 验证。
+真实跨平台 PTY 的输入回传、终端环境变量与自然退出末屏由 [`TerminalRuntimeRealPtyTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeRealPtyTest.java) 验证；查询应答与用户输入共用唯一 writer、过期模式、队列与字节预算、排队取消、整帧复制与不交叉、分块 UTF-8/CSI 调度、native 前后失败、截止时间先于 native 获胜或不可用、迟到截止时间、读写任务被提前中断、无法收尾任务的释放失败、无法解析的可执行程序与执行器拒绝等确定性边界由 [`TerminalRuntimeDeterministicTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeDeterministicTest.java) 验证。
 
 ### 文件与检索
 
