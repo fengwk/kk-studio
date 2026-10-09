@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -19,6 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
@@ -46,6 +48,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private BuiltinAgentInitializer builtinAgentInitializer;
 
   @Test
   public void shouldUseNameBasedIdentitiesAndEnforceCatalogGuards() throws Exception {
@@ -136,6 +139,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .content(objectMapper.writeValueAsString(agent)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.name").value(agentName))
+                .andExpect(jsonPath("$.data.type").value("USER"))
                 .andExpect(jsonPath("$.data.model").value(providerName + "/" + modelName))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").doesNotExist())
@@ -592,6 +596,57 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.errors.resource").value("agent_model"));
+  }
+
+  /** 测试意图：读模型暴露系统持有的 type；可编辑请求不接受 type；保留名不能覆盖内置身份；内置 Agent 在普通目录可见且不可删除。 */
+  @Test
+  void shouldExposeTypeAndProtectBuiltinIdentity() throws Exception {
+    String suffix = Long.toString(System.nanoTime());
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+    config.setSubagents(List.of());
+
+    ObjectNode forged = objectMapper.createObjectNode();
+    forged.put("name", "forged-" + suffix);
+    forged.put("model", "p/m");
+    forged.put("type", "BUILTIN");
+    forged.set("config", objectMapper.valueToTree(config));
+    mockMvc
+        .perform(
+            post("/api/ai/catalog/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(forged.toString()))
+        .andExpect(status().isBadRequest());
+
+    ObjectNode reserved = objectMapper.createObjectNode();
+    reserved.put("name", "compaction");
+    reserved.put("model", "p/m");
+    reserved.set("config", objectMapper.valueToTree(config));
+    mockMvc
+        .perform(
+            post("/api/ai/catalog/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reserved.toString()))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("duplicate"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
+
+    builtinAgentInitializer.afterPropertiesSet();
+    JsonNode page =
+        data(mockMvc.perform(get("/api/ai/catalog/agents")).andExpect(status().isOk()).andReturn());
+    JsonNode builtin = findResult(page, "compaction");
+    assertEquals("BUILTIN", builtin.path("type").asText());
+    // 未配置模型的内置 Agent 显式序列化 null，而不是字段缺失。
+    assertTrue(builtin.has("model"));
+    assertTrue(builtin.path("model").isNull());
+
+    mockMvc
+        .perform(
+            delete("/api/ai/catalog/agents/{name}", "compaction").param("expectedVersion", "0"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("in_use"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
   }
 
   private JsonNode data(MvcResult result) throws Exception {

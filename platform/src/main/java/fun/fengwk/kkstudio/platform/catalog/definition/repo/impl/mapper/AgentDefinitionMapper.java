@@ -19,8 +19,8 @@ import java.util.List;
 public interface AgentDefinitionMapper extends BaseMapper {
 
   String COLUMNS =
-      "name, description, system_prompt, model_provider_name, model_name, variant, config, version, "
-          + "created_at as create_time, updated_at as update_time";
+      "name, type, description, system_prompt, model_provider_name, model_name, variant, config,"
+          + " version, created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_definition")
   long count();
@@ -34,6 +34,7 @@ public interface AgentDefinitionMapper extends BaseMapper {
       id = "agentDefinitionResultMap",
       value = {
         @Result(column = "name", property = "name"),
+        @Result(column = "type", property = "type"),
         @Result(column = "description", property = "description"),
         @Result(column = "system_prompt", property = "systemPrompt"),
         @Result(column = "model_provider_name", property = "modelProviderName"),
@@ -90,11 +91,11 @@ public interface AgentDefinitionMapper extends BaseMapper {
   @Insert(
       """
       insert into agent_definition (
-          name, description, system_prompt, model_provider_name, model_name, variant, config,
+          name, type, description, system_prompt, model_provider_name, model_name, variant, config,
           created_at, updated_at, version
       ) values (
-          #{name}, #{description}, #{systemPrompt}, #{modelProviderName}, #{modelName}, #{variant},
-          cast(#{configJson} as jsonb), current_timestamp, current_timestamp, 0
+          #{name}, #{type}, #{description}, #{systemPrompt}, #{modelProviderName}, #{modelName},
+          #{variant}, cast(#{configJson} as jsonb), current_timestamp, current_timestamp, 0
       )
       """)
   int insert(AgentDefinitionDO agent);
