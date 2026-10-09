@@ -645,10 +645,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       childId,
                       100_000,
                       16_384,
-                      new CompactionStart(
+                      CompactionStart.pending(
                           CompactionPhase.FULL,
                           CompactionTrigger.THRESHOLD,
-                          branchSettings().model(),
                           userEntry,
                           null,
                           null)),

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -163,14 +162,7 @@ public final class ModelAttemptMaterialization {
     Entry resultEntry = resultPath.head();
     EntryPayload resultPayload = resultEntry.payload();
     if (start.compaction() != null) {
-      EntryPayload expected =
-          CompactionResultEvaluator.evaluate(
-              preResultPath(resultPath), start.compaction(), invocation.result());
-      if (!expected.equals(resultPayload)) {
-        throw new IllegalArgumentException(
-            "model result must materialize the exact compaction payload");
-      }
-      return;
+      throw new IllegalArgumentException("compaction turn must not have model invocations");
     }
     MessagePayload expected =
         new HistoryPayloadMapper()
@@ -179,16 +171,6 @@ public final class ModelAttemptMaterialization {
       throw new IllegalArgumentException(
           "model result must materialize the exact assistant payload");
     }
-  }
-
-  /** compaction 组装上下文：resultPath 去掉 head 结果后的前缀（至少保留 ROOT 与 basis 两项）。 */
-  private static EntryPath preResultPath(EntryPath resultPath) {
-    List<Entry> entries = resultPath.entries();
-    if (entries.size() < 3) {
-      throw new IllegalArgumentException(
-          "model result path must keep a non-trivial prefix before its head");
-    }
-    return new EntryPath(entries.subList(0, entries.size() - 1));
   }
 
   private static void requireDirectStopResult(

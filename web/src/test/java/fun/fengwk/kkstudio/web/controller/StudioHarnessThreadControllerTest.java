@@ -423,7 +423,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.turnStartEntryId").value(idText(2)))
-        .andExpect(jsonPath("$.data.modelInvocationId").value(nullValue()));
+        .andExpect(jsonPath("$.data.childThreadId").value(nullValue()));
 
     ArgumentCaptor<CompactThreadCommand> captor =
         ArgumentCaptor.forClass(CompactThreadCommand.class);

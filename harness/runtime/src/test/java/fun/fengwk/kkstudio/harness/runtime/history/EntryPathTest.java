@@ -371,13 +371,8 @@ class EntryPathTest {
                 id(999L),
                 null,
                 null,
-                new CompactionStart(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    compactionSettings.model(),
-                    id(1L),
-                    null,
-                    null)),
+                CompactionStart.pending(
+                    CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(1L), null, null)),
             time(id(6L)));
     Entry result = compactionResult(id(7L), id(6L));
     Entry end = turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, true, null, null);
@@ -1483,13 +1478,8 @@ class EntryPathTest {
             OWNER_THREAD_ID,
             null,
             null,
-            new CompactionStart(
-                phase,
-                trigger,
-                settings.model(),
-                id(1L),
-                turnPrefixStartEntryId,
-                historyCompactionEntryId)),
+            CompactionStart.pending(
+                phase, trigger, id(1L), turnPrefixStartEntryId, historyCompactionEntryId)),
         time(id));
   }
 

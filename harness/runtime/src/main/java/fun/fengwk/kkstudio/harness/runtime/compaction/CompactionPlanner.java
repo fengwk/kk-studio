@@ -130,7 +130,6 @@ public final class CompactionPlanner {
           new CompactionPreparation(
               CompactionPhase.FULL,
               trigger,
-              path.baseSettings().model(),
               cutEntryId,
               null,
               null,
@@ -150,7 +149,6 @@ public final class CompactionPlanner {
           new CompactionPreparation(
               CompactionPhase.TURN_PREFIX,
               trigger,
-              path.baseSettings().model(),
               cutEntryId,
               entries.get(turnPrefixStartIndex).id(),
               null,
@@ -165,7 +163,6 @@ public final class CompactionPlanner {
         new CompactionPreparation(
             CompactionPhase.HISTORY,
             trigger,
-            path.baseSettings().model(),
             cutEntryId,
             entries.get(turnPrefixStartIndex).id(),
             null,
@@ -217,7 +214,6 @@ public final class CompactionPlanner {
     return new CompactionPreparation(
         CompactionPhase.TURN_PREFIX,
         frozen.trigger(),
-        frozen.executionModel(),
         frozen.cutEntryId(),
         frozen.turnPrefixStartEntryId(),
         historyResultEntryId,
@@ -517,7 +513,7 @@ public final class CompactionPlanner {
     return 0L;
   }
 
-  private static long estimateTextTokens(String text) {
+  public static long estimateTextTokens(String text) {
     return (text.length() + 3L) / 4L;
   }
 

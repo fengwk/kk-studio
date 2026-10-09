@@ -31,12 +31,6 @@ class CompactionPromptsTest {
   private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
 
   @Test
-  void systemPromptMatchesResourceVerbatim() {
-    assertEquals(
-        resource("summarization-system.md"), CompactionPrompts.summarizationSystemPrompt());
-  }
-
-  @Test
   void summaryUserPromptFramesInitialAndUpdateVariants() {
     List<AgentMessage> messages =
         List.of(

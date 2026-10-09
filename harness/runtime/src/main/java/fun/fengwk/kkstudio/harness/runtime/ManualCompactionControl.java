@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
@@ -15,12 +16,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -88,10 +86,6 @@ final class ManualCompactionControl {
     if (result == null) {
       throw new IllegalStateException("turn resolver returned null for manual compaction");
     }
-    if (result instanceof TurnResolver.Resolved resolved) {
-      ResolvedRequestValidator.validate(
-          manualPlan.candidatePath(), manualPlan.preparation(), resolved);
-    }
     return store.transaction(tx -> commitManual(tx, command, manualPlan, result));
   }
 
@@ -122,7 +116,7 @@ final class ManualCompactionControl {
                 thread.id(),
                 null,
                 null,
-                decision.preparation().frozenStart()),
+                decision.preparation().pendingStart()),
             createdAt);
     List<Entry> candidateEntries = new ArrayList<>(path.entries());
     candidateEntries.add(candidateEntry);
@@ -146,6 +140,7 @@ final class ManualCompactionControl {
     ThreadContext context = threadContextProbe.probe(tx, thread, path);
     if (!(context instanceof ThreadContext.IdleOrHistorical)
         || path.openTurnStart().isPresent()
+        || !tx.loadIncompleteJoins(thread.id()).isEmpty()
         || automaticPlanner.plan(thread, path, compactionConfig, false) != null) {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
     }
@@ -212,16 +207,24 @@ final class ManualCompactionControl {
     Instant mutationNow =
         HarnessStoreTime.notBefore(
             now, thread.updatedAt(), plan.candidateTurnStartEntry().createdAt());
-    if (result instanceof TurnResolver.Resolved resolved) {
+    if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
+      CompactionChildStarter.CompactionChild child =
+          CompactionChildStarter.start(
+              tx,
+              thread,
+              plan.candidatePath(),
+              compactionResolved,
+              plan.preparation(),
+              mutationNow);
       TurnStartPayload startPayload = (TurnStartPayload) plan.candidateTurnStartEntry().payload();
       TurnStartPayload resolvedPayload =
           new TurnStartPayload(
               startPayload.reason(),
               startPayload.settings(),
               startPayload.ownerThreadId(),
-              resolved.contextWindow(),
-              resolved.maxOutputTokens(),
-              startPayload.compaction());
+              compactionResolved.contextWindow(),
+              compactionResolved.maxOutputTokens(),
+              child.frozenStart());
       tx.insertEntry(
           new Entry(
               plan.turnStartEntryId(),
@@ -231,25 +234,7 @@ final class ManualCompactionControl {
               mutationNow));
       ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), mutationNow);
       tx.updateThread(advanced);
-      UUID invocationId = tx.nextId();
-      tx.insertModelInvocation(
-          new ModelInvocation(
-              invocationId,
-              thread.id(),
-              plan.turnStartEntryId(),
-              plan.turnStartEntryId(),
-              resolved.spec(),
-              ModelInvocationStatus.READY,
-              0,
-              null,
-              null,
-              null,
-              null,
-              List.of(),
-              mutationNow,
-              mutationNow));
-      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
-      return new CompactThreadResult(advanced, plan.turnStartEntryId(), invocationId);
+      return new CompactThreadResult(advanced, plan.turnStartEntryId(), child.childThreadId());
     }
     TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
     tx.insertEntry(

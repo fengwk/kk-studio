@@ -833,13 +833,8 @@ class ProviderRequestPreviewServiceTest {
     UUID assistant = id(33L);
     UUID end = id(34L);
     CompactionStart start =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            assistant,
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, assistant, null, null);
     return new EntryPath(
         List.of(
             new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW),

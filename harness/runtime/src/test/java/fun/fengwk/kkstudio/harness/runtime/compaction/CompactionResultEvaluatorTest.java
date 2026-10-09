@@ -18,71 +18,68 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
 import java.time.Instant;
 import java.util.List;
 
-/** Compaction Provider terminal 到 durable result/error 的纯语义映射。 */
+/** Compaction terminal 到 durable result/error 的纯语义映射。 */
 class CompactionResultEvaluatorTest {
 
   private static final BranchSettings SETTINGS =
       new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
   private static final Instant NOW = Instant.EPOCH;
+  private static final long BUDGET = 4096L;
 
   @Test
   void mapsSemanticTerminalFailuresWithoutProviderRetry() {
     EntryPath path = historyPath();
-    CompactionStart start =
-        (CompactionStart) ((TurnStartPayload) path.head().payload()).compaction();
+    CompactionStart start = ((TurnStartPayload) path.head().payload()).compaction();
 
     assertError(
         "COMPACTION_OUTPUT_TRUNCATED",
         CompactionResultEvaluator.evaluate(
-            path, start, response("partial", GenerationStopReason.LENGTH, List.of())));
+            path, start, "partial", metadata(GenerationStopReason.LENGTH), BUDGET));
     assertError(
         "COMPACTION_CONTENT_FILTERED",
         CompactionResultEvaluator.evaluate(
-            path, start, response("", GenerationStopReason.FILTERED, List.of())));
+            path, start, "", metadata(GenerationStopReason.FILTERED), BUDGET));
     assertError(
         "COMPACTION_INVALID_RESPONSE",
-        CompactionResultEvaluator.evaluate(
-            path,
-            start,
-            response(
-                "summary",
-                GenerationStopReason.COMPLETE,
-                List.of(new ProviderToolCall("call-1", "bash", "{}")))));
+        CompactionResultEvaluator.evaluate(path, start, "summary", null, BUDGET));
     assertError(
         "COMPACTION_EMPTY_SUMMARY",
         CompactionResultEvaluator.evaluate(
-            path, start, response(" ", GenerationStopReason.COMPLETE, List.of())));
+            path, start, " ", metadata(GenerationStopReason.COMPLETE), BUDGET));
     assertError(
         "COMPACTION_INVALID_SUMMARY",
         CompactionResultEvaluator.evaluate(
             path,
             start,
-            response(
-                "<read-files>\na.txt\n</read-files>", GenerationStopReason.COMPLETE, List.of())));
+            "<read-files>\na.txt\n</read-files>",
+            metadata(GenerationStopReason.COMPLETE),
+            BUDGET));
+    assertError(
+        "COMPACTION_BUDGET_EXCEEDED",
+        CompactionResultEvaluator.evaluate(
+            path,
+            start,
+            "very long summary that definitely exceeds a budget of one token",
+            metadata(GenerationStopReason.COMPLETE),
+            1L));
   }
 
   @Test
   void historySuccessProducesMinimalPayload() {
     EntryPath path = historyPath();
     CompactionStart start = ((TurnStartPayload) path.head().payload()).compaction();
-    ProviderResponse response = response("summary", GenerationStopReason.COMPLETE, List.of());
+    AssistantMessageMetadata meta = metadata(GenerationStopReason.COMPLETE);
 
-    EntryPayload result = CompactionResultEvaluator.evaluate(path, start, response);
+    EntryPayload result = CompactionResultEvaluator.evaluate(path, start, "summary", meta, BUDGET);
 
-    // 成功结果只存最小事实：摘要文本 + 该次真实模型调用的 provider 元数据（stopReason / usage / decodeDuration）。
     CompactionPayload payload = assertInstanceOf(CompactionPayload.class, result);
     assertEquals("summary", payload.summaryText());
-    assertEquals(
-        new AssistantMessageMetadata(
-            response.stopReason(), response.usage(), response.decodeDurationMillis()),
-        payload.assistantMetadata());
+    assertEquals(meta, payload.assistantMetadata());
   }
 
   private static EntryPath historyPath() {
@@ -91,9 +88,12 @@ class CompactionResultEvaluatorTest {
             CompactionPhase.HISTORY,
             CompactionTrigger.THRESHOLD,
             SETTINGS.model(),
+            BUDGET,
             id(1L),
             id(1L),
-            null);
+            null,
+            id(300L),
+            id(400L));
     return new EntryPath(
         List.of(
             new Entry(id(1L), id(100L), null, new RootPayload(SETTINGS), NOW),
@@ -106,10 +106,8 @@ class CompactionResultEvaluatorTest {
                 NOW)));
   }
 
-  private static ProviderResponse response(
-      String text, GenerationStopReason stopReason, List<ProviderToolCall> calls) {
-    return new ProviderResponse(
-        text, "", calls, stopReason, new ModelUsage(1, 1, 0, 0, 0, 0, 2), null, null, null);
+  private static AssistantMessageMetadata metadata(GenerationStopReason stopReason) {
+    return new AssistantMessageMetadata(stopReason, new ModelUsage(1, 1, 0, 0, 0, 0, 2), 100L);
   }
 
   private static void assertError(String code, EntryPayload result) {

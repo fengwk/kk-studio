@@ -3697,13 +3697,8 @@ class ModelProcessorTest {
             parentId = inputEnd;
             turnStartAt = now.plusMillis(5);
             compaction =
-                new CompactionStart(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    branchSettings().model(),
-                    inputEnd,
-                    null,
-                    null);
+                CompactionStart.pending(
+                    CompactionPhase.FULL, CompactionTrigger.THRESHOLD, inputEnd, null, null);
           }
           UUID turnStartEntryId = tx.nextId();
           tx.insertEntry(
