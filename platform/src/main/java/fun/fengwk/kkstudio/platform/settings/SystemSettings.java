@@ -422,17 +422,19 @@ public record SystemSettings(
     }
   }
 
-  /** storageMedia section：上传/S3 预签名与 Canvas 媒体处理的非敏感预算。 */
+  /** storageMedia section：上传/S3 预签名、Canvas 媒体处理与受控临时资源的非敏感预算。 */
   public record StorageMedia(
       long uploadExpiresSeconds,
       long s3PresignDefaultExpiresSeconds,
       long s3PresignMaxExpiresSeconds,
       long canvasMediaProcessTimeoutMillis,
       int thumbnailMaxDimension,
-      int thumbnailQuality) {
+      int thumbnailQuality,
+      long temporaryResourceTtlSeconds,
+      long temporaryResourceCleanupIntervalSeconds) {
 
     public static final StorageMedia DEFAULT =
-        new StorageMedia(86_400L, 1_800L, 3_600L, 30_000L, 512, 80);
+        new StorageMedia(86_400L, 1_800L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L);
 
     public StorageMedia {
       SystemSettingsValidation.requirePositive(
@@ -452,6 +454,11 @@ public record SystemSettings(
           thumbnailMaxDimension, "storageMedia.thumbnailMaxDimension");
       SystemSettingsValidation.requireBounded(
           thumbnailQuality, 1, 100, "storageMedia.thumbnailQuality");
+      SystemSettingsValidation.requirePositive(
+          temporaryResourceTtlSeconds, "storageMedia.temporaryResourceTtlSeconds");
+      SystemSettingsValidation.requirePositive(
+          temporaryResourceCleanupIntervalSeconds,
+          "storageMedia.temporaryResourceCleanupIntervalSeconds");
     }
   }
 

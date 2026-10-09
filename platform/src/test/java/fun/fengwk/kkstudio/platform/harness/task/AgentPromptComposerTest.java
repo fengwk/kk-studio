@@ -45,13 +45,14 @@ class AgentPromptComposerTest {
     assertFalse(rendered.contains("- system:"), rendered);
     assertFalse(rendered.contains("- user:"), rendered);
     assertFalse(rendered.contains("- home:"), rendered);
+    assertFalse(rendered.contains("- temp:"), rendered);
     assertFalse(rendered.contains("- note:"), rendered);
     assertFalse(rendered.contains("root"), rendered);
     assertFalse(rendered.contains("workspace"), rendered);
     assertFalse(rendered.contains("cwd"), rendered);
   }
 
-  /** Environment 宿主事实严格按 name、system、user、home、date、note 顺序渲染。 */
+  /** Environment 宿主事实严格按 name、system、user、home、temp、date、note 顺序渲染。 */
   @Test
   void rendersEnvironmentFactsInStableOrder() {
     CurrentEnvironmentContext environment =
@@ -61,6 +62,7 @@ class AgentPromptComposerTest {
             DaemonOperatingSystem.LINUX,
             "dev-user",
             "/home/dev",
+            "/tmp/kk-studio",
             LocalDate.of(2026, 8, 9),
             "Linux environment.");
 
@@ -72,6 +74,7 @@ class AgentPromptComposerTest {
             + "- system: linux\n"
             + "- user: dev-user\n"
             + "- home: /home/dev\n"
+            + "- temp: /tmp/kk-studio\n"
             + "- date: 2026-08-09\n"
             + "- note: Linux environment.\n"
             + "</current_environment>",
@@ -88,6 +91,7 @@ class AgentPromptComposerTest {
             DaemonOperatingSystem.WINDOWS,
             "dev",
             "C:\\Users\\dev",
+            "C:\\Users\\dev\\AppData\\Local\\Temp",
             LocalDate.of(2026, 8, 9),
             null);
 
@@ -95,6 +99,7 @@ class AgentPromptComposerTest {
 
     assertTrue(rendered.contains("- system: windows\n"), rendered);
     assertTrue(rendered.contains("- home: C:\\Users\\dev\n"), rendered);
+    assertTrue(rendered.contains("- temp: C:\\Users\\dev\\AppData\\Local\\Temp\n"), rendered);
   }
 
   /** 可选宿主事实缺失时整行省略，但 name 与 date 始终存在。 */
@@ -104,6 +109,7 @@ class AgentPromptComposerTest {
         new CurrentEnvironmentContext(
             TestEnvironments.environmentId("env-1"),
             "nas-dev",
+            null,
             null,
             null,
             null,
@@ -130,6 +136,7 @@ class AgentPromptComposerTest {
             null,
             "none",
             "/srv/none",
+            "/srv/none",
             LocalDate.of(2026, 8, 9),
             "none");
 
@@ -140,6 +147,7 @@ class AgentPromptComposerTest {
             + "- name: nas-dev\n"
             + "- user: none\n"
             + "- home: /srv/none\n"
+            + "- temp: /srv/none\n"
             + "- date: 2026-08-09\n"
             + "- note: none\n"
             + "</current_environment>",
@@ -178,6 +186,7 @@ class AgentPromptComposerTest {
             DaemonOperatingSystem.WSL,
             "dev&user",
             "/home/<dev>",
+            "/tmp/<dev>",
             LocalDate.of(2026, 8, 9),
             "Use <mount> & \"commands\" from 'Windows'.");
 
@@ -191,6 +200,7 @@ class AgentPromptComposerTest {
     assertTrue(result.contains("- name: env-1&lt;&amp;&gt;"), result);
     assertTrue(result.contains("- user: dev&amp;user"), result);
     assertTrue(result.contains("- home: /home/&lt;dev&gt;"), result);
+    assertTrue(result.contains("- temp: /tmp/&lt;dev&gt;"), result);
     assertTrue(
         result.contains(
             "- note: Use &lt;mount&gt; &amp; &quot;commands&quot; from &apos;Windows&apos;."),
@@ -269,7 +279,7 @@ class AgentPromptComposerTest {
     EnvironmentId binding = TestEnvironments.environmentId("env");
     CurrentEnvironmentContext selected =
         new CurrentEnvironmentContext(
-            binding, "env", null, null, null, LocalDate.of(2026, 8, 9), null);
+            binding, "env", null, null, null, null, LocalDate.of(2026, 8, 9), null);
 
     String rendered = composer.compose(withBoth, selected, List.of(), List.of());
     assertTrue(rendered.startsWith("Today is 2026-08-09 in ${workspace}."), rendered);
@@ -299,6 +309,6 @@ class AgentPromptComposerTest {
 
   private static CurrentEnvironmentContext none() {
     return new CurrentEnvironmentContext(
-        null, null, null, null, null, LocalDate.of(2026, 8, 9), null);
+        null, null, null, null, null, null, LocalDate.of(2026, 8, 9), null);
   }
 }

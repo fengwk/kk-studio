@@ -47,7 +47,7 @@ public record CodingToolsConfig(
   /**
    * 用运行时的显式取值与受控临时产物根构建配置。
    *
-   * <p>输出布局完全由受控临时产物根决定：工具外化的本地大文本落在 {@code <tmp>/text} 与 {@code <tmp>/staging}。
+   * <p>输出布局完全由受控临时产物根决定：工具外化的本地大文本落在 {@code <tmp>/workspaces} 下的登记临时 workspace 内。
    *
    * @param tmp 数据目录下的受控临时产物根（{@code <data-dir>/tmp}）
    * @param bashExecutable 显式 bash 可执行文件，空白时回退默认值
@@ -61,7 +61,7 @@ public record CodingToolsConfig(
         bashExecutable == null || bashExecutable.isBlank()
             ? DEFAULT_BASH_EXECUTABLE
             : bashExecutable,
-        TextOutputStore.open(root.resolve("text"), root.resolve("staging")),
+        TextOutputStore.open(root),
         lsp);
   }
 

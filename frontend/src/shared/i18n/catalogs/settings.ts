@@ -967,6 +967,16 @@ export const settingsCatalog = {
     'en-US': 'Timeout and thumbnail budgets for canvas media processing.',
     'zh-CN': '画布媒体处理的超时与缩略图预算。',
   },
+  'settings.section.storageMedia.temporaryResource.title': {
+    'en-US': 'Temporary resources',
+    'zh-CN': '临时资源',
+  },
+  'settings.section.storageMedia.temporaryResource.description': {
+    'en-US':
+      'Retention and scan interval for controlled temporary tool workspaces. Changed values apply to not-yet-collected workspaces on the next scan.',
+    'zh-CN':
+      '受控工具临时工作区的保留期与扫描间隔。修改后的值在下次扫描时对尚未回收的工作区生效。',
+  },
   'settings.field.storageMedia.uploadExpiresSeconds': {
     'en-US': 'Upload expiry (s)',
     'zh-CN': '上传有效期（秒）',
@@ -1016,6 +1026,24 @@ export const settingsCatalog = {
   'settings.field.storageMedia.thumbnailQuality.hint': {
     'en-US': 'JPEG compression quality (1-100) for generated thumbnails. Higher values improve quality with larger file sizes.',
     'zh-CN': '缩略图生成的 JPEG 压缩质量（1-100）。数值越高画质越好但体积越大。',
+  },
+  'settings.field.storageMedia.temporaryResourceTtlSeconds': {
+    'en-US': 'Temporary resource retention (s)',
+    'zh-CN': '临时资源保留期（秒）',
+  },
+  'settings.field.storageMedia.temporaryResourceTtlSeconds.hint': {
+    'en-US':
+      'Lifetime in seconds of a controlled temporary tool workspace from its recorded creation. Shortening it collects older workspaces on their next scan; workspaces still in use are never collected.',
+    'zh-CN':
+      '受控工具临时工作区自登记创建起的保留秒数。缩短后较旧工作区会在下次扫描时被回收；仍在使用的不会回收。',
+  },
+  'settings.field.storageMedia.temporaryResourceCleanupIntervalSeconds': {
+    'en-US': 'Temporary resource scan interval (s)',
+    'zh-CN': '临时资源扫描间隔（秒）',
+  },
+  'settings.field.storageMedia.temporaryResourceCleanupIntervalSeconds.hint': {
+    'en-US': 'Interval in seconds between controlled temporary workspace cleanup scans.',
+    'zh-CN': '受控临时工作区清理扫描之间的间隔秒数。',
   },
   // --- Advanced ---
   'settings.section.advanced.description': {
