@@ -69,6 +69,11 @@ final class OpenAiChatStreamAccumulator {
   /** {@code choices[0]} 首个有效 finish_reason 之后语义封闭：只允许无语义尾帧，绝不再改写任何已累积事实。 */
   private boolean choiceFinalized = false;
 
+  /** 冻结时的原始 finish_reason 文本与 choices[0] index，用于判定重复终止标记是否为幂等冗余。 */
+  private String finalizedFinishReason = null;
+
+  private int finalizedChoiceIndex = 0;
+
   private final StringBuilder contentBuilder = new StringBuilder();
   private final StringBuilder refusalBuilder = new StringBuilder();
   private final StringBuilder reasoningContentBuilder = new StringBuilder();
@@ -167,15 +172,23 @@ final class OpenAiChatStreamAccumulator {
 
   private void parseChoice(JsonNode choice) {
     if (choiceFinalized) {
-      // 语义终态已封闭：此后只允许 usage-only 空 choices、无语义尾帧（如 provider 尾帧）与 [DONE]/keepalive，
-      // 任何非空 delta（包括仅 native 字段）或再次出现的 finish_reason 都 fail closed。
-      if (carriesFinishReason(choice)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "finish_reason repeated after finalized choice");
-      }
+      // 语义终态已封闭：此后只允许 usage-only 空 choices、无语义尾帧与 [DONE]/keepalive。
+      // 重复终止标记只有与冻结结果完全一致时才是幂等冗余——同一 choice index、同一有效 finish_reason 且无任何
+      // 语义 delta；它不追加内容、不重发增量、不改写 native/replay 事实。任何语义 delta、变更的 finish_reason
+      // 或不同 choice index 都 fail closed。
+      boolean carriesReason = carriesFinishReason(choice);
       if (!isEmptyTailDelta(choice)) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE, "semantic delta received after finalized choice");
+      }
+      if (carriesReason) {
+        String repeatedReason = choice.get("finish_reason").textValue();
+        if (!repeatedReason.equals(finalizedFinishReason)
+            || choiceIndexOf(choice) != finalizedChoiceIndex) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE,
+              "conflicting finish_reason after finalized choice");
+        }
       }
       return;
     }
@@ -302,8 +315,16 @@ final class OpenAiChatStreamAccumulator {
             ProviderErrorKind.INVALID_RESPONSE, "unsupported finish_reason: " + reasonText);
       }
       this.stopReason = mapFinishReason(reasonText);
+      this.finalizedFinishReason = reasonText;
+      this.finalizedChoiceIndex = choiceIndexOf(choice);
       this.choiceFinalized = true;
     }
+  }
+
+  /** choices[0] 的 wire index；缺失按主 choice 的默认 0 处理，供重复终止标记的同一性比较。 */
+  private static int choiceIndexOf(JsonNode choice) {
+    JsonNode index = choice.get("index");
+    return index != null && index.isIntegralNumber() ? index.asInt() : 0;
   }
 
   /**
