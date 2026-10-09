@@ -23,7 +23,9 @@ public enum EntryType {
   /** 一次 Model response turn 的关闭结果与 continuation obligation。 */
   TURN_END,
   /** 系统通知 Entry：可位于回合之间或 INPUT 输入段，对模型是上下文，不提升权限。 */
-  NOTIFICATION;
+  NOTIFICATION,
+  /** 安全边界上 append 的 branch settings 应用快照：不参与 turn grammar，不调度模型。 */
+  SETTINGS;
 
   /** 是否为 Session Tree 的语义根。 */
   public boolean isRoot() {

@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -35,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -1505,7 +1507,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * appliedEntryId（若有）必须与命令类型精确匹配：NOTIFICATION 必须引用自身四字段完全一致的 NOTIFICATION Entry；其它命令必须 引用本
+     * appliedEntryId（若有）必须与命令类型精确匹配：NOTIFICATION 必须引用自身四字段完全一致的 NOTIFICATION Entry；standalone 分支设置
+     * 命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）可以引用本 Thread 拥有的 SETTINGS 快照 Entry；其它命令必须引用本
      * Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
      */
     private void requireValidAppliedEntry(ThreadCommand command) {
@@ -1537,11 +1540,23 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         return;
       }
+      if (isBranchSettingCommand(command.type())
+          && applied.payload() instanceof SettingsPayload settings
+          && command.threadId().equals(settings.ownerThreadId())) {
+        return;
+      }
       if (!(applied.payload() instanceof TurnStartPayload turnStartPayload)
           || !command.threadId().equals(turnStartPayload.ownerThreadId())) {
         throw new IllegalArgumentException(
-            "appliedEntryId must reference a TURN_START owned by the command thread");
+            "appliedEntryId must reference a TURN_START or SETTINGS entry owned by the command"
+                + " thread");
       }
+    }
+
+    private static boolean isBranchSettingCommand(ThreadCommandType type) {
+      return type == ThreadCommandType.SET_AGENT
+          || type == ThreadCommandType.SET_MODEL
+          || type == ThreadCommandType.SET_ENVIRONMENT;
     }
 
     /**

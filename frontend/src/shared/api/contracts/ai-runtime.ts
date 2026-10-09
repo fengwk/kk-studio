@@ -43,6 +43,7 @@ export type EntryType =
   | 'ASSISTANT_ABORTED'
   | 'COMPACTION'
   | 'TURN_END'
+  | 'SETTINGS'
 
 /** 系统结果通知的分类；对模型只是上下文，不是更高权限指令。 */
 export type NotificationKind = 'SUBAGENT_RESULT' | 'TASK_BUDGET'

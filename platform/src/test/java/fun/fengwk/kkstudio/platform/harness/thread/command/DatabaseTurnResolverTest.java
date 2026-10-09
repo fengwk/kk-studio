@@ -2353,16 +2353,17 @@ class DatabaseTurnResolverTest {
     EntryPath path = projectionPath(settings, "summary text", id(4));
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
-    // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER。
+    // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER，随后是冻结压缩边界的 Goal 背景。
     assertTrue(requestSpec.systemInstruction().startsWith("agent system prompt"));
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    assertEquals(4, messages.size());
+    assertEquals(5, messages.size());
     assertEquals(ProviderMessageRole.USER, messages.get(0).role());
     assertEquals(CompactionPrompts.compactedContext("summary text"), textOf(messages.get(0)));
+    assertTrue(textOf(messages.get(1)).contains("No active user-set goal."));
     // 从 cut（ASST1）本身开始保留：ASST1、USER2、ASST2 继续投影；COMPACTION 控制 turn 内部不投影。
-    assertEquals("first reply", textOf(messages.get(1)));
-    assertEquals("second user", textOf(messages.get(2)));
-    assertEquals("second reply", textOf(messages.get(3)));
+    assertEquals("first reply", textOf(messages.get(2)));
+    assertEquals("second user", textOf(messages.get(3)));
+    assertEquals("second reply", textOf(messages.get(4)));
   }
 
   @Test
@@ -2401,14 +2402,15 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    // 投影里没有 SYSTEM 消息：wrapper summary 是第一条 USER，索引整体前移一位。
-    assertEquals(5, messages.size());
+    // 投影里没有 SYSTEM 消息：wrapper summary 是第一条 USER，其后的冻结 Goal 背景整体使索引后移。
+    assertEquals(6, messages.size());
     assertEquals(CompactionPrompts.compactedContext("latest summary"), textOf(messages.get(0)));
+    assertTrue(textOf(messages.get(1)).contains("No active user-set goal."));
     // 只有最新压缩的 wrapper；从最新 cut（USER2）起保留。
-    assertEquals("second user", textOf(messages.get(1)));
-    assertEquals("second reply", textOf(messages.get(2)));
-    assertEquals("third user", textOf(messages.get(3)));
-    assertEquals("third reply", textOf(messages.get(4)));
+    assertEquals("second user", textOf(messages.get(2)));
+    assertEquals("second reply", textOf(messages.get(3)));
+    assertEquals("third user", textOf(messages.get(4)));
+    assertEquals("third reply", textOf(messages.get(5)));
   }
 
   @Test
