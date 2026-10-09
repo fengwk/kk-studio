@@ -634,29 +634,288 @@ class TerminalWriterTest {
   }
 
   @Test
-  void recoverWithoutCurrentGrantOrAfterExpiryIsRejected() {
+  void recoverWithoutCurrentGrantIsRejected() {
     // 无当前授权时，任何旧 secret 都不能恢复。
     WriterGrant stray = new WriterGrant(UUID.randomUUID(), UUID.randomUUID());
     assertEquals(
         ControlResult.RejectReason.NOT_OWNER,
         writer.recover(owner("c1"), nextRequestId(), stray, 0L, null).reason());
-
-    WriterGrant grant = grant(owner("c1"));
-    writer.expire();
-    // 已失效授权不能作为恢复凭据。
-    assertEquals(
-        ControlResult.RejectReason.LEASE_EXPIRED,
-        writer.recover(owner("c2"), nextRequestId(), grant, 0L, null).reason());
   }
 
   @Test
-  void recoverWithDigestButNoOperationSeqIsUnverifiable() {
+  void recoveryAfterLeaseExpiryWithoutReplacementSucceeds() {
+    WriterOwner old = owner("c1");
+    WriterGrant grant = grant(old);
+    AdmissionResult written = writer.submitInput(old, grant, 1L, bytes("a"), 1L);
+    writer.complete(grant.epoch(), 1L, written.digest(), OperationOutcome.WRITTEN);
+
+    // 长断连后租期失效但尚无新 writer 接管：旧 epoch/token 与去重证据仍可核对并恢复实际已写。
+    writer.expire();
+    assertNull(writer.state().writerEpoch());
+    // 过期 token 不能当作同 epoch 续租或释放。
+    assertEquals(
+        ControlResult.RejectReason.LEASE_EXPIRED,
+        writer.renew(old, nextRequestId(), grant).reason());
+    assertEquals(
+        ControlResult.RejectReason.LEASE_EXPIRED,
+        writer.release(old, nextRequestId(), grant).reason());
+
+    ControlResult recovered =
+        writer.recover(owner("c2"), nextRequestId(), grant, 1L, written.digest());
+    assertEquals(Status.GRANTED, recovered.status());
+    assertEquals(OperationOutcome.WRITTEN, recovered.recovered());
+    assertNotEquals(grant.epoch(), recovered.grant().epoch());
+    assertEpochReset(recovered.grant());
+    // 新 epoch seq1 首次写入，即便同 bytes 也不可 CONFIRMED。
+    assertEquals(
+        Kind.ACCEPTED,
+        writer.submitInput(owner("c2"), recovered.grant(), 1L, bytes("a"), 1L).kind());
+  }
+
+  @Test
+  void expiredGrantWithPendingIsBusyThenRecoversRealOutcome() {
+    WriterOwner old = owner("c1");
+    WriterGrant grant = grant(old);
+    AdmissionResult pending = writer.submitInput(old, grant, 1L, bytes("a"), 1L);
+    writer.expire();
+
+    // 过期且有在途操作时恢复保守返回 BUSY。
+    assertEquals(
+        Status.BUSY,
+        writer.recover(owner("c2"), nextRequestId(), grant, 1L, pending.digest()).status());
+    assertTrue(writer.complete(grant.epoch(), 1L, pending.digest(), OperationOutcome.NOT_WRITTEN));
+
+    ControlResult recovered =
+        writer.recover(owner("c2"), nextRequestId(), grant, 1L, pending.digest());
+    assertEquals(Status.GRANTED, recovered.status());
+    assertEquals(OperationOutcome.NOT_WRITTEN, recovered.recovered());
+    // 新 epoch seq1 可写；旧 input 已被 fence。
+    assertEquals(
+        Kind.ACCEPTED,
+        writer.submitInput(owner("c2"), recovered.grant(), 1L, bytes("b"), 1L).kind());
+    assertEquals(
+        RejectReason.NOT_OWNER, writer.submitInput(old, grant, 2L, bytes("c"), 1L).reason());
+  }
+
+  @Test
+  void expiredGrantCannotRecoverAfterAnotherWriterRotated() {
+    WriterOwner old = owner("c1");
+    WriterGrant grant = grant(old);
+    writer.expire();
+    // 新 writer 接管后旧 token 不能恢复。
+    ControlResult fresh = writer.claim(owner("c2"), nextRequestId());
+    assertEquals(Status.GRANTED, fresh.status());
+    assertEquals(
+        ControlResult.RejectReason.RECOVERY_MISMATCH,
+        writer.recover(owner("c3"), nextRequestId(), grant, 0L, null).reason());
+  }
+
+  @Test
+  void recoverRejectsInvalidSeqAndDigestCombinations() {
     WriterGrant grant = grant(owner("c1"));
     OperationDigest digest = TerminalWriter.inputDigest(bytes("a"), 1L);
+
+    // 负 seq 不能当成无旧操作。
     assertEquals(
-        ControlResult.RejectReason.RECOVERY_UNVERIFIABLE,
+        ControlResult.RejectReason.INVALID,
+        writer.recover(owner("c2"), nextRequestId(), grant, -1L, null).reason());
+    // seq 0 必须无摘要。
+    assertEquals(
+        ControlResult.RejectReason.INVALID,
         writer.recover(owner("c2"), nextRequestId(), grant, 0L, digest).reason());
-    assertTrue(writer.state().frozen());
+    // seq>0 必须带摘要。
+    assertEquals(
+        ControlResult.RejectReason.INVALID,
+        writer.recover(owner("c2"), nextRequestId(), grant, 1L, null).reason());
+    // 超出 safe integer。
+    assertEquals(
+        ControlResult.RejectReason.INVALID,
+        writer
+            .recover(
+                owner("c2"), nextRequestId(), grant, TerminalLimits.MAX_SAFE_INTEGER + 1L, digest)
+            .reason());
+    // 非法参数明确拒绝且不冻结。
+    assertFalse(writer.state().frozen());
+    // 合法参数仍可恢复。
+    assertEquals(
+        Status.GRANTED, writer.recover(owner("c2"), nextRequestId(), grant, 0L, null).status());
+  }
+
+  @Test
+  void takeoverResetsEpochDedupWatermarks() {
+    WriterOwner a = owner("c1");
+    WriterGrant grantA = grant(a);
+    AdmissionResult written = writer.submitInput(a, grantA, 1L, bytes("a"), 1L);
+    writer.complete(grantA.epoch(), 1L, written.digest(), OperationOutcome.WRITTEN);
+
+    ControlResult taken = writer.takeover(owner("c2"), nextRequestId(), grantA.epoch());
+    assertEquals(Status.GRANTED, taken.status());
+    assertEpochReset(taken.grant());
+    // 同 bytes 在新 epoch 首次必须 ACCEPTED，不能 CONFIRMED。
+    assertEquals(
+        Kind.ACCEPTED, writer.submitInput(owner("c2"), taken.grant(), 1L, bytes("a"), 1L).kind());
+  }
+
+  @Test
+  void releaseThenClaimResetsEpochDedupWatermarks() {
+    WriterOwner a = owner("c1");
+    WriterGrant grantA = grant(a);
+    AdmissionResult written = writer.submitInput(a, grantA, 1L, bytes("a"), 1L);
+    writer.complete(grantA.epoch(), 1L, written.digest(), OperationOutcome.WRITTEN);
+    assertEquals(Status.RELEASED, writer.release(a, nextRequestId(), grantA).status());
+
+    ControlResult fresh = writer.claim(owner("c2"), nextRequestId());
+    assertEquals(Status.GRANTED, fresh.status());
+    assertEpochReset(fresh.grant());
+    assertEquals(
+        Kind.ACCEPTED, writer.submitInput(owner("c2"), fresh.grant(), 1L, bytes("a"), 1L).kind());
+  }
+
+  @Test
+  void expiryThenClaimResetsEpochDedupWatermarks() {
+    WriterOwner a = owner("c1");
+    WriterGrant grantA = grant(a);
+    AdmissionResult written = writer.submitInput(a, grantA, 1L, bytes("a"), 1L);
+    writer.complete(grantA.epoch(), 1L, written.digest(), OperationOutcome.WRITTEN);
+    writer.expire();
+
+    ControlResult fresh = writer.claim(owner("c2"), nextRequestId());
+    assertEquals(Status.GRANTED, fresh.status());
+    assertEpochReset(fresh.grant());
+    assertEquals(
+        Kind.ACCEPTED, writer.submitInput(owner("c2"), fresh.grant(), 1L, bytes("a"), 1L).kind());
+  }
+
+  @Test
+  void recoverResetsEpochWatermarksAndOldCompletionDoesNotAffectNewEpoch() {
+    WriterOwner old = owner("c1");
+    WriterGrant grant = grant(old);
+    AdmissionResult written = writer.submitInput(old, grant, 1L, bytes("a"), 1L);
+    writer.complete(grant.epoch(), 1L, written.digest(), OperationOutcome.WRITTEN);
+
+    ControlResult recovered =
+        writer.recover(owner("c2"), nextRequestId(), grant, 1L, written.digest());
+    assertEquals(OperationOutcome.WRITTEN, recovered.recovered());
+    assertEpochReset(recovered.grant());
+
+    AdmissionResult first = writer.submitInput(owner("c2"), recovered.grant(), 1L, bytes("a"), 1L);
+    assertEquals(Kind.ACCEPTED, first.kind());
+    // 旧 completion / 旧 token 不影响新 pending。
+    assertFalse(writer.complete(grant.epoch(), 1L, written.digest(), OperationOutcome.WRITTEN));
+    assertFalse(writer.complete(grant.epoch(), 1L, first.digest(), OperationOutcome.WRITTEN));
+    assertEquals(
+        Kind.PENDING,
+        writer.submitInput(owner("c2"), recovered.grant(), 1L, bytes("a"), 1L).kind());
+    assertEquals(
+        RejectReason.NOT_OWNER, writer.submitInput(old, grant, 2L, bytes("b"), 1L).reason());
+  }
+
+  private void assertEpochReset(WriterGrant grant) {
+    WriterState state = writer.state();
+    assertEquals(grant.epoch(), state.writerEpoch());
+    assertEquals(0L, state.lastWrittenSeq());
+    assertNull(state.lastWrittenDigest());
+    assertEquals(0L, state.lastResolvedSeq());
+    assertNull(state.lastResolvedDigest());
+    assertNull(state.lastResolvedOutcome());
+  }
+
+  @Test
+  void grantedReplayIsRevalidatedAfterExpiry() {
+    WriterOwner a = owner("c1");
+    UUID requestId = nextRequestId();
+    writer.claim(a, requestId);
+    // 未失权时重复仍返回同一 grant。
+    assertEquals(
+        writer.claim(a, requestId).grant().epoch(), writer.claim(a, requestId).grant().epoch());
+
+    writer.expire();
+    assertEquals(ControlResult.RejectReason.LEASE_EXPIRED, writer.claim(a, requestId).reason());
+  }
+
+  @Test
+  void grantedReplayAfterTakeoverIsNotOwner() {
+    WriterOwner a = owner("c1");
+    UUID claimRequestId = nextRequestId();
+    WriterGrant grant = writer.claim(a, claimRequestId).grant();
+    writer.takeover(owner("c2"), nextRequestId(), grant.epoch());
+    // 控制权已转移：旧 claim requestId 不再返回旧 secret。
+    assertEquals(ControlResult.RejectReason.NOT_OWNER, writer.claim(a, claimRequestId).reason());
+    assertNull(writer.claim(a, claimRequestId).grant());
+  }
+
+  @Test
+  void grantedReplayAfterReleaseIsNotOwner() {
+    WriterOwner d = owner("d1");
+    UUID claimRequestId = nextRequestId();
+    WriterGrant grant = writer.claim(d, claimRequestId).grant();
+    writer.release(d, nextRequestId(), grant);
+    // 释放后旧 claim requestId 仍被识别为已失效 replay，明确拒绝而不是重新授予控制权。
+    ControlResult replay = writer.claim(d, claimRequestId);
+    assertEquals(ControlResult.RejectReason.NOT_OWNER, replay.reason());
+    assertNull(replay.grant());
+    assertNull(writer.state().writerEpoch());
+  }
+
+  @Test
+  void grantedReplayAfterFreezeIsFrozenAndStateHidesAuthority() {
+    WriterOwner a = owner("c1");
+    UUID requestId = nextRequestId();
+    WriterGrant grant = writer.claim(a, requestId).grant();
+    AdmissionResult pending = writer.submitInput(a, grant, 1L, bytes("a"), 1L);
+    writer.complete(grant.epoch(), 1L, pending.digest(), OperationOutcome.OUTCOME_UNKNOWN);
+
+    assertEquals(ControlResult.RejectReason.FROZEN, writer.claim(a, requestId).reason());
+    // 冻结后公开状态不再宣称仍持有控制权。
+    assertNull(writer.state().writerEpoch());
+  }
+
+  @Test
+  void renewedReplayIsRevalidatedAndDoesNotExtendLease() {
+    WriterOwner a = owner("c1");
+    WriterGrant grant = grant(a);
+    UUID renewRequestId = nextRequestId();
+
+    now = TerminalWriter.LEASE_NANOS / 2;
+    assertEquals(Status.RENEWED, writer.renew(a, renewRequestId, grant).status());
+
+    now = TerminalWriter.LEASE_NANOS / 2 + TerminalWriter.LEASE_NANOS - 1;
+    // 重复正确续租返回原 RENEWED，但不延长租期。
+    assertEquals(Status.RENEWED, writer.renew(a, renewRequestId, grant).status());
+
+    now += 2;
+    // 若重放延长了租期，这里仍会 RENEWED；实际未延长，因此已过期。
+    assertEquals(
+        ControlResult.RejectReason.LEASE_EXPIRED, writer.renew(a, nextRequestId(), grant).reason());
+  }
+
+  @Test
+  void renewedReplayAfterTakeoverIsRejected() {
+    WriterOwner a = owner("c1");
+    WriterGrant grant = grant(a);
+    UUID renewRequestId = nextRequestId();
+    assertEquals(Status.RENEWED, writer.renew(a, renewRequestId, grant).status());
+
+    writer.takeover(owner("c2"), nextRequestId(), grant.epoch());
+    assertEquals(
+        ControlResult.RejectReason.NOT_OWNER, writer.renew(a, renewRequestId, grant).reason());
+  }
+
+  @Test
+  void requestConflictDoesNotPolluteFirstRequestReplay() {
+    WriterOwner a = owner("c1");
+    WriterOwner b = owner("c2");
+    UUID requestId = nextRequestId();
+    ControlResult first = writer.claim(a, requestId);
+
+    // 冲突请求（同 requestId 不同 owner）只确定拒绝，且不覆盖首个请求的签名/结果。
+    assertEquals(ControlResult.RejectReason.REQUEST_CONFLICT, writer.claim(b, requestId).reason());
+    assertEquals(ControlResult.RejectReason.REQUEST_CONFLICT, writer.claim(b, requestId).reason());
+
+    // 首个合法请求重复仍返回原 grant，而不是被冲突污染。
+    ControlResult replay = writer.claim(a, requestId);
+    assertEquals(first.grant().epoch(), replay.grant().epoch());
+    assertEquals(first.grant().token(), replay.grant().token());
   }
 
   private WriterGrant grant(WriterOwner owner) {

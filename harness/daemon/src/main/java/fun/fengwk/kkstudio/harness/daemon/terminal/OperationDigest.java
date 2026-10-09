@@ -15,7 +15,7 @@ public final class OperationDigest {
 
   private final byte[] value;
 
-  OperationDigest(byte[] value) {
+  private OperationDigest(byte[] value) {
     this.value = value;
   }
 

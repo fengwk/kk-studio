@@ -34,6 +34,8 @@ public record ControlResult(
     FROZEN,
     /** takeover 观察到的 expectedWriterEpoch 与当前不匹配。 */
     CAS_FAILED,
+    /** 恢复请求参数非法（seq 越界，或 seq 与摘要的存在性不一致）。 */
+    INVALID,
     /** 跨连接恢复提供的旧 epoch/token 不是当前控制者。 */
     RECOVERY_MISMATCH,
     /** 跨连接恢复携带的旧操作无法核对，结果不确定。 */

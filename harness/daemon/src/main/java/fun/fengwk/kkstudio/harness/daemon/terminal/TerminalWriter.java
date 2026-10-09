@@ -89,7 +89,7 @@ public final class TerminalWriter {
   public WriterState state() {
     observeExpiry();
     return new WriterState(
-        isActiveGrant() ? grantEpoch : null,
+        isActiveGrant() && !frozen ? grantEpoch : null,
         lastWrittenSeq,
         lastWrittenDigest,
         lastResolvedSeq,
@@ -172,14 +172,15 @@ public final class TerminalWriter {
   /**
    * 跨连接恢复 CLAIM：以旧 epoch/token 证明身份，在无在途操作时原子核对旧操作、围住旧 epoch 并授予新 epoch。
    *
-   * <p>旧操作 seq/digest 命中最近已写返回 WRITTEN，命中最近已决议返回其原结果，超过最近已决议 seq 表示确定未准入返回 NOT_WRITTEN；
-   * 其余过旧且无法核对的请求视为结果不确定，冻结本 writer 并拒绝恢复。
+   * <p>租期失效只禁用旧 INPUT/RENEW/RELEASE；旧 epoch/token 与去重证据仍保留，长断连后即便 grantFenced 也能核对并恢复。旧操作
+   * seq/digest 命中最近已写 返回 WRITTEN，命中最近已决议返回其原结果，超过最近已决议 seq 表示确定未准入返回
+   * NOT_WRITTEN；其余过旧且无法核对的请求视为结果不确定，冻结本 writer 并拒绝恢复。参数非法（seq 越界，或 seq 与摘要存在性不符）明确拒绝，不冻结、不伪称结果不确定。
    *
    * @param owner 恢复后的新连接身份
    * @param requestId 控制请求标识
    * @param previous 旧授权的 epoch/token secret
    * @param seq 待核对旧操作的 seq，无旧操作时为 0
-   * @param digest 待核对旧操作的摘要，无旧操作时为 {@code null}
+   * @param digest 待核对旧操作的摘要，无旧操作时必须为 {@code null}
    * @return 控制结果；授权成功时 {@link ControlResult#recovered()} 携带旧操作决议
    */
   public ControlResult recover(
@@ -199,25 +200,25 @@ public final class TerminalWriter {
     if (grantEpoch == null) {
       return reject(requestId, signature, ControlResult.RejectReason.NOT_OWNER);
     }
-    if (grantFenced) {
-      return reject(requestId, signature, ControlResult.RejectReason.LEASE_EXPIRED);
-    }
+    // 租期失效只禁用旧 INPUT/RENEW/RELEASE；旧 epoch/token 与去重证据仍保留，长断连后仍可核对并恢复。
     if (!grantEpoch.equals(previous.epoch()) || !grantToken.equals(previous.token())) {
       return reject(requestId, signature, ControlResult.RejectReason.RECOVERY_MISMATCH);
     }
     if (pending != null) {
       return busy(requestId, signature);
     }
+    if (seq < 0L
+        || seq > TerminalLimits.MAX_SAFE_INTEGER
+        || (seq == 0L && digest != null)
+        || (seq > 0L && digest == null)) {
+      return reject(requestId, signature, ControlResult.RejectReason.INVALID);
+    }
     OperationOutcome recovered;
-    if (seq <= 0L) {
-      if (digest != null) {
-        frozen = true;
-        return reject(requestId, signature, ControlResult.RejectReason.RECOVERY_UNVERIFIABLE);
-      }
+    if (seq == 0L) {
       recovered = null;
-    } else if (digest != null && seq == lastWrittenSeq && digest.equals(lastWrittenDigest)) {
+    } else if (seq == lastWrittenSeq && digest.equals(lastWrittenDigest)) {
       recovered = OperationOutcome.WRITTEN;
-    } else if (digest != null && seq == lastResolvedSeq && digest.equals(lastResolvedDigest)) {
+    } else if (seq == lastResolvedSeq && digest.equals(lastResolvedDigest)) {
       recovered = lastResolvedOutcome;
     } else if (seq > lastResolvedSeq) {
       recovered = OperationOutcome.NOT_WRITTEN;
@@ -283,13 +284,12 @@ public final class TerminalWriter {
     if (pending != null) {
       return busy(requestId, signature);
     }
+    // 只清除当前授权；保留 grant 创建请求的有界重放槽，使旧 claim requestId 在释放后仍被识别为
+    // 已失效 replay 并明确拒绝，而不是被当成新请求重新授予控制权。
     grantOwner = null;
     grantEpoch = null;
     grantToken = null;
     grantFenced = false;
-    grantRequestId = null;
-    grantRequestSignature = null;
-    grantRequestResult = null;
     return remember(requestId, signature, ControlResult.released());
   }
 
@@ -354,7 +354,7 @@ public final class TerminalWriter {
     Objects.requireNonNull(epoch, "epoch");
     Objects.requireNonNull(digest, "digest");
     Objects.requireNonNull(outcome, "outcome");
-    if (frozen || pending == null) {
+    if (pending == null) {
       return false;
     }
     if (pending.seq != seq || !pending.epoch.equals(epoch) || !pending.digest.equals(digest)) {
@@ -440,6 +440,12 @@ public final class TerminalWriter {
     grantToken = UUID.randomUUID();
     grantStartNanos = clock.getAsLong();
     grantFenced = false;
+    // 每次真实旋转 epoch 都重置去重水位：新 epoch 从 seq=1 重新开始，旧 epoch 的已写/已决议不会被 CONFIRMED 泄漏过来。
+    lastWrittenSeq = 0L;
+    lastWrittenDigest = null;
+    lastResolvedSeq = 0L;
+    lastResolvedDigest = null;
+    lastResolvedOutcome = null;
     ControlResult result =
         ControlResult.granted(new WriterGrant(grantEpoch, grantToken), recovered);
     grantRequestId = requestId;
@@ -449,25 +455,65 @@ public final class TerminalWriter {
   }
 
   private ControlResult replay(UUID requestId, ControlSignature signature) {
+    StoredControl stored = storedControl(requestId);
+    if (stored == null) {
+      return null;
+    }
+    if (!signature.equals(stored.signature)) {
+      // 冲突请求只做确定拒绝，绝不覆盖既有签名/结果，避免污染首个合法请求的后续重放。
+      return ControlResult.rejected(ControlResult.RejectReason.REQUEST_CONFLICT);
+    }
+    return revalidate(stored.result, signature);
+  }
+
+  /** 返回与该 requestId 关联的既有控制决议；只保留当前 grant 与最近一次控制这两个有界槽位。 */
+  private StoredControl storedControl(UUID requestId) {
     if (lastControlRequestId != null && lastControlRequestId.equals(requestId)) {
-      if (signature.equals(lastControlSignature)) {
-        return lastControlResult;
-      }
-      return remember(
-          requestId,
-          signature,
-          ControlResult.rejected(ControlResult.RejectReason.REQUEST_CONFLICT));
+      return new StoredControl(lastControlSignature, lastControlResult);
     }
     if (grantRequestId != null && grantRequestId.equals(requestId)) {
-      if (signature.equals(grantRequestSignature)) {
-        return grantRequestResult;
-      }
-      return remember(
-          requestId,
-          signature,
-          ControlResult.rejected(ControlResult.RejectReason.REQUEST_CONFLICT));
+      return new StoredControl(grantRequestSignature, grantRequestResult);
     }
     return null;
+  }
+
+  /**
+   * 重放前按当前状态重新校验：授权、续租、释放等历史决议不能在失效、转移或冻结之后仍被当作成功返回。
+   *
+   * <p>GRANTED 只有当所返回的 grant 仍是当前授权、owner 仍匹配、租期仍有效且未冻结时才重放；否则明确返回 FROZEN/LEASE_EXPIRED/NOT_OWNER，
+   * 不转新 grant、不返回旧 secret。RENEWED 在失权后不再声称成功，且重复重放不延长租期。RELEASED/BUSY/REJECTED 无副作用，按原结果重放。
+   */
+  private ControlResult revalidate(ControlResult stored, ControlSignature signature) {
+    if (frozen) {
+      return ControlResult.rejected(ControlResult.RejectReason.FROZEN);
+    }
+    switch (stored.status()) {
+      case GRANTED:
+        return replayGrant(stored, signature.owner());
+      case RENEWED:
+        ControlResult.RejectReason reason =
+            authorityReason(signature.owner(), signature.credential());
+        return reason == null ? stored : ControlResult.rejected(reason);
+      default:
+        return stored;
+    }
+  }
+
+  /** 重放 GRANTED 时确认所返回的 grant 仍是当前授权、其 owner 仍匹配且租期仍有效。 */
+  private ControlResult replayGrant(ControlResult stored, WriterOwner owner) {
+    if (grantEpoch == null) {
+      return ControlResult.rejected(ControlResult.RejectReason.NOT_OWNER);
+    }
+    if (grantFenced) {
+      return ControlResult.rejected(ControlResult.RejectReason.LEASE_EXPIRED);
+    }
+    WriterGrant grant = stored.grant();
+    if (!grantEpoch.equals(grant.epoch())
+        || !grantToken.equals(grant.token())
+        || !grantOwner.equals(owner)) {
+      return ControlResult.rejected(ControlResult.RejectReason.NOT_OWNER);
+    }
+    return stored;
   }
 
   private ControlResult reject(
@@ -534,6 +580,9 @@ public final class TerminalWriter {
     }
   }
 
+  /** 有界保存的一次控制请求签名与其决议，用于重复 requestId 重放。 */
+  private record StoredControl(ControlSignature signature, ControlResult result) {}
+
   /** 控制请求的等式签名，用于重复 requestId 重放与冲突判定。 */
   private record ControlSignature(
       ControlKind kind,
@@ -576,6 +625,29 @@ public final class TerminalWriter {
           grant == null ? null : grant.token(),
           0L,
           null);
+    }
+
+    /** 该签名携带的凭据，仅续租/释放/恢复签名有值。 */
+    WriterGrant credential() {
+      return previousEpoch == null ? null : new WriterGrant(previousEpoch, previousToken);
+    }
+
+    /** 去敏输出：不回显 previousToken secret。 */
+    @Override
+    public String toString() {
+      return "ControlSignature[kind="
+          + kind
+          + ", owner="
+          + owner
+          + ", expectedEpoch="
+          + expectedEpoch
+          + ", previousEpoch="
+          + previousEpoch
+          + ", previousToken=<redacted>, previousSeq="
+          + previousSeq
+          + ", previousDigest="
+          + previousDigest
+          + "]";
     }
   }
 
