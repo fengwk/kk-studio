@@ -72,6 +72,7 @@ function provider(overrides: Partial<AgentProviderDTO> = {}): AgentProviderDTO {
     version: '1',
     createTime: null,
     updateTime: null,
+    modelHttpRetryStatusCodes: null,
     ...overrides,
   }
 }

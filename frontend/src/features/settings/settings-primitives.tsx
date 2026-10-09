@@ -2,6 +2,7 @@ import { useId, type ReactNode } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
+import { TagInput } from '@/shared/ui/controls/TagInput'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 
 /** 配置生效时机：下次调用、新建对话或进程重启。 */
@@ -245,6 +246,60 @@ export function SettingsSelectField({
         disabled={disabled}
         placeholder={placeholder}
         onChange={onChange}
+      />
+    </div>
+  )
+}
+
+export function SettingsIntegerListField({
+  label,
+  value,
+  onChange,
+  min = 400,
+  max = 599,
+  disabled = false,
+  description,
+  hint,
+  placeholder,
+  fieldPath,
+  nullable = false,
+}: {
+  label: string
+  value: (number | string)[]
+  onChange: (next: (number | string)[]) => void
+  min?: number
+  max?: number
+  disabled?: boolean
+  description?: string
+  hint?: string
+  placeholder?: string
+  fieldPath?: string
+  nullable?: boolean
+}) {
+  const fieldId = useId()
+  const text = description ?? hint
+
+  return (
+    <div
+      className="settings-field"
+      data-settings-field-path={fieldPath}
+      data-settings-nullable={nullable}
+      data-settings-min={min}
+      data-settings-max={max}
+    >
+      <label className="settings-field-label" htmlFor={fieldId}>
+        {label}
+      </label>
+      {text ? <span className="settings-field-description">{text}</span> : null}
+      <TagInput
+        id={fieldId}
+        value={value}
+        onChange={onChange}
+        min={min}
+        max={max}
+        placeholder={placeholder}
+        disabled={disabled}
+        ariaLabel={label}
       />
     </div>
   )

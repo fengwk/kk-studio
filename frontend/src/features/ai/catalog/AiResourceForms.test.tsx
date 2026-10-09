@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
+import { validateResourceDraft } from '@/features/ai/catalog/ai-resource-form-validation'
+import { toEditableProvider, toEditableProviderUpdate } from '@/features/ai/catalog/ai-provider-draft-codec'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import { setLocale } from '@/shared/i18n'
@@ -46,6 +48,120 @@ describe('AiResourceForms', () => {
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
     expect(screen.getByDisplayValue('3000')).toBeInTheDocument()
     expect(screen.getByText('留空会以无 Authorization 方式请求 OpenAI-compatible 端点。')).toBeInTheDocument()
+  })
+
+  it('manages HTTP retry policy: inherit, custom, empty list, staged invalid withoutEnter, correct, duplicate, submit payload', async () => {
+    const user = userEvent.setup()
+    let currentDraft: ProviderDraft = {
+      name: 'provider-test',
+      description: '',
+      providerType: 'openai',
+      baseUrl: 'https://api.test/v1',
+      credential: '',
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
+      modelHttpRetryStatusCodes: null,
+    }
+
+    function ProviderLifecycleHarness() {
+      const [draft, setDraft] = useState<ProviderDraft>(currentDraft)
+      return (
+        <ProviderForm
+          draft={draft}
+          mode="create"
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    function validateCurrent() {
+      return validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: currentDraft,
+          modelDraft: emptyModelDraft(),
+          agentDraft: {
+            name: '',
+            description: '',
+            systemPrompt: '',
+            model: '',
+            variant: 'default',
+            inheritParentEnvironment: true,
+            tools: [],
+            skills: [],
+            subagents: [],
+          },
+        },
+      )
+    }
+
+    render(<ProviderLifecycleHarness />)
+
+    // 1. Initially "继承系统配置" is checked; modelHttpRetryStatusCodes is null
+    expect(screen.getByLabelText('继承系统配置')).toBeChecked()
+    expect(screen.getByLabelText('自定义重试名单')).not.toBeChecked()
+    expect(currentDraft.modelHttpRetryStatusCodes).toBeNull()
+    expect(validateCurrent().ok).toBe(true)
+    expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toBeNull()
+    expect(toEditableProviderUpdate(currentDraft).modelHttpRetryStatusCodes).toBeNull()
+
+    // 2. Toggle to "自定义重试名单" -> draft becomes []
+    await user.click(screen.getByLabelText('自定义重试名单'))
+    expect(screen.getByLabelText('自定义重试名单')).toBeChecked()
+    expect(currentDraft.modelHttpRetryStatusCodes).toEqual([])
+    expect(validateCurrent().ok).toBe(true)
+    expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toEqual([])
+    expect(toEditableProviderUpdate(currentDraft).modelHttpRetryStatusCodes).toEqual([])
+
+    // 3. Add valid custom status codes via TagInput
+    const tagInput = screen.getByRole('textbox', { name: 'HTTP 错误重试策略' })
+    await user.type(tagInput, '408{enter}')
+    expect(screen.getByText('408')).toBeInTheDocument()
+    expect(currentDraft.modelHttpRetryStatusCodes).toEqual([408])
+    expect(validateCurrent().ok).toBe(true)
+    expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toEqual([408])
+
+    await user.type(tagInput, '429{enter}')
+    expect(screen.getByText('429')).toBeInTheDocument()
+    expect(currentDraft.modelHttpRetryStatusCodes).toEqual([408, 429])
+    expect(validateCurrent().ok).toBe(true)
+    expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toEqual([408, 429])
+
+    // 4. Staged invalid input without Enter immediately blocks save
+    await user.type(tagInput, '200') // invalid out-of-range, NO enter
+    expect(currentDraft.modelHttpRetryStatusCodes).toEqual([408, 429, '200'])
+    expect(validateCurrent().ok).toBe(false)
+    expect(() => toEditableProvider(currentDraft)).toThrow()
+
+    // 5. Correct the input to 500 and press Enter
+    await user.clear(tagInput)
+    await user.type(tagInput, '500{enter}')
+    expect(screen.getByText('500')).toBeInTheDocument()
+    expect(currentDraft.modelHttpRetryStatusCodes).toEqual([408, 429, 500])
+    expect(validateCurrent().ok).toBe(true)
+    expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toEqual([408, 429, 500])
+
+    // 6. Staged duplicate without Enter blocks save
+    await user.type(tagInput, '429') // duplicate with existing chip 429, NO enter
+    expect(currentDraft.modelHttpRetryStatusCodes).toEqual([408, 429, 500, '429'])
+    expect(validateCurrent().ok).toBe(false)
+    expect(() => toEditableProvider(currentDraft)).toThrow()
+
+    // Clear the duplicate input
+    await user.clear(tagInput)
+    expect(currentDraft.modelHttpRetryStatusCodes).toEqual([408, 429, 500])
+    expect(validateCurrent().ok).toBe(true)
+
+    // 7. Toggle back to "继承系统配置" -> draft becomes null
+    await user.click(screen.getByLabelText('继承系统配置'))
+    expect(screen.getByLabelText('继承系统配置')).toBeChecked()
+    expect(currentDraft.modelHttpRetryStatusCodes).toBeNull()
+    expect(validateCurrent().ok).toBe(true)
+    expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toBeNull()
+    expect(toEditableProviderUpdate(currentDraft).modelHttpRetryStatusCodes).toBeNull()
   })
 
   it('explains that an empty edit credential preserves the existing secret without echoing it', () => {
@@ -120,6 +236,7 @@ describe('AiResourceForms', () => {
               version: '1',
               createTime: null,
               updateTime: null,
+              modelHttpRetryStatusCodes: null,
             },
           ]}
           onChange={() => undefined}
@@ -247,6 +364,7 @@ describe('AiResourceForms', () => {
               modelCallIdleTimeoutMillis: 120000,
               createTime: '2026-06-20T02:00:00',
               updateTime: '2026-06-20T02:00:00',
+              modelHttpRetryStatusCodes: null,
             },
           ]}
           onChange={setDraft}
@@ -427,6 +545,7 @@ describe('AiResourceForms', () => {
             version: '1',
             createTime: null,
             updateTime: null,
+            modelHttpRetryStatusCodes: null,
           },
         ]}
         fieldErrors={{
@@ -517,6 +636,7 @@ function ProviderFormHarness({ mode = 'create' }: { mode?: 'create' | 'edit' }) 
     credential: '',
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
+    modelHttpRetryStatusCodes: null,
   })
   return <ProviderForm draft={draft} mode={mode} onChange={setDraft} />
 }
@@ -542,6 +662,7 @@ function ModelFormHarness() {
           modelCallIdleTimeoutMillis: 120000,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
+          modelHttpRetryStatusCodes: null,
         },
       ]}
       onChange={setDraft}
@@ -572,6 +693,7 @@ function EditModelFormHarness() {
           version: '1',
           createTime: null,
           updateTime: null,
+          modelHttpRetryStatusCodes: null,
         },
       ]}
       onChange={setDraft}

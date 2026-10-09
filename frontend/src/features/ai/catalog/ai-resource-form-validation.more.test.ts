@@ -21,6 +21,7 @@ function provider(overrides: Partial<ProviderDraft> = {}): ProviderDraft {
     credential: '',
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
+    modelHttpRetryStatusCodes: null,
     ...overrides,
   }
 }

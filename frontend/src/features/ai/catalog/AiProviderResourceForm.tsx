@@ -1,6 +1,7 @@
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
+import { TagInput } from '@/shared/ui/controls/TagInput'
 import { providerTypes } from '@/features/ai/catalog/ai-console-types'
 import type { AgentProviderType } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
@@ -19,6 +20,7 @@ export function ProviderForm({
   onChange: (draft: ProviderDraft) => void
 }) {
   const { t } = useI18n()
+  const isCustomRetry = draft.modelHttpRetryStatusCodes !== null && draft.modelHttpRetryStatusCodes !== undefined
   return (
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
@@ -95,6 +97,48 @@ export function ProviderForm({
           inputMode="numeric"
         />
       </label>
+      <div className="form-group">
+        <FieldLabel>{t('ai.catalog.form.httpRetryPolicy')}</FieldLabel>
+        <div className="form-radio-group">
+          <label className="form-radio-label">
+            <input
+              type="radio"
+              name="provider-http-retry-mode"
+              checked={!isCustomRetry}
+              onChange={() => onChange({ ...draft, modelHttpRetryStatusCodes: null })}
+            />
+            {t('ai.catalog.form.httpRetryInherit')}
+          </label>
+          <label className="form-radio-label">
+            <input
+              type="radio"
+              name="provider-http-retry-mode"
+              checked={isCustomRetry}
+              onChange={() =>
+                onChange({
+                  ...draft,
+                  modelHttpRetryStatusCodes: draft.modelHttpRetryStatusCodes ?? [],
+                })
+              }
+            />
+            {t('ai.catalog.form.httpRetryCustom')}
+          </label>
+        </div>
+        {isCustomRetry ? (
+          <TagInput
+            value={draft.modelHttpRetryStatusCodes ?? []}
+            onChange={(next) => onChange({ ...draft, modelHttpRetryStatusCodes: next })}
+            min={400}
+            max={599}
+            placeholder={t('ai.catalog.form.httpRetryPlaceholder')}
+            ariaLabel={t('ai.catalog.form.httpRetryPolicy')}
+          />
+        ) : (
+          <small className="form-group-hint">
+            {t('ai.catalog.form.httpRetryInheritHint')}
+          </small>
+        )}
+      </div>
     </>
   )
 }
