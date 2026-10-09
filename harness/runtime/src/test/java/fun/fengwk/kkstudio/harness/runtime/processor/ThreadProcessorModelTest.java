@@ -472,6 +472,59 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     }
   }
 
+  /** 大体积上游错误正文（HTTP 404 HTML）导致的 terminal FAILED 必须在单个 claim 内完整结算，而不是抛异常挂起。 */
+  @Test
+  void modelTerminalErrorWithLargeUpstreamHttpBodySettlesWithoutHanging() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    String body =
+        "\n<!DOCTYPE html>\n<html>\n<body>\n  "
+            + "not found ".repeat(600)
+            + "错误\n</body>\n</html>\n  ";
+    String message = "HTTP 404\n" + body;
+    ModelInvocationError error =
+        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, message);
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.FAILED,
+            plainRequest(),
+            null,
+            error);
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    // 一个 claim 内完整结算，而不是再次抛出并让 THREAD Work 反复被 claim。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(5, path.entries().size());
+    AssistantErrorPayload errorPayload = (AssistantErrorPayload) path.entries().get(3).payload();
+    assertEquals("INVALID_REQUEST", errorPayload.error().code());
+    assertEquals(message, errorPayload.error().message());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    assertEquals(TurnEndReason.TURN_FAILED, end.reason());
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
+    // THREAD Work 完成且无残留 wake：失败 turn 收敛为单条 ASSISTANT_ERROR + TURN_END，不产生重复条目。
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    assertEquals(5, path(fixture.store, baseline.threadId()).entries().size());
+
+    // 正常新输入可继续：失败 turn 已关闭，后续 USER 命令在一个新 claim 中启动下一个 INPUT turn。
+    fixture.resolver.autoConsistent = true;
+    seedCommand(
+        fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("continue")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath after = path(fixture.store, baseline.threadId());
+    TurnStartPayload nextStart = (TurnStartPayload) after.entries().get(5).payload();
+    assertEquals(TurnStartReason.INPUT, nextStart.reason());
+    MessagePayload nextUser = (MessagePayload) after.entries().get(6).payload();
+    assertEquals(AgentMessageRole.USER, nextUser.message().role());
+  }
+
   @Test
   void modelTerminalWithBasisOffCurrentBranchIsNotApplied() {
     Fixture fixture = fixture();
