@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -139,6 +140,61 @@ class TerminalRuntimeDeterministicTest {
         second.get(WAIT_SECONDS, TimeUnit.SECONDS);
         third.get(WAIT_SECONDS, TimeUnit.SECONDS);
         assertEquals("AAABBBCCC", output.capturedAsString(), "帧不得交叉，顺序必须保持 FIFO");
+      } finally {
+        runtime.close();
+      }
+    }
+  }
+
+  @Test
+  void userFrameIsCopiedAtEnqueueAndSurvivesCallerMutation() throws Exception {
+    try (ProcessScope scope = holdScope()) {
+      BlockingScheduler scheduler = new BlockingScheduler();
+      schedulers.add(scheduler);
+      RecordingOutputStream output = new RecordingOutputStream();
+      TerminalRuntime runtime =
+          new TerminalRuntime(
+              scope,
+              new BlockingInputStream(),
+              output,
+              20,
+              5,
+              8,
+              vtExecutor(),
+              ioExecutor(),
+              scheduler);
+      try {
+        byte[] data = bytes("AAA");
+        CompletableFuture<Void> write = runtime.writeInput(data, 1L);
+        assertTrue(scheduler.awaitEntered(WAIT_SECONDS, TimeUnit.SECONDS), "写任务必须已停在调度窗口");
+        // 入队时即复制：调用方在 native 之前改写数组不得改变将要写入的帧。
+        Arrays.fill(data, (byte) 'X');
+        scheduler.release();
+        write.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertEquals("AAA", output.capturedAsString(), "帧必须在入队时复制，写入内容不受调用方改写影响");
+      } finally {
+        scheduler.release();
+        runtime.close();
+      }
+    }
+  }
+
+  @Test
+  void internalResponseAndUserFramesShareTheWriterAsWholeFrames() throws Exception {
+    try (ProcessScope scope = holdScope()) {
+      GateOutputStream output = new GateOutputStream();
+      TerminalRuntime runtime = runtime(scope, new BlockingInputStream(), output);
+      try {
+        CompletableFuture<Void> first = runtime.writeInput(bytes("AAA"), 1L);
+        assertTrue(output.awaitFirstWrite(WAIT_SECONDS, TimeUnit.SECONDS));
+        // 内核应答与后续用户帧进入同一队列：每个操作必须整帧写入，互不交叉。
+        runtime.onKernelResponse(bytes("\u001b[?6c"));
+        CompletableFuture<Void> second = runtime.writeInput(bytes("BBB"), 1L);
+        output.release();
+        first.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        second.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertEquals(
+            List.of("AAA", "\u001b[?6c", "BBB"), output.capturedFrames(), "应答与用户帧必须各自整帧写入，不得交叉");
       } finally {
         runtime.close();
       }
@@ -382,6 +438,33 @@ class TerminalRuntimeDeterministicTest {
   }
 
   @Test
+  void splitUtf8AndCsiChunksKeepSnapshotAndResizeResponsive() throws Exception {
+    try (ProcessScope scope = holdScope()) {
+      // 把 UTF-8 与 CSI 都切在 chunk 边界：解释器必须跨 chunk 保留状态，且分块期间 snapshot/resize 不得饥饿。
+      ChunkedInputStream input =
+          new ChunkedInputStream(
+              new byte[] {(byte) 0xE4},
+              new byte[] {(byte) 0xB8, (byte) 0xAD},
+              new byte[] {(byte) 0x1b, (byte) '['},
+              new byte[] {(byte) '3', (byte) '1', (byte) 'm', (byte) 'X'});
+      TerminalRuntime runtime = runtime(scope, input, new RecordingOutputStream());
+      try {
+        assertTrue(awaitProjected(runtime, "\u4e2d"), "跨 chunk UTF-8 必须补全为完整字符");
+        // 未完成序列在场时，一致画面捕获与尺寸调整仍必须在预算内完成。
+        runtime.snapshot().get(WAIT_SECONDS, TimeUnit.SECONDS);
+        runtime.resize(30, 6).get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertEquals(
+            30, runtime.snapshot().get(WAIT_SECONDS, TimeUnit.SECONDS).columns(), "分块序列不得阻塞尺寸调整");
+        String rendered = awaitProjectedText(runtime, "\u4e2dX");
+        assertTrue(
+            rendered.contains("\u4e2dX"), "补全 CSI 后必须显示后续字符，实际：" + rendered.replace('\n', '/'));
+      } finally {
+        runtime.close();
+      }
+    }
+  }
+
+  @Test
   void unavailableWriteDeadlineIsDeterminateAndEndsTheSession() throws Exception {
     try (ProcessScope scope = holdScope()) {
       TerminalRuntime runtime =
@@ -412,7 +495,7 @@ class TerminalRuntimeDeterministicTest {
   }
 
   @Test
-  void unavailableResizeDeadlineIsUncertainAndEndsTheSession() throws Exception {
+  void unavailableResizeDeadlineIsDeterminateAndLeavesSizeUnchanged() throws Exception {
     try (ProcessScope scope = holdScope()) {
       TerminalRuntime runtime =
           new TerminalRuntime(
@@ -430,12 +513,16 @@ class TerminalRuntimeDeterministicTest {
         ExecutionException failure =
             assertThrows(
                 ExecutionException.class, () -> resize.get(WAIT_SECONDS, TimeUnit.SECONDS));
-        assertTrue(
+        assertFalse(
             failure.getCause() instanceof TerminalRuntime.OutcomeUnknownException,
-            "内核尺寸已改而窗口未改是部分变更，结果必须是不确定");
+            "截止时间在 native 之前调度失败时确定未执行");
         assertThrows(
             ExecutionException.class,
             () -> runtime.termination().get(WAIT_SECONDS, TimeUnit.SECONDS));
+        // 收敛后仍可读回末屏：内核尺寸必须保持原值，证明 native resize 从未开始。
+        TerminalView view = runtime.snapshot().get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertEquals(20, view.columns(), "内核尺寸必须保持原值");
+        assertEquals(5, view.rows(), "内核行数必须保持原值");
       } finally {
         runtime.close();
       }
@@ -531,20 +618,132 @@ class TerminalRuntimeDeterministicTest {
   }
 
   @Test
-  void unresponsiveNativeWriteIsReportedAsUncertainAndTaskFailure() throws Exception {
+  void deadlineThatFiresBeforeNativeAdmissionKeepsTheFrameUnwritten() throws Exception {
+    try (ProcessScope scope = holdScope()) {
+      InlineScheduler scheduler = new InlineScheduler();
+      schedulers.add(scheduler);
+      RecordingOutputStream output = new RecordingOutputStream();
+      TerminalRuntime runtime =
+          new TerminalRuntime(
+              scope,
+              new BlockingInputStream(),
+              output,
+              20,
+              5,
+              8,
+              vtExecutor(),
+              ioExecutor(),
+              scheduler);
+      try {
+        // 截止时间在提交调用内同步触发：它早于 native 准入赢下竞争，该帧必须确定未执行。
+        CompletableFuture<Void> write = runtime.writeInput(bytes("hello"), 1L);
+        ExecutionException failure =
+            assertThrows(ExecutionException.class, () -> write.get(WAIT_SECONDS, TimeUnit.SECONDS));
+        assertFalse(
+            failure.getCause() instanceof TerminalRuntime.OutcomeUnknownException,
+            "截止时间在 native 之前获胜时确定未执行");
+        assertEquals("", output.capturedAsString(), "截止时间先赢时不得进入 native 写");
+        assertThrows(
+            ExecutionException.class,
+            () -> runtime.termination().get(WAIT_SECONDS, TimeUnit.SECONDS));
+      } finally {
+        runtime.close();
+      }
+    }
+  }
+
+  @Test
+  void cancelWinningBeforeNativeAdmissionKeepsTheFrameUnwritten() throws Exception {
+    try (ProcessScope scope = holdScope()) {
+      BlockingScheduler scheduler = new BlockingScheduler();
+      schedulers.add(scheduler);
+      RecordingOutputStream output = new RecordingOutputStream();
+      TerminalRuntime runtime =
+          new TerminalRuntime(
+              scope,
+              new BlockingInputStream(),
+              output,
+              20,
+              5,
+              8,
+              vtExecutor(),
+              ioExecutor(),
+              scheduler);
+      try {
+        CompletableFuture<Void> write = runtime.writeInput(bytes("hello"), 1L);
+        assertTrue(scheduler.awaitEntered(WAIT_SECONDS, TimeUnit.SECONDS), "写任务必须已停在调度窗口");
+        // 调用方在 native 之前取消：准入必须拒绝，即使截止时间随后才被调度出来。
+        assertTrue(write.cancel(false), "native 之前的取消必须成功");
+        scheduler.release();
+        assertTrue(write.isCancelled(), "取消必须保持已决议");
+        // 会话仍存活：后续帧必须被写入，证明被取消的帧确定未执行。
+        runtime.writeInput(bytes("z"), 1L).get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertEquals("z", output.capturedAsString(), "取消的帧不得进入 native 写");
+      } finally {
+        scheduler.release();
+        runtime.close();
+      }
+    }
+  }
+
+  @Test
+  void closeWinningBeforeNativeAdmissionKeepsTheFrameUnwritten() throws Exception {
+    try (ProcessScope scope = holdScope()) {
+      BlockingScheduler scheduler = new BlockingScheduler();
+      schedulers.add(scheduler);
+      RecordingOutputStream output = new RecordingOutputStream();
+      TerminalRuntime runtime =
+          new TerminalRuntime(
+              scope,
+              new BlockingInputStream(),
+              output,
+              20,
+              5,
+              8,
+              vtExecutor(),
+              ioExecutor(),
+              scheduler);
+      try {
+        CompletableFuture<Void> write = runtime.writeInput(bytes("hello"), 1L);
+        assertTrue(scheduler.awaitEntered(WAIT_SECONDS, TimeUnit.SECONDS), "写任务必须已停在调度窗口");
+        Thread closer = new Thread(runtime::close, "close-winner");
+        closer.start();
+        // offer 已拒绝即为「关闭已赢」的证据；此时再放行 scheduler，准入必须拒绝 native。
+        awaitTrue(
+            () -> runtime.writeInput(bytes("z"), 1L).isCompletedExceptionally(), WAIT_SECONDS);
+        scheduler.release();
+        closer.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS));
+        assertFalse(closer.isAlive(), "close 必须在 scheduler 放行后完成");
+        assertEquals("", output.capturedAsString(), "关闭先赢时不得进入 native 写");
+        assertTrue(write.isCompletedExceptionally(), "在途写不得遗留 pending");
+        assertTrue(runtime.termination().isDone(), "关闭必须收敛");
+      } finally {
+        scheduler.release();
+        runtime.close();
+      }
+    }
+  }
+
+  @Test
+  void unresponsiveNativeWriteIsReportedAsUncertainAndCloseFailsExplicitly() throws Exception {
     try (ProcessScope scope = holdScope()) {
       UninterruptibleOutputStream output = new UninterruptibleOutputStream();
       TerminalRuntime runtime = runtime(scope, new BlockingInputStream(), output);
       try {
         CompletableFuture<Void> write = runtime.writeInput(bytes("stuck"), 1L);
         assertTrue(output.awaitEntered(WAIT_SECONDS, TimeUnit.SECONDS), "写任务必须已进入 native 写");
-        // 忽略中断的 native 写无法收尾：pending 必须显式终结为不确定，收敛必须报告任务失败。
-        runtime.close();
+        // 忽略中断的 native 写无法在收尾预算内停止：close 必须显式报告释放失败，绝不宣称已收敛。
+        IllegalStateException failure = assertThrows(IllegalStateException.class, runtime::close);
+        assertEquals(
+            "terminal runtime task did not stop within its budget",
+            failure.getMessage(),
+            "无法收尾的任务必须报释放失败");
         assertTrue(write.isCompletedExceptionally(), "无法收尾的在途写不得遗留 pending");
         assertTrue(runtime.termination().isCompletedExceptionally(), "任务无法收尾必须显式失败");
       } finally {
         output.release();
-        runtime.close();
+        // 释放后重复 close 仍必须显式报告释放失败，不得静默返回。
+        assertThrows(IllegalStateException.class, runtime::close);
       }
     }
   }
@@ -554,20 +753,23 @@ class TerminalRuntimeDeterministicTest {
     ProcessScope scope = holdScope();
     try {
       ExecutorService io = ioExecutor();
+      CountingInputStream input = new CountingInputStream();
       TerminalRuntime runtime =
           new TerminalRuntime(
-              scope,
-              new BlockingInputStream(),
-              new RecordingOutputStream(),
-              20,
-              5,
-              8,
-              vtExecutor(),
-              io,
-              scheduler());
-      // 调用方提前放弃阻塞 I/O executor：运行时仍必须有界收敛并显式报告会话失败。
+              scope, input, new RecordingOutputStream(), 20, 5, 8, vtExecutor(), io, scheduler());
+      // 调用方提前放弃阻塞 I/O executor：先确认读任务已在 PTY 读上就位，再中断整个池。
+      assertTrue(input.awaitEntered(WAIT_SECONDS, TimeUnit.SECONDS), "读任务必须已进入 PTY 读");
       io.shutdownNow();
-      runtime.close();
+      // 被中断的读任务必须自己发停止信号并让 lifecycle 收敛，且显式报告会话失败。
+      ExecutionException failure =
+          assertThrows(
+              ExecutionException.class,
+              () -> runtime.termination().get(WAIT_SECONDS, TimeUnit.SECONDS));
+      assertTrue(failure.getCause() instanceof IllegalStateException);
+      // 收敛发生在已放弃、被中断的 lifecycle 线程上：内核释放等待被打断，close 必须显式报告释放失败。
+      IllegalStateException closeFailure =
+          assertThrows(IllegalStateException.class, runtime::close);
+      assertTrue(closeFailure.getMessage() != null, "释放失败必须带固定说明");
       assertTrue(runtime.termination().isCompletedExceptionally(), "调用方放弃执行器必须显式失败");
     } finally {
       scope.close();
@@ -764,6 +966,44 @@ class TerminalRuntimeDeterministicTest {
     }
   }
 
+  /** 有界轮询直到投影包含期望文本；用于吸收真实内核的异步处理时机。 */
+  private static boolean awaitProjected(TerminalRuntime runtime, String expected) throws Exception {
+    return awaitProjectedText(runtime, expected).contains(expected);
+  }
+
+  /** 有界轮询直到投影包含期望文本，返回最后一次投影；用于吸收真实内核的异步处理时机。 */
+  private static String awaitProjectedText(TerminalRuntime runtime, String expected)
+      throws Exception {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS);
+    String text = "";
+    while (System.nanoTime() < deadline) {
+      text = projected(runtime.snapshot().get(WAIT_SECONDS, TimeUnit.SECONDS));
+      if (text.contains(expected)) {
+        return text;
+      }
+      Thread.sleep(10L);
+    }
+    return text;
+  }
+
+  private static String projected(TerminalView view) {
+    if (view == null) {
+      return "";
+    }
+    StringBuilder text = new StringBuilder();
+    for (TerminalView.Line line : view.lines()) {
+      for (TerminalView.Slot slot : line.slots()) {
+        // 双宽字符的续格只证明宽度拓扑，不携带额外文本，因此拼接逻辑文本时跳过。
+        if (slot.kind() == TerminalView.SlotKind.DWC) {
+          continue;
+        }
+        text.append((char) slot.code());
+      }
+      text.append('\n');
+    }
+    return text.toString();
+  }
+
   /** 记录每次写入的原始字节，用于断言帧内容与顺序。 */
   static final class RecordingOutputStream extends OutputStream {
 
@@ -788,12 +1028,13 @@ class TerminalRuntimeDeterministicTest {
     }
   }
 
-  /** 首次 native 写阻塞在闸门上，用于确定性地构造「写者被占住」的窗口。 */
+  /** 首次 native 写阻塞在闸门上，用于确定性地构造「写者被占住」的窗口；同时按写调用记录整帧边界。 */
   static final class GateOutputStream extends OutputStream {
 
     private final CountDownLatch firstWrite = new CountDownLatch(1);
     private final CountDownLatch release = new CountDownLatch(1);
     private final ByteArrayOutputStream captured = new ByteArrayOutputStream();
+    private final List<String> frames = new CopyOnWriteArrayList<>();
     private int writes;
 
     @Override
@@ -813,6 +1054,7 @@ class TerminalRuntimeDeterministicTest {
       }
       synchronized (this) {
         captured.write(data, offset, length);
+        frames.add(new String(data, offset, length, StandardCharsets.ISO_8859_1));
       }
     }
 
@@ -835,6 +1077,11 @@ class TerminalRuntimeDeterministicTest {
 
     synchronized String capturedAsString() {
       return new String(captured.toByteArray(), StandardCharsets.ISO_8859_1);
+    }
+
+    /** 按 native 写调用切分的整帧内容；用于断言每个操作整帧写入、互不交叉。 */
+    List<String> capturedFrames() {
+      return List.copyOf(frames);
     }
   }
 
@@ -1226,6 +1473,141 @@ class TerminalRuntimeDeterministicTest {
       for (Runnable deadline : deadlines) {
         deadline.run();
       }
+    }
+  }
+
+  /** 在 schedule 调用内同步触发截止任务；用于证明截止时间早于 native 准入赢下竞争。 */
+  static final class InlineScheduler extends ScheduledThreadPoolExecutor {
+
+    InlineScheduler() {
+      super(1);
+    }
+
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+      command.run();
+      return super.schedule(() -> {}, delay, unit);
+    }
+  }
+
+  /** schedule 阻塞到测试释放（忽略中断但保留标志）；用于把写任务停在 native 之前的调度窗口。 */
+  static final class BlockingScheduler extends ScheduledThreadPoolExecutor {
+
+    private final CountDownLatch entered = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+
+    BlockingScheduler() {
+      super(1);
+    }
+
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+      entered.countDown();
+      awaitRelease();
+      return super.schedule(command, delay, unit);
+    }
+
+    private void awaitRelease() {
+      boolean interrupted = false;
+      while (true) {
+        try {
+          release.await();
+          break;
+        } catch (InterruptedException ignored) {
+          interrupted = true;
+        }
+      }
+      if (interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    boolean awaitEntered(long timeout, TimeUnit unit) throws InterruptedException {
+      return entered.await(timeout, unit);
+    }
+
+    void release() {
+      release.countDown();
+    }
+  }
+
+  /** 按预置 chunk 依次投递，其后永久阻塞；用于把 VT 序列确定性地切在 chunk 边界。 */
+  static final class ChunkedInputStream extends InputStream {
+
+    private final List<byte[]> chunks;
+    private final CountDownLatch gate = new CountDownLatch(1);
+    private int chunkIndex;
+    private int offset;
+
+    ChunkedInputStream(byte[]... chunks) {
+      this.chunks = List.of(chunks);
+    }
+
+    @Override
+    public int read() throws IOException {
+      byte[] single = new byte[1];
+      int read = read(single, 0, 1);
+      return read < 0 ? -1 : single[0] & 0xff;
+    }
+
+    @Override
+    public int read(byte[] buffer, int offset, int length) throws IOException {
+      synchronized (this) {
+        if (chunkIndex < chunks.size()) {
+          byte[] chunk = chunks.get(chunkIndex);
+          int count = Math.min(length, chunk.length - this.offset);
+          System.arraycopy(chunk, this.offset, buffer, offset, count);
+          this.offset += count;
+          if (this.offset == chunk.length) {
+            this.offset = 0;
+            chunkIndex++;
+          }
+          return count;
+        }
+      }
+      return block();
+    }
+
+    private int block() throws IOException {
+      try {
+        gate.await();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new InterruptedIOException("read interrupted");
+      }
+      return -1;
+    }
+  }
+
+  /** 首次进入读即放行，其后永久阻塞；用于确认读任务已在 PTY 读上就位。 */
+  static final class CountingInputStream extends InputStream {
+
+    private final CountDownLatch entered = new CountDownLatch(1);
+    private final CountDownLatch gate = new CountDownLatch(1);
+
+    @Override
+    public int read() throws IOException {
+      return block();
+    }
+
+    @Override
+    public int read(byte[] buffer, int offset, int length) throws IOException {
+      return block();
+    }
+
+    private int block() throws IOException {
+      entered.countDown();
+      try {
+        gate.await();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new InterruptedIOException("read interrupted");
+      }
+      return -1;
+    }
+
+    boolean awaitEntered(long timeout, TimeUnit unit) throws InterruptedException {
+      return entered.await(timeout, unit);
     }
   }
 }

@@ -28,9 +28,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * 单个人工终端的可信运行时边界：唯一 scoped PTY、唯一 {@link TerminalKernel} 与唯一有界写队列的所有者。
  *
  * <p>本类不创建、不关闭、也不直接启动线程：VT 解释运行在调用方注入的 {@code ExecutorService} 上，PTY 阻塞读写与收敛运行在调用方注入的阻塞 I/O
- * executor 上，native 截止时间调度运行在调用方注入的 {@code ScheduledExecutorService} 上。写入方只需注入已解析的 {@link
- * TerminalLaunchSpec}、尺寸/历史、继承环境与启动闸门，运行时按原样 argv 启动 scoped PTY，并声明 {@code
- * TERM=xterm-256color}/{@code COLORTERM=truecolor}。
+ * executor 上，native 截止时间调度运行在调用方注入的 {@code ScheduledExecutorService} 上。因为预留的 lifecycle
+ * 任务、读任务与写任务都会阻塞，注入的 I/O executor 必须能并发运行这三者（例如缓存线程或等价的非绑定阻塞 executor）；单线程 executor
+ * 会让运行时无法在读写进行中收敛。写入方只需注入已解析的 {@link TerminalLaunchSpec}、尺寸/历史、继承环境与启动闸门，运行时按原样 argv 启动 scoped
+ * PTY，并声明 {@code TERM=xterm-256color}/{@code COLORTERM=truecolor}。
  *
  * <p>收敛只有一个执行者：构造时先在阻塞 I/O executor 上预留唯一 lifecycle 任务，它等待停止信号后完成全部清理。read failure、kernel
  * failure、native 超时、自然退出与显式 {@link #close()} 都只设置失败原因并唤醒该任务，绝不在 reader/writer/VT owner/scheduler 或
@@ -98,6 +99,8 @@ public final class TerminalRuntime implements AutoCloseable {
   private static final String KERNEL_CLOSE_FAILURE_MESSAGE = "terminal kernel could not be closed";
   private static final String TASK_FAILURE_MESSAGE =
       "terminal runtime task did not stop within its budget";
+  private static final String TASK_INTERRUPTED_MESSAGE = "terminal runtime task was interrupted";
+  private static final String SHUTDOWN_FAILURE_MESSAGE = "terminal process scope did not shut down";
   private static final String DEADLINE_UNAVAILABLE_MESSAGE =
       "terminal write deadline is unavailable";
   private static final String CLOSE_INTERRUPTED_MESSAGE = "terminal close was interrupted";
@@ -126,6 +129,7 @@ public final class TerminalRuntime implements AutoCloseable {
   private final CountDownLatch stopSignal = new CountDownLatch(1);
 
   private final AtomicReference<Throwable> failureRef = new AtomicReference<>();
+  private final AtomicReference<Throwable> cleanupFailure = new AtomicReference<>();
   private final CompletableFuture<Void> terminated = new CompletableFuture<>();
   private final CountDownLatch convergeDone = new CountDownLatch(1);
 
@@ -162,7 +166,7 @@ public final class TerminalRuntime implements AutoCloseable {
    * @param environment 被继承的环境变量
    * @param gate 启动闸门，拒绝时不会执行任何用户命令
    * @param vtExecutor VT 内核唯一 owner 使用的调用方 executor
-   * @param ioExecutor PTY 阻塞读写与收敛使用的调用方阻塞 I/O executor
+   * @param ioExecutor PTY 阻塞读写与收敛使用的调用方阻塞 I/O executor；必须能并发运行预留的 lifecycle 任务与读、写任务
    * @param scheduler native 截止时间使用的调用方 scheduler
    */
   public static TerminalRuntime start(
@@ -209,8 +213,13 @@ public final class TerminalRuntime implements AutoCloseable {
           ioExecutor,
           scheduler);
     } catch (RuntimeException | Error error) {
-      // 运行时未能建立：释放刚启动的 native 范围；scope.close 幂等，不掩盖原始失败。
-      scope.close();
+      // 运行时未能建立：释放刚启动的 native 范围。释放失败必须以固定异常显式保留 shutdown 失败，
+      // 但不能回显原始 cause 或路径。
+      try {
+        scope.close();
+      } catch (RuntimeException closeFailure) {
+        throw new IllegalStateException(SHUTDOWN_FAILURE_MESSAGE);
+      }
       throw error;
     }
   }
@@ -260,7 +269,7 @@ public final class TerminalRuntime implements AutoCloseable {
       startGate.countDown();
       requestStop(new IllegalStateException(STARTUP_FAILURE_MESSAGE));
       if (lifecycleReserved) {
-        awaitConvergenceQuietly();
+        awaitConvergence();
       } else {
         converge();
       }
@@ -407,6 +416,8 @@ public final class TerminalRuntime implements AutoCloseable {
           kernel.feed(chunk).get(KERNEL_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
+          // 被调用方提前中断：必须发停止信号，否则无人收敛会让 termination 永不完成；已在关闭中则无需额外失败。
+          onTaskInterrupted();
           return;
         } catch (Exception error) {
           requestStop(new IllegalStateException(READ_FAILURE_MESSAGE));
@@ -433,6 +444,8 @@ public final class TerminalRuntime implements AutoCloseable {
           } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             writerShutdown = true;
+            // 被调用方提前中断：发停止信号收敛；已在关闭中则无需额外失败，避免忙循环。
+            onTaskInterrupted();
           }
         }
         if (writerShutdown || queue.isEmpty()) {
@@ -490,6 +503,8 @@ public final class TerminalRuntime implements AutoCloseable {
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       notExecuted(frame, SESSION_CLOSED_MESSAGE);
+      // 模式核验被中断：该帧确定未写；必须发停止信号，否则 writer/interrupt 会持续忙循环。
+      onTaskInterrupted();
       return false;
     } catch (Exception error) {
       // 尚未写任何字节：确定未执行；内核失败另行终止会话。
@@ -505,9 +520,6 @@ public final class TerminalRuntime implements AutoCloseable {
   }
 
   private void writeNative(Frame frame) {
-    if (!admitNative(frame)) {
-      return;
-    }
     ScheduledFuture<?> deadline = scheduleDeadline(() -> onNativeTimeout(frame));
     if (deadline == null) {
       // 尚未进入 native 写：确定未执行；无法建立截止时间即终止会话。
@@ -515,6 +527,10 @@ public final class TerminalRuntime implements AutoCloseable {
         frame.future.completeExceptionally(new IllegalStateException(DEADLINE_UNAVAILABLE_MESSAGE));
       }
       requestStop(new IllegalStateException(DEADLINE_UNAVAILABLE_MESSAGE));
+      return;
+    }
+    if (!admitNative(frame)) {
+      deadline.cancel(false);
       return;
     }
     Throwable failure = null;
@@ -530,39 +546,39 @@ public final class TerminalRuntime implements AutoCloseable {
   }
 
   private void resizeNative(ResizeOperation operation) {
+    ScheduledFuture<?> deadline = scheduleDeadline(() -> onNativeTimeout(operation));
+    if (deadline == null) {
+      notExecuted(operation, DEADLINE_UNAVAILABLE_MESSAGE);
+      requestStop(new IllegalStateException(DEADLINE_UNAVAILABLE_MESSAGE));
+      return;
+    }
     if (!admitNative(operation)) {
+      deadline.cancel(false);
       return;
     }
     try {
       kernel
           .resize(operation.columns(), operation.rows())
           .get(KERNEL_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      boolean stopped;
+      synchronized (queueLock) {
+        stopped = operation.phase != Phase.WRITING || closing;
+      }
+      if (stopped) {
+        finishNative(operation, new IllegalStateException(SESSION_CLOSED_MESSAGE));
+        return;
+      }
+      scope.resize(operation.columns(), operation.rows());
     } catch (Exception error) {
       if (error instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
       finishNative(operation, error);
       return;
-    }
-    ScheduledFuture<?> deadline = scheduleDeadline(() -> onNativeTimeout(operation));
-    if (deadline == null) {
-      // 内核尺寸已改、窗口尚未调整：部分变更，结果不确定。
-      if (resolve(operation) != null) {
-        operation.future.completeExceptionally(
-            new OutcomeUnknownException(RESIZE_UNCERTAIN_MESSAGE));
-      }
-      requestStop(new IllegalStateException(RESIZE_UNCERTAIN_MESSAGE));
-      return;
-    }
-    Throwable failure = null;
-    try {
-      scope.resize(operation.columns(), operation.rows());
-    } catch (Throwable error) {
-      failure = error;
     } finally {
       deadline.cancel(false);
     }
-    finishNative(operation, failure);
+    finishNative(operation, null);
   }
 
   /**
@@ -575,18 +591,30 @@ public final class TerminalRuntime implements AutoCloseable {
       if (operation.phase != Phase.PREPARING) {
         return false;
       }
-      operation.phase = Phase.WRITING;
-      return true;
+      if (closing || writerShutdown || operation.future.isDone()) {
+        operation.phase = Phase.DONE;
+      } else {
+        operation.phase = Phase.WRITING;
+        return true;
+      }
     }
+    operation.future.completeExceptionally(new IllegalStateException(SESSION_CLOSED_MESSAGE));
+    return false;
   }
 
   /** native 截止时间触发：只有正在 native 时获胜才致结果不确定；已完成则忽略迟到的截止。 */
   private void onNativeTimeout(Operation operation) {
-    if (resolve(operation) == null) {
+    Phase previous = resolve(operation);
+    if (previous == null) {
       return;
     }
-    operation.future.completeExceptionally(
-        new OutcomeUnknownException(operation.uncertainMessage()));
+    if (previous == Phase.WRITING) {
+      operation.future.completeExceptionally(
+          new OutcomeUnknownException(operation.uncertainMessage()));
+    } else {
+      operation.future.completeExceptionally(
+          new IllegalStateException(DEADLINE_UNAVAILABLE_MESSAGE));
+    }
     requestStop(new IllegalStateException(operation.uncertainMessage()));
   }
 
@@ -683,9 +711,11 @@ public final class TerminalRuntime implements AutoCloseable {
   // ------------------------------------------------------------------ 收敛
 
   private void requestStop(Throwable failure) {
-    closing = true;
-    if (failure != null) {
-      failureRef.compareAndSet(null, failure);
+    synchronized (queueLock) {
+      closing = true;
+      if (failure != null) {
+        failureRef.compareAndSet(null, failure);
+      }
     }
     stopSignal.countDown();
   }
@@ -708,26 +738,25 @@ public final class TerminalRuntime implements AutoCloseable {
     }
   }
 
-  /** 真实 EOF 之后有界读取退出码；读不到即显式失败，不伪造自然退出。 */
+  /** 真实 EOF 之后有界读取退出码；读不到即以固定失败收尾，不伪造自然退出，也不阻断其余清理。 */
   private void resolveNaturalExit() {
     if (!ptyEof) {
       return;
     }
-    if (!scope.awaitNaturalExit(NATURAL_EXIT_BUDGET_MILLIS)) {
-      failureRef.compareAndSet(null, new IllegalStateException(NATURAL_EXIT_MISSING_MESSAGE));
-      return;
-    }
-    Integer code;
     try {
-      code = scope.naturalExitCode();
+      if (!scope.awaitNaturalExit(NATURAL_EXIT_BUDGET_MILLIS)) {
+        failureRef.compareAndSet(null, new IllegalStateException(NATURAL_EXIT_MISSING_MESSAGE));
+        return;
+      }
+      Integer code = scope.naturalExitCode();
+      if (code == null) {
+        failureRef.compareAndSet(null, new IllegalStateException(NATURAL_EXIT_MISSING_MESSAGE));
+        return;
+      }
+      exitCode = code;
     } catch (RuntimeException error) {
-      code = null;
-    }
-    if (code == null) {
       failureRef.compareAndSet(null, new IllegalStateException(NATURAL_EXIT_MISSING_MESSAGE));
-      return;
     }
-    exitCode = code;
   }
 
   private void captureFinalView() {
@@ -775,12 +804,12 @@ public final class TerminalRuntime implements AutoCloseable {
     try {
       converged = scope.terminate();
     } catch (RuntimeException error) {
-      failureRef.compareAndSet(null, new IllegalStateException(CONVERGENCE_FAILURE_MESSAGE));
+      recordCleanupFailure(CONVERGENCE_FAILURE_MESSAGE);
     }
     try {
       scope.close();
     } catch (RuntimeException error) {
-      failureRef.compareAndSet(null, new IllegalStateException(CONVERGENCE_FAILURE_MESSAGE));
+      recordCleanupFailure(CONVERGENCE_FAILURE_MESSAGE);
       converged = false;
     }
     return converged;
@@ -790,7 +819,7 @@ public final class TerminalRuntime implements AutoCloseable {
     try {
       kernel.close();
     } catch (RuntimeException error) {
-      failureRef.compareAndSet(null, new IllegalStateException(KERNEL_CLOSE_FAILURE_MESSAGE));
+      recordCleanupFailure(KERNEL_CLOSE_FAILURE_MESSAGE);
     }
   }
 
@@ -807,17 +836,17 @@ public final class TerminalRuntime implements AutoCloseable {
     }
     try {
       if (!done.await(TASK_JOIN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-        failureRef.compareAndSet(null, new IllegalStateException(TASK_FAILURE_MESSAGE));
+        recordCleanupFailure(TASK_FAILURE_MESSAGE);
       }
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      failureRef.compareAndSet(null, new IllegalStateException(TASK_FAILURE_MESSAGE));
+      recordCleanupFailure(TASK_FAILURE_MESSAGE);
     }
   }
 
   private void completeTermination(boolean converged) {
     if (!converged) {
-      failureRef.compareAndSet(null, new IllegalStateException(CONVERGENCE_FAILURE_MESSAGE));
+      recordCleanupFailure(CONVERGENCE_FAILURE_MESSAGE);
     }
     Throwable failure = failureRef.get();
     if (failure != null) {
@@ -837,14 +866,23 @@ public final class TerminalRuntime implements AutoCloseable {
       Thread.currentThread().interrupt();
       throw new IllegalStateException(CLOSE_INTERRUPTED_MESSAGE);
     }
+    Throwable failure = cleanupFailure.get();
+    if (failure != null) {
+      throw new IllegalStateException(failure.getMessage());
+    }
   }
 
-  private void awaitConvergenceQuietly() {
-    try {
-      convergeDone.await(CONVERGE_WAIT_SECONDS, TimeUnit.SECONDS);
-    } catch (InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
+  /** 任务被调用方提前中断：发停止信号收敛；已在关闭中则无需额外失败。 */
+  private void onTaskInterrupted() {
+    if (!closing) {
+      requestStop(new IllegalStateException(TASK_INTERRUPTED_MESSAGE));
     }
+  }
+
+  private void recordCleanupFailure(String message) {
+    IllegalStateException error = new IllegalStateException(message);
+    cleanupFailure.compareAndSet(null, error);
+    failureRef.compareAndSet(null, error);
   }
 
   // ------------------------------------------------------------------ 校验

@@ -17,7 +17,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 终端运行时用例的跨平台进程夹具：只用 JDK，不依赖 shell，用于在真实 PTY 中证明输出/输入/查询应答与自然退出。
+ * 终端运行时用例的跨平台进程夹具：只用 JDK，不依赖 shell，用于在真实 PTY 中证明输出经 PTY 回传、写入到达命令与自然退出。
  *
  * <p>它是 {@link TerminalRuntime} 启动的用户命令（helper 的子进程），三条标准流就是伪终端，因此「输出经 PTY 回传」与「写入到达
  * 命令」都由命令自身的行为证明。用法（第一个参数是模式）：
@@ -25,7 +25,6 @@ import java.util.regex.Pattern;
  * <pre>
  *   hold         &lt;pidFile&gt;      写完 pid 后长时间存活（不会自己退出）
  *   echo                         把 stdin 的每一行回写为 {@code ECHO:&lt;line&gt;}，读到 EOF 后退出 0
- *   da-query     &lt;resultFile&gt;    写 Primary DA 查询，读到内核应答后写结果文件并继续存活
  *   env-probe    &lt;resultFile&gt;    把自身 TERM/COLORTERM 写入结果文件，打印标记后退出 0
  *   exit-code    &lt;code&gt;          打印标记后退到指定退出码
  * </pre>
@@ -34,12 +33,6 @@ public final class TerminalRuntimeFixtureMain {
 
   /** 自然退出与输出回传的固定标记。 */
   static final String MARKER = "__TTY_RUNTIME_FIXTURE__";
-
-  /** Primary DA 查询（CSI c）：内核应答固定为 {@code ESC[?6c}。 */
-  static final String DEVICE_ATTRIBUTES_QUERY = "\u001b[c";
-
-  /** 内核的 Primary DA 应答（VT102）。 */
-  static final String DEVICE_ATTRIBUTES_RESPONSE = "\u001b[?6c";
 
   private static final long HOLD_MILLIS = 600_000L;
 
@@ -79,7 +72,6 @@ public final class TerminalRuntimeFixtureMain {
         sleepForever();
       }
       case "echo" -> echoUntilEof();
-      case "da-query" -> deviceAttributesQuery(Path.of(args[1]));
       case "env-probe" -> envProbe(Path.of(args[1]));
       case "exit-code" -> {
         System.out.println(MARKER);
@@ -112,28 +104,6 @@ public final class TerminalRuntimeFixtureMain {
     }
     out.flush();
     System.exit(0);
-  }
-
-  /** 写 Primary DA 查询并等待内核应答：只有应答经唯一写队列回到命令，结果文件才会出现。 */
-  private static void deviceAttributesQuery(Path resultFile) throws IOException {
-    OutputStream out = System.out;
-    out.write(DEVICE_ATTRIBUTES_QUERY.getBytes(StandardCharsets.UTF_8));
-    out.flush();
-    InputStream in = System.in;
-    ByteArrayOutputStream collected = new ByteArrayOutputStream();
-    String response = DEVICE_ATTRIBUTES_RESPONSE;
-    while (true) {
-      int read = in.read();
-      if (read < 0) {
-        System.exit(1);
-      }
-      collected.write(read);
-      if (collected.toString(StandardCharsets.UTF_8).contains(response)) {
-        break;
-      }
-    }
-    publishAtomically(resultFile, "OK");
-    sleepForever();
   }
 
   /** 把继承到的 TERM/COLORTERM 写进结果文件，并打印标记，供父进程核对终端声明。 */
