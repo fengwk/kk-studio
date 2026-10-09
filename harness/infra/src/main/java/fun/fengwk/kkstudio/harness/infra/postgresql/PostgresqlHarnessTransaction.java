@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -45,6 +46,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -337,7 +339,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    *
    * <p>用于解析 branch 生效 settings（等价于 {@link EntryPath#baseSettings()}）：递归仍遍历祖先链，但只返回决定 settings
    * 的必要节点， 减少结果传输与 Java 侧完整 EntryPath 物化，其结果绝不回填完整路径缓存。COMPACTION turn 的 settings 只描述压缩执行模型，因此在 SQL
-   * 侧就被排除，绝不参与 branch settings 解析。
+   * 侧就被排除，绝不参与 branch settings 解析；安全边界上 append 的 SETTINGS 快照则与 TURN_START 一样参与解析。
    */
   private static final String LOAD_BRANCH_SETTINGS =
       """
@@ -356,6 +358,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       where depth = 0
          or entry_type = 'ROOT'
          or is_cycle
+         or entry_type = 'SETTINGS'
          or (entry_type = 'TURN_START' and payload ->> 'reason' <> 'COMPACTION')
       order by depth desc
       """;
@@ -733,6 +736,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         if (start.reason() != TurnStartReason.COMPACTION) {
           return start.settings();
         }
+      } else if (payload instanceof SettingsPayload applied) {
+        return applied.settings();
       } else if (payload instanceof RootPayload root) {
         return root.settings();
       }
@@ -2727,7 +2732,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   /**
    * {@code appliedEntryId}（若有）必须与命令类型精确匹配：{@code NOTIFICATION} 必须引用自身四字段完全一致的 NOTIFICATION
-   * Entry；其它命令必须引用本 Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
+   * Entry；standalone 分支设置命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）可以引用本 Thread 拥有的 SETTINGS 快照
+   * Entry；其它命令 必须引用本 Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
    */
   private void requireValidAppliedEntry(ThreadCommand command) {
     UUID appliedEntryId = command.appliedEntryId();
@@ -2759,11 +2765,22 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       }
       return;
     }
+    if (isBranchSettingCommand(command.type())
+        && applied.payload() instanceof SettingsPayload settings
+        && command.threadId().equals(settings.ownerThreadId())) {
+      return;
+    }
     if (!(applied.payload() instanceof TurnStartPayload turnStart)
         || !command.threadId().equals(turnStart.ownerThreadId())) {
       throw new IllegalArgumentException(
-          "applied entry must be a TURN_START owned by the command thread");
+          "applied entry must be a TURN_START or SETTINGS entry owned by the command thread");
     }
+  }
+
+  private static boolean isBranchSettingCommand(ThreadCommandType type) {
+    return type == ThreadCommandType.SET_AGENT
+        || type == ThreadCommandType.SET_MODEL
+        || type == ThreadCommandType.SET_ENVIRONMENT;
   }
 
   private static void requireValidCommandLifecycle(ThreadCommand stored, ThreadCommand command) {

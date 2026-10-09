@@ -23,11 +23,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 10 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
+ * 最终 11 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
  * {@link MessagePayload} / {@link CustomEntryPayload} / {@link ModelAttemptFailurePayload} / {@link
  * CustomMessagePayload} / {@link AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link
- * CompactionPayload} / {@link TurnEndPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload}
- * 实现显式拒绝。
+ * CompactionPayload} / {@link TurnEndPayload} / {@link SettingsPayload}。直接对应 {@link EntryType}；其它
+ * {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -62,6 +62,7 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("summaryText", "assistantMetadata");
   private static final Set<String> NOTIFICATION_FIELDS =
       orderedSet("notificationId", "kind", "sourceThreadId", "message");
+  private static final Set<String> SETTINGS_FIELDS = orderedSet("settings", "ownerThreadId");
   private static final Set<String> TURN_END_FIELDS =
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
@@ -88,7 +89,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   public HistoryEntryPayloadJsonCodec() {}
 
-  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 10 类 history payload，其它实现显式拒绝。 */
+  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 11 类 history payload，其它实现显式拒绝。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
@@ -109,6 +110,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case CompactionPayload value -> encodeCompaction(value);
       case TurnEndPayload value -> encodeTurnEnd(value);
       case NotificationPayload value -> encodeNotification(value);
+      case SettingsPayload value -> encodeSettings(value);
     };
   }
 
@@ -147,6 +149,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case COMPACTION -> decodeCompaction(value);
       case TURN_END -> decodeTurnEnd(value);
       case NOTIFICATION -> decodeNotification(value);
+      case SETTINGS -> decodeSettings(value);
     };
   }
 
@@ -291,6 +294,13 @@ public final class HistoryEntryPayloadJsonCodec {
     node.put("kind", value.kind().name());
     node.put("sourceThreadId", value.sourceThreadId().toString());
     node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
+    return node;
+  }
+
+  private static ObjectNode encodeSettings(SettingsPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.set("settings", HistoryValueCodecs.encodeBranchSettings(value.settings()));
+    node.put("ownerThreadId", value.ownerThreadId().toString());
     return node;
   }
 
@@ -528,6 +538,14 @@ public final class HistoryEntryPayloadJsonCodec {
             NotificationKind.class, HistoryValueCodecs.text(node, "kind"), "NOTIFICATION.kind"),
         HistoryValueCodecs.requiredPositiveId(node, "sourceThreadId", "NOTIFICATION"),
         MESSAGE_CODEC.decodeNode(node.get("message")));
+  }
+
+  private static SettingsPayload decodeSettings(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "SETTINGS");
+    HistoryValueCodecs.requireExactFields(node, SETTINGS_FIELDS, "SETTINGS");
+    return new SettingsPayload(
+        HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "SETTINGS.settings"),
+        HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "SETTINGS"));
   }
 
   private static AssistantError decodeError(JsonNode value) {

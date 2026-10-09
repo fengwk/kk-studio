@@ -698,7 +698,7 @@ final class StopControl {
    * TURN_PREFIX COMPACTION barrier，使 Stop receipt 与被取消的 durable obligation 同域。
    */
   private static TurnStartPayload continuationBarrierStart(EntryPath path, ThreadState thread) {
-    TurnEndPayload due = (TurnEndPayload) path.headIgnoringTrailingNotifications().payload();
+    TurnEndPayload due = (TurnEndPayload) path.headIgnoringTrailingControlEntries().payload();
     Entry referencedStart = null;
     for (Entry entry : path.entries()) {
       if (entry.id().equals(due.turnStartEntryId())
