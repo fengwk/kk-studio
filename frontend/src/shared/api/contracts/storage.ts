@@ -37,6 +37,9 @@ export interface StoragePresignedPutDTO {
  *
  * `id` 是持久的 upload 句柄：USER_MESSAGE ATTACHMENT 引用它，释放也删除它；
  * complete 后句柄不变（blobId 仅表示落库后的持久资源，客户端通常无需使用）。
+ *
+ * `expiresAt` 只是响应时刻按当前上传有效期换算的快照；服务端始终以
+ * 创建时间 + 当下配置的上传有效期判定过期，之后修改配置会立即改变实际上传有效期。
  */
 export type StorageUploadDTO =
   | {

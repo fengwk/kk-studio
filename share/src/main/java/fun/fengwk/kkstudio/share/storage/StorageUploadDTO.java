@@ -32,6 +32,11 @@ public class StorageUploadDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private StoragePresignedUrlDTO presignedPut;
 
-  /** 上传清理截止时刻：过期后由服务端回收（UTC Instant）。 */
+  /**
+   * 上传清理截止时刻快照：按响应时刻的 upload TTL 与 {@code created_at} 换算的展示值（UTC Instant）。
+   *
+   * <p>它只是快照，不是过期权威事实；服务端始终以 {@code created_at + 当下 upload TTL} 判定过期，因此之后修改 TTL 会立即改变实际上传有效期， 但不会
+   * 回改这里已经返回的值。
+   */
   private Instant expiresAt;
 }

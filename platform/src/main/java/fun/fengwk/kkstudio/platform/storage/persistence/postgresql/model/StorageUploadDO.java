@@ -23,8 +23,6 @@ public class StorageUploadDO {
 
   private String declaredSha256;
 
-  private Instant expiresAt;
-
   private Instant cleanupRequestedAt;
 
   private String cleanupToken;

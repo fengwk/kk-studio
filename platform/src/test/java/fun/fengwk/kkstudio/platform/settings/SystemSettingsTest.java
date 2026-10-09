@@ -91,8 +91,8 @@ class SystemSettingsTest {
     assertEquals(1_800_000L, integrations.minimaxH3().comfyMaxWaitMillis());
 
     SystemSettings.StorageMedia storageMedia = defaults.storageMedia();
-    assertEquals(3_600L, storageMedia.uploadExpiresSeconds());
-    assertEquals(600L, storageMedia.s3PresignDefaultExpiresSeconds());
+    assertEquals(86_400L, storageMedia.uploadExpiresSeconds());
+    assertEquals(1_800L, storageMedia.s3PresignDefaultExpiresSeconds());
     assertEquals(3_600L, storageMedia.s3PresignMaxExpiresSeconds());
     assertEquals(30_000L, storageMedia.canvasMediaProcessTimeoutMillis());
     assertEquals(512, storageMedia.thumbnailMaxDimension());

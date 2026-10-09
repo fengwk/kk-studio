@@ -823,8 +823,8 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'storageMedia.upload',
             labelKey: 'settings.section.storageMedia.upload.title',
             descriptionKey: 'settings.section.storageMedia.upload.description',
-            restartRequired: true,
-            applyTiming: null,
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'storageMedia.uploadExpiresSeconds',

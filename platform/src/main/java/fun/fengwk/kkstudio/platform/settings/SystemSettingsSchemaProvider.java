@@ -561,8 +561,8 @@ public class SystemSettingsSchemaProvider {
                     "storageMedia.upload",
                     "settings.section.storageMedia.upload.title",
                     "settings.section.storageMedia.upload.description",
-                    true,
-                    null,
+                    false,
+                    ApplyTiming.NEXT_INVOCATION,
                     field(
                         "storageMedia.uploadExpiresSeconds",
                         "settings.field.storageMedia.uploadExpiresSeconds",

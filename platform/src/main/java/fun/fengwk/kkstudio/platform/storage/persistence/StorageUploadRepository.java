@@ -16,8 +16,8 @@ public interface StorageUploadRepository {
   /** 行级锁定读取（{@code for update}），用于 complete 绑定与 READY 消费。 */
   StorageUpload getByIdForUpdate(UUID id);
 
-  /** 仅当仍为未过期、未被清理 claim 的 PENDING 时绑定 blob。 */
-  boolean setBlobIdIfNull(UUID id, UUID blobId, Instant now);
+  /** 仅当仍未被清理请求/claim、且未过期（{@code created_at > expiryCutoff}）的 PENDING 时绑定 blob。 */
+  boolean setBlobIdIfNull(UUID id, UUID blobId, Instant expiryCutoff);
 
   /** CAS 标记显式清理请求；调用方必须在同一事务内按 READY 状态恰好 release 一次。 */
   boolean markCleanupRequested(UUID id, Instant requestedAt);
@@ -25,8 +25,11 @@ public interface StorageUploadRepository {
   /**
    * 列出当下可清理的 upload id（显式 cleanup request 或已过期，且没有有效 cleanup lease）：只读快照，不写入、不加行锁； 调用方必须在持有该 upload
    * 操作锁后重新读取当下事实再 claim，绝不据旧快照处理。
+   *
+   * <p>{@code expiryCutoff} 是同一份 upload TTL 快照换算出的 {@code now - TTL}；{@code created_at <=
+   * expiryCutoff} 即过期。
    */
-  List<UUID> listCleanupCandidateIds(int limit, Instant now);
+  List<UUID> listCleanupCandidateIds(int limit, Instant now, Instant expiryCutoff);
 
   /** 按 id claim 指定清理事实；不能抢占有效 lease。 */
   StorageUpload claimById(UUID id, Instant now, Instant leaseUntil, String cleanupToken);
