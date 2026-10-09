@@ -34,9 +34,9 @@ class DaemonDataDirectoryTest {
   void openCreatesFullLayoutAndOwnerOnlyDirectories() throws IOException {
     try (DaemonDataDirectory dir = DaemonDataDirectory.open(dataDir)) {
       Path lockFile = dataDir.resolve(DaemonDataDirectory.LOCK_FILE_NAME);
-      Path resourcesDir = dataDir.resolve("resources");
-      Path textDir = resourcesDir.resolve("text");
-      Path stagingDir = resourcesDir.resolve("staging");
+      Path tmpDir = dataDir.resolve("tmp");
+      Path textDir = tmpDir.resolve("text");
+      Path stagingDir = tmpDir.resolve("staging");
       Path skillsDir = dataDir.resolve("skills");
       Path skillWorkDir = dataDir.resolve("skill-work");
       Path skillCacheDir = skillWorkDir.resolve("cache");
@@ -44,7 +44,7 @@ class DaemonDataDirectoryTest {
       Path skillBackupDir = skillWorkDir.resolve("backup");
 
       assertEquals(dataDir.toAbsolutePath().normalize(), dir.root());
-      assertEquals(resourcesDir, dir.resources());
+      assertEquals(tmpDir, dir.tmp());
       assertEquals(textDir, dir.text());
       assertEquals(stagingDir, dir.staging());
       assertEquals(skillsDir, dir.skills());
@@ -55,7 +55,7 @@ class DaemonDataDirectoryTest {
 
       assertTrue(Files.isRegularFile(lockFile, LinkOption.NOFOLLOW_LINKS), "daemon.lock 必须为普通文件");
       assertTrue(Files.isDirectory(dir.root(), LinkOption.NOFOLLOW_LINKS), "root 必须为目录");
-      assertTrue(Files.isDirectory(dir.resources(), LinkOption.NOFOLLOW_LINKS), "resources 必须为目录");
+      assertTrue(Files.isDirectory(dir.tmp(), LinkOption.NOFOLLOW_LINKS), "tmp 必须为目录");
       assertTrue(Files.isDirectory(dir.text(), LinkOption.NOFOLLOW_LINKS), "text 必须为目录");
       assertTrue(Files.isDirectory(dir.staging(), LinkOption.NOFOLLOW_LINKS), "staging 必须为目录");
       assertTrue(Files.isDirectory(dir.skills(), LinkOption.NOFOLLOW_LINKS), "skills 必须为目录");
@@ -76,7 +76,7 @@ class DaemonDataDirectoryTest {
         Set<PosixFilePermission> ownerOnlyFilePerms =
             Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.root()));
-        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.resources()));
+        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.tmp()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.text()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.staging()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skills()));
@@ -153,8 +153,8 @@ class DaemonDataDirectoryTest {
   /** 验证 open 启动时仅清理 staging 目录下的残留 *.part 暂存文件，已发布的 durable text 内容完整保留。 */
   @Test
   void staleStagingPartCleanupPreservesPublishedData() throws IOException {
-    Path stagingDir = dataDir.resolve("resources").resolve("staging");
-    Path textDir = dataDir.resolve("resources").resolve("text");
+    Path stagingDir = dataDir.resolve("tmp").resolve("staging");
+    Path textDir = dataDir.resolve("tmp").resolve("text");
     Files.createDirectories(stagingDir);
     Files.createDirectories(textDir);
 

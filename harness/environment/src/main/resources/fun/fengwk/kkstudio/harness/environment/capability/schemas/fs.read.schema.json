@@ -3,11 +3,7 @@
   "properties": {
     "path": {
       "type": "string",
-      "description": "File, directory, or supported image path to read."
-    },
-    "workdir": {
-      "type": "string",
-      "description": "Optional absolute directory used to resolve a relative local path. It is never inherited from another call, a session default, cwd, or home directory. Omit it for kkstudio: resources or absolute local paths. Provide an expanded absolute path (no '~' or environment-variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Absolute path on the target daemon's file system of the file, directory, or supported image to read, or a complete `kkstudio:` resource/skill URI. Relative paths are rejected; use a drive-rooted or UNC path such as `C:/src/app.ts` on Windows targets."
     },
     "offset": {
       "type": "integer",

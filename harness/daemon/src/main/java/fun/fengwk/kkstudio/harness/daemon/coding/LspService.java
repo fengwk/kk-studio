@@ -109,14 +109,13 @@ public final class LspService implements AutoCloseable {
   }
 
   /**
-   * 反编译 Java class：{@code jdt://} 目标走 jdtls 的 class contents，本地路径按 {@code workdir} 解析后交给 jdtls 的
-   * decompile 命令。返回源码原样透传。
+   * 反编译 Java class：{@code jdt://} 目标走 jdtls 的 class contents，绝对本地 class 路径或 {@code file:} URI 交给
+   * jdtls 的 decompile 命令。返回源码原样透传。
    */
-  public String javaDecompile(Path file, Path workdir, String target, Duration timeout)
-      throws Exception {
+  public String javaDecompile(Path file, String target, Duration timeout) throws Exception {
     LspClientPool.Client entry = pool.lease(file);
     try {
-      return entry.client().javaDecompile(workdir, target, timeout);
+      return entry.client().javaDecompile(target, timeout);
     } finally {
       pool.release(entry);
     }

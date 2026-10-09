@@ -14,7 +14,7 @@ class DaemonCapabilityInvokeCodecTest {
 
   private static final String VALID =
       "{\"capabilityId\":\"fs.read\",\"capabilityVersion\":\"1\","
-          + "\"arguments\":{\"path\":\"README.md\"},\"timeoutMillis\":0}";
+          + "\"arguments\":{\"path\":\"/srv/README.md\"},\"timeoutMillis\":0}";
 
   private final DaemonCapabilityInvokeCodec codec = new DaemonCapabilityInvokeCodec();
 
@@ -23,7 +23,10 @@ class DaemonCapabilityInvokeCodecTest {
   void encodesAllFieldsAndRoundTrips() {
     DaemonCapabilityInvokeCodec.InvokeRequest request =
         new DaemonCapabilityInvokeCodec.InvokeRequest(
-            EnvironmentCapabilityIds.FS_READ, "1", "{ \"path\": \"README.md\" }", Duration.ZERO);
+            EnvironmentCapabilityIds.FS_READ,
+            "1",
+            "{ \"path\": \"/srv/README.md\" }",
+            Duration.ZERO);
 
     assertEquals(VALID, codec.encode(request));
     assertEquals(request, codec.decode(VALID));
@@ -121,7 +124,7 @@ class DaemonCapabilityInvokeCodecTest {
   void rejectsRemovedWorkspacePathField() {
     assertInvalid(
         "{\"capabilityId\":\"fs.read\",\"capabilityVersion\":\"1\",\"workspacePath\":\"src/main\","
-            + "\"arguments\":{\"path\":\"README.md\"},\"timeoutMillis\":0}");
+            + "\"arguments\":{\"path\":\"/srv/README.md\"},\"timeoutMillis\":0}");
   }
 
   /** 所有固定字段都必须是规定类型；arguments 只能是 object，不能被数组/标量替代。 */
@@ -129,8 +132,9 @@ class DaemonCapabilityInvokeCodecTest {
   void rejectsWrongFieldTypesAndNonObjectArguments() {
     assertInvalid(VALID.replace("\"fs.read\"", "1"));
     assertInvalid(VALID.replace("\"capabilityVersion\":\"1\"", "\"capabilityVersion\":1"));
-    assertInvalid(VALID.replace("\"arguments\":{\"path\":\"README.md\"}", "\"arguments\":[]"));
-    assertInvalid(VALID.replace("\"arguments\":{\"path\":\"README.md\"}", "\"arguments\":\"{}\""));
+    assertInvalid(VALID.replace("\"arguments\":{\"path\":\"/srv/README.md\"}", "\"arguments\":[]"));
+    assertInvalid(
+        VALID.replace("\"arguments\":{\"path\":\"/srv/README.md\"}", "\"arguments\":\"{}\""));
     assertInvalid(VALID.replace("\"timeoutMillis\":0", "\"timeoutMillis\":\"0\""));
     assertInvalid("[]");
     assertInvalid("null");

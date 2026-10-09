@@ -112,9 +112,9 @@ class PermissionContractsTest {
     }
   }
 
-  /** wildcard `?`、绝对 workdir 与空 command 使用确定候选。 */
+  /** wildcard `?`、非绝对 path 回落与空 command 使用确定候选。 */
   @Test
-  void evaluatesWildcardWorkdirRelativeAndEmptyTargets() {
+  void evaluatesWildcardAndPathFallbackTargets() {
     Map<String, List<PermissionRule>> rules = new LinkedHashMap<>();
     rules.put(
         WRITE,
@@ -126,10 +126,14 @@ class PermissionContractsTest {
 
     assertEquals(
         PermissionAction.ALLOW, evaluate(WRITE, "{\"path\":\"file1.txt\"}", settings).action());
-    // 显式绝对 workdir 决定 `secret` 的相对坐标，规则按该 workdir 命中。
+    // 绝对 path 按 filesystem-root 坐标命中 basename 规则。
     assertEquals(
         PermissionAction.DENY,
-        evaluate(WRITE, "{\"workdir\":\"/outside\",\"path\":\"secret\"}", settings).action());
+        evaluate(WRITE, "{\"path\":\"/outside/secret\"}", settings).action());
+    // 相对 path 不是路径坐标，回落 wildcard 候选 `*`。
+    assertEquals(
+        PermissionAction.ASK,
+        evaluateRaw(WRITE, "{\"workdir\":\"/outside\",\"path\":\"secret\"}", settings).action());
     assertEquals(
         PermissionAction.ASK,
         evaluate(
@@ -150,11 +154,12 @@ class PermissionContractsTest {
     assertThrows(
         NullPointerException.class,
         () -> new PermissionEvaluationContext(null, "{}", ToolSettings.DEFAULT));
-    PermissionEvaluationContext invalidWorkdir =
+    // workdir 不再参与 path 解析：相对 path 回落 wildcard，非法 workdir 仍原样进入 preview。
+    PermissionEvaluationContext relativePath =
         new PermissionEvaluationContext(
             WRITE, "{\"path\":\"x\",\"workdir\":\"@\"}", ToolSettings.DEFAULT);
-    assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate(invalidWorkdir));
-    assertEquals("@", evaluator.preview(invalidWorkdir).workdir());
+    assertEquals(PermissionAction.ALLOW, evaluator.evaluate(relativePath).action());
+    assertEquals("@", evaluator.preview(relativePath).workdir());
     assertEquals(PermissionAction.ALLOW, PermissionAction.fromValue("allow"));
     assertEquals(PermissionAction.ASK, PermissionAction.fromValue("ask"));
     assertEquals(PermissionAction.DENY, PermissionAction.fromValue("deny"));
@@ -213,14 +218,19 @@ class PermissionContractsTest {
     return new ToolSettings(permission, false);
   }
 
-  /** path 规则夹具：自动为 {@code {"path":...}} 形态注入固定 absolute workdir；其余形态原样评估。 */
+  /** path 规则夹具：把相对 fixture 根到 filesystem root（坐标即 fixture 文本）；其余形态原样评估。 */
   private PermissionEvaluator.Evaluation evaluate(
       String tool, String arguments, ToolSettings settings) {
     if (arguments.startsWith("{\"path\":")) {
       return evaluator.evaluate(
           new PermissionEvaluationContext(
-              tool, "{\"workdir\":\"/environment\"," + arguments.substring(1), settings));
+              tool, "{\"path\":\"/" + arguments.substring("{\"path\":\"".length()), settings));
     }
+    return evaluator.evaluate(new PermissionEvaluationContext(tool, arguments, settings));
+  }
+
+  private PermissionEvaluator.Evaluation evaluateRaw(
+      String tool, String arguments, ToolSettings settings) {
     return evaluator.evaluate(new PermissionEvaluationContext(tool, arguments, settings));
   }
 }

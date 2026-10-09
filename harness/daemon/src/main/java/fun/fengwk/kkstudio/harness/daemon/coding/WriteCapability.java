@@ -36,10 +36,8 @@ public final class WriteCapability extends AbstractCodingCapability {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
     String content = string(args, "content");
-    String rawWorkdir = optionalString(args, "workdir");
-    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
-    Path path = EnvironmentPaths.writable(rawPath, workdir);
-    String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
+    Path path = EnvironmentPaths.writable(rawPath);
+    String displayPath = EnvironmentPaths.displayPath(path, rawPath);
 
     ReentrantLock lock = FileMutations.lock(path);
     try {

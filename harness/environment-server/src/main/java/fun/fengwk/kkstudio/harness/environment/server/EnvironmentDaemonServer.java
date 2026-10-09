@@ -326,7 +326,7 @@ public final class EnvironmentDaemonServer
     if (state == null || leaseToken == null || !state.isReady()) {
       throw unavailable(environmentId, descriptor.id().value());
     }
-    validateWorkdirShape(state, descriptor, request.call());
+    validateRequiredWorkdirShape(state, descriptor, request.call());
 
     // 租约存储访问（可能跨进程/网络）绝不在核心状态锁内执行。
     boolean holdsReady;
@@ -1257,19 +1257,18 @@ public final class EnvironmentDaemonServer
   }
 
   /**
-   * 发送前按该连接 READY 中冻结的目标 Daemon OS 校验路径形状；Schema 允许省略 workdir 的能力必须提供绝对 path。
+   * 发送前按该连接 READY 中冻结的目标 Daemon OS 校验必填 workdir（当前只有 {@code process.exec}）的形状。
    *
-   * <p>只做纯文本校验：不使用 Backend 本机 {@code Path} 解析远端路径，也不做 home/环境变量展开。真实存在性、目录类型与可访问性由 Daemon 用 自己的
-   * {@code Path} 判定。
+   * <p>文件工具的本地 {@code path} 必须是绝对路径，但其绝对性由目标 Daemon 用自身 {@code Path} 判定（host-specific），这里不做跨 OS
+   * 词法校验。本方法只做纯文本校验：不使用 Backend 本机 {@code Path} 解析远端路径，也不做 home/环境变量展开。
    */
-  private static void validateWorkdirShape(
+  private static void validateRequiredWorkdirShape(
       ConnectionState state,
       EnvironmentCapabilityDescriptor descriptor,
       EnvironmentCapabilityCall call) {
-    if (!descriptor.inputSchema().properties().containsKey("workdir")) {
+    if (!descriptor.inputSchema().required().contains("workdir")) {
       return;
     }
-    boolean optionalWorkdir = !descriptor.inputSchema().required().contains("workdir");
     JsonNode arguments = JsonValues.readTree(call.argumentsJson());
     JsonNode workdir = arguments.get("workdir");
     DaemonOperatingSystem operatingSystem = state.readyDaemonOperatingSystem();
@@ -1279,13 +1278,6 @@ public final class EnvironmentDaemonServer
               + descriptor.id().value());
     }
     try {
-      if (optionalWorkdir && (workdir == null || workdir.isNull())) {
-        JsonNode path = arguments.get("path");
-        String pathText = path != null && path.isTextual() ? path.textValue() : null;
-        if (DaemonWorkdirSyntax.isAbsolutePath(pathText, operatingSystem)) {
-          return;
-        }
-      }
       DaemonWorkdirSyntax.requireAbsolute(
           workdir == null || !workdir.isTextual() ? null : workdir.textValue(), operatingSystem);
     } catch (IllegalArgumentException error) {

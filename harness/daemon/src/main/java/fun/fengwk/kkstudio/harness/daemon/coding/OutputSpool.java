@@ -89,18 +89,18 @@ public final class OutputSpool implements AutoCloseable {
   }
 
   /** 写入单个字节。 */
-  public void write(int b) throws IOException {
+  public void write(int b) {
     write(new byte[] {(byte) b}, 0, 1);
   }
 
   /** 写入字节数组切片。 */
-  public void write(byte[] b) throws IOException {
+  public void write(byte[] b) {
     Objects.requireNonNull(b, "b");
     write(b, 0, b.length);
   }
 
   /** 写入指定范围的字节切片；任何本地 IO 失败都只降级为有界预览。 */
-  public void write(byte[] b, int off, int len) throws IOException {
+  public void write(byte[] b, int off, int len) {
     Objects.requireNonNull(b, "b");
     if (off < 0 || len < 0 || off + len > b.length) {
       throw new IndexOutOfBoundsException();

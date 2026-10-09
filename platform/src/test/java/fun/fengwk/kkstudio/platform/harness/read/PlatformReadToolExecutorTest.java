@@ -140,19 +140,23 @@ class PlatformReadToolExecutorTest {
     assertTrue(firstText(result).contains("offset must be a positive integer"));
   }
 
-  /** kkstudio URI 指定 workdir 时拒绝并返回错误结果 */
+  /** kkstudio URI 即使携带无意义的 workdir 也不做拦截，workdir 参数被静默忽略。 */
   @Test
-  void kkstudioUriWithWorkdirCompletesWithError() {
+  void kkstudioUriIgnoresWorkdirArgument() {
+    byte[] bytes = "# Dev Skill\nline2\n".getBytes(StandardCharsets.UTF_8);
+    when(skillReader.readSkillFile("p", "s", "SKILL.md")).thenReturn(bytes);
+
     ToolExecutionRequest request =
         mockRequest("{\"path\":\"kkstudio:/skills/p/s/SKILL.md\",\"workdir\":\"/tmp\"}", null);
 
-    executor.read(request, listener);
+    ToolExecutionHandle handle = executor.read(request, listener);
+    assertSame(CompletedToolExecutionHandle.INSTANCE, handle);
 
     ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
     verify(listener).onComplete(captor.capture());
     ToolResult result = captor.getValue();
-    assertTrue(result.error());
-    assertTrue(firstText(result).contains("workdir must be omitted for kkstudio: URIs"));
+    assertFalse(result.error());
+    assertTrue(firstText(result).contains("# Dev Skill"));
   }
 
   /** kkstudio Skill URI 无需 Environment 即可成功读取并格式化 */
@@ -375,8 +379,25 @@ class PlatformReadToolExecutorTest {
     when(context.environment()).thenReturn(Optional.of(environment));
     ToolExecutionHandle expected = mock(ToolExecutionHandle.class);
     ToolExecutionRequest request =
+        mockRequest(objectMapper.writeValueAsString(Map.of("path", path)), context);
+    when(environment.execute(any(), eq(request), eq(listener))).thenReturn(expected);
+
+    assertSame(expected, executor.read(request, listener));
+    verify(environment).execute(any(), eq(request), eq(listener));
+    verifyNoInteractions(skillReader, resourceReader, listener);
+  }
+
+  /** read 调用即使携带多余的 workdir 键也直接忽略并原样委托给 Environment 执行。 */
+  @Test
+  void localPathWithIgnoredWorkdirDelegatesUnchanged() throws Exception {
+    BoundEnvironment environment = mock(BoundEnvironment.class);
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    when(context.environment()).thenReturn(Optional.of(environment));
+    ToolExecutionHandle expected = mock(ToolExecutionHandle.class);
+    ToolExecutionRequest request =
         mockRequest(
-            objectMapper.writeValueAsString(Map.of("path", path, "workdir", "work")), context);
+            objectMapper.writeValueAsString(Map.of("path", "/tmp/file.txt", "workdir", "/tmp")),
+            context);
     when(environment.execute(any(), eq(request), eq(listener))).thenReturn(expected);
 
     assertSame(expected, executor.read(request, listener));

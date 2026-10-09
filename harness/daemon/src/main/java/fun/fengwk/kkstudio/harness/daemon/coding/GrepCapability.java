@@ -53,9 +53,7 @@ public final class GrepCapability extends AbstractCodingCapability {
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String sourcePattern = string(args, "pattern");
-    String rawWorkdir = optionalString(args, "workdir");
-    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
-    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
+    Path path = EnvironmentPaths.existing(string(args, "path"));
     int limit = optionalPositiveInt(args, "limit", 100, 100_000);
     // 有效超时在 Platform 侧解析完成（definition 默认值或显式 timeout_seconds）；这里只消费它。
     Duration timeout = request.timeout();
@@ -77,11 +75,10 @@ public final class GrepCapability extends AbstractCodingCapability {
 
     if (directFile) {
       if (!Files.isReadable(path)) {
-        throw new IllegalArgumentException("path is not readable: " + displayPath(workdir, path));
+        throw new IllegalArgumentException("path is not readable: " + displayPath(path));
       }
       if (!SearchFiles.isGitMetadata(path)) {
-        searchInFile(
-            workdir, path, path.getParent(), true, include, pattern, multiline, control, results);
+        searchInFile(path, path.getParent(), true, include, pattern, multiline, control, results);
       }
     } else {
       if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
@@ -93,19 +90,17 @@ public final class GrepCapability extends AbstractCodingCapability {
               control,
               file -> {
                 control.check();
-                searchInFile(
-                    workdir, file, path, false, include, pattern, multiline, control, results);
+                searchInFile(file, path, false, include, pattern, multiline, control, results);
                 return !results.limitReached();
               });
       for (Path unreadable : report.unreadable()) {
-        results.skip(displayPath(workdir, unreadable), "could not be read");
+        results.skip(displayPath(unreadable), "could not be read");
       }
     }
     return results.finish(request.call().id(), config, "No matches found");
   }
 
   private static void searchInFile(
-      Path workdir,
       Path file,
       Path includeRoot,
       boolean directFile,
@@ -121,7 +116,7 @@ public final class GrepCapability extends AbstractCodingCapability {
         return;
       }
     }
-    String display = displayPath(workdir, file);
+    String display = displayPath(file);
     try {
       if (multiline) {
         searchMultiline(file, display, pattern, control, results);
@@ -336,19 +331,9 @@ public final class GrepCapability extends AbstractCodingCapability {
     return low;
   }
 
-  /**
-   * 展示路径：调用方给了 workdir 时保持相对 workdir 的展示（越界目标仍是 {@code ../} 形态）；没有 workdir，或目标与 workdir 跨根（Windows
-   * 上不同驱动器） 无法相对化时退化为目标的绝对路径。任何情况下都不回退到 cwd、HOME 或其它默认目录。
-   */
-  private static String displayPath(Path workdir, Path file) {
-    if (workdir == null) {
-      return SearchFiles.toPosix(file);
-    }
-    try {
-      return SearchFiles.toPosix(workdir.relativize(file));
-    } catch (IllegalArgumentException differentRoots) {
-      return SearchFiles.toPosix(file);
-    }
+  /** 展示路径：永远是目标的绝对路径。绝不回退到 cwd、HOME 或其它默认目录。 */
+  private static String displayPath(Path file) {
+    return SearchFiles.toPosix(file);
   }
 
   private record IncludePattern(boolean pathPattern, GlobPattern pattern) {
@@ -432,7 +417,7 @@ public final class GrepCapability extends AbstractCodingCapability {
     }
 
     private EnvironmentCapabilityResult finish(
-        String callId, CodingToolsConfig config, String emptyMessage) throws IOException {
+        String callId, CodingToolsConfig config, String emptyMessage) {
       if (lines.isEmpty()) {
         if (!skipped.isEmpty()) {
           return error(

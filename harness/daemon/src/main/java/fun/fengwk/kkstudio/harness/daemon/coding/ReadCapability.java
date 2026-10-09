@@ -44,20 +44,27 @@ public final class ReadCapability extends AbstractCodingCapability {
     super(config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ));
   }
 
+  /**
+   * {@code read} 的结果本身就是精确有界窗口（正文最多 60000 码点），Platform 侧对内联预算信任它，因此绝不对其二次外化：大窗口保持内联，不会被本地 durable
+   * 全文替换。
+   */
+  @Override
+  boolean spoolsLargeTextOutput() {
+    return false;
+  }
+
   @Override
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
-    String rawWorkdir = optionalString(args, "workdir");
     // 窗口参数先于任何文件系统访问校验，畸形窗口不会以 ENOENT 之类的 I/O 结论掩盖参数错误。
     int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
     int limit = optionalPositiveInt(args, "limit", DEFAULT_LIMIT, MAX_LIMIT);
     // 非法口径仍先于任何文件系统访问校验；合法值对非文本目标（目录/图片）只是被忽略。
     Integer columnOffset = parseOptionalPositiveInt(args, "column_offset");
-    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
-    Path path = EnvironmentPaths.existing(rawPath, workdir);
-    String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
+    Path path = EnvironmentPaths.existing(rawPath);
+    String displayPath = EnvironmentPaths.displayPath(path, rawPath);
 
     if (Files.isDirectory(path)) {
       return directoryResponse(request, args, path, displayPath, offset, limit);

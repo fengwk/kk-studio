@@ -13,8 +13,8 @@ import java.util.Optional;
 /**
  * Environment capability 的历史动作渲染器：按 capability 语义生成 “动词 + 目标” 短语。
  *
- * <p>保留决定目标作用域的 {@code workdir}、{@code grep.include} 以及会改变解释的 {@code edit.replace_all} / {@code
- * grep} 匹配标志；省略 {@code timeout_seconds}、{@code limit}、{@code offset}、{@code column_offset}
+ * <p>保留决定目标作用域的 {@code process.exec workdir}、{@code grep.include} 以及会改变解释的 {@code edit.replace_all}
+ * / {@code grep} 匹配标志；省略 {@code timeout_seconds}、{@code limit}、{@code offset}、{@code column_offset}
  * 等执行预算或结果窗口参数，具体结果仍由 ToolResult 表达。无法形成有意义动作时返回 empty，由 Runtime 中性回退（回退逐字保留全部 arguments）。
  */
 final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
@@ -109,8 +109,11 @@ final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
     return null;
   }
 
-  /** workdir 决定相对路径、命令与 LSP workspace 的实际作用域，属于动作语义而非执行控制。 */
-  private static String withWorkdir(String action, JsonNode args) {
+  /** workdir 只决定 {@code process.exec} 的实际执行目录，属于动作语义；文件工具已不接受 workdir。 */
+  private String withWorkdir(String action, JsonNode args) {
+    if (!capabilityId.equals(EnvironmentCapabilityIds.PROCESS_EXEC)) {
+      return action;
+    }
     String workdir = ToolArguments.text(args, "workdir");
     return workdir == null ? action : action + " from " + workdir;
   }
