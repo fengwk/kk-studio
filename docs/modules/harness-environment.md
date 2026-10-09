@@ -198,6 +198,29 @@ Tool，READY 与 Package 发布后的同步由 Platform 发起。
 网络读取空闲超时 180 秒；持续收到数据时不因累计时长终止。`skill.sync` 的 timeout 为 0，
 没有外层总期限，但断线、关闭和取消仍会收尾在途任务。其他 capability 的默认超时不变。
 
+## 终端结构化画面 wire
+
+[`TerminalViewUpdate`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdate.java)
+把 [`TerminalView`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalView.java) 的一次真实投影表达为一次 RESET 或基于旧基线的 PATCH 增量，复用其 `Line`/`Slot`/`Style`/`Color`/`InputModes` 子类型：
+
+```text
+type / terminalId / streamId / baseVersion / version
+cols / rows / alternate / history
+cursor: { x, y, visible, shape }
+inputModeRevision
+inputModes: { applicationCursor, applicationKeypad, bracketedPaste,
+              autoNewLine, altSendsEscape, mouseMode, mouseFormat }
+historyTrim / historyAppend / screenRows / styles
+```
+
+RESET 的 `baseVersion` 在 JSON 中显式为 `null`，`historyAppend.size()=history` 且 `screenRows` 恰好覆盖 `0..rows-1` 各一次，同时替换整个活动屏与历史；PATCH 要求 `baseVersion>=1` 且 `version>baseVersion`，`historyTrim`（`0..MAX_HISTORY_LINES`）与有界追加 `historyAppend` 描述历史变化，`screenRows` 是行号不重复的有界行替换。与浏览器旧历史的跨消息一致性由镜像/流状态机检查，codec 不伪造旧基线。`version`、`baseVersion`、`inputModeRevision` 与行 id 都是正数且不超过 JS `MAX_SAFE_INTEGER`；`alternate` 打开时 `history=0` 且无历史追加/裁剪；行宽恰好 `cols`，`cursorX` 含 pending wrap 取 `0..cols`，`cursorY` 取 `0..rows-1`。
+
+[`TerminalViewUpdateCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdateCodec.java)
+是唯一 canonical JSON codec：每行编码为 `[id, wrapped, slots]`，每槽 `[kind, code, styleIndex]`（`0`=UNIT、`1`=EMPTY、`2`=DWC），`styles` 是本消息唯一字典，每项 `[foreground, background, flags]`，按首次出现顺序收集并去重。颜色整数语义为 `-1` 缺省、`-2..-257` 索引 `0..255`、`0..16777215` RGB；`flags` 为 `0..255`，bit0..7 依次为 bold/dim/italic/underline/blink/inverse/hidden/strikethrough。解码要求字典恰好是 canonical first-seen 顺序（重复项、未被引用的项或与首次出现顺序不一致的索引都拒绝），并严格拒绝未知/缺失/重复/尾随字段、非 canonical UUID、浮点或字符串数字、越界维度/索引/行号、错基线与重复行替换；解析与模型错误一律转为固定描述，不携带 payload、屏幕或原始异常文本。整数值保真：NUL、DWC (`0xe000`)、FEFF 与孤立代理项都按原始码元往返，不做规范化。
+
+[`TerminalLimits`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalLimits.java)
+固定尺寸与预算：列 `5..300`、行 `2..100`、单消息历史至多 `512` 行、编码后至多 `8 MiB` UTF-8、JS 安全整数上限 `9007199254740991`。最大允许 RESET 为 `183600` 槽；真实生成的最坏颜色/flag 字典（`183600` 个唯一样式、最大码元与六位 styleIndex）编码后约 `7.0 MiB`，稳定落在 8 MiB 载体以内。
+
 ## workdir 词法契约
 
 [`DaemonWorkdirSyntax`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntax.java) 的 `requireAbsolute(workdir, operatingSystem)` 是发送前的纯文本校验：
@@ -230,15 +253,17 @@ harness-environment
 | `fun.fengwk.kkstudio.harness.environment` | canonical Environment UUID，无 I/O |
 | `fun.fengwk.kkstudio.harness.environment.capability` | 固定目录、schema、执行与传输 SPI、发送确定性与终态契约 |
 | `fun.fengwk.kkstudio.harness.environment.daemon` | wire 值与 codec、资源票据、远端 workdir 词法校验；不拥有连接、租约或执行状态 |
-| `fun.fengwk.kkstudio.harness.environment.terminal` | JDK-only 深不可变数值画面、逐槽样式与输入模式；不解释 VT、不拥有进程或连接 |
+| `fun.fengwk.kkstudio.harness.environment.terminal` | 深不可变数值画面与结构化更新模型（JDK-only）、canonical JSON codec 与固定尺寸预算；不解释 VT、不拥有进程或连接 |
 
 ## 源码与测试
 
-主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`DaemonProtocol.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java)、[`DaemonEnvelopeCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java)、[`DaemonCapabilityResultCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java)、[`DaemonResourceTransferCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceTransferCodec.java)。
+主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`DaemonProtocol.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java)、[`DaemonEnvelopeCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java)、[`DaemonCapabilityResultCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java)、[`DaemonResourceTransferCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceTransferCodec.java)、[`TerminalViewUpdateCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdateCodec.java)。
 
 测试守卫：
 
 - [`TerminalViewTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewTest.java)：画面的深不可变、数字 UTF-16 序列化与颜色边界。
+- [`TerminalViewUpdateTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdateTest.java)：RESET/PATCH 语义、行身份唯一性、alternate 无历史与 JS 安全整数边界。
+- [`TerminalViewUpdateCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdateCodecTest.java) 与 [`TerminalViewUpdateCodecBudgetTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdateCodecBudgetTest.java)：canonical roundtrip（`reset-update.json`/`patch-update.json`/`patch-metadata.json`）、每色/flag 与 NUL/DWC/FEFF/孤立代理项数值保真、字典重复/未引用/乱序拒绝、unknown/missing/duplicate/trailing 与预算拒绝，以及 183600 槽最坏画面的真实编码预算（实测 7356173 字节）。
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：10 项能力的固定顺序与版本、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。

@@ -48,6 +48,9 @@
                                     <includes>
                                         <include>fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog</include>
                                         <include>fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec</include>
+                                        <include>fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdate</include>
+                                        <include>fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewUpdateCodec</include>
+                                        <include>fun/fengwk/kkstudio/harness/environment/terminal/TerminalLimits</include>
                                     </includes>
                                     <limits>
                                         <limit>
