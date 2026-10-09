@@ -74,6 +74,8 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -1235,6 +1237,190 @@ class ModelProcessorTest {
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+  }
+
+  /** 白名单命中的 HTTP 失败进入既有重试预算，且诊断 kind 不被改写（429 仍是 BILLING）。 */
+  @Test
+  void httpWhitelistedStatusRetriesKeepingDiagnosticKind() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            providerName -> new ModelHttpErrorPolicy(List.of(408, 429)));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onFailed(new ModelInvocationError(ProviderErrorKind.BILLING, "quota exceeded", 429));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, model.status());
+    assertEquals(1, model.failedAttempts().size());
+    ModelInvocationError recorded = model.failedAttempts().getFirst().error();
+    assertEquals(ProviderErrorKind.BILLING, recorded.kind());
+    assertEquals(429, recorded.httpStatus());
+  }
+
+  /** 未列入白名单的 HTTP 失败立即失败，不消耗重试预算、不新增 failed attempt。 */
+  @Test
+  void httpUnlistedStatusFailsImmediately() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                3,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            providerName -> new ModelHttpErrorPolicy(List.of(429)));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "server", 500));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertEquals(1, model.attempt());
+    assertTrue(model.failedAttempts().isEmpty());
+    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+    assertEquals(500, model.error().httpStatus());
+  }
+
+  /** 空白名单禁用 HTTP 重试：即使还有预算也直接失败。 */
+  @Test
+  void emptyWhitelistDisablesHttpRetry() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                3,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            providerName -> new ModelHttpErrorPolicy(List.of()));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "overloaded", 503));
+
+    assertEquals(ModelInvocationStatus.FAILED, model(fixture.store, fixture.invocationId).status());
+  }
+
+  /** 非预期 3xx 保留实际状态并明确失败，不能丢掉状态后当作破损响应自动重试。 */
+  @Test
+  void unexpectedRedirectStatusFailsInsteadOfBrokenResponseRetry() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                3,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            providerName -> new ModelHttpErrorPolicy(List.of(408, 429, 500, 502, 503, 504)));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onFailed(
+        new ModelInvocationError(ProviderErrorKind.INVALID_RESPONSE, "unexpected redirect", 301));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertEquals(301, model.error().httpStatus());
+    assertTrue(model.failedAttempts().isEmpty());
+  }
+
+  /** 重试判定使用当前 Invocation 冻结的 Provider 身份读取白名单，且现读最新策略快照。 */
+  @Test
+  void httpRetryReadsFrozenProviderIdentityAndLivePolicy() {
+    AtomicReference<List<Integer>> live = new AtomicReference<>(List.of(503));
+    AtomicReference<String> observedProvider = new AtomicReference<>();
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            providerName -> {
+              observedProvider.set(providerName);
+              return new ModelHttpErrorPolicy(live.get());
+            });
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
+
+    assertEquals("provider", observedProvider.get());
+    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
+
+    // 现读快照：把白名单改为空后，下一次失败立即终止，不重写已派发的 attempt。
+    live.set(List.of());
+    fixture.clock.advance(Duration.ofSeconds(5));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    ClaimedWork second = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
+    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+
+    secondListener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertEquals(2, model.attempt());
+    assertEquals(1, model.failedAttempts().size());
+  }
+
+  /** 白名单命中但重试预算耗尽：记录一次 failed attempt 后明确失败，不因诊断 kind 被领域层拒绝而挂起。 */
+  @Test
+  void httpWhitelistedRetryExhaustionTerminatesFailed() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            providerName -> new ModelHttpErrorPolicy(List.of(401, 429, 500, 502, 503, 504)));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onFailed(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
+
+    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
+
+    fixture.clock.advance(Duration.ofSeconds(5));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    ClaimedWork second = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
+    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+
+    secondListener.onFailed(
+        new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertEquals(2, model.attempt());
+    assertEquals(1, model.failedAttempts().size());
+    assertEquals(
+        ProviderErrorKind.AUTHENTICATION, model.failedAttempts().getFirst().error().kind());
+    assertEquals(401, model.failedAttempts().getFirst().error().httpStatus());
   }
 
   /** onUnknown：RUNNING 保留 attempt 转 UNKNOWN，即使错误是 TRANSIENT 也不 retry。 */
@@ -3441,6 +3627,19 @@ class ModelProcessorTest {
   }
 
   private Fixture fixture(
+      InvocationRetryPolicy retryPolicy, ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+    return new Fixture(
+        retryPolicy,
+        requestSpec(),
+        newScheduler(),
+        TurnStartReason.INPUT,
+        StreamFlushConfig.DEFAULT,
+        Runnable::run,
+        null,
+        httpErrorPolicyProvider);
+  }
+
+  private Fixture fixture(
       InvocationRetryPolicy retryPolicy,
       ModelRequestSpec requestSpec,
       StreamFlushConfig flushConfig) {
@@ -3493,7 +3692,15 @@ class ModelProcessorTest {
         TurnStartReason reason,
         StreamFlushConfig flushConfig,
         Executor flushExecutor) {
-      this(retryPolicy, requestSpec, scheduler, reason, flushConfig, flushExecutor, null);
+      this(
+          retryPolicy,
+          requestSpec,
+          scheduler,
+          reason,
+          flushConfig,
+          flushExecutor,
+          null,
+          ModelHttpErrorPolicyProvider.DEFAULT);
     }
 
     Fixture(
@@ -3507,7 +3714,8 @@ class ModelProcessorTest {
           TurnStartReason.INPUT,
           StreamFlushConfig.DEFAULT,
           Runnable::run,
-          toolHistoryActionResolver);
+          toolHistoryActionResolver,
+          ModelHttpErrorPolicyProvider.DEFAULT);
     }
 
     Fixture(
@@ -3517,7 +3725,8 @@ class ModelProcessorTest {
         TurnStartReason reason,
         StreamFlushConfig flushConfig,
         Executor flushExecutor,
-        ToolHistoryActionResolver toolHistoryActionResolver) {
+        ToolHistoryActionResolver toolHistoryActionResolver,
+        ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
       this.baseline = seedBaseline(store, NOW, reason);
@@ -3532,7 +3741,8 @@ class ModelProcessorTest {
                   () -> retryPolicy,
                   FALLBACK_DELAY,
                   flushConfig,
-                  toolHistoryActionResolver),
+                  toolHistoryActionResolver,
+                  httpErrorPolicyProvider),
               clock,
               scheduler,
               Runnable::run,

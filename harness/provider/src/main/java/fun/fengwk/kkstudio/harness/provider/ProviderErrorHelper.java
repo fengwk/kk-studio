@@ -32,6 +32,16 @@ public final class ProviderErrorHelper {
   }
 
   /**
+   * 仅把 100–599 的 HTTP 状态暴露为结构化元数据；越界返回 null，绝不从消息文本推断状态。3xx 等非预期状态同样保留实际值，供上层明确失败而不是当成无 HTTP 的破损响应。
+   *
+   * @param statusCode 传输层观察到的 HTTP 状态码
+   * @return 100–599 时返回该状态，否则返回 null
+   */
+  public static Integer httpErrorStatus(int statusCode) {
+    return statusCode >= 100 && statusCode <= 599 ? statusCode : null;
+  }
+
+  /**
    * 格式化 HTTP 状态码与响应体为错误消息。
    *
    * @param statusCode HTTP 状态码

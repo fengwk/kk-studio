@@ -66,7 +66,7 @@ final class AnthropicErrorMapper {
       ProviderErrorKind kind = classify(status, errorType);
       String fallback = fallbackForKind(kind);
       String message = ProviderErrorHelper.formatHttpErrorMessage(exception, fallback);
-      return new ProviderException(kind, message);
+      return new ProviderException(kind, message, ProviderErrorHelper.httpErrorStatus(status));
     }
     return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
   }

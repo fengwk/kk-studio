@@ -38,7 +38,12 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
+import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
@@ -66,6 +71,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -181,6 +187,29 @@ public class HarnessRuntimeConfiguration {
     };
   }
 
+  /** 模型 HTTP 状态策略现读通道：每次带 HTTP 状态的失败 retry 判定点按冻结 Provider 身份解析，Provider 覆盖优先于系统名单。 */
+  @Bean
+  public ModelHttpErrorPolicyProvider modelHttpErrorPolicyProvider(
+      SystemSettingsSnapshot systemSettingsSnapshot,
+      AgentProviderRepository agentProviderRepository,
+      AgentProviderConfigurationCodec providerConfigurationCodec) {
+    return providerName -> {
+      SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
+      List<Integer> effective = aiRuntime.modelHttpRetryStatusCodes();
+      if (providerName != null) {
+        AgentProvider provider = agentProviderRepository.getByName(providerName);
+        if (provider != null) {
+          List<Integer> override =
+              providerConfigurationCodec.readHttpRetryStatusCodes(provider.getConfigJson());
+          if (override != null) {
+            effective = override;
+          }
+        }
+      }
+      return new ModelHttpErrorPolicy(effective);
+    };
+  }
+
   /** processor 共用的 claim/lease 与 heartbeat 节奏：读取共享启动快照的 SystemSettings.Advanced。 */
   @Bean
   public ProcessorLeaseConfig processorLeaseConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
@@ -206,6 +235,7 @@ public class HarnessRuntimeConfiguration {
   public ModelProcessorConfig modelProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
       InvocationRetryPolicyProvider retryPolicyProvider,
+      ModelHttpErrorPolicyProvider modelHttpErrorPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot,
       ToolHistoryActionResolver toolHistoryActionResolver) {
     return new ModelProcessorConfig(
@@ -214,7 +244,8 @@ public class HarnessRuntimeConfiguration {
         Duration.ofMillis(
             systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()),
         StreamFlushConfig.DEFAULT,
-        toolHistoryActionResolver);
+        toolHistoryActionResolver,
+        modelHttpErrorPolicyProvider);
   }
 
   @Bean

@@ -23,7 +23,7 @@ public final class ModelInvocationErrorJsonCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-  private static final Set<String> EXPECTED_FIELDS = Set.of("kind", "message");
+  private static final Set<String> EXPECTED_FIELDS = Set.of("kind", "message", "httpStatus");
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -32,7 +32,10 @@ public final class ModelInvocationErrorJsonCodec {
 
   public ModelInvocationErrorJsonCodec() {}
 
-  /** 将 snapshot 编码为 canonical JSON 字符串。{@code kind} 输出为 enum name；{@code message} 原样输出。 */
+  /**
+   * 将 snapshot 编码为 canonical JSON 字符串。{@code kind} 输出为 enum name；{@code message} 原样输出；{@code
+   * httpStatus} 始终输出（null 时为显式 null）。
+   */
   public String encode(ModelInvocationError error) {
     Objects.requireNonNull(error, "error");
     try {
@@ -48,6 +51,7 @@ public final class ModelInvocationErrorJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("kind", error.kind().name());
     node.put("message", error.message());
+    node.put("httpStatus", error.httpStatus());
     return node;
   }
 
@@ -72,7 +76,7 @@ public final class ModelInvocationErrorJsonCodec {
     } catch (IllegalArgumentException exception) {
       throw new IllegalArgumentException("unknown provider error kind", exception);
     }
-    return new ModelInvocationError(kind, text(node, "message"));
+    return new ModelInvocationError(kind, text(node, "message"), httpStatus(node));
   }
 
   private static void requireFields(ObjectNode node) {
@@ -89,5 +93,18 @@ public final class ModelInvocationErrorJsonCodec {
       throw new IllegalArgumentException(field + " must be text");
     }
     return value.textValue();
+  }
+
+  /** 读取 required 的 {@code httpStatus}：显式 null 或 400–599 的整型 HTTP error 状态；其余一律拒绝。 */
+  private static Integer httpStatus(ObjectNode node) {
+    JsonNode value = node.get("httpStatus");
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToInt()) {
+      throw new IllegalArgumentException(
+          "httpStatus must be an integral HTTP error status or null");
+    }
+    return value.intValue();
   }
 }

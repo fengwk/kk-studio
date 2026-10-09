@@ -206,6 +206,7 @@ public final class ConfigSyncParser {
     properties.setCredential(entry.optString("credential"));
     properties.setModelCallTimeoutMillis(entry.optLong("modelCallTimeoutMillis"));
     properties.setModelCallIdleTimeoutMillis(entry.optLong("modelCallIdleTimeoutMillis"));
+    properties.applyModelHttpRetryStatusCodes(entry.optIntegerList("modelHttpRetryStatusCodes"));
     // 先用写入路径校验已知字段，未知字段不能绕过缺必填与非法值。
     validateEntry(
         ConfigSyncKind.PROVIDERS, name, () -> providerFactory.validateImport(name, properties));
@@ -536,6 +537,47 @@ public final class ConfigSyncParser {
         return number.longValue();
       }
       throw new AiValidationException(RESOURCE, path + "." + key + " must be an integer");
+    }
+
+    List<Integer> optIntegerList(String key) {
+      consumed.add(key);
+      Object value = raw.get(key);
+      if (value == null) {
+        return null;
+      }
+      if (!(value instanceof List<?> list)) {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must be a list of integers");
+      }
+      List<Integer> result = new ArrayList<>(list.size());
+      for (Object item : list) {
+        result.add(toInt(item, key));
+      }
+      return result;
+    }
+
+    private int toInt(Object value, String key) {
+      if (value == null
+          || value instanceof BigDecimal
+          || value instanceof Float
+          || value instanceof Double) {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+      }
+      long longValue;
+      if (value instanceof BigInteger bigInteger) {
+        if (bigInteger.bitLength() > 63) {
+          throw new AiValidationException(
+              RESOURCE, path + "." + key + " must contain only integers");
+        }
+        longValue = bigInteger.longValue();
+      } else if (value instanceof Number number) {
+        longValue = number.longValue();
+      } else {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+      }
+      if (longValue < Integer.MIN_VALUE || longValue > Integer.MAX_VALUE) {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+      }
+      return (int) longValue;
     }
 
     Boolean optBoolean(String key) {

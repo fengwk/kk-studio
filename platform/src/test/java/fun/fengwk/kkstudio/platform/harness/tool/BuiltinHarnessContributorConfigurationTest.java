@@ -47,7 +47,8 @@ class BuiltinHarnessContributorConfigurationTest {
             4,
             7,
             13,
-            89);
+            89,
+            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
 
     SubagentConfig config =
         new BuiltinHarnessContributorConfiguration()

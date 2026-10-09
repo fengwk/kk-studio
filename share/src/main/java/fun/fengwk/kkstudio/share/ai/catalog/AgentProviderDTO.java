@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.List;
 
 /** 不含凭证的 Provider 公开表示。 */
 @Data
@@ -28,6 +29,9 @@ public class AgentProviderDTO {
 
   /** 模型调用空闲超时（毫秒，正数）；未配置时由产品默认值填充。 */
   private Long modelCallIdleTimeoutMillis;
+
+  /** HTTP 重试白名单覆盖：null 表示继承系统名单，空数组表示不自动重试任何 HTTP 错误。 */
+  private List<Integer> modelHttpRetryStatusCodes;
 
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
   private String version;
