@@ -253,6 +253,18 @@ export const aiCatalog = {
     'en-US': 'Idle',
     'zh-CN': 'Idle',
   },
+  'ai.catalog.card.httpRetry': {
+    'en-US': 'HTTP Retry',
+    'zh-CN': 'HTTP 重试',
+  },
+  'ai.catalog.card.httpRetryInherit': {
+    'en-US': 'Inherit system',
+    'zh-CN': '继承系统',
+  },
+  'ai.catalog.card.httpRetryDisabled': {
+    'en-US': 'Disabled',
+    'zh-CN': '禁用',
+  },
   'ai.catalog.card.configured': {
     'en-US': 'Configured',
     'zh-CN': '已配置',
@@ -360,6 +372,26 @@ export const aiCatalog = {
   'ai.catalog.form.modelCallIdleTimeout': {
     'en-US': 'Model Call Idle Timeout (ms)',
     'zh-CN': 'Model Call Idle Timeout (ms)',
+  },
+  'ai.catalog.form.httpRetryPolicy': {
+    'en-US': 'HTTP Retry Policy',
+    'zh-CN': 'HTTP 错误重试策略',
+  },
+  'ai.catalog.form.httpRetryInherit': {
+    'en-US': 'Inherit system settings',
+    'zh-CN': '继承系统配置',
+  },
+  'ai.catalog.form.httpRetryInheritHint': {
+    'en-US': 'Inherits the system-wide HTTP retry status code list.',
+    'zh-CN': '当前 Provider 继承系统全局配置的 HTTP 重试状态码名单。',
+  },
+  'ai.catalog.form.httpRetryCustom': {
+    'en-US': 'Custom status codes',
+    'zh-CN': '自定义重试名单',
+  },
+  'ai.catalog.form.httpRetryPlaceholder': {
+    'en-US': 'Enter status code (400-599), press Enter or comma',
+    'zh-CN': '输入 400-599 状态码，按 Enter 或逗号添加',
   },
   'ai.catalog.form.contextWindow': {
     'en-US': 'Context Window',

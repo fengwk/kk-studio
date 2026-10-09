@@ -124,6 +124,7 @@ describe('AI domain utilities', () => {
       credential: '',
       modelCallTimeoutMillis: '120000',
       modelCallIdleTimeoutMillis: '3000',
+      modelHttpRetryStatusCodes: null,
     })
 
     expect(
@@ -188,6 +189,7 @@ describe('AI domain utilities', () => {
       credential: ' secret ',
       modelCallTimeoutMillis: '120000',
       modelCallIdleTimeoutMillis: '3000',
+      modelHttpRetryStatusCodes: null,
     }
     expect(toEditableProvider(providerInput)).toEqual({
       name: 'minimax',
@@ -197,6 +199,7 @@ describe('AI domain utilities', () => {
       credential: 'secret',
       modelCallTimeoutMillis: 120000,
       modelCallIdleTimeoutMillis: 3000,
+      modelHttpRetryStatusCodes: null,
     })
     expect(toEditableProviderUpdate(providerInput)).toEqual({
       description: 'provider desc',
@@ -205,6 +208,37 @@ describe('AI domain utilities', () => {
       credential: 'secret',
       modelCallTimeoutMillis: 120000,
       modelCallIdleTimeoutMillis: 3000,
+      modelHttpRetryStatusCodes: null,
+    })
+
+    // Custom retry codes serialization
+    expect(
+      toEditableProviderUpdate({
+        ...providerInput,
+        modelHttpRetryStatusCodes: [408, '429', 500],
+      }),
+    ).toMatchObject({
+      modelHttpRetryStatusCodes: [408, 429, 500],
+    })
+
+    // Disabled retry codes ([]) serialization
+    expect(
+      toEditableProviderUpdate({
+        ...providerInput,
+        modelHttpRetryStatusCodes: [],
+      }),
+    ).toMatchObject({
+      modelHttpRetryStatusCodes: [],
+    })
+
+    // Inherit (null) serialization
+    expect(
+      toEditableProviderUpdate({
+        ...providerInput,
+        modelHttpRetryStatusCodes: null,
+      }),
+    ).toMatchObject({
+      modelHttpRetryStatusCodes: null,
     })
 
     const baseVariant = emptyModelDraft().variants[0]
@@ -467,6 +501,7 @@ describe('AI domain utilities', () => {
         credential: '   ',
         modelCallTimeoutMillis: '   ',
         modelCallIdleTimeoutMillis: '   ',
+        modelHttpRetryStatusCodes: null,
       }),
     ).toEqual({
       name: 'stub',
@@ -476,6 +511,7 @@ describe('AI domain utilities', () => {
       credential: null,
       modelCallTimeoutMillis: null,
       modelCallIdleTimeoutMillis: null,
+      modelHttpRetryStatusCodes: null,
     })
 
     expect(includesSearch('MiniMax', 'missing')).toBe(false)

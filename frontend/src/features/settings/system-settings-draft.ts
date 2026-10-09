@@ -4,6 +4,7 @@ import type {
   SystemSettingsUpdateDTO,
 } from '@/shared/api/contracts/system-settings'
 import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
+import { assembleHttpStatusCodeList, IntegerListValidationError } from '@/shared/lib/integer-list'
 
 /** 前端 draft 的共享数字/文本基元。 */
 export type DraftNumericField = string
@@ -39,6 +40,7 @@ export interface SystemSettingsAiRuntimeDraft {
   /** '' 表示不额外限制（无 cap）。 */
   subagentMaxTotalConcurrency: DraftNumericField
   subagentMaxTurns: DraftNumericField
+  modelHttpRetryStatusCodes: (number | string)[]
 }
 
 export interface ModelSelectionDraft {
@@ -155,6 +157,9 @@ export type DraftValidationReason =
   | 'blankPattern'
   | 'emptyNumericField'
   | 'partialModelSelection'
+  | 'httpStatusNotInteger'
+  | 'httpStatusOutOfRange'
+  | 'httpStatusDuplicate'
 
 export class DraftValidationError extends Error {
   readonly reason: DraftValidationReason
@@ -239,6 +244,9 @@ function aiRuntimeToDraft(
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
     subagentMaxTurns: String(dto.subagentMaxTurns),
+    modelHttpRetryStatusCodes: Array.isArray(dto.modelHttpRetryStatusCodes)
+      ? [...dto.modelHttpRetryStatusCodes]
+      : [],
   }
 }
 
@@ -352,6 +360,9 @@ export function assembleSettingsUpdate(
         draft.aiRuntime.subagentMaxTotalConcurrency,
       ),
       subagentMaxTurns: requiredInt(draft.aiRuntime.subagentMaxTurns),
+      modelHttpRetryStatusCodes: assembleHttpStatusList(
+        draft.aiRuntime.modelHttpRetryStatusCodes,
+      ),
     },
     environment: {
       maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),
@@ -524,9 +535,26 @@ function assembleModelSelection(
   return { providerName, modelName, variant }
 }
 
+export function assembleHttpStatusList(items: unknown): number[] {
+  try {
+    return assembleHttpStatusCodeList(items)
+  } catch (err: unknown) {
+    if (err instanceof IntegerListValidationError) {
+      if (err.code === 'outOfRange') {
+        throw new DraftValidationError('httpStatusOutOfRange')
+      }
+      if (err.code === 'duplicate') {
+        throw new DraftValidationError('httpStatusDuplicate')
+      }
+    }
+    throw new DraftValidationError('httpStatusNotInteger')
+  }
+}
+
 const CUSTOM_ATOMIC_FIELD_PATHS = new Set([
   'tool.permission',
   'aiRuntime.compactionFallbackModel',
+  'aiRuntime.modelHttpRetryStatusCodes',
 ])
 
 /** 严格读取 draft 路径；schema renderer 不维护第二份 server field registry。 */

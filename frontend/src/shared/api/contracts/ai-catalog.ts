@@ -14,6 +14,7 @@ export interface AgentProviderDTO {
   version: CatalogVersion
   createTime: InstantTimestamp
   updateTime: InstantTimestamp
+  modelHttpRetryStatusCodes: number[] | null
 }
 
 export interface AgentProviderEditablePropertiesDTO {
@@ -24,6 +25,7 @@ export interface AgentProviderEditablePropertiesDTO {
   credential?: string | null
   modelCallTimeoutMillis?: BackendLong | null
   modelCallIdleTimeoutMillis?: BackendLong | null
+  modelHttpRetryStatusCodes?: number[] | null
 }
 
 export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesDTO {

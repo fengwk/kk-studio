@@ -545,3 +545,98 @@
   padding-top: 16px;
 }
 
+/* TagInput: 统一标签输入组件 */
+.ui-tag-input-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.ui-tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  max-height: 128px;
+  overflow-y: auto;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  cursor: text;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ui-tag-input:focus-within {
+  border-color: var(--green-primary, #71e79a);
+  box-shadow: 0 0 0 3px var(--focus-ring, rgba(113, 231, 154, 0.2));
+}
+
+.ui-tag-input[data-invalid='true'] {
+  border-color: var(--danger, #ff7b7b);
+}
+
+.ui-tag-input.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ui-tag-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: var(--surface-raised, #24292e);
+  border: 1px solid var(--border, #30363d);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--fg);
+  line-height: 1.4;
+}
+
+.ui-tag-item.is-invalid {
+  border-color: var(--danger, #ff7b7b);
+  color: var(--danger, #ff7b7b);
+}
+
+.ui-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted, #8b949e);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.ui-tag-remove:hover:not(:disabled) {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.ui-tag-input-field {
+  flex: 1 1 80px;
+  min-width: 60px;
+  height: 24px;
+  padding: 0 4px;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.ui-tag-input-field::placeholder {
+  color: var(--fg-dim, #6e7681);
+}
+
