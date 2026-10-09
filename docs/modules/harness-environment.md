@@ -97,13 +97,14 @@ default Duration terminationGrace() { return Duration.ZERO; }
 
 ## daemon wire 协议会话与消息流
 
-[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `2`，消息集合为：
+[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `3`，消息集合为：
 
 ```text
 HELLO / WELCOME / READY / HEARTBEAT
 INVOKE / STARTED / PROGRESS / COMPLETED / FAILED
 CANCEL / CANCELLED / ERROR
 RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
+SHELL_COMMAND / SHELL_EVENT
 ```
 
 [`DaemonEnvelope`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelope.java) 的固定字段为：
@@ -112,14 +113,14 @@ RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
 protocolVersion / messageType / environmentId / invocationId? / payload
 ```
 
-`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR` 外的全部消息都必须携带非空的 `invocationId`，资源上传控制消息也以它关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
+`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT`、调用消息与 shell 消息必须非空；`ERROR` 在握手失败时可能没有绑定 scope。调用与资源上传控制消息必须携带非空的 `invocationId`，`transferId` 只存在于 payload。`SHELL_COMMAND` 与 `SHELL_EVENT` 禁止携带 `invocationId`，其 scope 必须与内层命令或事件的 `environmentId` 一致。`payload` 必须是 JSON 对象。
 
 重连去重以 invocationId 与 Daemon journal 关联消息，各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion。同实例恢复的进程生命周期限制见下文。
 
 握手与调用时序：
 
 ```text
-Daemon -> HELLO(protocolVersion=2, registrationToken, capabilityCatalogVersion=2, daemonInstanceId)
+Daemon -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=2, daemonInstanceId)
 Gateway -> WELCOME(environmentId, name, maxResourceBytes)
 Daemon -> READY(version=2, environment)
 Daemon -> HEARTBEAT*
@@ -142,6 +143,12 @@ Daemon -> CANCELLED | 已冻结的终态重放
 `daemonInstanceId` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Gateway 保有在途记录时，同实例重连以相同 `invocationId` 恢复（已取消的调用只重发 CANCEL），Daemon journal 去重，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启或迁移的执行恢复。握手失败时 Gateway 以 `ERROR` 收尾，`REGISTRATION_REJECTED` 与 `RETRY_LATER` 是仅有的两个冻结错误码。
 
 传输层强制协商 `permessage-deflate`：两端都在握手阶段要求该扩展，任一侧未协商成功即按 RFC 6455 close code `1010` 关闭连接，双方都不退化为未压缩会话。
+
+### 人工终端控制
+
+shell 控制独立于 capability 调用和 invocation journal。Gateway 向 Daemon 发送 `SHELL_COMMAND`，Daemon 以 `SHELL_EVENT` 回传；两者的 payload 分别由 [`TerminalControlCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalControlCodec.java) 编解码为 `TerminalRequest` 与 `TerminalResponse`。
+
+请求包含宿主验证并填写的 `TerminalRoute` 与用户命令，响应携带同一路由与终端事件。路由用于返回实际浏览器连接，不代表终端控制权；控制权由终端实例、writer epoch 与 grant 裁决。`ERROR` 事件在终端尚未创建或请求未获准入时允许没有 identity，服务端仍以认证 READY 连接的实例身份封装回执。
 
 ## 载荷编解码器
 

@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketServic
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentServerSettings;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalListener;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -23,9 +24,9 @@ import java.util.Optional;
  * 状态。
  *
  * <p>Platform 只提供窄端口实现：{@link EnvironmentRegistry} 提供租约存储围栏，{@link EnvironmentRepository} 提供注册凭据解析，
- * {@link EnvironmentSessionListener} 接收 READY 事件，{@link DaemonResourceTicketService} 把调用作用域上传映射到全局
- * Blob 上传契约，{@link SystemSettingsSnapshot} 提供每次判定现读的心跳超时与资源上限。WebSocket 传输与 capability
- * 产品映射分别由其他适配器承担，核心本身不依赖 Spring。
+ * {@link EnvironmentSessionListener} 接收 READY 事件，{@link EnvironmentTerminalListener} 接收终端响应并路由投递，
+ * {@link DaemonResourceTicketService} 把调用作用域上传映射到全局 Blob 上传契约，{@link SystemSettingsSnapshot}
+ * 提供每次判定现读的心跳超时与资源上限。WebSocket 传输与 capability 产品映射分别由其他适配器承担，核心本身不依赖 Spring。
  */
 @Configuration(proxyBeanMethods = false)
 public class EnvironmentServerConfiguration {
@@ -35,12 +36,14 @@ public class EnvironmentServerConfiguration {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       EnvironmentSessionListener environmentSessionListener,
+      EnvironmentTerminalListener environmentTerminalListener,
       DaemonResourceTicketService ticketService,
       SystemSettingsSnapshot snapshot) {
     return new EnvironmentDaemonServer(
         environmentRegistry,
         token -> toRegistration(environmentRepository, token),
         environmentSessionListener,
+        environmentTerminalListener,
         ticketService,
         () -> toSettings(snapshot.get()));
   }

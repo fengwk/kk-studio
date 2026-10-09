@@ -7,6 +7,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalListener;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.ShellTopics;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.infra.realtime.BusRealtimeEventSource;
@@ -19,6 +21,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.project.notification.ProjectNotifications;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.share.notification.NotificationTopic;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
@@ -57,7 +60,9 @@ public class NotificationConfiguration {
           ProjectNotifications.WORK_DUE,
           PlatformNotifications.SETTINGS_CHANGED,
           PlatformNotifications.SKILL_PACKAGE_CHANGED,
-          PlatformNotifications.ENVIRONMENT_CHANGED);
+          PlatformNotifications.ENVIRONMENT_CHANGED,
+          ShellTopics.COMMAND,
+          ShellTopics.EVENT);
 
   /**
    * 全应用唯一的 physical transaction manager：沿用 Spring Boot 默认的 {@link
@@ -128,5 +133,11 @@ public class NotificationConfiguration {
         executionTreeChangeHub,
         interactionChangeHub,
         environmentChangeHub);
+  }
+
+  /** 生产终端响应监听器：将 Daemon 终端事件通过通知总线投递至目标 App 节点。 */
+  @Bean
+  public EnvironmentTerminalListener environmentTerminalListener(NotificationBus notificationBus) {
+    return new ShellEventPublisher(notificationBus);
   }
 }
