@@ -42,4 +42,10 @@ final class ManualThreadControlGuard {
       }
     }
   }
+
+  /** NEW_FORKED_SESSION 人工 fork：来源 Thread 所属会话同样必须是纯执行根会话。 */
+  static void requireForkRootSourceThread(HarnessRuntime runtime, UUID sourceThreadId) {
+    UUID sessionId = runtime.getThreadSnapshot(sourceThreadId).thread().sessionId();
+    requireForkRootSession(runtime, sessionId);
+  }
 }

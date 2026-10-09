@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -175,6 +176,9 @@ public final class ModelRequestMaterializer {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       } else if (payload instanceof NotificationPayload notification) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(notification.message()));
+      } else if (payload instanceof ForkPayload) {
+        projectedMessages.add(
+            ProviderMessageProjector.ProjectedMessage.of(AgentMessage.user(ForkPayload.NOTICE)));
       } else if (payload instanceof AssistantAbortedPayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }

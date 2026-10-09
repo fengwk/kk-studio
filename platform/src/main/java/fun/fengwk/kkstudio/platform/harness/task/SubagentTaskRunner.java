@@ -53,6 +53,8 @@ public class SubagentTaskRunner implements SubagentRunner {
   private static final String CHILD_THREAD_NAMESPACE = "kk-studio/harness/subagent/thread/";
   private static final String COMMAND_NAMESPACE_PREFIX = "kk-studio/harness/subagent/command/";
   private static final int ACCEPT_ATTEMPTS = 3;
+  static final String INVALID_RESUME_THREAD_MESSAGE =
+      "This subagent thread is no longer valid. Dispatch a new task without thread_id.";
 
   private final Supplier<HarnessRuntime> runtimeProvider;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
@@ -80,6 +82,9 @@ public class SubagentTaskRunner implements SubagentRunner {
       return replayed;
     }
     ParentInvocation parent = parentInvocation(runtime, request);
+    if (request.resumeThreadId() != null) {
+      requireResumeOwnership(runtime, request);
+    }
     BranchSettings settings = materializeTarget(request, parent);
     // 默认 maxTurns 是软预算默认值：一次接受内只物化一次，避免重试/回放改写既有 join 的预算。
     int maxTurns =
@@ -203,6 +208,19 @@ public class SubagentTaskRunner implements SubagentRunner {
         new AcceptCommandsTarget.Thread(
             childThreadId, child.thread().headEntryId(), child.thread().nextCommandSequence()),
         List.copyOf(commands));
+  }
+
+  /** 续接既有子 Thread 前做所属权前置校验：跨父续接直接拒绝，不进入重试且不触发任何持久写入。 */
+  private static void requireResumeOwnership(HarnessRuntime runtime, SubagentTaskRequest request) {
+    ThreadSnapshot child;
+    try {
+      child = runtime.getThreadSnapshot(request.resumeThreadId());
+    } catch (HarnessRuntimeNotFoundException notFound) {
+      throw reject("subagent thread " + request.resumeThreadId() + " was not found", notFound);
+    }
+    if (!Objects.equals(request.parentThreadId(), child.thread().parentThreadId())) {
+      throw reject(INVALID_RESUME_THREAD_MESSAGE);
+    }
   }
 
   private static ThreadSnapshot requireChild(

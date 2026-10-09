@@ -559,6 +559,7 @@ class SubagentTaskRunnerTest {
 
   @Test
   void rejectsResumingAThreadOfAnotherParent() {
+    // 跨父 resume 在提交前直接以确切文案拒绝，不进入重试且不触发任何持久写入。
     stubParent(List.of(AGENT));
     UUID childThreadId = UUID.randomUUID();
     ThreadSnapshot foreignChild = child(childThreadId, UUID.randomUUID(), 3L);
@@ -569,7 +570,9 @@ class SubagentTaskRunnerTest {
             SubagentTaskRejectedException.class,
             () -> runner(config()).accept(request(null, childThreadId)));
 
-    assertTrue(rejected.getMessage().contains("does not belong"), rejected.getMessage());
+    assertEquals(
+        "This subagent thread is no longer valid. Dispatch a new task without thread_id.",
+        rejected.getMessage());
     verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
   }
 
