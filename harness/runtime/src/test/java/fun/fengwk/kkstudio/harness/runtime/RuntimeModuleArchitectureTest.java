@@ -156,7 +156,10 @@ class RuntimeModuleArchitectureTest {
             "net.java.dev.jna:jna-platform",
             "org.eclipse.lsp4j:org.eclipse.lsp4j",
             "org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc",
-            "org.eclipse.jgit:org.eclipse.jgit"));
+            "org.eclipse.jgit:org.eclipse.jgit",
+            "org.jetbrains.pty4j:pty4j",
+            "org.slf4j:slf4j-api",
+            "org.slf4j:slf4j-nop"));
 
     List<String> violations = scanViolations(main);
     assertTrue(

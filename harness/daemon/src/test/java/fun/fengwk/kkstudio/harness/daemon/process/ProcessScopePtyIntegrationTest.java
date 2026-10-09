@@ -177,10 +177,12 @@ class ProcessScopePtyIntegrationTest {
   @Test
   void ptyRunsAJvmFixtureAndKeepsItsExitCode() throws Exception {
     Path pidFile = workdir.resolve("pty-exit.pid");
+    Path exitPermit = workdir.resolve("pty-exit.permit");
     ProcessScope scope =
         ProcessScope.startPty(
             workdir,
-            ProcessScopeFixtureMain.fixtureCommand("pty-exit", pidFile.toString(), "7"),
+            ProcessScopeFixtureMain.fixtureCommand(
+                "pty-exit", pidFile.toString(), "7", exitPermit.toString()),
             80,
             24,
             System.getenv(),
@@ -188,6 +190,10 @@ class ProcessScopePtyIntegrationTest {
     try {
       String output = readUntil(scope.process().getInputStream(), "__PTY_FIXTURE_OK__", 30_000);
       assertTrue(output.contains("__PTY_FIXTURE_OK__"), "夹具标记必须经由伪终端回传，实际为：" + output);
+      Files.writeString(exitPermit, "permit", StandardCharsets.UTF_8);
+      String permitted =
+          readUntil(scope.process().getInputStream(), "__PTY_EXIT_PERMITTED__", 30_000);
+      assertTrue(permitted.contains("__PTY_EXIT_PERMITTED__"), "首个标记读取完毕后 PTY 必须仍可接收输出");
       assertTrue(scope.awaitNaturalExit(30_000), "夹具必须在预算内自然退出");
       assertEquals(7, scope.naturalExitCode(), "退出码必须原样保真");
       assertTrue(scope.terminate(), "PTY 会话必须在终止后收敛");
@@ -257,15 +263,15 @@ class ProcessScopePtyIntegrationTest {
    * 读到标记、EOF 或超时为止。
    *
    * <p>用 {@link InputStreamReader} + UTF-8 增量解码器连续解码，而不是对每个字节块做 {@code new String}：多字节字符会被跨块切开，逐块
-   * 解码会把它变成替换字符。读取放在守护线程里并在 finally 里取消、关闭并汇合，因此命令挂住时用例仍能收敛，也不会在后台留下读取线程。
+   * 解码会把它变成替换字符。读取线程在成功后交还读取权；PTY 主端只由 scope 关闭，不能在读到标记时触发挂断。
    */
   private static String readUntil(InputStream input, String marker, long millis) throws Exception {
     StringBuilder collected = new StringBuilder();
     Thread reader =
         new Thread(
             () -> {
-              try (InputStreamReader decoder =
-                  new InputStreamReader(input, StandardCharsets.UTF_8)) {
+              try {
+                InputStreamReader decoder = new InputStreamReader(input, StandardCharsets.UTF_8);
                 char[] buffer = new char[512];
                 int read;
                 while ((read = decoder.read(buffer)) >= 0) {
@@ -284,15 +290,16 @@ class ProcessScopePtyIntegrationTest {
     reader.setDaemon(true);
     reader.start();
     reader.join(millis);
-    try {
-      synchronized (collected) {
-        return collected.toString();
-      }
-    } finally {
-      // 取消并关闭读取端，再汇合守护线程：无论读到标记、EOF 还是超时，都不留下后台读取。
+    if (reader.isAlive()) {
+      // 超时才中断本次读取；调用方 finally 仍负责整个 scope 的终止与关闭。
       closeQuietly(input);
       reader.interrupt();
       reader.join(1_000);
+      assertFalse(reader.isAlive(), "关闭输入后读取线程必须在预算内退出");
+      throw new AssertionError("PTY 未在预算内输出标记：" + marker);
+    }
+    synchronized (collected) {
+      return collected.toString();
     }
   }
 

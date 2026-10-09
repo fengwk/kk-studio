@@ -33,7 +33,7 @@ import java.util.Locale;
  *   fork-hold        &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后继续存活
  *   nest-hold        &lt;pidFile&gt; &lt;childPidFile&gt; &lt;grandPidFile&gt; 派生子进程（fork-hold），等孙进程写出 pid 后继续存活
  *   pty-probe        &lt;pidFile&gt; &lt;resultFile&gt;               把自己的 pid/sid/pgrp 与 fd 0/1/2 的 TTY 事实写进结果文件
- *   pty-exit         &lt;pidFile&gt; [exitCode]                  把固定标记写进 stdout（跨平台 PTY 用例）后按代码退出
+ *   pty-exit         &lt;pidFile&gt; &lt;exitCode&gt; &lt;exitPermitFile&gt; 把固定标记写进 stdout，等许可后再次输出并按代码退出
  *   conpty-size      &lt;pidFile&gt; &lt;initialSizeFile&gt; &lt;resizePermitFile&gt; &lt;resizedSizeFile&gt; &lt;expectedColumns&gt; &lt;expectedRows&gt;  读回本进程原生 ConPTY 窗口尺寸，等许可后轮询到期望尺寸再发布（仅 Windows）
  * </pre>
  *
@@ -121,8 +121,11 @@ public final class ProcessScopeFixtureMain {
             StandardCharsets.UTF_8);
       }
       case "pty-exit" -> {
-        // 跨平台 PTY 夹具：把标记写进 stdout（PTY 从端）后按给定代码退出，不依赖任何 shell。
+        // 许可前保持存活，证明读取首个标记不会提前关闭 PTY。
         System.out.println("__PTY_FIXTURE_OK__");
+        System.out.flush();
+        awaitReleaseFile(Path.of(args[3]));
+        System.out.println("__PTY_EXIT_PERMITTED__");
         System.out.flush();
         System.exit(exitCode(args));
       }
