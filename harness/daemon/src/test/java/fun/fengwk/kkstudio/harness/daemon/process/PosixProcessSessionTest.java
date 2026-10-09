@@ -105,25 +105,70 @@ class PosixProcessSessionTest {
   }
 
   /**
-   * 有真实枚举能力的平台必须能枚举出自己；没有能力的 POSIX 平台必须如实回答「不可判定」。
+   * 具备枚举能力的平台必须完整识别独占执行范围；无能力的平台必须如实回答「不可判定」。
    *
-   * <p>「没有成员」会让收敛跳过强杀阶段并宣布已经收敛，所以能力缺口只能表现为不可判定（返回 {@code null}）。
+   * <p>测试不继承 launcher 的共享会话，其中可能有本用户无权读取的成员；不可判定不能被误当成已经收敛。
    */
   @Test
-  void memberEnumerationUsesRealKernelQueriesOrReportsUndecidable() {
+  void memberEnumerationUsesRealKernelQueriesOrReportsUndecidable() throws Exception {
     assumeFalse(isWindows(), "需要 POSIX 会话语义");
-    long session = PosixProcessSession.currentSession();
     if (isLinux() || isMac()) {
-      List<PosixProcessSession.GroupMember> members =
-          PosixProcessSession.membersSnapshot(session, PosixProcessSession.NO_PROCESS);
-      assertNotNull(members, () -> "具备内核查询能力的平台必须能枚举会话成员" + macEnumerationDiagnostics(session));
-      assertTrue(
-          members.stream().anyMatch(member -> member.pid() == ProcessHandle.current().pid()),
-          "当前进程必须出现在自己的会话里");
+      Path commandPidFile = workdir.resolve("owned-command.pid");
+      try (ProcessScope scope =
+          ProcessScope.start(
+              workdir, ProcessScopeFixtureMain.fixtureCommand("hold", commandPidFile.toString()))) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+        while ((!Files.exists(commandPidFile) || Files.size(commandPidFile) == 0)
+            && System.nanoTime() < deadline) {
+          Thread.sleep(10);
+        }
+        assertTrue(Files.exists(commandPidFile), "命令必须在预算内发布身份");
+        long commandPid = Long.parseLong(Files.readString(commandPidFile).trim());
+        long session = scope.process().pid();
+        assertEquals(session, PosixProcessSession.sessionOf(commandPid));
+        List<PosixProcessSession.GroupMember> members =
+            PosixProcessSession.membersSnapshot(session, PosixProcessSession.NO_PROCESS);
+        assertNotNull(members, () -> "独占执行范围必须能够完整枚举" + macEnumerationDiagnostics(session));
+        assertEquals(
+            List.of(session, commandPid).stream().sorted().toList(),
+            members.stream().map(PosixProcessSession.GroupMember::pid).sorted().toList(),
+            "快照必须完整包含 helper 和真实命令");
+        for (PosixProcessSession.GroupMember member : members) {
+          assertNotNull(member.start(), "每个成员必须携带可重新核验的启动身份");
+          assertEquals(PosixProcessSession.processStart(member.pid()), member.start());
+        }
+        List<PosixProcessSession.GroupMember> withoutCommand =
+            PosixProcessSession.membersSnapshot(session, commandPid);
+        assertNotNull(withoutCommand);
+        assertEquals(
+            List.of(session),
+            withoutCommand.stream().map(PosixProcessSession.GroupMember::pid).toList());
+        assertTrue(scope.terminate(), "核验完毕后必须确认整个独占会话收敛");
+      }
     } else {
       assertNull(
-          PosixProcessSession.membersSnapshot(session, PosixProcessSession.NO_PROCESS),
+          PosixProcessSession.membersSnapshot(
+              PosixProcessSession.currentSession(), PosixProcessSession.NO_PROCESS),
           "没有真实枚举能力就必须返回不可判定");
+    }
+  }
+
+  /** 真实内核拒绝读取活成员时必须失败关闭；拥有读取权限时仍须保留成员。 */
+  @Test
+  void macEnumerationPreservesKernelPermissionBoundary() {
+    assumeTrue(isMac(), "需要真实 Darwin getsid/libproc");
+    long session = PosixProcessSession.sessionOf(1);
+    assertTrue(session >= 0, "launchd 必须仍在内核中");
+    SystemB.ProcBsdInfo info = new SystemB.ProcBsdInfo();
+    int bytes = SystemB.INSTANCE.proc_pidinfo(1, SystemB.PROC_PIDTBSDINFO, 0, info, info.size());
+    List<PosixProcessSession.GroupMember> members =
+        PosixProcessSession.macMembers(session, PosixProcessSession.NO_PROCESS, new int[] {1});
+    if (bytes != info.size()) {
+      assertNull(members, "读取活成员失败不能被解释为没有成员");
+    } else {
+      assertNotNull(members);
+      assertEquals(
+          List.of(1L), members.stream().map(PosixProcessSession.GroupMember::pid).toList());
     }
   }
 

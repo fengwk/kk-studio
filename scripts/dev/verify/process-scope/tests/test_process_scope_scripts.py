@@ -78,6 +78,7 @@ CONPTY_CASES = (
 MACOS_CASES = (
     "memberEnumerationUsesRealKernelQueriesOrReportsUndecidable",
     "macEnumerationIgnoresVanishedPidsAndPreservesMemberIdentity",
+    "macEnumerationPreservesKernelPermissionBoundary",
 )
 PTY_CASES = (
     "ptyCarriesCommandOutputAndKeepsTheExactExitCode",
@@ -327,26 +328,27 @@ class AssertSurefireReportsTest(unittest.TestCase):
             )
 
     def test_macos_requires_native_enumeration_cases(self):
-        """Darwin 的已消失 pid 回归必须真实运行；缺失、跳过和重复都不能通过。"""
-        for cases, skipped_cases in (
-            (MACOS_CASES[:-1], ()),
-            (MACOS_CASES, (MACOS_CASES[-1],)),
-            (MACOS_CASES + (MACOS_CASES[-1],), ()),
-        ):
-            with self.subTest(cases=cases, skipped_cases=skipped_cases):
-                with tempfile.TemporaryDirectory() as tmp:
-                    reports = Path(tmp)
-                    write_complete_reports(reports)
-                    write_surefire_report(
-                        reports,
-                        "PosixProcessSessionTest",
-                        cases,
-                        skipped=len(skipped_cases),
-                        skipped_cases=skipped_cases,
-                    )
-                    result = run_script("assert-surefire-reports.py", reports, "macos-latest")
-                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-                    self.assertIn(MACOS_CASES[-1], result.stdout)
+        """Darwin 枚举、退出竞态和权限边界必须真实运行；缺失、跳过和重复都不能通过。"""
+        for required in MACOS_CASES:
+            for cases, skipped_cases in (
+                (tuple(case for case in MACOS_CASES if case != required), ()),
+                (MACOS_CASES, (required,)),
+                (MACOS_CASES + (required,), ()),
+            ):
+                with self.subTest(required=required, cases=cases, skipped_cases=skipped_cases):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        write_surefire_report(
+                            reports,
+                            "PosixProcessSessionTest",
+                            cases,
+                            skipped=len(skipped_cases),
+                            skipped_cases=skipped_cases,
+                        )
+                        result = run_script("assert-surefire-reports.py", reports, "macos-latest")
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(required, result.stdout)
 
     def test_fails_when_a_required_case_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

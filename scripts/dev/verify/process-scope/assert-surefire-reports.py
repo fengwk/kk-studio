@@ -82,6 +82,7 @@ MACOS_REQUIRED_CASES = {
     PROCESS_PACKAGE + "PosixProcessSessionTest": {
         "memberEnumerationUsesRealKernelQueriesOrReportsUndecidable",
         "macEnumerationIgnoresVanishedPidsAndPreservesMemberIdentity",
+        "macEnumerationPreservesKernelPermissionBoundary",
     },
 }
 

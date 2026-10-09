@@ -169,17 +169,32 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
     const validation = source.indexOf(`- name: ${validationName}`)
     assert.ok(setup > 0 && setup < selection && selection < scripts && scripts < validation)
     const block = source.slice(setup, validation)
+    const commands = block.replaceAll(/\\\r?\n[ \t]*/gu, ' ')
+    const aptPrefix = String.raw`^[ \t]*sudo[ \t]+(?:env[ \t]+DEBIAN_FRONTEND=noninteractive[ \t]+)?apt-get(?:[ \t]+-o[ \t]+[^ \t\n]+)*[ \t]+`
+    const update = commands.match(new RegExp(`${aptPrefix}update[ \\t]*$`, 'mu'))
     assert.ok(block.includes('https://www.postgresql.org/media/keys/ACCC4CF8.asc'))
     assert.ok(block.includes('URIs: https://apt.postgresql.org/pub/repos/apt'))
     assert.ok(block.includes('Suites: ${VERSION_CODENAME}-pgdg'))
     assert.ok(block.includes('Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc'))
-    assert.ok(block.indexOf('/etc/apt/sources.list.d/pgdg.sources') < block.indexOf('sudo apt-get update'))
+    assert.ok(update, 'the client setup must update the configured package indexes')
+    assert.ok(commands.indexOf('/etc/apt/sources.list.d/pgdg.sources') < update.index)
     assert.doesNotMatch(block, /allow-unauthenticated|trusted=yes/u)
-    assert.ok(block.includes('sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"'))
+    assert.match(commands, new RegExp(`${aptPrefix}install --yes --no-install-recommends "postgresql-client-\\$\\{POSTGRES_VERSION\\}"[ \\t]*$`, 'mu'))
     assert.ok(block.includes('echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"'))
     assert.ok(block.includes('for tool in psql pg_dump pg_restore createdb pg_isready; do'))
     assert.ok(block.includes('test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"'))
   }
+})
+
+test('repository PostgreSQL bootstrap bounds network and package-lock waits', () => {
+  const setup = validationSteps().find((step) => stepField(step, 'name', 0) === 'Set up PostgreSQL client tools')
+  assert.ok(setup)
+  assert.equal(stepField(setup, 'timeout-minutes'), '10')
+  const commands = stepField(setup, 'run').replaceAll(/\\\r?\n[ \t]*/gu, ' ')
+  assert.match(commands, /curl[^\n]*--connect-timeout 10[^\n]*--max-time 60/u)
+  assert.match(commands, /apt-get[^\n]*Acquire::http::Timeout=30[^\n]*Acquire::https::Timeout=30[^\n]* update/u)
+  assert.match(commands, /env DEBIAN_FRONTEND=noninteractive apt-get[^\n]*Acquire::http::Timeout=30[^\n]*Acquire::https::Timeout=30[^\n]*DPkg::Lock::Timeout=60[^\n]* install/u)
+  assert.doesNotMatch(commands, /continue-on-error|allow-unauthenticated|trusted=yes/u)
 })
 
 test('both release workflows run the second Windows host even after the first fails', () => {

@@ -43,7 +43,7 @@ class PosixProcessSignalOrderTest {
     List<PosixProcessSession.GroupMember> ordered =
         PosixProcessSession.parentsBeforeChildren(forest);
     assertNotNull(ordered);
-    // 根 10 在输入中先于根 1，因此整棵 10 子树先被访问。
+    // 根 10 先于根 1 入队，各自后代再按父子关系入队。
     assertEquals(List.of(10L, 1L, 11L, 2L, 3L, 4L), pids(ordered), "独立根节点必须保持输入相遇顺序");
     assertParentsBeforeChildren(ordered);
   }

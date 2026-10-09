@@ -147,10 +147,9 @@ final class PosixProcessSession {
   }
 
   /**
-   * 会内成员的快照项：pid、它在快照时刻的身份（启动时刻），以及同一快照里读到的父进程 pid。
+   * 会话成员的快照项：pid、启动身份和父进程 pid。
    *
-   * <p>只带 pid 的快照无法对抗 pid 复用：调用方必须在强杀之前重新核验身份。父进程 pid 也必须来自同一份内核快照（Linux 的 {@code /proc/<pid>/stat}
-   * ppid、macOS 的 {@code pbi_ppid}）：它只用于把信号排成「父先子后」，不能事后另查，否则父身份与成员身份 就不是同一时刻的事实。
+   * <p>父进程与会话归属从同一次 {@code stat}/{@code proc_bsdinfo} 查询取得，用于父先子后的排序；发信号前仍须重新核验启动身份和会话归属，避免 PID 复用。
    */
   record GroupMember(long pid, Instant start, long parentPid) {}
 
