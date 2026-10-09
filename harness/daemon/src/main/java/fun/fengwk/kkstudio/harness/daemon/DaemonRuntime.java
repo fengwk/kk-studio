@@ -44,13 +44,20 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -91,6 +98,9 @@ public final class DaemonRuntime implements AutoCloseable {
   private static final Duration EXECUTOR_TERMINATION_TIMEOUT = Duration.ofSeconds(5);
   private static final String FALLBACK_FAILURE_MESSAGE = "capability execution failed";
 
+  /** 进程内存中保留的受管更新回执条数上界：足够覆盖少量重发与重连重放，不无界累积。 */
+  private static final int MAX_TRACKED_UPDATE_OPERATIONS = 8;
+
   private final DaemonConfig config;
 
   /** 本 Daemon 在 WELCOME 中收到的 Environment 绑定；WELCOME 之前为 null，断开时重置。 */
@@ -123,6 +133,29 @@ public final class DaemonRuntime implements AutoCloseable {
 
   /** 本 Daemon 的构建版本：HELLO/READY 上报的事实，未打包时为 {@code development}。 */
   private final String daemonVersion = DaemonBuildInfo.version();
+
+  private final DaemonUpdateCommandCodec updateCommandCodec = new DaemonUpdateCommandCodec();
+  private final DaemonUpdateResultCodec updateResultCodec = new DaemonUpdateResultCodec();
+
+  /**
+   * 受管更新操作的结果缓存（operationId -> 冻结回执）：同一 operation 的重发只重放结果，不产生第二次下载。
+   *
+   * <p>保留最近若干条并在重连后重发，使断开不等于失败时 Platform 能重新收敛。
+   */
+  private final Map<String, DaemonUpdateResult> updateResults =
+      Collections.synchronizedMap(
+          new LinkedHashMap<>(16, 0.75f, false) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, DaemonUpdateResult> eldest) {
+              return size() > MAX_TRACKED_UPDATE_OPERATIONS;
+            }
+          });
+
+  /** 正在准备的 operationId；null 表示当前没有更新在途。 */
+  private final AtomicReference<String> activeUpdateOperationId = new AtomicReference<>();
+
+  private volatile ManagedUpdatePreparer managedUpdater;
+  private volatile ManagedUpdateLauncher updateLauncher;
 
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
@@ -510,6 +543,119 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
+  /**
+   * 处理服务端下发的受管更新命令：只在 READY 绑定连接上接受；同一 operation 幂等。
+   *
+   * <p>命令先在接收路径上立即回执 {@code ACCEPTED}（让 Platform 尽快进入 RUNNING），下载/校验/预检在独立任务线程执行并以 {@code
+   * PREPARED}/{@code FAILED} 回执。任何失败都保留旧二进制不动。
+   */
+  private void handleUpdate(DaemonEnvelope envelope) {
+    if (state != DaemonRuntimeState.READY || envelope.environmentId() == null) {
+      throw new DaemonProtocolException("UPDATE requires a READY bound connection");
+    }
+    DaemonUpdateCommand command = updateCommandCodec.decode(envelope.payloadJson());
+    DaemonUpdateResult completed = updateResults.get(command.operationId());
+    if (completed != null) {
+      sendUpdateResult(completed);
+      return;
+    }
+    if (!activeUpdateOperationId.compareAndSet(null, command.operationId())) {
+      if (command.operationId().equals(activeUpdateOperationId.get())) {
+        return;
+      }
+      throw new DaemonProtocolException("a different update operation is already in progress");
+    }
+    sendUpdateResult(DaemonUpdateResult.accepted(command.operationId()));
+    try {
+      taskExecutor.execute(() -> runUpdate(command));
+    } catch (RejectedExecutionException error) {
+      activeUpdateOperationId.compareAndSet(command.operationId(), null);
+      sendUpdateResult(
+          DaemonUpdateResult.failed(command.operationId(), "update executor rejected"));
+    }
+  }
+
+  private void runUpdate(DaemonUpdateCommand command) {
+    DaemonUpdateResult result;
+    try {
+      result =
+          switch (managedUpdater().prepare(command)) {
+            case ManagedUpdateOutcome.Prepared prepared -> updateLauncher().launch(prepared)
+                ? DaemonUpdateResult.prepared(command.operationId())
+                : DaemonUpdateResult.failed(
+                    command.operationId(), "detached updater could not be started");
+            case ManagedUpdateOutcome.Failed failed -> DaemonUpdateResult.failed(
+                command.operationId(), failed.message());
+          };
+    } catch (RuntimeException error) {
+      result = DaemonUpdateResult.failed(command.operationId(), "update preparation failed");
+    } finally {
+      activeUpdateOperationId.compareAndSet(command.operationId(), null);
+    }
+    updateResults.put(command.operationId(), result);
+    sendUpdateResult(result);
+  }
+
+  private void sendUpdateResult(DaemonUpdateResult result) {
+    if (state == DaemonRuntimeState.READY) {
+      send(DaemonMessageType.UPDATE_RESULT, null, updateResultCodec.encode(result));
+    }
+  }
+
+  /** 重连 READY 后重发已知更新回执：进行中重发 ACCEPTED，否则重发最近一次已完成回执。 */
+  private void resendUpdateResultAfterReconnect() {
+    String active = activeUpdateOperationId.get();
+    if (active != null && !updateResults.containsKey(active)) {
+      sendUpdateResult(DaemonUpdateResult.accepted(active));
+      return;
+    }
+    List<DaemonUpdateResult> snapshot;
+    synchronized (updateResults) {
+      snapshot = new ArrayList<>(updateResults.values());
+    }
+    if (!snapshot.isEmpty()) {
+      sendUpdateResult(snapshot.get(snapshot.size() - 1));
+    }
+  }
+
+  private ManagedUpdatePreparer managedUpdater() {
+    ManagedUpdatePreparer current = managedUpdater;
+    if (current == null) {
+      synchronized (this) {
+        current = managedUpdater;
+        if (current == null) {
+          current = new ManagedDaemonUpdater(config.dataDir());
+          managedUpdater = current;
+        }
+      }
+    }
+    return current;
+  }
+
+  private ManagedUpdateLauncher updateLauncher() {
+    ManagedUpdateLauncher current = updateLauncher;
+    if (current == null) {
+      synchronized (this) {
+        current = updateLauncher;
+        if (current == null) {
+          current = new DetachedUpdateLauncher(environmentInfo.operatingSystem());
+          updateLauncher = current;
+        }
+      }
+    }
+    return current;
+  }
+
+  /** 测试注入点：替换分离更新器启动器，避免真实 fork 进程。 */
+  void setUpdateLauncher(ManagedUpdateLauncher launcher) {
+    this.updateLauncher = launcher;
+  }
+
+  /** 测试注入点：替换更新准备器，避免真实网络下载。 */
+  void setManagedUpdater(ManagedUpdatePreparer updater) {
+    this.managedUpdater = updater;
+  }
+
   private void onMessage(long generation, String rawMessage) {
     ActiveConnection connection = activeConnection.get();
     if (connection == null || connection.generation() != generation) {
@@ -530,6 +676,7 @@ public final class DaemonRuntime implements AutoCloseable {
         }
         case WELCOME -> handleWelcome(connection, envelope);
         case ERROR -> handleError(connection, envelope);
+        case UPDATE -> handleUpdate(envelope);
           // 上传票据是调用作用域的控制平面响应，绝不进入通用协议处理。
         case RESOURCE_UPLOAD_TICKET -> requireInvocationIdAndDeliverTicket(envelope);
         case READY,
@@ -540,7 +687,8 @@ public final class DaemonRuntime implements AutoCloseable {
             FAILED,
             CANCELLED,
             RESOURCE_UPLOAD_REQUEST,
-            RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
+            RESOURCE_UPLOAD_COMMIT,
+            UPDATE_RESULT -> throw new DaemonProtocolException(
             "daemon must not receive " + envelope.messageType() + " from server");
         default -> throw new DaemonProtocolException(
             "unexpected inbound messageType: " + envelope.messageType());
@@ -582,6 +730,8 @@ public final class DaemonRuntime implements AutoCloseable {
         state = DaemonRuntimeState.READY;
         // 只有 READY 连接才能递交上传控制帧；放行在断连期间等待重连的上传继续重放同一 transfer。
         resourceTransferClient.onConnectionReady();
+        // 断开不改变已接受的更新事实：重连后重发已知回执，让 Platform 重新收敛而不是判定失败。
+        resendUpdateResultAfterReconnect();
       }
     }
   }

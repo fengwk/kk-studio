@@ -22,6 +22,8 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
   },
 }))
 

@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -111,12 +112,17 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static String helloPayload(String token, String daemonInstanceId) {
+    return helloPayload(token, daemonInstanceId, EnvironmentCapabilityCatalog.version());
+  }
+
+  static String helloPayload(
+      String token, String daemonInstanceId, String capabilityCatalogVersion) {
     return "{\"protocolVersion\":"
         + DaemonProtocol.VERSION
         + ",\"registrationToken\":\""
         + token
         + "\",\"capabilityCatalogVersion\":\""
-        + EnvironmentCapabilityCatalog.version()
+        + capabilityCatalogVersion
         + "\",\"daemonVersion\":\""
         + DAEMON_VERSION
         + "\",\"daemonInstanceId\":\""
@@ -147,6 +153,8 @@ final class EnvironmentDaemonServerTestSupport {
     final FakeLeaseStore leaseStore = new FakeLeaseStore();
     final FakeTicketService ticketService = new FakeTicketService();
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
+    final List<EnvironmentId> updateResultEnvironments = new ArrayList<>();
+    final List<DaemonUpdateResult> updateResults = new ArrayList<>();
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
 
@@ -167,6 +175,10 @@ final class EnvironmentDaemonServerTestSupport {
                 return Optional.empty();
               },
               readyNotifications::add,
+              (environmentId, result) -> {
+                updateResultEnvironments.add(environmentId);
+                updateResults.add(result);
+              },
               ticketService,
               () -> new EnvironmentServerSettings(Duration.ofSeconds(60), 16L * 1024 * 1024));
     }
@@ -183,6 +195,22 @@ final class EnvironmentDaemonServerTestSupport {
       FakeChannel channel = new FakeChannel(connectionId);
       server.open(channel);
       receiveHello(channel, TOKEN, ENVIRONMENT_ID, daemonInstanceId);
+      receiveReady(channel);
+      return channel;
+    }
+
+    /** 用声明的 capability catalog 版本完成握手：用于验证目录不匹配仍可承载版本查询与受管更新。 */
+    FakeChannel connectReadyWithCatalog(String connectionId, String capabilityCatalogVersion) {
+      FakeChannel channel = new FakeChannel(connectionId);
+      server.open(channel);
+      server.receive(
+          channel.connectionId(),
+          encode(
+              null,
+              DaemonMessageType.HELLO,
+              null,
+              helloPayload(TOKEN, INSTANCE_ID, capabilityCatalogVersion)));
+      channel.boundEnvironmentId = ENVIRONMENT_ID;
       receiveReady(channel);
       return channel;
     }

@@ -21,7 +21,13 @@ vi.mock('@/shared/api/agent-service', () => ({
   agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() },
 }))
 vi.mock('@/shared/api/chat-service', () => ({ chatService: { listChats: vi.fn() } }))
-vi.mock('@/shared/api/environment-service', () => ({ environmentService: { listEnvironments: vi.fn() } }))
+vi.mock('@/shared/api/environment-service', () => ({
+  environmentService: {
+    listEnvironments: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
+  },
+}))
 
 const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: results.length, results })
 

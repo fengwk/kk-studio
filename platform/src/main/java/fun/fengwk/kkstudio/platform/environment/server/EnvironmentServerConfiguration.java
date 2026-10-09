@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.server;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -9,6 +10,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketServic
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentServerSettings;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentUpdateListener;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -35,12 +37,19 @@ public class EnvironmentServerConfiguration {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       EnvironmentSessionListener environmentSessionListener,
+      ObjectProvider<EnvironmentUpdateListener> updateListenerProvider,
       DaemonResourceTicketService ticketService,
       SystemSettingsSnapshot snapshot) {
     return new EnvironmentDaemonServer(
         environmentRegistry,
         token -> toRegistration(environmentRepository, token),
         environmentSessionListener,
+        (environmentId, result) -> {
+          EnvironmentUpdateListener listener = updateListenerProvider.getIfAvailable();
+          if (listener != null) {
+            listener.onUpdateResult(environmentId, result);
+          }
+        },
         ticketService,
         () -> toSettings(snapshot.get()));
   }

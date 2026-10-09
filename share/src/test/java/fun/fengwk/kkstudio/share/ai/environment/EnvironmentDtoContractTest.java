@@ -59,6 +59,18 @@ class EnvironmentDtoContractTest {
     assertEquals(String.class, EnvironmentCardDTO.class.getDeclaredField("version").getType());
   }
 
+  /** 意图：Card 携带最近一次受管更新投影；它是独立于 daemonVersion/CAS version 的第三个事实。 */
+  @Test
+  void environmentCardExposesManagedUpdateProjection() throws Exception {
+    assertEquals(
+        EnvironmentUpdateDTO.class, EnvironmentCardDTO.class.getDeclaredField("update").getType());
+    assertEquals(
+        List.of("operationId", "targetVersion", "phase", "error", "createdAt", "updatedAt"),
+        List.of(EnvironmentUpdateDTO.class.getDeclaredFields()).stream()
+            .map(Field::getName)
+            .toList());
+  }
+
   /** 意图：验证 Card 不再携带历史事件；完整事件列表是有界的四项事实，只在 events 端点暴露。 */
   @Test
   void environmentCardCarriesNoEventAndEventsStayBoundedFacts() throws Exception {
