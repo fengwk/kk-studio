@@ -20,9 +20,9 @@ import java.util.stream.Stream;
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、OkHttp（{@code okhttp3}/{@code okio}）、JGit（{@code
  * org.eclipse.jgit.*}）、LSP4J（{@code org.eclipse.lsp4j.*}，标准 LSP 客户端库）、{@code
  * com.google.re2j}、JNA（{@code com.sun.jna.*}，跨平台执行范围的原生边界）、pty4j（{@code
- * com.pty4j.*}，PTY/ConPTY）、{@code harness.common}、{@code harness.environment}、共享 Environment
- * 配置模型以及本模块自身包。 严禁直接依赖 {@code harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及
- * Provider SDK 和 LangChain4j。
+ * com.pty4j.*}，PTY/ConPTY）、JediTerm（{@code com.jediterm.*}，唯一 VT 内核）、{@code harness.common}、{@code
+ * harness.environment}、共享 Environment 配置模型以及本模块自身包。 严禁直接依赖 {@code
+ * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK 和 LangChain4j。
  */
 class DaemonModuleArchitectureTest {
 
@@ -200,6 +200,7 @@ class DaemonModuleArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("com.pty4j.")
+        || imported.startsWith("com.jediterm.")
         || imported.startsWith("com.fasterxml.jackson.")
         || imported.startsWith("com.sun.jna.")
         || imported.startsWith("okhttp3.")

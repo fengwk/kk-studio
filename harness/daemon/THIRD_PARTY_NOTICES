@@ -15,6 +15,7 @@ dependency-provided notices are also retained in the JAR.
 | SLF4J | MIT License |
 | JNA and JNA Platform (`net.java.dev.jna:jna`, `net.java.dev.jna:jna-platform`) | Apache License 2.0（双许可，本项目按 Apache-2.0 使用） |
 | pty4j (`org.jetbrains.pty4j:pty4j`) | Eclipse Public License 1.0（构件 POM 声明；JAR 内嵌预编译原生库，见下节） |
+| JediTerm (`org.jetbrains.jediterm:jediterm-core`) | LGPL-3.0 OR Apache-2.0（上游双授权；本项目按 Apache-2.0 使用，见下节） |
 | RE2/J | Go License (BSD-style) |
 
 ## pty4j
@@ -85,6 +86,35 @@ Both `about.html` files are retained inside the bundled JARs, and the
 settle the question either. A redistributor that needs one
 authoritative license must establish it from the Eclipse project
 (`https://github.com/eclipse-lsp4j/lsp4j`) instead of relying on this table.
+
+## JediTerm
+
+`harness/daemon` directly depends on `org.jetbrains.jediterm:jediterm-core:3.76`
+(published on the JetBrains `intellij-dependencies` repository). It is the single VT
+emulator implementation behind the headless terminal kernel.
+
+The upstream project is dual-licensed. Its `README.md` "Licenses" section states that
+JediTerm is licensed under both the LGPLv3 (`LICENSE-LGPLv3.txt`) and the Apache 2.0
+License (`LICENSE-APACHE-2.0.txt`), and that a licensee "may select, at your option,
+one of the above-listed licenses". The published Maven POM declares only `LGPL 3.0`
+(one of the two options) and the published binary and sources artifacts carry no
+`LICENSE` file, so the dual grant is evidenced by the upstream repository rather than
+by the artifact metadata. The repository `VERSION` file is `3.76`, matching the
+version this JAR bundles, and both root license files plus the dual-licensing
+statement are present for that revision.
+
+This distribution uses the Apache License 2.0 option: the complete license is
+bundled at `META-INF/licenses/jediterm/LICENSE-APACHE-2.0.txt`. The per-file Apache-2.0 headers that the upstream
+sources carry (for example `com/jediterm/terminal/util/Pair.java`) are retained where
+sources are redistributed. The upstream repository publishes no `NOTICE` file, so no
+upstream notice is omitted.
+
+Sources:
+
+- Version 3.76 revision: https://github.com/JetBrains/jediterm/tree/1b354a63f9845aee3474b0749af0a62e406f0076
+- Dual-license statement: https://github.com/JetBrains/jediterm/blob/1b354a63f9845aee3474b0749af0a62e406f0076/README.md
+- Apache 2.0 text: https://github.com/JetBrains/jediterm/blob/1b354a63f9845aee3474b0749af0a62e406f0076/LICENSE-APACHE-2.0.txt
+- LGPLv3 text: https://github.com/JetBrains/jediterm/blob/1b354a63f9845aee3474b0749af0a62e406f0076/LICENSE-LGPLv3.txt
 
 ## pi-base behavior reference
 

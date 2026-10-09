@@ -2,7 +2,7 @@
 
 Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；共享契约见 [Harness Environment](harness-environment.md)，服务端会话见 [Harness Environment Server](harness-environment-server.md)。
 
-模块依赖 `harness-common`、`harness-environment` 及 Jackson、OkHttp、JGit、RE2/J、LSP4J、JNA。官方发布物将这些依赖和 LSP client 打成 shaded JAR；语言服务器与 Bash 由宿主提供。
+模块依赖 `harness-common`、`harness-environment` 及 Jackson、OkHttp、JGit、RE2/J、LSP4J、JNA、pty4j 和 JediTerm。官方发布物将依赖、Kotlin 与 PTY 原生资源打成 shaded JAR；语言服务器与 Bash 由宿主提供。
 
 ## 启动与本地状态
 
@@ -93,6 +93,16 @@ helper 命令行只携带固定入口与私有状态目录；工作目录和 arg
 
 范围管理不是恶意命令隔离：POSIX 命令主动重新建立 session 可离开边界，不承诺阻止逃逸；仅改变进程组不会脱离会话收敛。LSP 使用同一范围的双向 stdio 模式，stderr 独立，客户端关闭先发送 shutdown/exit，宽限后收敛后代。跨平台测试见 [`ProcessScopeCrossPlatformTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScopeCrossPlatformTest.java)，其它命令行为见[内置 Bash 测试映射](../operations/builtin-bash-tests.md)。
 
+### Headless 终端内核
+
+[`TerminalKernel`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernel.java) 以 JediTerm 3.76 为唯一 VT 解释器。调用方注入执行器与非阻塞应答出口；一个 owner 完成 UTF-8 解码、解释、输入模式编码、resize 和一致画面捕获。它不创建 GUI，也没有第二个解析器或原始输出回放。
+
+输入与控制共用 128 项 FIFO，每次输入最多 4096 字节；空读点处理控制，半截 CSI、OSC、UTF-8 不阻止捕获、resize 或关闭。单次解释最多消费 65536 个 UTF-16 单位，超限明确失败。尺寸采用 JediTerm 的公开下限 5 列、2 行，低于下限直接拒绝，避免初始化与 resize 的实际尺寸不一致。关闭优先于待决事件，有界等待 owner 退出；`termination()` 与未决操作明确报告失败。DA/DSR/OSC 应答只进入注入的出口，外部回调异常不会暴露终端内容。
+
+画面使用 [`TerminalView`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalView.java) 深不可变投影：每槽为数字 UTF-16 单位、UNIT/EMPTY/DWC 拓扑和独立样式；不拼接码点、规范化或重新推理宽度。只投影活动缓冲与有界历史；输入模式版本按实际模式和尺寸比较递增，不随普通输出改变。内核没有日志或持久化出口，也不拥有 PTY 或网络连接。
+
+数值投影、样式、历史与缓冲切换由 [`TerminalKernelTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelTest.java) 和 [`TerminalSnapshotProjectorTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalSnapshotProjectorTest.java) 验证；分块调度、预算、满队列、关闭与异常传播由 [`TerminalKernelSchedulingTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelSchedulingTest.java) 验证。
+
 ### 文件与检索
 
 文件修改保留编码、BOM、行尾，通过进程内分段锁串行化同文件修改。文本读窗口以 1-based 行/列定位，limit 默认及最大 2000，正文预算 60000 Unicode 码点；扫描到 EOF 得到总行数与 ends_with_newline，内存只驻留窗口。超时/中断不返回半个窗口；续读由 next 指向首个未返回字符。支持的图片以二进制结果直传对象存储，设备、FIFO、socket 等特殊节点在 I/O 前拒绝。详细读写契约见[内置 Read 测试映射](../operations/builtin-read-tests.md)与[文件修改测试映射](../operations/builtin-mutation-tests.md)。
@@ -125,6 +135,7 @@ COMPLETED(uploadId 与权威元数据)
 | `daemon` | CLI、数据目录、能力注册、执行器所有权、握手与调用运行时 |
 | `daemon.coding` | 文件、命令、检索、文本输出与 LSP；只消费显式调用目录 |
 | `daemon.process` | 唯一 OS 执行范围基座：父进程侧 `ProcessScope`、helper 侧 `ProcessScopeHelper`、POSIX/Windows 原生原语；不注册工具 |
+| `daemon.terminal` | 单 owner JediTerm 内核、显式 headless Display 与深不可变数值投影；不拥有 PTY、连接或业务持久化 |
 | `daemon.journal` | 进程内原子去重与冻结终态，不持久化跨进程执行状态 |
 | `daemon.skill` | exact commit 的技能包拉取、校验、替换与启动恢复 |
 | `daemon.transport` | WebSocket 文本传输、压缩协商与帧边界 |

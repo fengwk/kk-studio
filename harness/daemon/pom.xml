@@ -22,6 +22,8 @@
         <pty4j.version>0.14.0</pty4j.version>
         <!-- SLF4J：pty4j 与 JGit 以 SLF4J 记录诊断，绑定固定为 nop，避免无绑定告警污染用户终端（PTY 模式下 stderr 就是终端）。 -->
         <slf4j.version>2.0.19</slf4j.version>
+        <!-- headless VT 内核唯一实现：JediTerm 核心；上游双许可，本项目选择 Apache-2.0。 -->
+        <jediterm.version>3.76</jediterm.version>
     </properties>
 
     <dependencyManagement>
@@ -34,6 +36,14 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <repositories>
+        <!-- JediTerm 只发布在 JetBrains 仓库，Central 不提供该构件。 -->
+        <repository>
+            <id>jetbrains-intellij-dependencies</id>
+            <url>https://packages.jetbrains.team/maven/p/ij/intellij-dependencies/</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <dependency>
@@ -89,6 +99,12 @@
             <artifactId>pty4j</artifactId>
             <version>${pty4j.version}</version>
         </dependency>
+        <!-- headless VT 内核：JediTerm 核心提供终端解释与缓冲模型，是唯一解析实现（不新增第二解析器）。 -->
+        <dependency>
+            <groupId>org.jetbrains.jediterm</groupId>
+            <artifactId>jediterm-core</artifactId>
+            <version>${jediterm.version}</version>
+        </dependency>
         <!-- pty4j 以 SLF4J 记录诊断；绑定固定为 nop，避免「没有 provider」告警混进用户终端（PTY 模式下 stderr 就是终端）。 -->
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -112,6 +128,37 @@
         <finalName>kk-studio-daemon</finalName>
 
         <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>check-terminal-kernel-line-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <!-- 核心新包：headless VT 内核与画面投影按包聚合行覆盖率。 -->
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>fun/fengwk/kkstudio/harness/daemon/terminal</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -138,6 +185,7 @@
                                         <!-- 交付声明只由下面的 IncludeResourceTransformer 追加一份；留在这里会让「重复 verify」时的输入
                                              （上一轮已经打包好声明的 jar）与本轮的声明撞成 duplicate entry。 -->
                                         <exclude>META-INF/THIRD_PARTY_NOTICES</exclude>
+                                        <exclude>META-INF/licenses/jediterm/LICENSE-APACHE-2.0.txt</exclude>
                                         <!-- 多份 module-info 合并会互相覆盖；Daemon 运行在 unnamed module 中。 -->
                                         <exclude>module-info.class</exclude>
                                         <exclude>META-INF/versions/**/module-info.class</exclude>
@@ -157,6 +205,11 @@
                                         implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
                                     <resource>META-INF/THIRD_PARTY_NOTICES</resource>
                                     <file>${project.basedir}/THIRD_PARTY_NOTICES</file>
+                                </transformer>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
+                                    <resource>META-INF/licenses/jediterm/LICENSE-APACHE-2.0.txt</resource>
+                                    <file>${project.basedir}/../../LICENSE</file>
                                 </transformer>
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">

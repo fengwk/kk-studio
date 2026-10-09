@@ -157,6 +157,7 @@ class RuntimeModuleArchitectureTest {
             "org.eclipse.lsp4j:org.eclipse.lsp4j",
             "org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc",
             "org.eclipse.jgit:org.eclipse.jgit",
+            "org.jetbrains.jediterm:jediterm-core",
             "org.jetbrains.pty4j:pty4j",
             "org.slf4j:slf4j-api",
             "org.slf4j:slf4j-nop"));

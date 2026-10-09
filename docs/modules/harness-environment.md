@@ -230,6 +230,7 @@ harness-environment
 | `fun.fengwk.kkstudio.harness.environment` | canonical Environment UUID，无 I/O |
 | `fun.fengwk.kkstudio.harness.environment.capability` | 固定目录、schema、执行与传输 SPI、发送确定性与终态契约 |
 | `fun.fengwk.kkstudio.harness.environment.daemon` | wire 值与 codec、资源票据、远端 workdir 词法校验；不拥有连接、租约或执行状态 |
+| `fun.fengwk.kkstudio.harness.environment.terminal` | JDK-only 深不可变数值画面、逐槽样式与输入模式；不解释 VT、不拥有进程或连接 |
 
 ## 源码与测试
 
@@ -237,6 +238,7 @@ harness-environment
 
 测试守卫：
 
+- [`TerminalViewTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalViewTest.java)：画面的深不可变、数字 UTF-16 序列化与颜色边界。
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：10 项能力的固定顺序与版本、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。
