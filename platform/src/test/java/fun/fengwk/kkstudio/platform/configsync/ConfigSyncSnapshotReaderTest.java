@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
+import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.agent;
+import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.agentConfig;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.environment;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.mcpServer;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.mcpTool;
@@ -17,6 +19,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
@@ -24,6 +27,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
 import java.util.List;
 
@@ -79,6 +83,25 @@ class ConfigSyncSnapshotReaderTest {
     assertEquals(List.of(server), snapshot.mcpServers());
     assertEquals(List.of(tool), snapshot.mcpTools());
     assertTrue(snapshot.agents().isEmpty());
+  }
+
+  /** 测试意图：系统内置 Agent 由系统持有身份，不参与配置同步，读取快照时被排除。 */
+  @Test
+  void excludesBuiltinAgentsFromTheSnapshot() {
+    when(systemSettingsRepository.get()).thenReturn(settings(1L));
+    when(skillCatalogQueryService.listPackages()).thenReturn(List.of());
+    AgentDefinition user =
+        agent("user-agent", "p", "m", agentConfig(List.of(), List.of(), List.of()));
+    user.setType(AgentDefinitionType.USER);
+    AgentDefinition builtin =
+        agent("compaction", null, null, agentConfig(List.of(), List.of(), List.of()));
+    builtin.setType(AgentDefinitionType.BUILTIN);
+    when(definitionRepository.listAll()).thenReturn(List.of(user, builtin));
+
+    ConfigSyncSnapshot snapshot = reader.read();
+
+    assertEquals(
+        List.of("user-agent"), snapshot.agents().stream().map(AgentDefinition::getName).toList());
   }
 
   @Test

@@ -3,7 +3,12 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
-/** 完整的 Agent Definition create/PUT 请求体；可空文本字段用于显式清除对应值。 */
+/**
+ * 完整的 Agent Definition create/PUT 请求体；可空文本字段用于显式清除对应值。
+ *
+ * <p>所有权类型 {@link fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType}
+ * 由系统持有，不出现在可编辑请求体中：用户创建一律为 USER，内置 Agent 的类型由系统初始化决定；携带 {@code type} 字段会被未知字段拒绝。
+ */
 @Data
 public class AgentDefinitionEditablePropertiesDTO {
 

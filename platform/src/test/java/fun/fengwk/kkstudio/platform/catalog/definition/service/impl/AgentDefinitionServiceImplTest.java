@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
@@ -23,11 +24,14 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
+import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -53,7 +57,7 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinition definition = definition();
     AgentDefinitionCreateDTO create = create();
-    when(factory.newAgent("agent", create)).thenReturn(definition);
+    when(factory.newUserAgent("agent", create)).thenReturn(definition);
     when(repository.create(definition)).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createAgent(create));
 
@@ -115,7 +119,7 @@ public class AgentDefinitionServiceImplTest {
     definition.setConfigJson(
         "{\"tools\":[],\"skills\":[{\"packageName\":\"tools\",\"name\":\"dev\"}],\"subagents\":[]}");
 
-    when(factory.newAgent("agent", create)).thenReturn(definition);
+    when(factory.newUserAgent("agent", create)).thenReturn(definition);
     when(repository.create(definition)).thenReturn(true);
 
     service.createAgent(create);
@@ -206,7 +210,7 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinition badVariant = definition();
     badVariant.setVariant("bad-variant");
     AgentDefinitionCreateDTO create = create();
-    when(factory.newAgent("agent", create)).thenReturn(badVariant);
+    when(factory.newUserAgent("agent", create)).thenReturn(badVariant);
     when(variants.resolve("provider", "model", "bad-variant"))
         .thenThrow(new IllegalArgumentException("unknown variant: bad-variant"));
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
@@ -214,7 +218,7 @@ public class AgentDefinitionServiceImplTest {
     // 非法 config：Agent 选择不存在的工具，configValidator 拒绝时包装为 AiValidationException。
     AgentDefinition badConfig = definition();
     badConfig.setConfigJson("{\"tools\":[\"no-such-tool\"],\"skills\":[],\"subagents\":[]}");
-    when(factory.newAgent("agent", create)).thenReturn(badConfig);
+    when(factory.newUserAgent("agent", create)).thenReturn(badConfig);
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
   }
 
@@ -230,7 +234,7 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinition definition = definition();
     AgentDefinitionCreateDTO create = create();
-    when(factory.newAgent("agent", create)).thenReturn(definition);
+    when(factory.newUserAgent("agent", create)).thenReturn(definition);
 
     // PostgreSQL FK 完整性失败：模型不存在 → 确定性 not found。
     doThrow(integrityFailure("23503")).when(repository).create(definition);
@@ -269,6 +273,99 @@ public class AgentDefinitionServiceImplTest {
         nonForeignKey,
         assertThrows(
             DataIntegrityViolationException.class, () -> service.updateAgent("agent", update)));
+  }
+
+  /** 测试意图：用户不能以保留的内置名称创建自己的 Agent，覆盖系统持有的身份。 */
+  @Test
+  public void shouldRejectReservedBuiltinNameOnCreate() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants);
+
+    AgentDefinitionCreateDTO create = create();
+    create.setName("compaction");
+    assertThrows(AiDuplicateException.class, () -> service.createAgent(create));
+    verify(factory, never()).newUserAgent(eq("compaction"), eq(create));
+    verify(repository, never()).create(any());
+  }
+
+  /** 测试意图：内置 Agent 按类型受删除保护，与具体名称无关。 */
+  @Test
+  public void shouldProtectBuiltinFromDeletionByType() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants);
+
+    AgentDefinition builtin = definition();
+    builtin.setType(AgentDefinitionType.BUILTIN);
+    when(resolver.requireAgentForUpdate("agent")).thenReturn(builtin);
+
+    assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
+    verify(repository, never()).deleteByName(eq("agent"), eq(0L));
+  }
+
+  /** 测试意图：内置 Agent 允许更新为显式未配置模型，跳过模型存在性与 variant 校验。 */
+  @Test
+  public void shouldAllowBuiltinUpdateWithoutModel() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants);
+
+    AgentDefinition builtin = definition();
+    builtin.setType(AgentDefinitionType.BUILTIN);
+    builtin.setModelProviderName(null);
+    builtin.setModelName(null);
+    when(resolver.requireAgent("agent")).thenReturn(builtin);
+    when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(builtin);
+    when(repository.updateByName(any(AgentDefinition.class), eq(0L))).thenReturn(true);
+    when(repository.getByName("agent")).thenReturn(builtin);
+    when(converter.convert(builtin)).thenReturn(new AgentDefinitionDTO());
+
+    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setModel(null);
+    update.setConfig(config());
+    update.setExpectedVersion("0");
+
+    service.updateAgent("agent", update);
+    verify(resolver, never()).requireModelForUpdate(any(), any());
+    verify(variants, never()).resolve(any(), any(), any());
+  }
+
+  /** 测试意图：用户 Agent 更新仍必须有模型；显式未配置模型只对内置 Agent 合法（防止 required 语义反转）。 */
+  @Test
+  public void shouldRequireModelForUserAgentUpdate() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants);
+
+    AgentDefinition user = definition();
+    user.setType(AgentDefinitionType.USER);
+    when(resolver.requireAgent("agent")).thenReturn(user);
+
+    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setModel(null);
+    update.setConfig(config());
+    update.setExpectedVersion("0");
+
+    assertThrows(AiValidationException.class, () -> service.updateAgent("agent", update));
+    verify(resolver, never()).requireModelForUpdate(any(), any());
+    verify(factory, never()).update(any(), any());
   }
 
   private AgentDefinitionServiceImpl service(

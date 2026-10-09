@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
 import java.util.List;
 
@@ -74,6 +75,7 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
     }
     AgentDefinitionDO result = new AgentDefinitionDO();
     result.setName(definition.getName());
+    result.setType(definition.getType() == null ? null : definition.getType().name());
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());
     result.setModelProviderName(definition.getModelProviderName());
@@ -89,6 +91,8 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
     }
     AgentDefinition result = new AgentDefinition();
     result.setName(definition.getName());
+    result.setType(
+        definition.getType() == null ? null : AgentDefinitionType.valueOf(definition.getType()));
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());
     result.setModelProviderName(definition.getModelProviderName());

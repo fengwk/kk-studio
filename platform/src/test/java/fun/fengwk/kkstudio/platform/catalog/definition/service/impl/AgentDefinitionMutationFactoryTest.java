@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -29,7 +30,7 @@ public class AgentDefinitionMutationFactoryTest {
         config(List.of("browser"), List.of(skillRef("tools", "java"), skillRef("tools", "dev")));
     AgentDefinitionCreateDTO create = create("agent", "provider/model", config, "default");
 
-    AgentDefinition definition = factory.newAgent("agent", create);
+    AgentDefinition definition = factory.newUserAgent("agent", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
     assertEquals(List.of("browser"), stored.getTools());
@@ -59,13 +60,13 @@ public class AgentDefinitionMutationFactoryTest {
             config(List.of(), List.of(skillRef("tools", "java"), skillRef("tools", "java"))),
             "default");
     AiValidationException error =
-        assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
+        assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", create));
     assertEquals(
         "agent definition config skills must not contain duplicates: tools/java",
         error.getMessage());
 
     create.setConfig(config(List.of(" read "), List.of()));
-    error = assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
+    error = assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", create));
     assertEquals(
         "agent definition config tools must contain valid model-visible tool names:  read ",
         error.getMessage());
@@ -75,48 +76,69 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldRequireCompleteConfigurationAndEnforceLimits() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     assertThrows(
-        AiValidationException.class, () -> factory.newAgent(" ", new AgentDefinitionCreateDTO()));
+        AiValidationException.class,
+        () -> factory.newUserAgent(" ", new AgentDefinitionCreateDTO()));
     assertThrows(
         AiValidationException.class,
         () ->
-            factory.newAgent(
+            factory.newUserAgent(
                 "\u2003agent\u2003",
                 create("\u2003agent\u2003", "provider/model", config(List.of(), List.of()), null)));
     AgentDefinitionCreateDTO missingModel =
         create("agent", null, config(List.of(), List.of()), null);
-    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", missingModel));
+    assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", missingModel));
     missingModel.setModel("no-slash");
-    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", missingModel));
+    assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", missingModel));
 
     AgentDefinitionCreateDTO incomplete = create("agent", "provider/model", null, null);
-    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", incomplete));
+    assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", incomplete));
     incomplete.setConfig(config(List.of(), List.of()));
-    AgentDefinition allowedBlankVariant = factory.newAgent("agent", incomplete);
+    AgentDefinition allowedBlankVariant = factory.newUserAgent("agent", incomplete);
     assertNull(allowedBlankVariant.getVariant());
 
     AgentDefinitionCreateDTO oversized =
         create("n".repeat(65), "provider/model", config(List.of(), List.of()), null);
     assertThrows(
-        AiValidationException.class, () -> factory.newAgent(oversized.getName(), oversized));
+        AiValidationException.class, () -> factory.newUserAgent(oversized.getName(), oversized));
     // description 已放开为 text：超长文本不再被拒绝，也不再截断。
     AgentDefinitionCreateDTO longDescription =
         create("agent", "provider/model", config(List.of(), List.of()), null);
     longDescription.setDescription("d".repeat(4096));
-    assertEquals("d".repeat(4096), factory.newAgent("agent", longDescription).getDescription());
+    assertEquals("d".repeat(4096), factory.newUserAgent("agent", longDescription).getDescription());
     AgentDefinitionCreateDTO pathBreaking =
         create("agent/name", "provider/model", config(List.of(), List.of()), null);
     assertThrows(
-        AiValidationException.class, () -> factory.newAgent(pathBreaking.getName(), pathBreaking));
+        AiValidationException.class,
+        () -> factory.newUserAgent(pathBreaking.getName(), pathBreaking));
+  }
+
+  /** 测试意图：内置 Agent 允许显式未配置模型，但 variant 必须同时为空；用户 Agent 仍必须提供模型。 */
+  @Test
+  public void shouldAllowUnconfiguredBuiltinModel() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionCreateDTO create =
+        create("compaction", null, config(List.of(), List.of()), null);
+    AgentDefinition builtin = factory.newBuiltinAgent("compaction", create);
+    assertEquals(AgentDefinitionType.BUILTIN, builtin.getType());
+    assertNull(builtin.getModelProviderName());
+    assertNull(builtin.getModelName());
+    assertNull(builtin.getVariant());
+
+    create.setVariant("default");
+    assertThrows(AiValidationException.class, () -> factory.newBuiltinAgent("compaction", create));
+
+    AgentDefinitionCreateDTO user = create("agent", null, config(List.of(), List.of()), null);
+    assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", user));
   }
 
   // 测试意图: 验证 mutation factory 在 body 或 name 为 null 时抛出清晰的 AiValidationException
   @Test
   public void shouldRejectNullPropertiesAndNullName() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
-    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", null));
+    assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", null));
     AgentDefinitionCreateDTO create =
         create(null, "provider/model", config(List.of(), List.of()), null);
-    assertThrows(AiValidationException.class, () -> factory.newAgent(null, create));
+    assertThrows(AiValidationException.class, () -> factory.newUserAgent(null, create));
   }
 
   private static AgentDefinitionCreateDTO create(
