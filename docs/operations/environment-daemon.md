@@ -138,7 +138,7 @@ journal 不跨重启保留，已经发生的命令副作用不回滚。
 | 数据 | 配置文件的父目录 | 配置文件的父目录 |
 
 `daemon.json` 就是 Web 中 `installConfig.daemon` 对象本身，只含 `studioUrl`、`note`、
-`bashExecutable` 与可选的 `lsp`，**不含** `operatingSystem`、`javaHome`，也不含 token、gateway
+`bashExecutable`、可选的 `terminal` 与可选的 `lsp`，**不含** `operatingSystem`、`javaHome`，也不含 token、gateway
 或数据目录字段。`operatingSystem` 与 `javaHome` 只用于安装与生成命令，不进入运行时配置文件。
 token 是独立兄弟文件 `daemon.token`。Daemon 不做任何独立配置解析：`daemon.json` 是唯一配置
 来源，没有第二个 LSP 文件，也没有环境变量配置入口。
@@ -162,6 +162,11 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
     "studioUrl": "https://studio.example.com",
     "note": null,
     "bashExecutable": null,
+    "terminal": {
+      "executable": null,
+      "args": [],
+      "workdir": null
+    },
     "lsp": {
       "servers": {
         "jdtls": {
@@ -187,6 +192,11 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
   `ws(s)://<authority>/api/harness/environment-daemon/v1`。
 - `note` 可选，trim 后单行、最长 512 字符、不含控制字符；空值保存为省略/null。
 - `bashExecutable` 可选，非空白且不含控制字符；缺省为 `bash`。
+- `terminal` 可选，缺省、`null` 与空对象都表示默认配置：`executable`、`workdir` 若显式则非空白、不含
+  控制字符且不 trim 改值，`args` 是严格字符串数组、每项保留原值（允许空字符串，不丢弃空参数）。共享
+  codec 只做无控制文本校验（配置可能在不同 OS 安装）；可执行程序解析与 workdir 的“绝对且可访问”校验
+  由 Daemon 在读取配置时完成，且 shell 与工作目录只在此处确定一次。`terminal` 与模型工具的
+  `bashExecutable` 互相独立，不改变 Bash capability 语义。
 - `lsp` 可选；一旦启用就必须声明至少一个 server，空表非法。server id 匹配
   `[A-Za-z0-9_.-]+`，`command` 是非空字符串数组，`extensions` 必须带前导点且不含路径分隔符，
   `rootMarkers` / `firstMatchMarkers` 是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段
@@ -220,6 +230,10 @@ environments:
       daemon:
         studioUrl: https://studio.example.com
         bashExecutable: /bin/bash
+        terminal:
+          executable: /bin/zsh
+          args: ["-l", ""]
+          workdir: /opt/work
         lsp:
           servers:
             jdtls:

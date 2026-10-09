@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.daemon.coding.TestCodingConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
+import fun.fengwk.kkstudio.harness.daemon.terminal.TerminalLaunchSpec;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
@@ -124,6 +125,10 @@ class DaemonRuntimeTest {
 
   /** 测试用注册凭证：与真实部署一样，只以 owner-only 文件形式存在，argv/日志中不出现明文。 */
   private static final String REGISTRATION_TOKEN = "test-registration-token";
+
+  /** 生产构造点的固定终端 launch spec：runtime 用例不驱动终端，只需一个合法规格。 */
+  private static final TerminalLaunchSpec TERMINAL =
+      new TerminalLaunchSpec("sh", List.of(), Path.of("").toAbsolutePath());
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
@@ -287,7 +292,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir());
+            dataDir(),
+            TERMINAL);
 
     assertThrows(
         IllegalStateException.class,
@@ -311,7 +317,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir());
+            dataDir(),
+            TERMINAL);
     CodingToolsConfig toolsConfig = TestCodingConfig.withLsp(WORKSPACE_ROOT);
 
     try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(config.dataDir())) {
@@ -334,7 +341,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir());
+            dataDir(),
+            TERMINAL);
     AtomicReference<ExecutorService> executorRef = new AtomicReference<>();
     AtomicReference<ScheduledExecutorService> schedulerRef = new AtomicReference<>();
 
@@ -385,7 +393,8 @@ class DaemonRuntimeTest {
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 null,
-                dataDir())
+                dataDir(),
+                TERMINAL)
             .effectiveNote(capabilities.environment().operatingSystem()),
         capabilities.environment().note());
   }
@@ -1090,7 +1099,8 @@ class DaemonRuntimeTest {
                   Duration.ZERO,
                   Duration.ofSeconds(1),
                   null,
-                  dataDir()),
+                  dataDir(),
+                  TERMINAL),
               transport,
               registry,
               new InMemoryDaemonInvocationJournal(),
@@ -2077,7 +2087,8 @@ class DaemonRuntimeTest {
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 null,
-                dataDir()),
+                dataDir(),
+                TERMINAL),
             transport,
             registry,
             new InMemoryDaemonInvocationJournal(),
@@ -2121,7 +2132,8 @@ class DaemonRuntimeTest {
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 null,
-                dataDir()),
+                dataDir(),
+                TERMINAL),
             transport,
             registry,
             new InMemoryDaemonInvocationJournal(),
@@ -2207,7 +2219,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir()),
+            dataDir(),
+            TERMINAL),
         transport,
         registry,
         new InMemoryDaemonInvocationJournal(),
@@ -2228,7 +2241,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             note,
-            dataDir()),
+            dataDir(),
+            TERMINAL),
         transport,
         registry,
         new InMemoryDaemonInvocationJournal(),
@@ -2246,7 +2260,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir()),
+            dataDir(),
+            TERMINAL),
         transport,
         registry,
         new InMemoryDaemonInvocationJournal(),
@@ -2269,7 +2284,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir()),
+            dataDir(),
+            TERMINAL),
         transport,
         registry,
         journal,
@@ -2292,7 +2308,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir()),
+            dataDir(),
+            TERMINAL),
         transport,
         registry,
         new InMemoryDaemonInvocationJournal(),
@@ -2316,7 +2333,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            dataDir()),
+            dataDir(),
+            TERMINAL),
         transport,
         registry,
         journal,

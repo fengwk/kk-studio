@@ -42,11 +42,13 @@ public final class DaemonConfigurationCodec {
   }
 
   public static DaemonConfiguration parse(JsonNode node) {
-    object(node, "daemon", Set.of("studioUrl", "note", "bashExecutable", "lsp"));
+    object(node, "daemon", Set.of("studioUrl", "note", "bashExecutable", "terminal", "lsp"));
     DaemonConfiguration config = new DaemonConfiguration();
     config.setStudioUrl(text(node.get("studioUrl"), "daemon.studioUrl"));
     config.setNote(text(node.get("note"), "daemon.note"));
     config.setBashExecutable(text(node.get("bashExecutable"), "daemon.bashExecutable"));
+    JsonNode terminal = node.get("terminal");
+    config.setTerminal(absent(terminal) ? null : parseTerminalNode(terminal));
     JsonNode lsp = node.get("lsp");
     config.setLsp(absent(lsp) ? null : parseLspNode(lsp));
     return validate(config);
@@ -88,6 +90,15 @@ public final class DaemonConfigurationCodec {
     return config;
   }
 
+  private static DaemonTerminalConfiguration parseTerminalNode(JsonNode node) {
+    object(node, "daemon.terminal", Set.of("executable", "args", "workdir"));
+    DaemonTerminalConfiguration value = new DaemonTerminalConfiguration();
+    value.setExecutable(text(node.get("executable"), "daemon.terminal.executable"));
+    value.setArgs(argvList(node.get("args"), "daemon.terminal.args"));
+    value.setWorkdir(text(node.get("workdir"), "daemon.terminal.workdir"));
+    return value;
+  }
+
   public static DaemonConfiguration validate(DaemonConfiguration config) {
     if (config == null) {
       throw invalid("daemon", "must be an object");
@@ -108,8 +119,65 @@ public final class DaemonConfigurationCodec {
       nonblank(bash, "daemon.bashExecutable");
     }
     result.setBashExecutable(bash);
+    result.setTerminal(
+        config.getTerminal() == null ? null : validateTerminal(config.getTerminal()));
     result.setLsp(config.getLsp() == null ? null : validateLsp(config.getLsp()));
     return result;
+  }
+
+  private static DaemonTerminalConfiguration validateTerminal(DaemonTerminalConfiguration config) {
+    DaemonTerminalConfiguration result = new DaemonTerminalConfiguration();
+    String executable = config.getExecutable();
+    if (executable != null) {
+      nonblank(executable, "daemon.terminal.executable");
+    }
+    result.setExecutable(executable);
+    result.setArgs(argvList(config.getArgs(), "daemon.terminal.args"));
+    String workdir = config.getWorkdir();
+    if (workdir != null) {
+      nonblank(workdir, "daemon.terminal.workdir");
+    }
+    result.setWorkdir(workdir);
+    if (executable == null && workdir == null && result.getArgs().isEmpty()) {
+      return null;
+    }
+    return result;
+  }
+
+  /** 程序构造的 argv：每项保留原值（允许空字符串），只拒绝非字符串与控制字符。 */
+  private static List<String> argvList(List<String> values, String path) {
+    if (values == null || values.isEmpty()) {
+      return List.of();
+    }
+    List<String> result = new ArrayList<>();
+    for (int index = 0; index < values.size(); index++) {
+      String value = values.get(index);
+      if (value == null) {
+        throw invalid(path + "[" + index + "]", "must be a string");
+      }
+      noControls(value, path + "[" + index + "]");
+      result.add(value);
+    }
+    return List.copyOf(result);
+  }
+
+  /** 外部 JSON argv：严格字符串数组，不做标量强制转换，也不丢弃空参数。 */
+  private static List<String> argvList(JsonNode node, String path) {
+    if (absent(node)) {
+      return null;
+    }
+    if (!node.isArray()) {
+      throw invalid(path, "must be an array of strings");
+    }
+    List<String> values = new ArrayList<>();
+    for (int index = 0; index < node.size(); index++) {
+      JsonNode item = node.get(index);
+      if (item == null || !item.isTextual()) {
+        throw invalid(path + "[" + index + "]", "must be a string");
+      }
+      values.add(item.textValue());
+    }
+    return values;
   }
 
   /** Studio HTTP(S) origin 对应的 Environment WebSocket 入口。 */

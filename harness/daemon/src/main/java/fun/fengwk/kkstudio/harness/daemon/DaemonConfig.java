@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.ExecutableResolver;
 import fun.fengwk.kkstudio.harness.daemon.coding.LspDiscovery;
+import fun.fengwk.kkstudio.harness.daemon.terminal.TerminalLaunchSpec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
@@ -21,6 +22,8 @@ import java.util.Objects;
  *
  * <p>数据目录承载大文本输出与进程锁。二进制结果由 Daemon 直传对象存储。 Environment UUID 由 Gateway 在 WELCOME 消息中下发。
  *
+ * <p>人工终端的 launch spec 在配置解析时确定一次（shell 与工作目录），运行期不再更换；它与模型工具的 bash 可执行程序互相独立。
+ *
  * <p>note 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
 public record DaemonConfig(
@@ -32,7 +35,8 @@ public record DaemonConfig(
     String note,
     Path dataDir,
     String bashExecutable,
-    LspDiscovery lsp) {
+    LspDiscovery lsp,
+    TerminalLaunchSpec terminal) {
 
   /** 未显式配置时的 bash 可执行文件。 */
   public static final String DEFAULT_BASH_EXECUTABLE = "bash";
@@ -53,9 +57,10 @@ public record DaemonConfig(
     dataDir = requireAbsoluteDirectory(dataDir);
     bashExecutable = blankToDefault(bashExecutable, DEFAULT_BASH_EXECUTABLE, "bashExecutable");
     lsp = Objects.requireNonNull(lsp, "lsp");
+    terminal = Objects.requireNonNull(terminal, "terminal");
   }
 
-  /** 便捷构造器：本地执行程序使用默认值，未配置任何 LSP 服务器。 */
+  /** 便捷构造器：bash 与 LSP 使用默认值，人工终端 launch spec 由调用方给出。 */
   public DaemonConfig(
       URI gatewayUri,
       Path registrationTokenFile,
@@ -63,7 +68,8 @@ public record DaemonConfig(
       Duration initialReconnectDelay,
       Duration maxReconnectDelay,
       String note,
-      Path dataDir) {
+      Path dataDir,
+      TerminalLaunchSpec terminal) {
     this(
         gatewayUri,
         registrationTokenFile,
@@ -73,7 +79,8 @@ public record DaemonConfig(
         note,
         dataDir,
         DEFAULT_BASH_EXECUTABLE,
-        LspDiscovery.empty());
+        LspDiscovery.empty(),
+        terminal);
   }
 
   /** 正常运行仅接受唯一的 {@code --config <absolute-path>}。 */
@@ -86,9 +93,10 @@ public record DaemonConfig(
   }
 
   /**
-   * 只读取与校验配置、同目录凭证路径与配置的 bash 可执行程序：不创建目录、锁、连接或启动任何进程。
+   * 只读取与校验配置、同目录凭证路径、配置的 bash 可执行程序与人工终端 launch spec：不创建目录、锁、连接或启动任何进程。
    *
-   * <p>bash 按宿主 PATH/绝对路径只读解析为实际路径，无法解析时立即失败关闭， 避免安装成功后才在执行期暴露缺失。
+   * <p>bash 与终端 executable 都按宿主 PATH/绝对路径只读解析为实际路径，无法解析时立即失败关闭， 避免安装成功后才在执行期暴露缺失。终端 shell 与工作目录
+   * 只在此处确定一次，运行期不再更换。
    */
   static DaemonConfig fromFile(Path file) {
     if (!file.isAbsolute()) {
@@ -105,7 +113,9 @@ public record DaemonConfig(
         configuration.getNote(),
         normalized.getParent(),
         resolveBash(configuration.getBashExecutable()),
-        LspDiscovery.fromConfiguration(configuration.getLsp()));
+        LspDiscovery.fromConfiguration(configuration.getLsp()),
+        TerminalLaunchSpec.resolve(
+            configuration.getTerminal(), DaemonOperatingSystemDetector.detectCurrent()));
   }
 
   /**

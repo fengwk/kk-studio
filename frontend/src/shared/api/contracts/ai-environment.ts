@@ -9,6 +9,12 @@ export interface DaemonLspServerConfiguration {
   firstMatchMarkers?: string[] | null
 }
 
+export interface DaemonTerminalConfiguration {
+  executable?: string | null
+  args?: string[] | null
+  workdir?: string | null
+}
+
 export interface EnvironmentInstallConfigDTO {
   operatingSystem: InstallOperatingSystem
   javaHome?: string | null
@@ -16,6 +22,7 @@ export interface EnvironmentInstallConfigDTO {
     studioUrl: string
     note?: string | null
     bashExecutable?: string | null
+    terminal?: DaemonTerminalConfiguration | null
     lsp?: { servers: Record<string, DaemonLspServerConfiguration> } | null
   }
 }

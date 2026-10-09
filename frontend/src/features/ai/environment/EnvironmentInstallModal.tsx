@@ -47,6 +47,10 @@ function fieldMessage(t: Translate, field: string): string {
   if (field === 'installConfig.javaHome') return t('ai.environment.install.invalidJavaHome')
   if (field === 'daemon.note') return t('ai.environment.install.invalidNote')
   if (field === 'daemon.bashExecutable') return t('ai.environment.install.invalidBash')
+  if (field === 'daemon.terminal.executable') return t('ai.environment.install.invalidTerminalExecutable')
+  if (field.startsWith('daemon.terminal.args')) return t('ai.environment.install.invalidTerminalArgs')
+  if (field === 'daemon.terminal.workdir') return t('ai.environment.install.invalidTerminalWorkdir')
+  if (field === 'daemon.terminal') return t('ai.environment.install.invalidTerminal')
   if (field.startsWith('daemon.lsp')) return t('ai.environment.install.invalidLsp')
   if (field.endsWith('operatingSystem')) return t('ai.environment.install.invalidOs')
   return t('ai.environment.install.invalidField', { field })
@@ -56,11 +60,15 @@ const blankToNull = (value: string): string | null => (value.trim() ? value : nu
 
 /** 已保存设置 → 表单字段；仅在加载成功或用户选择默认设置时应用。 */
 function formFromConfig(config: EnvironmentInstallConfigDTO) {
+  const terminal = config.daemon.terminal
   return {
     os: config.operatingSystem,
     studioUrl: config.daemon.studioUrl,
     javaHome: config.javaHome ?? '',
     bashExecutable: config.daemon.bashExecutable ?? '',
+    terminalExecutable: terminal?.executable ?? '',
+    terminalArgs: JSON.stringify(terminal?.args ?? []),
+    terminalWorkdir: terminal?.workdir ?? '',
     note: config.daemon.note ?? '',
     lspEnabled: config.daemon.lsp != null,
     // 未配置 LSP 时保持空值，避免把示例当作配置提交。
@@ -78,10 +86,28 @@ const LSP_EXAMPLE_TEXT = `{
 }`
 
 /** 路径示例只随所选操作系统变化，不检测本机、不写入表单值。 */
-const PATH_EXAMPLES: Record<InstallOperatingSystem, { javaHome: string; bash: string }> = {
-  linux: { javaHome: '/usr/lib/jvm/java-21-openjdk', bash: '/bin/bash' },
-  macos: { javaHome: '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home', bash: '/bin/bash' },
-  windows: { javaHome: 'C:\\Program Files\\Java\\jdk-21', bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
+const PATH_EXAMPLES: Record<
+  InstallOperatingSystem,
+  { javaHome: string; bash: string; terminal: string; terminalWorkdir: string }
+> = {
+  linux: {
+    javaHome: '/usr/lib/jvm/java-21-openjdk',
+    bash: '/bin/bash',
+    terminal: '/bin/zsh',
+    terminalWorkdir: '/home/user',
+  },
+  macos: {
+    javaHome: '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home',
+    bash: '/bin/bash',
+    terminal: '/bin/zsh',
+    terminalWorkdir: '/Users/user',
+  },
+  windows: {
+    javaHome: 'C:\\Program Files\\Java\\jdk-21',
+    bash: 'C:\\Program Files\\Git\\bin\\bash.exe',
+    terminal: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+    terminalWorkdir: 'C:\\Users\\user',
+  },
 }
 
 export function EnvironmentInstallModal({ environment, uninstall = false, onClose }: Props) {
@@ -92,6 +118,9 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
   const [studioUrl, setStudioUrl] = useState(window.location.origin)
   const [javaHome, setJavaHome] = useState('')
   const [bashExecutable, setBashExecutable] = useState('')
+  const [terminalExecutable, setTerminalExecutable] = useState('')
+  const [terminalArgs, setTerminalArgs] = useState('[]')
+  const [terminalWorkdir, setTerminalWorkdir] = useState('')
   const [note, setNote] = useState('')
   const [lspEnabled, setLspEnabled] = useState(false)
   const [servers, setServers] = useState('')
@@ -132,6 +161,9 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             setStudioUrl(form.studioUrl)
             setJavaHome(form.javaHome)
             setBashExecutable(form.bashExecutable)
+            setTerminalExecutable(form.terminalExecutable)
+            setTerminalArgs(form.terminalArgs)
+            setTerminalWorkdir(form.terminalWorkdir)
             setNote(form.note)
             setLspEnabled(form.lspEnabled)
             setServers(form.servers)
@@ -175,6 +207,9 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
     setStudioUrl(window.location.origin)
     setJavaHome('')
     setBashExecutable('')
+    setTerminalExecutable('')
+    setTerminalArgs('[]')
+    setTerminalWorkdir('')
     setNote('')
     setLspEnabled(false)
     setServers('')
@@ -203,12 +238,30 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             throw new InstallConfigError('daemon.lsp.servers')
           }
         }
+        // 参数是 JSON 字符串数组；空文本按默认 [] 处理，解析失败只暴露固定字段、不回显异常。
+        let parsedArgs: string[] = []
+        const argsText = terminalArgs.trim()
+        if (argsText !== '') {
+          try {
+            parsedArgs = JSON.parse(argsText)
+            if (!Array.isArray(parsedArgs)) {
+              throw new InstallConfigError('daemon.terminal.args')
+            }
+          } catch {
+            throw new InstallConfigError('daemon.terminal.args')
+          }
+        }
         const installConfig = validateInstallConfig({
           operatingSystem: os,
           javaHome: blankToNull(javaHome),
           daemon: {
             studioUrl,
             bashExecutable: blankToNull(bashExecutable),
+            terminal: {
+              executable: blankToNull(terminalExecutable),
+              args: parsedArgs,
+              workdir: blankToNull(terminalWorkdir),
+            },
             note: blankToNull(note),
             lsp: parsedLsp,
           },
@@ -343,6 +396,41 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                     value={bashExecutable}
                     onChange={event => setBashExecutable(event.target.value)}
                     placeholder={PATH_EXAMPLES[os].bash}
+                    disabled={disabled}
+                  />
+                </label>
+                <label className="form-group">
+                  <span>{t('ai.environment.install.terminalExecutable')}</span>
+                  <TextInput
+                    value={terminalExecutable}
+                    onChange={event => setTerminalExecutable(event.target.value)}
+                    placeholder={PATH_EXAMPLES[os].terminal}
+                    disabled={disabled}
+                  />
+                </label>
+                <div className="install-field">
+                  <label className="form-group">
+                    <span>{t('ai.environment.install.terminalArgs')}</span>
+                    <TextArea
+                      rows={2}
+                      value={terminalArgs}
+                      onChange={event => setTerminalArgs(event.target.value)}
+                      placeholder="[]"
+                      aria-describedby="install-terminal-args-help"
+                      disabled={disabled}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <p id="install-terminal-args-help" className="field-help">
+                    {t('ai.environment.install.terminalArgsHelp')}
+                  </p>
+                </div>
+                <label className="form-group">
+                  <span>{t('ai.environment.install.terminalWorkdir')}</span>
+                  <TextInput
+                    value={terminalWorkdir}
+                    onChange={event => setTerminalWorkdir(event.target.value)}
+                    placeholder={PATH_EXAMPLES[os].terminalWorkdir}
                     disabled={disabled}
                   />
                 </label>

@@ -25,12 +25,13 @@ public final class DaemonMain {
       Usage: java -jar kk-studio-daemon.jar --config <absolute-path>
 
       Configuration:
-        --config <absolute-path>         Load daemon JSON (studioUrl, note, bashExecutable, lsp).
-                                         The sibling daemon.token holds the owner-only token;
-                                         the configuration parent is the runtime data directory.
+        --config <absolute-path>         Load daemon JSON (studioUrl, note, bashExecutable,
+                                         terminal, lsp). The sibling daemon.token holds the
+                                         owner-only token; the configuration parent is the
+                                         runtime data directory.
         --check-config <absolute-path>   Validate configuration, sibling token and resolved bash
-                                         executable, then exit. No data creation, locking,
-                                         connections, process spawning or LSP startup.
+                                         and terminal executables, then exit. No data creation,
+                                         locking, connections, process spawning or LSP startup.
                                          Managed installation uses ~/.kk-studio/daemon.json.
 
       Local proxy:

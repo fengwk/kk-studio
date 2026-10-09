@@ -8,5 +8,6 @@ public class DaemonConfiguration {
   private String studioUrl;
   private String note;
   private String bashExecutable;
+  private DaemonTerminalConfiguration terminal;
   private DaemonLspConfiguration lsp;
 }

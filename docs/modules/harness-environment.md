@@ -6,7 +6,7 @@
 
 [`EnvironmentId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java) 是规范 UUID 路由身份：构造与解析只接受 `UUID#toString()` 的小写 canonical 文本，空白、大小写变体与其它形状一律拒绝，`toString()` 也只输出该形式。
 
-Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 亲和性共用这个 UUID。产品展示名与历史名称的冻结由 [Platform](platform.md)维护；调用目录在具体 capability arguments 中显式给出。Studio 保存的安装设置（`installConfig`）属于产品侧持久状态，不进入 wire；Daemon 只从 `--config` 指向的 `daemon.json` 消费其中的 `daemon` 对象（studioUrl、note、bashExecutable、内联 LSP servers）。
+Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 亲和性共用这个 UUID。产品展示名与历史名称的冻结由 [Platform](platform.md)维护；调用目录在具体 capability arguments 中显式给出。Studio 保存的安装设置（`installConfig`）属于产品侧持久状态，不进入 wire；Daemon 只从 `--config` 指向的 `daemon.json` 消费其中的 `daemon` 对象（studioUrl、note、bashExecutable、terminal、内联 LSP servers）。
 
 ## 原子能力目录
 

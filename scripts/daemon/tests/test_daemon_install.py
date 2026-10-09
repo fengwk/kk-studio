@@ -103,7 +103,10 @@ class UnixInstallContracts:
         for text in ('{"studioUrl":"https://ok.invalid","unknown":1}',
                      '{"studioUrl":"https://ok.invalid","studioUrl":"https://other.invalid"}',
                      '{"studioUrl": 3}', '{bad',
-                     '{"studioUrl":"https://ok.invalid","bashExecutable":"/missing/bash"}'):
+                     '{"studioUrl":"https://ok.invalid","bashExecutable":"/missing/bash"}',
+                     '{"studioUrl":"https://ok.invalid","terminal":{"executable":1}}',
+                     '{"studioUrl":"https://ok.invalid","terminal":{"args":"x"}}',
+                     '{"studioUrl":"https://ok.invalid","terminal":{"unknown":1}}'):
             fixture.input_config.write_text(text)
             fixture.reset_record()
             rejected = fixture.install()
@@ -115,6 +118,11 @@ class UnixInstallContracts:
         fixture.input_config.write_text(json.dumps({"studioUrl": STUDIO_URL, "bashExecutable": "/bin/bash"}))
         self.assert_ok(fixture.install())
         self.assertNotIn("bashExecutable", fixture.service.read_text())
+        # 合法 terminal 三字段与空参数必须被 --check-config 契约接受。
+        fixture.input_config.write_text(json.dumps({
+            "studioUrl": STUDIO_URL,
+            "terminal": {"executable": "/bin/zsh", "args": ["-l", ""], "workdir": "/tmp"}}))
+        self.assert_ok(fixture.install())
 
     def test_staged_inputs_metadata_and_bounds_rejected_before_download(self):
         for name in ("daemon.json", "daemon.token"):

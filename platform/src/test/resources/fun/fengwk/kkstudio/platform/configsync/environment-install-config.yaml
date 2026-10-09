@@ -8,6 +8,10 @@ environments:
         studioUrl: https://studio.example.com/
         note: "宿主 'quoted'"
         bashExecutable: /bin/bash
+        terminal:
+          executable: /bin/zsh
+          args: ["-l", ""]
+          workdir: /opt/work
         lsp:
           servers:
             jdtls:

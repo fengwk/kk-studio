@@ -43,6 +43,9 @@ class EnvironmentInstallScriptsTest {
     assertEquals(0, execution.status());
     assertFalse((execution.stdout() + execution.stderr()).contains("private-"));
     assertEquals(expectedDaemon(config), execution.record().get("config"));
+    assertEquals(
+        List.of("--flag", "汉字 ' \" $ ` $(touch NEVER)", ""),
+        texts(execution.record().get("config").get("terminal").get("args")));
     assertEquals(token, execution.record().get("token").asText());
     assertTrue(execution.record().get("sibling").asBoolean());
     assertTrue(execution.record().get("stage").asText().startsWith("/"));
@@ -364,16 +367,22 @@ class EnvironmentInstallScriptsTest {
   }
 
   private static EnvironmentInstallConfigDTO config(String operatingSystem, String javaHome) {
+    Map<String, Object> terminal = new LinkedHashMap<>();
+    terminal.put("executable", "/bin/汉字 '$`");
+    // argv 保留空参数与 shell 特殊字符，安装生成脚本必须原样转义。
+    terminal.put("args", List.of("--flag", "汉字 ' \" $ ` $(touch NEVER)", ""));
+    terminal.put("workdir", "/home/汉字 '$`");
+    Map<String, Object> daemon = new LinkedHashMap<>();
+    daemon.put("studioUrl", "https://studio.example.com/");
+    daemon.put(
+        "note",
+        "汉字 ' \" $ ` $(touch NEVER) %s @@ACTION@@ @@PARAMETERS@@ @@INSTALLER@@ @@STAGING@@");
+    daemon.put("bashExecutable", "/bin/汉字 '$`");
+    daemon.put("terminal", terminal);
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("operatingSystem", operatingSystem);
     body.put("javaHome", javaHome);
-    body.put(
-        "daemon",
-        Map.of(
-            "studioUrl", "https://studio.example.com/",
-            "note",
-                "汉字 ' \" $ ` $(touch NEVER) %s @@ACTION@@ @@PARAMETERS@@ @@INSTALLER@@ @@STAGING@@",
-            "bashExecutable", "/bin/汉字 '$`"));
+    body.put("daemon", daemon);
     return EnvironmentInstallConfigs.parse(JSON.valueToTree(body));
   }
 

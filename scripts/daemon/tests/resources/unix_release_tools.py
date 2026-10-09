@@ -27,6 +27,11 @@ def fail():
     sys.exit(1)
 
 
+def _has_control(value):
+    return any(ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f or ord(char) in (0x2028, 0x2029)
+               for char in value)
+
+
 if tool == "uname":
     assert args == ["-s"]
     print(env.get("FAKE_OS", "Linux"))
@@ -80,7 +85,7 @@ elif tool == "java":
                     return value
 
                 data = json.loads(config.read_text(), object_pairs_hook=no_duplicates)
-                assert set(data) <= {"studioUrl", "note", "bashExecutable", "lsp"}
+                assert set(data) <= {"studioUrl", "note", "bashExecutable", "terminal", "lsp"}
                 assert data["studioUrl"].startswith(("https://", "http://"))
                 assert token.read_text().strip() and not any(c.isspace()
                                                             for c in token.read_text().strip())
@@ -89,6 +94,19 @@ elif tool == "java":
                     candidate = data["bashExecutable"]
                     resolved = candidate if os.path.isabs(candidate) else shutil.which(candidate)
                     assert resolved and os.access(resolved, os.X_OK), candidate
+                terminal = data.get("terminal")
+                if terminal is not None:
+                    # 安装流程的 schema 夹具；可执行程序与目录的宿主校验由真实 JAR 测试负责。
+                    assert isinstance(terminal, dict)
+                    assert set(terminal) <= {"executable", "args", "workdir"}
+                    for key in ("executable", "workdir"):
+                        value = terminal.get(key)
+                        assert value is None or (isinstance(value, str) and value.strip()
+                                                 and not _has_control(value))
+                    args = terminal.get("args")
+                    assert args is None or (isinstance(args, list)
+                                            and all(isinstance(item, str) and not _has_control(item)
+                                                    for item in args))
             except (AssertionError, ValueError, KeyError):
                 print("invalid config/token", file=sys.stderr)
                 fail()
