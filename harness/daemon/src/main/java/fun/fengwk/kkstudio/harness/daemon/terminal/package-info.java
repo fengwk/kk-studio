@@ -20,6 +20,12 @@
  * 失败、超时、自然退出、被调用方提前中断与显式关闭都只发出停止信号，不在 reader/writer/VT owner/scheduler
  * 上就地收敛。它使用调用方注入的执行器，不创建也不关闭执行器；因为预留的 lifecycle 任务与读、写任务都会阻塞，注入的阻塞 I/O executor 必须能并发运行这三者。
  *
+ * <p>{@link fun.fengwk.kkstudio.harness.daemon.terminal.TerminalWriter} 是按 terminalId 构造、由调用方单
+ * owner 串行访问的纯内存 writer reducer：它不写 PTY、不创建 executor 或定时器、不维护观察流或 transport，只以固定的 15 秒租期、公开 epoch
+ * 与私有 token secret 仲裁控制权，并用一个在途操作、单调 seq 与 SHA-256 摘要完成去重和跨连接恢复核对。它把唯一正向 {@code ACCEPTED}
+ * 决议交给调用方，由调用方在拿到它之后才调用 Runtime，并把真实 future 决议一次性反馈；结果不确定会冻结本 writer。它公开的状态不含 token
+ * 与输入字节，也不保留输入日志或历史 journal。
+ *
  * <p>本包与模型工具的 {@code bashExecutable} 语义互相独立，不拥有业务表、日志或持久化出口。DA/DSR/OSC 回应只交给注入的回调，调用方负责接唯一 PTY
  * writer。
  */

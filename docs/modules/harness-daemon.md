@@ -117,6 +117,8 @@ helper 命令行只携带固定入口与私有状态目录；工作目录和 arg
 
 真实跨平台 PTY 的输入回传、终端环境变量与自然退出末屏由 [`TerminalRuntimeRealPtyTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeRealPtyTest.java) 验证；查询应答与用户输入共用唯一 writer、过期模式、队列与字节预算、排队取消、整帧复制与不交叉、分块 UTF-8/CSI 调度、native 前后失败、截止时间先于 native 获胜或不可用、迟到截止时间、读写任务被提前中断、无法收尾任务的释放失败、无法解析的可执行程序与执行器拒绝等确定性边界由 [`TerminalRuntimeDeterministicTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeDeterministicTest.java) 验证。
 
+[`TerminalWriter`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalWriter.java) 是单个 terminal 的纯内存 writer reducer，由调用方单 owner 串行访问，类似 [`TerminalViewStream`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalViewStream.java)：它不写 PTY、不创建 executor 或定时器、不维护观察流或 transport，生产时钟为 `System::nanoTime`。它按 `terminalId` 维护固定 15 秒租期、公开 epoch 与私有 token secret 的控制权，`viewerId` 不能单独授权；每个 epoch 从 seq=1 起只允许一个在途 INPUT/RESIZE，操作摘要为 SHA-256，只有唯一 `ACCEPTED` 决议才交由调用方调用 Runtime，真实 future 决议通过 `complete` 一次性回填。已有在途操作时所有控制权轮换（takeover、跨连接恢复、释放、过期后重新授权）保守返回 `BUSY`；跨连接恢复必须携带旧 epoch/token 与待核对 seq/摘要，无法核对的旧操作视为结果不确定并冻结 writer。公开状态与 `toString` 不回显 token 或输入字节，也不保留输入日志或历史 journal。租期/seq 去重/跨连接恢复/fencing/secret 去敏由 [`TerminalWriterTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalWriterTest.java) 验证。
+
 ### 文件与检索
 
 文件修改保留编码、BOM、行尾，通过进程内分段锁串行化同文件修改。文本读窗口以 1-based 行/列定位，limit 默认及最大 2000，正文预算 60000 Unicode 码点；扫描到 EOF 得到总行数与 ends_with_newline，内存只驻留窗口。超时/中断不返回半个窗口；续读由 next 指向首个未返回字符。支持的图片以二进制结果直传对象存储，设备、FIFO、socket 等特殊节点在 I/O 前拒绝。详细读写契约见[内置 Read 测试映射](../operations/builtin-read-tests.md)与[文件修改测试映射](../operations/builtin-mutation-tests.md)。
@@ -149,7 +151,7 @@ COMPLETED(uploadId 与权威元数据)
 | `daemon` | CLI、数据目录、能力注册、执行器所有权、握手与调用运行时 |
 | `daemon.coding` | 文件、命令、检索、文本输出与 LSP；只消费显式调用目录 |
 | `daemon.process` | 唯一 OS 执行范围基座：父进程侧 `ProcessScope`、helper 侧 `ProcessScopeHelper`、POSIX/Windows 原生原语；不注册工具 |
-| `daemon.terminal` | 唯一启动规格解析、单 owner JediTerm 内核、headless Display、数值投影与一次调用的终端运行时资源边界；不注册工具、不拥有连接或业务持久化 |
+| `daemon.terminal` | 唯一启动规格解析、单 owner JediTerm 内核、headless Display、数值投影、纯内存 writer reducer 与一次调用的终端运行时资源边界；不注册工具、不拥有连接或业务持久化 |
 | `daemon.journal` | 进程内原子去重与冻结终态，不持久化跨进程执行状态 |
 | `daemon.skill` | exact commit 的技能包拉取、校验、替换与启动恢复 |
 | `daemon.transport` | WebSocket 文本传输、压缩协商与帧边界 |
