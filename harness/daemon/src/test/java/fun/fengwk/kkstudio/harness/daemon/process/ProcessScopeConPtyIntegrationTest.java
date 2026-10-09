@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.pty4j.PtyProcess;
-import com.pty4j.WinSize;
 import com.pty4j.windows.conpty.WinConPtyProcess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,7 +12,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Locale;
 
 /**
@@ -29,35 +26,72 @@ class ProcessScopeConPtyIntegrationTest {
   @TempDir Path workdir;
 
   /**
-   * 必须拿到 ConPTY 对象，且 {@code resize} 之后原生窗口尺寸读回的是新值。
+   * 必须拿到 ConPTY 对象，且 {@code resize} 之后命令自己读回的原生窗口尺寸是新值。
    *
-   * <p>{@code cmd /c pause} 会一直等按键，正好提供一个稳定存活的控制台进程；{@code getWinSize()} 是真实的原生调用（ConPTY 屏幕
-   * 缓冲区），因此它同时证明「命令确实在一个可调整尺寸的控制台里」。
+   * <p>夹具在自己的 ConPTY 控制台里用原生 {@code GetConsoleScreenBufferInfo} 读回可见视口，因此这里的断言是「命令自身看到的窗口」， 而不是
+   * pty4j 缓存的上次请求值：初始必须读到 80x24，父进程 {@code resize(100,40)} 并放行后必须读到 100x40。
    */
   @Test
   void conPtyIsUsedAndNativeWindowSizeFollowsResize() throws Exception {
     assumeTrue(isWindows(), "需要 Windows ConPTY");
+    Path pidFile = workdir.resolve("conpty-size.pid");
+    Path initialSizeFile = workdir.resolve("conpty-size.initial");
+    Path resizePermitFile = workdir.resolve("conpty-size.permit");
+    Path resizedSizeFile = workdir.resolve("conpty-size.resized");
     ProcessScope scope =
         ProcessScope.startPty(
-            workdir, List.of("cmd", "/c", "pause"), 80, 24, System.getenv(), () -> true);
+            workdir,
+            ProcessScopeFixtureMain.fixtureCommand(
+                "conpty-size",
+                pidFile.toString(),
+                initialSizeFile.toString(),
+                resizePermitFile.toString(),
+                resizedSizeFile.toString(),
+                "100",
+                "40"),
+            80,
+            24,
+            System.getenv(),
+            () -> true);
     try {
       assertTrue(
           scope.process() instanceof WinConPtyProcess,
           "必须得到 ConPTY，绝不接受 WinPTY 回退：" + scope.process().getClass().getName());
-      PtyProcess pty = (PtyProcess) scope.process();
-      WinSize initial = pty.getWinSize();
-      assertEquals(80, initial.getColumns(), "初始列数必须来自请求值");
-      assertEquals(24, initial.getRows(), "初始行数必须来自请求值");
+      Viewport initial = awaitViewport(initialSizeFile);
+      assertEquals(80, initial.columns(), "初始列数必须是命令自己读到的原生窗口");
+      assertEquals(24, initial.rows(), "初始行数必须是命令自己读到的原生窗口");
 
       scope.resize(100, 40);
-      WinSize resized = pty.getWinSize();
-      assertEquals(100, resized.getColumns(), "resize 之后原生列数必须变化");
-      assertEquals(40, resized.getRows(), "resize 之后原生行数必须变化");
-    } finally {
+      Files.writeString(resizePermitFile, "go", StandardCharsets.UTF_8);
+      Viewport resized = awaitViewport(resizedSizeFile);
+      assertEquals(100, resized.columns(), "resize 之后命令自己读到的原生列数必须是新值");
+      assertEquals(40, resized.rows(), "resize 之后命令自己读到的原生行数必须是新值");
+
+      assertTrue(scope.awaitNaturalExit(30_000), "命令必须在预算内自然退出");
+      assertEquals(0, scope.naturalExitCode(), "原生探测必须正常退出");
       assertTrue(scope.terminate(), "ConPTY 会话必须在终止后收敛");
+      assertTrue(scope.converged());
+    } finally {
       scope.close();
     }
   }
+
+  /** 有界等待夹具发布原生窗口尺寸，并解析出列/行（文件由夹具原子改名，父进程不会读到半截数值）。 */
+  private static Viewport awaitViewport(Path sizeFile) throws Exception {
+    long deadline = System.nanoTime() + 30_000_000_000L;
+    while (System.nanoTime() < deadline) {
+      if (Files.isRegularFile(sizeFile)) {
+        String[] parts = Files.readString(sizeFile, StandardCharsets.UTF_8).trim().split("\\s+");
+        assertEquals(2, parts.length, "原子发布的尺寸文件必须恰好包含列数与行数");
+        return new Viewport(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+      }
+      Thread.sleep(20);
+    }
+    throw new AssertionError("命令没有在预算内发布原生窗口尺寸：" + sizeFile);
+  }
+
+  /** 命令自己读到的原生控制台可见视口尺寸。 */
+  private record Viewport(int columns, int rows) {}
 
   /**
    * 命令自然退出后留下的子进程必须随 Job 一起被清掉：ConPTY 模式下命令同样归属到命名 Job，收敛覆盖整个 Job。

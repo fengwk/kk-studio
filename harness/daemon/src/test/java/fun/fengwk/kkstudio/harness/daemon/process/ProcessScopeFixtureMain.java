@@ -1,16 +1,23 @@
 package fun.fengwk.kkstudio.harness.daemon.process;
 
+import com.sun.jna.Pointer;
+import com.sun.jna.platform.win32.Kernel32;
+import com.sun.jna.platform.win32.WinNT;
+import com.sun.jna.platform.win32.Wincon;
+import com.sun.jna.platform.win32.Wincon.SMALL_RECT;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * 跨平台执行范围用例的真实进程夹具：只依赖 JDK 的 Java main，用来在没有 shell、没有 MSYS 的情况造出真实的进程层级。
+ * 跨平台执行范围用例的真实进程夹具：通用模式只依赖 JDK，不依赖 shell/MSYS；Windows 原生窗口探测使用已有的 JNA。
  *
  * <p>它存在的理由是 C01 的验收事实必须用原生 PID 观察：执行范围由 {@link ProcessScope} 建立，本夹具作为「用户命令」运行，再由它 自己派生子
  * JVM，因此「根进程自然退出后后台进程是否被收敛」「终止是否覆盖嵌套后代」可以在 Linux/macOS/Windows 上用同一段测试 断言，而不依赖任何平台的 shell 语义。
@@ -27,7 +34,12 @@ import java.util.Locale;
  *   nest-hold        &lt;pidFile&gt; &lt;childPidFile&gt; &lt;grandPidFile&gt; 派生子进程（fork-hold），等孙进程写出 pid 后继续存活
  *   pty-probe        &lt;pidFile&gt; &lt;resultFile&gt;               把自己的 pid/sid/pgrp 与 fd 0/1/2 的 TTY 事实写进结果文件
  *   pty-exit         &lt;pidFile&gt; [exitCode]                  把固定标记写进 stdout（跨平台 PTY 用例）后按代码退出
+ *   conpty-size      &lt;pidFile&gt; &lt;initialSizeFile&gt; &lt;resizePermitFile&gt; &lt;resizedSizeFile&gt; &lt;expectedColumns&gt; &lt;expectedRows&gt;  读回本进程原生 ConPTY 窗口尺寸，等许可后轮询到期望尺寸再发布（仅 Windows）
  * </pre>
+ *
+ * <p>{@code conpty-size} 只服务 Windows ConPTY 用例：它不读 pty4j 的缓存，而是直接用 Win32 {@code GetStdHandle} +
+ * {@code GetConsoleScreenBufferInfo} 读回自己可见视口的列/行（{@code srWindow}），因此父进程断言的是「命令自身在原生控制台里看到的窗口」，
+ * 而不是 pty4j 记下的最后一次请求值。尺寸只写进文件，不改动 stdout，也不打印任何终端历史。
  *
  * <p>两种「自然退出」模式都必须先拿到调用方许可才返回：{@code fork-exit} 等许可文件（捕获模式下命令的 stdin 是一条已关闭的空管道，许可选不到 stdin），{@code
  * duplex-fork-exit} 等 stdin 上的一个字节。许可让「根进程退出时子进程仍然活着」成为调用方掌握的事实，而不是让用例与收敛赛跑—— 没有许可时，快机器完全可能在用例读到子进程
@@ -42,6 +54,18 @@ public final class ProcessScopeFixtureMain {
 
   /** 等待子进程写出 pid 的预算。 */
   private static final Duration CHILD_BUDGET = Duration.ofSeconds(20);
+
+  /** 等待原生 ConPTY 窗口轮询到目标尺寸的预算。 */
+  private static final Duration VIEWPORT_BUDGET = Duration.ofSeconds(20);
+
+  /** 原生窗口尺寸的轮询步长。 */
+  private static final long VIEWPORT_POLL_MILLIS = 20;
+
+  /** Win32 空句柄值。 */
+  private static final long NULL_HANDLE = 0L;
+
+  /** Win32 {@code INVALID_HANDLE_VALUE}。 */
+  private static final long INVALID_HANDLE_VALUE = -1L;
 
   /**
    * 写在 stderr 上的固定标记：测试用它判断命令的诊断是否走了自己的通道。
@@ -102,6 +126,7 @@ public final class ProcessScopeFixtureMain {
         System.out.flush();
         System.exit(exitCode(args));
       }
+      case "conpty-size" -> conPtySize(args);
       case "hold" -> sleepForever();
       case "eof" -> {
         readUntilEof();
@@ -140,6 +165,101 @@ public final class ProcessScopeFixtureMain {
       }
     }
   }
+
+  /**
+   * Windows ConPTY 专用：把本进程自己读到的原生控制台窗口尺寸发布给父进程，供「resize 真的改变了窗口」这一验收使用。
+   *
+   * <p>初始尺寸先发布一次，父进程据此断言启动尺寸；随后等父进程写下许可文件（它已完成 resize），再轮询原生窗口直到期望尺寸出现才发布， 因此父进程读到的永远是命令自身在 ConPTY
+   * 里看到的尺寸，而不是一个定时猜测。
+   */
+  private static void conPtySize(String[] args) throws Exception {
+    Path initialSizeFile = Path.of(args[2]);
+    Path resizePermitFile = Path.of(args[3]);
+    Path resizedSizeFile = Path.of(args[4]);
+    int expectedColumns = Integer.parseInt(args[5]);
+    int expectedRows = Integer.parseInt(args[6]);
+
+    publishAtomically(initialSizeFile, formatViewport(readConsoleViewport()));
+    awaitReleaseFile(resizePermitFile);
+    publishAtomically(
+        resizedSizeFile, formatViewport(awaitConsoleViewport(expectedColumns, expectedRows)));
+  }
+
+  /**
+   * 读回本进程原生控制台窗口的可见视口尺寸（列、行）。
+   *
+   * <p>只走 Win32 控制台 API：{@code GetStdHandle(STD_OUTPUT_HANDLE)} 取得 ConPTY 屏幕缓冲区句柄，再用 {@code
+   * GetConsoleScreenBufferInfo} 读回 {@code srWindow}。任何一步失败都带上原生错误码显式抛出，绝不退回缓存值——pty4j 的 {@code
+   * getWinSize()} 只返回它自己记下的最后一次请求值，无法证明原生窗口真的变了。
+   */
+  private static ConsoleViewport readConsoleViewport() {
+    WinNT.HANDLE handle = Kernel32.INSTANCE.GetStdHandle(Wincon.STD_OUTPUT_HANDLE);
+    if (handle == null
+        || handle.getPointer() == null
+        || Pointer.nativeValue(handle.getPointer()) == NULL_HANDLE
+        || Pointer.nativeValue(handle.getPointer()) == INVALID_HANDLE_VALUE) {
+      throw new IllegalStateException(
+          "no ConPTY stdout console handle (GetLastError="
+              + Kernel32.INSTANCE.GetLastError()
+              + ")");
+    }
+    Wincon.CONSOLE_SCREEN_BUFFER_INFO info = new Wincon.CONSOLE_SCREEN_BUFFER_INFO();
+    if (!Kernel32.INSTANCE.GetConsoleScreenBufferInfo(handle, info)) {
+      throw new IllegalStateException(
+          "GetConsoleScreenBufferInfo failed (GetLastError="
+              + Kernel32.INSTANCE.GetLastError()
+              + ")");
+    }
+    // 可见窗口而不是回滚缓冲区：srWindow 的宽高才是命令实际看到的视口。
+    SMALL_RECT window = info.srWindow;
+    return new ConsoleViewport(window.Right - window.Left + 1, window.Bottom - window.Top + 1);
+  }
+
+  /** 有界轮询原生窗口，直到父进程 resize 后的期望尺寸真的可读。 */
+  private static ConsoleViewport awaitConsoleViewport(int expectedColumns, int expectedRows)
+      throws InterruptedException {
+    long deadline = System.nanoTime() + VIEWPORT_BUDGET.toNanos();
+    ConsoleViewport observed = readConsoleViewport();
+    while (observed.columns() != expectedColumns || observed.rows() != expectedRows) {
+      if (System.nanoTime() >= deadline) {
+        throw new IllegalStateException(
+            "console viewport never reached "
+                + expectedColumns
+                + "x"
+                + expectedRows
+                + " within "
+                + VIEWPORT_BUDGET
+                + " (last observed "
+                + observed.columns()
+                + "x"
+                + observed.rows()
+                + ")");
+      }
+      Thread.sleep(VIEWPORT_POLL_MILLIS);
+      observed = readConsoleViewport();
+    }
+    return observed;
+  }
+
+  /** 尺寸文件内容：两段数值，列在前、行在后，仅此而已。 */
+  private static String formatViewport(ConsoleViewport viewport) {
+    return viewport.columns() + " " + viewport.rows() + "\n";
+  }
+
+  /** 先写临时文件再原子改名，父进程绝不会读到只写了一半的数值。 */
+  private static void publishAtomically(Path target, String content) throws IOException {
+    Path temporary =
+        Files.createTempFile(target.getParent(), target.getFileName().toString(), ".tmp");
+    try {
+      Files.writeString(temporary, content, StandardCharsets.UTF_8);
+      Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
+    } finally {
+      Files.deleteIfExists(temporary);
+    }
+  }
+
+  /** 本进程在 ConPTY 里实际看到的可见视口尺寸。 */
+  private record ConsoleViewport(int columns, int rows) {}
 
   /** 派生一层子进程：同一个类路径、同一个 JVM 可执行文件，因此它一定落在本进程一开始所属的执行范围里。 */
   private static void spawn(String mode, String... files) throws Exception {
