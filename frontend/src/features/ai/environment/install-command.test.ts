@@ -178,6 +178,7 @@ describe('install command', () => {
         studioUrl: 'https://host:8443',
         note: 'hi',
         bashExecutable: ' bash ',
+        terminal: null,
         lsp: {
           servers: {
             Jdtls: {
@@ -192,11 +193,47 @@ describe('install command', () => {
     })
   })
 
+  it('normalizes terminal exactly like the shared codec and preserves empty argv', () => {
+    const withTerminal = validateInstallConfig({
+      operatingSystem: 'linux',
+      daemon: {
+        studioUrl: 'https://host',
+        terminal: { executable: '/bin/zsh', args: ['-l', '', '  x  '], workdir: '/opt/me' },
+      },
+    })
+    expect(withTerminal.daemon.terminal).toEqual({
+      executable: '/bin/zsh', args: ['-l', '', '  x  '], workdir: '/opt/me',
+    })
+    // 所有默认表示归一为 null，保存未改设置不推进 CAS 版本。
+    expect(validateInstallConfig({ operatingSystem: 'linux', daemon: { studioUrl: 'https://host' } })
+      .daemon.terminal).toBeNull()
+    expect(validateInstallConfig({
+      operatingSystem: 'linux', daemon: { studioUrl: 'https://host', terminal: null },
+    }).daemon.terminal).toBeNull()
+    expect(validateInstallConfig({
+      operatingSystem: 'linux', daemon: { studioUrl: 'https://host', terminal: {} },
+    }).daemon.terminal).toBeNull()
+    expect(validateInstallConfig({
+      operatingSystem: 'linux', daemon: { studioUrl: 'https://host', terminal: { args: [''] } },
+    }).daemon.terminal).toEqual({ executable: null, args: [''], workdir: null })
+  })
+
+  it.each([
+    { terminal: 'x' }, { terminal: [] }, { terminal: { unknown: 1 } },
+    { terminal: { executable: '  ' } }, { terminal: { workdir: 'x\ny' } },
+    { terminal: { args: 'x' } }, { terminal: { args: [1] } }, { terminal: { args: ['a\u0000b'] } },
+  ])('rejects invalid terminal fields without echoing values %#', patch => {
+    const input = config()
+    expect(() => validateInstallConfig(
+      { ...input, daemon: { ...input.daemon, ...patch } } as EnvironmentInstallConfigDTO,
+    )).toThrow(/^Invalid /)
+  })
+
   it('detects defaults without overriding saved settings', () => {
     expect(['Win32', 'MacIntel', 'Linux'].map(detectInstallOS)).toEqual(['windows', 'macos', 'linux'])
     expect(validateInstallConfig({ operatingSystem: 'linux', javaHome: null, daemon: { studioUrl: 'http://[::1]:8080/', note: null, bashExecutable: null } }))
       .toEqual({ operatingSystem: 'linux', javaHome: null,
-        daemon: { studioUrl: 'http://[::1]:8080', note: null, bashExecutable: null, lsp: null } })
+        daemon: { studioUrl: 'http://[::1]:8080', note: null, bashExecutable: null, terminal: null, lsp: null } })
   })
 
   it.each(['ftp://host', 'https://user:pass@host', 'https://@host', 'https://host:', 'https://host:0',

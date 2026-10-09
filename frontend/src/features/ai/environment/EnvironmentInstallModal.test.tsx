@@ -18,12 +18,14 @@ vi.mock('./clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 const saved: EnvironmentInstallConfigDTO = {
   operatingSystem: 'windows', javaHome: 'C:\\Java\\21',
   daemon: { studioUrl: 'https://saved.example.com', bashExecutable: 'bash.exe', note: 'saved note',
+    terminal: { executable: '/bin/zsh', args: ['-l', ''], workdir: '/opt/saved' },
     lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'] } } } },
 }
 // Shared codec normalization adds the omitted optional marker array.
 const savedNormalized: EnvironmentInstallConfigDTO = {
   operatingSystem: 'windows', javaHome: 'C:\\Java\\21',
   daemon: { studioUrl: 'https://saved.example.com', bashExecutable: 'bash.exe', note: 'saved note',
+    terminal: { executable: '/bin/zsh', args: ['-l', ''], workdir: '/opt/saved' },
     lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'], firstMatchMarkers: [] } } } },
 }
 const card: EnvironmentCardDTO = {
@@ -75,6 +77,9 @@ describe('EnvironmentInstallModal', () => {
     expect(screen.getByRole('checkbox')).toBeChecked()
     expect(screen.getByRole('textbox', { name: 'LSP servers (JSON)' }))
       .toHaveValue(JSON.stringify(savedNormalized.daemon.lsp!.servers, null, 2))
+    expect(screen.getByRole('textbox', { name: '终端程序' })).toHaveValue('/bin/zsh')
+    expect(screen.getByRole('textbox', { name: '参数（JSON 数组）' })).toHaveValue('["-l",""]')
+    expect(screen.getByRole('textbox', { name: '启动目录' })).toHaveValue('/opt/saved')
     // Returned canonical OS, not the unsaved browser form, selects the script URL.
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8',
       installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://canonical.example.com' } } })
@@ -254,7 +259,8 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith(
       'env-1', '7',
       { operatingSystem: 'linux', javaHome: null,
-        daemon: { studioUrl: window.location.origin, note: null, bashExecutable: null, lsp: null } },
+        daemon: { studioUrl: window.location.origin, note: null, bashExecutable: null,
+          terminal: null, lsp: null } },
     ))
   })
 
@@ -304,7 +310,8 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
       operatingSystem: 'linux', javaHome: null,
-      daemon: { studioUrl: 'https://valid.example.com', bashExecutable: ' bash ', note: 'note', lsp: null },
+      daemon: { studioUrl: 'https://valid.example.com', bashExecutable: ' bash ', note: 'note',
+        terminal: { executable: '/bin/zsh', args: ['-l', ''], workdir: '/opt/saved' }, lsp: null },
     }))
   })
 
@@ -376,6 +383,7 @@ describe('EnvironmentInstallModal', () => {
       operatingSystem: 'linux', javaHome: null,
       daemon: {
         studioUrl: window.location.origin, note: null, bashExecutable: null,
+        terminal: null,
         lsp: { servers: { jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'], rootMarkers: [], firstMatchMarkers: [] } } },
       },
     }))
@@ -445,7 +453,8 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
       operatingSystem: 'windows', javaHome: 'D:\\custom\\jdk',
-      daemon: { studioUrl: window.location.origin, bashExecutable: 'D:\\custom\\bash.exe', note: '我的工作站', lsp: null },
+      daemon: { studioUrl: window.location.origin, bashExecutable: 'D:\\custom\\bash.exe', note: '我的工作站',
+        terminal: null, lsp: null },
     }))
     const payload = JSON.stringify(vi.mocked(environmentService.saveInstallConfig).mock.calls[0])
     expect(payload).not.toContain(examples.windows.javaHome)
@@ -471,6 +480,37 @@ describe('EnvironmentInstallModal', () => {
     } finally {
       setLocale('zh-CN')
     }
+  })
+
+  it('validates terminal args JSON with a fixed field message and saves explicit terminal settings', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
+    open()
+    await waitFor(() => expect(copyButton()).toBeEnabled())
+    const args = screen.getByRole('textbox', { name: '参数（JSON 数组）' })
+    expect(args).toHaveValue('[]')
+    fireEvent.change(args, { target: { value: 'not JSON' } })
+    await user.click(copyButton())
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('终端参数无效'))
+    expect(screen.getByRole('alert')).not.toHaveTextContent('not JSON')
+    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
+    // Parse 成功但非字符串数组同样按固定字段拒绝，不落库。
+    for (const value of ['"x"', 'null', '1', '{}']) {
+      fireEvent.change(args, { target: { value } })
+      await user.click(copyButton())
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('终端参数无效'))
+      expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
+    }
+    // 合法设置保存时保留空参数，空可执行/工作目录映射为 null 默认。
+    fireEvent.change(screen.getByRole('textbox', { name: '终端程序' }), { target: { value: '/bin/zsh' } })
+    fireEvent.change(args, { target: { value: '["-l",""]' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '启动目录' }), { target: { value: '/opt/me' } })
+    await user.click(copyButton())
+    await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
+      operatingSystem: 'linux', javaHome: null,
+      daemon: { studioUrl: window.location.origin, note: null, bashExecutable: null,
+        terminal: { executable: '/bin/zsh', args: ['-l', ''], workdir: '/opt/me' }, lsp: null },
+    }))
   })
 
   it('defaults uninstall to the saved operating system without metadata, token or save', async () => {

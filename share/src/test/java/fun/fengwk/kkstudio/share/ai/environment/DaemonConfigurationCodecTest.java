@@ -12,6 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -234,6 +235,85 @@ class DaemonConfigurationCodecTest {
     assertEquals("http://host", DaemonConfigurationCodec.read(file).getStudioUrl());
     Files.delete(file);
     assertSafe(() -> DaemonConfigurationCodec.read(file), "daemon");
+  }
+
+  @Test
+  void normalizesTerminalAndPreservesArgvExactly() throws Exception {
+    DaemonConfiguration parsed =
+        DaemonConfigurationCodec.parse(
+            MAPPER.readTree(
+                "{\"studioUrl\":\"http://host\",\"terminal\":"
+                    + "{\"executable\":\" /bin/zsh \",\"args\":[\"-l\",\"\",\"  x  \"],"
+                    + "\"workdir\":\" /opt \"}}"));
+    DaemonTerminalConfiguration terminal = parsed.getTerminal();
+    assertEquals(" /bin/zsh ", terminal.getExecutable());
+    assertEquals(List.of("-l", "", "  x  "), terminal.getArgs());
+    assertEquals(" /opt ", terminal.getWorkdir());
+    assertThrows(UnsupportedOperationException.class, () -> terminal.getArgs().add("mutate"));
+    assertEquals(parsed, DaemonConfigurationCodec.validate(parsed));
+
+    assertNull(
+        DaemonConfigurationCodec.parse(MAPPER.readTree("{\"studioUrl\":\"http://host\"}"))
+            .getTerminal());
+    assertNull(
+        DaemonConfigurationCodec.parse(
+                MAPPER.readTree("{\"studioUrl\":\"http://host\",\"terminal\":null}"))
+            .getTerminal());
+    DaemonTerminalConfiguration empty =
+        DaemonConfigurationCodec.parse(
+                MAPPER.readTree("{\"studioUrl\":\"http://host\",\"terminal\":{}}"))
+            .getTerminal();
+    assertNull(empty);
+    assertEquals(
+        DaemonConfigurationCodec.parse(MAPPER.readTree("{\"studioUrl\":\"http://host\"}")),
+        DaemonConfigurationCodec.parse(
+            MAPPER.readTree("{\"studioUrl\":\"http://host\",\"terminal\":{\"args\":[]}}")));
+    DaemonConfiguration withEmptyArgument =
+        DaemonConfigurationCodec.parse(
+            MAPPER.readTree("{\"studioUrl\":\"http://host\",\"terminal\":{\"args\":[\"\"]}}"));
+    assertEquals(List.of(""), withEmptyArgument.getTerminal().getArgs());
+    DaemonConfiguration secret =
+        DaemonConfigurationCodec.parse(
+            MAPPER.readTree(
+                "{\"studioUrl\":\"http://host\",\"terminal\":{\"args\":[\"SECRET\"]}}"));
+    assertFalse(secret.toString().contains("SECRET"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"studioUrl\":\"http://host\",\"terminal\":[]}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"unknown\":1}}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"executable\":1}}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"executable\":\"  \"}}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"args\":\"x\"}}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"args\":[1]}}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"args\":[null]}}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"args\":[\"SECRET\\u0000\"]}}",
+        "{\"studioUrl\":\"http://host\",\"terminal\":{\"workdir\":\"SECRET\\n\"}}"
+      })
+  void rejectsInvalidTerminalStructure(String json) throws Exception {
+    var node = MAPPER.readTree(json);
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> DaemonConfigurationCodec.parse(node));
+    assertTrue(error.getMessage().startsWith("daemon.terminal"), error.getMessage());
+    assertFalse(error.getMessage().contains("SECRET"));
+    assertNull(error.getCause());
+  }
+
+  @Test
+  void terminalRejectsControlCharactersAndNullArgvEntries() {
+    DaemonConfiguration config = basic();
+    DaemonTerminalConfiguration terminal = new DaemonTerminalConfiguration();
+    config.setTerminal(terminal);
+    terminal.setExecutable("SECRET\u0000");
+    assertSafe(() -> DaemonConfigurationCodec.validate(config), "daemon.terminal.executable");
+    terminal.setExecutable(null);
+    terminal.setWorkdir("SECRET\u2028");
+    assertSafe(() -> DaemonConfigurationCodec.validate(config), "daemon.terminal.workdir");
+    terminal.setWorkdir(null);
+    terminal.setArgs(Arrays.asList("ok", null));
+    assertSafe(() -> DaemonConfigurationCodec.validate(config), "daemon.terminal.args");
   }
 
   private static DaemonConfiguration basic() {

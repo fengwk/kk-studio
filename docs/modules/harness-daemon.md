@@ -10,7 +10,7 @@ Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原�
 
 单独 `--help` / `-h` 或 `--version` 不打开数据目录。机器入口 `--base64-args` 必须在首位，后续每个 token 是一个原始应用参数的 UTF-8 Base64；[`DaemonArguments`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonArguments.java) 严格解码一次，拒绝非法 Base64、UTF-8、null 与 NUL，且不回显原值。它不是加密或第二套配置来源。Windows 安装器用该入口传应用参数，并通过任务的 Unicode 字段设置 Java 路径和工作目录，以 ASCII 相对 JAR 名规避 JDK 21 launcher 的 ANSI argv 转换损失。
 
-[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 只消费唯一的 `--config <绝对路径>`：配置文件是 `daemon.json`，其父目录就是运行数据目录，同目录的 `daemon.token` 是 owner-only 注册凭证。gateway 由配置里的 `studioUrl` 派生，心跳/重连固定 `PT15S`/`PT1S`/`PT30S`。进程不接受 token 文本，也不接受 gateway、数据目录或 LSP 文件路径等第二配置来源；完整参数见安装指南。
+[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 只消费唯一的 `--config <绝对路径>`：配置文件是 `daemon.json`，其父目录就是运行数据目录，同目录的 `daemon.token` 是 owner-only 注册凭证。gateway 由配置里的 `studioUrl` 派生，心跳/重连固定 `PT15S`/`PT1S`/`PT30S`。进程不接受 token 文本，也不接受 gateway、数据目录或 LSP 文件路径等第二配置来源；完整参数见安装指南。配置里的 `terminal`（可执行程序、argv、工作目录）在读取配置时由 [`TerminalLaunchSpec`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalLaunchSpec.java) 只解析一次：显式值立即只读校验，缺省时按宿主 OS 选择 shell 并以 `user.home` 为工作目录；运行失败不换 shell，argv 不进入 `toString` 或诊断，且与模型工具的 `bashExecutable` 互相独立。
 
 [`DaemonTokenFile`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFile.java) 校验绝对路径、普通文件和非符号链接，在 POSIX 上要求属主可读且无 group/other 权限位。它不核对 Unix UID，也不复核 Windows DACL；当前用户所有权和 Windows ACL 由安装器检查。配置对象只保存路径，每次 HELLO 前读取 UTF-8 内容并去除外围空白，凭证不进入配置对象的 `toString` 或日志。
 
@@ -135,7 +135,7 @@ COMPLETED(uploadId 与权威元数据)
 | `daemon` | CLI、数据目录、能力注册、执行器所有权、握手与调用运行时 |
 | `daemon.coding` | 文件、命令、检索、文本输出与 LSP；只消费显式调用目录 |
 | `daemon.process` | 唯一 OS 执行范围基座：父进程侧 `ProcessScope`、helper 侧 `ProcessScopeHelper`、POSIX/Windows 原生原语；不注册工具 |
-| `daemon.terminal` | 单 owner JediTerm 内核、显式 headless Display 与深不可变数值投影；不拥有 PTY、连接或业务持久化 |
+| `daemon.terminal` | 唯一启动规格解析、单 owner JediTerm 内核、headless Display 与数值投影；不拥有 PTY、连接或业务持久化 |
 | `daemon.journal` | 进程内原子去重与冻结终态，不持久化跨进程执行状态 |
 | `daemon.skill` | exact commit 的技能包拉取、校验、替换与启动恢复 |
 | `daemon.transport` | WebSocket 文本传输、压缩协商与帧边界 |

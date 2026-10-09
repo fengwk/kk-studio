@@ -1,5 +1,6 @@
 import type {
   DaemonLspServerConfiguration,
+  DaemonTerminalConfiguration,
   EnvironmentInstallConfigDTO,
   InstallOperatingSystem,
 } from '@/shared/api/contracts/ai-environment'
@@ -27,7 +28,8 @@ function fail(field: string): never {
 const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
 const operatingSystems = ['linux', 'macos', 'windows'] as const
 const topLevelFields = ['operatingSystem', 'javaHome', 'daemon']
-const daemonFields = ['studioUrl', 'note', 'bashExecutable', 'lsp']
+const daemonFields = ['studioUrl', 'note', 'bashExecutable', 'terminal', 'lsp']
+const terminalFields = ['executable', 'args', 'workdir']
 const serverFields = ['command', 'extensions', 'rootMarkers', 'firstMatchMarkers']
 const serverIdPattern = /^[A-Za-z0-9_.-]+$/
 
@@ -91,6 +93,38 @@ function bashExecutable(value: unknown): string | null {
   if (raw === null) return null
   if (raw.trim().length === 0 || controls.test(raw)) fail('daemon.bashExecutable')
   return raw
+}
+
+/** 终端程序/启动目录与 bash 同义：显式则非空白、不含控制字符、不去空白改值。 */
+function nonblankOrNull(value: unknown, field: string): string | null {
+  const raw = stringOrNull(value, field)
+  if (raw === null) return null
+  if (raw.trim().length === 0 || controls.test(raw)) fail(field)
+  return raw
+}
+
+/** 终端 argv：严格字符串数组，每项保留原值（允许空字符串），只拒绝非字符串与控制字符。 */
+function argv(value: unknown, field: string): string[] {
+  if (value === null || value === undefined) return []
+  if (!Array.isArray(value)) fail(field)
+  return value.map((item, index) => {
+    if (typeof item !== 'string' || controls.test(item)) fail(`${field}[${index}]`)
+    return item
+  })
+}
+
+/** 与共享 codec 同义：全默认配置归一为 null；非默认配置保留每个 argv 项。 */
+function terminalConfiguration(value: unknown): DaemonTerminalConfiguration | null {
+  if (value === null || value === undefined) return null
+  if (!isPlainObject(value) || hasUnknownField(value, terminalFields)) fail('daemon.terminal')
+  const terminal = {
+    executable: nonblankOrNull(value.executable, 'daemon.terminal.executable'),
+    args: argv(value.args, 'daemon.terminal.args'),
+    workdir: nonblankOrNull(value.workdir, 'daemon.terminal.workdir'),
+  }
+  return terminal.executable === null && terminal.workdir === null && terminal.args.length === 0
+    ? null
+    : terminal
 }
 
 /** 与后端 `EnvironmentInstallConfigs.validate` 相同的绝对路径与占位符规则。 */
@@ -196,6 +230,7 @@ export function validateInstallConfig(
       studioUrl: origin(config.daemon.studioUrl),
       note: note(config.daemon.note),
       bashExecutable: bashExecutable(config.daemon.bashExecutable),
+      terminal: terminalConfiguration(config.daemon.terminal),
       lsp: lspConfiguration(config.daemon.lsp),
     },
   }

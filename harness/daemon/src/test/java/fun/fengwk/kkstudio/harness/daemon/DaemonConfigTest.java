@@ -10,6 +10,7 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.parallel.Resources;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.ExecutableResolver;
+import fun.fengwk.kkstudio.harness.daemon.terminal.TerminalLaunchSpec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
 import java.io.IOException;
@@ -201,6 +202,52 @@ class DaemonConfigTest {
     }
   }
 
+  /** 终端 launch spec 随配置解析确定：显式 executable/args/workdir 原样（args 含空参数）解析为宿主规格。 */
+  @Test
+  void terminalLaunchSpecIsResolvedAndArgvPreserved() throws Exception {
+    Path bash = writeExecutable(root.resolve("bin"), "acme-bash");
+    Path shell = writeExecutable(root.resolve("bin"), "acme-shell");
+    Path workdir = Files.createDirectory(root.resolve("cwd"));
+    ObjectNode json = MAPPER.createObjectNode().put("studioUrl", "http://localhost");
+    json.put("bashExecutable", bash.toString());
+    ObjectNode terminal = json.putObject("terminal");
+    terminal.put("executable", shell.toString());
+    terminal.putArray("args").add("-l").add("");
+    terminal.put("workdir", workdir.toString());
+    Path file = writeConfig(root, "http://localhost");
+    MAPPER.writeValue(file.toFile(), json);
+
+    DaemonConfig config = load(file);
+    assertEquals(shell.toString(), config.terminal().executable());
+    assertEquals(List.of("-l", ""), config.terminal().args());
+    assertEquals(workdir.toAbsolutePath().normalize(), config.terminal().workdir());
+  }
+
+  /** 省略 terminal 时使用宿主 shell 与 user.home，且不创建任何额外文件。 */
+  @Test
+  void terminalDefaultsToHostShellAndHome() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+    DaemonConfig config = load(file);
+    assertTrue(ExecutableResolver.resolve(config.terminal().executable()).isPresent());
+    assertEquals(List.of(), config.terminal().args());
+    assertEquals(Path.of(System.getProperty("user.home")).normalize(), config.terminal().workdir());
+    assertEquals(List.of("daemon.json", "daemon.token"), entries(root));
+  }
+
+  /** 显式 terminal executable 无法解析时在配置解析期失败关闭，错误只含字段路径、不回显取值。 */
+  @Test
+  void unresolvedTerminalExecutableFailsClosedWithoutEcho() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+    String absent = root.resolve("absent-shell").toString();
+    ObjectNode json = MAPPER.createObjectNode().put("studioUrl", "http://localhost");
+    json.set("terminal", MAPPER.createObjectNode().put("executable", absent));
+    MAPPER.writeValue(file.toFile(), json);
+    IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> load(file));
+    assertTrue(error.getMessage().contains("daemon.terminal.executable"), error.getMessage());
+    assertFalse(error.getMessage().contains(absent), "错误信息不得回显配置取值");
+    assertEquals(List.of("daemon.json", "daemon.token"), entries(root));
+  }
+
   @Test
   @ResourceLock(Resources.SYSTEM_PROPERTIES)
   void removedPropertiesDoNotOverrideFile() throws Exception {
@@ -271,7 +318,12 @@ class DaemonConfigTest {
 
   private static DaemonConfig runtime(
       URI uri, Path token, Duration heartbeat, Duration initial, Duration max, Path data) {
-    return new DaemonConfig(uri, token, heartbeat, initial, max, null, data);
+    return new DaemonConfig(uri, token, heartbeat, initial, max, null, data, defaultTerminal());
+  }
+
+  /** 内部构造器用例的固定终端规格：这些用例不驱动终端，只需一个合法 launch spec。 */
+  static TerminalLaunchSpec defaultTerminal() {
+    return new TerminalLaunchSpec("sh", List.of(), Path.of("").toAbsolutePath());
   }
 
   static Path writeConfig(Path directory, String url) throws IOException {

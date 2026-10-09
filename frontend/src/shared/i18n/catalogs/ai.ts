@@ -2959,6 +2959,38 @@ export const aiCatalog = {
     'en-US': "Bash executable is invalid: it must be nonblank without control characters.",
     'zh-CN': "Bash 可执行文件无效：不能为空或包含控制字符。",
   },
+  'ai.environment.install.terminalExecutable': {
+    'en-US': "Terminal program",
+    'zh-CN': "终端程序",
+  },
+  'ai.environment.install.terminalArgs': {
+    'en-US': "Arguments (JSON array)",
+    'zh-CN': "参数（JSON 数组）",
+  },
+  'ai.environment.install.terminalArgsHelp': {
+    'en-US': 'JSON string array; empty string arguments are kept.',
+    'zh-CN': 'JSON 字符串数组；空字符串参数会保留。',
+  },
+  'ai.environment.install.terminalWorkdir': {
+    'en-US': "Start directory",
+    'zh-CN': "启动目录",
+  },
+  'ai.environment.install.invalidTerminalExecutable': {
+    'en-US': "Terminal program is invalid: it must be nonblank without control characters.",
+    'zh-CN': "终端程序无效：不能为空或包含控制字符。",
+  },
+  'ai.environment.install.invalidTerminalArgs': {
+    'en-US': "Terminal arguments are invalid: use a JSON array of strings.",
+    'zh-CN': "终端参数无效：请使用字符串 JSON 数组。",
+  },
+  'ai.environment.install.invalidTerminalWorkdir': {
+    'en-US': "Start directory is invalid: it must be a nonblank absolute path without control characters.",
+    'zh-CN': "启动目录无效：需为非空绝对路径，且不含控制字符。",
+  },
+  'ai.environment.install.invalidTerminal': {
+    'en-US': "Terminal settings are invalid.",
+    'zh-CN': "终端设置无效。",
+  },
   'ai.environment.install.invalidOs': {
     'en-US': "The operating system is invalid.",
     'zh-CN': "操作系统无效。",
