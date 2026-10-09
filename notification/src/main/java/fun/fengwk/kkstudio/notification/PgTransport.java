@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
 import fun.fengwk.kkstudio.share.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationOutbox;
 import fun.fengwk.kkstudio.share.notification.NotificationPacket;
 import fun.fengwk.kkstudio.share.notification.NotificationReassembler;
 
@@ -18,7 +19,6 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -32,15 +32,6 @@ final class PgTransport implements CrossNodeTransport {
   private static final String SEND_SQL =
       "select pg_notify(?, payload) from unnest(?::text[]) with ordinality as n(payload, ord) order by ord";
 
-  private static final class Cursor {
-    final NotificationPacket message;
-    int index;
-
-    Cursor(NotificationPacket message) {
-      this.message = message;
-    }
-  }
-
   private final DataSource dataSource;
   private final JdbcTemplate jdbc;
   private final UUID self;
@@ -50,9 +41,7 @@ final class PgTransport implements CrossNodeTransport {
   private final NotificationReassembler reassembler;
   private final Consumer<String> resync;
   private final Runnable resyncAll;
-  private final ArrayDeque<Cursor> pending = new ArrayDeque<>();
-  private int pendingBytes;
-  private int pendingMessages;
+  private final NotificationOutbox outbox;
   private boolean closed;
   private boolean started;
   private volatile boolean readerHealthy;
@@ -80,6 +69,7 @@ final class PgTransport implements CrossNodeTransport {
     this.reconnectMillis = positiveMillis(reconnectBackoff);
     this.resync = resync;
     this.resyncAll = resyncAll;
+    this.outbox = new NotificationOutbox(limits);
     this.reassembler =
         new NotificationReassembler(self, limits, System::nanoTime, delivery, resync);
   }
@@ -115,14 +105,10 @@ final class PgTransport implements CrossNodeTransport {
         if (closed) {
           throw new IllegalStateException("transport closed");
         }
-        if (pendingMessages >= limits.queueCapacity()
-            || message.byteLength() > limits.pendingBytes() - pendingBytes) {
+        if (!outbox.offer(message)) {
           resync.accept(message.topic());
           throw new IllegalStateException("transient notification outbox budget exceeded");
         }
-        pending.addLast(new Cursor(message));
-        pendingBytes += message.byteLength();
-        pendingMessages++;
         notifyAll();
       }
     }
@@ -188,48 +174,39 @@ final class PgTransport implements CrossNodeTransport {
   private void sendPending() {
     try {
       while (true) {
-        Cursor cursor;
+        NotificationOutbox.Batch batch;
         synchronized (this) {
-          while (!closed && pending.isEmpty()) {
+          while (true) {
+            if (closed) {
+              return;
+            }
+            NotificationOutbox.Batch candidate = outbox.pollBatch().orElse(null);
+            if (candidate != null) {
+              batch = candidate;
+              break;
+            }
             wait();
           }
-          if (closed) {
-            return;
-          }
-          cursor = pending.removeFirst();
-          // Retain reservation while the SQL call is in flight.
         }
-        boolean failed = false;
+        boolean sent = false;
         try {
-          List<String> frames = new ArrayList<>();
-          int end =
-              Math.min(
-                  NotificationCarrier.count(cursor.message.byteLength()),
-                  cursor.index + limits.sendBatchFrames());
-          while (cursor.index < end) {
-            frames.add(NotificationCarrier.chunk(cursor.message, cursor.index++).encode());
-          }
-          sendPendingFrames(cursor.message.target(), frames);
+          // The outbox retains the whole logical reservation while the SQL call is in flight.
+          sendPendingFrames(batch.target(), batch.frames());
           senderHealthy = true;
+          sent = true;
         } catch (SQLException | RuntimeException error) {
-          failed = true;
           senderHealthy = false;
-          resync.accept(cursor.message.topic());
+          resync.accept(batch.topic());
           log.warn(
               "Notification send failed topic={} errorType={}",
-              cursor.message.topic(),
+              batch.topic(),
               error.getClass().getSimpleName());
         }
         synchronized (this) {
           if (closed) {
             return;
           }
-          if (failed || cursor.index == NotificationCarrier.count(cursor.message.byteLength())) {
-            pendingBytes -= cursor.message.byteLength();
-            pendingMessages--;
-          } else {
-            pending.addLast(cursor);
-          }
+          outbox.complete(batch, sent);
         }
       }
     } catch (InterruptedException ignored) {
@@ -339,9 +316,7 @@ final class PgTransport implements CrossNodeTransport {
       closed = true;
       readerHealthy = false;
       senderHealthy = false;
-      pending.clear();
-      pendingBytes = 0;
-      pendingMessages = 0;
+      outbox.close();
       listenConn = listenConnection;
       senderConn = senderConnection;
       senderStmt = senderStatement;

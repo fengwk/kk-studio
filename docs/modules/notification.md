@@ -40,13 +40,16 @@ PG reader 在解析 publisher UUID 后无条件直接丢弃自身回声，不解
 监听连接按 `notificationPollMillis` 执行主动 JDBC 存活检查，检查超时取同一间隔向上取整的秒数（至少 1 秒）；
 被动通知读取不能单独检测空闲 TCP 黑洞。检查失败先标记不健康并请求全量对账，再按已有重连节奏重新 LISTEN。
 临时发送失败不自动重试；本地恢复请求和连接健康状态用于暴露不可用。
+无事务（瞬态）远端发送由 Share 的有界公平 [`NotificationOutbox`](../../share/src/main/java/fun/fengwk/kkstudio/share/notification/NotificationOutbox.java)
+承接：它从入队到最后一个 native 分片成功前一直保留整包预算，按批次公平轮转，
+失败丢弃该逻辑包并释放，不重试、不补发。
 
 所有远端消息均使用一种 carrier，包含协议版本、publisher、target、topic、messageId、
 index/count 和逻辑总字节数。`count=1` 也遵守同一校验。carrier 文本使用严格 UTF-8：编码拒绝 lone surrogate，解码拒绝坏字节与截断序列，绝不静默替换成 replacement character 后再参与 canonical 比对。最终 UTF-8 carrier 小于 7900 字节；
 数据按字节分片，仅在完整重组后调用领域 codec。重复片必须一致，矛盾、缺片、超时与资源溢出
 丢弃整包并请求恢复。瞬态发送按有界分片批次轮转，大消息不能独占发送队列。
-分片与重组是 Share 的公共纯 JDK 原语 [`NotificationCarrier` / `NotificationReassembler`](../../share/src/main/java/fun/fengwk/kkstudio/share/notification/)，
-PG 与两条 WS 通道直接复用同一算法，不复制第二套实现；公共 carrier/packet 深不可变、错误只描述字段或规则且不回显输入。
+分片、重组与有界公平发送游标是 Share 的公共纯 JDK 原语 [`NotificationCarrier` / `NotificationReassembler` / `NotificationOutbox`](../../share/src/main/java/fun/fengwk/kkstudio/share/notification/)，
+PG 与两条 WS 通道直接复用同一算法，不复制第二套实现；公共 carrier/packet/outbox 深不可变、错误只描述字段或规则且不回显输入。
 
 默认预算由 `NotificationLimits.defaults()` 提供：单逻辑消息 8 MiB、发送/Inbox 各 32 MiB、重组 32 MiB、8 条并发重组及 5 秒截止；
 生产负载的最终预算仍需依据基准结果锁定。PG NOTIFY 队列有容量上限，可使用临时磁盘；
@@ -56,7 +59,7 @@ PG 与两条 WS 通道直接复用同一算法，不复制第二套实现；公�
 
 [`NotificationPostgresqlIntegrationTest`](../../notification/src/test/java/fun/fengwk/kkstudio/notification/NotificationPostgresqlIntegrationTest.java)
 使用隔离 Testcontainers PG 验证物理提交/回滚、SQL poisoning、同源回声、双节点与重连。
-分片与重组的正负单测随公共原语放在 Share（[`NotificationCarrierTest` / `NotificationReassemblerTest`](../../share/src/test/java/fun/fengwk/kkstudio/share/notification/)），
+分片、重组与 outbox 的正负单测随公共原语放在 Share（[`NotificationCarrierTest` / `NotificationReassemblerTest` / `NotificationOutboxTest`](../../share/src/test/java/fun/fengwk/kkstudio/share/notification/)），
 notification 侧单测覆盖 Inbox 的顺序、溢出和恢复状态。
 
 ```bash
