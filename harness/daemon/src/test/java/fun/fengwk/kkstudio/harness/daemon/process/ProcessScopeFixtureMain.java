@@ -79,7 +79,7 @@ public final class ProcessScopeFixtureMain {
   /** 构造运行本夹具的命令行（测试用）：与 {@link ProcessScope} 的启动方式一致（同一 JVM 与类路径，带上覆盖率代理）。 */
   static List<String> fixtureCommand(String... arguments) {
     List<String> command = new ArrayList<>();
-    command.add(System.getProperty("java.home") + "/bin/java");
+    command.add(javaBinary());
     command.addAll(TestCoverageAgentArguments.forwarded());
     command.add("-cp");
     command.add(System.getProperty("java.class.path"));

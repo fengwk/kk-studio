@@ -61,7 +61,7 @@ class ProcessScopeInteractivePtyTest {
       console.write("echo \"__P\"\"ID__$$\"\n");
       long shellPid = Long.parseLong(console.awaitToken("__PID__", 20_000));
 
-      console.write(LONG_SLEEP + " & echo \"__J\"\"OB__$!\"\n");
+      console.write(LONG_SLEEP + " & echo \"__J\"\"OB__\"$!\n");
       long jobPid = Long.parseLong(console.awaitToken("__JOB__", 20_000));
       console.write("echo \"__P\"\"GID__$(ps -o pgid= -p " + jobPid + ")\"\n");
       long jobPgid = Long.parseLong(console.awaitToken("__PGID__", 20_000));
@@ -171,13 +171,13 @@ class ProcessScopeInteractivePtyTest {
     try (PtyConsole console = new PtyConsole(scope.process())) {
       console.write("echo \"__P\"\"ID__$$\"\n");
       assertTrue(Long.parseLong(console.awaitToken("__PID__", 20_000)) > 0);
-      console.write(LONG_SLEEP + " & echo \"__A\"\"__$!\"\n");
+      console.write(LONG_SLEEP + " & echo \"__A\"\"__\"$!\n");
       long plainJob = Long.parseLong(console.awaitToken("__A__", 20_000));
       // 子 shell 里忽略 SIGTERM：忽略状态被 exec 继承，因此这个作业连温和信号都不理会。
       console.write(
           "(trap '' TERM; printf ready > term-ready; exec "
               + LONG_SLEEP
-              + ") & echo \"__B\"\"__$!\"\n");
+              + ") & echo \"__B\"\"__\"$!\n");
       long termIgnoringJob = Long.parseLong(console.awaitToken("__B__", 20_000));
       assertTrue(plainJob > 0 && termIgnoringJob > 0);
       long deadline = System.nanoTime() + 10_000_000_000L;
@@ -304,7 +304,12 @@ class ProcessScopeInteractivePtyTest {
           long remaining = deadline - System.nanoTime();
           if (remaining <= 0) {
             throw new AssertionError(
-                "did not observe " + sentinel + " within " + millis + "ms; output=" + buffer);
+                "did not observe "
+                    + sentinel
+                    + " within "
+                    + millis
+                    + "ms; received characters="
+                    + buffer.length());
           }
           buffer.wait(Math.max(1, remaining / 1_000_000L));
         }

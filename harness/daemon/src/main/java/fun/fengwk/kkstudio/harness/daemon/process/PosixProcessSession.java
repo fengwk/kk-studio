@@ -60,6 +60,9 @@ final class PosixProcessSession {
   /** macOS {@code pbi_status}：僵尸进程（{@code <sys/proc.h>} 的 {@code SZOMB}）。 */
   private static final int MAC_STATUS_ZOMBIE = 5;
 
+  /** Darwin {@code getsid}：内核中找不到活进程。 */
+  private static final int ESRCH = 3;
+
   /** macOS pid 枚举的安全上限：按几何增长重试时用来封顶，避免病态情况下无界循环。 */
   private static final int MAC_PID_LIMIT = 1 << 20;
 
@@ -297,7 +300,11 @@ final class PosixProcessSession {
    * SZOMB}）不算 活成员，读不到身份时按「不可判定」返回 {@code null}，绝不把「查不到」当成「已经消失」。
    */
   private static List<GroupMember> macMembers(long session, long excludedPid) {
-    int[] pids = macProcessIds();
+    return macMembers(session, excludedPid, macProcessIds());
+  }
+
+  /** 按一次真实 pid 快照查询；包内回归用已消失 pid 验证扫描期间的退出竞态。 */
+  static List<GroupMember> macMembers(long session, long excludedPid, int[] pids) {
     if (pids == null) {
       return null;
     }
@@ -310,8 +317,8 @@ final class PosixProcessSession {
       }
       int processSession = LibC.INSTANCE.getsid((int) pid);
       if (processSession < 0) {
-        // getsid 失败：进程可能已经消失；若它仍存在，这次枚举就无法确认「没有成员」。
-        undecidable |= ProcessHandle.of(pid).isPresent();
+        // ESRCH 已由内核证明没有活成员；JDK 句柄仍可看到僵尸，不能反向把它判为活着。
+        undecidable |= Native.getLastError() != ESRCH;
         continue;
       }
       if (Integer.toUnsignedLong(processSession) != session) {

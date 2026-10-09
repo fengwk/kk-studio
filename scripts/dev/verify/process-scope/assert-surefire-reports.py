@@ -77,6 +77,13 @@ WINDOWS_CONPTY_REQUIRED_CASES = {
     },
 }
 
+MACOS_REQUIRED_CASES = {
+    PROCESS_PACKAGE + "PosixProcessSessionTest": {
+        "memberEnumerationUsesRealKernelQueriesOrReportsUndecidable",
+        "macEnumerationIgnoresVanishedPidsAndPreservesMemberIdentity",
+    },
+}
+
 # PTY 的平台无关契约必须在每条矩阵腿真跑，不能被同类的 POSIX 前置条件一起跳过。
 ALL_PLATFORM_REQUIRED_CASES = {
     PROCESS_PACKAGE + "ProcessScopePtyIntegrationTest": {
@@ -183,6 +190,8 @@ def main() -> int:
                 platform_cases |= WINDOWS_CONPTY_REQUIRED_CASES.get(qualified, set())
             else:
                 platform_cases |= POSIX_INTERACTIVE_REQUIRED_CASES.get(qualified, set())
+                if os_label.startswith("macos"):
+                    platform_cases |= MACOS_REQUIRED_CASES.get(qualified, set())
             if not platform_cases:
                 continue
             required = platform_cases

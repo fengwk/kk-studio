@@ -73,6 +73,10 @@ CONPTY_CASES = (
     "conPtyIsUsedAndNativeWindowSizeFollowsResize",
     "conPtySessionConvergesAChildThatOutlivesTheCommand",
 )
+MACOS_CASES = (
+    "memberEnumerationUsesRealKernelQueriesOrReportsUndecidable",
+    "macEnumerationIgnoresVanishedPidsAndPreservesMemberIdentity",
+)
 PTY_CASES = (
     "ptyCarriesCommandOutputAndKeepsTheExactExitCode",
     "ptyRunsAJvmFixtureAndKeepsItsExitCode",
@@ -156,6 +160,8 @@ def write_complete_reports(
             cases = PTY_CASES
         elif class_name == "WindowsJobScopeTest":
             cases = ("realKernelReportsMissingExecutableWorkdirAndJobName",)
+        elif class_name == "PosixProcessSessionTest":
+            cases = MACOS_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -166,7 +172,7 @@ def write_complete_reports(
         )
 
 
-class CollectCoverageInputsTest(unittest.TestCase):
+class CollectCoverageLinksTest(unittest.TestCase):
     """收集与合并前置条件：三平台的 class 必须一致，且收集出来的 class 链接必须真的可用。"""
 
     @staticmethod
@@ -306,6 +312,28 @@ class AssertSurefireReportsTest(unittest.TestCase):
                 "windows-latest",
                 result.stdout,
             )
+
+    def test_macos_requires_native_enumeration_cases(self):
+        """Darwin 的已消失 pid 回归必须真实运行；缺失、跳过和重复都不能通过。"""
+        for cases, skipped_cases in (
+            (MACOS_CASES[:-1], ()),
+            (MACOS_CASES, (MACOS_CASES[-1],)),
+            (MACOS_CASES + (MACOS_CASES[-1],), ()),
+        ):
+            with self.subTest(cases=cases, skipped_cases=skipped_cases):
+                with tempfile.TemporaryDirectory() as tmp:
+                    reports = Path(tmp)
+                    write_complete_reports(reports)
+                    write_surefire_report(
+                        reports,
+                        "PosixProcessSessionTest",
+                        cases,
+                        skipped=len(skipped_cases),
+                        skipped_cases=skipped_cases,
+                    )
+                    result = run_script("assert-surefire-reports.py", reports, "macos-latest")
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    self.assertIn(MACOS_CASES[-1], result.stdout)
 
     def test_fails_when_a_required_case_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

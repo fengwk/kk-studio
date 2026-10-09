@@ -117,11 +117,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Set up PostgreSQL client tools
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           # Ubuntu's default repositories do not provide every supported PostgreSQL major.
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl --fail --silent --show-error --retry 3 \
+          sudo curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 60 \
             -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc
           . /etc/os-release
@@ -133,8 +134,10 @@ jobs:
             'Components: main' \
             'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
             | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60 \
+            install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
           # Match the real PostgreSQL fixture; runner defaults may point pg_dump at an older major.
           echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"
       - name: Verify PostgreSQL client selection

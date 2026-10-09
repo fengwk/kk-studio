@@ -123,6 +123,23 @@ class PosixProcessSessionTest {
     }
   }
 
+  /** pid 快照里的已退出项不污染真实成员；排除成员仍必须得到确定的空集合。 */
+  @Test
+  void macEnumerationIgnoresVanishedPidsAndPreservesMemberIdentity() {
+    assumeTrue(isMac(), "需要真实 Darwin getsid/libproc");
+    long self = ProcessHandle.current().pid();
+    long session = PosixProcessSession.currentSession();
+    int[] pids = {(int) self, Integer.MAX_VALUE};
+    List<PosixProcessSession.GroupMember> members =
+        PosixProcessSession.macMembers(session, PosixProcessSession.NO_PROCESS, pids);
+    assertNotNull(members);
+    assertEquals(1, members.size());
+    assertEquals(self, members.getFirst().pid());
+    assertEquals(PosixProcessSession.processStart(self), members.getFirst().start());
+    assertNotNull(members.getFirst().start());
+    assertEquals(List.of(), PosixProcessSession.macMembers(session, self, pids));
+  }
+
   /** 枚举不可判定必须表现为「还有成员」：谎称已经收敛会让收尾跳过强杀阶段。 */
   @Test
   void undecidableEnumerationIsNeverReportedAsConverged() {
