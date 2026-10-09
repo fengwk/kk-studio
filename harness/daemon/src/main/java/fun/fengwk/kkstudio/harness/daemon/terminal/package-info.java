@@ -14,6 +14,12 @@
  * argv 与绝对规范化工作目录。 解析只在配置读取时发生一次：显式 executable/workdir 立即只读校验并失败关闭，缺省时按宿主 OS 选择 shell 并以 {@code
  * user.home} 为工作目录； 运行失败后不换 shell，也不把参数拼接成 shell 字符串。argv 可能包含秘密，因此不进入 {@code toString} 或诊断输出。
  *
+ * <p>{@link fun.fengwk.kkstudio.harness.daemon.terminal.TerminalRuntime} 把唯一 scoped
+ * PTY、唯一内核与唯一有界写队列合成一次调用的资源边界：用户写入、尺寸调整与内核查询应答走同一队列，操作都先建立截止时间再推进内核与 native，并在进入 native
+ * 前后明确区分「确定未执行」与「结果不确定」，native 截止时间与关闭仲裁同一 gate；收敛只由一个预留的 lifecycle 任务完成，read/kernel
+ * 失败、超时、自然退出、被调用方提前中断与显式关闭都只发出停止信号，不在 reader/writer/VT owner/scheduler
+ * 上就地收敛。它使用调用方注入的执行器，不创建也不关闭执行器；因为预留的 lifecycle 任务与读、写任务都会阻塞，注入的阻塞 I/O executor 必须能并发运行这三者。
+ *
  * <p>本包与模型工具的 {@code bashExecutable} 语义互相独立，不拥有业务表、日志或持久化出口。DA/DSR/OSC 回应只交给注入的回调，调用方负责接唯一 PTY
  * writer。
  */
