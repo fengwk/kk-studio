@@ -43,7 +43,6 @@ class BuiltinHarnessContributorConfigurationTest {
             SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
             SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
             SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
-            SystemSettings.AiRuntime.DEFAULT.compactionFallbackModel(),
             4,
             7,
             13,

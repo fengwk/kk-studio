@@ -1,11 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -36,9 +32,9 @@ import java.util.UUID;
 /**
  * 唯一请求重建边界：从不可变 {@link EntryPath} 与冻结 {@link ModelRequestSpec} 纯投影内存 {@link ProviderRequest}。
  *
- * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩摘要调用通过 basis
- * EntryPath 末尾 owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）识别——closed
- * Invocation 后仍可从 Entry 恢复 fallback / split 元数据，不再在请求内复制 compaction facts。
+ * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩执行已完全移出本
+ * materializer：压缩子 Thread 的首条输入由 {@code CompactionChildStarter} 以普通 CUSTOM_MESSAGE 构造，父 COMPACTION
+ * turn 不创建 ModelInvocation，也不在请求内复制 compaction facts。
  *
  * <p>压缩感知历史投影还把执行本次压缩的 COMPACTION TURN_START 冻结 settings 中的 Goal 作为有界 USER 级历史背景放在摘要之后、真实近期消息之前：
  * 背景逐字来自该冻结快照（同一压缩每次重建结果相同），已被切掉或仍在近期消息中都不改变它，后续 Goal 设置 / 清除由真实输入消息自身携带。 Goal 只作为用户级背景，绝不提升为
@@ -59,24 +55,14 @@ public final class ModelRequestMaterializer {
     this.schemaCodec = Objects.requireNonNull(schemaCodec, "schemaCodec");
   }
 
+  /**
+   * 纯投影一次普通 Model 请求：压缩执行已完全移出本 materializer——压缩子 Thread 的首条输入是普通 CUSTOM_MESSAGE，由 {@code
+   * CompactionChildStarter} 用共享 {@link CompactionPrompts} 构造，父 COMPACTION turn 不产生 ModelInvocation。
+   */
   public ProviderRequest materialize(EntryPath path, ModelRequestSpec spec) {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(spec, "spec");
-    CompactionStart compaction = compactionStartAtHead(path);
-    if (compaction != null) {
-      return materializeCompaction(path, spec, compaction);
-    }
     return materializeLive(path, spec);
-  }
-
-  /** basis path 末尾条目是 owned COMPACTION TURN_START 时返回其冻结元数据，否则 null。 */
-  public static CompactionStart compactionStartAtHead(EntryPath path) {
-    Entry head = path.head();
-    if (head.payload() instanceof TurnStartPayload start
-        && start.reason() == TurnStartReason.COMPACTION) {
-      return start.compaction();
-    }
-    return null;
   }
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
@@ -90,25 +76,6 @@ public final class ModelRequestMaterializer {
         spec.systemInstruction(),
         projector(spec.toolBindings()).projectSources(projectedMessages),
         tools,
-        spec.cacheControl());
-  }
-
-  /** 摘要调用：summarization system prompt 是唯一 systemInstruction，conversation 是一个 USER 消息。 */
-  private ProviderRequest materializeCompaction(
-      EntryPath path, ModelRequestSpec spec, CompactionStart compaction) {
-    CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
-    String userPrompt =
-        compaction.phase() == CompactionPhase.TURN_PREFIX
-            ? CompactionPrompts.turnPrefixUserPrompt(input.messages())
-            : CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary());
-    ProviderMessageProjector projector = projector(List.of());
-    return new ProviderRequest(
-        spec.model(),
-        spec.variant(),
-        spec.outputTokens(),
-        CompactionPrompts.summarizationSystemPrompt(),
-        projector.project(List.of(AgentMessage.user(userPrompt))),
-        List.of(),
         spec.cacheControl());
   }
 

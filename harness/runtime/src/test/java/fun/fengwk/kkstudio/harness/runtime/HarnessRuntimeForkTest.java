@@ -741,9 +741,12 @@ class HarnessRuntimeForkTest {
                           CompactionPhase.FULL,
                           CompactionTrigger.MANUAL,
                           settings().model(),
+                          4_096L,
                           u2,
                           null,
-                          null),
+                          null,
+                          tx.nextId(),
+                          tx.nextId()),
                       T2,
                       false)
                   .endId();
@@ -791,9 +794,12 @@ class HarnessRuntimeForkTest {
                       CompactionPhase.HISTORY,
                       CompactionTrigger.THRESHOLD,
                       settings().model(),
+                      4_096L,
                       a1,
                       u1,
-                      null),
+                      null,
+                      tx.nextId(),
+                      tx.nextId()),
                   T1,
                   true);
           tx.insertEntry(turnStartEntry(ts2, sessionId, historyTurn.endId(), T2, threadId));
@@ -810,9 +816,12 @@ class HarnessRuntimeForkTest {
                       CompactionPhase.TURN_PREFIX,
                       CompactionTrigger.MANUAL,
                       settings().model(),
+                      4_096L,
                       a2,
                       u2,
-                      historyTurn.resultId()),
+                      historyTurn.resultId(),
+                      tx.nextId(),
+                      tx.nextId()),
                   T2,
                   false);
           tx.insertEntry(turnStartEntry(ts3, sessionId, prefixTurn.endId(), T3, threadId));

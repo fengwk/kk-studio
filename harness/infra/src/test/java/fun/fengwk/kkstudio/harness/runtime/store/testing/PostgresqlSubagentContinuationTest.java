@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -92,7 +93,7 @@ class PostgresqlSubagentContinuationTest {
             new ThreadProcessorConfig(
                 new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                 Duration.ofSeconds(5),
-                () -> new CompactionConfig(20_000, null)),
+                () -> new CompactionConfig(20_000)),
             clock,
             scheduler,
             Runnable::run);
@@ -187,6 +188,16 @@ class PostgresqlSubagentContinuationTest {
     assertInstanceOf(TurnEndPayload.class, firstFinal.entryPath().head().payload());
     assertEquals(1L, firstFinal.thread().inputThroughSequence());
     assertEquals(pendingBatch, firstFinal.queuedCommands());
+    assertUnmatchedWithoutReceipts(delegation, secondJoin);
+
+    // 安全边界先独立应用 SET_*，不创建空回合，也不消耗后续任务输入。
+    processNext(childId);
+    ThreadSnapshot appliedSettings = snapshot(childId);
+    assertEquals(ThreadRuntimeStatus.QUEUED, appliedSettings.runtimeStatus());
+    assertInstanceOf(SettingsPayload.class, appliedSettings.entryPath().head().payload());
+    assertEquals(1L, appliedSettings.thread().inputThroughSequence());
+    assertEquals(List.of(secondInput), appliedSettings.queuedCommands());
+    assertNull(appliedSettings.model());
     assertUnmatchedWithoutReceipts(delegation, secondJoin);
 
     processNext(childId);

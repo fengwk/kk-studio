@@ -1,7 +1,6 @@
 import {
   draftLeafPaths,
   getDraftValue,
-  type ModelSelectionDraft,
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import type {
@@ -18,7 +17,6 @@ const FIELD_TYPES = new Set<SystemSettingsSchemaFieldType>([
   'TEXT',
   'ENUM',
   'PERMISSION',
-  'MODEL_SELECTION',
   'INTEGER_LIST',
 ])
 
@@ -133,7 +131,7 @@ function validateField(
       optionValues.add(option.value)
     }
   }
-  if (!matchesFieldType(field.type, value, field.nullable)) {
+  if (!matchesFieldType(field.type, value)) {
     return `settings schema type does not match draft: ${field.path}`
   }
   if (
@@ -152,11 +150,7 @@ function isFiniteBound(value: number | null): boolean {
   return value == null || (Number.isInteger(value) && Number.isFinite(value))
 }
 
-function matchesFieldType(
-  type: SystemSettingsSchemaFieldType,
-  value: unknown,
-  nullable: boolean,
-): boolean {
+function matchesFieldType(type: SystemSettingsSchemaFieldType, value: unknown): boolean {
   switch (type) {
     case 'BOOLEAN':
       return typeof value === 'boolean'
@@ -171,20 +165,7 @@ function matchesFieldType(
       return Array.isArray(value)
     case 'INTEGER_LIST':
       return Array.isArray(value)
-    case 'MODEL_SELECTION':
-      return value == null ? nullable : isModelSelectionDraft(value)
   }
-}
-
-function isModelSelectionDraft(value: unknown): value is ModelSelectionDraft {
-  return (
-    value != null
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && typeof (value as ModelSelectionDraft).providerName === 'string'
-    && typeof (value as ModelSelectionDraft).modelName === 'string'
-    && typeof (value as ModelSelectionDraft).variant === 'string'
-  )
 }
 
 function sameSet(left: Set<string>, right: Set<string>): boolean {

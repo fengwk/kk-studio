@@ -1,15 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
@@ -26,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 
 import java.time.Instant;
@@ -45,8 +37,7 @@ import java.util.UUID;
  * complete Claim，也不参与 Stop 控制：这些仍由各自调用方（{@link ThreadProcessor} 的 claim 调度、Stop 的 收敛）掌握。
  *
  * <p>{@link #appendModel} 覆盖非 compaction turn 的 terminal Model（Complete / Continue / Failed /
- * ToolBatch / 非成功）；{@link #appendCompaction} 覆盖 compaction turn 的结果评估；{@link #appendToolBatch}
- * 覆盖已物化 assistant + 全部 terminal sibling 的批量结果落库。
+ * ToolBatch / 非成功）；{@link #appendToolBatch} 覆盖已物化 assistant + 全部 terminal sibling 的批量结果落库。
  */
 public final class ModelOutcomeAppender {
 
@@ -183,66 +174,6 @@ public final class ModelOutcomeAppender {
         yield new Applied(resultEntryId, null, false, false, true, null, invocations);
       }
     };
-  }
-
-  /** compaction turn 的 terminal Model：按 result evaluator 落结果并维护 Invocation 行。 */
-  public Applied appendCompaction(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
-      EntryPath path,
-      ModelInvocation model,
-      CompactionStart start,
-      Instant mutationNow) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(thread, "thread");
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(model, "model");
-    Objects.requireNonNull(start, "start");
-    UUID sessionId = path.root().sessionId();
-    EntryPayload resultPayload;
-    TurnEndOutcome outcome;
-    boolean continueModel = false;
-    if (model.status() != ModelInvocationStatus.SUCCEEDED) {
-      resultPayload =
-          payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model));
-      outcome = TurnEndOutcome.FAILED;
-    } else {
-      resultPayload = CompactionResultEvaluator.evaluate(path, start, model.result());
-      if (resultPayload instanceof CompactionPayload) {
-        outcome = TurnEndOutcome.COMPLETED;
-        continueModel =
-            start.phase() == CompactionPhase.HISTORY
-                || start.trigger() == CompactionTrigger.OVERFLOW
-                || (start.trigger() == CompactionTrigger.THRESHOLD
-                    && CompactionHistory.hasPendingOwnedContinuation(
-                        thread, path, model.turnStartEntryId()));
-      } else {
-        outcome = TurnEndOutcome.FAILED;
-      }
-    }
-    UUID resultEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(resultEntryId, sessionId, path.head().id(), resultPayload, mutationNow));
-    UUID turnEndId =
-        appendTurnEnd(
-            tx,
-            sessionId,
-            resultEntryId,
-            model.turnStartEntryId(),
-            outcome,
-            continueModel,
-            outcome == TurnEndOutcome.FAILED ? TurnEndReason.TURN_FAILED : null,
-            mutationNow);
-    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-    tx.deleteModelInvocation(model.id());
-    return new Applied(
-        turnEndId,
-        null,
-        outcome == TurnEndOutcome.FAILED,
-        continueModel,
-        false,
-        outcome,
-        List.of());
   }
 
   /**

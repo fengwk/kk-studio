@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.share.systemsettings;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
-
 import java.util.List;
 
 /**
@@ -26,8 +24,6 @@ public class SystemSettingsAiRuntimeDTO {
   private Long retryMaxDelayMillis;
 
   private Integer compactionKeepRecentTokens;
-
-  private HarnessModelSelectionDTO compactionFallbackModel;
 
   private Integer subagentMaxDepth;
 

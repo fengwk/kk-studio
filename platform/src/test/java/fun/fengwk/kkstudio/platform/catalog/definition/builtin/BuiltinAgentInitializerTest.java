@@ -14,12 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
 
 /** 测试意图：内置 Agent 初始化 add-if-missing、幂等、不覆盖既有定义，并以真实主键冲突收敛多实例并发。 */
 class BuiltinAgentInitializerTest {
@@ -45,7 +45,8 @@ class BuiltinAgentInitializerTest {
     assertNull(created.getModelProviderName());
     assertNull(created.getModelName());
     assertNull(created.getVariant());
-    assertEquals(CompactionPrompts.summarizationSystemPrompt(), created.getSystemPrompt());
+    assertEquals(
+        BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), created.getSystemPrompt());
     AgentDefinitionConfigDTO config = codec.decode(created.getConfigJson());
     assertTrue(config.getTools().isEmpty());
     assertTrue(config.getSkills().isEmpty());

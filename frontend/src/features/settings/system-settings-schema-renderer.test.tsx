@@ -10,14 +10,13 @@ import {
   makeSettingsSchema,
 } from '@/test-support/settings-test-fixtures'
 import {
-  settingsSectionsToDraft,
   assembleSettingsUpdate,
+  settingsSectionsToDraft,
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
 import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import type { SystemSettingsSchemaDTO } from '@/shared/api/contracts/system-settings'
-import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -100,9 +99,8 @@ describe('system settings schema renderer', () => {
       schema.sections.flatMap((section) => section.groups.flatMap((group) => group.fields.map((field) => field.path))),
     )
     expect(paths).toEqual(expectedPaths)
-    // 双 custom atomic leaf 也各渲染一次。
+    // custom atomic leaf（PERMISSION）渲染一次。
     expect(screen.getByText('权限规则')).toBeInTheDocument()
-    expect(screen.getByText('压缩回退模型')).toBeInTheDocument()
   })
 
   it('renders a single section pane when given only that section', () => {
@@ -121,7 +119,6 @@ describe('system settings schema renderer', () => {
       'aiRuntime.retryBaseDelayMillis',
       'aiRuntime.retryMaxDelayMillis',
       'aiRuntime.compactionKeepRecentTokens',
-      'aiRuntime.compactionFallbackModel',
       'aiRuntime.subagentMaxDepth',
       'aiRuntime.subagentMaxConcurrency',
       'aiRuntime.subagentMaxTotalConcurrency',
@@ -231,7 +228,7 @@ describe('system settings schema renderer', () => {
   it('fail-closes on an unknown field path', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    schema.sections[0]!.groups[1]!.fields[1]!.path = 'aiRuntime.compactionFallbackModel.bogus'
+    schema.sections[0]!.groups[1]!.fields[0]!.path = 'aiRuntime.compactionKeepRecentTokens.bogus'
     expect(validateSystemSettingsSchema(schema, draft)).toMatch(/unknown system settings draft path/)
   })
 
@@ -242,19 +239,10 @@ describe('system settings schema renderer', () => {
     expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema field/)
   })
 
-  it('fail-closes when a null model selection is declared non-nullable', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    schema.sections[0]!.groups[1]!.fields[1]!.nullable = false
-    expect(validateSystemSettingsSchema(schema, draft)).toMatch(
-      /settings schema type does not match draft/,
-    )
-  })
-
   it('fail-closes when a schema path is missing from the draft', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    schema.sections[0]!.groups[1]!.fields.splice(1, 1)
+    schema.sections[0]!.groups[0]!.fields.splice(1, 1)
     expect(validateSystemSettingsSchema(schema, draft)).toMatch(
       /settings schema field paths do not match the editable draft/,
     )
@@ -339,47 +327,6 @@ describe('system settings schema renderer', () => {
     expect(next.aiRuntime.retryBaseDelayMillis).toBe('3000')
     // 未触碰字段保持原值。
     expect(next.aiRuntime.retryMaxDelayMillis).toBe('60000')
-  })
-
-  it('derives fallback model sub-field labels from labelKey and writes through', async () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'aiRuntime')
-    const savedDrafts: typeof draft[] = []
-    function StatefulHarness() {
-      const [current, setCurrent] = useState(draft)
-      return (
-        <SystemSettingsSchemaRenderer
-          schema={{ sections: [section] }}
-          draft={current}
-          onChange={(next) => {
-            savedDrafts.push(next)
-            setCurrent(next)
-          }}
-        />
-      )
-    }
-    renderRenderer(<StatefulHarness />)
-    const user = userEvent.setup()
-    await waitFor(() => {
-      expect(
-        screen.getByLabelText('模型').closest('[data-settings-options]')?.getAttribute('data-settings-options'),
-      ).toContain('minimax/MiniMax')
-    })
-    await chooseSelectOption(user, '模型', 'minimax/MiniMax')
-    expect(savedDrafts.at(-1)!.aiRuntime.compactionFallbackModel).toEqual({
-      providerName: 'minimax',
-      modelName: 'MiniMax',
-      variant: 'default',
-    })
-    await chooseSelectOption(user, '变体', 'fast')
-    expect(savedDrafts.at(-1)!.aiRuntime.compactionFallbackModel).toEqual({
-      providerName: 'minimax',
-      modelName: 'MiniMax',
-      variant: 'fast',
-    })
-    await chooseSelectOption(user, '模型', '不使用回退')
-    expect(savedDrafts.at(-1)!.aiRuntime.compactionFallbackModel).toBeNull()
   })
 
   it('supports roundtrip editing of INTEGER_LIST field via TagInput and serializes into settings update', async () => {

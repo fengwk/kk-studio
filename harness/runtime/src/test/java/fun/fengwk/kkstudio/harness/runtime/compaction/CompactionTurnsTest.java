@@ -68,10 +68,9 @@ class CompactionTurnsTest {
 
   private static EntryPath completedPath(CompactionPhase phase, boolean continueModel) {
     CompactionStart start =
-        new CompactionStart(
+        CompactionStart.pending(
             phase,
             CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
             id(1L),
             phase == CompactionPhase.FULL ? null : id(1L),
             null);

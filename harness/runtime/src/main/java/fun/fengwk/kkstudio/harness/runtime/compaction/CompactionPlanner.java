@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
@@ -44,11 +43,10 @@ import java.util.UUID;
  * <p>切分检测：cut 非 USER 时从最近 INPUT 的首个 USER/CUSTOM 开始，并把后续 CONTINUATION durable turns 视为同一逻辑 Agent
  * segment；切分且 HISTORY 段为空时直接执行 TURN_PREFIX，HISTORY 段非空时为 HISTORY→TURN_PREFIX 两段。{@link
  * #prepareTurnPrefix} 精确引用紧邻已关闭 HISTORY 结果 Entry（{@code historyCompactionEntryId}），绝不扫描 stale
- * partial；{@link #prepareFallback} 复用失败 primary 的 phase/anchors，仅替换 executionModel 为 fallback。
+ * partial。
  *
  * <p>本类只计算切分事实与 {@link CompactionPreparation#removedPrefixTokens()}。Resolver 按实际 execution model 解析
- * context window / max output 后调用 {@link CompactionConfig#outputBudget} 计算请求预算；fallback 不复用 primary
- * model 的窗口。
+ * context window / max output 后调用 {@link CompactionConfig#outputBudget} 计算请求预算。
  */
 public final class CompactionPlanner {
 
@@ -132,7 +130,6 @@ public final class CompactionPlanner {
           new CompactionPreparation(
               CompactionPhase.FULL,
               trigger,
-              path.baseSettings().model(),
               cutEntryId,
               null,
               null,
@@ -152,7 +149,6 @@ public final class CompactionPlanner {
           new CompactionPreparation(
               CompactionPhase.TURN_PREFIX,
               trigger,
-              path.baseSettings().model(),
               cutEntryId,
               entries.get(turnPrefixStartIndex).id(),
               null,
@@ -167,7 +163,6 @@ public final class CompactionPlanner {
         new CompactionPreparation(
             CompactionPhase.HISTORY,
             trigger,
-            path.baseSettings().model(),
             cutEntryId,
             entries.get(turnPrefixStartIndex).id(),
             null,
@@ -219,113 +214,12 @@ public final class CompactionPlanner {
     return new CompactionPreparation(
         CompactionPhase.TURN_PREFIX,
         frozen.trigger(),
-        frozen.executionModel(),
         frozen.cutEntryId(),
         frozen.turnPrefixStartEntryId(),
         historyResultEntryId,
         null,
         prefixMessages,
         removedPrefixTokens);
-  }
-
-  /**
-   * 失败 primary 的 fallback：同 phase/anchors 的第二个 Compaction Turn，仅把 executionModel 替换为 {@link
-   * CompactionConfig#fallbackModel()}；HISTORY/TURN_PREFIX 冻结引用原样复用。引用缺失视为分支损坏，fail closed。
-   */
-  public CompactionPreparation prepareFallback(
-      EntryPath path, CompactionTurns.CompactionTurn failedTurn) {
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(failedTurn, "failedTurn");
-    if (failedTurn.end() == null || failedTurn.end().outcome() != TurnEndOutcome.FAILED) {
-      throw new IllegalStateException("fallback requires a FAILED compaction turn");
-    }
-    CompactionStart frozen = failedTurn.freezing();
-    if (config.fallbackModel() == null || config.fallbackModel().equals(frozen.executionModel())) {
-      throw new IllegalStateException(
-          "fallback requires a configured fallbackModel different from the failed executionModel");
-    }
-    List<Entry> entries = path.entries();
-    boolean[] visible = visibilityMask(entries);
-    int cutIndex = indexOfId(entries, frozen.cutEntryId());
-    if (cutIndex < 0) {
-      throw new IllegalStateException(
-          "failed compaction cutEntryId is not on the current path: " + frozen.cutEntryId());
-    }
-    int boundaryStart = boundaryStartIndex(entries);
-    String previousSummary = previousSummary(entries);
-    List<AgentMessage> messages;
-    UUID historyResultEntryId = null;
-    if (frozen.phase() == CompactionPhase.FULL) {
-      messages = contextMessages(entries, visible, boundaryStart, cutIndex);
-    } else {
-      int prefixIndex = indexOfId(entries, frozen.turnPrefixStartEntryId());
-      if (prefixIndex < 0 || prefixIndex >= cutIndex) {
-        throw new IllegalStateException(
-            "failed compaction turnPrefixStartEntryId is not on the current path before cut");
-      }
-      if (frozen.phase() == CompactionPhase.HISTORY) {
-        messages = contextMessages(entries, visible, boundaryStart, prefixIndex);
-      } else {
-        messages = contextMessages(entries, visible, prefixIndex, cutIndex);
-        historyResultEntryId = frozen.historyCompactionEntryId();
-      }
-    }
-    if (messages.isEmpty()) {
-      throw new IllegalStateException("fallback compaction range contains no context messages");
-    }
-    long removedPrefixTokens = estimateMessages(messages);
-    return new CompactionPreparation(
-        frozen.phase(),
-        frozen.trigger(),
-        config.fallbackModel(),
-        frozen.cutEntryId(),
-        frozen.turnPrefixStartEntryId(),
-        historyResultEntryId,
-        frozen.phase() == CompactionPhase.TURN_PREFIX ? null : previousSummary,
-        messages,
-        removedPrefixTokens);
-  }
-
-  /**
-   * 按已冻结的 {@link CompactionStart} Entry IDs 重建摘要输入，不重新运行 cut selection。
-   *
-   * <p>FULL/HISTORY 从最新 complete 压缩的 cut 之后取到 historyEnd；TURN_PREFIX 只取 prefix..cut。previousSummary
-   * 仅 FULL/HISTORY 且路径上存在 complete 压缩时非空。
-   */
-  public static CompactionSummaryInput reconstructSummaryInput(
-      EntryPath path, CompactionStart start) {
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(start, "start");
-    List<Entry> entries = path.entries();
-    boolean[] visible = visibilityMask(entries);
-    int cutIndex = indexOfId(entries, start.cutEntryId());
-    if (cutIndex < 0) {
-      throw new IllegalStateException(
-          "compaction cutEntryId is not on the current path: " + start.cutEntryId());
-    }
-    if (start.phase() == CompactionPhase.TURN_PREFIX) {
-      int prefixIndex = indexOfId(entries, start.turnPrefixStartEntryId());
-      if (prefixIndex < 0 || prefixIndex >= cutIndex) {
-        throw new IllegalStateException(
-            "TURN_PREFIX compaction requires turnPrefixStartEntryId on the current path before cut");
-      }
-      List<AgentMessage> messages = contextMessages(entries, visible, prefixIndex, cutIndex);
-      if (messages.isEmpty()) {
-        throw new IllegalStateException("compaction prefix range contains no context messages");
-      }
-      return new CompactionSummaryInput(messages, null);
-    }
-    int boundaryStart = boundaryStartIndex(entries);
-    String previousSummary = previousSummary(entries);
-    int historyEnd =
-        start.phase() == CompactionPhase.HISTORY
-            ? indexOfId(entries, start.turnPrefixStartEntryId())
-            : cutIndex;
-    List<AgentMessage> messages = contextMessages(entries, visible, boundaryStart, historyEnd);
-    if (messages.isEmpty()) {
-      throw new IllegalStateException("compaction history range contains no context messages");
-    }
-    return new CompactionSummaryInput(messages, previousSummary);
   }
 
   /**
@@ -391,16 +285,6 @@ public final class CompactionPlanner {
       tokens = Math.addExact(tokens, visible[i] ? estimateTokens(entries.get(i)) : 0L);
     }
     return tokens;
-  }
-
-  private static int boundaryStartIndex(List<Entry> entries) {
-    var path = new EntryPath(entries);
-    Optional<CompactionTurns.CompactionTurn> latest = CompactionTurns.latestComplete(path);
-    if (latest.isEmpty()) {
-      return 0;
-    }
-    CompactionTurns.CompactionTurn complete = latest.get();
-    return cutIndex(entries, complete);
   }
 
   private static int cutIndex(List<Entry> entries, CompactionTurns.CompactionTurn complete) {
@@ -577,7 +461,7 @@ public final class CompactionPlanner {
     return 0L;
   }
 
-  private static long estimateTextTokens(String text) {
+  public static long estimateTextTokens(String text) {
     return (text.length() + 3L) / 4L;
   }
 

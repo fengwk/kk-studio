@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -97,9 +98,9 @@ class ManualCompactionLifecycleRegressionTest {
     assertEquals(ThreadExecutionControl.RUNNABLE, rootAfterCompaction.executionControl());
     assertEquals(0L, rootAfterCompaction.version());
 
-    // (c) 同一事务中创建了 ModelInvocation 与 MODEL work，不创建 THREAD work
-    assertNotNull(result.modelInvocationId());
-    assertNotNull(work(store, new WorkTarget(WorkTargetType.MODEL, result.modelInvocationId())));
+    // (c) 同一事务中创建了子 Thread 与 THREAD work
+    assertNotNull(result.childThreadId());
+    assertNotNull(work(store, new WorkTarget(WorkTargetType.THREAD, result.childThreadId())));
     assertNull(work(store, new WorkTarget(WorkTargetType.THREAD, baseline.childThreadId)));
   }
 
@@ -142,9 +143,9 @@ class ManualCompactionLifecycleRegressionTest {
     assertEquals(ThreadExecutionControl.RUNNABLE, rootAfterCompaction.executionControl());
     assertEquals(0L, rootAfterCompaction.version());
 
-    // (c) ModelInvocation 与 MODEL work 存在
-    assertNotNull(result.modelInvocationId());
-    assertNotNull(work(store, new WorkTarget(WorkTargetType.MODEL, result.modelInvocationId())));
+    // (c) 子 Thread 与 THREAD work 存在
+    assertNotNull(result.childThreadId());
+    assertNotNull(work(store, new WorkTarget(WorkTargetType.THREAD, result.childThreadId())));
   }
 
   // --- 测试脚手架与数据初始化 ---
@@ -389,8 +390,16 @@ class ManualCompactionLifecycleRegressionTest {
   private static final class FakeTurnResolver implements TurnResolver {
     @Override
     public Result resolve(UUID threadId, EntryPath path, CompactionPreparation preparation) {
-      return new Resolved(
-          HarnessRuntimeTestSupport.modelRequest(), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);
+      return new CompactionResolved(
+          HarnessRuntimeTestSupport.settings().model(),
+          4096L,
+          CONTEXT_WINDOW,
+          MAX_OUTPUT_TOKENS,
+          new BranchSettings(
+              "compaction",
+              HarnessRuntimeTestSupport.settings().model(),
+              HarnessRuntimeTestSupport.settings().environmentName(),
+              null));
     }
   }
 }

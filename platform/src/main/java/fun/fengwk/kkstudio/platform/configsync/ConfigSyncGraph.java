@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.configsync;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
@@ -192,10 +191,6 @@ public final class ConfigSyncGraph {
 
   private List<ConfigSyncRef> settingsDependencies(SystemSettings settings) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
-    ModelSelection fallback = settings.aiRuntime().compactionFallbackModel();
-    if (fallback != null) {
-      deps.add(ConfigSyncRefs.model(fallback.providerName(), fallback.modelName()));
-    }
     String promptAgent = settings.integrations().minimaxH3().promptAgentName();
     if (promptAgent != null) {
       deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, promptAgent));

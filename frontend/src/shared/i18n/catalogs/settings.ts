@@ -261,10 +261,6 @@ export const settingsCatalog = {
     'en-US': 'A required numeric field is empty; fill it in before saving.',
     'zh-CN': '存在为空的必需数值字段，请填写后再保存。',
   },
-  'settings.error.partialModelSelection': {
-    'en-US': 'The fallback model selection is incomplete; fill in all three fields or clear all of them.',
-    'zh-CN': '回退模型选择不完整，请填齐三个字段或全部清空。',
-  },
   'settings.error.httpStatusNotInteger': {
     'en-US': 'HTTP status codes must be integers without decimals or empty entries.',
     'zh-CN': 'HTTP 状态码必须为整数，不能包含小数、非法字符或空条目。',
@@ -363,8 +359,8 @@ export const settingsCatalog = {
 
   // --- AI Runtime ---
   'settings.section.aiRuntime.description': {
-    'en-US': 'Shared invocation retry, compaction fallback and subagent budgets.',
-    'zh-CN': '共享调用重试、压缩回退与子代理预算。',
+    'en-US': 'Shared invocation retry, automatic compaction and subagent budgets.',
+    'zh-CN': '共享调用重试、自动压缩与子代理预算。',
   },
   'settings.section.aiRuntime.retry.title': {
     'en-US': 'Invocation retry',
@@ -429,26 +425,6 @@ export const settingsCatalog = {
   'settings.field.aiRuntime.compactionKeepRecentTokens.hint': {
     'en-US': 'Token budget for recent context to preserve during automatic conversation compaction. Messages within this budget remain uncompressed.',
     'zh-CN': '对话自动压缩时保留的最近上下文 Token 预算。低于此预算的最新消息将被完整保留而不被压缩。',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel': {
-    'en-US': 'Compaction fallback model',
-    'zh-CN': '压缩回退模型',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.hint': {
-    'en-US': 'Fallback model and variant used when the active conversation model cannot complete a compaction turn. Leave empty to disable fallback.',
-    'zh-CN': '当前会话模型无法完成压缩轮次时使用的备选模型与变体。留空表示不使用回退模型。',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.providerName': {
-    'en-US': 'Provider',
-    'zh-CN': 'Provider',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.modelName': {
-    'en-US': 'Model',
-    'zh-CN': '模型',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.variant': {
-    'en-US': 'Variant',
-    'zh-CN': '变体',
   },
   'settings.field.aiRuntime.subagentMaxDepth': {
     'en-US': 'Max depth',
@@ -571,10 +547,6 @@ export const settingsCatalog = {
   'settings.field.tool.toolGatewayOverloadRetryMillis.hint': {
     'en-US': 'Delay in milliseconds before retrying when the tool gateway encounters system overload.',
     'zh-CN': '工具网关在系统过载时的重试等待毫秒数。',
-  },
-  'settings.modelSelection.none': {
-    'en-US': 'None',
-    'zh-CN': '不使用回退',
   },
   'settings.permission.empty': {
     'en-US': 'No permission rules configured.',

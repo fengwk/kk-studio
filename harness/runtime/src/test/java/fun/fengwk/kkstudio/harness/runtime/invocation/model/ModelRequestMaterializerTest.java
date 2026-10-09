@@ -13,10 +13,8 @@ import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
@@ -141,13 +139,8 @@ class ModelRequestMaterializerTest {
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
     CompactionStart completed =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("kept summary", null)));
     entries.add(
@@ -240,34 +233,6 @@ class ModelRequestMaterializerTest {
   }
 
   @Test
-  void compactionRequestRebuildsTheSameSummaryPromptFromEntryIds() {
-    EntryPath history = conversationPath(2);
-    CompactionStart compaction =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
-    List<Entry> entries = new ArrayList<>(history.entries());
-    entries.add(
-        entry(id(10L), history.head().id(), resolvedStart(TurnStartReason.COMPACTION, compaction)));
-    EntryPath path = new EntryPath(entries);
-    CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
-    ModelRequestSpec spec = compactionSpec();
-
-    ProviderRequest request = MATERIALIZER.materialize(path, spec);
-
-    assertEquals(1, request.messages().size());
-    assertEquals(CompactionPrompts.summarizationSystemPrompt(), request.systemInstruction());
-    assertEquals(
-        CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary()),
-        textOf(request.messages().get(0)));
-    assertTrue(request.tools().isEmpty());
-  }
-
-  @Test
   void liveHistoryTransmitsReplayState() {
     ProviderReplayState replayState = sampleReplayState();
     List<Entry> entries = new ArrayList<>();
@@ -305,13 +270,8 @@ class ModelRequestMaterializerTest {
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
 
     CompactionStart completed =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("summary", null)));
     entries.add(
@@ -498,19 +458,6 @@ class ModelRequestMaterializerTest {
         ProviderCacheControl.none());
   }
 
-  private static ModelRequestSpec compactionSpec() {
-    return new ModelRequestSpec(
-        ProviderType.OPENAI,
-        new UUID(0L, 1L),
-        descriptor(),
-        variant(),
-        1024,
-        "Test system instruction.",
-        List.of(),
-        List.of(),
-        ProviderCacheControl.none());
-  }
-
   /**
    * Goal 路径：ROOT(无 Goal) -> INPUT(设置 Goal，TURN_START 冻结 settings 含 Goal) + 冻结 Goal USER 消息 ->
    * assistant -> TURN_END -> [可选清除 turn] -> COMPACTION（TURN_START 冻结其自身 settings 中的
@@ -552,13 +499,8 @@ class ModelRequestMaterializerTest {
       boundarySettings = clearedSettings;
     }
     CompactionStart compaction =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(cutId),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(cutId), null, null);
     entries.add(
         entry(
             id(compactionTurnStart),

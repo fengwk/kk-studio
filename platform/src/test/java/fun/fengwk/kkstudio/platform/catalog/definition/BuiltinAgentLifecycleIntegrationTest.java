@@ -10,7 +10,6 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -27,6 +26,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
 
 import java.util.List;
 
@@ -50,7 +50,8 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     assertNull(first.getModelProviderName());
     assertNull(first.getModelName());
     assertNull(first.getVariant());
-    assertEquals(CompactionPrompts.summarizationSystemPrompt(), first.getSystemPrompt());
+    assertEquals(
+        BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), first.getSystemPrompt());
     assertEquals(0L, first.getVersion());
 
     initializer.afterPropertiesSet();

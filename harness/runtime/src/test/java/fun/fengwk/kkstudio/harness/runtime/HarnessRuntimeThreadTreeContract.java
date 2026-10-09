@@ -583,13 +583,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
             ownerThreadId,
             100_000,
             16_384,
-            new CompactionStart(
-                CompactionPhase.FULL,
-                CompactionTrigger.MANUAL,
-                settings().model(),
-                cutEntryId,
-                null,
-                null)),
+            CompactionStart.pending(
+                CompactionPhase.FULL, CompactionTrigger.MANUAL, cutEntryId, null, null)),
         createdAt);
   }
 

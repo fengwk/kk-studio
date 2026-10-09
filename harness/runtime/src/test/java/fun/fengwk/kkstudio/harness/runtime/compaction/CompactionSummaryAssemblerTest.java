@@ -82,10 +82,9 @@ class CompactionSummaryAssemblerTest {
     // TURN_PREFIX 只读取 CompactionStart.historyCompactionEntryId，不扫描任意 stale partial。
     SplitPath split = splitPath("history summary");
     CompactionStart prefix =
-        new CompactionStart(
+        CompactionStart.pending(
             CompactionPhase.TURN_PREFIX,
             CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
             id(5L),
             id(2L),
             split.historyResultEntryId());
@@ -103,13 +102,8 @@ class CompactionSummaryAssemblerTest {
     // direct split 必须保留固定 history 段（HISTORY.summaryText 或固定 "No prior history."），
     // 不能只保存 prefix 文本而丢失两段式形状。
     CompactionStart prefix =
-        new CompactionStart(
-            CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            id(3L),
-            null);
+        CompactionStart.pending(
+            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, id(4L), id(3L), null);
     EntryPath path = simpleTurnWithOpenCompaction(prefix);
 
     CompactionPayload payload =
@@ -127,13 +121,8 @@ class CompactionSummaryAssemblerTest {
     // 丢失精确 HISTORY result 引用是 durable branch 损坏，不能回退扫描更早摘要。
     SplitPath split = splitPath("history summary");
     CompactionStart missing =
-        new CompactionStart(
-            CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(5L),
-            id(2L),
-            id(999L));
+        CompactionStart.pending(
+            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, id(5L), id(2L), id(999L));
 
     assertThrows(
         IllegalStateException.class,
@@ -141,20 +130,14 @@ class CompactionSummaryAssemblerTest {
   }
 
   private static CompactionStart fullStart(UUID cutEntryId) {
-    return new CompactionStart(
-        CompactionPhase.FULL,
-        CompactionTrigger.THRESHOLD,
-        SETTINGS.model(),
-        cutEntryId,
-        null,
-        null);
+    return CompactionStart.pending(
+        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, cutEntryId, null, null);
   }
 
   private static CompactionStart historyStart(UUID cutEntryId, UUID turnPrefixStartEntryId) {
-    return new CompactionStart(
+    return CompactionStart.pending(
         CompactionPhase.HISTORY,
         CompactionTrigger.THRESHOLD,
-        SETTINGS.model(),
         cutEntryId,
         turnPrefixStartEntryId,
         null);
@@ -225,10 +208,9 @@ class CompactionSummaryAssemblerTest {
             new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, true, null, null),
             NOW));
     CompactionStart prefix =
-        new CompactionStart(
+        CompactionStart.pending(
             CompactionPhase.TURN_PREFIX,
             CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
             id(5L),
             id(2L),
             historyResultEntryId);

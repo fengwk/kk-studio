@@ -728,10 +728,9 @@ final class StopControl {
     }
     CompactionStart frozen = source.compaction();
     CompactionStart stoppedPrefix =
-        new CompactionStart(
+        CompactionStart.pending(
             CompactionPhase.TURN_PREFIX,
             frozen.trigger(),
-            frozen.executionModel(),
             frozen.cutEntryId(),
             frozen.turnPrefixStartEntryId(),
             CompactionTurns.entryAt(path, history.resultIndex()).id());
@@ -752,11 +751,7 @@ final class StopControl {
         new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
     UUID parentId =
         ModelAttemptFailureAppender.append(
-            tx,
-            path.root().sessionId(),
-            path.head().id(),
-            model,
-            ((TurnStartPayload) path.openTurnStart().orElseThrow().payload()).compaction() != null);
+            tx, path.root().sessionId(), path.head().id(), model, false);
     UUID barrierId = tx.nextId();
     tx.insertEntry(new Entry(barrierId, path.root().sessionId(), parentId, barrier, now));
     // attach 转换触发与 ModelAttemptMaterialization 等价的严格校验（failed attempts 与 terminal 结果逐条比对）。
@@ -912,10 +907,7 @@ final class StopControl {
                             "terminal model must belong to an open TURN_START"))
                 .payload();
     ModelOutcomeAppender.Applied applied =
-        turnStart.compaction() != null
-            ? modelOutcomeAppender.appendCompaction(
-                tx, thread, path, model, turnStart.compaction(), mutationNow)
-            : modelOutcomeAppender.appendModel(tx, path, model, mutationNow);
+        modelOutcomeAppender.appendModel(tx, path, model, mutationNow);
     ThreadState advanced = thread.advanceHead(applied.headEntryId(), mutationNow);
     tx.updateThread(advanced);
     // ToolBatch：Model 行被 attach 保留、新 siblings 进入 active Tool phase；其余结果已关闭 turn 且删除 Model 行。

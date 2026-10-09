@@ -7,10 +7,11 @@
 column	agent_definition	config	type=jsonb notnull=t default=<null> generated= collation=-
 column	agent_definition	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	agent_definition	description	type=text notnull=f default=<null> generated= collation="default"
-column	agent_definition	model_name	type=character varying(128) notnull=t default=<null> generated= collation="default"
-column	agent_definition	model_provider_name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_definition	model_name	type=character varying(128) notnull=f default=<null> generated= collation="default"
+column	agent_definition	model_provider_name	type=character varying(64) notnull=f default=<null> generated= collation="default"
 column	agent_definition	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	agent_definition	system_prompt	type=text notnull=f default=<null> generated= collation="default"
+column	agent_definition	type	type=character varying(16) notnull=t default='USER'::character varying generated= collation="default"
 column	agent_definition	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	agent_definition	variant	type=character varying(64) notnull=f default=<null> generated= collation="default"
 column	agent_definition	version	type=bigint notnull=t default=0 generated= collation=-
@@ -230,7 +231,11 @@ column	system_setting	id	type=bigint notnull=t default=<null> generated= collati
 column	system_setting	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	system_setting	version	type=bigint notnull=t default=0 generated= collation=-
 constraint	agent_definition	agent_definition_pkey	PRIMARY KEY (name)
+constraint	agent_definition	ck_agent_definition_model_pair	CHECK (((model_provider_name IS NULL) = (model_name IS NULL)))
 constraint	agent_definition	ck_agent_definition_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
+constraint	agent_definition	ck_agent_definition_type	CHECK (((type)::text = ANY ((ARRAY['USER'::character varying, 'BUILTIN'::character varying])::text[])))
+constraint	agent_definition	ck_agent_definition_user_requires_model	CHECK ((((type)::text = 'BUILTIN'::text) OR (model_name IS NOT NULL)))
+constraint	agent_definition	ck_agent_definition_variant_requires_model	CHECK (((variant IS NULL) OR (model_name IS NOT NULL)))
 constraint	agent_definition	ck_agent_definition_version_nonneg	CHECK ((version >= 0))
 constraint	agent_definition	fk_agent_definition_model	FOREIGN KEY (model_provider_name, model_name) REFERENCES agent_model(provider_name, name)
 constraint	agent_model	ck_agent_model_model_id	CHECK ((((model_id)::text !~ '^[[:space:]]'::text) AND ((model_id)::text !~ '[[:space:]]$'::text) AND (char_length((model_id)::text) > 0)))
@@ -270,7 +275,7 @@ constraint	environment_update_operation	fk_environment_update_operation_environm
 constraint	harness_entry	ck_harness_entry_parent_not_self	CHECK (((parent_entry_id IS NULL) OR (parent_entry_id <> id)))
 constraint	harness_entry	ck_harness_entry_parent_shape	CHECK (((((entry_type)::text = 'ROOT'::text) AND (parent_entry_id IS NULL)) OR (((entry_type)::text <> 'ROOT'::text) AND (parent_entry_id IS NOT NULL))))
 constraint	harness_entry	ck_harness_entry_provider_replay_state	CHECK (((provider_replay_state IS NULL) OR ((jsonb_typeof(provider_replay_state) = 'object'::text) AND ((entry_type)::text = 'MESSAGE'::text) AND (((payload -> 'message'::text) ->> 'role'::text) = 'ASSISTANT'::text))))
-constraint	harness_entry	ck_harness_entry_type	CHECK (((entry_type)::text = ANY ((ARRAY['ROOT'::character varying, 'TURN_START'::character varying, 'MESSAGE'::character varying, 'CUSTOM'::character varying, 'MODEL_ATTEMPT_FAILURE'::character varying, 'CUSTOM_MESSAGE'::character varying, 'ASSISTANT_ERROR'::character varying, 'ASSISTANT_ABORTED'::character varying, 'COMPACTION'::character varying, 'TURN_END'::character varying, 'NOTIFICATION'::character varying, 'SETTINGS'::character varying])::text[])))
+constraint	harness_entry	ck_harness_entry_type	CHECK (((entry_type)::text = ANY ((ARRAY['ROOT'::character varying, 'TURN_START'::character varying, 'MESSAGE'::character varying, 'CUSTOM'::character varying, 'MODEL_ATTEMPT_FAILURE'::character varying, 'CUSTOM_MESSAGE'::character varying, 'ASSISTANT_ERROR'::character varying, 'ASSISTANT_ABORTED'::character varying, 'COMPACTION'::character varying, 'TURN_END'::character varying, 'NOTIFICATION'::character varying, 'SETTINGS'::character varying, 'FORK'::character varying])::text[])))
 constraint	harness_entry	fk_harness_entry_parent	FOREIGN KEY (session_id, parent_entry_id) REFERENCES harness_entry(session_id, id)
 constraint	harness_entry	fk_harness_entry_session	FOREIGN KEY (session_id) REFERENCES harness_session(id)
 constraint	harness_entry	harness_entry_payload_check	CHECK ((jsonb_typeof(payload) = 'object'::text))

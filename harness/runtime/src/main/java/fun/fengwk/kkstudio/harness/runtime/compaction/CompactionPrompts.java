@@ -41,11 +41,6 @@ public final class CompactionPrompts {
 
   private CompactionPrompts() {}
 
-  /** 压缩 Model 调用的 system prompt（无变量）。 */
-  public static String summarizationSystemPrompt() {
-    return text("summarization-system.md");
-  }
-
   /**
    * FULL/HISTORY 的 user prompt：conversation frame + （有 previous summary 时）previous-summary frame +
    * initial/update summarization prompt。

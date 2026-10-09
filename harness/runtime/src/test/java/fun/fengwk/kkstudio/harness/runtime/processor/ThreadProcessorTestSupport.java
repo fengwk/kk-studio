@@ -125,7 +125,7 @@ final class ThreadProcessorTestSupport {
   static final int MAX_OUTPUT_TOKENS = 16_384;
 
   /** 测试用默认压缩配置（20_000 保留，无 fallback）。 */
-  static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(20_000, null);
+  static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(20_000);
 
   /** 测试种子线程的合法 64 位小写 SHA-256 creation request hash（非 accept 路径的固定身份键）。 */
   static final String CREATION_REQUEST_HASH =
@@ -882,19 +882,22 @@ final class ThreadProcessorTestSupport {
     return new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), hostBinding("bash"));
   }
 
-  /** 按冻结 preparation 构造机械一致的压缩 Resolved 请求（使用 executionModel，零 bindings、缓存 none）。 */
-  static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
+  /** 按指定模型构造机械一致的压缩 Resolved 请求（零 bindings、缓存 none）。 */
+  static ModelRequestSpec compactionRequest(ModelSelection model) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
-        modelDescriptor(
-            preparation.executionModel().providerName(), preparation.executionModel().modelName()),
-        new ModelVariant(preparation.executionModel().variant()),
+        modelDescriptor(model.providerName(), model.modelName()),
+        new ModelVariant(model.variant()),
         1024,
         "Test system instruction.",
         List.of(),
         List.of(),
         ProviderCacheControl.none());
+  }
+
+  static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
+    return compactionRequest(new ModelSelection("provider", "compactor-model", "v1"));
   }
 
   /**
@@ -1168,11 +1171,19 @@ final class ThreadProcessorTestSupport {
         throw failure;
       }
       if (autoConsistent) {
-        // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造。
+        // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造 CompactionResolved。
+        if (preparation != null) {
+          ModelSelection compactorModel = new ModelSelection("provider", "compactor-model", "v1");
+          return new TurnResolver.CompactionResolved(
+              compactorModel,
+              4096L,
+              CONTEXT_WINDOW,
+              MAX_OUTPUT_TOKENS,
+              new BranchSettings(
+                  "compaction", compactorModel, path.baseSettings().environmentName(), null));
+        }
         return new TurnResolver.Resolved(
-            preparation == null ? requestFor(path.baseSettings()) : compactionRequest(preparation),
-            CONTEXT_WINDOW,
-            MAX_OUTPUT_TOKENS);
+            requestFor(path.baseSettings()), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);
       }
       if (results.isEmpty()) {
         return null;

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -41,19 +40,12 @@ public final class ModelAttemptMaterialization {
             "materialized model attempt failure must not carry provider replay state");
       }
     }
-    if (isCompactionInvocation(stored, resultPath)) {
-      if (!materialized.isEmpty()) {
-        throw new IllegalArgumentException(
-            "compaction result paths must not materialize model attempt failures");
-      }
-    } else {
-      if (materialized.size() != stored.failedAttempts().size()) {
-        throw new IllegalArgumentException(
-            "model result path must materialize every failed attempt exactly once");
-      }
-      for (int index = 0; index < materialized.size(); index++) {
-        requireSameFailure(stored.failedAttempts().get(index), materialized.get(index));
-      }
+    if (materialized.size() != stored.failedAttempts().size()) {
+      throw new IllegalArgumentException(
+          "model result path must materialize every failed attempt exactly once");
+    }
+    for (int index = 0; index < materialized.size(); index++) {
+      requireSameFailure(stored.failedAttempts().get(index), materialized.get(index));
     }
     if (stored.status().isTerminal()) {
       requireTerminalResult(stored, resultPath);
@@ -97,17 +89,14 @@ public final class ModelAttemptMaterialization {
   }
 
   /**
-   * terminal 结果的严格物化校验：SUCCEEDED 必须完整等于重放的结果 payload（normal 经 {@link HistoryPayloadMapper}，
-   * compaction 经 {@link CompactionSummaryAssembler}）；FAILED / CANCELLED 保持 exact error / checkpoint
-   * 语义不变。
+   * terminal 结果的严格物化校验：SUCCEEDED 必须完整等于重放的结果 payload（{@link
+   * HistoryPayloadMapper#assistantPayload}）；FAILED / CANCELLED 保持 exact error / checkpoint 语义不变。
    */
   private static void requireTerminalResult(ModelInvocation invocation, EntryPath resultPath) {
     if (invocation.status() == ModelInvocationStatus.SUCCEEDED) {
       TurnStartPayload start = requiredTurnStart(invocation, resultPath);
-      // 普通 Assistant 结果转移 replay state；压缩结果只保留摘要，丢弃 provider 原生状态。
-      if (start.compaction() == null
-          && !Objects.equals(
-              invocation.providerReplayState(), resultPath.head().providerReplayState())) {
+      if (!Objects.equals(
+          invocation.providerReplayState(), resultPath.head().providerReplayState())) {
         throw new IllegalArgumentException(
             "materialized assistant entry must match the invocation provider replay state");
       }
@@ -127,18 +116,6 @@ public final class ModelAttemptMaterialization {
     }
   }
 
-  /** 从 immutable TURN_START 事实判断 Invocation 是否属于 Compaction turn。 */
-  public static boolean isCompactionInvocation(ModelInvocation invocation, EntryPath resultPath) {
-    for (Entry entry : resultPath.entries()) {
-      if (entry.id().equals(invocation.turnStartEntryId())
-          && entry.payload() instanceof TurnStartPayload start) {
-        return start.compaction() != null;
-      }
-    }
-    throw new IllegalArgumentException(
-        "model result path must contain the invocation turnStartEntryId");
-  }
-
   private static TurnStartPayload requiredTurnStart(
       ModelInvocation invocation, EntryPath resultPath) {
     for (Entry entry : resultPath.entries()) {
@@ -152,25 +129,20 @@ public final class ModelAttemptMaterialization {
   }
 
   /**
-   * SUCCEEDED model 的结果 Entry payload 必须完整等于按当前 frozen 事实重放的结果：normal（无 compaction）为 {@link
-   * HistoryPayloadMapper#assistantPayload} 的 ASSISTANT payload；compaction 为 {@link
-   * CompactionResultEvaluator#evaluate} 的 payload（{@code preResultPath} 是 resultPath 去掉 head
-   * 结果后的前缀，保证 TURN_PREFIX / HISTORY 组装上下文与 apply 时一致）。任何字段漂移（text / thinking / tool call renderer /
-   * metadata / summary text）都必须被拒。
+   * SUCCEEDED model 的结果 Entry payload 必须完整等于按当前 frozen 事实重放的结果：唯一合法形状是 {@link
+   * HistoryPayloadMapper#assistantPayload} 的 ASSISTANT payload。任何字段漂移（text / thinking / tool call
+   * renderer / metadata / summary text）都必须被拒。
+   *
+   * <p>压缩 turn 不创建 ModelInvocation（压缩在隔离的 child Runtime Thread 内执行），因此这里不接受任何压缩调用形状。
    */
   private static void requireSuccessfulResult(
       ModelInvocation invocation, EntryPath resultPath, TurnStartPayload start) {
     Entry resultEntry = resultPath.head();
     EntryPayload resultPayload = resultEntry.payload();
     if (start.compaction() != null) {
-      EntryPayload expected =
-          CompactionResultEvaluator.evaluate(
-              preResultPath(resultPath), start.compaction(), invocation.result());
-      if (!expected.equals(resultPayload)) {
-        throw new IllegalArgumentException(
-            "model result must materialize the exact compaction payload");
-      }
-      return;
+      throw new IllegalArgumentException(
+          "a COMPACTION turn must not have model invocations; compaction runs in a child runtime"
+              + " thread");
     }
     MessagePayload expected =
         new HistoryPayloadMapper()
@@ -179,16 +151,6 @@ public final class ModelAttemptMaterialization {
       throw new IllegalArgumentException(
           "model result must materialize the exact assistant payload");
     }
-  }
-
-  /** compaction 组装上下文：resultPath 去掉 head 结果后的前缀（至少保留 ROOT 与 basis 两项）。 */
-  private static EntryPath preResultPath(EntryPath resultPath) {
-    List<Entry> entries = resultPath.entries();
-    if (entries.size() < 3) {
-      throw new IllegalArgumentException(
-          "model result path must keep a non-trivial prefix before its head");
-    }
-    return new EntryPath(entries.subList(0, entries.size() - 1));
   }
 
   private static void requireDirectStopResult(
@@ -261,8 +223,8 @@ public final class ModelAttemptMaterialization {
    *   <li>resultEntryId 必须是 resultPath 的 head（Assistant 结果恰在 head 才构成活跃 Tool phase）；
    *   <li>resultPath 必须包含 requestHeadEntryId 且严格位于 head 之前（result 必须是 request head 的严格 descendant，
    *       不允许 attach 到 basis 自身）；
-   *   <li>非压缩 model：basis 之后 head 之前的 ModelAttemptFailurePayload 必须精确等于已确认的 attempt 前缀（attempt 从 1
-   *       连续递增且数量恰为 {@code attached.attempt() - 1}，不允许遗漏）；压缩 model：不允许出现任何失败条目；
+   *   <li>basis 之后 head 之前的 ModelAttemptFailurePayload 必须精确等于已确认的 attempt 前缀（attempt 从 1 连续递增且数量恰为
+   *       {@code attached.attempt() - 1}，不允许遗漏）；
    *   <li>SUCCEEDED model 的 result 必须按值等价于 Assistant head：通过与 {@link
    *       HistoryPayloadMapper#assistantPayload} 映射结果（thinking / text / tool calls renderer /
    *       metadata usage / cost / stop reason）完整一致， 不能只比对 tool calls。
@@ -291,7 +253,6 @@ public final class ModelAttemptMaterialization {
     }
     boolean afterBasis = false;
     boolean foundBasis = false;
-    boolean compaction = isCompactionInvocation(attached, resultPath);
     int expectedAttempt = 1;
     for (Entry entry : entries) {
       if (entry.id().equals(attached.requestHeadEntryId())) {
@@ -303,10 +264,6 @@ public final class ModelAttemptMaterialization {
         continue;
       }
       if (entry.payload() instanceof ModelAttemptFailurePayload failure) {
-        if (compaction) {
-          throw new IllegalArgumentException(
-              "compaction result paths must not materialize model attempt failures");
-        }
         if (failure.attempt().attempt() != expectedAttempt) {
           throw new IllegalArgumentException(
               "materialized model attempt failures must form a consecutive prefix starting at"
@@ -318,7 +275,7 @@ public final class ModelAttemptMaterialization {
     if (!foundBasis) {
       throw new IllegalArgumentException("model result path must contain requestHeadEntryId");
     }
-    if (!compaction && expectedAttempt - 1 != attached.attempt() - 1) {
+    if (expectedAttempt - 1 != attached.attempt() - 1) {
       throw new IllegalArgumentException(
           "materialized model attempt failures must be exactly the confirmed attempt prefix:"
               + " expected "

@@ -67,7 +67,6 @@ class SystemSettingsSnapshotTest {
             SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
             SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
             SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
-            SystemSettings.AiRuntime.DEFAULT.compactionFallbackModel(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
