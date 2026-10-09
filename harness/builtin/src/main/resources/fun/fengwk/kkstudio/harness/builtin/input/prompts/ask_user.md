@@ -7,6 +7,5 @@ Usage:
 - An option declares a `label` that is unique within its question, may carry a `description`, and may set `recommended: true`. A recommended option is only a suggestion: it never replaces the user's choice, and a single choice question allows at most one.
 - Omit `options` when a question has no meaningful choices: every question always accepts one free-form answer in addition to its options, so never add an "other" option.
 - Send `multiple` and `recommended` only as JSON booleans (`true`/`false`), never as `null` or as text; `question`, `label` and `description` must not carry leading or trailing whitespace.
-- Stay within the frozen limits: at most 20 questions, at most 20 options per question, at most 1024 characters for a `question` or a `description`, at most 256 characters for a `label`.
 - Answers map to the questions by position: the user submits one answer per question, exactly one for a single choice question and deduplicated options plus at most one free-form answer for a multiple choice question. The user may decline instead of answering; a declined submission is an explicit result, so never invent, assume or prefill an answer, and never treat an ordinary message as an answer.
 - Do not call this tool from delegated internal work: return the missing information to the caller instead.

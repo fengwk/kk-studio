@@ -18,10 +18,16 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -215,38 +221,69 @@ class HumanInputContractTest {
     assertEquals("builtin", HumanInputTool.BUILTIN_CONTRIBUTOR_ID);
   }
 
-  /** 契约上限：问题数、选项数、文本长度与答案长度都在接受边界上拒绝，避免无界放大。 */
+  /**
+   * 问卷与答案不再有业务数量/长度上限：fixture 的题数、选项数与问题/label/description 都超过旧上限，必须被接受并逐字保留。
+   *
+   * <p>长结构化问卷放在 classpath fixture（{@code input/long-questionnaire.json}），避免把巨型 JSON 写进测试代码。
+   */
   @Test
-  void contractLimitsAreEnforcedAtTheirBoundaries() {
-    String tooManyQuestions =
-        "{\"questions\":["
-            + "{\"question\":\"q\"},".repeat(HumanInputQuestionnaire.MAX_QUESTIONS)
-            + "{\"question\":\"q\"}]}";
-    assertThrows(IllegalArgumentException.class, () -> CODEC.decodeQuestionnaire(tooManyQuestions));
-    String tooManyOptions =
-        "{\"questions\":[{\"question\":\"q\",\"options\":["
-            + "{\"label\":\"l\"},".repeat(HumanInputQuestion.MAX_OPTIONS)
-            + "{\"label\":\"l\"}]}]}";
-    assertThrows(IllegalArgumentException.class, () -> CODEC.decodeQuestionnaire(tooManyOptions));
-    // 问题文本必须有界且无首尾空白；超长或带空白都拒绝。
+  void longContentIsAcceptedWithoutBusinessCeilings() {
+    HumanInputQuestionnaire questionnaire =
+        CODEC.decodeQuestionnaire(
+            readResource("/fun/fengwk/kkstudio/harness/runtime/input/long-questionnaire.json"));
+
+    assertEquals(21, questionnaire.questions().size());
+    assertEquals("Q".repeat(1100), questionnaire.questions().get(0).question());
+    assertEquals(21, questionnaire.questions().get(1).options().size());
+    assertEquals("L".repeat(300), questionnaire.questions().get(1).options().get(0).label());
+    assertEquals("D".repeat(1100), questionnaire.questions().get(1).options().get(0).description());
+
+    // 超长自定义答案按冻结问卷规范化，原样保留而不是截断或静默降级。
+    String longAnswer = "a".repeat(5000);
+    List<List<String>> submitted = new ArrayList<>(questionnaire.questions().size());
+    for (int q = 0; q < questionnaire.questions().size(); q++) {
+      submitted.add(List.of(longAnswer));
+    }
+    HumanInputAnswers answers = HumanInputAnswers.accept(questionnaire, false, submitted);
+    assertEquals(questionnaire.questions().size(), answers.answers().size());
+    assertEquals(longAnswer, answers.answers().get(0).get(0));
+  }
+
+  /** 去掉业务上限后仍保留结构约束：至少一问、非空文本、无首尾空白、label 唯一、单选至多一个 recommended。 */
+  @Test
+  void structuralConstraintsRemain() {
+    assertThrows(IllegalArgumentException.class, () -> new HumanInputQuestionnaire(List.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new HumanInputQuestion(" padded ", false, List.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new HumanInputQuestion("   ", false, List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new HumanInputQuestion(
-                "x".repeat(HumanInputQuestion.MAX_QUESTION_CHARACTERS + 1), false, List.of()));
-    assertThrows(
-        IllegalArgumentException.class, () -> new HumanInputQuestion(" padded ", false, List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new HumanInputOption(
-                "x".repeat(HumanInputOption.MAX_LABEL_CHARACTERS + 1), null, false));
+                "ok",
+                false,
+                List.of(
+                    new HumanInputOption("a", null, false),
+                    new HumanInputOption("a", null, false))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new HumanInputOption(
-                "ok", "x".repeat(HumanInputOption.MAX_DESCRIPTION_CHARACTERS + 1), false));
-    assertThrows(IllegalArgumentException.class, () -> new HumanInputQuestionnaire(List.of()));
+            new HumanInputQuestion(
+                "ok",
+                false,
+                List.of(
+                    new HumanInputOption("a", null, true), new HumanInputOption("b", null, true))));
+    // 多选允许多个 recommended：结构约束只针对单选。
+    assertEquals(
+        2,
+        new HumanInputQuestion(
+                "ok",
+                true,
+                List.of(
+                    new HumanInputOption("a", null, true), new HumanInputOption("b", null, true)))
+            .options()
+            .size());
   }
 
   /** 提交命令自身的形状校验：actor 必须非空、无首尾空白且有界；拒答不得携带答案。 */
@@ -275,6 +312,17 @@ class HumanInputContractTest {
       String actor, boolean declined, List<List<String>> answers) {
     return new ToolInputSubmissionCommand(
         new UUID(0L, 1L), new UUID(0L, 2L), new UUID(0L, 3L), actor, declined, answers);
+  }
+
+  /** 读取 classpath 测试资源：长结构化问卷 fixture 不写进测试代码。 */
+  private static String readResource(String resource) {
+    try (InputStream input =
+        Objects.requireNonNull(
+            HumanInputContractTest.class.getResourceAsStream(resource), resource)) {
+      return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException exception) {
+      throw new UncheckedIOException(exception);
+    }
   }
 
   private static ToolBinding binding(String toolName, String contributorId, String localName) {
