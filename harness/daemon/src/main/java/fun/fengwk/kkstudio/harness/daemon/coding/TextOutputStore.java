@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -28,6 +30,8 @@ public final class TextOutputStore {
 
   /** 默认单次调用的全文捕获预算：1 GiB。达到预算只停止文件捕获，绝不终止产生输出的进程。 */
   public static final long DEFAULT_CAPTURE_BUDGET_BYTES = 1024L * 1024 * 1024;
+
+  private static final Logger LOG = System.getLogger(TextOutputStore.class.getName());
 
   private static final String STAGING_SUFFIX = ".part";
   private static final String TEXT_SUFFIX = ".log";
@@ -177,15 +181,17 @@ public final class TextOutputStore {
     return published;
   }
 
-  /** 清理未发布的中转文件并释放其 workspace；已发布全文不受影响。 */
+  /** 清理未发布的中转文件并释放其 workspace；已发布全文不受影响。删除失败记录路径 warn，不静默吞掉。 */
   void deleteStagingQuietly(Path stagingFile) {
     if (stagingFile == null) {
       return;
     }
     try {
       Files.deleteIfExists(stagingFile);
-    } catch (IOException ignored) {
-      // 残留中转文件由后续清扫收敛。
+    } catch (IOException error) {
+      LOG.log(
+          Level.WARNING,
+          "cannot delete temporary staging file " + stagingFile + ": " + error.getMessage());
     }
     TemporaryResourceStore.Workspace workspace = openWorkspaces.remove(stagingFile);
     if (workspace != null) {

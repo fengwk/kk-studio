@@ -14,14 +14,17 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.UUID;
 
 /**
  * 针对 {@link TemporaryResourceStore} 的行为断言：不可变创建登记、TTL/扫描清扫、活动租约保护、符号链接与路径逃逸拒绝，以及重启后按登记清扫。
@@ -206,13 +209,115 @@ class TemporaryResourceStoreTest {
     assertSame(TextOutputStore.Lease.NONE, store.acquire(store.root()));
   }
 
-  /** 清扫无法读取受控根时必须显式失败，绝不静默返回“已清扫 0 个”掩盖真实故障。 */
+  /** 清扫无法定位受控根（被删除）时必须显式失败，绝不静默返回“已清扫 0 个”掩盖真实故障。 */
   @Test
-  void sweepReportsUnreadableRootInsteadOfSilentlySucceeding() throws IOException {
+  void sweepReportsMissingRootInsteadOfSilentlySucceeding() throws IOException {
     TemporaryResourceStore store = TemporaryResourceStore.open(tmpRoot);
     Files.delete(store.root());
 
-    assertThrows(UncheckedIOException.class, () -> store.sweep(1));
+    assertThrows(IllegalStateException.class, () -> store.sweep(1));
+  }
+
+  /** 受控根被替换成符号链接后必须拒绝扫描，绝不跟随链接删除根外内容。 */
+  @Test
+  void sweepRejectsRootReplacedBySymlink() throws IOException {
+    assumeTrue(supportsSymlinks(), "需要支持符号链接的文件系统");
+    MutableClock clock = new MutableClock(Instant.ofEpochSecond(0));
+    TemporaryResourceStore store = TemporaryResourceStore.open(tmpRoot, clock);
+
+    Path external = Files.createDirectories(tmpRoot.resolve("external"));
+    Path victim = external.resolve("55555555-5555-5555-5555-555555555555");
+    Files.createDirectories(victim);
+    Files.writeString(victim.resolve("created-at"), "0");
+    Files.delete(store.root());
+    Files.createSymbolicLink(store.root(), external);
+
+    clock.advance(Duration.ofSeconds(1_000_000));
+    assertThrows(IllegalStateException.class, () -> store.sweep(1), "受控根被替换成符号链接后必须拒绝扫描");
+    assertTrue(Files.exists(victim), "根外内容不得被删除");
+  }
+
+  /** 句柄 close 与读者 lease close 都必须原子一次：重复 close 不得提前清空计数放行清扫。 */
+  @Test
+  void workspaceCloseAndReaderLeaseAreIdempotent() throws IOException {
+    MutableClock clock = new MutableClock(Instant.ofEpochSecond(0));
+    TemporaryResourceStore store = TemporaryResourceStore.open(tmpRoot, clock);
+    TemporaryResourceStore.Workspace workspace = store.create();
+    UUID id = workspace.id();
+    TextOutputStore.Lease reader = store.acquire(workspace.directory().resolve("output.log"));
+    assertNotSame(TextOutputStore.Lease.NONE, reader);
+    assertTrue(store.hasActiveLease(id));
+
+    clock.advance(Duration.ofSeconds(10_000));
+    workspace.close();
+    workspace.close();
+    assertTrue(store.hasActiveLease(id), "重复 close 后读者 lease 计数必须仍然存在");
+    assertEquals(0, store.sweep(1), "读者 lease 未释放前绝不删除");
+    assertTrue(Files.exists(workspace.directory()));
+
+    reader.close();
+    reader.close();
+    assertFalse(store.hasActiveLease(id));
+    assertEquals(1, store.sweep(1), "读者释放后过期 workspace 才可回收");
+    assertFalse(Files.exists(workspace.directory()));
+  }
+
+  /** 受控根存在但不是可读目录（如权限被收紧）时，清扫必须显式失败而不是静默当作空目录。 */
+  @Test
+  void sweepReportsListingFailureInsteadOfTreatingRootAsEmpty() throws IOException {
+    assumeTrue(assumePosixNonRoot(), "需要 POSIX 且非 root 才能让目录不可读");
+    MutableClock clock = new MutableClock(Instant.ofEpochSecond(0));
+    TemporaryResourceStore store = TemporaryResourceStore.open(tmpRoot, clock);
+    store.create().close();
+
+    Files.setPosixFilePermissions(store.root(), PosixFilePermissions.fromString("---------"));
+    try {
+      assertThrows(UncheckedIOException.class, () -> store.sweep(1));
+    } finally {
+      Files.setPosixFilePermissions(store.root(), PosixFilePermissions.fromString("rwx------"));
+    }
+  }
+
+  /** 单个 workspace 删除失败必须记录并保留到下一轮，绝不让整轮清扫失败或静默丢弃资源。 */
+  @Test
+  void sweepKeepsUndeletableWorkspaceForNextRound() throws IOException {
+    assumeTrue(assumePosixNonRoot(), "需要 POSIX 且非 root 才能让目录不可删");
+    MutableClock clock = new MutableClock(Instant.ofEpochSecond(0));
+    TemporaryResourceStore store = TemporaryResourceStore.open(tmpRoot, clock);
+    TemporaryResourceStore.Workspace workspace = store.create();
+    workspace.close();
+    clock.advance(Duration.ofSeconds(10_000));
+
+    Files.setPosixFilePermissions(
+        workspace.directory(), PosixFilePermissions.fromString("r-x------"));
+    try {
+      assertEquals(0, store.sweep(1), "删除失败的 workspace 不得计入已清扫");
+      assertTrue(Files.exists(workspace.directory()));
+    } finally {
+      Files.setPosixFilePermissions(
+          workspace.directory(), PosixFilePermissions.fromString("rwx------"));
+    }
+    assertEquals(1, store.sweep(1), "权限恢复后下一轮清扫收敛");
+    assertFalse(Files.exists(workspace.directory()));
+  }
+
+  /** 立即回收（取消/发布失败）路径遇到删除失败不得抛错，也不得静默：保留资源由清扫兜底。 */
+  @Test
+  void deleteWorkspaceToleratesDeletionFailure() throws IOException {
+    assumeTrue(assumePosixNonRoot(), "需要 POSIX 且非 root 才能让目录不可删");
+    TemporaryResourceStore store = TemporaryResourceStore.open(tmpRoot);
+    TemporaryResourceStore.Workspace workspace = store.create();
+    workspace.close();
+
+    Files.setPosixFilePermissions(
+        workspace.directory(), PosixFilePermissions.fromString("r-x------"));
+    try {
+      store.deleteWorkspace(workspace.directory());
+      assertTrue(Files.exists(workspace.directory()));
+    } finally {
+      Files.setPosixFilePermissions(
+          workspace.directory(), PosixFilePermissions.fromString("rwx------"));
+    }
   }
 
   /** 创建登记损坏（非法数字）时不得被当作受控 workspace 清扫；同轮合法的过期 workspace 仍被回收。 */
@@ -281,6 +386,12 @@ class TemporaryResourceStoreTest {
         UncheckedIOException.class,
         () -> TemporaryResourceStore.open(tmpDir, clock),
         "workspaces 分量是符号链接时必须拒绝");
+  }
+
+  /** POSIX 且非 root：只有这样才能用权限位构造“不可读/不可删目录”，root 会绕过权限检查。 */
+  private static boolean assumePosixNonRoot() {
+    return FileSystems.getDefault().supportedFileAttributeViews().contains("posix")
+        && !"root".equals(System.getProperty("user.name"));
   }
 
   private static boolean supportsSymlinks() {

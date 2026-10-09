@@ -25,7 +25,7 @@ class OwnerOnlyFilesTest {
 
   @TempDir Path trustedRoot;
 
-  /** 目录必须以 0700 创建并在重复调用时保持 owner-only，不产生“先建后改权限”的窗口。 */
+  /** 目录必须以 0700 创建（含新建的父级链）并在重复调用时保持 owner-only，不产生“先建后改权限”的窗口。 */
   @Test
   void ensureOwnerOnlyDirectoryCreatesAndConvergesToOwnerOnly() throws IOException {
     assumeTrue(isPosixSupported(), "需要 POSIX 文件系统验证权限位");
@@ -34,16 +34,25 @@ class OwnerOnlyFilesTest {
     Path first = OwnerOnlyFiles.ensureOwnerOnlyDirectory(trustedRoot, directory);
     assertEquals(directory, first);
 
+    Set<PosixFilePermission> ownerOnlyDirectory =
+        Set.of(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE,
+            PosixFilePermission.OWNER_EXECUTE);
+    assertEquals(
+        ownerOnlyDirectory,
+        Files.getPosixFilePermissions(trustedRoot.resolve("data")),
+        "新建的父级目录必须以 0700 创建");
+    assertEquals(
+        ownerOnlyDirectory,
+        Files.getPosixFilePermissions(trustedRoot.resolve("data").resolve("tmp")),
+        "新建的中间目录必须以 0700 创建");
+
     // 放宽权限后再确保一次：收敛回 0700。
     Files.setPosixFilePermissions(directory, Set.of(PosixFilePermission.OWNER_READ));
     Path second = OwnerOnlyFiles.ensureOwnerOnlyDirectory(trustedRoot, directory);
     assertEquals(directory, second);
-    assertEquals(
-        Set.of(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-            PosixFilePermission.OWNER_EXECUTE),
-        Files.getPosixFilePermissions(directory));
+    assertEquals(ownerOnlyDirectory, Files.getPosixFilePermissions(directory));
   }
 
   /** 新建中转文件必须以 owner-only 0600 直接创建。 */
