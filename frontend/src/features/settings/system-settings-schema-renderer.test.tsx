@@ -411,7 +411,7 @@ describe('system settings schema renderer', () => {
     expect(screen.getByText('500')).toBeInTheDocument()
 
     // Remove 502
-    const remove502 = screen.getByLabelText('Remove 502')
+    const remove502 = screen.getByLabelText('移除 502')
     await user.click(remove502)
 
     const updatedDraft1 = savedDrafts.at(-1)!

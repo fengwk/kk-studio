@@ -189,6 +189,7 @@ describe('AI domain utilities', () => {
       credential: ' secret ',
       modelCallTimeoutMillis: '120000',
       modelCallIdleTimeoutMillis: '3000',
+      modelHttpRetryStatusCodes: null,
     }
     expect(toEditableProvider(providerInput)).toEqual({
       name: 'minimax',
@@ -207,6 +208,7 @@ describe('AI domain utilities', () => {
       credential: 'secret',
       modelCallTimeoutMillis: 120000,
       modelCallIdleTimeoutMillis: 3000,
+      modelHttpRetryStatusCodes: null,
     })
 
     // Custom retry codes serialization
@@ -497,6 +499,7 @@ describe('AI domain utilities', () => {
         credential: '   ',
         modelCallTimeoutMillis: '   ',
         modelCallIdleTimeoutMillis: '   ',
+        modelHttpRetryStatusCodes: null,
       }),
     ).toEqual({
       name: 'stub',

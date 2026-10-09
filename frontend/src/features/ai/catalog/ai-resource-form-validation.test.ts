@@ -38,6 +38,7 @@ function providerDraft() {
     credential: '',
     modelCallTimeoutMillis: '',
     modelCallIdleTimeoutMillis: '',
+    modelHttpRetryStatusCodes: null,
   }
 }
 

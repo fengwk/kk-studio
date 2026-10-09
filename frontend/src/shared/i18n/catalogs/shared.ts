@@ -17,6 +17,46 @@ export const sharedCatalog = {
     'en-US': 'Decrease',
     'zh-CN': '减少',
   },
+  'controls.tagInput.remove': {
+    'en-US': 'Remove {{item}}',
+    'zh-CN': '移除 {{item}}',
+  },
+  'controls.tagInput.emptyToken': {
+    'en-US': 'Contains an empty token.',
+    'zh-CN': '包含空项。',
+  },
+  'controls.tagInput.invalidToken': {
+    'en-US': '"{{token}}" is not a valid integer.',
+    'zh-CN': '“{{token}}”不是有效整数。',
+  },
+  'controls.tagInput.outOfRange': {
+    'en-US': '"{{token}}" is outside the valid range ({{min}}–{{max}}).',
+    'zh-CN': '“{{token}}”超出有效范围（{{min}}–{{max}}）。',
+  },
+  'controls.tagInput.duplicate': {
+    'en-US': 'Duplicate token: "{{token}}".',
+    'zh-CN': '重复项：“{{token}}”。',
+  },
+  'shared.tagInput.remove': {
+    'en-US': 'Remove {{item}}',
+    'zh-CN': '移除 {{item}}',
+  },
+  'shared.tagInput.emptyToken': {
+    'en-US': 'Contains an empty token.',
+    'zh-CN': '包含空项。',
+  },
+  'shared.tagInput.invalidToken': {
+    'en-US': '"{{token}}" is not a valid integer.',
+    'zh-CN': '“{{token}}”不是有效整数。',
+  },
+  'shared.tagInput.outOfRange': {
+    'en-US': '"{{token}}" is outside the valid range ({{min}}–{{max}}).',
+    'zh-CN': '“{{token}}”超出有效范围（{{min}}–{{max}}）。',
+  },
+  'shared.tagInput.duplicate': {
+    'en-US': 'Duplicate token: "{{token}}".',
+    'zh-CN': '重复项：“{{token}}”。',
+  },
   'shared.cancel': {
     'en-US': 'Cancel',
     'zh-CN': '取消',

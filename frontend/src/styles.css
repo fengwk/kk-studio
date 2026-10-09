@@ -684,6 +684,25 @@ div.is-error {
   font-weight: 600;
 }
 
+.form-radio-group {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.form-radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.form-group-hint {
+  color: var(--fg-muted);
+}
+
 /* 表单控件基座（.form-group 后代控件）：普通控件统一 32px 高度、表面与聚焦。
    共享控件自带高度/表面/焦点语义，故显式排除 .ui-text-input/.ui-textarea/
    .number-input-field/.ui-search-input。 */

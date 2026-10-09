@@ -99,8 +99,8 @@ export function ProviderForm({
       </label>
       <div className="form-group">
         <FieldLabel>{t('ai.catalog.form.httpRetryPolicy')}</FieldLabel>
-        <div style={{ display: 'flex', gap: '16px', marginBottom: '8px' }}>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
+        <div className="form-radio-group">
+          <label className="form-radio-label">
             <input
               type="radio"
               name="provider-http-retry-mode"
@@ -109,7 +109,7 @@ export function ProviderForm({
             />
             {t('ai.catalog.form.httpRetryInherit')}
           </label>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
+          <label className="form-radio-label">
             <input
               type="radio"
               name="provider-http-retry-mode"
@@ -134,7 +134,7 @@ export function ProviderForm({
             ariaLabel={t('ai.catalog.form.httpRetryPolicy')}
           />
         ) : (
-          <small style={{ color: 'var(--fg-muted)' }}>
+          <small className="form-group-hint">
             {t('ai.catalog.form.httpRetryInheritHint')}
           </small>
         )}
