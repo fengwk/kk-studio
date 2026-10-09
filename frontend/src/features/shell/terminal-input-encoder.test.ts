@@ -59,6 +59,21 @@ describe('terminal-input-encoder', () => {
       ).toBeNull()
     })
 
+    it('prototype-key 负向：toString / constructor / __proto__ / valueOf 绝不误匹配任何键映射', () => {
+      const modes = createModes({
+        applicationCursor: true,
+        applicationKeypad: true,
+      })
+      const maliciousKeys = ['toString', 'constructor', '__proto__', 'valueOf', 'hasOwnProperty']
+      for (const key of maliciousKeys) {
+        expect(encodeTerminalKey({ key }, modes)).toBeNull()
+        expect(encodeTerminalKey({ key, code: key }, modes)).toBeNull()
+        expect(encodeTerminalKey({ key, shift: true }, modes)).toBeNull()
+        expect(encodeTerminalKey({ key, ctrl: true }, modes)).toBeNull()
+        expect(encodeTerminalKey({ key, alt: true }, modes)).toBeNull()
+      }
+    })
+
     describe('控制键：Enter / Backspace / Esc / Tab', () => {
       it('Enter 在不同 autoNewLine 与 altSendsEscape 下正确编码', () => {
         const defaultModes = createModes({ autoNewLine: false, altSendsEscape: true })
@@ -442,6 +457,14 @@ describe('terminal-input-encoder', () => {
         expect(encodeTerminalKey({ key: 'F13', ctrl: true }, modes)).toBeNull()
       })
 
+      it('非 ASCII Unicode 字符带 Ctrl 时返回 null，不误折叠为 Ctrl+S', () => {
+        const modes = createModes()
+        expect(encodeTerminalKey({ key: 'ß', ctrl: true }, modes)).toBeNull()
+        expect(encodeTerminalKey({ key: 'ſ', ctrl: true }, modes)).toBeNull()
+        expect(encodeTerminalKey({ key: 'é', ctrl: true }, modes)).toBeNull()
+        expect(encodeTerminalKey({ key: 'Ω', ctrl: true }, modes)).toBeNull()
+      })
+
       it('Alt+Ctrl 按 altSendsEscape 决定前置 ESC', () => {
         const withEsc = createModes({ altSendsEscape: true })
         expect(
@@ -535,6 +558,15 @@ describe('terminal-input-encoder', () => {
       // high surrogate 后跟非 low surrogate
       expect(() => encodeTerminalText('\ud83dA')).toThrow(TerminalInputError)
     })
+
+    it('64KiB 单次预算边界精准断言，超出 64KiB 抛出 TerminalInputError', () => {
+      const exactText = 'a'.repeat(MAX_INPUT_BUFFER_BYTES)
+      const valid = encodeTerminalText(exactText)
+      expect(valid?.length).toBe(MAX_INPUT_BUFFER_BYTES)
+
+      const overflowText = 'a'.repeat(MAX_INPUT_BUFFER_BYTES + 1)
+      expect(() => encodeTerminalText(overflowText)).toThrow(TerminalInputError)
+    })
   })
 
   describe('encodeTerminalPaste', () => {
@@ -578,6 +610,16 @@ describe('terminal-input-encoder', () => {
       expect(() => encodeTerminalPaste('bad\ud800text', modes)).toThrow(
         TerminalInputError,
       )
+      expect(() => encodeTerminalPaste('bad\ude80text', modes)).toThrow(
+        TerminalInputError,
+      )
+    })
+
+    it('正确编码多字节中文与 Emoji 代理对的粘贴文本', () => {
+      const modes = createModes({ bracketedPaste: false })
+      const text = '粘贴中文测试-é-🚀🔥'
+      const expected = new Uint8Array(new TextEncoder().encode(text))
+      expect(encodeTerminalPaste(text, modes)).toEqual(expected)
     })
 
     it('计算包含括号在内的总字节数，超过 64KiB 抛错且不静默截断', () => {
@@ -604,6 +646,15 @@ describe('terminal-input-encoder', () => {
       expect(() => encodeTerminalPaste(overflowText, modes)).toThrow(
         TerminalInputError,
       )
+    })
+
+    it('CRLF 换行按 normalized 结果计算预算，大文本不超限成功编码', () => {
+      const modes = createModes({ bracketedPaste: true })
+      // 括号占 12 字节，允许 normalized 文本最多 65536 - 12 = 65524 字节
+      // 构造 65524 个 \r\n，原字符长为 131048 字符；若未规范化会超过 64KiB，但规范化后正好 65524 字节
+      const crlfText = '\r\n'.repeat(MAX_INPUT_BUFFER_BYTES - 12)
+      const res = encodeTerminalPaste(crlfText, modes)
+      expect(res?.length).toBe(MAX_INPUT_BUFFER_BYTES)
     })
   })
 
@@ -1324,6 +1375,22 @@ describe('terminal-input-encoder', () => {
       expect(encodeTerminalFocus(false, focusModes)).toEqual(
         new Uint8Array([0x1b, 0x5b, 0x4f]),
       )
+    })
+
+    it('返回防御性副本，外部修改不污染后续结果', () => {
+      const focusModes = createModes({ mouseMode: 'FOCUS' })
+      const first = encodeTerminalFocus(true, focusModes)
+      expect(first).toEqual(new Uint8Array([0x1b, 0x5b, 0x49]))
+      first![0] = 0x00
+      first![1] = 0x00
+
+      const second = encodeTerminalFocus(true, focusModes)
+      expect(second).toEqual(new Uint8Array([0x1b, 0x5b, 0x49]))
+
+      const unfocusedFirst = encodeTerminalFocus(false, focusModes)
+      unfocusedFirst![0] = 0x00
+      const unfocusedSecond = encodeTerminalFocus(false, focusModes)
+      expect(unfocusedSecond).toEqual(new Uint8Array([0x1b, 0x5b, 0x4f]))
     })
 
     it('mouseMode !== FOCUS 时返回 null', () => {

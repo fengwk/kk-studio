@@ -1,8 +1,8 @@
 /**
- * SH1 浏览器终端输入纯字节编码器。
+ * 终端浏览器输入字节编码器。
  *
- * 严格按照 CONTRACT.md 规范实现键盘、文本、粘贴、鼠标、焦点纯函数编码与分片，
- * 不依赖 DOM 全局状态、VT parser、Unicode width 表或外部终端库。
+ * 提供按终端输入模式编码键盘、直接文本、剪贴板粘贴、鼠标与焦点事件的纯函数，
+ * 以及不超过 4096 字节的分片工具。不持有 DOM 全局状态与外部依赖。
  */
 
 import type { MouseFormat, MouseMode, TerminalInputModes } from './terminal-view-codec'
@@ -12,11 +12,8 @@ export const TERMINAL_INPUT_INVALID_MESSAGE = 'terminal input is invalid'
 export const MAX_INPUT_BUFFER_BYTES = 64 * 1024 // 65536
 export const INPUT_CHUNK_MAX_BYTES = 4096
 
-const BRACKETED_PASTE_START = new Uint8Array([0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e]) // ESC [ 2 0 0 ~
-const BRACKETED_PASTE_END = new Uint8Array([0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e]) // ESC [ 2 0 1 ~
-
-const FOCUS_IN_BYTES = new Uint8Array([0x1b, 0x5b, 0x49]) // ESC [ I
-const FOCUS_OUT_BYTES = new Uint8Array([0x1b, 0x5b, 0x4f]) // ESC [ O
+const BRACKETED_PASTE_START = new Uint8Array([0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e])
+const BRACKETED_PASTE_END = new Uint8Array([0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e])
 
 const TEXT_ENCODER = new TextEncoder()
 
@@ -64,15 +61,15 @@ function toAsciiBytes(str: string): Uint8Array {
 
 function validateAndMeasureUtf8(str: string): number {
   let bytes = 0
-  for (let i = 0; i < str.length; i++) {
+  const len = str.length
+  for (let i = 0; i < len; i++) {
     const code = str.charCodeAt(i)
     if (code <= 0x7f) {
       bytes += 1
     } else if (code <= 0x7ff) {
       bytes += 2
     } else if (code >= 0xd800 && code <= 0xdbff) {
-      // High surrogate
-      if (i + 1 < str.length) {
+      if (i + 1 < len) {
         const next = str.charCodeAt(i + 1)
         if (next >= 0xdc00 && next <= 0xdfff) {
           bytes += 4
@@ -82,7 +79,6 @@ function validateAndMeasureUtf8(str: string): number {
       }
       throw new TerminalInputError()
     } else if (code >= 0xdc00 && code <= 0xdfff) {
-      // Lone low surrogate
       throw new TerminalInputError()
     } else {
       bytes += 3
@@ -91,69 +87,104 @@ function validateAndMeasureUtf8(str: string): number {
   return bytes
 }
 
-const NAVIGATION_KEYS: Record<string, string> = {
-  ArrowUp: 'A',
-  ArrowDown: 'B',
-  ArrowRight: 'C',
-  ArrowLeft: 'D',
-  Home: 'H',
-  End: 'F',
+function measureNormalizedPasteUtf8(text: string): number {
+  let bytes = 0
+  const len = text.length
+  for (let i = 0; i < len; i++) {
+    const code = text.charCodeAt(i)
+    if (code === 0x0d) {
+      if (i + 1 < len && text.charCodeAt(i + 1) === 0x0a) {
+        i++
+      }
+      bytes += 1
+    } else if (code === 0x0a) {
+      bytes += 1
+    } else if (code <= 0x7f) {
+      bytes += 1
+    } else if (code <= 0x7ff) {
+      bytes += 2
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      if (i + 1 < len) {
+        const next = text.charCodeAt(i + 1)
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          bytes += 4
+          i++
+          continue
+        }
+      }
+      throw new TerminalInputError()
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new TerminalInputError()
+    } else {
+      bytes += 3
+    }
+  }
+  return bytes
 }
 
-const EDIT_KEYS: Record<string, number> = {
-  Insert: 2,
-  Delete: 3,
-  PageUp: 5,
-  PageDown: 6,
-}
+const NAVIGATION_KEYS = new Map<string, string>([
+  ['ArrowUp', 'A'],
+  ['ArrowDown', 'B'],
+  ['ArrowRight', 'C'],
+  ['ArrowLeft', 'D'],
+  ['Home', 'H'],
+  ['End', 'F'],
+])
 
-const FUNCTION_KEYS_F1_F4: Record<string, string> = {
-  F1: 'P',
-  F2: 'Q',
-  F3: 'R',
-  F4: 'S',
-}
+const EDIT_KEYS = new Map<string, number>([
+  ['Insert', 2],
+  ['Delete', 3],
+  ['PageUp', 5],
+  ['PageDown', 6],
+])
 
-const FUNCTION_KEYS_F5_F12: Record<string, number> = {
-  F5: 15,
-  F6: 17,
-  F7: 18,
-  F8: 19,
-  F9: 20,
-  F10: 21,
-  F11: 23,
-  F12: 24,
-}
+const FUNCTION_KEYS_F1_F4 = new Map<string, string>([
+  ['F1', 'P'],
+  ['F2', 'Q'],
+  ['F3', 'R'],
+  ['F4', 'S'],
+])
 
-const NUMPAD_CODES: Record<string, string> = {
-  Numpad0: 'p',
-  Numpad1: 'q',
-  Numpad2: 'r',
-  Numpad3: 's',
-  Numpad4: 't',
-  Numpad5: 'u',
-  Numpad6: 'v',
-  Numpad7: 'w',
-  Numpad8: 'x',
-  Numpad9: 'y',
-  NumpadDecimal: 'n',
-  NumpadDivide: 'o',
-  NumpadMultiply: 'j',
-  NumpadSubtract: 'm',
-  NumpadAdd: 'k',
-  NumpadEnter: 'M',
-  NumpadEqual: 'X',
-}
+const FUNCTION_KEYS_F5_F12 = new Map<string, number>([
+  ['F5', 15],
+  ['F6', 17],
+  ['F7', 18],
+  ['F8', 19],
+  ['F9', 20],
+  ['F10', 21],
+  ['F11', 23],
+  ['F12', 24],
+])
+
+const NUMPAD_CODES = new Map<string, string>([
+  ['Numpad0', 'p'],
+  ['Numpad1', 'q'],
+  ['Numpad2', 'r'],
+  ['Numpad3', 's'],
+  ['Numpad4', 't'],
+  ['Numpad5', 'u'],
+  ['Numpad6', 'v'],
+  ['Numpad7', 'w'],
+  ['Numpad8', 'x'],
+  ['Numpad9', 'y'],
+  ['NumpadDecimal', 'n'],
+  ['NumpadDivide', 'o'],
+  ['NumpadMultiply', 'j'],
+  ['NumpadSubtract', 'm'],
+  ['NumpadAdd', 'k'],
+  ['NumpadEnter', 'M'],
+  ['NumpadEqual', 'X'],
+])
 
 /**
  * 映射纯 Ctrl 键到 ASCII 控制码 (0..127)。
- * 无法映射的字符返回 null。
+ * 仅映射纯 ASCII 字符，避免 Unicode 大小写折叠误匹配。
  */
 function mapCtrlChar(key: string): number | null {
   if (key.length === 1) {
-    const upper = key.toUpperCase()
-    if (upper >= 'A' && upper <= 'Z') {
-      return upper.charCodeAt(0) - 64 // 1..26
+    const code = key.charCodeAt(0)
+    if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
+      return code & 0x1f
     }
     switch (key) {
       case ' ':
@@ -186,17 +217,12 @@ function mapCtrlChar(key: string): number | null {
   return null
 }
 
-/**
- * 检查按键是否为无特殊功能语义的普通打印键（包括多字节 UTF-8 字符）。
- */
 function isPrintableKey(key: string): boolean {
   if (!key) return false
-  // 长度为 1 的字符（排除 ASCII 控制字符 0x00..0x1F 与 0x7F）
   if (key.length === 1) {
     const ch = key.charCodeAt(0)
     return ch >= 0x20 && ch !== 0x7f
   }
-  // 可能是合法的代理对（如 Emoji）
   if (key.length === 2) {
     const high = key.charCodeAt(0)
     const low = key.charCodeAt(1)
@@ -212,7 +238,6 @@ export function encodeTerminalKey(
   descriptor: TerminalKeyDescriptor,
   modes: TerminalInputModes,
 ): Uint8Array | null {
-  // composition/AltGraph/meta 交给输入法/浏览器，不产生键字节
   if (descriptor.isComposing || descriptor.altGraph || descriptor.meta) {
     return null
   }
@@ -222,11 +247,9 @@ export function encodeTerminalKey(
   const alt = Boolean(descriptor.alt)
   const ctrl = Boolean(descriptor.ctrl)
 
-  // xterm 修饰符参数：m = 1 + shift*1 + alt*2 + ctrl*4
   const m = 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (ctrl ? 4 : 0)
 
-  // 1. 小键盘（Numpad）处理
-  const numpadFinal = NUMPAD_CODES[code] ?? NUMPAD_CODES[key]
+  const numpadFinal = NUMPAD_CODES.get(code) ?? NUMPAD_CODES.get(key)
   if (numpadFinal !== undefined) {
     if (code === 'NumpadEnter' || key === 'NumpadEnter') {
       if (modes.applicationKeypad) {
@@ -235,22 +258,18 @@ export function encodeTerminalKey(
         }
         return toAsciiBytes(`\x1b[1;${m}M`)
       }
-      // 非 applicationKeypad 时，NumpadEnter 仍按普通 Enter 处理（下述分支）
     } else if (modes.applicationKeypad) {
       if (m === 1) {
         return toAsciiBytes(`\x1bO${numpadFinal}`)
       }
       return toAsciiBytes(`\x1b[1;${m}${numpadFinal}`)
     } else {
-      // 非 application mode 普通 numpad 交 text
       if (!ctrl && !alt) {
         return null
       }
-      // 若带 ctrl 或 alt 则继续由后续对应修饰键逻辑处理
     }
   }
 
-  // 2. 回车（Enter）
   if (key === 'Enter' || code === 'NumpadEnter') {
     const baseBytes = modes.autoNewLine ? [0x0d, 0x0a] : [0x0d]
     if (alt && modes.altSendsEscape) {
@@ -259,9 +278,7 @@ export function encodeTerminalKey(
     return new Uint8Array(baseBytes)
   }
 
-  // 3. 退格（Backspace）
   if (key === 'Backspace') {
-    // Backspace DEL, Ctrl+Backspace BS
     const byte = ctrl ? 0x08 : 0x7f
     if (alt && modes.altSendsEscape) {
       return new Uint8Array([0x1b, byte])
@@ -269,23 +286,19 @@ export function encodeTerminalKey(
     return new Uint8Array([byte])
   }
 
-  // 4. 制表键（Tab）
   if (key === 'Tab') {
     if (shift) {
-      // ShiftTab: ESC [ Z
       if (alt && modes.altSendsEscape) {
         return toAsciiBytes('\x1b\x1b[Z')
       }
       return toAsciiBytes('\x1b[Z')
     }
-    // 普通 Tab: HT (0x09)
     if (alt && modes.altSendsEscape) {
       return new Uint8Array([0x1b, 0x09])
     }
     return new Uint8Array([0x09])
   }
 
-  // 5. 退出键（Escape）
   if (key === 'Escape') {
     if (alt && modes.altSendsEscape) {
       return new Uint8Array([0x1b, 0x1b])
@@ -293,8 +306,7 @@ export function encodeTerminalKey(
     return new Uint8Array([0x1b])
   }
 
-  // 6. 导航键（ArrowUp/Down/Right/Left, Home, End）
-  const navFinal = NAVIGATION_KEYS[key]
+  const navFinal = NAVIGATION_KEYS.get(key)
   if (navFinal !== undefined) {
     if (m === 1) {
       if (key === 'Home' || key === 'End') {
@@ -302,12 +314,10 @@ export function encodeTerminalKey(
       }
       return toAsciiBytes(modes.applicationCursor ? `\x1bO${navFinal}` : `\x1b[${navFinal}`)
     }
-    // 参数化导航不额外叠 ESC
     return toAsciiBytes(`\x1b[1;${m}${navFinal}`)
   }
 
-  // 7. 页面与编辑键（Insert, Delete, PageUp, PageDown）
-  const editCode = EDIT_KEYS[key]
+  const editCode = EDIT_KEYS.get(key)
   if (editCode !== undefined) {
     if (m === 1) {
       return toAsciiBytes(`\x1b[${editCode}~`)
@@ -315,8 +325,7 @@ export function encodeTerminalKey(
     return toAsciiBytes(`\x1b[${editCode};${m}~`)
   }
 
-  // 8. 功能键（F1..F4）
-  const fnFinal1to4 = FUNCTION_KEYS_F1_F4[key]
+  const fnFinal1to4 = FUNCTION_KEYS_F1_F4.get(key)
   if (fnFinal1to4 !== undefined) {
     if (m === 1) {
       return toAsciiBytes(`\x1bO${fnFinal1to4}`)
@@ -324,8 +333,7 @@ export function encodeTerminalKey(
     return toAsciiBytes(`\x1b[1;${m}${fnFinal1to4}`)
   }
 
-  // 9. 功能键（F5..F12）
-  const fnCode5to12 = FUNCTION_KEYS_F5_F12[key]
+  const fnCode5to12 = FUNCTION_KEYS_F5_F12.get(key)
   if (fnCode5to12 !== undefined) {
     if (m === 1) {
       return toAsciiBytes(`\x1b[${fnCode5to12}~`)
@@ -333,7 +341,6 @@ export function encodeTerminalKey(
     return toAsciiBytes(`\x1b[${fnCode5to12};${m}~`)
   }
 
-  // 10. Ctrl 组合键处理
   if (ctrl) {
     const ctrlVal = mapCtrlChar(key)
     if (ctrlVal !== null) {
@@ -342,11 +349,9 @@ export function encodeTerminalKey(
       }
       return new Uint8Array([ctrlVal])
     }
-    // Ctrl 无法映射的打印键不生成 bytes
     return null
   }
 
-  // 11. Alt 打印键
   if (alt) {
     if (isPrintableKey(key)) {
       if (modes.altSendsEscape) {
@@ -357,28 +362,28 @@ export function encodeTerminalKey(
         result.set(utf8, 1)
         return result
       }
-      // altSendsEscape 为 false 时交文字提交
       return null
     }
   }
 
-  // 12. 普通无 Ctrl/Alt 可打印 key 不在 keydown 产生 bytes，交 text 提交避免 IME/keydown 双写
   if (!ctrl && !alt && isPrintableKey(key)) {
     return null
   }
 
-  // 其余未产生字节的非打印控制键（如单独 Shift, CapsLock, NumLock 等）
   return null
 }
 
 /**
- * 编码直接文本输入，严格 UTF-8，拒绝 lone surrogate，不做 Unicode normalization。
+ * 编码直接文本输入，严格 UTF-8，拒绝 lone surrogate，检查 64KiB 预算，不做 Unicode normalization。
  */
 export function encodeTerminalText(text: string): Uint8Array | null {
   if (text.length === 0) {
     return null
   }
-  validateAndMeasureUtf8(text)
+  const byteCount = validateAndMeasureUtf8(text)
+  if (byteCount > MAX_INPUT_BUFFER_BYTES) {
+    throw new TerminalInputError()
+  }
   return TEXT_ENCODER.encode(text)
 }
 
@@ -393,18 +398,18 @@ export function encodeTerminalPaste(
     return null
   }
 
-  // CRLF/LF → CR，保留原 CR
-  const normalized = text.replace(/\r\n|\n/g, '\r')
-  const textByteCount = validateAndMeasureUtf8(normalized)
   const overhead = modes.bracketedPaste
     ? BRACKETED_PASTE_START.length + BRACKETED_PASTE_END.length
     : 0
+
+  const textByteCount = measureNormalizedPasteUtf8(text)
   const totalBytes = textByteCount + overhead
 
   if (totalBytes > MAX_INPUT_BUFFER_BYTES) {
     throw new TerminalInputError()
   }
 
+  const normalized = text.replace(/\r\n|\n/g, '\r')
   const result = new Uint8Array(totalBytes)
   let offset = 0
 
@@ -443,9 +448,6 @@ export function splitTerminalInput(bytes: Uint8Array): Uint8Array[] {
   return chunks
 }
 
-/**
- * 将 Unicode 码点以 UTF-8 格式写入字节数组（用于 XTERM_EXT 1005 格式）。
- */
 function appendUtf8Codepoint(target: number[], codePoint: number): void {
   if (codePoint <= 0x7f) {
     target.push(codePoint)
@@ -463,7 +465,6 @@ export function encodeTerminalMouse(
   cols: number,
   rows: number,
 ): Uint8Array | null {
-  // 1. 严格尺寸校验
   if (
     typeof cols !== 'number' ||
     !Number.isInteger(cols) ||
@@ -481,7 +482,6 @@ export function encodeTerminalMouse(
 
   const { action, x, y } = event
 
-  // 2. 严格字段校验
   if (
     action !== 'press' &&
     action !== 'release' &&
@@ -521,12 +521,10 @@ export function encodeTerminalMouse(
     }
   }
 
-  // 3. 权威 screen 槽越界检测（1-based 权威坐标，越界返回 null，不 clamp 不 truncate）
   if (x < 1 || x > cols || y < 1 || y > rows) {
     return null
   }
 
-  // 4. 终端 mouseMode 模式过滤
   const mouseMode: MouseMode = modes.mouseMode
   if (mouseMode === 'NONE' || mouseMode === 'FOCUS') {
     return null
@@ -544,15 +542,12 @@ export function encodeTerminalMouse(
       return null
     }
   }
-  // ALL_MOTION 允许全部 press / release / wheel / move
 
-  // 5. 计算修饰键偏置
   const modBits =
     (event.shift ? 4 : 0) | (event.alt ? 8 : 0) | (event.ctrl ? 16 : 0)
 
   const format: MouseFormat = modes.mouseFormat
 
-  // 6. SGR (1006) 格式编码
   if (format === 'SGR') {
     let baseButton: number
     if (action === 'wheel') {
@@ -561,12 +556,11 @@ export function encodeTerminalMouse(
       if (event.button !== null && event.button !== undefined) {
         baseButton = event.button + 32
       } else {
-        baseButton = 3 + 32 // 35: motion without button
+        baseButton = 3 + 32
       }
     } else if (action === 'press') {
       baseButton = event.button!
     } else {
-      // SGR release 仍保留真实 button
       baseButton = event.button!
     }
 
@@ -575,7 +569,6 @@ export function encodeTerminalMouse(
     return toAsciiBytes(`\x1b[<${cb};${x};${y}${finalChar}`)
   }
 
-  // 7. Legacy 格式 (URXVT, XTERM, XTERM_EXT) 基础 button
   let baseButton: number
   if (action === 'wheel') {
     baseButton = event.wheel === 'up' ? 64 : 65
@@ -588,18 +581,15 @@ export function encodeTerminalMouse(
   } else if (action === 'press') {
     baseButton = event.button!
   } else {
-    // legacy release = 3
     baseButton = 3
   }
 
   const cb = baseButton + modBits
 
-  // 8. URXVT (1015) 格式编码
   if (format === 'URXVT') {
     return toAsciiBytes(`\x1b[${cb + 32};${x};${y}M`)
   }
 
-  // 9. XTERM 格式编码（最多 223，单字节不可表达返回 null）
   if (format === 'XTERM') {
     if (x > 223 || y > 223 || cb + 32 > 255) {
       return null
@@ -607,7 +597,6 @@ export function encodeTerminalMouse(
     return new Uint8Array([0x1b, 0x5b, 0x4d, cb + 32, x + 32, y + 32])
   }
 
-  // 10. XTERM_EXT (1005) 格式编码（最多 2015）
   if (x > 2015 || y > 2015 || cb + 32 > 2047) {
     return null
   }
@@ -619,7 +608,7 @@ export function encodeTerminalMouse(
 }
 
 /**
- * 编码焦点事件：仅在 mouseMode === 'FOCUS' 时生成 ESC [ I 或 ESC [ O。
+ * 编码焦点事件，返回独立的防御性副本。
  */
 export function encodeTerminalFocus(
   focused: boolean,
@@ -630,7 +619,9 @@ export function encodeTerminalFocus(
   }
 
   if (modes.mouseMode === 'FOCUS') {
-    return focused ? FOCUS_IN_BYTES : FOCUS_OUT_BYTES
+    return focused
+      ? new Uint8Array([0x1b, 0x5b, 0x49])
+      : new Uint8Array([0x1b, 0x5b, 0x4f])
   }
 
   return null
