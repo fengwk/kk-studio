@@ -85,6 +85,9 @@ PTY_CASES = (
     "ptyRunsAJvmFixtureAndKeepsItsExitCode",
     "ptyUnpermittedStartNeverRunsTheCommand",
     "ptyRejectsNonPositiveInitialSize",
+    "ptyRejectsInvalidLaunchWithoutLeakingScopeState",
+    "ptyRejectsNonPositiveResizeWithoutEndingScope",
+    "pipeScopeRejectsResizeWithoutEndingScope",
 )
 # 发信号前的父子排序是纯逻辑：三平台都必须真跑全部用例。
 SIGNAL_ORDER_CASES = (

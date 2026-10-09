@@ -93,6 +93,9 @@ ALL_PLATFORM_REQUIRED_CASES = {
         "ptyRunsAJvmFixtureAndKeepsItsExitCode",
         "ptyUnpermittedStartNeverRunsTheCommand",
         "ptyRejectsNonPositiveInitialSize",
+        "ptyRejectsInvalidLaunchWithoutLeakingScopeState",
+        "ptyRejectsNonPositiveResizeWithoutEndingScope",
+        "pipeScopeRejectsResizeWithoutEndingScope",
     },
     # 发信号前的父子排序是纯逻辑，不依赖任何平台命令或内核查询：三平台都必须真跑全部用例。
     PROCESS_PACKAGE + "PosixProcessSignalOrderTest": {

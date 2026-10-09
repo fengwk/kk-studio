@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -169,6 +170,57 @@ class ProcessScopePtyIntegrationTest {
         () -> ProcessScope.startPty(workdir, markerCommand(), 0, 24, System.getenv(), () -> true));
   }
 
+  /** 非法 argv 在 native 启动前拒绝，并删除本次分配的私有状态目录。 */
+  @Test
+  void ptyRejectsInvalidLaunchWithoutLeakingScopeState() throws Exception {
+    Set<Path> before = scopeDirectories();
+    Path marker = workdir.resolve("invalid-launch-never-created");
+    List<String> command = new ArrayList<>(touchCommand(marker));
+    command.add("invalid\0argument");
+    IllegalArgumentException failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> ProcessScope.startPty(workdir, command, 80, 24, System.getenv(), () -> true));
+    assertFalse(failure.getMessage().contains("invalid\0argument"), "失败消息不回显调用方参数");
+    assertFalse(Files.exists(marker), "非法启动规格不得执行任何命令");
+    assertEquals(before, scopeDirectories(), "native 启动前失败也必须释放私有状态目录");
+  }
+
+  /** 已启动 PTY 的非法 resize 明确拒绝，不能破坏原执行范围。 */
+  @Test
+  void ptyRejectsNonPositiveResizeWithoutEndingScope() throws Exception {
+    try (ProcessScope scope =
+        ProcessScope.startPty(
+            workdir,
+            ProcessScopeFixtureMain.fixtureCommand(
+                "hold", workdir.resolve("resize.pid").toString()),
+            80,
+            24,
+            System.getenv(),
+            () -> true)) {
+      assertThrows(IllegalArgumentException.class, () -> scope.resize(0, 24));
+      assertThrows(IllegalArgumentException.class, () -> scope.resize(80, 0));
+      assertThrows(IllegalArgumentException.class, () -> scope.resize(-1, 24));
+      assertThrows(IllegalArgumentException.class, () -> scope.resize(80, -1));
+      assertTrue(scope.process().isAlive(), "拒绝非法尺寸不得结束原 PTY");
+      assertTrue(scope.terminate(), "拒绝后范围仍须正常收敛");
+    }
+  }
+
+  /** 捕获管道不是终端，不能通过 resize 冒充 PTY。 */
+  @Test
+  void pipeScopeRejectsResizeWithoutEndingScope() throws Exception {
+    try (ProcessScope scope =
+        ProcessScope.start(
+            workdir,
+            ProcessScopeFixtureMain.fixtureCommand(
+                "hold", workdir.resolve("pipe.pid").toString()))) {
+      assertThrows(IllegalStateException.class, () -> scope.resize(80, 24));
+      assertTrue(scope.process().isAlive(), "拒绝 resize 不得结束原管道范围");
+      assertTrue(scope.terminate(), "拒绝后范围仍须正常收敛");
+    }
+  }
+
   /**
    * 跨平台：PTY 里跑一个只依赖 JDK 的夹具（不经过任何 shell），标记必须原样从伪终端回传，退出码必须保真。
    *
@@ -217,6 +269,16 @@ class ProcessScopePtyIntegrationTest {
       }
       assertEquals(before, ptyDescriptors(), "close 后不得残留 PTY 主端描述符");
     }
+  }
+
+  private static Set<Path> scopeDirectories() throws IOException {
+    Set<Path> directories = new HashSet<>();
+    try (Stream<Path> entries = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
+      entries
+          .filter(path -> path.getFileName().toString().startsWith(ProcessScope.STATE_DIR_PREFIX))
+          .forEach(directories::add);
+    }
+    return directories;
   }
 
   private static Set<String> ptyDescriptors() throws IOException {
