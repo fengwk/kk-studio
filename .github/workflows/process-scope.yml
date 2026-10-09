@@ -140,19 +140,41 @@ jobs:
       - name: Collect exec files and verify the class files agree
         shell: bash
         run: python3 scripts/dev/verify/process-scope/collect-coverage-inputs.py coverage/platforms coverage/inputs
-      - name: Fetch the JaCoCo CLI
+      - name: Fetch the JaCoCo CLI and the execution data reader
         shell: bash
         run: |
           set -euo pipefail
+          # CLI 负责 merge/report；core 只作为规范化工具的官方 Reader，两者都固定 0.8.11 且只用于构建期，不进入项目依赖。
           mvn -B -ntp dependency:copy \
             -Dartifact=org.jacoco:org.jacoco.cli:0.8.11:jar:nodeps \
             -DoutputDirectory=coverage/tools
+          mvn -B -ntp dependency:copy \
+            -Dartifact=org.jacoco:org.jacoco.core:0.8.11:jar \
+            -DoutputDirectory=coverage/tools
+      # 规范化工具的正负测试必须真跑（不跳过）：直接在已取到 core 的环境里执行，确保它读的正是 CI 用的那份官方 Reader。
+      # 该模块不匹配通用无参数 discover 的默认模式，因此不会被没准备 core 的其它 workflow 误跑。
+      - name: Test the coverage normalization tool
+        shell: bash
+        env:
+          JACOCO_CORE_JAR: coverage/tools/org.jacoco.core-0.8.11.jar
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            -s scripts/dev/verify/process-scope/tests -p normalize_coverage_test.py -v
+      # 被终止的 helper 会留下一条未完成的执行数据记录；这里只裁掉那一条尾部残缺字节，其余输入逐字节保留，父 exec 与任何格式损坏都失败。
+      - name: Normalize the exec inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -cp coverage/tools/org.jacoco.core-0.8.11.jar \
+            scripts/dev/verify/process-scope/NormalizeCoverage.java \
+            coverage/inputs/exec-files.txt coverage/normalized
       - name: Merge every platform and build the report
         shell: bash
         run: |
           set -euo pipefail
           cli=coverage/tools/org.jacoco.cli-0.8.11-nodeps.jar
-          java -jar "$cli" merge $(cat coverage/inputs/exec-files.txt) --destfile coverage/merged.exec
+          java -jar "$cli" merge $(cat coverage/normalized/exec-files.txt) --destfile coverage/merged.exec
           java -jar "$cli" report coverage/merged.exec \
             --classfiles coverage/inputs/classes \
             --sourcefiles harness/daemon/src/main/java \

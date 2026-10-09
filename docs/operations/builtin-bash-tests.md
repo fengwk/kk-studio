@@ -141,7 +141,9 @@ Windows 必须在 Daemon 配置的 `bashExecutable`（Web 安装设置或 `daemo
 
 helper 是独立 JVM，默认不进入主覆盖数据。矩阵启用
 `-Dkk-studio.process-scope.helper-coverage=true`，收集 `target/jacoco-helper/*.exec`。
-合并作业校验三平台 class 文件一致，再合并数据。核心类清单、合计行覆盖率计算与阈值由
+合并作业先校验三平台 class 文件一致，再规范化、合并数据：被终止的 helper 可能留下一条只写了一半的执行数据记录，
+[NormalizeCoverage.java](../../scripts/dev/verify/process-scope/NormalizeCoverage.java) 用官方 Reader 定位最后一条完整记录的边界，
+只裁掉那一条残缺尾部，其余输入逐字节保留；父 exec 与任何其它格式损坏都让作业失败。核心类清单、合计行覆盖率计算与阈值由
 [gate-core-coverage.py](../../scripts/dev/verify/process-scope/gate-core-coverage.py) 定义；
 单平台数字与同一次矩阵的合并数字分别报告。
 
