@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
@@ -90,6 +92,8 @@ final class AcceptCommandsControl {
       case AcceptCommandsTarget.NewChildSession target -> acceptNewChildSession(
           target, commands, join, preflight);
       case AcceptCommandsTarget.NewThread target -> acceptNewThread(
+          target, commands, join, preflight);
+      case AcceptCommandsTarget.NewForkedSession target -> acceptNewForkedSession(
           target, commands, join, preflight);
       case AcceptCommandsTarget.Thread target -> acceptOnThread(target, commands, join, preflight);
     };
@@ -320,12 +324,21 @@ final class AcceptCommandsControl {
                   yoloPolicy,
                   commands);
           Instant now = clock.instant();
+          // fork 事实节点：作为新 Thread head 的第一个 Entry，只记录模式与切点，不复制共享前缀、不移动源 Thread。
+          UUID forkEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  forkEntryId,
+                  target.sessionId(),
+                  target.startEntryId(),
+                  ForkPayload.branch(target.startEntryId()),
+                  HarnessStoreTime.notBefore(now, startEntry.createdAt())));
           ThreadState thread =
               new ThreadState(
                   target.threadId(),
                   target.sessionId(),
                   null,
-                  target.startEntryId(),
+                  forkEntryId,
                   creationRequestHash,
                   target.threadName(),
                   yoloPolicy,
@@ -346,13 +359,144 @@ final class AcceptCommandsControl {
    * start Entry 自身判定，不写源 Thread、不补写 synthetic closure，也不做任何 source Thread 推断。
    */
   private static void requireLegalForkBoundary(Entry startEntry) {
+    requireLegalForkBoundary(startEntry, "NEW_THREAD");
+  }
+
+  private static void requireLegalForkBoundary(Entry startEntry, String target) {
     if (startEntry.payload().type().isRoot() || startEntry.payload() instanceof TurnEndPayload) {
       return;
     }
     throw new IllegalArgumentException(
         "start entry "
             + startEntry.id()
-            + " is not a legal NEW_THREAD fork boundary (ROOT or a closed TURN_END)");
+            + " is not a legal "
+            + target
+            + " fork boundary (ROOT or a closed TURN_END)");
+  }
+
+  /**
+   * NEW_FORKED_SESSION：把既有执行根 {@code sourceThreadId} 在合法切点处的有效上下文复制到新 Session，并创建独立执行根 Thread。
+   *
+   * <p>来源事实（来源必须是执行根、cut 属于该来源 head 路径、cut 是 ROOT 或已闭合 TURN_END）在创建任何新行之前完成，非法来源零写入。根 settings 从来源
+   * branch 在切点处的生效快照推导，不接受调用方给定；只复制有效上下文（最新 complete 压缩摘要与保留尾部，或完整起点历史），不复制 join / commands /
+   * invocations，也不订阅源执行。creation request hash 与 client threadId 一起提供 initial creation replay 幂等。
+   */
+  private AcceptedCommands acceptNewForkedSession(
+      AcceptCommandsTarget.NewForkedSession target,
+      List<NewThreadCommand> commands,
+      ThreadJoinRequest join,
+      AcceptancePreflight preflight) {
+    validateBatchShape(target, commands);
+    ThreadYoloPolicy yoloPolicy = ThreadYoloPolicy.root(target.yoloEnabled());
+    return store.transaction(
+        tx -> {
+          // initial creation replay 必须先于来源校验：已接受的 fork 不依赖来源是否仍然存在。
+          String creationRequestHash =
+              ThreadCreationRequestHash.forNewForkedSession(
+                  target.sourceThreadId(),
+                  target.startEntryId(),
+                  target.sessionId(),
+                  target.threadId(),
+                  yoloPolicy,
+                  commands);
+          LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
+          ThreadState existing = locked.threads.get(target.threadId());
+          if (existing != null) {
+            return attachJoin(
+                tx,
+                replayInitial(
+                    tx,
+                    target.sessionId(),
+                    target.threadId(),
+                    existing,
+                    commands,
+                    creationRequestHash),
+                join);
+          }
+          // 来源事实与切点校验先于任何写入：来源必须是执行根，cut 必须在其当前 head 路径上且是合法边界。
+          ThreadState sourceThread =
+              tx.findThread(target.sourceThreadId())
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "source thread " + target.sourceThreadId() + " does not exist"));
+          if (sourceThread.parentThreadId() != null) {
+            throw new IllegalArgumentException(
+                "fork source thread " + target.sourceThreadId() + " must be an execution root");
+          }
+          UUID sourceSessionId = sourceThread.sessionId();
+          tx.lockSessionForKeyShare(sourceSessionId)
+              .orElseThrow(
+                  () ->
+                      new HarnessRuntimeNotFoundException(
+                          "source session " + sourceSessionId + " does not exist"));
+          Entry startEntry =
+              tx.findEntry(target.startEntryId())
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "entry " + target.startEntryId() + " does not exist"));
+          if (!startEntry.sessionId().equals(sourceSessionId)) {
+            throw new IllegalArgumentException(
+                "start entry "
+                    + target.startEntryId()
+                    + " is not in the source session "
+                    + sourceSessionId);
+          }
+          requireLegalForkBoundary(startEntry, "NEW_FORKED_SESSION");
+          EntryPath sourceCutPath = tx.loadEntryPath(target.startEntryId());
+          boolean onSourcePath =
+              tx.loadEntryPath(sourceThread.headEntryId()).entries().stream()
+                  .anyMatch(entry -> entry.id().equals(target.startEntryId()));
+          if (!onSourcePath) {
+            throw new IllegalArgumentException(
+                "start entry " + target.startEntryId() + " is not on the source thread path");
+          }
+          BranchSettings rootSettings = tx.loadBranchSettings(target.startEntryId());
+          admitJoin(tx, target.threadId(), null, join, true);
+          Instant now = clock.instant();
+          Session session =
+              new Session(
+                  target.sessionId(), initialSessionName(commands, target.sessionId()), now);
+          tx.insertSession(session);
+          UUID rootEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(rootEntryId, target.sessionId(), null, new RootPayload(rootSettings), now));
+          Entry lastCopied =
+              SessionForkCopy.copyEffectiveContext(
+                  tx, target.sessionId(), rootEntryId, sourceCutPath, now);
+          UUID forkParentId = lastCopied == null ? rootEntryId : lastCopied.id();
+          Instant forkCreatedAt =
+              HarnessStoreTime.notBefore(
+                  now.plusMillis(1L),
+                  lastCopied == null ? now : lastCopied.createdAt().plusMillis(1L));
+          UUID forkEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  forkEntryId,
+                  target.sessionId(),
+                  forkParentId,
+                  ForkPayload.session(target.sourceThreadId(), target.startEntryId()),
+                  forkCreatedAt));
+          ThreadState thread =
+              new ThreadState(
+                  target.threadId(),
+                  target.sessionId(),
+                  null,
+                  forkEntryId,
+                  creationRequestHash,
+                  Names.rootThreadName(),
+                  yoloPolicy,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
+                  1L,
+                  0,
+                  now,
+                  now);
+          tx.insertThread(thread);
+          return attachJoin(
+              tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
+        });
   }
 
   private AcceptedCommands acceptOnThread(

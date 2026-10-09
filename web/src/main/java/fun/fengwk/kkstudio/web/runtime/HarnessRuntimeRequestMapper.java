@@ -225,6 +225,8 @@ public final class HarnessRuntimeRequestMapper {
       case "NEW_SESSION" -> {
         requireForbidden(dto.hasStartEntryIdField(), "target.startEntryId", "target type " + type);
         requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
+        requireForbidden(
+            dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
         yield new AcceptCommandsTarget.NewRootSession(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
@@ -233,11 +235,23 @@ public final class HarnessRuntimeRequestMapper {
       }
       case "NEW_THREAD" -> {
         requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
+        requireForbidden(
+            dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
         yield new AcceptCommandsTarget.NewThread(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getStartEntryId(), "target.startEntryId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
             requireText(dto.getThreadName(), "target.threadName"),
+            requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
+      }
+      case "NEW_FORKED_SESSION" -> {
+        requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
+        requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
+        yield new AcceptCommandsTarget.NewForkedSession(
+            parseUuid(dto.getSourceThreadId(), "target.sourceThreadId"),
+            parseUuid(dto.getStartEntryId(), "target.startEntryId"),
+            parseUuid(dto.getSessionId(), "target.sessionId"),
+            parseUuid(dto.getThreadId(), "target.threadId"),
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
       default -> throw new IllegalArgumentException("unknown target type: " + type);

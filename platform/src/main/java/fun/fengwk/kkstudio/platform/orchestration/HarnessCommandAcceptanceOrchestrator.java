@@ -10,6 +10,15 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -28,6 +37,7 @@ import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -129,15 +139,17 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
-   * owner-aware 入口只服务产品创建（NEW_ROOT_SESSION / NEW_THREAD）：既有 Thread 的继续写入走 {@link
-   * #acceptOnThread}，子代理 NEW_CHILD_SESSION 只由 internal task 经 {@code
+   * owner-aware 入口只服务产品创建（NEW_ROOT_SESSION / NEW_THREAD / NEW_FORKED_SESSION）：既有 Thread 的继续写入走
+   * {@link #acceptOnThread}，子代理 NEW_CHILD_SESSION 只由 internal task 经 {@code
    * HarnessRuntime.acceptCommandsAndJoin} 原子创建，不经产品 owner 路由（产品 owner 无法持有子 Session）。
    */
   private static void requireCreationTarget(AcceptCommandsTarget target) {
     if (!(target instanceof AcceptCommandsTarget.NewRootSession)
-        && !(target instanceof AcceptCommandsTarget.NewThread)) {
+        && !(target instanceof AcceptCommandsTarget.NewThread)
+        && !(target instanceof AcceptCommandsTarget.NewForkedSession)) {
       throw new IllegalArgumentException(
-          "owner-aware command acceptance is limited to NEW_SESSION / NEW_THREAD creation");
+          "owner-aware command acceptance is limited to NEW_SESSION / NEW_THREAD /"
+              + " NEW_FORKED_SESSION creation");
     }
   }
 
@@ -163,7 +175,8 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 目标 Session 必须已由 owner 持有：NEW_SESSION 只在 Session 已存在（精确 replay）时校验；NEW_THREAD 直接用 target 的
-   * sessionId。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}）；NEW_CHILD_SESSION 与 THREAD 都不属于
+   * sessionId；NEW_FORKED_SESSION 校验来源 Thread 所属 Session（产品 owner 无法持有内部子 Session，Issue+Agent 不支持会话
+   * fork）。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}）；NEW_CHILD_SESSION 与 THREAD 都不属于
    * owner-aware 产品入口，即使上层形状校验被绕过也必须 fail closed。
    */
   private void requireTargetOwnership(OwnerRef owner, AcceptCommandsTarget target) {
@@ -175,11 +188,25 @@ public class HarnessCommandAcceptanceOrchestrator {
       }
       case AcceptCommandsTarget.NewThread newThread -> requireOwnedSession(
           owner, newThread.sessionId());
+      case AcceptCommandsTarget.NewForkedSession forkedSession -> {
+        if (owner instanceof OwnerRef.IssueAgent) {
+          throw new IllegalArgumentException(
+              "Issue agent sessions do not support NEW_FORKED_SESSION");
+        }
+        requireOwnedSession(owner, sourceSessionId(forkedSession.sourceThreadId()));
+      }
       case AcceptCommandsTarget.NewChildSession ignored -> throw new IllegalStateException(
           "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
       case AcceptCommandsTarget.Thread ignoredThread -> throw new IllegalStateException(
           "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
     }
+  }
+
+  /** 由来源执行根 Thread 解析其 Session；Thread 不可解析说明来源已不一致，失败而不是回退。 */
+  private UUID sourceSessionId(UUID sourceThreadId) {
+    return requireStore()
+        .transaction(tx -> tx.findThread(sourceThreadId).map(ThreadState::sessionId))
+        .orElseThrow(() -> new IllegalArgumentException("fork source thread does not exist"));
   }
 
   /**
@@ -276,11 +303,53 @@ public class HarnessCommandAcceptanceOrchestrator {
   private AcceptancePreflight preflight(OwnerRef owner, AcceptCommandsTarget target) {
     return (tx, session, commands) -> {
       if (owner instanceof OwnerRef.Chat chat
-          && target instanceof AcceptCommandsTarget.NewRootSession) {
+          && (target instanceof AcceptCommandsTarget.NewRootSession
+              || target instanceof AcceptCommandsTarget.NewForkedSession)) {
         createChatSessionOwnership(session.id(), chat.chatId());
+      }
+      if (target instanceof AcceptCommandsTarget.NewForkedSession) {
+        retainCopiedResources(tx, session.id());
       }
       return prepareUserContents(session.id(), commands);
     };
+  }
+
+  /**
+   * 会话 fork 复制有效上下文时必须把被复制消息引用的 blob 重新 retain 到新 Session：新身份的 Entry 只携带 blobId，blob 生命周期由 {@code
+   * session_blob_ref} 持有，源 Session 删除后新历史仍须可用。已存在的 ref 由幂等 retain 自然去重。
+   */
+  private void retainCopiedResources(HarnessStore.Transaction tx, UUID sessionId) {
+    for (Entry entry : tx.loadEntriesBySessionId(sessionId)) {
+      for (ResourceMessageContent resource : referencedResources(entry.payload())) {
+        refManager.retainRef(sessionId, resource.blobId());
+      }
+    }
+  }
+
+  /** 提取 Entry payload 中模型可见消息引用的 Resource（含 tool result 内嵌内容）；其它 payload 无资源引用。 */
+  private static List<ResourceMessageContent> referencedResources(EntryPayload payload) {
+    List<AgentMessageContent> contents =
+        switch (payload) {
+          case MessagePayload message -> message.message().contents();
+          case CustomMessagePayload message -> message.message().contents();
+          case NotificationPayload message -> message.message().contents();
+          case AssistantAbortedPayload message -> message.message().contents();
+          default -> List.of();
+        };
+    List<ResourceMessageContent> resources = new ArrayList<>();
+    collectResources(contents, resources);
+    return resources;
+  }
+
+  private static void collectResources(
+      List<AgentMessageContent> contents, List<ResourceMessageContent> resources) {
+    for (AgentMessageContent content : contents) {
+      if (content instanceof ResourceMessageContent resource) {
+        resources.add(resource);
+      } else if (content instanceof ToolResultMessageContent result) {
+        collectResources(result.contents(), resources);
+      }
+    }
   }
 
   /** 建立 Chat 归属边 {@code chat_session(session_id, chat_id)}：与 Runtime 写入同事务，唯一键原子保证 Session 单归属。 */
