@@ -7,6 +7,8 @@
  * fun.fengwk.kkstudio.harness.daemon.terminal.HeadlessTerminalDisplay} 显式实现 JediTerm Display；
  * {@link fun.fengwk.kkstudio.harness.daemon.terminal.TerminalSnapshotProjector} 把公开缓冲投影为 {@code
  * harness-environment} 的 {@link fun.fengwk.kkstudio.harness.environment.terminal.TerminalView}。
+ * 每个内核独占投影器，以观察到的行对象身份分配单调正数 id；捕获后只保留活动历史与屏幕行引用，尺寸或主/备用屏切换时清空引用但不重用 id。 旧 view
+ * 仅保留不可变数值数据，不持有模拟器引用，不以重复文本猜测滚动。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.daemon.terminal.TerminalLaunchSpec} 保存已解析的可执行程序、按原样组成的不可变
  * argv 与绝对规范化工作目录。 解析只在配置读取时发生一次：显式 executable/workdir 立即只读校验并失败关闭，缺省时按宿主 OS 选择 shell 并以 {@code

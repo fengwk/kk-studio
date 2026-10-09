@@ -26,8 +26,9 @@ class TerminalViewTest {
   void linesAndSlotsAreDefensivelyCopied() {
     List<TerminalView.Slot> slots = new ArrayList<>();
     slots.add(new TerminalView.Slot(SlotKind.UNIT, 'A', TerminalView.Style.DEFAULT));
-    TerminalView.Line line = new TerminalView.Line(false, slots);
+    TerminalView.Line line = new TerminalView.Line(1L, false, slots);
     slots.clear();
+    assertEquals(1L, line.id());
     assertEquals(1, line.slots().size());
 
     List<TerminalView.Line> lines = new ArrayList<>();
@@ -35,9 +36,22 @@ class TerminalViewTest {
     TerminalView view = new TerminalView(1, 1, 0, 0, false, 0, lines, true, null, 1L, modes());
     lines.clear();
     assertEquals(1, view.lines().size());
+    assertEquals(1L, view.lines().get(0).id());
     assertThrows(UnsupportedOperationException.class, () -> view.lines().add(line));
     assertThrows(
         UnsupportedOperationException.class, () -> line.slots().add(TerminalView.Slot.EMPTY));
+  }
+
+  @Test
+  void lineIdentityMustBePositiveAndSerializesAsLong() {
+    assertThrows(IllegalArgumentException.class, () -> new TerminalView.Line(0L, false, List.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new TerminalView.Line(-1L, false, List.of()));
+    TerminalView.Line line = new TerminalView.Line(Long.MAX_VALUE, true, List.of());
+    JsonNode encoded = new ObjectMapper().valueToTree(line);
+    assertTrue(encoded.get("id").isIntegralNumber());
+    assertEquals(Long.MAX_VALUE, encoded.get("id").longValue());
+    assertTrue(line.wrapped());
   }
 
   @Test

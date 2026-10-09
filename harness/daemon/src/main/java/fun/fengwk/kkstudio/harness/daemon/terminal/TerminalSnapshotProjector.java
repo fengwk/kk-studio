@@ -16,6 +16,7 @@ import com.jediterm.terminal.util.CharUtils;
 import fun.fengwk.kkstudio.harness.environment.terminal.TerminalView;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 
 /**
@@ -24,44 +25,85 @@ import java.util.List;
  * <p>投影逐 entry 读取 {@code TerminalLine.getEntries()/TextEntry.getText()} 的原始 UTF-16 单位与样式：{@code
  * 0xe000} 记为 DWC 续格，其余为 UNIT（含 NUL、FEFF、孤立代理项）；超出 entry 的尾槽补 {@link TerminalView.Slot#EMPTY}。投影不调用
  * NFC、码点拼接、 宽度表或字形合并，也不解释 SGR。
+ *
+ * <p>每个内核独占一个投影器；行身份来自实际 {@link TerminalLine} 引用而非文本匹配。成功捕获后只保留活动历史与屏幕的引用，
+ * 尺寸或活动缓冲改变时清空引用但不重用行号。全部状态只在 VT owner 与缓冲锁下访问。
  */
 final class TerminalSnapshotProjector {
 
-  private TerminalSnapshotProjector() {}
+  private IdentityHashMap<TerminalLine, Long> lineIds = new IdentityHashMap<>();
+  private long nextLineId = 1L;
+  private int lastColumns;
+  private int lastRows;
+  private boolean lastAlternate;
 
-  /** 在持有缓冲锁的前提下投影当前画面；{@code history} 在备用缓冲下恒为 0。 */
-  static TerminalView project(
+  TerminalSnapshotProjector() {}
+
+  /** 在 VT owner 上加锁投影当前画面；{@code history} 在备用缓冲下恒为 0。 */
+  TerminalView project(
       JediTerminal terminal,
       TerminalTextBuffer buffer,
       HeadlessTerminalDisplay display,
       long inputModeRevision) {
     buffer.lock();
     try {
+      resetIfChanged(buffer);
       int columns = buffer.getWidth();
+      int rows = buffer.getHeight();
       int history = buffer.isUsingAlternateBuffer() ? 0 : buffer.getHistoryLinesCount();
-      List<TerminalView.Line> lines = new ArrayList<>(history + buffer.getHeight());
-      for (int row = -history; row < buffer.getHeight(); row++) {
-        lines.add(projectLine(buffer.getLine(row), columns));
+      IdentityHashMap<TerminalLine, Long> captured = new IdentityHashMap<>();
+      List<TerminalView.Line> lines = new ArrayList<>(history + rows);
+      for (int row = -history; row < rows; row++) {
+        TerminalLine line = buffer.getLine(row);
+        Long id = lineIds.get(line);
+        if (id == null) {
+          id = nextLineId;
+          nextLineId = Math.incrementExact(nextLineId);
+        }
+        captured.put(line, id);
+        lines.add(projectLine(line, columns, id));
       }
-      return new TerminalView(
-          columns,
-          buffer.getHeight(),
-          terminal.getCursorX() - 1,
-          terminal.getCursorY() - 1,
-          buffer.isUsingAlternateBuffer(),
-          history,
-          lines,
-          display.cursorVisible(),
-          mapCursorShape(display.cursorShape()),
-          inputModeRevision,
-          inputModes(terminal, display));
+      TerminalView view =
+          new TerminalView(
+              columns,
+              rows,
+              terminal.getCursorX() - 1,
+              terminal.getCursorY() - 1,
+              buffer.isUsingAlternateBuffer(),
+              history,
+              lines,
+              display.cursorVisible(),
+              mapCursorShape(display.cursorShape()),
+              inputModeRevision,
+              inputModes(terminal, display));
+      // 仅在完整投影成功后替换引用集合，不保留已裁剪历史或隐藏缓冲。
+      lineIds = captured;
+      return view;
     } finally {
       buffer.unlock();
     }
   }
 
+  /** owner 在缓冲锁下观察每次解释/resize 的实际状态，也覆盖两次捕获间切出再切回的情况。 */
+  void resetIfChanged(TerminalTextBuffer buffer) {
+    int columns = buffer.getWidth();
+    int rows = buffer.getHeight();
+    boolean alternate = buffer.isUsingAlternateBuffer();
+    if (columns != lastColumns || rows != lastRows || alternate != lastAlternate) {
+      lineIds.clear();
+      lastColumns = columns;
+      lastRows = rows;
+      lastAlternate = alternate;
+    }
+  }
+
+  /** 仅供包内测试检查捕获后的引用预算，不暴露行引用。 */
+  int retainedLineCount() {
+    return lineIds.size();
+  }
+
   /** 投影单行；每行恰好 {@code columns} 个槽，超出部分裁掉。 */
-  static TerminalView.Line projectLine(TerminalLine line, int columns) {
+  static TerminalView.Line projectLine(TerminalLine line, int columns, long id) {
     List<TerminalView.Slot> slots = new ArrayList<>(columns);
     for (TerminalLine.TextEntry entry : line.getEntries()) {
       TerminalView.Style style = projectStyle(entry.getStyle());
@@ -69,7 +111,7 @@ final class TerminalSnapshotProjector {
       int length = text.length();
       for (int index = 0; index < length; index++) {
         if (slots.size() >= columns) {
-          return new TerminalView.Line(line.isWrapped(), slots);
+          return new TerminalView.Line(id, line.isWrapped(), slots);
         }
         char code = text.charAt(index);
         TerminalView.SlotKind kind =
@@ -80,7 +122,7 @@ final class TerminalSnapshotProjector {
     while (slots.size() < columns) {
       slots.add(TerminalView.Slot.EMPTY);
     }
-    return new TerminalView.Line(line.isWrapped(), slots);
+    return new TerminalView.Line(id, line.isWrapped(), slots);
   }
 
   /** 投影逐槽样式；JediTerm 3.76 无 strikethrough，固定为 false。 */

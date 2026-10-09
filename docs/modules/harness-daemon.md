@@ -101,6 +101,8 @@ helper 命令行只携带固定入口与私有状态目录；工作目录和 arg
 
 画面使用 [`TerminalView`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/terminal/TerminalView.java) 深不可变投影：每槽为数字 UTF-16 单位、UNIT/EMPTY/DWC 拓扑和独立样式；不拼接码点、规范化或重新推理宽度。只投影活动缓冲与有界历史；输入模式版本按实际模式和尺寸比较递增，不随普通输出改变。内核没有日志或持久化出口，也不拥有 PTY 或网络连接。
 
+每个内核拥有一个投影器，按实际观察到的 JediTerm 行对象身份分配从 1 开始的单调正数 `id`。同一行滚入历史时保留身份，文本相同的新行获得新号，不以文本重叠猜测滚动。捕获成功后引用映射只保留当前活动历史与屏幕行，最多为 `history + rows`；真实尺寸或主/备用屏切换时清空引用但不重用行号，切换期间不捕获也会重置。旧画面只保存不可变 id 与数值槽，不持有模拟器行引用；身份变化本身不改变输入模式版本。
+
 数值投影、样式、历史与缓冲切换由 [`TerminalKernelTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelTest.java) 和 [`TerminalSnapshotProjectorTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalSnapshotProjectorTest.java) 验证；分块调度、预算、满队列、关闭与异常传播由 [`TerminalKernelSchedulingTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelSchedulingTest.java) 验证。
 
 ### 文件与检索

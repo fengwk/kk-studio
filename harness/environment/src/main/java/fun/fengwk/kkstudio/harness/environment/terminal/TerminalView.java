@@ -31,10 +31,13 @@ public record TerminalView(
     Objects.requireNonNull(inputModes, "inputModes");
   }
 
-  /** 一行：{@code wrapped} 加恰好 {@link TerminalView#columns} 个槽。 */
-  public record Line(boolean wrapped, List<Slot> slots) {
+  /** 一行：内核观察到的正数身份、{@code wrapped} 加恰好 {@link TerminalView#columns} 个槽；不持有模拟器行引用。 */
+  public record Line(long id, boolean wrapped, List<Slot> slots) {
 
     public Line {
+      if (id <= 0) {
+        throw new IllegalArgumentException("line id must be positive");
+      }
       slots = List.copyOf(slots);
     }
   }

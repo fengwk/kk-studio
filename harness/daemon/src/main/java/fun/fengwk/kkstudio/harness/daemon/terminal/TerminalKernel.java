@@ -75,6 +75,7 @@ public final class TerminalKernel implements AutoCloseable {
   private JediTerminal terminal;
   private TerminalTextBuffer buffer;
   private HeadlessTerminalDisplay display;
+  private TerminalSnapshotProjector projector;
   private JediEmulator emulator;
   private int consumedUnits;
   private Throwable outputFailure;
@@ -249,6 +250,7 @@ public final class TerminalKernel implements AutoCloseable {
     StyleState styleState = new StyleState();
     buffer = new TerminalTextBuffer(columns, rows, styleState, maxHistoryLines);
     display = new HeadlessTerminalDisplay();
+    projector = new TerminalSnapshotProjector();
     terminal = new JediTerminal(display, buffer, styleState);
     terminal.setTerminalOutput(new KernelOutputStream());
     emulator = new JediEmulator(new KernelDataStream(), terminal);
@@ -285,7 +287,7 @@ public final class TerminalKernel implements AutoCloseable {
   }
 
   private TerminalView capture() {
-    return TerminalSnapshotProjector.project(terminal, buffer, display, inputModeRevision);
+    return projector.project(terminal, buffer, display, inputModeRevision);
   }
 
   private void resizeTo(int columns, int rows) {
@@ -301,10 +303,16 @@ public final class TerminalKernel implements AutoCloseable {
   }
 
   private void refreshRevision() {
-    InputState state = inputState();
-    if (!state.equals(lastInputState)) {
-      lastInputState = state;
-      inputModeRevision++;
+    buffer.lock();
+    try {
+      projector.resetIfChanged(buffer);
+      InputState state = inputState();
+      if (!state.equals(lastInputState)) {
+        lastInputState = state;
+        inputModeRevision++;
+      }
+    } finally {
+      buffer.unlock();
     }
   }
 

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.terminal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -159,21 +160,90 @@ class TerminalKernelTest {
   }
 
   @Test
+  void identicalBlankScrollMovesObservedScreenIdIntoHistoryAndAllocatesNewRowId() throws Exception {
+    try (TerminalKernel kernel = kernel(8, 4)) {
+      // 清屏使旧空行与滚动生成的新空行具有完全相同的数值槽，不靠文本差异证明滚动。
+      kernel.feed(utf8("\033[2J\033[4;1H")).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView before = snapshot(kernel);
+      assertEquals(List.of(1L, 2L, 3L, 4L), lineIds(before));
+      assertEquals(before, snapshot(kernel));
+      kernel.feed(utf8("\r\n")).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView scrolled = snapshot(kernel);
+      assertEquals(1, scrolled.history());
+      assertEquals(before.lines().get(0), scrolled.lines().get(0));
+      assertEquals(before.lines().getLast().slots(), scrolled.lines().getLast().slots());
+      assertEquals(5L, scrolled.lines().getLast().id());
+      assertEquals(before.inputModeRevision(), scrolled.inputModeRevision());
+
+      kernel.feed(utf8("\r\n".repeat(120))).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView trimmed = snapshot(kernel);
+      assertEquals(8, trimmed.history());
+      assertEquals(12, trimmed.lines().size());
+      assertTrue(trimmed.lines().stream().noneMatch(line -> line.id() == 1L));
+      assertEquals(trimmed.lines().size(), lineIds(trimmed).stream().distinct().count());
+      assertEquals(before.inputModeRevision(), trimmed.inputModeRevision());
+    }
+  }
+
+  @Test
+  void paddedRowsKeepIdentityAndContentEditsDoNotMutatePastSnapshots() throws Exception {
+    try (TerminalKernel kernel = kernel(8, 2);
+        TerminalKernel independent = kernel(8, 2)) {
+      TerminalView initial = snapshot(kernel);
+      assertEquals(List.of(1L, 2L), lineIds(initial));
+      assertEquals(initial, snapshot(kernel));
+      assertEquals(lineIds(initial), lineIds(snapshot(independent)));
+      kernel.feed(utf8("X")).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView changed = snapshot(kernel);
+      assertEquals(lineIds(initial), lineIds(changed));
+      assertEquals(SlotKind.EMPTY, initial.lines().get(0).slots().get(0).kind());
+      assertEquals('X', changed.lines().get(0).slots().get(0).code());
+      assertEquals(initial.inputModeRevision(), changed.inputModeRevision());
+    }
+  }
+
+  @Test
+  void zeroHistoryAndAlternateScrollNeverProjectHiddenMainHistory() throws Exception {
+    try (TerminalKernel kernel = kernel(8, 2, 0)) {
+      kernel.feed(utf8("\r\n".repeat(12))).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView main = snapshot(kernel);
+      assertEquals(0, main.history());
+      assertEquals(2, main.lines().size());
+      kernel.feed(utf8("\033[?1049h" + "\r\n".repeat(12))).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView alternate = snapshot(kernel);
+      assertTrue(alternate.alternate());
+      assertEquals(0, alternate.history());
+      assertEquals(2, alternate.lines().size());
+      assertTrue(alternate.lines().getFirst().id() > main.lines().getLast().id());
+      assertEquals(main.inputModeRevision(), alternate.inputModeRevision());
+    }
+  }
+
+  @Test
   void alternateBufferThenRestoreProjectsMainScreen() throws Exception {
     try (TerminalKernel kernel = kernel(8, 2)) {
       kernel.feed(utf8("MAIN")).get();
+      TerminalView before = snapshot(kernel);
       kernel.feed(utf8("\033[?1049h\rALT")).get();
       TerminalView alternate = snapshot(kernel);
       assertTrue(alternate.alternate());
       assertEquals(0, alternate.history());
       assertEquals('A', alternate.lines().get(0).slots().get(0).code());
       assertEquals('T', alternate.lines().get(0).slots().get(2).code());
+      assertTrue(alternate.lines().getFirst().id() > before.lines().getLast().id());
+      assertEquals(before.inputModeRevision(), alternate.inputModeRevision());
 
       kernel.feed(utf8("\033[?1049l")).get();
       TerminalView main = snapshot(kernel);
       assertFalse(main.alternate());
       assertEquals('M', main.lines().get(0).slots().get(0).code());
       assertEquals('N', main.lines().get(0).slots().get(3).code());
+      for (int row = 0; row < main.rows(); row++) {
+        assertTrue(main.lines().get(row).id() > alternate.lines().getLast().id());
+        assertEquals(before.lines().get(row).slots(), main.lines().get(row).slots());
+        assertEquals(before.lines().get(row).wrapped(), main.lines().get(row).wrapped());
+      }
+      assertEquals(before.inputModeRevision(), main.inputModeRevision());
     }
   }
 
@@ -181,12 +251,48 @@ class TerminalKernelTest {
   void resizeReflowsToRequestedSize() throws Exception {
     try (TerminalKernel kernel = kernel(8, 4)) {
       kernel.feed(utf8("123456789ABC")).get();
+      TerminalView before = snapshot(kernel);
       kernel.resize(6, 4).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
       TerminalView view = snapshot(kernel);
       assertEquals(6, view.columns());
       assertEquals(4, view.rows());
       for (TerminalView.Line line : view.lines()) {
         assertEquals(6, line.slots().size());
+        assertTrue(line.id() > before.lines().getLast().id());
+      }
+      assertTrue(view.lines().get(0).wrapped());
+      for (int col = 0; col < 6; col++) {
+        assertEquals("123456".charAt(col), view.lines().get(0).slots().get(col).code());
+        assertEquals("789ABC".charAt(col), view.lines().get(1).slots().get(col).code());
+      }
+      kernel.resize(6, 4).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      assertEquals(view, snapshot(kernel));
+    }
+  }
+
+  @Test
+  void heightChangeAndBufferRoundTripBetweenCapturesStillResetIdentity() throws Exception {
+    try (TerminalKernel kernel = kernel(8, 2)) {
+      kernel.feed(utf8("M")).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView initial = snapshot(kernel);
+      kernel.resize(8, 3).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView taller = snapshot(kernel);
+      assertTrue(taller.lines().getFirst().id() > initial.lines().getLast().id());
+      assertEquals(initial.lines().get(0).slots(), taller.lines().get(0).slots());
+      kernel.resize(8, 2).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      kernel.resize(8, 3).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView roundTrip = snapshot(kernel);
+      assertNotEquals(lineIds(taller), lineIds(roundTrip));
+      assertTrue(roundTrip.lines().getFirst().id() > taller.lines().getLast().id());
+
+      kernel.feed(utf8("\033[?1049h\033[?1049l")).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      TerminalView main = snapshot(kernel);
+      assertFalse(main.alternate());
+      assertTrue(main.lines().getFirst().id() > roundTrip.lines().getLast().id());
+      assertEquals(roundTrip.inputModeRevision(), main.inputModeRevision());
+      for (int row = 0; row < main.rows(); row++) {
+        assertEquals(roundTrip.lines().get(row).slots(), main.lines().get(row).slots());
+        assertEquals(roundTrip.lines().get(row).wrapped(), main.lines().get(row).wrapped());
       }
     }
   }
@@ -314,9 +420,17 @@ class TerminalKernelTest {
   }
 
   private TerminalKernel kernel(int columns, int rows) {
+    return kernel(columns, rows, 8);
+  }
+
+  private TerminalKernel kernel(int columns, int rows, int history) {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     executors.add(executor);
-    return new TerminalKernel(columns, rows, 8, executor, responses::add);
+    return new TerminalKernel(columns, rows, history, executor, responses::add);
+  }
+
+  private static List<Long> lineIds(TerminalView view) {
+    return view.lines().stream().map(TerminalView.Line::id).toList();
   }
 
   private static TerminalView snapshot(TerminalKernel kernel) throws Exception {
