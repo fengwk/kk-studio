@@ -63,6 +63,8 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> NOTIFICATION_FIELDS =
       orderedSet("notificationId", "kind", "sourceThreadId", "message");
   private static final Set<String> SETTINGS_FIELDS = orderedSet("settings", "ownerThreadId");
+  private static final Set<String> FORK_FIELDS =
+      orderedSet("mode", "sourceEntryId", "sourceThreadId");
   private static final Set<String> TURN_END_FIELDS =
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
@@ -111,6 +113,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case TurnEndPayload value -> encodeTurnEnd(value);
       case NotificationPayload value -> encodeNotification(value);
       case SettingsPayload value -> encodeSettings(value);
+      case ForkPayload value -> encodeFork(value);
     };
   }
 
@@ -150,6 +153,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case TURN_END -> decodeTurnEnd(value);
       case NOTIFICATION -> decodeNotification(value);
       case SETTINGS -> decodeSettings(value);
+      case FORK -> decodeFork(value);
     };
   }
 
@@ -301,6 +305,18 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.set("settings", HistoryValueCodecs.encodeBranchSettings(value.settings()));
     node.put("ownerThreadId", value.ownerThreadId().toString());
+    return node;
+  }
+
+  private static ObjectNode encodeFork(ForkPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.put("mode", value.mode().name());
+    node.put("sourceEntryId", value.sourceEntryId().toString());
+    if (value.sourceThreadId() == null) {
+      node.putNull("sourceThreadId");
+    } else {
+      node.put("sourceThreadId", value.sourceThreadId().toString());
+    }
     return node;
   }
 
@@ -546,6 +562,16 @@ public final class HistoryEntryPayloadJsonCodec {
     return new SettingsPayload(
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "SETTINGS.settings"),
         HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "SETTINGS"));
+  }
+
+  private static ForkPayload decodeFork(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "FORK");
+    HistoryValueCodecs.requireExactFields(node, FORK_FIELDS, "FORK");
+    return new ForkPayload(
+        HistoryValueCodecs.readEnum(
+            ForkMode.class, HistoryValueCodecs.text(node, "mode"), "FORK.mode"),
+        HistoryValueCodecs.requiredPositiveId(node, "sourceEntryId", "FORK"),
+        HistoryValueCodecs.nullablePositiveId(node, "sourceThreadId", "FORK"));
   }
 
   private static AssistantError decodeError(JsonNode value) {

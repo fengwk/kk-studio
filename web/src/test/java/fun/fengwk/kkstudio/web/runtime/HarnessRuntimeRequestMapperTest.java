@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -116,9 +117,19 @@ class HarnessRuntimeRequestMapperTest {
     AcceptCommandsCommand newThread =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(newThreadTarget(), userCommand("entry")));
+    AcceptCommandsCommand newForkedSession =
+        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+            request(newForkedSessionTarget(), userCommand("fork")));
 
     assertInstanceOf(AcceptCommandsTarget.NewRootSession.class, newSession.target());
     assertInstanceOf(AcceptCommandsTarget.NewThread.class, newThread.target());
+    AcceptCommandsTarget.NewForkedSession forked =
+        assertInstanceOf(AcceptCommandsTarget.NewForkedSession.class, newForkedSession.target());
+    assertEquals(id(1), forked.sourceThreadId());
+    assertEquals(id(2), forked.startEntryId());
+    assertEquals(id(3), forked.sessionId());
+    assertEquals(id(4), forked.threadId());
+    assertFalse(forked.yoloEnabled());
 
     // 既有 Thread 不再经由 target union 承载：type "THREAD" 现在按未知 target 类型拒绝。
     HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
@@ -694,6 +705,35 @@ class HarnessRuntimeRequestMapperTest {
     sessionWithThreadName.setThreadName("branch");
     assertTargetRejected(sessionWithThreadName);
 
+    // NEW_FORKED_SESSION 的字段集合互斥：rootSettings / threadName 禁用，sourceThreadId 必填。
+    HarnessCommandTargetDTO forkedWithRootSettings = newForkedSessionTarget();
+    forkedWithRootSettings.setRootSettings(branchSettings());
+    assertTargetRejected(forkedWithRootSettings);
+
+    HarnessCommandTargetDTO forkedWithThreadName = newForkedSessionTarget();
+    forkedWithThreadName.setThreadName("branch");
+    assertTargetRejected(forkedWithThreadName);
+
+    HarnessCommandTargetDTO missingSourceThreadId = newForkedSessionTarget();
+    missingSourceThreadId.setSourceThreadId(null);
+    assertTargetRejected(missingSourceThreadId);
+
+    // sourceThreadId 只属于 NEW_FORKED_SESSION。
+    HarnessCommandTargetDTO newSessionWithSource = newSessionTarget();
+    newSessionWithSource.setSourceThreadId(idText(7));
+    assertTargetRejected(newSessionWithSource);
+    HarnessCommandTargetDTO newThreadWithSource = newThreadTarget();
+    newThreadWithSource.setSourceThreadId(idText(7));
+    assertTargetRejected(newThreadWithSource);
+    // 显式 null 也按 presence 拒绝：不能靠 null 绕过禁用字段校验。
+    HarnessCommandTargetDTO newSessionWithNullSource = newSessionTarget();
+    newSessionWithNullSource.setSourceThreadId(null);
+    assertTargetRejected(newSessionWithNullSource);
+
+    HarnessCommandTargetDTO forkedMissingYolo = newForkedSessionTarget();
+    forkedMissingYolo.setYoloEnabled(null);
+    assertTargetRejected(forkedMissingYolo);
+
     HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
     thread.setType("THREAD");
     thread.setThreadId(idText(1));
@@ -897,6 +937,17 @@ class HarnessRuntimeRequestMapperTest {
     target.setStartEntryId(idText(3));
     target.setThreadId(idText(1));
     target.setThreadName("branch");
+    target.setYoloEnabled(false);
+    return target;
+  }
+
+  private static HarnessCommandTargetDTO newForkedSessionTarget() {
+    HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
+    target.setType("NEW_FORKED_SESSION");
+    target.setSourceThreadId(idText(1));
+    target.setStartEntryId(idText(2));
+    target.setSessionId(idText(3));
+    target.setThreadId(idText(4));
     target.setYoloEnabled(false);
     return target;
   }

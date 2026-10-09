@@ -75,14 +75,15 @@ public record EntryPath(List<Entry> entries) {
   }
 
   /**
-   * 返回跳过尾部控制 Entry（{@link NotificationPayload} 与 {@link SettingsPayload}）后的最近 Entry：系统通知与安全边界上
-   * append 的 settings 应用快照都可追加在回合之间，判定续写义务等回合锚点必须看到其之前的 TURN_END。
+   * 返回跳过尾部控制 Entry（{@link NotificationPayload}、{@link SettingsPayload} 与 {@link ForkPayload}）后的最近
+   * Entry：系统通知、安全边界上 append 的 settings 应用快照与 fork 事实节点都可追加在回合之间，判定续写义务等回合锚点必须看到其之前的 TURN_END。
    */
   public Entry headIgnoringTrailingControlEntries() {
     for (int i = entries.size() - 1; i >= 0; i--) {
       Entry entry = entries.get(i);
       if (!(entry.payload() instanceof NotificationPayload)
-          && !(entry.payload() instanceof SettingsPayload)) {
+          && !(entry.payload() instanceof SettingsPayload)
+          && !(entry.payload() instanceof ForkPayload)) {
         return entry;
       }
     }
