@@ -21,7 +21,9 @@ PROCESS_CLASSES = frozenset(
         "ProcessScopeStateTest",
         "ProcessScopeHelperFailureTest",
         "ProcessScopePtyIntegrationTest",
-        "PosixProcessGroupTest",
+        "ProcessScopeInteractivePtyTest",
+        "ProcessScopeConPtyIntegrationTest",
+        "PosixProcessSessionTest",
         "WindowsCommandLineTest",
         "WindowsJobScopeTest",
     }
@@ -45,8 +47,10 @@ SELECTED_CLASSES = (
     "ProcessScopeTest",
     "ProcessScopeStateTest",
     "ProcessScopeHelperFailureTest",
-    "PosixProcessGroupTest",
+    "PosixProcessSessionTest",
     "ProcessScopePtyIntegrationTest",
+    "ProcessScopeInteractivePtyTest",
+    "ProcessScopeConPtyIntegrationTest",
     "BashCapabilityTest",
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",
@@ -57,6 +61,24 @@ WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",
 )
+# Linux/macOS 腿必须真跑的交互式 shell 验收用例。
+INTERACTIVE_CASES = (
+    "interactiveBashRunsWithJobControlAndMultiProcessGroupSession",
+    "controlCTerminatesOnlyTheForegroundJob",
+    "controlZThenBackgroundResumesTheJobProcessGroup",
+    "naturalExitConvergesBackgroundJobsIncludingTermIgnoringOnes",
+)
+# Windows 腿必须真跑的 ConPTY 验收用例。
+CONPTY_CASES = (
+    "conPtyIsUsedAndNativeWindowSizeFollowsResize",
+    "conPtySessionConvergesAChildThatOutlivesTheCommand",
+)
+PTY_CASES = (
+    "ptyCarriesCommandOutputAndKeepsTheExactExitCode",
+    "ptyRunsAJvmFixtureAndKeepsItsExitCode",
+    "ptyUnpermittedStartNeverRunsTheCommand",
+    "ptyRejectsNonPositiveInitialSize",
+)
 WINDOWS_REQUIRED_BASH_CASES = (
     "closesStdinSoCommandsWaitingForEofFinishNaturally",
     "unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout",
@@ -64,7 +86,7 @@ WINDOWS_REQUIRED_BASH_CASES = (
 CORE_CLASSES = (
     "ProcessScope",
     "ProcessScopeHelper",
-    "PosixProcessGroup",
+    "PosixProcessSession",
     "ProcessScopeState",
     "WindowsJobScope",
     "WindowsCommandLine",
@@ -126,6 +148,14 @@ def write_complete_reports(
         elif class_name == "BashCapabilityTest":
             # Windows 上点名必跑的那两条在这里出现；其余用例按平台前置条件可能被跳过。
             cases = tuple(bash_cases) + ("posixOnlyCase",)
+        elif class_name == "ProcessScopeInteractivePtyTest":
+            cases = INTERACTIVE_CASES
+        elif class_name == "ProcessScopeConPtyIntegrationTest":
+            cases = CONPTY_CASES
+        elif class_name == "ProcessScopePtyIntegrationTest":
+            cases = PTY_CASES
+        elif class_name == "WindowsJobScopeTest":
+            cases = ("realKernelReportsMissingExecutableWorkdirAndJobName",)
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -237,6 +267,46 @@ class AssertSurefireReportsTest(unittest.TestCase):
             result = run_script("assert-surefire-reports.py", reports, "macos-latest")
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    def test_posix_requires_the_interactive_shell_cases_to_really_run(self):
+        """Linux/macOS 腿必须留下交互式 job control 的实证：点名的用例被跳过即失败。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            reports = Path(tmp)
+            write_complete_reports(reports)
+            write_surefire_report(
+                reports,
+                "ProcessScopeInteractivePtyTest",
+                INTERACTIVE_CASES,
+                skipped=1,
+                skipped_cases=(INTERACTIVE_CASES[0],),
+            )
+            result = run_script("assert-surefire-reports.py", reports, "macos-latest")
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn(
+                "ProcessScopeInteractivePtyTest: required cases must not be skipped on "
+                "macos-latest: ['%s']" % INTERACTIVE_CASES[0],
+                result.stdout,
+            )
+
+    def test_windows_requires_the_conpty_cases_to_really_run(self):
+        """Windows 腿必须留下 ConPTY 的实证：点名的用例被跳过即失败。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            reports = Path(tmp)
+            write_complete_reports(reports)
+            write_surefire_report(
+                reports,
+                "ProcessScopeConPtyIntegrationTest",
+                CONPTY_CASES,
+                skipped=len(CONPTY_CASES),
+                skipped_cases=CONPTY_CASES,
+            )
+            result = run_script("assert-surefire-reports.py", reports, "windows-latest")
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn(
+                "ProcessScopeConPtyIntegrationTest: required cases must not be skipped on "
+                "windows-latest",
+                result.stdout,
+            )
+
     def test_fails_when_a_required_case_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             reports = Path(tmp)
@@ -244,6 +314,36 @@ class AssertSurefireReportsTest(unittest.TestCase):
             result = run_script("assert-surefire-reports.py", reports, "test-os")
             self.assertEqual(1, result.returncode)
             self.assertIn(REQUIRED_CASES[-1], result.stdout)
+
+    def test_every_platform_requires_the_portable_pty_cases(self):
+        """PTY 的通用用例在三平台都必须真跑，缺失或跳过都不能通过门禁。"""
+        for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            for missing in (False, True):
+                with self.subTest(os_label=os_label, missing=missing):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        write_surefire_report(
+                            reports,
+                            "ProcessScopePtyIntegrationTest",
+                            PTY_CASES[:-1] if missing else PTY_CASES,
+                            skipped=0 if missing else 1,
+                            skipped_cases=() if missing else (PTY_CASES[-1],),
+                        )
+                        result = run_script("assert-surefire-reports.py", reports, os_label)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(PTY_CASES[-1], result.stdout)
+
+    def test_fails_when_a_required_case_is_duplicated(self):
+        """重复的用例不能代替「每项只执行一次」的验收事实。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            reports = Path(tmp)
+            write_complete_reports(
+                reports, cross_platform_cases=REQUIRED_CASES + (REQUIRED_CASES[0],)
+            )
+            result = run_script("assert-surefire-reports.py", reports, "ubuntu-latest")
+            self.assertEqual(1, result.returncode)
+            self.assertIn("required cases ran more than once", result.stdout)
 
     def test_fails_when_a_required_case_is_skipped_even_if_the_count_matches(self):
         with tempfile.TemporaryDirectory() as tmp:

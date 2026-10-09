@@ -331,7 +331,8 @@ class BashCapabilityTest {
             Duration.ZERO);
 
     assertTrue(result.error());
-    assertTrue(text(result).contains("kk-studio-missing-bash"), text(result));
+    assertTrue(text(result).contains("could not be started"), text(result));
+    assertFalse(text(result).contains("kk-studio-missing-bash"), "失败原因不得回显命令路径");
     assertEquals("{}", result.detailsJson(), "启动失败时没有捕获事实可报告");
     assertTrue(
         listFiles(missingShell.textOutputStore().stagingDirectory()).isEmpty(), "启动失败不得留下幽灵中转文件");

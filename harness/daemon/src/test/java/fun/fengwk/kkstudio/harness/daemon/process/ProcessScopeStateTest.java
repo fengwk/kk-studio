@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.process;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -118,6 +119,93 @@ class ProcessScopeStateTest {
   }
 
   private static final String MEMBER_FILE = "member";
+
+  /**
+   * 启动规格必须对命令参数里的换行、回车、引号、反斜杠与 Unicode 无损，并保留空参数。
+   *
+   * <p>这些字符正是「用分隔符编码」会出错的输入：按行分隔会把含换行的参数拆成两个，空参数会被吞掉。JSON 编码对这些输入无损。
+   */
+  @Test
+  void launchSpecRoundTripsHostileArguments() {
+    List<String> command =
+        List.of(
+            "sh",
+            "-c",
+            "printf 'a\\nb'\n",
+            "carriage\rreturn",
+            "quote'\"",
+            "back\\slash",
+            "中文🙂",
+            "",
+            "tab\t");
+    ProcessScopeState.publishLaunch(stateDir, stateDir.toAbsolutePath(), command);
+    ProcessScopeState.LaunchSpec spec = ProcessScopeState.readLaunch(stateDir);
+    assertNotNull(spec);
+    assertEquals(stateDir.toAbsolutePath().toString(), spec.workdir());
+    assertEquals(command, spec.command(), "argv 必须逐元素无损还原，包括空参数");
+  }
+
+  /** 读取启动规格必须删除它：规格承载用户命令的 argv，不能留在磁盘上。 */
+  @Test
+  void readLaunchDeletesTheSpecification() {
+    ProcessScopeState.publishLaunch(
+        stateDir, stateDir.toAbsolutePath(), List.of("sh", "-c", "true"));
+    assertNotNull(ProcessScopeState.readLaunch(stateDir));
+    assertFalse(Files.exists(stateDir.resolve(ProcessScopeState.LAUNCH_FILE)));
+    assertNull(ProcessScopeState.readLaunch(stateDir), "删除之后必须按「还没有发布」处理");
+  }
+
+  /** argv 中出现 NUL 时必须显式拒绝，绝不静默改写。 */
+  @Test
+  void launchSpecRejectsNulArguments() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ProcessScopeState.publishLaunch(stateDir, stateDir, List.of("sh", "-c", "a\0b")));
+  }
+
+  /** 不可解析的载荷必须显式失败，且失败原因不回显载荷内容（里面是用户命令的 argv）。 */
+  @Test
+  void readLaunchDoesNotEchoAnUnreadablePayload() throws Exception {
+    Path file = stateDir.resolve(ProcessScopeState.LAUNCH_FILE);
+    Files.writeString(file, "secret-argv-token", StandardCharsets.UTF_8);
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> ProcessScopeState.readLaunch(stateDir));
+    assertFalse(failure.getMessage().contains("secret-argv-token"), failure.getMessage());
+    assertFalse(Files.exists(file), "解析失败也必须立即删除携带 argv 的载荷");
+  }
+
+  /** 启动规格不能发布时必须显式失败，且不能留下目标文件。 */
+  @Test
+  void launchSpecPublicationFailsClosedWhenTheStateDirectoryIsMissing() {
+    Path missing = stateDir.resolve("missing");
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () -> ProcessScopeState.publishLaunch(missing, stateDir, List.of("secret-argv-token")));
+    assertTrue(failure.getMessage().contains("cannot publish the helper launch spec"));
+    assertFalse(failure.getMessage().contains("secret-argv-token"));
+    assertFalse(Files.exists(missing.resolve(ProcessScopeState.LAUNCH_FILE)));
+  }
+
+  /** 可解析但不完整的 JSON 不能成为启动命令的依据，读取后同样删除。 */
+  @Test
+  void readLaunchRejectsAnIncompleteSpecification() throws Exception {
+    Path file = stateDir.resolve(ProcessScopeState.LAUNCH_FILE);
+    Files.writeString(file, "{\"command\":[\"secret-argv-token\"]}", StandardCharsets.UTF_8);
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> ProcessScopeState.readLaunch(stateDir));
+    assertEquals("the helper launch spec is incomplete", failure.getMessage());
+    assertFalse(Files.exists(file));
+  }
+
+  /** POSIX 上启动规格必须是属主可读写：它承载用户命令的 argv，不能暴露给同机其它用户。 */
+  @Test
+  void launchSpecIsOwnerOnlyOnPosix() throws Exception {
+    assumeTrue(supportsPosixPermissions(), "需要 POSIX 权限才能表达属主可读写");
+    ProcessScopeState.publishLaunch(stateDir, stateDir, List.of("sh", "-c", "true"));
+    Path file = stateDir.resolve(ProcessScopeState.LAUNCH_FILE);
+    assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(file));
+  }
 
   /** 建一个带成员的目录再去掉写权限；权限表达不了「不可写」时用例被跳过。 */
   private Path unwritableDirectory() throws IOException {

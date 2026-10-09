@@ -25,6 +25,8 @@ import java.util.Locale;
  *   duplex-fork-exit &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid、且调用方在 stdin 上写下许可后自己退出
  *   fork-hold        &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后继续存活
  *   nest-hold        &lt;pidFile&gt; &lt;childPidFile&gt; &lt;grandPidFile&gt; 派生子进程（fork-hold），等孙进程写出 pid 后继续存活
+ *   pty-probe        &lt;pidFile&gt; &lt;resultFile&gt;               把自己的 pid/sid/pgrp 与 fd 0/1/2 的 TTY 事实写进结果文件
+ *   pty-exit         &lt;pidFile&gt; [exitCode]                  把固定标记写进 stdout（跨平台 PTY 用例）后按代码退出
  * </pre>
  *
  * <p>两种「自然退出」模式都必须先拿到调用方许可才返回：{@code fork-exit} 等许可文件（捕获模式下命令的 stdin 是一条已关闭的空管道，许可选不到 stdin），{@code
@@ -50,6 +52,18 @@ public final class ProcessScopeFixtureMain {
 
   private ProcessScopeFixtureMain() {}
 
+  /** 构造运行本夹具的命令行（测试用）：与 {@link ProcessScope} 的启动方式一致（同一 JVM 与类路径，带上覆盖率代理）。 */
+  static List<String> fixtureCommand(String... arguments) {
+    List<String> command = new ArrayList<>();
+    command.add(System.getProperty("java.home") + "/bin/java");
+    command.addAll(TestCoverageAgentArguments.forwarded());
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(ProcessScopeFixtureMain.class.getName());
+    command.addAll(List.of(arguments));
+    return command;
+  }
+
   public static void main(String[] args) {
     if (args.length < 2) {
       System.err.println("usage: <mode> <pidFile> [...]");
@@ -68,6 +82,26 @@ public final class ProcessScopeFixtureMain {
     String mode = args[0];
     record(Path.of(args[1]));
     switch (mode) {
+      case "pty-probe" -> {
+        // PTY 模式：把自己在伪终端里的身份与三路标准流的 TTY 事实写进结果文件（只能由 POSIX 用例驱动）。
+        Files.writeString(
+            Path.of(args[2]),
+            String.join(
+                "\n",
+                "pid=" + ProcessHandle.current().pid(),
+                "sid=" + PosixProcessSession.currentSession(),
+                "pgrp=" + PosixProcessSession.currentGroup(),
+                "tty0=" + PosixProcessSession.isTerminal(0),
+                "tty1=" + PosixProcessSession.isTerminal(1),
+                "tty2=" + PosixProcessSession.isTerminal(2)),
+            StandardCharsets.UTF_8);
+      }
+      case "pty-exit" -> {
+        // 跨平台 PTY 夹具：把标记写进 stdout（PTY 从端）后按给定代码退出，不依赖任何 shell。
+        System.out.println("__PTY_FIXTURE_OK__");
+        System.out.flush();
+        System.exit(exitCode(args));
+      }
       case "hold" -> sleepForever();
       case "eof" -> {
         readUntilEof();

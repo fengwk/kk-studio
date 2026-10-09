@@ -76,7 +76,7 @@ class ProcessScopeTest {
    * 命令无法启动时失败关闭：发布失败原因、没有自然退出码、范围仍然收敛。
    *
    * <p>平台差异：POSIX 上命令进程在范围建立之后才 {@code exec}，因此失败发生在已建立的范围内；Windows 上首个进程必须
-   * 先创建并归属，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭且都带上命令名，调用方 据同样的失败终态处理。
+   * 先创建并归属，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭，并且失败原因必须是固定的失败类型 ——绝不回显可执行文件、参数或工作目录等调用方输入。
    */
   @Test
   void missingExecutableIsReportedAsScopeFailure() throws Exception {
@@ -85,7 +85,7 @@ class ProcessScopeTest {
       scope =
           ProcessScope.start(workdir, List.of("kk-studio-missing-command", "-lc", "echo never"));
     } catch (IllegalStateException failure) {
-      assertTrue(failure.getMessage().contains("kk-studio-missing-command"), failure.getMessage());
+      assertNoCommandEcho(failure.getMessage());
       return;
     }
     try {
@@ -93,12 +93,19 @@ class ProcessScopeTest {
       scope.process().waitFor();
       String failure = scope.startFailure();
       assertNotNull(failure, "无法启动命令时必须发布失败原因");
-      assertTrue(failure.contains("kk-studio-missing-command"), failure);
+      assertNoCommandEcho(failure);
       assertNull(scope.naturalExitCode(), "启动失败没有自然退出码");
       assertTrue(scope.converged(), "启动失败也必须收敛范围");
     } finally {
       scope.close();
     }
+  }
+
+  /** 失败原因绝不回显命令的可执行文件、参数或工作目录。 */
+  private void assertNoCommandEcho(String failure) {
+    assertNotNull(failure);
+    assertFalse(failure.contains("kk-studio-missing-command"), "失败原因不得回显命令可执行文件：" + failure);
+    assertFalse(failure.contains(workdir.toString()), "失败原因不得回显工作目录：" + failure);
   }
 
   /** 收敛判定必须看见活着的命令：发过终止信号不等于已经收敛，更不允许把存活进程当成已结束。 */
@@ -481,27 +488,26 @@ class ProcessScopeTest {
   /**
    * 只有身份被核验过的 pid 才允许强杀：启动时刻不符或不属于本次范围的进程一律不动。
    *
-   * <p>这里用 pid 1 做「不属于本次范围但确实存在的进程」：它永远活着、也永远不在本次调用新建的进程组里。任何一次误杀都会
-   * 立刻表现为这个断言失败，因此这条用例把「绝不杀错进程」从注释变成事实。
+   * <p>另起一个测试拥有的进程作为范围外成员：误发信号会使断言失败，但不会触及系统进程。
    */
   @Test
   void killVerifiedMemberNeverSignalsAnUnverifiedProcess() throws Exception {
     assumeFalse(isWindows(), "需要 POSIX 进程组语义");
-    ProcessHandle foreign = ProcessHandle.of(1).orElse(null);
-    assertNotNull(foreign, "需要 pid 1 作为「存在但不属于本次范围」的进程");
-    Instant foreignStart = foreign.info().startInstant().orElse(null);
-    assertNotNull(foreignStart, "需要能读到 pid 1 的启动时刻");
-
-    ProcessScope scope = ProcessScope.start(workdir, List.of("sh", "-c", "sleep 30"));
-    try {
+    Process foreignProcess = new ProcessBuilder("sleep", "300").start();
+    try (ProcessScope scope = ProcessScope.start(workdir, List.of("sh", "-c", "sleep 30"))) {
+      ProcessHandle foreign = foreignProcess.toHandle();
+      Instant foreignStart = PosixProcessSession.processStart(foreign.pid());
+      assertNotNull(foreignStart, "必须能读到范围外进程的启动身份");
       // 启动时刻不符：同一个 pid 但换了进程（pid 复用）时绝不能动手。
-      scope.killVerifiedMember(new PosixProcessGroup.GroupMember(1, foreignStart.plusSeconds(60)));
+      scope.killVerifiedMember(
+          new PosixProcessSession.GroupMember(foreign.pid(), foreignStart.plusSeconds(60)));
       assertTrue(foreign.isAlive(), "启动时刻不符时绝不能发信号");
       // 身份对得上、但不属于本次调用的进程组：同样绝不能动手。
-      scope.killVerifiedMember(new PosixProcessGroup.GroupMember(1, foreignStart));
+      scope.killVerifiedMember(new PosixProcessSession.GroupMember(foreign.pid(), foreignStart));
       assertTrue(foreign.isAlive(), "不属于本次范围的进程绝不能发信号");
     } finally {
-      scope.close();
+      foreignProcess.destroyForcibly();
+      assertTrue(foreignProcess.waitFor(10, TimeUnit.SECONDS), "范围外夹具也必须被测试回收");
     }
   }
 

@@ -166,9 +166,9 @@ class WindowsJobScopeTest {
     assertEquals(List.of(FakeKernel.STDIN_READ, FakeKernel.STDIN_WRITE), kernel.closedHandles());
   }
 
-  /** 命令无法启动时必须带上命令与工作目录，并且把所有已取得资源交还。 */
+  /** 命令无法启动时只报告原生错误码、不回显命令与工作目录，并交还所有已取得资源。 */
   @Test
-  void commandStartFailureReportsTheCommandAndClosesEverything() {
+  void commandStartFailureIsSanitizedAndClosesEverything() {
     FakeKernel kernel = new FakeKernel().failingCreateProcess();
     IllegalStateException failure =
         assertThrows(
@@ -176,8 +176,9 @@ class WindowsJobScopeTest {
             () ->
                 WindowsJobScope.createSuspended(
                     kernel, "job", List.of("kk-studio-missing-exe"), WORKDIR));
-    assertTrue(failure.getMessage().contains("kk-studio-missing-exe"), failure.getMessage());
-    assertTrue(failure.getMessage().contains(WORKDIR.toString()), failure.getMessage());
+    assertTrue(failure.getMessage().contains("could not be started: GetLastError="));
+    assertFalse(failure.getMessage().contains("kk-studio-missing-exe"));
+    assertFalse(failure.getMessage().contains(WORKDIR.toString()));
     assertEquals(1, kernel.deletedAttributeLists);
     assertEquals(List.of(FakeKernel.STDIN_READ, FakeKernel.STDIN_WRITE), kernel.closedHandles());
     assertTrue(kernel.isClosed(FakeKernel.JOB_HANDLE));
@@ -353,6 +354,44 @@ class WindowsJobScopeTest {
   }
 
   /**
+   * 控制台模式（PTY/ConPTY）：命令附着到 helper 当前的控制台，而不是被显式标准句柄接管。
+   *
+   * <p>这条路径只带 {@code JOB_LIST} 一个属性（不带句柄列表），不设置 {@code STARTF_USESTDHANDLES}，也不打开句柄继承；归属仍然与
+   * 创建是同一条内核指令。真正的 ConPTY 附着只能在 Windows runner 上验证（见 {@code ProcessScopePtyIntegrationTest}），这里固定的是
+   * 可脱离平台断言的创建契约。
+   */
+  @Test
+  void consoleModeAttachesToTheHelperConsoleWithoutHandleList() {
+    FakeKernel kernel = new FakeKernel();
+    WindowsJobScope scope =
+        WindowsJobScope.createSuspendedForConsole(
+            kernel, "job", List.of("cmd", "/c", "exit"), WORKDIR);
+    try {
+      assertEquals(1, kernel.initializedAttributeCount(), "控制台模式只申请 JOB_LIST 一个属性");
+      assertEquals(
+          List.of(FakeKernel.JOB_HANDLE),
+          kernel.handlesOf(WindowsJobScope.PROC_THREAD_ATTRIBUTE_JOB_LIST),
+          "归属必须与创建是同一条内核指令的一部分");
+      assertEquals(
+          List.of(),
+          kernel.handlesOf(WindowsJobScope.PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
+          "控制台模式不得限制句柄列表");
+      assertEquals(0, kernel.createdStartupFlags(), "控制台模式不得设置 STARTF_USESTDHANDLES");
+      assertEquals(
+          List.of(0L, 0L, 0L),
+          List.of(
+              kernel.createdStandardStreams()[0],
+              kernel.createdStandardStreams()[1],
+              kernel.createdStandardStreams()[2]),
+          "控制台模式不得显式设置任何标准句柄");
+      assertFalse(kernel.createdInheritHandles(), "控制台附着与句柄继承无关，必须关闭句柄继承");
+      assertEquals(List.of(), kernel.closedHandles(), "控制台模式不创建任何管道句柄");
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
    * 真实 kernel32 上的失败去向：命令不存在、工作目录不存在、Job 名不存在。
    *
    * <p>这些只有真实 Windows 能构造，因此它们由 Windows runner 断言；假实现覆盖的是句柄所有权，不替代真实 API 的错误语义。
@@ -367,7 +406,8 @@ class WindowsJobScopeTest {
             () ->
                 WindowsJobScope.createSuspended(
                     jobName, List.of("kk-studio-missing-exe"), WORKDIR, false));
-    assertTrue(missingExecutable.getMessage().contains("kk-studio-missing-exe"));
+    assertTrue(missingExecutable.getMessage().contains("could not be started: GetLastError="));
+    assertFalse(missingExecutable.getMessage().contains("kk-studio-missing-exe"));
     IllegalStateException missingWorkdir =
         assertThrows(
             IllegalStateException.class,
@@ -377,7 +417,8 @@ class WindowsJobScopeTest {
                     List.of("cmd", "/c", "exit"),
                     WORKDIR.resolve("missing-workdir"),
                     false));
-    assertTrue(missingWorkdir.getMessage().contains("missing-workdir"));
+    assertTrue(missingWorkdir.getMessage().contains("could not be started: GetLastError="));
+    assertFalse(missingWorkdir.getMessage().contains("missing-workdir"));
     assertThrows(IllegalStateException.class, () -> WindowsJobScope.attach(jobName));
   }
 
@@ -420,6 +461,9 @@ class WindowsJobScopeTest {
 
     private final Map<Long, List<Long>> attributeHandles = new LinkedHashMap<>();
     private long[] createdStandardStreams;
+    private int initializedAttributeCount = -1;
+    private boolean createdInheritHandles;
+    private int createdStartupFlags = -1;
 
     int deletedAttributeLists;
     int standardHandleRewriteCount;
@@ -463,6 +507,21 @@ class WindowsJobScopeTest {
     /** 命令实际收到的三条标准流（hStdInput/hStdOutput/hStdError）。 */
     long[] createdStandardStreams() {
       return createdStandardStreams;
+    }
+
+    /** 内核收到的属性数量；控制台模式必须只申请 JOB_LIST 一个属性。 */
+    int initializedAttributeCount() {
+      return initializedAttributeCount;
+    }
+
+    /** 创建命令时是否打开了句柄继承；控制台模式必须为 false。 */
+    boolean createdInheritHandles() {
+      return createdInheritHandles;
+    }
+
+    /** 创建命令时的 {@code STARTUPINFO.dwFlags}；控制台模式必须为 0（不设 STARTF_USESTDHANDLES）。 */
+    int createdStartupFlags() {
+      return createdStartupFlags;
     }
 
     FakeKernel withAttributeListInitialization(boolean value) {
@@ -606,11 +665,13 @@ class WindowsJobScopeTest {
       WindowsJobScope.STARTUPINFOEX startup =
           Structure.newInstance(WindowsJobScope.STARTUPINFOEX.class, startupInfo);
       startup.read();
+      createdInheritHandles = inheritHandles;
+      createdStartupFlags = startup.StartupInfo.dwFlags;
       createdStandardStreams =
           new long[] {
-            value(startup.StartupInfo.hStdInput),
-            value(startup.StartupInfo.hStdOutput),
-            value(startup.StartupInfo.hStdError)
+            valueOrZero(startup.StartupInfo.hStdInput),
+            valueOrZero(startup.StartupInfo.hStdOutput),
+            valueOrZero(startup.StartupInfo.hStdError)
           };
       processInformation.hProcess = handle(PROCESS_HANDLE);
       processInformation.hThread = handle(THREAD_HANDLE);
@@ -633,6 +694,7 @@ class WindowsJobScopeTest {
     @Override
     public boolean InitializeProcThreadAttributeList(
         Pointer attributeList, int attributeCount, int flags, Pointer size) {
+      initializedAttributeCount = attributeCount;
       return attributeListInitialization;
     }
 
@@ -705,6 +767,11 @@ class WindowsJobScopeTest {
 
     private static long value(HANDLE handle) {
       return Pointer.nativeValue(handle.getPointer());
+    }
+
+    /** 控制台模式不设置标准句柄，因此句柄可能是 null；null 代表「没有这个标准句柄」（值 0）。 */
+    private static long valueOrZero(HANDLE handle) {
+      return handle == null ? 0 : value(handle);
     }
   }
 }

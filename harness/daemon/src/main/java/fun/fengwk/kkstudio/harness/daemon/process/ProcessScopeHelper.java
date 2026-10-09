@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
-import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -20,13 +19,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 进程 scope helper：以独立 JVM 建立操作系统级执行范围，然后在范围内启动用户命令。
  *
  * <p>daemon 不是用户命令的 OS 所有者：它无法把 {@code ProcessBuilder} 直接放进一个新的 session/Job。helper 因此先取得 所有权（POSIX
- * 用 {@code setsid} 建立新 session 与进程组，Windows 建立带 {@code KILL_ON_JOB_CLOSE} 的命名 Job 并把首个进程
- * 挂起后归属进去），再等父进程确认，最后才让用户命令运行。
+ * 管道模式用 {@code setsid} 建立新 session 与进程组；PTY 模式由 pty4j 原生 {@code login_tty} 建立，本类只验证 身份；Windows 建立带
+ * {@code KILL_ON_JOB_CLOSE} 的命名 Job 并把首个进程挂起后归属进去），再等父进程确认，最后才让用户命令运行。
  *
- * <p>「父进程确认之后才启动命令」是本类的核心约定：许可之前失败（取消、超时、父进程退出）因此永远等价于「用户命令没有产生
- * 任何副作用」。命令自然退出时先把退出码原子发布，再收敛整个范围并把收敛事实发布到 {@link ProcessScopeState#CLEANUP_FILE}。
+ * <p>helper 的命令行只携带固定入口与调用私有的状态目录；启动规格（workdir 与 argv）通过 {@link ProcessScopeState#LAUNCH_FILE}
+ * 交接、读取后立即删除，因此命令行、pty4j 线程名与诊断都不会带上启动参数。
  *
- * <p>本类只作为 helper 入口存在：它不是能力、不注册新工具，也不读取任何新配置；参数全部来自父进程本次调用。它自己的话只写 调用私有的诊断文件，标准输出完全属于用户命令。
+ * <p>标准流由 stdio 属性区分：捕获模式把命令的 stderr 合并进 stdout 并关闭 stdin 写端；双向与 PTY 模式让命令继承 helper 的三条流 （PTY
+ * 模式下它们就是伪终端从端），供常驻协议或交互终端使用。
+ *
+ * <p>「父进程确认之后才启动命令」是本类的核心约定：许可之前失败（取消、超时、父进程退出）因此永远等价于「用户命令没有产生 任何副作用」。命令自然退出时先把退出码原子发布，再收敛整个会话（交互
+ * shell 会建立多个作业进程组，单组收敛会漏组）并把收敛事实发布 到 {@link ProcessScopeState#CLEANUP_FILE}。
+ *
+ * <p>本类只作为 helper 入口存在：它不是能力、不注册新工具，也不读取任何新配置；它自己的话只写调用私有的诊断文件，标准输出完全属于 用户命令。
  */
 public final class ProcessScopeHelper {
 
@@ -47,32 +52,30 @@ public final class ProcessScopeHelper {
   /** 测试闸门的等待预算：没有释放就必须显式失败，绝不静默继续。 */
   private static final Duration SPAWN_LATCH_BUDGET = Duration.ofSeconds(20);
 
-  /** 双向标准流模式的属性值；属性名与父进程 {@code ProcessScope} 的约定一致。 */
-  private static final String STDIO_PROPERTY = "kk-studio.process-scope.stdio";
-
   private static final String SPAWN_LATCH_READY_FILE = "spawn-ready";
   private static final String SPAWN_LATCH_RELEASE_FILE = "spawn-go";
 
   private ProcessScopeHelper() {}
 
   /**
-   * helper 入口：{@code <state-dir> <workdir> <command...>}。
+   * helper 入口：{@code <state-dir>}。启动规格从状态目录读取，不再出现在命令行。
    *
    * <p>失败一律写入失败原因文件并以非零状态退出：范围建立失败、JNA 载入失败与不支持的平台都必须显式失败，绝不静默回退到 「没有范围」的直接执行。
    */
   public static void main(String[] args) {
-    if (args.length < 3) {
+    // 入口只接受恰好一个参数（调用私有的状态目录）：多给参数说明调用方走错了入口，绝不忽略它们继续。
+    if (args.length != 1) {
       System.exit(2);
       return;
     }
     Path stateDir = Path.of(args[0]);
     redirectDiagnostics(stateDir);
-    Helper helper = new Helper(stateDir, Path.of(args[1]), List.of(args).subList(2, args.length));
     int exitCode;
     try {
-      exitCode = helper.run();
+      exitCode = new Helper(stateDir).run();
     } catch (Throwable error) {
-      helper.publishFailure(error);
+      // 失败原因必须独立于 Helper 是否构造成功：启动规格缺失等失败恰恰发生在构造阶段。
+      ProcessScopeState.publishQuietly(stateDir, ProcessScopeState.ERROR_FILE, describe(error));
       exitCode = 1;
     }
     System.exit(exitCode);
@@ -81,8 +84,8 @@ public final class ProcessScopeHelper {
   /**
    * helper 自己的输出（异常、诊断）写调用私有的诊断文件。
    *
-   * <p>标准输出只承载用户命令的输出，因此 JVM 启动噪声（例如 {@code JAVA_TOOL_OPTIONS} 的提示）与 helper 的报错都不能出现
-   * 在那里；父进程把这些内容重定向到同一个诊断文件，只在需要解释失败原因时读取它。
+   * <p>标准输出只承载用户命令的输出，因此 JVM 启动噪声与 helper 的报错都不能出现在那里；这里同时重定向 Java 侧的两条流，底层
+   * 文件描述符不变，命令仍继承原始的标准流（捕获管道、双向管道或伪终端）。
    */
   private static void redirectDiagnostics(Path stateDir) {
     try {
@@ -95,20 +98,37 @@ public final class ProcessScopeHelper {
               true,
               StandardCharsets.UTF_8);
       System.setErr(diagnostics);
+      System.setOut(diagnostics);
     } catch (IOException ignored) {
       // 诊断文件不可写只影响 helper 报错的可见性；父进程仍会以退出码与状态文件收敛为失败。
     }
+  }
+
+  /**
+   * 失败原因的可读化。
+   *
+   * <p>POSIX 命令启动失败的 {@link IOException} 可能带着可执行文件与工作目录，只报告固定类型；Windows 创建失败在原生边界直接生成不含 argv
+   * 的说明。其余失败都是 helper 自己的状态描述（会话/权限/errno）。
+   */
+  private static String describe(Throwable error) {
+    if (error instanceof IOException) {
+      return "the command could not be started";
+    }
+    String message = error.getMessage();
+    return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
   }
 
   /** 单次调用的 helper 状态机；不含任何静态可变状态。 */
   private static final class Helper {
 
     private final Path stateDir;
-    private final Path workdir;
-    private final List<String> command;
+    private final ProcessScopeState.LaunchSpec spec;
 
-    /** 双向标准流：命令的 stdin/stdout/stderr 直接继承 keeper 的三条流（供常驻协议收发消息）。 */
-    private final boolean duplex;
+    /** 命令的 stdin/stdout/stderr 是否继承 helper 自己的三条流（双向与 PTY 模式）。 */
+    private final boolean inheritStreams;
+
+    /** 是否运行在伪终端中（PTY/ConPTY 模式）。 */
+    private final boolean pty;
 
     /**
      * 派生与收敛的互斥锁：{@code stopping} 一旦在锁内成立，就不再有任何命令被派生。
@@ -122,9 +142,8 @@ public final class ProcessScopeHelper {
     /**
      * 命令是否真的被派生过。
      *
-     * <p>取值只在 {@code spawnLock} 内改变，因此「{@code stopping} 已经成立」配上「{@code spawned} 仍为 false」是一条确定性的「
-     * 本次调用没有任何成员」证明：锁内一旦声明不再派生，就不可能有新成员诞生；此前也没派生过，就没有任何后代需要收敛。收敛因此 不必扫描、更不必向整组广播强杀（那一条会打到 helper
-     * 自己），permit/工作目录这类启动失败也就不会把父进程看到的事实变成 「被强杀」。
+     * <p>取值只在 {@code spawnLock} 内改变，因此「{@code stopping} 已经成立」配上「{@code spawned} 仍为 false」是一条
+     * 确定性的「本次调用没有任何成员」证明：锁内一旦声明不再派生，就不可能有新成员诞生。
      */
     private volatile boolean spawned;
 
@@ -136,11 +155,18 @@ public final class ProcessScopeHelper {
 
     private volatile boolean convergenceResult;
 
-    private Helper(Path stateDir, Path workdir, List<String> command) {
+    private Helper(Path stateDir) {
       this.stateDir = stateDir;
-      this.workdir = workdir;
-      this.command = command;
-      this.duplex = "duplex".equalsIgnoreCase(System.getProperty(STDIO_PROPERTY));
+      this.spec = ProcessScopeState.readLaunch(stateDir);
+      if (spec == null) {
+        throw new IllegalStateException("the helper launch spec is missing");
+      }
+      String stdio = System.getProperty(ProcessScope.STDIO_PROPERTY);
+      if (stdio != null && !"pty".equals(stdio) && !"duplex".equals(stdio)) {
+        throw new IllegalStateException("unsupported process scope stdio mode");
+      }
+      this.pty = "pty".equals(stdio);
+      this.inheritStreams = "duplex".equals(stdio) || pty;
     }
 
     private int run() throws Exception {
@@ -150,100 +176,117 @@ public final class ProcessScopeHelper {
       return runPosix();
     }
 
-    /** POSIX：先建立 session/进程组并公开范围，等父进程确认，然后启动用户命令。 */
+    /** POSIX：先建立或验证 session/进程组并公开范围，等父进程确认，然后启动用户命令。 */
     private int runPosix() throws Exception {
-      PosixProcessGroup.createSession();
-      long processGroup = PosixProcessGroup.currentGroup();
-      if (processGroup != ProcessHandle.current().pid()) {
-        throw new IllegalStateException(
-            "the scope helper is not the leader of its process group: " + processGroup);
+      long processGroup;
+      if (pty) {
+        // PTY 模式下 pty4j 的原生 login_tty 已经建立 session 与控制终端：只验证身份，绝不再次 setsid。
+        long session = PosixProcessSession.currentSession();
+        processGroup = PosixProcessSession.currentGroup();
+        long pid = ProcessHandle.current().pid();
+        if (session != pid || processGroup != pid) {
+          throw new IllegalStateException(
+              "the pty scope helper is not the leader of its session: sid="
+                  + session
+                  + " pgrp="
+                  + processGroup
+                  + " pid="
+                  + pid);
+        }
+        if (!PosixProcessSession.isTerminal(0)
+            || !PosixProcessSession.isTerminal(1)
+            || !PosixProcessSession.isTerminal(2)) {
+          throw new IllegalStateException(
+              "the pty scope helper did not inherit a TTY on fds 0/1/2");
+        }
+      } else {
+        PosixProcessSession.createSession();
+        processGroup = PosixProcessSession.currentGroup();
+        if (processGroup != ProcessHandle.current().pid()) {
+          throw new IllegalStateException(
+              "the scope helper is not the leader of its process group: " + processGroup);
+        }
       }
-      // 收敛的唯一执行者是 convergePosixGroup：它在两处被调用——命令自然退出后的这里，以及 JVM 默认 SIGTERM 处置触发的 shutdown
-      // hook。JVM 的信号处置是「捕获」而不是「忽略」，而 exec 会把被捕获的信号复位成默认处置，因此命令可以注册自己的 trap，
-      // helper 也不必在启动命令的瞬间改动任何信号处置（忽略状态会被 fork 继承，非交互 shell 无法覆盖）。
-      // hook 必须在范围发布之前注册：发布之后父进程随时可能对整组广播温和信号。
-      installConvergenceHook(processGroup);
-      PosixProcessGroup.becomeChildSubreaper();
-      ProcessScopeState.publish(
-          stateDir, ProcessScopeState.SCOPE_FILE, Long.toString(processGroup));
+      long session = PosixProcessSession.currentSession();
+      // 收敛的唯一执行者是 convergePosixSession：它在两处被调用——命令自然退出后的这里，以及 JVM 默认 SIGTERM 处置触发的
+      // shutdown hook。JVM 的信号处置是「捕获」而不是「忽略」，而 exec 会把被捕获的信号复位成默认处置，因此命令可以注册自己
+      // 的 trap，helper 也不必在启动命令的瞬间改动任何信号处置（忽略状态会被 fork 继承，非交互 shell 无法覆盖）。
+      // hook 必须在范围发布之前注册：发布之后父进程随时可能对会话广播温和信号。
+      installConvergenceHook(session);
+      PosixProcessSession.becomeChildSubreaper();
+      ProcessScopeState.publish(stateDir, ProcessScopeState.SCOPE_FILE, Long.toString(session));
       awaitPermit();
       awaitSpawnRelease();
-      // 派生与收敛在同一把锁上互斥：收敛开始之后绝不会有新成员诞生，命令 fork 出来的那一刻收敛也还没有开始。整个
-      // ProcessBuilder.start()（含 fork 与 exec 之间的窗口）都在锁内，收敛不可能穿过它扫描一次「看起来已经收敛」的组。
+      // 派生与收敛在同一把锁上互斥：收敛开始之后绝不会有新成员诞生，命令 fork 出来的那一刻收敛也还没有开始。
       Process child = null;
       synchronized (spawnLock) {
         if (!stopping) {
-          // 捕获模式把命令的 stderr 合并进 stdout（helper 的诊断已经指向诊断文件，不会被继承）；双向模式必须让 stderr 保持
-          // 独立，父进程才能像对待一个直接启动的进程那样分别读它。
-          if (!duplex) {
-            PosixProcessGroup.mergeStandardErrorIntoStandardOutput();
+          // 捕获模式把命令的 stderr 合并进 stdout（helper 的诊断已经指向诊断文件，不会被继承）；双向与 PTY 模式必须让
+          // 三条流保持独立（PTY 下它们就是伪终端从端），父进程才能像对待一个直接启动的进程那样分别读它们。
+          if (!inheritStreams) {
+            PosixProcessSession.mergeStandardErrorIntoStandardOutput();
           }
           ProcessBuilder builder =
-              new ProcessBuilder(command)
-                  .directory(workdir.toFile())
+              new ProcessBuilder(spec.command())
+                  .directory(Path.of(spec.workdir()).toFile())
                   .redirectOutput(ProcessBuilder.Redirect.INHERIT)
                   .redirectError(ProcessBuilder.Redirect.INHERIT);
-          if (duplex) {
-            // 命令的 stdin 就是 keeper 自己的 stdin（父进程持有的管道）：既不新建空管道，也不关闭它，EOF 只在父进程关闭
-            // 自己那一端时到达。
+          if (inheritStreams) {
+            // 命令的 stdin 就是 helper 自己的 stdin（父进程持有的双向管道，或伪终端从端）：既不新建空管道，也不关闭它。
             builder.redirectInput(ProcessBuilder.Redirect.INHERIT);
           } else {
             builder.redirectInput(ProcessBuilder.Redirect.PIPE);
           }
           child = builder.start();
-          // 派生事实在同一把锁内成立：收敛若在锁内看到 stopping，就一定也看到「有没有派生过」的最终值。
           spawned = true;
-          // 命令已经 fork 完成，此刻才开始忽略温和信号：收敛自己的整组信号会打到组长身上，helper 必须活到强杀与结论发布
-          // 完成。放在 fork 之后是为了不让忽略状态被命令继承——非交互 shell 无法为「进入时已被忽略」的信号注册 trap。
-          PosixProcessGroup.ignoreTerminationSignal();
+          // 命令已经 fork 完成，此刻才开始忽略温和信号：收敛自己的会话信号会打到组长身上，helper 必须活到强杀与结论发布完成。
+          // 放在 fork 之后是为了不让忽略状态被命令继承——非交互 shell 无法为「进入时已被忽略」的信号注册 trap。
+          PosixProcessSession.ignoreTerminationSignal();
         }
       }
       if (child == null) {
-        // 收敛已经接管，命令绝不会被派生：这里只对齐它的结论，既不制造第二个事实，也不让 JVM 提前退出。
         awaitConvergenceFinished();
         return convergenceResult ? 0 : 1;
       }
-      // 捕获模式下命令的 stdin 是一条只有 helper 持有写端的空管道：立刻关闭写端，于是「等待 EOF 的命令自然退出」只取决于
-      // 这里，而不是调用方何时关闭自己的写端，也不是是否有别的进程持有了写端的副本。双向模式没有这条管道，也不去动它。
-      if (!duplex) {
+      // 捕获模式下命令的 stdin 是一条只有 helper 持有写端的空管道：立刻关闭写端，于是「等待 EOF 的命令自然退出」只取决于这里。
+      if (!inheritStreams) {
         closeQuietly(child.getOutputStream());
       }
       int exitCode = child.waitFor();
       ProcessScopeState.publish(stateDir, ProcessScopeState.EXIT_FILE, Integer.toString(exitCode));
       // 命令的退出码已经回收，此后 waitpid(-1) 只会回收被收养的孤儿，不会偷走命令的状态。
       startOrphanReaper();
-      return convergePosixGroup(processGroup) ? 0 : 1;
+      return convergePosixSession(session) ? 0 : 1;
     }
 
-    /** 注册收敛 hook：必须在范围发布之前，否则父进程可能先看到范围再对整组发信号，而那时还没有人能接住温和信号。 */
-    private void installConvergenceHook(long processGroup) {
+    /** 注册收敛 hook：必须在范围发布之前，否则父进程可能先看到范围再对会话发信号，而那时还没有人能接住温和信号。 */
+    private void installConvergenceHook(long session) {
       Runtime.getRuntime()
           .addShutdownHook(
               new Thread(
                   () -> {
-                    // 顺序不能颠倒：先在锁内声明「不再派生」，再忽略温和信号。反过来（先忽略、后加锁）会让一个尚未派生的
-                    // 命令继承忽略状态，也会让收敛扫描与派生互相穿过。收尾期间屏蔽重复的温和信号也是这里的目的之一。
+                    // 顺序不能颠倒：先在锁内声明「不再派生」，再忽略温和信号。反过来会让一个尚未派生的命令继承忽略状态，
+                    // 也会让收敛扫描与派生互相穿过。收尾期间屏蔽重复的温和信号也是这里的目的之一。
                     synchronized (spawnLock) {
                       stopping = true;
-                      PosixProcessGroup.ignoreTerminationSignal();
+                      PosixProcessSession.ignoreTerminationSignal();
                     }
-                    convergePosixGroup(processGroup);
+                    convergePosixSession(session);
                   },
                   "process-scope-convergence"));
     }
 
     /**
-     * 收敛整组并把结果发布到 {@code cleanup}；同一次调用的收敛只执行一次——命令自然退出的 main 路径与 shutdown hook 会竞争，
-     * 先到者执行，后到者直接复用它的结论。
+     * 收敛整个会话并把结果发布到 {@code cleanup}；同一次调用的收敛只执行一次——命令自然退出的 main 路径与 shutdown hook
+     * 会竞争，先到者执行，后到者直接复用它的结论。
      */
-    private boolean convergePosixGroup(long processGroup) {
+    private boolean convergePosixSession(long session) {
       if (!convergenceStarted.compareAndSet(false, true)) {
-        // 收敛已经在别处执行：必须等它结束再返回。直接返回 false 会让 JVM 在收敛完成之前退出，把「后代还在」留在系统里。
         awaitConvergenceFinished();
         return convergenceResult;
       }
       try {
-        boolean drained = convergeGroup(processGroup);
+        boolean drained = convergeSession(session);
         ProcessScopeState.publish(
             stateDir, ProcessScopeState.CLEANUP_FILE, Boolean.toString(drained));
         convergenceResult = drained;
@@ -258,11 +301,7 @@ public final class ProcessScopeHelper {
       }
     }
 
-    /**
-     * 有界等待正在执行的收敛结束。
-     *
-     * <p>等不到就显式失败：报告「还没收敛」比让调用方以为已经收敛安全得多。
-     */
+    /** 有界等待正在执行的收敛结束；等不到就显式失败：报告「还没收敛」比让调用方以为已经收敛安全得多。 */
     private void awaitConvergenceFinished() {
       try {
         if (!convergenceFinished.await(CONVERGENCE_WAIT_BUDGET.toMillis(), TimeUnit.MILLISECONDS)) {
@@ -327,8 +366,14 @@ public final class ProcessScopeHelper {
      */
     private int runWindows() throws Exception {
       WindowsJobScope scope =
-          WindowsJobScope.createSuspended(
-              WindowsJobScope.jobNameFor(stateDir), command, workdir, duplex);
+          pty
+              ? WindowsJobScope.createSuspendedForConsole(
+                  WindowsJobScope.jobNameFor(stateDir), spec.command(), Path.of(spec.workdir()))
+              : WindowsJobScope.createSuspended(
+                  WindowsJobScope.jobNameFor(stateDir),
+                  spec.command(),
+                  Path.of(spec.workdir()),
+                  inheritStreams);
       try {
         ProcessScopeState.publish(
             stateDir, ProcessScopeState.SCOPE_FILE, Long.toString(scope.processId()));
@@ -347,25 +392,23 @@ public final class ProcessScopeHelper {
     }
 
     /**
-     * 收敛整个 POSIX 进程组；返回是否已经确认「除 helper 自己之外没有活着的成员」。
+     * 收缩整个会话；返回是否已经确认「除 helper 自己之外没有活着的成员」。
      *
-     * <p>只有 Linux/WSL 能在 {@code /proc} 里区分「只剩 helper 自己」与「还有后代」；其它 POSIX 平台只能广播强杀（这一条包含 helper
-     * 自身），因此收敛的最终判定由父进程的内核检查收口。
+     * <p>成员枚举按平台使用真实内核查询（Linux {@code /proc}、macOS libproc）；快照不可判定时不能发信号或宣称收敛。
      */
-    private boolean convergeGroup(long processGroup) {
+    private boolean convergeSession(long session) {
       if (!spawned) {
-        // 从未派生过命令：stopping 已经在同一把锁内成立，因此不可能再有成员诞生。这是一条确定性的「没有成员」证明，不需要
-        // 扫描，更不需要向整组广播强杀——那一条会把 helper 自己也带走，让父进程只能看到「被信号杀掉」而不是真实的失败原因。
+        // 从未派生过命令：stopping 已经在同一把锁内成立，因此不可能再有成员诞生。这是一条确定性的「没有成员」证明。
         return true;
       }
-      PosixProcessGroup.signalGroup(processGroup, PosixProcessGroup.SIGTERM);
-      if (awaitGroupGone(processGroup, TERMINATION_GRACE)) {
+      long self = ProcessHandle.current().pid();
+      PosixProcessSession.signalSession(session, PosixProcessSession.SIGTERM, self);
+      if (awaitSessionGone(session, self, TERMINATION_GRACE)) {
         return true;
       }
-      // 宽限窗口内没有收敛：广播强杀，这一条路径包含 helper 自身——只有它才能覆盖连温和信号都不理的后代。
-      PosixProcessGroup.signalGroup(processGroup, PosixProcessGroup.SIGKILL);
-      awaitGroupGone(processGroup, TERMINATION_GRACE);
-      return false;
+      // 宽限窗口内没有收敛：对会话成员强杀（排除 helper 自己），覆盖连温和信号都不理的后代。
+      PosixProcessSession.signalSession(session, PosixProcessSession.SIGKILL, self);
+      return awaitSessionGone(session, self, TERMINATION_GRACE);
     }
 
     /**
@@ -378,7 +421,7 @@ public final class ProcessScopeHelper {
           new Thread(
               () -> {
                 while (true) {
-                  PosixProcessGroup.reapOrphans();
+                  PosixProcessSession.reapOrphans();
                   sleepQuietly();
                 }
               },
@@ -387,10 +430,10 @@ public final class ProcessScopeHelper {
       reaper.start();
     }
 
-    /** 等到范围内只剩 helper 自己；{@code hasLiveMember} 在 Linux 上按状态排除僵尸。 */
-    private boolean awaitGroupGone(long processGroup, Duration budget) {
+    /** 等到会话里只剩 helper 自己；{@code hasLiveMember} 在 Linux 上按状态排除僵尸。 */
+    private boolean awaitSessionGone(long session, long self, Duration budget) {
       long deadline = System.nanoTime() + budget.toNanos();
-      while (PosixProcessGroup.hasLiveMember(processGroup, ProcessHandle.current().pid())) {
+      while (PosixProcessSession.hasLiveMember(session, self)) {
         if (System.nanoTime() >= deadline) {
           return false;
         }
@@ -402,11 +445,6 @@ public final class ProcessScopeHelper {
     /** 尽力报告失败原因；报告本身失败时只能放弃，父进程会以「没有状态文件」收敛为失败。 */
     private void publishFailure(Throwable error) {
       ProcessScopeState.publishQuietly(stateDir, ProcessScopeState.ERROR_FILE, describe(error));
-    }
-
-    private static String describe(Throwable error) {
-      String message = error.getMessage();
-      return message == null || message.isBlank() ? error.toString() : message;
     }
 
     private static void closeQuietly(OutputStream stream) {

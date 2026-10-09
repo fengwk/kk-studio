@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ElementTree
 CORE_CLASSES = (
     "ProcessScope",
     "ProcessScopeHelper",
-    "PosixProcessGroup",
+    "PosixProcessSession",
     "ProcessScopeState",
     "WindowsJobScope",
     "WindowsCommandLine",
