@@ -655,6 +655,77 @@ class ThreadJoinProjectorTest {
   }
 
   @Test
+  void longDurableErrorStaysCompleteInReceiptWhileRenderedPreviewIsBounded() {
+    // 测试意图：持久化 AssistantError 正文在投影凭据中逐字完整（源错误不变），仅渲染出的模型可见 XML 被有界截断。
+    String longError = "错".repeat(1_500);
+    UUID turnStart = id(490);
+    UUID user = id(491);
+    UUID assistantError = id(492);
+    UUID turnEnd = id(493);
+
+    store.transaction(
+        tx -> {
+          tx.insertEntry(
+              new Entry(
+                  turnStart,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                  T0));
+          tx.insertEntry(userEntry(user, sessionId, turnStart, "run task", T0));
+          tx.insertEntry(
+              new Entry(
+                  assistantError,
+                  sessionId,
+                  user,
+                  new AssistantErrorPayload(new AssistantError("TURN_FAILED", longError), null),
+                  T0));
+          tx.insertEntry(
+              new Entry(
+                  turnEnd,
+                  sessionId,
+                  assistantError,
+                  new TurnEndPayload(
+                      turnStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                  T0));
+
+          seedAppliedCommand(tx, childThreadId, 1L, "run task", turnStart);
+          return null;
+        });
+
+    ThreadJoin join =
+        new ThreadJoin(
+            id(52),
+            VALID_HASH,
+            id(11),
+            childThreadId,
+            1L,
+            "coder",
+            10,
+            0L,
+            turnEnd,
+            null,
+            null,
+            T0,
+            T1,
+            JoinPurpose.TASK,
+            null);
+
+    store.transaction(
+        tx -> {
+          ThreadJoinReceipt receipt = ThreadJoinProjector.INSTANCE.project(tx, join).orElseThrow();
+          assertEquals(ThreadJoinOutcome.ERROR, receipt.outcome());
+          assertEquals(longError, receipt.error(), "durable/source error must stay complete");
+
+          String xml = receipt.renderCompletionXml();
+          assertFalse(xml.contains(longError), "model-visible error must be bounded");
+          assertTrue(
+              xml.contains("错".repeat(988) + ThreadJoinCompletionRenderer.TRUNCATION_MARKER), xml);
+          return null;
+        });
+  }
+
+  @Test
   void failedTurnWithoutErrorPayloadFallsBackToSynthesizedReason() {
     // 测试意图：验证在缺少 AssistantErrorPayload 时，FAILED 终态的 error 回退至合成为 subagent turn failed: <reason>。
     UUID turnStart = id(420);
