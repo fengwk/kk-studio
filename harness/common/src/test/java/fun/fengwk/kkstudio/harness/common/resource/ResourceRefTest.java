@@ -458,6 +458,70 @@ class ResourceRefTest {
         () -> new ResourceRef(uri.toUpperCase(), "text/plain", null, 1L, sha256("a")));
   }
 
+  /**
+   * kkstudio Session 资源引用：必须精确 {@code kkstudio:/resources/<canonical-uuid>} 且携带非空 size/sha，并回环解析出
+   * blobId。
+   */
+  @Test
+  void acceptsCanonicalSessionResourceUrisAndRoundTripsBlobId() {
+    UUID blobId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
+    ResourceRef ref =
+        new ResourceRef(
+            ResourceRef.sessionResourceUri(blobId),
+            "image/png",
+            blobId.toString(),
+            3L,
+            sha256("abc"));
+    assertEquals(blobId, ref.sessionBlobId());
+    assertEquals(blobId, ResourceRef.sessionBlobId("kkstudio:/resources/" + blobId));
+    // kkstudio 引用不是上传引用，两者不互相混淆。
+    assertNull(ref.blobUploadId());
+    assertNull(ResourceRef.sessionBlobId("file:///export/abc"));
+    assertNull(ResourceRef.sessionBlobId(null));
+  }
+
+  /** kkstudio 只接受规范小写 UUID：大写、非 UUID、别名 scheme 或携带额外成分都返回 null。 */
+  @Test
+  void sessionBlobIdRejectsNonCanonicalForms() {
+    UUID blobId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
+    assertNull(ResourceRef.sessionBlobId("kkstudio:/resources/" + blobId.toString().toUpperCase()));
+    assertNull(ResourceRef.sessionBlobId("kkstudio:/resources/not-a-uuid"));
+    assertNull(ResourceRef.sessionBlobId(blobId.toString()));
+    assertNull(ResourceRef.sessionBlobId("kkstudio:/resources/"));
+    assertNull(ResourceRef.sessionBlobId("kkstudio:/resources/" + blobId + "/x"));
+    assertNull(ResourceRef.sessionBlobId("kkstudio:/resources/" + blobId + "?a=b"));
+    assertNull(ResourceRef.sessionBlobId("kkstudio://resources/" + blobId));
+    assertNull(ResourceRef.sessionBlobId("x-kkstudio:/resources/" + blobId));
+  }
+
+  /** kkstudio 必须携带非空 size/sha，且不得携带 authority/query/fragment 或非规范 UUID。 */
+  @Test
+  void rejectsSessionResourceUriViolations() {
+    UUID blobId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
+    String uri = ResourceRef.sessionResourceUri(blobId);
+    assertThrows(
+        IllegalArgumentException.class, () -> new ResourceRef(uri, "image/png", null, null, null));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ResourceRef(uri, "image/png", null, 1L, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ResourceRef(uri + "?a=b", "image/png", null, 1L, sha256("a")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ResourceRef(
+                "kkstudio://host/resources/" + blobId, "image/png", null, 1L, sha256("a")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ResourceRef(
+                "kkstudio:/resources/" + blobId.toString().toUpperCase(),
+                "image/png",
+                null,
+                1L,
+                sha256("a")));
+  }
+
   /** 验证 null URI 被拒绝。 */
   @Test
   void rejectsNullUri() {
