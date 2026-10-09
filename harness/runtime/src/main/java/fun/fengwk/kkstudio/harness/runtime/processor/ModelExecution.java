@@ -104,72 +104,6 @@ final class ModelExecution implements ModelGateway.Listener {
   private long lastCommittedSequence;
   private long lastSafeSequence;
 
-  ModelExecution(
-      HarnessStore store,
-      RealtimeEventSink realtimeEventSink,
-      ClaimedWork claim,
-      UUID threadId,
-      int attempt,
-      boolean compaction,
-      List<ToolBinding> bindings,
-      ModelProcessorConfig config,
-      Clock clock,
-      ScheduledExecutorService scheduler,
-      Executor heartbeatWorker,
-      Executor flushExecutor,
-      Consumer<ModelExecution> ownerRelease) {
-    this(
-        store,
-        realtimeEventSink,
-        claim,
-        threadId,
-        attempt,
-        compaction,
-        bindings,
-        config,
-        null,
-        clock,
-        scheduler,
-        heartbeatWorker,
-        flushExecutor,
-        ownerRelease,
-        System::nanoTime);
-  }
-
-  /** 无冻结 Provider 身份的便利构造（仅测试使用）：解析 HTTP 策略时视为系统名单。 */
-  ModelExecution(
-      HarnessStore store,
-      RealtimeEventSink realtimeEventSink,
-      ClaimedWork claim,
-      UUID threadId,
-      int attempt,
-      boolean compaction,
-      List<ToolBinding> bindings,
-      ModelProcessorConfig config,
-      Clock clock,
-      ScheduledExecutorService scheduler,
-      Executor heartbeatWorker,
-      Executor flushExecutor,
-      Consumer<ModelExecution> ownerRelease,
-      LongSupplier nanoTime) {
-    this(
-        store,
-        realtimeEventSink,
-        claim,
-        threadId,
-        attempt,
-        compaction,
-        bindings,
-        config,
-        null,
-        clock,
-        scheduler,
-        heartbeatWorker,
-        flushExecutor,
-        ownerRelease,
-        nanoTime);
-  }
-
   /**
    * 完整构造器：{@code providerName} 是本次 Invocation 冻结的 Provider 身份；{@code nanoTime} 是采集流式生成计时的单调时间源，生产默认
    * {@link System#nanoTime}，测试可注入可控来源。
@@ -232,7 +166,7 @@ final class ModelExecution implements ModelGateway.Listener {
     this.compaction = compaction;
     this.bindings = List.copyOf(Objects.requireNonNull(bindings, "bindings"));
     this.config = Objects.requireNonNull(config, "config");
-    this.providerName = providerName;
+    this.providerName = requireProviderName(providerName);
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
@@ -246,6 +180,15 @@ final class ModelExecution implements ModelGateway.Listener {
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+  }
+
+  /** 冻结的 Provider 身份必须非空白：未知名称在策略层按“继承系统名单”处理，但 null/blank 不得进入 live 路径。 */
+  private static String requireProviderName(String providerName) {
+    Objects.requireNonNull(providerName, "providerName");
+    if (providerName.isBlank()) {
+      throw new IllegalArgumentException("providerName must not be blank");
+    }
+    return providerName;
   }
 
   UUID invocationId() {

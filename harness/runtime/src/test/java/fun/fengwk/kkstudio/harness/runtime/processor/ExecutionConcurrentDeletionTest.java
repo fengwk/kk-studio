@@ -266,6 +266,7 @@ class ExecutionConcurrentDeletionTest {
                   () -> ToolProcessorTestSupport.NO_RETRY,
                   Duration.ofSeconds(1),
                   StreamFlushConfig.IMMEDIATE),
+              "test-provider",
               Clock.fixed(ThreadProcessorTestSupport.NOW, ZoneOffset.UTC),
               scheduler,
               Runnable::run,

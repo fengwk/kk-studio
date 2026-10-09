@@ -72,6 +72,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -194,16 +195,19 @@ public class HarnessRuntimeConfiguration {
       AgentProviderRepository agentProviderRepository,
       AgentProviderConfigurationCodec providerConfigurationCodec) {
     return providerName -> {
+      // live 路径绝不允许 null/blank：冻结 Provider 身份来自 Invocation；未知名称才按“继承系统名单”处理。
+      Objects.requireNonNull(providerName, "providerName");
+      if (providerName.isBlank()) {
+        throw new IllegalArgumentException("providerName must not be blank");
+      }
       SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
       List<Integer> effective = aiRuntime.modelHttpRetryStatusCodes();
-      if (providerName != null) {
-        AgentProvider provider = agentProviderRepository.getByName(providerName);
-        if (provider != null) {
-          List<Integer> override =
-              providerConfigurationCodec.readHttpRetryStatusCodes(provider.getConfigJson());
-          if (override != null) {
-            effective = override;
-          }
+      AgentProvider provider = agentProviderRepository.getByName(providerName);
+      if (provider != null) {
+        List<Integer> override =
+            providerConfigurationCodec.readHttpRetryStatusCodes(provider.getConfigJson());
+        if (override != null) {
+          effective = override;
         }
       }
       return new ModelHttpErrorPolicy(effective);

@@ -8,10 +8,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 
@@ -102,22 +102,10 @@ public final class AgentProviderConfigurationCodec {
                 + MODEL_HTTP_RETRY_STATUS_CODES
                 + " must contain only integers");
       }
-      int code = item.intValue();
-      if (code < 400 || code > 599) {
-        throw new IllegalArgumentException(
-            "persisted provider configJson."
-                + MODEL_HTTP_RETRY_STATUS_CODES
-                + " must contain only HTTP error statuses 400-599");
-      }
-      if (codes.contains(code)) {
-        throw new IllegalArgumentException(
-            "persisted provider configJson."
-                + MODEL_HTTP_RETRY_STATUS_CODES
-                + " must not contain duplicate statuses");
-      }
-      codes.add(code);
+      codes.add(item.intValue());
     }
-    return List.copyOf(codes);
+    // 范围/重复/不可变副本统一由 ModelHttpErrorPolicy 决定，避免第二份规则。
+    return new ModelHttpErrorPolicy(codes).retryStatusCodes();
   }
 
   /**
@@ -134,21 +122,10 @@ public final class AgentProviderConfigurationCodec {
     if (statusCodes == null) {
       config.remove(MODEL_HTTP_RETRY_STATUS_CODES);
     } else {
-      for (Integer code : statusCodes) {
-        if (code == null || code < 400 || code > 599) {
-          throw new IllegalArgumentException(
-              "provider "
-                  + MODEL_HTTP_RETRY_STATUS_CODES
-                  + " must contain only HTTP error statuses"
-                  + " 400-599");
-        }
-      }
-      if (new HashSet<>(statusCodes).size() != statusCodes.size()) {
-        throw new IllegalArgumentException(
-            "provider " + MODEL_HTTP_RETRY_STATUS_CODES + " must not contain duplicate statuses");
-      }
+      // 范围/重复统一由 ModelHttpErrorPolicy 决定，避免第二份规则。
+      List<Integer> validated = new ModelHttpErrorPolicy(statusCodes).retryStatusCodes();
       ArrayNode array = config.putArray(MODEL_HTTP_RETRY_STATUS_CODES);
-      for (Integer code : statusCodes) {
+      for (Integer code : validated) {
         array.add(code);
       }
     }
