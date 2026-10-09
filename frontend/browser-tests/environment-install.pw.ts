@@ -128,7 +128,7 @@ for (const width of [1280, 390, 320]) {
     await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', '/bin/bash')
     await expect(modal.getByLabel('备注')).toHaveAttribute('placeholder', '例如：开发工作站')
     const gray = 'rgb(157, 168, 159)'
-    for (const label of ['Java home (JDK 21)', 'Bash 可执行文件', '备注']) {
+    for (const label of ['Java home (JDK 21)', 'Bash 可执行文件', '终端程序', '启动目录', '备注']) {
       const field = modal.getByLabel(label)
       expect(await field.evaluate(element => element.matches(':placeholder-shown'))).toBe(true)
       expect(await field.evaluate(element => getComputedStyle(element, '::placeholder').color)).toBe(gray)
@@ -136,18 +136,29 @@ for (const width of [1280, 390, 320]) {
     // 字段只使用 modal-body 的统一 row-gap，不能再叠加相邻 margin。
     const spacing = await modal.evaluate(element => {
       const body = element.querySelector('.modal-body')!
-      const labels = ['Java home (JDK 21)', 'Bash 可执行文件', '备注']
-      const groups = labels.map(label => [...element.querySelectorAll('.form-group')]
-        .find(group => group.querySelector(':scope > span')?.textContent === label)!)
+      const blocks = [...body.querySelectorAll(':scope > .form-group, :scope > .install-field')]
+      const groups = blocks.map(block => (block.matches('.form-group') ? block : block.querySelector('.form-group')!))
+      const labels = groups.map(group => group.querySelector(':scope > span')?.textContent?.trim() ?? '')
       const gap = Number.parseFloat(getComputedStyle(body).rowGap)
       return {
         gap,
+        labels,
         margins: groups.map(group => Number.parseFloat(getComputedStyle(group).marginTop)),
-        distances: groups.slice(1).map((group, index) => group.getBoundingClientRect().top - groups[index]!.getBoundingClientRect().bottom),
+        distances: blocks.slice(1).map((block, index) => block.getBoundingClientRect().top - blocks[index]!.getBoundingClientRect().bottom),
       }
     })
     expect(spacing.gap).toBe(18)
-    expect(spacing.margins).toEqual([0, 0, 0])
+    expect(spacing.labels).toEqual([
+      '操作系统',
+      'Studio 地址',
+      'Java home (JDK 21)',
+      'Bash 可执行文件',
+      '终端程序',
+      '参数（JSON 数组）',
+      '启动目录',
+      '备注',
+    ])
+    expect(spacing.margins).toEqual([0, 0, 0, 0, 0, 0, 0, 0])
     expect(spacing.distances.every(distance => Math.abs(distance - spacing.gap) <= 1)).toBe(true)
     const lsp = modal.locator('label.ui-checkbox', { hasText: '启用 LSP servers' })
     await expect(lsp).toBeVisible()
