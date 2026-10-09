@@ -189,6 +189,14 @@ export const aiCatalog = {
     'en-US': 'unresolved',
     'zh-CN': '未解析',
   },
+  'ai.catalog.card.builtinBadge': {
+    'en-US': 'Built-in',
+    'zh-CN': '内置',
+  },
+  'ai.catalog.card.modelUnconfigured': {
+    'en-US': 'Not configured',
+    'zh-CN': '未配置',
+  },
   'ai.catalog.card.tools': {
     'en-US': 'Tools',
     'zh-CN': 'Tools',
@@ -505,6 +513,15 @@ export const aiCatalog = {
   'ai.catalog.form.fillFirstModel': {
     'en-US': 'Use the first Model to fill the default configuration',
     'zh-CN': '使用第一个 Model 填充默认配置',
+  },
+  'ai.catalog.form.modelUnconfigured': {
+    'en-US': 'Not configured',
+    'zh-CN': '未配置',
+  },
+  'ai.catalog.form.modelUnconfiguredHint': {
+    'en-US':
+      'This built-in Agent has no Model configured. Select a Model and save to activate it.',
+    'zh-CN': '该内置 Agent 尚未配置 Model。选择 Model 后保存即可生效。',
   },
   'ai.catalog.form.unavailable': {
     'en-US': 'Unavailable',
