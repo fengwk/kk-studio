@@ -26,7 +26,7 @@ Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原�
   skill-work/backup/         # 替换备份
 ```
 
-POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File` 的 owner-only 设置，不等同于安装器对 token 的显式 Windows DACL 校验。`tmp/workspaces` 的清理由受控临时存储承担（见下）；数据目录启动时不再扫描或删除遗留 `.part`，技能安装器另行恢复或清理 staging/backup，已发布全文、已安装包与 Git 缓存都不随服务卸载自动删除。
+POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File` 的 owner-only 设置，不等同于安装器对 token 的显式 Windows DACL 校验。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫承担（见下）；技能安装器负责恢复或清理 staging/backup；已发布全文由定时清扫按保留期回收，已发布技能包与 Git 缓存由安装器保留、不随服务卸载自动删除。
 
 ## 能力注册与调度
 
@@ -62,19 +62,19 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 ## 本地存储与文本输出
 
-[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 把超阈值命令与检索输出先写 `tmp/workspaces/<uuid>/<name>.part`，再同一目录内原子发布为 `*.log`；每次外化登记一个新 workspace。全文是本地 durable 事实，不是内容寻址 Resource；历史可能仍引用绝对路径，不会隐式删除，只在超过当前保留期（默认 3 天）且未被使用时由定时清扫（默认 30 分钟一次）回收整个 workspace，不跟随符号链接、不越受控根、不删除仍持有 in-use lease 的资源。
+[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 把超阈值命令与检索输出先写 `tmp/workspaces/<uuid>/<name>.part`，再同一目录内原子发布为 `*.log`；每次外化登记一个新 workspace。全文是本地 durable 事实，不是内容寻址 Resource；历史可能仍引用绝对路径。定时清扫（默认 30 分钟一次）只回收超过当前保留期（默认 3 天）且未被使用的整个 workspace，历史引用的全文因此在保留期后可能被自动回收；清扫不跟随符号链接、不越受控根、不删除仍持有 in-use lease 的资源。
 
-小输出内联，超过 50 KiB 或 2000 行时返回有界 head/tail、绝对路径、字节与行数，以及 read/grep 指引。预览不截断多字节字符，不重复重叠窗口；CR、LF、CRLF 的行数与文件读取一致。默认捕获预算为 1 GiB，达到预算只停止文件捕获，继续排空与统计；磁盘失败降级为无路径预览，不因输出量或磁盘错误杀死命令。结果明确区分完整捕获、截断与捕获失败。
+小输出内联，超过 50 KiB 或 2000 行时返回有界 head/tail、绝对路径、字节与行数，以及 read/grep 指引。预览不截断多字节字符，不重复重叠窗口；CR、LF、CRLF 的行数与文件读取一致。默认捕获预算为 1 GiB，达到预算只停止文件捕获，继续排空与统计；落盘或发布失败不谎报成功，也不把失败改成整段大文本内联，而是退回无路径的有界预览并在 `detailsJson.textOutput.captureFailed` 显式标记、footer 说明无法落盘，命令的退出状态不因此改变。结果明确区分完整捕获、截断与捕获失败。
 
 自然退出、非零退出、超时、取消都先保留可发布输出。收尾说明不写入全文、不计入全文统计；只有自然退出报告 exitCode。`detailsJson.process.outcome` 区分 EXITED / TIMED_OUT / CANCELLED，运行时强制失败或取消的 wire 正文通过前述收尾窗口携带文本。
 
-[`SkillPackageInstaller`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPackageInstaller.java) 以请求指定的 exact commit 安装，不以 branch HEAD 替代。先拉取 bare cache、物化 staging、检查整棵 tree，再替换 `skills/<package>`；拒绝符号链接、submodule、路径穿越与非普通文件，失败保留或恢复旧包。包内 `.kkstudio-commit` 记录 commit，模型路径稳定为 `<data-dir>/skills/<package>/<skill>/SKILL.md`。origin URL 变化时重建缓存；marker 相同也重新校验物化结果。
+[`SkillPackageInstaller`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPackageInstaller.java) 以请求指定的 exact commit 安装，不以 branch HEAD 替代。先拉取 bare cache、物化 staging、检查整棵 tree，只有新包完整物化并校验通过后才原子替换 `skills/<package>`，因此替换期间始终保留已发布技能包，失败则保留旧包或从 backup 恢复；拒绝符号链接、submodule、路径穿越与非普通文件。包内 `.kkstudio-commit` 记录 commit，模型路径稳定为 `<data-dir>/skills/<package>/<skill>/SKILL.md`。origin URL 变化时重建缓存；marker 相同也重新校验物化结果。
 
 ## 编码能力
 
 ### workdir 与权限
 
-[`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java) 用本次 arguments 定位路径。相对 path 要求绝对、现存、可读 workdir；绝对 path 可直接定位，process.exec 始终要求 workdir。目录校验失败即拒绝本次调用，每次调用独立解析目录。
+[`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java) 用本次 arguments 定位路径。文件与 LSP 能力的 `path` 必须是绝对路径，相对路径直接拒绝、不接受 `workdir`；只有 process.exec 要求本次调用显式给出绝对、现存、可读的 `workdir`。目录校验失败即拒绝本次调用，每次调用独立解析目录。
 
 workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿主权限来自运行用户，业务授权由 Platform 判定。READY 的进程用户、时区、OS、HOME、可信 note 与受控临时目录 `tempDirectory` 仅为宿主展示事实，HOME canonical 化失败时退回绝对规范路径，不是执行默认值。
 
@@ -93,7 +93,7 @@ workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿�
 
 文件修改保留编码、BOM、行尾，通过进程内分段锁串行化同文件修改。文本读窗口以 1-based 行/列定位，limit 默认及最大 2000，正文预算 60000 Unicode 码点；扫描到 EOF 得到总行数与 ends_with_newline，内存只驻留窗口。超时/中断不返回半个窗口；续读由 next 指向首个未返回字符。支持的图片以二进制结果直传对象存储，设备、FIFO、socket 等特殊节点在 I/O 前拒绝。详细读写契约见[内置 Read 测试映射](../operations/builtin-read-tests.md)与[文件修改测试映射](../operations/builtin-mutation-tests.md)。
 
-grep/find 用 Java NIO 遍历，不依赖外部检索二进制。忽略规则从目标路径的祖先读取，支持分层 `.gitignore` 与 `.git/info/exclude`（含 worktree 的 gitdir/commondir），不依赖调用 workdir，始终排除 `.git`。单行检索流式扫描，超长行（1 MiB）显式报告无法完整搜索；multiline 整文件视图上限 64 MiB。UTF-8 与 BOM 指明的 UTF-16 严格解码，不把不支持编码静默替换成乱码。失败、限制与忽略行为见[内置检索测试映射](../operations/builtin-search-tests.md)。
+grep/find 用 Java NIO 遍历，不依赖外部检索二进制。忽略规则从目标路径的祖先读取，支持分层 `.gitignore` 与 `.git/info/exclude`（含 worktree 的 gitdir/commondir），不依赖调用目录，始终排除 `.git`。单行检索流式扫描，超长行（1 MiB）显式报告无法完整搜索；multiline 整文件视图上限 64 MiB。UTF-8 与 BOM 指明的 UTF-16 严格解码，不把不支持编码静默替换成乱码。失败、限制与忽略行为见[内置检索测试映射](../operations/builtin-search-tests.md)。
 
 ### LSP
 
