@@ -102,6 +102,15 @@ describe('AgentPane command registry', () => {
     }
     expect(commandIdsForTarget(newThread)).toContain('rename-session')
     expect(commandIdsForTarget(newThread)).toContain('rename-thread')
+    // FORK_SESSION_DRAFT：新 Session / Thread 均尚未创建且无本地命名字段，重命名不可用。
+    const forkSession = {
+      kind: 'FORK_SESSION_DRAFT' as const,
+      sessionId: 's1',
+      sourceThreadId: 't1',
+      startEntryId: 'e1',
+    }
+    expect(commandIdsForTarget(forkSession)).not.toContain('rename-session')
+    expect(commandIdsForTarget(forkSession)).not.toContain('rename-thread')
     // BOUND_THREAD：Session 与 Thread 都已持久化，两者可用。
     const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
     expect(commandIdsForTarget(bound)).toContain('rename-session')

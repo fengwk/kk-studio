@@ -1042,6 +1042,11 @@ describe('buildThreadEventTimeline', () => {
         [{ type: 'tool_result', toolCallId: 'c1', toolName: 'bash', contents: [{ type: 'text', text: 'ok' }] }],
       )),
       entry('notification-1', 'NOTIFICATION', { kind: 'SUBAGENT_RESULT', sourceThreadId: 'sub-1' }),
+      entry('fork-1', 'FORK', {
+        mode: 'SESSION',
+        sourceEntryId: 'turn-end-1',
+        sourceThreadId: 'source-thread-1',
+      }),
     ]
 
     const events = build(entries)
@@ -1066,6 +1071,19 @@ describe('buildThreadEventTimeline', () => {
     expect(notification.kind).toBe('NOTIFICATION')
     expect(notification.title).toBe('SUBAGENT_RESULT')
     expect(notification.historicalPreviewEligible).toBeUndefined()
+
+    const fork = events.find((e) => e.id === 'entry:fork-1')!
+    expect(fork.kind).toBe('FORK')
+    expect(fork.title).toBe('FORK')
+    expect(fork.status).toBe('completed')
+    expect(fork.historicalPreviewEligible).toBeUndefined()
+    expect(fork.details).toEqual(
+      expect.arrayContaining([
+        { label: '分叉模式', value: 'SESSION' },
+        { label: '来源 Entry ID', value: 'turn-end-1' },
+        { label: '来源', value: 'source-thread-1' },
+      ]),
+    )
   })
 })
 

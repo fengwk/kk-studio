@@ -1064,6 +1064,10 @@ export const aiCatalog = {
     'en-US': 'Branch from here',
     'zh-CN': '从此处分支',
   },
+  'ai.chat.branch.forkSession': {
+    'en-US': 'Fork to new session',
+    'zh-CN': '从此处新建会话',
+  },
   'ai.chat.branch.notBoundary': {
     'en-US': 'Only ROOT or a closed turn end can branch',
     'zh-CN': '仅 ROOT 或已关闭的回合末尾可分支',
@@ -1115,6 +1119,10 @@ export const aiCatalog = {
   'ai.chat.branch.draftEmpty': {
     'en-US': 'Thread draft opened. Send a message to start this thread.',
     'zh-CN': '已打开 thread 草稿，发送消息开始此 thread。',
+  },
+  'ai.chat.branch.forkSessionDraftEmpty': {
+    'en-US': 'Session fork draft opened. Send a message to start this session.',
+    'zh-CN': '已打开会话 fork 草稿，发送消息开始此会话。',
   },
   'ai.chat.branch.draftLabel': {
     'en-US': 'Thread draft',
@@ -2060,6 +2068,18 @@ export const aiCatalog = {
     'en-US': 'Collapse compaction summary',
     'zh-CN': '收起压缩摘要',
   },
+  'ai.runtime.entry.forkTitle': {
+    'en-US': 'Thread forked',
+    'zh-CN': '已从历史切点分叉',
+  },
+  'ai.runtime.entry.forkBranchTitle': {
+    'en-US': 'Branched from history',
+    'zh-CN': '已从历史切点创建分支',
+  },
+  'ai.runtime.entry.forkSessionTitle': {
+    'en-US': 'Forked to new session',
+    'zh-CN': '已从历史切点复制为新会话',
+  },
   'ai.runtime.event.list': {
     'en-US': 'Events',
     'zh-CN': '事件',
@@ -2703,6 +2723,14 @@ export const aiCatalog = {
   'ai.runtime.event.detail.cost': {
     'en-US': 'Cost',
     'zh-CN': '费用',
+  },
+  'ai.runtime.event.detail.forkMode': {
+    'en-US': 'Fork mode',
+    'zh-CN': '分叉模式',
+  },
+  'ai.runtime.event.detail.sourceEntryId': {
+    'en-US': 'Source entry ID',
+    'zh-CN': '来源 Entry ID',
   },
   'ai.runtime.event.status.PENDING': {
     'en-US': 'Pending',

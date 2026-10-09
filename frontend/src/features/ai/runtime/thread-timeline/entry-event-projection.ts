@@ -137,6 +137,48 @@ const NOTIFICATION_TITLE_KEYS: Record<string, string> = {
 }
 
 /**
+ * FORK Entry 的模型可见固定英文通知正文（与后端 ForkPayload.NOTICE 保持逐字一致）。
+ * 只陈述事实，不包含行为引导，也不是更高权限的 system 指令。
+ */
+export const FORK_NOTICE_TEXT =
+  'This thread was forked. Earlier tool calls and background tasks will not resume or report here. Subagent thread IDs inherited from history are no longer valid.'
+
+const FORK_TITLE_KEYS: Record<string, string> = {
+  BRANCH: 'ai.runtime.entry.forkBranchTitle',
+  SESSION: 'ai.runtime.entry.forkSessionTitle',
+}
+
+/**
+ * fork 事实节点（FORK Entry）：呈现固定英文通知正文与真实 mode/sourceEntryId/sourceThreadId，
+ * 与平台系统通知一样使用独立系统外观，绝不伪装成人类输入，也不进入可编辑草稿。
+ */
+export function projectForkEntry(
+  entry: HarnessSessionEntryDTO,
+  payload: unknown,
+): EntryEventDialogueMessage {
+  const record = payload != null && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {}
+  const mode = typeof record.mode === 'string' ? record.mode : ''
+  const sourceEntryId = typeof record.sourceEntryId === 'string' && record.sourceEntryId
+    ? record.sourceEntryId
+    : null
+  const sourceThreadId = typeof record.sourceThreadId === 'string' && record.sourceThreadId
+    ? record.sourceThreadId
+    : null
+  const titleKey = FORK_TITLE_KEYS[mode] ?? 'ai.runtime.entry.forkTitle'
+  return {
+    ...event(
+      entry,
+      'fork',
+      translate(titleKey),
+      FORK_NOTICE_TEXT,
+    ),
+    fork: { mode, sourceEntryId, sourceThreadId },
+  }
+}
+
+/**
  * 完整成功压缩的摘要卡片（COMPACTION Entry）：text 是逐字保留的
  * {@code COMPACTION.payload.summaryText}，subjectEntryId 是摘要 Entry 身份。
  * 是否成功由 builder 依据 enclosing TURN_START.phase 与匹配 TURN_END.outcome 判定，
