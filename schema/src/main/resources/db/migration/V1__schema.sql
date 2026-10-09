@@ -828,7 +828,8 @@ create table harness_entry (
             'ASSISTANT_ABORTED',
             'COMPACTION',
             'TURN_END',
-            'NOTIFICATION'
+            'NOTIFICATION',
+            'SETTINGS'
         )
     ),
     constraint ck_harness_entry_parent_shape check (
@@ -852,7 +853,7 @@ comment on table harness_entry is '不可变 Entry：append-only 树节点，ROO
 comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
 comment on column harness_entry.session_id is '所属 Session';
 comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
-comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION）';
+comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
 comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';
