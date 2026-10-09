@@ -107,6 +107,16 @@ helper 命令行只携带固定入口与私有状态目录；工作目录和 arg
 
 数值投影、样式、历史与缓冲切换由 [`TerminalKernelTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelTest.java) 和 [`TerminalSnapshotProjectorTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalSnapshotProjectorTest.java) 验证；分块调度、预算、满队列、关闭与异常传播由 [`TerminalKernelSchedulingTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelSchedulingTest.java) 验证；RESET/PATCH 归约、单在途额度与 ACK 围栏由 [`TerminalViewStreamTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalViewStreamTest.java) 验证。
 
+### 终端运行时
+
+[`TerminalRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntime.java) 把唯一 scoped PTY、唯一内核与唯一有界写队列合成一次调用的资源边界。它只使用调用方注入的 VT executor、阻塞 I/O executor 与 scheduler，既不创建也不关闭执行器，并按原样 argv 启动、声明 `TERM=xterm-256color`/`COLORTERM=truecolor`。用户写入、尺寸调整与内核查询应答共用同一 128 项 / 512 KiB 写队列与唯一写任务：用户帧在落笔前用内核 FIFO 快照核对编码所用的输入模式版本，不匹配即明确未写；只有完整 `write` + `flush` 成功才完成 future，入队本身不代表已写。
+
+每个操作都有一个 native 阶段：进入 native 之前失败（模式过期、核验失败、截止时间不可用、会话结束）一律确定未执行；一旦进入 native 写或窗口调整，异常、超时或关闭都可能已产生前缀或部分变更，因此以固定的结果不确定异常通知调用方并终止整个范围。native 截止时间与关闭仲裁同一 gate：只有截止时间在 native 进行中获胜才致结果不确定，已完成的操作不会被迟到的截止时间终止。
+
+收敛只有一个执行者：构造时先在阻塞 I/O executor 上预留 lifecycle 任务，read failure、kernel failure、native 超时、自然退出与显式 `close()` 都只设置失败原因并唤醒它，绝不在 reader/writer/VT owner/scheduler 上就地收敛。所有任务先停在启动闸门上，任务与 kernel 终止钩子登记完成后才放行；任一 executor 拒绝都会先收敛已预留的任务与 native 范围再失败。自然退出时排空 PTY 到真正 EOF、有界读取退出码、捕获一份有界末屏，再释放 PTY 与内核；退出后 `snapshot()` 仍返回该末屏。`close()` 幂等、统一有界，收敛失败或等待超时都显式报告，绝不静默宣称资源已释放。
+
+真实跨平台 PTY 的输入回传、查询应答与自然退出末屏由 [`TerminalRuntimeRealPtyTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeRealPtyTest.java) 验证；过期模式、队列与字节预算、排队取消、native 前后失败、迟到截止时间与执行器拒绝等确定性边界由 [`TerminalRuntimeDeterministicTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalRuntimeDeterministicTest.java) 验证。
+
 ### 文件与检索
 
 文件修改保留编码、BOM、行尾，通过进程内分段锁串行化同文件修改。文本读窗口以 1-based 行/列定位，limit 默认及最大 2000，正文预算 60000 Unicode 码点；扫描到 EOF 得到总行数与 ends_with_newline，内存只驻留窗口。超时/中断不返回半个窗口；续读由 next 指向首个未返回字符。支持的图片以二进制结果直传对象存储，设备、FIFO、socket 等特殊节点在 I/O 前拒绝。详细读写契约见[内置 Read 测试映射](../operations/builtin-read-tests.md)与[文件修改测试映射](../operations/builtin-mutation-tests.md)。
@@ -139,7 +149,7 @@ COMPLETED(uploadId 与权威元数据)
 | `daemon` | CLI、数据目录、能力注册、执行器所有权、握手与调用运行时 |
 | `daemon.coding` | 文件、命令、检索、文本输出与 LSP；只消费显式调用目录 |
 | `daemon.process` | 唯一 OS 执行范围基座：父进程侧 `ProcessScope`、helper 侧 `ProcessScopeHelper`、POSIX/Windows 原生原语；不注册工具 |
-| `daemon.terminal` | 唯一启动规格解析、单 owner JediTerm 内核、headless Display 与数值投影；不拥有 PTY、连接或业务持久化 |
+| `daemon.terminal` | 唯一启动规格解析、单 owner JediTerm 内核、headless Display、数值投影与一次调用的终端运行时资源边界；不注册工具、不拥有连接或业务持久化 |
 | `daemon.journal` | 进程内原子去重与冻结终态，不持久化跨进程执行状态 |
 | `daemon.skill` | exact commit 的技能包拉取、校验、替换与启动恢复 |
 | `daemon.transport` | WebSocket 文本传输、压缩协商与帧边界 |
