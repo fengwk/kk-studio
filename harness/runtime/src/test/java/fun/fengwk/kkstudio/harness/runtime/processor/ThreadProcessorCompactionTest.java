@@ -59,11 +59,14 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -1686,6 +1689,109 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertTrue(guardBlocks(fixture.store, compactionDescendant));
     assertFalse(guardBlocks(fixture.store, baseline.threadId()));
     assertFalse(guardBlocks(fixture.store, taskChild));
+  }
+
+  /**
+   * 意图：父 COMPACTION TURN_START 冻结的 outputBudget 是压缩子每一次请求的权威上限——子自身解析出的更大预算被收紧到该值，cache 被强制
+   * NONE（不按易变 Agent name 猜身份），冻结的 maxOutputTokens 与实际 spec 一致；其余字段原样保留。
+   */
+  @Test
+  void compactionChildRequestIsCappedToFrozenParentOutputBudgetAndForcedNoneCache() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage("trigger demand")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    CompactionStart frozen =
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).compaction();
+    assertEquals(4096L, frozen.outputBudget());
+
+    // 子解析出的 spec 预算更大且带会话级 cache：必须被父冻结 budget 收紧并强制 NONE。
+    fixture.resolver.autoConsistent = false;
+    BranchSettings childSettings =
+        fixture.store.transaction(
+            tx ->
+                tx.loadEntryPath(tx.findThread(frozen.childThreadId()).orElseThrow().headEntryId())
+                    .baseSettings());
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(
+            probeSpec(
+                childSettings,
+                9000,
+                ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session")),
+            CONTEXT_WINDOW,
+            9000));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(frozen.childThreadId()));
+
+    ModelInvocation invocation = childOpenModel(fixture.store, frozen.childThreadId());
+    assertEquals(4096, invocation.requestSpec().outputTokens());
+    assertEquals(ProviderCacheControl.none(), invocation.requestSpec().cacheControl());
+    assertEquals("Test system instruction.", invocation.requestSpec().systemInstruction());
+    assertEquals(4096, turnStartMaxOutputTokens(fixture.store, invocation.turnStartEntryId()));
+  }
+
+  /** 意图：普通 Thread 与未结算 TASK subagent 不位于 COMPACTION 子执行树内，其解析结果（预算与 cache）完全不被压缩规则改写。 */
+  @Test
+  void threadOutsideCompactionChildTreeKeepsResolvedBudgetAndCache() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, BELOW_THRESHOLD_USAGE);
+    UUID taskChild = seedJoinChildThread(fixture.store, baseline.threadId(), JoinPurpose.TASK);
+    requestThreadWork(fixture.store, taskChild);
+
+    ProviderCacheControl sessionCache =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "task-session");
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(
+            probeSpec(branchSettings(), 9000, sessionCache), CONTEXT_WINDOW, 9000));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(taskChild));
+
+    ModelInvocation invocation = childOpenModel(fixture.store, taskChild);
+    assertEquals(9000, invocation.requestSpec().outputTokens());
+    assertEquals(sessionCache, invocation.requestSpec().cacheControl());
+    assertEquals(9000, turnStartMaxOutputTokens(fixture.store, invocation.turnStartEntryId()));
+    boolean hasFrozenStart =
+        fixture.store.transaction(
+            tx -> CompactionChildScope.frozenStartFor(tx, taskChild).isPresent());
+    assertFalse(hasFrozenStart);
+  }
+
+  /** 以 base spec 为模板构造指定预算与 cache 的探测 spec。 */
+  private static ModelRequestSpec probeSpec(
+      BranchSettings settings, int outputTokens, ProviderCacheControl cacheControl) {
+    ModelRequestSpec base = ThreadProcessorTestSupport.requestFor(settings);
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.providerConnectionGenerationId(),
+        base.model(),
+        base.variant(),
+        outputTokens,
+        base.systemInstruction(),
+        base.toolBindings(),
+        base.subagentBindings(),
+        cacheControl);
+  }
+
+  /** 读取指定 Thread 当前 open Turn 的 model invocation（未经模型执行，仅本地 durable 事实）。 */
+  private static ModelInvocation childOpenModel(InMemoryHarnessStore store, UUID childThreadId) {
+    return store.transaction(
+        tx -> {
+          ThreadState child = tx.findThread(childThreadId).orElseThrow();
+          UUID turn = tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().id();
+          return tx.findModelInvocationByTurn(childThreadId, turn).orElseThrow();
+        });
+  }
+
+  /** 读取指定 TURN_START Entry 冻结的 maxOutputTokens。 */
+  private static int turnStartMaxOutputTokens(InMemoryHarnessStore store, UUID turnStartEntryId) {
+    return store.transaction(
+        tx ->
+            ((TurnStartPayload) tx.findEntry(turnStartEntryId).orElseThrow().payload())
+                .maxOutputTokens());
   }
 
   private static long compactionFailureCount(InMemoryHarnessStore store, UUID threadId) {

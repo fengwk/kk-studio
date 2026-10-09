@@ -31,6 +31,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -43,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -64,6 +67,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -92,6 +97,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -118,6 +124,14 @@ class PostgresqlCompactionChildTest {
   private ModelProcessor modelProcessor;
   private volatile InvocationRetryPolicy retryPolicy = NO_RETRY;
 
+  /** 普通 Turn 解析出的输出预算与 cache 覆盖：仅在本测试内模拟“当前配置给压缩子的预算/缓存档位”。 */
+  private Integer resolvedOutputTokens;
+
+  private ProviderCacheControl resolvedCacheControl;
+
+  /** 记录每次普通 Turn 解析出的 spec：用于在断言收紧结果的同时证明“收紧前确实更大 / 带 cache”。 */
+  private final List<ModelRequestSpec> observedResolvedSpecs = new CopyOnWriteArrayList<>();
+
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
@@ -135,8 +149,12 @@ class PostgresqlCompactionChildTest {
                 new BranchSettings(
                     "compaction", compactorModel, path.baseSettings().environmentName(), null));
           }
+          ModelRequestSpec spec = resolvedSpec(path.baseSettings());
+          observedResolvedSpecs.add(spec);
           return new TurnResolver.Resolved(
-              requestFor(path.baseSettings()), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);
+              spec,
+              CONTEXT_WINDOW,
+              resolvedOutputTokens != null ? resolvedOutputTokens : MAX_OUTPUT_TOKENS);
         };
     runtime = new HarnessRuntime(store, clock, resolver, () -> CompactionConfig.DEFAULT);
     processor =
@@ -503,6 +521,173 @@ class PostgresqlCompactionChildTest {
     assertEquals(1, queuedCommandCount(parentId));
   }
 
+  /**
+   * 意图：父 COMPACTION TURN_START 冻结的 outputBudget 是压缩子每一次请求的权威上限。子自身解析出的更大预算被收紧到冻结值（min 语义）、cache 强制
+   * NONE、TURN_START 冻结的实际预算与落库 spec 一致；身份只来自 durable COMPACTION Join，而非 Agent name。
+   */
+  @Test
+  void compactionChildFirstRequestBudgetIsCappedAndCacheForcedNone() {
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session");
+    resolvedOutputTokens = 9000;
+    resolvedCacheControl = cacheControl;
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    assertEquals(4096L, frozenOutputBudget(parentId));
+
+    processNext(child.childThreadId());
+    // 反证前提：resolver 确实给压缩子提出了更大的预算与会话级 cache（否则本用例不构成收紧证据）。
+    assertTrue(observedResolvedSpecs.stream().anyMatch(item -> item.outputTokens() == 9000));
+    assertTrue(
+        observedResolvedSpecs.stream().anyMatch(item -> cacheControl.equals(item.cacheControl())));
+    ModelRequestSpec spec = findModel(openChildModel(child.childThreadId())).requestSpec();
+    assertEquals(4096, spec.outputTokens());
+    assertEquals(ProviderCacheControl.none(), spec.cacheControl());
+    assertEquals("Test system instruction.", spec.systemInstruction());
+    // TURN_START 冻结的 maxOutputTokens 必须等于实际请求预算，绝不残留 resolver 提出的 9000。
+    assertEquals(4096, childTurnStartMaxOutputTokens(child.childThreadId()));
+  }
+
+  /**
+   * 意图：压缩子的工具 loop 续作回合（工具回合闭合后的 CONTINUATION 模型轮）同样只由 durable 冻结事实收紧——resolver 给出的预算低于父 冻结预算时保持
+   * min 语义（绝不抬高到父预算），cache 一律 NONE，TURN_START 与实际 spec 一致。
+   */
+  @Test
+  void compactionChildToolLoopContinuationTurnIsCappedAndCacheForcedNone() {
+    resolvedOutputTokens = 1024;
+    resolvedCacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session");
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    // 子第一条输入回合：真实工具调用 + 工具结果 + continueModel=true，形成工具 loop 的续作义务（不依赖工具执行器）。
+    seedClosedToolLoopTurn(child.childThreadId());
+    processNext(child.childThreadId());
+
+    TurnStartPayload continuationStart =
+        (TurnStartPayload) path(child.childThreadId()).openTurnStart().orElseThrow().payload();
+    assertEquals(TurnStartReason.CONTINUATION, continuationStart.reason());
+    ModelRequestSpec spec = findModel(openChildModel(child.childThreadId())).requestSpec();
+    assertEquals(1024, spec.outputTokens());
+    assertEquals(1024, continuationStart.maxOutputTokens());
+    assertEquals(ProviderCacheControl.none(), spec.cacheControl());
+  }
+
+  /** 纯空白 final（COMPLETE）同样不是可用摘要：绝不冻结成父 receipt，走同一调用的既有重试，第二次合法摘要才由父一次提交。 */
+  @Test
+  void compactionChildWhitespaceFinalRetriesThenParentCommitsOneSummary() {
+    retryPolicy = RETRY_ONCE;
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    processNext(child.childThreadId());
+    UUID childModelId = openChildModel(child.childThreadId());
+
+    // attempt 1：纯空白 final → INVALID_RESPONSE，绝不产生结果，也不交付父。
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse("  \n ", GenerationStopReason.COMPLETE));
+    ModelInvocation afterFirstAttempt = findModel(childModelId);
+    assertEquals(ModelInvocationStatus.READY, afterFirstAttempt.status());
+    assertEquals(1, afterFirstAttempt.attempt());
+    assertNull(afterFirstAttempt.resultEntryId());
+    assertEquals(1, afterFirstAttempt.failedAttempts().size());
+    assertEquals(
+        ProviderErrorKind.INVALID_RESPONSE,
+        afterFirstAttempt.failedAttempts().getFirst().error().kind());
+    assertFalse(hasWork(WorkTargetType.THREAD, parentId));
+
+    // attempt 2：合法摘要，attempt 计数不重置。
+    String summary = "durable compacted summary";
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse(summary, GenerationStopReason.COMPLETE));
+    assertEquals(ModelInvocationStatus.SUCCEEDED, findModel(childModelId).status());
+
+    processNext(child.childThreadId());
+    assertTrue(findJoin(child.joinInvocationId()).matched());
+    processNext(parentId);
+
+    EntryPath parentPath = path(parentId);
+    assertInstanceOf(TurnEndPayload.class, parentPath.head().payload());
+    assertEquals(
+        TurnEndOutcome.COMPLETED, ((TurnEndPayload) parentPath.head().payload()).outcome());
+    Entry summaryEntry = parentPath.entries().get(parentPath.entries().size() - 2);
+    assertInstanceOf(CompactionPayload.class, summaryEntry.payload());
+    assertEquals(summary, ((CompactionPayload) summaryEntry.payload()).summaryText());
+    assertEquals(
+        1,
+        parentPath.entries().stream()
+            .filter(entry -> entry.payload() instanceof CompactionPayload)
+            .count());
+  }
+
+  /** 纯空白 final 重试耗尽：子 invocation / 子回合 / 父压缩全部 FAILED，绝不交付空白或部分摘要，也不残留子 Work。 */
+  @Test
+  void compactionChildWhitespaceFinalExhaustionFailsParentWithoutPartialSummary() {
+    retryPolicy = RETRY_ONCE;
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    processNext(child.childThreadId());
+    UUID childModelId = openChildModel(child.childThreadId());
+
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse("   ", GenerationStopReason.COMPLETE));
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse("\n\n", GenerationStopReason.COMPLETE));
+
+    ModelInvocation exhausted = findModel(childModelId);
+    assertEquals(ModelInvocationStatus.FAILED, exhausted.status());
+    assertEquals(2, exhausted.attempt());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, exhausted.error().kind());
+    assertEquals(1, exhausted.failedAttempts().size());
+    assertEquals(
+        ProviderErrorKind.INVALID_RESPONSE, exhausted.failedAttempts().getFirst().error().kind());
+
+    processNext(child.childThreadId());
+    assertNoRecursiveCompactionOnChild(child.childThreadId());
+    processNext(parentId);
+
+    EntryPath parentPath = path(parentId);
+    assertInstanceOf(TurnEndPayload.class, parentPath.head().payload());
+    assertEquals(TurnEndOutcome.FAILED, ((TurnEndPayload) parentPath.head().payload()).outcome());
+    assertTrue(
+        parentPath.entries().stream()
+            .noneMatch(entry -> entry.payload() instanceof CompactionPayload));
+    assertFalse(hasWork(WorkTargetType.THREAD, child.childThreadId()));
+    // 压缩失败不消费用户输入：父线程仍被唤醒去处理未消费的排队命令。
+    assertTrue(hasWork(WorkTargetType.THREAD, parentId));
+    assertEquals(1, queuedCommandCount(parentId));
+  }
+
   // ===== 压缩子驱动的真实模型执行辅助 =====
 
   private record CompactionChild(
@@ -535,6 +720,151 @@ class PostgresqlCompactionChildTest {
               tx.findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, invocation.status());
           return invocation.id();
+        });
+  }
+
+  /** 普通 Turn 解析：默认沿用 branch settings 的默认请求，测试可覆盖预算与 cache 以观察压缩子的收紧。 */
+  private ModelRequestSpec resolvedSpec(BranchSettings settings) {
+    ModelRequestSpec base = requestFor(settings);
+    if (resolvedOutputTokens == null && resolvedCacheControl == null) {
+      return base;
+    }
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.providerConnectionGenerationId(),
+        base.model(),
+        base.variant(),
+        resolvedOutputTokens != null ? resolvedOutputTokens : base.outputTokens(),
+        base.systemInstruction(),
+        base.toolBindings(),
+        base.subagentBindings(),
+        resolvedCacheControl != null ? resolvedCacheControl : base.cacheControl());
+  }
+
+  /** 父路径上冻结的压缩输出预算。 */
+  private long frozenOutputBudget(UUID parentId) {
+    return store.transaction(
+        tx -> {
+          ThreadState parent = tx.findThread(parentId).orElseThrow();
+          TurnStartPayload start =
+              (TurnStartPayload) tx.findEntry(parent.headEntryId()).orElseThrow().payload();
+          assertNotNull(start.compaction(), "parent head must be a compaction turn start");
+          return start.compaction().outputBudget();
+        });
+  }
+
+  /** 子当前 open Turn 的 TURN_START 冻结输出预算。 */
+  private int childTurnStartMaxOutputTokens(UUID childThreadId) {
+    return store.transaction(
+        tx -> {
+          ThreadState child = tx.findThread(childThreadId).orElseThrow();
+          TurnStartPayload start =
+              (TurnStartPayload)
+                  tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().payload();
+          assertNotNull(start.maxOutputTokens(), "open child turn must freeze maxOutputTokens");
+          return start.maxOutputTokens();
+        });
+  }
+
+  /**
+   * 在压缩子上种一个已闭合的工具 loop 输入回合：真实工具调用 + 匹配的工具结果 + {@code continueModel=true}，并消费子第一条
+   * CUSTOM_MESSAGE、推进输入水位，使下一次 claim 规划出工具 loop 的 CONTINUATION 模型轮。
+   */
+  private void seedClosedToolLoopTurn(UUID childThreadId) {
+    store.transaction(
+        tx -> {
+          ThreadState child = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, childThreadId);
+          BranchSettings settings = tx.loadEntryPath(child.headEntryId()).baseSettings();
+          String callId = "call-1";
+          UUID startId = tx.nextId();
+          UUID inputId = tx.nextId();
+          UUID assistantId = tx.nextId();
+          UUID toolResultId = tx.nextId();
+          UUID endId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  startId,
+                  child.sessionId(),
+                  child.headEntryId(),
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT,
+                      settings,
+                      childThreadId,
+                      CONTEXT_WINDOW,
+                      MAX_OUTPUT_TOKENS,
+                      null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  inputId,
+                  child.sessionId(),
+                  startId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(new TextMessageContent("compaction instruction"))),
+                      null,
+                      null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  assistantId,
+                  child.sessionId(),
+                  inputId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT,
+                          List.of(
+                              new ToolCallMessageContent(callId, "bash", "bash", "{}"),
+                              new TextMessageContent("working"))),
+                      new AssistantMessageMetadata(
+                          GenerationStopReason.COMPLETE,
+                          new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                      null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  toolResultId,
+                  child.sessionId(),
+                  assistantId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.TOOL,
+                          List.of(
+                              new ToolResultMessageContent(
+                                  callId,
+                                  "bash",
+                                  "bash",
+                                  List.of(new TextMessageContent("tool output")),
+                                  false,
+                                  "{}"))),
+                      null,
+                      new ToolResultMetadata(
+                          new UUID(0L, 8888L),
+                          assistantId,
+                          callId,
+                          0,
+                          ToolResultStatus.SUCCEEDED,
+                          false,
+                          null,
+                          null)),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  endId,
+                  child.sessionId(),
+                  toolResultId,
+                  new TurnEndPayload(startId, TurnEndOutcome.COMPLETED, true, null, null),
+                  T1));
+          ThreadCommand childCommand =
+              tx.loadQueuedCommands(childThreadId).stream()
+                  .filter(command -> command.sequence() == 1L)
+                  .findFirst()
+                  .orElseThrow();
+          tx.updateCommands(List.of(childCommand.markApplied(startId)));
+          tx.updateThread(child.advanceHeadAndInputThroughSequence(endId, 1L, T1));
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId), T1);
+          return null;
         });
   }
 

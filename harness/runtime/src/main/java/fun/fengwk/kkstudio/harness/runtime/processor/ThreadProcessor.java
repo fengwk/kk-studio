@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -858,9 +860,19 @@ public final class ThreadProcessor {
     Integer contextWindow = null;
     Integer maxOutputTokens = null;
     CompactionStart compactionStart = null;
+    ModelRequestSpec invocationSpec = null;
     if (result instanceof TurnResolver.Resolved resolved) {
       contextWindow = resolved.contextWindow();
-      maxOutputTokens = resolved.maxOutputTokens();
+      // 直接压缩子 Thread 的每一次请求（含工具 loop turn 与失败重试）都按父冻结 outputBudget 收紧输出预算并把 cache 固定为 NONE：
+      // 身份只来自 durable COMPACTION Join 事实，事实缺失 fail closed。TURN_START 冻结的 maxOutputTokens 必须等于实际
+      // spec。
+      Optional<CompactionStart> frozen = CompactionChildScope.frozenStartFor(tx, thread.id());
+      invocationSpec =
+          frozen
+              .map(start -> capCompactionChildSpec(resolved.spec(), start))
+              .orElse(resolved.spec());
+      maxOutputTokens =
+          frozen.isPresent() ? invocationSpec.outputTokens() : resolved.maxOutputTokens();
     } else if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
       contextWindow = compactionResolved.contextWindow();
       maxOutputTokens = compactionResolved.maxOutputTokens();
@@ -898,7 +910,7 @@ public final class ThreadProcessor {
               thread.id(),
               plan.turnStartEntryId(),
               plan.candidateHeadEntryId(),
-              resolved.spec(),
+              invocationSpec,
               ModelInvocationStatus.READY,
               0,
               null,
@@ -1011,6 +1023,26 @@ public final class ThreadProcessor {
   static Entry withCreatedAt(Entry entry, Instant createdAt) {
     return new Entry(
         entry.id(), entry.sessionId(), entry.parentEntryId(), entry.payload(), createdAt);
+  }
+
+  /**
+   * 压缩子请求的冻结事实收紧：只把输出预算压低到父冻结 {@code outputBudget}（min 语义），并把 cache 固定为 NONE；其余字段（模型、
+   * variant、system instruction、tools、subagents）原样保留，不复制也不新增任何 durable 标志。
+   */
+  private static ModelRequestSpec capCompactionChildSpec(
+      ModelRequestSpec spec, CompactionStart frozen) {
+    long outputBudget = frozen.outputBudget();
+    int outputTokens = (int) Math.min(spec.outputTokens(), outputBudget);
+    return new ModelRequestSpec(
+        spec.providerType(),
+        spec.providerConnectionGenerationId(),
+        spec.model(),
+        spec.variant(),
+        outputTokens,
+        spec.systemInstruction(),
+        spec.toolBindings(),
+        spec.subagentBindings(),
+        ProviderCacheControl.none());
   }
 
   /**

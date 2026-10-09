@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -231,23 +230,6 @@ class ModelRequestMaterializerTest {
         agentText(GoalMessages.inputCleared()),
         textOf(after.messages().get(after.messages().size() - 2)));
     assertEquals("cleared reply", textOf(after.messages().get(after.messages().size() - 1)));
-  }
-
-  /** 只读历史规划仍从 basis head 恢复压缩事实：仅 owned COMPACTION TURN_START 命中，普通 head 返回 null。 */
-  @Test
-  void compactionStartAtHeadRecoversOnlyOwnedCompactionTurnStart() {
-    EntryPath history = conversationPath(1);
-    assertNull(ModelRequestMaterializer.compactionStartAtHead(history));
-
-    CompactionStart compaction =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
-    List<Entry> entries = new ArrayList<>(history.entries());
-    entries.add(
-        entry(id(10L), history.head().id(), resolvedStart(TurnStartReason.COMPACTION, compaction)));
-
-    assertEquals(
-        compaction, ModelRequestMaterializer.compactionStartAtHead(new EntryPath(entries)));
   }
 
   @Test
