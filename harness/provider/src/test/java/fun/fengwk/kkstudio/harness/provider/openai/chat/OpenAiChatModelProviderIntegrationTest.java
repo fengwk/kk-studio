@@ -367,6 +367,72 @@ class OpenAiChatModelProviderIntegrationTest {
   }
 
   /**
+   * 测试意图：真实 SSE transport 下「完整文本 + 重复 finish_reason=stop（同行 usage，随后冗余同形尾帧）+ [DONE]」必须恰好 完成一次——只有一次
+   * completion、无 error、文本与 usage 保持，证明重复终止标记既不被误判为非法，也不会重复交付终态。
+   */
+  @Test
+  void redundantFinishTailCompletesExactlyOnce() throws Exception {
+    byte[] payload = loadFixtureBytes("redundant-finish-tail.sse");
+    server.createContext(
+        "/chat/completions",
+        exchange -> {
+          exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(payload);
+            os.flush();
+          }
+        });
+
+    ModelProvider provider = new OpenAiChatProviderAdapter(transport, "sk-test").create(descriptor);
+    AtomicInteger errors = new AtomicInteger(0);
+    AtomicInteger completes = new AtomicInteger(0);
+    List<ProviderStreamEvent> deltas = new ArrayList<>();
+    AtomicReference<ProviderCompletion> completionRef = new AtomicReference<>();
+    AtomicReference<ProviderException> caught = new AtomicReference<>();
+    CountDownLatch firstTerminal = new CountDownLatch(1);
+    // 终态计数为 2：只允许一次终态，出现第二次即释放
+    CountDownLatch duplicateTerminal = new CountDownLatch(2);
+
+    provider.stream(
+        simpleRequest(),
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            deltas.add(event);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+            completes.incrementAndGet();
+            completionRef.set(completion);
+            firstTerminal.countDown();
+            duplicateTerminal.countDown();
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            errors.incrementAndGet();
+            caught.set(error);
+            firstTerminal.countDown();
+            duplicateTerminal.countDown();
+          }
+        });
+
+    assertTrue(firstTerminal.await(5, TimeUnit.SECONDS));
+    assertFalse(duplicateTerminal.await(500, TimeUnit.MILLISECONDS));
+    assertEquals(0, errors.get(), () -> "unexpected error: " + caught.get());
+    assertEquals(1, completes.get());
+    ProviderCompletion completion = completionRef.get();
+    assertNotNull(completion);
+    assertEquals("Hello world", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(11L, completion.response().usage().totalTokens());
+    assertEquals(1, deltas.size());
+    assertEquals("Hello world", ((ProviderStreamEvent.TextDelta) deltas.get(0)).text());
+  }
+
+  /**
    * 测试意图：provider 内部回调逃逸的非 ProviderException 由真实 transport 转换为 CALLBACK_FAILED，经 ErrorMapper 脱敏为
    * INVALID_RESPONSE 后 handler 恰好收到一次终态错误（不静默、不重复、无 completion）。用户 handler 自身抛错属于 0-onError
    * 契约，不在本例范围。
