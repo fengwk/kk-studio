@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
@@ -108,14 +107,13 @@ public record SystemSettings(
     }
   }
 
-  /** aiRuntime section：共享调用重试、自动压缩 fallback、subagent 预算与模型 HTTP 重试状态白名单。 */
+  /** aiRuntime section：共享调用重试、自动压缩保留量、subagent 预算与模型 HTTP 重试状态白名单。 */
   public record AiRuntime(
       int retryMaxRetries,
       InvocationRetryBackoffStrategy retryBackoffStrategy,
       long retryBaseDelayMillis,
       long retryMaxDelayMillis,
       int compactionKeepRecentTokens,
-      ModelSelection compactionFallbackModel,
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
@@ -129,7 +127,6 @@ public record SystemSettings(
             2_000L,
             60_000L,
             20_000,
-            null,
             2,
             10,
             0,

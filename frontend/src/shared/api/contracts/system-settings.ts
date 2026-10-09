@@ -1,5 +1,4 @@
 import type { DecimalLong, InstantTimestamp } from '@/shared/api/contracts/base'
-import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
 
 /**
  * GET/PUT {@code /api/settings} 的严格 wire 契约（对齐 share/systemsettings 各 DTO）。
@@ -35,7 +34,6 @@ export interface SystemSettingsAiRuntimeDTO {
   retryBaseDelayMillis: DecimalLong
   retryMaxDelayMillis: DecimalLong
   compactionKeepRecentTokens: number
-  compactionFallbackModel: HarnessModelSelectionDTO | null
   subagentMaxDepth: number
   subagentMaxConcurrency: number
   /** 0 表示不额外限制（无 cap）。 */
@@ -169,7 +167,6 @@ export type SystemSettingsSchemaFieldType =
   | 'TEXT'
   | 'ENUM'
   | 'PERMISSION'
-  | 'MODEL_SELECTION'
   | 'INTEGER_LIST'
 
 export type SystemSettingsSchemaApplyTiming = 'NEXT_INVOCATION' | 'NEXT_CHAT' | 'RESTART'

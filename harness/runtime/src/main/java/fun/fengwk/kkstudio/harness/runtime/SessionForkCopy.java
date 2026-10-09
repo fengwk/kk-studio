@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
@@ -104,7 +105,9 @@ final class SessionForkCopy {
   }
 
   private static boolean isBetweenTurnControl(EntryPayload payload) {
-    return payload instanceof NotificationPayload || payload instanceof SettingsPayload;
+    return payload instanceof NotificationPayload
+        || payload instanceof SettingsPayload
+        || payload instanceof ForkPayload;
   }
 
   /** 返回 {@code index} 处 Entry 所属 Turn 的 TURN_START；位于回合之间的控制 Entry 直接返回自身。 */
@@ -143,9 +146,12 @@ final class SessionForkCopy {
               compaction.phase(),
               compaction.trigger(),
               compaction.executionModel(),
+              compaction.outputBudget(),
               requireMapped(compaction.cutEntryId(), newIds),
               mappedOrNull(compaction.turnPrefixStartEntryId(), newIds),
-              mappedOrNull(compaction.historyCompactionEntryId(), newIds)));
+              mappedOrNull(compaction.historyCompactionEntryId(), newIds),
+              compaction.childThreadId(),
+              compaction.joinInvocationId()));
     }
     if (payload instanceof MessagePayload message && message.toolResultMetadata() != null) {
       ToolResultMetadata metadata = message.toolResultMetadata();

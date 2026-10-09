@@ -100,14 +100,6 @@ public class SystemSettingsSchemaProvider {
                         FieldType.INTEGER,
                         false,
                         1,
-                        null),
-                    field(
-                        "aiRuntime.compactionFallbackModel",
-                        "settings.field.aiRuntime.compactionFallbackModel",
-                        null,
-                        FieldType.MODEL_SELECTION,
-                        true,
-                        null,
                         null)),
                 group(
                     "aiRuntime.subagent",

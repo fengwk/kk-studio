@@ -789,41 +789,25 @@ class ProviderRequestPreviewServiceTest {
   }
 
   /**
-   * 测试意图：压缩输出也是真实模型调用，历史预览按 durable COMPACTION TURN_START 冻结的 executionModel 与预算走 planHistorical
-   * 重建；请求前缀是 ROOT 到该 TURN_START，输出自身绝不进入前缀，也不再用人为 unsupported 拒绝。
+   * 测试意图：父 COMPACTION turn 自身不创建 ModelInvocation，其 provider 请求属于压缩子 Thread；父侧历史预览绝不伪造一份零工具请求，
+   * 而是在任何规划与 provider 解析之前明确 typed 拒绝并指向子的真实调用。
    */
   @Test
-  void previewsHistoricalCompactionOutputThroughItsDurableTurnStart() {
+  void rejectsHistoricalPreviewOfParentCompactionOutput() {
     EntryPath sessionTree = compactionOutputPath();
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
-    when(turnResolver.planHistorical(any(), any(), eq(COMPACTION_RESULT_TIME)))
-        .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
-    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
-        .thenAnswer(
-            invocation ->
-                new ResolvedExecution(
-                    invocation.getArgument(2),
-                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
-                    policy -> null,
-                    request -> BODY));
 
-    HarnessProviderRequestPreviewDTO dto =
-        service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
+    ProviderRequestPreviewUnavailableException rejected =
+        assertThrows(
+            ProviderRequestPreviewUnavailableException.class,
+            () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID));
 
-    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW, dto.getKind());
-    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE, dto.getNotice());
-    assertEquals(COMPACTION_TURN_START_ID.toString(), dto.getSourceHeadEntryId());
-    assertEquals(COMPACTION_RESULT_TIME, dto.getGeneratedAt());
-    assertEquals(new String(BODY, StandardCharsets.UTF_8), dto.getBodyJson());
-
-    ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planHistorical(any(), pathCaptor.capture(), eq(COMPACTION_RESULT_TIME));
-    assertEquals(COMPACTION_TURN_START_ID, pathCaptor.getValue().head().id());
-    // 被预览的压缩结果自身绝不进入它自己的请求前缀。
-    assertFalse(ids(pathCaptor.getValue()).contains(COMPACTION_ENTRY_ID));
-    // 压缩输出走专用历史规划，绝不被当作普通 live 请求。
+    assertEquals(Reason.PREVIEW_UNSUPPORTED, rejected.reason());
+    assertTrue(rejected.getMessage().contains("compaction child thread"), rejected.getMessage());
+    verify(turnResolver, never()).planHistorical(any(), any(), any());
     verify(turnResolver, never()).planLive(any(), any(), any());
     verify(runtime, never()).getThreadSnapshot(any());
+    verify(providerResolution, never()).resolve(any(), any(), any());
   }
 
   /** ROOT + 一个关闭 INPUT turn + 其 parent 为 COMPACTION TURN_START 的压缩结果。 */
@@ -833,13 +817,8 @@ class ProviderRequestPreviewServiceTest {
     UUID assistant = id(33L);
     UUID end = id(34L);
     CompactionStart start =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            assistant,
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, assistant, null, null);
     return new EntryPath(
         List.of(
             new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW),

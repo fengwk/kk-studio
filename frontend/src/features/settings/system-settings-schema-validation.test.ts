@@ -135,30 +135,6 @@ describe('system settings schema validation', () => {
     )
   })
 
-  it('rejects a non-nullable MODEL_SELECTION field with a null draft value', () => {
-    const schema = makeSettingsSchema()
-    const field = schema.sections[0]!.groups[1]!.fields[1]!
-    // fixture 的 compactionFallbackModel 是 null 且 nullable=true；改成非空后必须失败。
-    field.nullable = false
-    expect(validateSystemSettingsSchema(schema, draft)).toMatch(
-      /settings schema type does not match draft/,
-    )
-  })
-
-  it('rejects an invalid MODEL_SELECTION draft shape', () => {
-    const schema = makeSettingsSchema()
-    const field = schema.sections[0]!.groups[1]!.fields[1]!
-    // draft 值不是合法的 {providerName, modelName, variant} 形状（缺 variant）。
-    ;(draft.aiRuntime as { compactionFallbackModel: unknown }).compactionFallbackModel = {
-      providerName: 'minimax',
-      modelName: 'MiniMax',
-    }
-    field.nullable = true
-    expect(validateSystemSettingsSchema(schema, draft)).toMatch(
-      /settings schema type does not match draft/,
-    )
-  })
-
   it('validates INTEGER_LIST field type against array draft values', () => {
     const schema = makeSettingsSchema()
     const testDraft = settingsSectionsToDraft(makeSettingsDto())
@@ -174,8 +150,7 @@ describe('system settings schema validation', () => {
   it('rejects a duplicate field path', () => {
     const schema = makeSettingsSchema()
     // 复制 retryMaxDelayMillis（LONG，draft 值为 '60000'）两次：第二次命中重复路径检查。
-    // （不能复制 MODEL_SELECTION 字段：重复值会在到达重复路径检查前先命中
-    // 「nullable 值类型不匹配」，永远轮不到重复路径错误。）
+    // 复制一个 nullable TEXT 字段：第二次命中重复路径检查。
     const retryMaxDelay = schema.sections[0]!.groups[0]!.fields[3]!
     schema.sections[0]!.groups[0]!.fields.push(structuredClone(retryMaxDelay))
     expect(validateSystemSettingsSchema(schema, draft)).toBe(
@@ -187,9 +162,9 @@ describe('system settings schema validation', () => {
     const schema = makeSettingsSchema()
     const field = schema.sections[0]!.groups[1]!.fields[0]!
     // schema 引用了 draft 中不存在的路径：getDraftValue 会抛错，校验必须把它转成错误消息。
-    field.path = 'aiRuntime.compactionFallbackModel.bogus'
+    field.path = 'aiRuntime.compactionKeepRecentTokens.bogus'
     expect(validateSystemSettingsSchema(schema, draft)).toBe(
-      'unknown system settings draft path: aiRuntime.compactionFallbackModel.bogus',
+      'unknown system settings draft path: aiRuntime.compactionKeepRecentTokens.bogus',
     )
   })
 
@@ -218,7 +193,7 @@ describe('system settings schema validation', () => {
   it('rejects a schema field list that misses a draft leaf', () => {
     const schema = makeSettingsSchema()
     // 从 schema 中删掉一个字段：draft 存在但 schema 未声明，路径集合不相等。
-    schema.sections[0]!.groups[1]!.fields.splice(1, 1)
+    schema.sections[0]!.groups[0]!.fields.splice(1, 1)
     expect(validateSystemSettingsSchema(schema, draft)).toBe(
       'settings schema field paths do not match the editable draft',
     )

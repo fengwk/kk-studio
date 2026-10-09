@@ -145,6 +145,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumns(
         "agent_definition",
         "name",
+        "type",
         "description",
         "system_prompt",
         "model_provider_name",

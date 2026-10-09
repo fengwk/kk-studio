@@ -559,5 +559,5 @@ export interface ManualCompactionRequestDTO {
 export interface ManualCompactionResponseDTO {
   thread: HarnessThreadDTO
   turnStartEntryId: string
-  modelInvocationId: string | null
+  childThreadId: string | null
 }

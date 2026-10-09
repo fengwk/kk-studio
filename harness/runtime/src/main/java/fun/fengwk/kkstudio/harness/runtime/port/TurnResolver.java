@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
@@ -29,7 +31,8 @@ public interface TurnResolver {
   Result resolve(UUID threadId, EntryPath path, CompactionPreparation compactionPreparation);
 
   /** 解析结果：冻结请求或确定性拒绝。 */
-  sealed interface Result permits TurnResolver.Resolved, TurnResolver.Rejected {}
+  sealed interface Result
+      permits TurnResolver.Resolved, TurnResolver.Rejected, TurnResolver.CompactionResolved {}
 
   /** 解析成功：紧凑 spec 已冻结，contextWindow 与 maxOutputTokens 为本次 turn 冻结的正整数。 */
   record Resolved(ModelRequestSpec spec, int contextWindow, int maxOutputTokens) implements Result {
@@ -48,6 +51,29 @@ public interface TurnResolver {
   record Rejected(AssistantError error) implements Result {
     public Rejected {
       error = Objects.requireNonNull(error, "error");
+    }
+  }
+
+  /** 压缩 turn 解析成功：冻结 compactor 执行模型、输出预算与子 Thread 设置。 */
+  record CompactionResolved(
+      ModelSelection executionModel,
+      long outputBudget,
+      int contextWindow,
+      int maxOutputTokens,
+      BranchSettings childSettings)
+      implements Result {
+    public CompactionResolved {
+      executionModel = Objects.requireNonNull(executionModel, "executionModel");
+      if (outputBudget <= 0L) {
+        throw new IllegalArgumentException("outputBudget must be positive");
+      }
+      if (contextWindow <= 0) {
+        throw new IllegalArgumentException("contextWindow must be positive");
+      }
+      if (maxOutputTokens <= 0) {
+        throw new IllegalArgumentException("maxOutputTokens must be positive");
+      }
+      childSettings = Objects.requireNonNull(childSettings, "childSettings");
     }
   }
 }

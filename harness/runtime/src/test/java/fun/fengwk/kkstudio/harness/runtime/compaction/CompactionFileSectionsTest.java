@@ -353,13 +353,8 @@ class CompactionFileSectionsTest {
                   OWNER_THREAD_ID,
                   100_000,
                   16_384,
-                  new CompactionStart(
-                      CompactionPhase.FULL,
-                      CompactionTrigger.THRESHOLD,
-                      SETTINGS.model(),
-                      cutEntryId,
-                      null,
-                      null)),
+                  CompactionStart.pending(
+                      CompactionPhase.FULL, CompactionTrigger.THRESHOLD, cutEntryId, null, null)),
               BASE));
       entries.add(
           new Entry(

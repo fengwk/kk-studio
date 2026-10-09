@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -22,6 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -108,7 +111,7 @@ class HarnessRuntimeManualCompactionTest {
         fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
     assertEquals(1L, result.thread().version());
-    assertNotNull(result.modelInvocationId());
+    assertNotNull(result.childThreadId());
     EntryPath path = path(fixture.store, baseline.threadId());
     TurnStartPayload start = (TurnStartPayload) path.head().payload();
     assertEquals(result.turnStartEntryId(), path.head().id());
@@ -117,7 +120,7 @@ class HarnessRuntimeManualCompactionTest {
     assertNotNull(start.contextWindow());
     assertNotNull(start.maxOutputTokens());
     assertNotNull(
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, result.modelInvocationId())));
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, result.childThreadId())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
@@ -132,7 +135,7 @@ class HarnessRuntimeManualCompactionTest {
     CompactThreadResult result =
         fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
-    assertNotNull(result.modelInvocationId());
+    assertNotNull(result.childThreadId());
   }
 
   @Test
@@ -169,7 +172,7 @@ class HarnessRuntimeManualCompactionTest {
     CompactThreadResult result =
         fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
-    assertNull(result.modelInvocationId());
+    assertNull(result.childThreadId());
     assertEquals(1L, result.thread().version());
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(12, path.entries().size());
@@ -438,6 +441,114 @@ class HarnessRuntimeManualCompactionTest {
     return store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
   }
 
+  /**
+   * 手动入口与自动压缩共用同一条祖先链 purpose guard：位于 COMPACTION 子执行树内的 Thread 一律不可手动压缩，即使该 Thread 自己的
+   * 委派已经结算（{@code loadIncompleteJoins} 为空）。runtime primitive 自身拒绝并返回明确 receipt，不依赖上层调用方的 root
+   * guard。
+   */
+  @Test
+  void availabilityRejectsThreadsInsideCompactionChildTree() {
+    Fixture fixture = fixture();
+    UUID parentThreadId = HarnessRuntimeTestSupport.seedBaseline(fixture.store).threadId();
+    // 压缩子自身（其 COMPACTION Join 未结算）。
+    UUID compactionChild =
+        seedChildThread(fixture.store, parentThreadId, JoinPurpose.COMPACTION, false);
+    // 压缩子的后代：自己的 TASK Join 已结算，只有祖先链 guard 能挡住它。
+    UUID descendant = seedChildThread(fixture.store, compactionChild, JoinPurpose.TASK, true);
+    assertTrue(
+        fixture.store.<Boolean>transaction(tx -> tx.loadIncompleteJoins(descendant).isEmpty()));
+
+    ManualCompactionAvailability descendantAvailability =
+        fixture.runtime.manualCompactionAvailability(descendant);
+    assertFalse(descendantAvailability.available());
+    assertEquals(
+        ManualCompactionAvailability.DisabledReason.THREAD_BUSY,
+        descendantAvailability.disabledReason());
+    HarnessRuntimeConflictException rejected =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> fixture.runtime.compactThread(new CompactThreadCommand(descendant, 0)));
+    assertEquals(
+        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE, rejected.reason());
+
+    assertFalse(fixture.runtime.manualCompactionAvailability(compactionChild).available());
+
+    // 该压缩树的父 Thread 只是 Join owner，不在压缩子执行树内：其可用性仍由自身历史决定，不被压缩树牵连。
+    ManualCompactionAvailability ownerAvailability =
+        fixture.runtime.manualCompactionAvailability(parentThreadId);
+    assertFalse(ownerAvailability.available());
+    assertEquals(
+        ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT,
+        ownerAvailability.disabledReason());
+  }
+
+  /** 手工创建带 source command 与 Join 的 child Thread，用于按 Join purpose 事实验证手动入口 guard。 */
+  private static UUID seedChildThread(
+      InMemoryHarnessStore store, UUID parentThreadId, JoinPurpose purpose, boolean matchedJoin) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(parentThreadId);
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          UUID commandId = tx.nextId();
+          tx.insertSession(new Session(sessionId, "child-" + sessionId, NOW));
+          tx.insertEntry(
+              new Entry(
+                  rootEntryId,
+                  sessionId,
+                  null,
+                  new RootPayload(HarnessRuntimeTestSupport.settings()),
+                  NOW));
+          List<UUID> ancestors = tx.findAncestorChain(parentThreadId);
+          UUID rootThreadId = ancestors.isEmpty() ? parentThreadId : ancestors.getLast();
+          tx.insertThread(
+              new ThreadState(
+                  threadId,
+                  sessionId,
+                  parentThreadId,
+                  rootEntryId,
+                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                  "child-" + purpose.name().toLowerCase(),
+                  ThreadYoloPolicy.follow(rootThreadId),
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
+                  2L,
+                  0L,
+                  NOW,
+                  NOW));
+          CustomMessageCommandPayload payload =
+              new CustomMessageCommandPayload(AgentMessage.user("child instruction"));
+          String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      threadId, 1L, payload, commandId, requestHash, null, null, null, NOW)));
+          ThreadJoin join =
+              new ThreadJoin(
+                  commandId,
+                  requestHash,
+                  parentThreadId,
+                  threadId,
+                  1L,
+                  "child",
+                  null,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  NOW,
+                  NOW,
+                  purpose,
+                  null);
+          tx.insertJoin(join);
+          if (matchedJoin) {
+            tx.updateJoin(join.match(rootEntryId, null, NOW));
+          }
+          return threadId;
+        });
+  }
+
   private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
   }
@@ -463,8 +574,16 @@ class HarnessRuntimeManualCompactionTest {
         onResolve.run();
       }
       if (autoConsistent) {
-        return new Resolved(
-            HarnessRuntimeTestSupport.modelRequest(), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);
+        return new CompactionResolved(
+            HarnessRuntimeTestSupport.settings().model(),
+            4096L,
+            CONTEXT_WINDOW,
+            MAX_OUTPUT_TOKENS,
+            new BranchSettings(
+                "compaction",
+                HarnessRuntimeTestSupport.settings().model(),
+                HarnessRuntimeTestSupport.settings().environmentName(),
+                null));
       }
       return results.poll();
     }

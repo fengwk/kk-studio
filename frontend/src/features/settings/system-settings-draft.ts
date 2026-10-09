@@ -3,7 +3,6 @@ import type {
   SystemSettingsSectionsDTO,
   SystemSettingsUpdateDTO,
 } from '@/shared/api/contracts/system-settings'
-import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
 import { assembleHttpStatusCodeList, IntegerListValidationError } from '@/shared/lib/integer-list'
 
 /** 前端 draft 的共享数字/文本基元。 */
@@ -34,19 +33,12 @@ export interface SystemSettingsAiRuntimeDraft {
   retryBaseDelayMillis: DraftNumericField
   retryMaxDelayMillis: DraftNumericField
   compactionKeepRecentTokens: DraftNumericField
-  compactionFallbackModel: ModelSelectionDraft | null
   subagentMaxDepth: DraftNumericField
   subagentMaxConcurrency: DraftNumericField
   /** '' 表示不额外限制（无 cap）。 */
   subagentMaxTotalConcurrency: DraftNumericField
   subagentMaxTurns: DraftNumericField
   modelHttpRetryStatusCodes: (number | string)[]
-}
-
-export interface ModelSelectionDraft {
-  providerName: string
-  modelName: string
-  variant: string
 }
 
 export interface SystemSettingsEnvironmentDraft {
@@ -158,7 +150,6 @@ export type DraftValidationReason =
   | 'duplicateToolName'
   | 'blankPattern'
   | 'emptyNumericField'
-  | 'partialModelSelection'
   | 'httpStatusNotInteger'
   | 'httpStatusOutOfRange'
   | 'httpStatusDuplicate'
@@ -237,14 +228,6 @@ function aiRuntimeToDraft(
     retryBaseDelayMillis: dto.retryBaseDelayMillis,
     retryMaxDelayMillis: dto.retryMaxDelayMillis,
     compactionKeepRecentTokens: String(dto.compactionKeepRecentTokens),
-    compactionFallbackModel:
-      dto.compactionFallbackModel == null
-        ? null
-        : {
-            providerName: dto.compactionFallbackModel.providerName,
-            modelName: dto.compactionFallbackModel.modelName,
-            variant: dto.compactionFallbackModel.variant,
-          },
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
@@ -356,9 +339,6 @@ export function assembleSettingsUpdate(
       retryBaseDelayMillis: requiredLong(draft.aiRuntime.retryBaseDelayMillis),
       retryMaxDelayMillis: requiredLong(draft.aiRuntime.retryMaxDelayMillis),
       compactionKeepRecentTokens: requiredInt(draft.aiRuntime.compactionKeepRecentTokens),
-      compactionFallbackModel: assembleModelSelection(
-        draft.aiRuntime.compactionFallbackModel,
-      ),
       subagentMaxDepth: requiredInt(draft.aiRuntime.subagentMaxDepth),
       subagentMaxConcurrency: requiredInt(draft.aiRuntime.subagentMaxConcurrency),
       subagentMaxTotalConcurrency: requiredInt(
@@ -526,24 +506,6 @@ function nullableText(value: string): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-function assembleModelSelection(
-  value: ModelSelectionDraft | null,
-): HarnessModelSelectionDTO | null {
-  if (value == null) {
-    return null
-  }
-  const providerName = value.providerName.trim()
-  const modelName = value.modelName.trim()
-  const variant = value.variant.trim()
-  if (providerName === '' && modelName === '' && variant === '') {
-    return null
-  }
-  if (providerName === '' || modelName === '' || variant === '') {
-    throw new DraftValidationError('partialModelSelection')
-  }
-  return { providerName, modelName, variant }
-}
-
 export function assembleHttpStatusList(items: unknown): number[] {
   try {
     return assembleHttpStatusCodeList(items)
@@ -562,7 +524,6 @@ export function assembleHttpStatusList(items: unknown): number[] {
 
 const CUSTOM_ATOMIC_FIELD_PATHS = new Set([
   'tool.permission',
-  'aiRuntime.compactionFallbackModel',
   'aiRuntime.modelHttpRetryStatusCodes',
 ])
 

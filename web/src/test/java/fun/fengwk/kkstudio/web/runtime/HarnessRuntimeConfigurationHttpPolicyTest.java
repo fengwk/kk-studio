@@ -87,7 +87,6 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
             ai.retryBaseDelayMillis(),
             ai.retryMaxDelayMillis(),
             ai.compactionKeepRecentTokens(),
-            ai.compactionFallbackModel(),
             ai.subagentMaxDepth(),
             ai.subagentMaxConcurrency(),
             ai.subagentMaxTotalConcurrency(),

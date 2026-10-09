@@ -69,6 +69,34 @@ insert into agent_model (provider_name, name, model_id, config)
 insert into agent_definition (name, model_provider_name, model_name, config)
     values ('designer', 'fixture', 'fixture', '{}'), ('reviewer', 'fixture', 'fixture', '{}');
 
+-- Catalog ownership and explicit unconfigured built-in models are database facts.
+select pg_temp.assert_true('user agent is the default ownership',
+    (select type = 'USER' from agent_definition where name = 'designer'));
+insert into agent_definition (name, type, config)
+    values ('probe-builtin', 'BUILTIN', '{}');
+select pg_temp.assert_true('built-in agent accepts an unconfigured model',
+    (select model_provider_name is null and model_name is null and variant is null
+        from agent_definition where name = 'probe-builtin'));
+select pg_temp.rejects('unknown agent ownership is rejected',
+    $$insert into agent_definition(name,type,model_provider_name,model_name,config)
+      values('probe-unknown','ROOT','fixture','fixture','{}')$$,
+    '23514', 'ck_agent_definition_type');
+select pg_temp.rejects('agent model pair rejects provider only',
+    $$insert into agent_definition(name,type,model_provider_name,config)
+      values('probe-provider','BUILTIN','fixture','{}')$$,
+    '23514', 'ck_agent_definition_model_pair');
+select pg_temp.rejects('agent model pair rejects model only',
+    $$insert into agent_definition(name,type,model_name,config)
+      values('probe-model','BUILTIN','fixture','{}')$$,
+    '23514', 'ck_agent_definition_model_pair');
+select pg_temp.rejects('agent variant requires a model',
+    $$insert into agent_definition(name,type,variant,config)
+      values('probe-variant','BUILTIN','default','{}')$$,
+    '23514', 'ck_agent_definition_variant_requires_model');
+select pg_temp.rejects('user agent requires a model',
+    $$insert into agent_definition(name,type,config) values('probe-user','USER','{}')$$,
+    '23514', 'ck_agent_definition_user_requires_model');
+
 insert into project (id, title, description, workflow) values
     (pg_temp.uid(1), 'one', '',
         '{"states":[{"state":"INIT","name":"start","next":["WORK"]},'
@@ -99,6 +127,12 @@ insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,
     (pg_temp.uid(205), pg_temp.uid(100), pg_temp.uid(200), 'MESSAGE',
         '{"message":{"role":"ASSISTANT"}}', now()),
     (pg_temp.uid(206), pg_temp.uid(100), pg_temp.uid(205), 'TURN_END', '{}', now());
+insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)
+    values (pg_temp.uid(9700), pg_temp.uid(100), pg_temp.uid(206), 'FORK',
+        '{"mode":"BRANCH","sourceEntryId":"00000000-0000-0000-0000-0000000000ce","sourceThreadId":null}',
+        now());
+select pg_temp.assert_true('fork entry is an accepted history fact',
+    (select entry_type = 'FORK' from harness_entry where id = pg_temp.uid(9700)));
 insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
     yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
     (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', 'ENABLE', null, 'RUNNABLE', 0, 1, 0, now(), now()),
@@ -911,6 +945,13 @@ select pg_temp.rejects('a matched join cannot be superseded',
 -- Storage/Skills/Environment-update baseline changes: removed persisted upload
 -- expiry, encrypted skill token envelope, and managed update admission.
 -- ---------------------------------------------------------------------------
+select pg_temp.assert_true('default HTTP retry list matches the runtime policy',
+    (select config->'aiRuntime'->'modelHttpRetryStatusCodes' = '[408,429,500,502,503,504]'::jsonb
+        from system_setting where id = 1));
+select pg_temp.assert_true('temporary resource defaults are three days and thirty minutes',
+    (select (config->'storageMedia'->>'temporaryResourceTtlSeconds')::bigint = 259200
+        and (config->'storageMedia'->>'temporaryResourceCleanupIntervalSeconds')::bigint = 1800
+        from system_setting where id = 1));
 select pg_temp.assert_true('storage_upload no longer persists an expiry fact',
     not exists(select 1 from information_schema.columns
         where table_name = 'storage_upload' and column_name = 'expires_at')

@@ -279,6 +279,18 @@ final class HistoryValueCodecs {
     return value.intValue();
   }
 
+  static Long nullablePositiveLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0L) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a positive integer or null");
+    }
+    return value.longValue();
+  }
+
   static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
     try {
       return Enum.valueOf(kind, name);

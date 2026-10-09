@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInputReceiptJsonCodec;
@@ -486,15 +487,27 @@ public final class HistoryEntryPayloadJsonCodec {
           "phase",
           "trigger",
           "executionModel",
+          "outputBudget",
           "cutEntryId",
           "turnPrefixStartEntryId",
-          "historyCompactionEntryId");
+          "historyCompactionEntryId",
+          "childThreadId",
+          "joinInvocationId");
 
   private static ObjectNode encodeCompactionStart(CompactionStart start) {
     ObjectNode node = NODES.objectNode();
     node.put("phase", start.phase().name());
     node.put("trigger", start.trigger().name());
-    node.set("executionModel", HistoryValueCodecs.encodeModelSelection(start.executionModel()));
+    if (start.executionModel() == null) {
+      node.putNull("executionModel");
+    } else {
+      node.set("executionModel", HistoryValueCodecs.encodeModelSelection(start.executionModel()));
+    }
+    if (start.outputBudget() == null) {
+      node.putNull("outputBudget");
+    } else {
+      node.put("outputBudget", start.outputBudget());
+    }
     node.put("cutEntryId", start.cutEntryId().toString());
     if (start.turnPrefixStartEntryId() == null) {
       node.putNull("turnPrefixStartEntryId");
@@ -506,6 +519,16 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.put("historyCompactionEntryId", start.historyCompactionEntryId().toString());
     }
+    if (start.childThreadId() == null) {
+      node.putNull("childThreadId");
+    } else {
+      node.put("childThreadId", start.childThreadId().toString());
+    }
+    if (start.joinInvocationId() == null) {
+      node.putNull("joinInvocationId");
+    } else {
+      node.put("joinInvocationId", start.joinInvocationId().toString());
+    }
     return node;
   }
 
@@ -515,6 +538,12 @@ public final class HistoryEntryPayloadJsonCodec {
     }
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.compaction");
     HistoryValueCodecs.requireExactFields(node, COMPACTION_START_FIELDS, "TURN_START.compaction");
+    JsonNode modelNode = node.get("executionModel");
+    ModelSelection executionModel =
+        modelNode == null || modelNode.isNull()
+            ? null
+            : HistoryValueCodecs.decodeModelSelection(
+                modelNode, "TURN_START.compaction.executionModel");
     return new CompactionStart(
         HistoryValueCodecs.readEnum(
             CompactionPhase.class,
@@ -524,13 +553,15 @@ public final class HistoryEntryPayloadJsonCodec {
             CompactionTrigger.class,
             HistoryValueCodecs.text(node, "trigger"),
             "TURN_START.compaction.trigger"),
-        HistoryValueCodecs.decodeModelSelection(
-            node.get("executionModel"), "TURN_START.compaction.executionModel"),
+        executionModel,
+        HistoryValueCodecs.nullablePositiveLong(node, "outputBudget", "TURN_START.compaction"),
         HistoryValueCodecs.requiredPositiveId(node, "cutEntryId", "TURN_START.compaction"),
         HistoryValueCodecs.nullablePositiveId(
             node, "turnPrefixStartEntryId", "TURN_START.compaction"),
         HistoryValueCodecs.nullablePositiveId(
-            node, "historyCompactionEntryId", "TURN_START.compaction"));
+            node, "historyCompactionEntryId", "TURN_START.compaction"),
+        HistoryValueCodecs.nullablePositiveId(node, "childThreadId", "TURN_START.compaction"),
+        HistoryValueCodecs.nullablePositiveId(node, "joinInvocationId", "TURN_START.compaction"));
   }
 
   private static TurnEndPayload decodeTurnEnd(JsonNode value) {

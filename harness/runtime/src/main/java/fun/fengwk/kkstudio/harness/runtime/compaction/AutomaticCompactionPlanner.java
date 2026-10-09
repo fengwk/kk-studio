@@ -13,19 +13,15 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import java.util.Objects;
 
 /**
- * 自动压缩规划器：按 owned HISTORY -&gt; fallback -&gt; hard overflow -&gt; eligible threshold 的顺序计算下一次自动压缩。
+ * 自动压缩规划器：按 owned HISTORY -&gt; hard overflow -&gt; eligible threshold 的顺序计算下一次自动压缩。
  *
- * <p>每次决策使用同一个 {@link CompactionConfig} 快照构建或驱动 {@link CompactionPlanner}， 保证阈值判定、fallbackModel
- * 与规划逻辑完全一致。
+ * <p>每次决策使用同一个 {@link CompactionConfig} 快照构建或驱动 {@link CompactionPlanner}， 保证阈值判定与规划逻辑完全一致。
  */
 public final class AutomaticCompactionPlanner {
 
   public AutomaticCompactionPlanner() {}
 
-  /**
-   * 按 owned HISTORY -&gt; fallback -&gt; hard overflow -&gt; eligible threshold 的顺序计算下一次压缩。
-   * 无需自动压缩时返回 null。
-   */
+  /** 按 owned HISTORY -&gt; hard overflow -&gt; eligible threshold 的顺序计算下一次压缩。 无需自动压缩时返回 null。 */
   public CompactionPreparation plan(
       ThreadState thread, EntryPath path, CompactionConfig compaction, boolean thresholdEligible) {
     Objects.requireNonNull(thread, "thread");
@@ -48,17 +44,6 @@ public final class AutomaticCompactionPlanner {
           ownedHistoryContinuation(thread, path, latestTurn, planner);
       if (historyContinuation != null) {
         return historyContinuation;
-      }
-      CompactionTurns.CompactionTurn compactionTurn =
-          CompactionHistory.compactionTurnAtStart(path, latestStart.id());
-      if (latestTurn.end().outcome() == TurnEndOutcome.FAILED
-          && compaction.fallbackModel() != null
-          && latestStartPayload
-              .compaction()
-              .executionModel()
-              .equals(latestStartPayload.settings().model())
-          && !compaction.fallbackModel().equals(latestStartPayload.compaction().executionModel())) {
-        return planner.prepareFallback(path, compactionTurn);
       }
       return null;
     }

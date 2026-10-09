@@ -128,10 +128,11 @@ comment on column agent_model.model_id is
 
 create table agent_definition (
     name            varchar(64)   primary key,
+    type            varchar(16)   not null default 'USER',
     description     text,
     system_prompt   text,
-    model_provider_name varchar(64) not null,
-    model_name      varchar(128)  not null,
+    model_provider_name varchar(64),
+    model_name      varchar(128),
     variant         varchar(64),
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
@@ -145,6 +146,16 @@ create table agent_definition (
     ),
     constraint fk_agent_definition_model foreign key (model_provider_name, model_name)
         references agent_model (provider_name, name),
+    constraint ck_agent_definition_type check (type in ('USER', 'BUILTIN')),
+    constraint ck_agent_definition_model_pair check (
+        (model_provider_name is null) = (model_name is null)
+    ),
+    constraint ck_agent_definition_variant_requires_model check (
+        variant is null or model_name is not null
+    ),
+    constraint ck_agent_definition_user_requires_model check (
+        type = 'BUILTIN' or model_name is not null
+    ),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
 
@@ -768,7 +779,15 @@ comment on column system_setting.updated_at is '最后更新时间（毫秒精�
 
 insert into system_setting (id, config) values (
     1,
-     '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"network":{"noProxyHosts":"localhost,127.*,::1"},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
+    '{
+      "advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},
+      "aiRuntime":{"compactionKeepRecentTokens":20000,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
+      "environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},
+      "integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},
+      "network":{"noProxyHosts":"localhost,127.*,::1"},
+      "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
+      "tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}
+    }'::jsonb
 );
 
 ------------------------------------------------------------------------------
@@ -829,7 +848,8 @@ create table harness_entry (
             'COMPACTION',
             'TURN_END',
             'NOTIFICATION',
-            'SETTINGS'
+            'SETTINGS',
+            'FORK'
         )
     ),
     constraint ck_harness_entry_parent_shape check (
@@ -853,7 +873,7 @@ comment on table harness_entry is '不可变 Entry：append-only 树节点，ROO
 comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
 comment on column harness_entry.session_id is '所属 Session';
 comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
-comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS）';
+comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
 comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';

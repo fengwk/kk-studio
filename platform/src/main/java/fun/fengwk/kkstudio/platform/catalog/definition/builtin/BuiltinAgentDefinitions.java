@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.definition.builtin;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
 
 import java.util.List;
 
@@ -21,7 +21,9 @@ public final class BuiltinAgentDefinitions {
   private static final List<BuiltinAgent> DEFINITIONS =
       List.of(
           new BuiltinAgent(
-              COMPACTION_NAME, CompactionPrompts.summarizationSystemPrompt(), emptyConfig()));
+              COMPACTION_NAME,
+              BuiltinAgentPrompts.compactionSummarizationSystemPrompt(),
+              emptyConfig()));
 
   private BuiltinAgentDefinitions() {}
 
