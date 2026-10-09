@@ -119,6 +119,20 @@ helper 命令行只携带固定入口与私有状态目录；工作目录和 arg
 
 [`TerminalWriter`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalWriter.java) 是单个 terminal 的纯内存 writer reducer，由调用方单 owner 串行访问，类似 [`TerminalViewStream`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalViewStream.java)：它不写 PTY、不创建 executor 或定时器、不维护观察流或 transport，生产时钟为 `System::nanoTime`。它按 `terminalId` 维护固定 15 秒租期、公开 epoch 与私有 token secret 的控制权，`viewerId` 不能单独授权；每个 epoch 从 seq=1 起只允许一个在途 INPUT/RESIZE，操作摘要为 SHA-256，只有唯一 `ACCEPTED` 决议才交由调用方调用 Runtime，真实 future 决议通过 `complete` 一次性回填。已有在途操作时所有控制权轮换（takeover、跨连接恢复、释放、过期后重新授权）保守返回 `BUSY`；跨连接恢复必须携带旧 epoch/token 与待核对 seq/摘要（租期失效只禁用旧输入/续租/释放，长断连后仍可凭旧 secret 核对并恢复），无法核对的旧操作视为结果不确定并冻结 writer；每次真实轮换到新 epoch 都重置去重水位，使新 epoch 从 seq=1 重新开始。重复控制 requestId 只在授权仍有效时重放，失效、转移或冻结后一律明确拒绝，冲突 requestId 不覆盖首个请求的结果。公开状态与 `toString` 不回显 token 或输入字节，也不保留输入日志或历史 journal。租期/seq 去重/跨连接恢复/fencing/secret 去敏由 [`TerminalWriterTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalWriterTest.java) 验证。reducer 的公开值类型 `WriterGrant`/`WriterState`/`OperationDigest`/`OperationOutcome`/`ControlResult`/`AdmissionResult` 已归一到 `harness-environment` 的 terminal 包，与[终端控制 wire](harness-environment.md)共用同一组不可变定义；reducer 与 `WriterOwner` 仍留在 Daemon，状态机不变。
 
+### 终端协调器
+
+[`TerminalCoordinator`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalCoordinator.java) 是每 Daemon 一份的单例终端协调器：持有随机 `daemonInstanceId`、唯一启动规格、原 Environment 身份与当前 Backend generation、一份 `TerminalRuntime`/`TerminalWriter` 与最多 8 个 Observer。公开边界是异步 `bind(environmentId, generation)`、`receive(generation, request)`、`disconnect(generation)`、`shutdown()` 与 `termination()`（shutdown 幂等）；这些 future 只表示命令已被受理/状态处理完成，不代表 INPUT 已在 PTY 执行，真实操作结果以事件为准。全部 reducer/stream/状态变更在注入的单 owner executor 上串行执行；PTY 启动不在 owner、scheduler 或 VT executor 上执行，而是投给注入的阻塞 I/O executor。它不创建 executor，不装配连接、持久化或 UI。
+
+外部受理进入 128 项 / 512 KiB 的有界 mailbox（输入字节加固定 metadata 计费），满队列或已关闭时立即以固定异常拒绝，不丢已收请求；runtime 写决议、启动与停止等内部完成信号使用独立保留槽，外部满队列不会挤掉它们。同一时刻最多一份 snapshot、一次启动/收敛与一次 writer 操作，ticker 最多一份排队：调度间隔 34ms（上限 30Hz），只发有界 owner 信号，仅在存在观察者且有 credit 时捕获一次画面。每个 Observer 保留一条 `TerminalViewStream`、route+viewerId、streamId、最后 attach/open 请求签名与结果的有界槽，以及至多一份在途更新；同 requestId 且同签名重放现存流而不旋转，冲突 requestId 明确拒绝。KEEPALIVE 期望 5s、闲置 15s 撤销；`VIEW_APPLIED` 等待 10s 后只撤销该流而不杀 shell；判时只用单调 clock 差值。emitter 必须非阻塞，抛错时只移除该收件人的 Observer，不重试也不杀 shell。
+
+`bind` 同 Environment 新 generation 清旧观察 route、保留 shell 与 writer 租期；同代际换 Environment 不是合法重绑，一律 no-op 而不复用或倒退绑定；`disconnect` 只影响匹配 generation。`bind` 不同 Environment 先围住旧操作入口、停止旧 runtime 并等待唯一收敛，再清 session 绑定新身份；重绑等待期间任何新 `bind` 都以固定 REBINDING 拒绝，不让调用方提前认为已绑定；启动 gate 只检查未关闭且原 Environment 仍匹配，过期 generation 的 receive/disconnect/迟到完成回调都无副作用。OPEN 首次才以 80x24/history 512 启动，并发或重复 OPEN 只启动一个 native；没有旧 session 时带 `expectedExited` 固定 REQUEST_CONFLICT；RUNNING 复用同一 instance 并 attach，已 EXITED/FAILED 且无 `expectedExited` 只 attach 末屏不自动新开，只有精确匹配旧 identity 且旧 session 已结束的 `expectedExited` 才新建 terminalId，迟到或重复的 `expectedExited` 不能再次启动，错误不回显 launch executable/argv。ATTACH 只指向现存 identity，与 OPEN 共用同一 attach 路径，新流先发不含 grant 的 ATTACHED 与 RESET。命令的 environmentId 必须匹配绑定，带 identity 必须同时匹配 daemonInstanceId 与 terminalId，带 stream 必须来自匹配 route+viewer 的真实 Observer。CLAIM/TAKEOVER/INPUT/RESIZE 仅在 RUNNING 且该流已有 applied 基线后准入，CLAIM 恢复直接复用既有 `TerminalWriter.recover`。`WRITER_CHANGED` 公开广播不含 `ControlResult`（尤其不含 grant secret），发起者另行收到自己的 result。
+
+INPUT/RESIZE 只在 `AdmissionResult` 为 ACCEPTED 时调用 Runtime 一次，PENDING/CONFIRMED/REJECTED 直接返回既有决议。真实 future 成功记 WRITTEN，`StaleModeException` 记 NOT_WRITTEN+STALE_MODE，native 之前异常记 NOT_WRITTEN，`OutcomeUnknownException` 记 OUTCOME_UNKNOWN 并冻结/停止会话；先 `writer.complete(epoch, seq, digest, outcome)` 再发 OP_ACK，迟到完成不能推进新 session/epoch。Runtime 自然 termination 记录 EXITED/FAILED、exitCode 与末屏、expire writer 入口且不清末屏，仍可 attach 查看；CLOSE 要求精确 identity 与 `expectedWriterEpoch` CAS，有未决操作时返回 BUSY，通过后按自然 termination 路径停止并记录末屏。画面捕获失败以固定 ERROR RUNTIME_FAILED 上报并按 FAILED 收敛、不再读取失败内核；已保留末屏时之后仍可 attach 读末屏，没有末屏时之后的 ATTACH 立即拿固定错误而不是永远 pending。
+
+失败关闭可从任意线程触发：先围栏 drain（置位 `drainFailed` 并清空 control），再以异常终结全部已受理的外部 future（含唯一在途重绑）、停止并汇合全部 runtime、释放全部观察流与重放引用；被放弃或迟到的启动一律先停止已返回的 runtime，其 cleanup 失败传入 session 与重绑失败边界，不让新 Environment 虚假绑定成功。每次启动决议离开 pending 集合后独立触发终止汇合，因此 owner 回调被 fatal 丢弃也不会让 `termination()` 悬空；shutdown 与收敛失败都以异常 future 显式报告，不吞掉。
+
+单例 OPEN/重复与迟到 restart、不同 Environment 重绑与 generation fence、重绑期间 bind 拒绝与同代际 no-op、RESET credit 与慢观察者只撤流、viewer 不能索取 writer secret、操作 pending 不重复、mode stale、未知 write 冻结、CLOSE CAS/pending、画面捕获失败、启动/收敛/emitter 失败与 fatal 资源释放等确定性边界，以及真实 PTY 创建/输入/自然退出路径，由 [`TerminalCoordinatorTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalCoordinatorTest.java) 验证。
+
 ### 文件与检索
 
 文件修改保留编码、BOM、行尾，通过进程内分段锁串行化同文件修改。文本读窗口以 1-based 行/列定位，limit 默认及最大 2000，正文预算 60000 Unicode 码点；扫描到 EOF 得到总行数与 ends_with_newline，内存只驻留窗口。超时/中断不返回半个窗口；续读由 next 指向首个未返回字符。支持的图片以二进制结果直传对象存储，设备、FIFO、socket 等特殊节点在 I/O 前拒绝。详细读写契约见[内置 Read 测试映射](../operations/builtin-read-tests.md)与[文件修改测试映射](../operations/builtin-mutation-tests.md)。
@@ -151,7 +165,7 @@ COMPLETED(uploadId 与权威元数据)
 | `daemon` | CLI、数据目录、能力注册、执行器所有权、握手与调用运行时 |
 | `daemon.coding` | 文件、命令、检索、文本输出与 LSP；只消费显式调用目录 |
 | `daemon.process` | 唯一 OS 执行范围基座：父进程侧 `ProcessScope`、helper 侧 `ProcessScopeHelper`、POSIX/Windows 原生原语；不注册工具 |
-| `daemon.terminal` | 唯一启动规格解析、单 owner JediTerm 内核、headless Display、数值投影、纯内存 writer reducer 与一次调用的终端运行时资源边界；不注册工具、不拥有连接或业务持久化 |
+| `daemon.terminal` | 唯一启动规格解析、单 owner JediTerm 内核、headless Display、数值投影、纯内存 writer reducer、单例终端协调器与一次调用的终端运行时资源边界；不注册工具、不拥有连接或业务持久化 |
 | `daemon.journal` | 进程内原子去重与冻结终态，不持久化跨进程执行状态 |
 | `daemon.skill` | exact commit 的技能包拉取、校验、替换与启动恢复 |
 | `daemon.transport` | WebSocket 文本传输、压缩协商与帧边界 |
