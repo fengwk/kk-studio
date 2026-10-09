@@ -16,6 +16,7 @@ import type {
 export type PaneTarget =
   | { kind: 'NEW_SESSION_DRAFT' }
   | { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string; threadName: string }
+  | { kind: 'FORK_SESSION_DRAFT'; sessionId: string; sourceThreadId: string; startEntryId: string }
   | { kind: 'BOUND_THREAD'; threadId: string }
 
 export type PaneTargetKind = PaneTarget['kind']
@@ -147,6 +148,16 @@ function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
       && nonBlank(value.startEntryId)
       && nonBlank(value.threadId)
       && isCanonicalThreadName(value.threadName)
+      && typeof value.yoloEnabled === 'boolean'
+  }
+  if (value.type === 'NEW_FORKED_SESSION') {
+    return keys.length === 6
+      && keys.every((key) => key === 'type' || key === 'sourceThreadId' || key === 'startEntryId'
+        || key === 'sessionId' || key === 'threadId' || key === 'yoloEnabled')
+      && nonBlank(value.sourceThreadId)
+      && nonBlank(value.startEntryId)
+      && nonBlank(value.sessionId)
+      && nonBlank(value.threadId)
       && typeof value.yoloEnabled === 'boolean'
   }
   return false
@@ -297,6 +308,14 @@ export function isPaneTarget(value: unknown): value is PaneTarget {
       && nonBlank(value.startEntryId)
       && isCanonicalThreadName(value.threadName)
   }
+  if (value.kind === 'FORK_SESSION_DRAFT') {
+    return keys.length === 4
+      && keys.every((key) => key === 'kind' || key === 'sessionId' || key === 'sourceThreadId'
+        || key === 'startEntryId')
+      && nonBlank(value.sessionId)
+      && nonBlank(value.sourceThreadId)
+      && nonBlank(value.startEntryId)
+  }
   if (value.kind === 'BOUND_THREAD') {
     return keys.length === 2
       && keys.every((key) => key === 'kind' || key === 'threadId')
@@ -320,6 +339,14 @@ export function normalizePaneTarget(value: unknown): PaneTarget {
       threadName: value.threadName,
     }
   }
+  if (value.kind === 'FORK_SESSION_DRAFT') {
+    return {
+      kind: value.kind,
+      sessionId: value.sessionId.trim(),
+      sourceThreadId: value.sourceThreadId.trim(),
+      startEntryId: value.startEntryId.trim(),
+    }
+  }
   return { kind: value.kind, threadId: value.threadId.trim() }
 }
 
@@ -334,6 +361,11 @@ export function samePaneTarget(left: PaneTarget, right: PaneTarget): boolean {
     return left.sessionId === right.sessionId
       && left.startEntryId === right.startEntryId
       && left.threadName === right.threadName
+  }
+  if (left.kind === 'FORK_SESSION_DRAFT' && right.kind === 'FORK_SESSION_DRAFT') {
+    return left.sessionId === right.sessionId
+      && left.sourceThreadId === right.sourceThreadId
+      && left.startEntryId === right.startEntryId
   }
   if (left.kind === 'BOUND_THREAD' && right.kind === 'BOUND_THREAD') {
     return left.threadId === right.threadId
@@ -351,6 +383,24 @@ export function isNewThreadTarget(
   return target.kind === 'NEW_THREAD_DRAFT'
 }
 
+export function isForkSessionTarget(
+  target: PaneTarget,
+): target is { kind: 'FORK_SESSION_DRAFT'; sessionId: string; sourceThreadId: string; startEntryId: string } {
+  return target.kind === 'FORK_SESSION_DRAFT'
+}
+
+/**
+ * 承载历史路径的草稿目标：新建 Thread 分支（同 Session）与会话 fork（新 Session）都从
+ * 选定切点读取有效历史并据此初始化草稿，因此共用同一套 entries 读取与路径校验。
+ */
+export function isDraftHistoryTarget(
+  target: PaneTarget,
+): target is
+  | { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string; threadName: string }
+  | { kind: 'FORK_SESSION_DRAFT'; sessionId: string; sourceThreadId: string; startEntryId: string } {
+  return target.kind === 'NEW_THREAD_DRAFT' || target.kind === 'FORK_SESSION_DRAFT'
+}
+
 export function isBoundTarget(
   target: PaneTarget,
 ): target is { kind: 'BOUND_THREAD'; threadId: string } {
@@ -363,6 +413,9 @@ export function targetIdentity(target: PaneTarget): string {
   }
   if (target.kind === 'NEW_THREAD_DRAFT') {
     return `thread-draft:${target.sessionId}:${target.startEntryId}:${target.threadName}`
+  }
+  if (target.kind === 'FORK_SESSION_DRAFT') {
+    return `fork-session-draft:${target.sessionId}:${target.sourceThreadId}:${target.startEntryId}`
   }
   return `thread:${target.threadId}`
 }

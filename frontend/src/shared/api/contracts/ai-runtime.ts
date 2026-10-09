@@ -38,12 +38,27 @@ export type EntryType =
   | 'CUSTOM'
   | 'CUSTOM_MESSAGE'
   | 'NOTIFICATION'
+  | 'FORK'
   | 'MODEL_ATTEMPT_FAILURE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
   | 'COMPACTION'
   | 'TURN_END'
   | 'SETTINGS'
+
+/** 一次 fork 的模式：只陈述历史来源形态（同 Session 分支或复制到新 Session）。 */
+export type ForkMode = 'BRANCH' | 'SESSION'
+
+/**
+ * FORK Entry 的持久 payload：记录 fork 模式、作为切点的来源 Entry，以及会话 fork 时的来源 Thread
+ * （分支 fork 与来源同处一个 Session，因此 sourceThreadId 为 null）。
+ * 模型可见的固定英文通知正文不持久化在 payload JSON 中，只陈述事实，不建立执行父子关系。
+ */
+export interface HarnessForkPayloadDTO {
+  mode: ForkMode
+  sourceEntryId: string
+  sourceThreadId: string | null
+}
 
 /** 系统结果通知的分类；对模型只是上下文，不是更高权限指令。 */
 export type NotificationKind = 'SUBAGENT_RESULT' | 'TASK_BUDGET'
@@ -444,10 +459,25 @@ export interface NewThreadCommandTargetDTO {
   yoloEnabled: boolean
 }
 
-/** 创建型命令批次 target：NEW_SESSION / NEW_THREAD，都需要产品 owner。 */
+/**
+ * 会话 fork 创建 target：从 sourceThread 的 startEntryId 切点复制有效上下文到新 Session
+ * 与新 Thread。settings 从源切点 branch 推导，因此不携带 rootSettings/threadName；
+ * commands 与产品 owner 语义同 NEW_SESSION / NEW_THREAD。
+ */
+export interface NewForkedSessionCommandTargetDTO {
+  type: 'NEW_FORKED_SESSION'
+  sourceThreadId: string
+  startEntryId: string
+  sessionId: string
+  threadId: string
+  yoloEnabled: boolean
+}
+
+/** 创建型命令批次 target：NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION，都需要产品 owner。 */
 export type AgentCommandTargetDTO =
   | NewSessionCommandTargetDTO
   | NewThreadCommandTargetDTO
+  | NewForkedSessionCommandTargetDTO
 
 /** 创建型命令批次请求（POST /harness/command-batches）。 */
 export interface AgentCommandBatchRequestDTO {

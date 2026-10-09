@@ -1,6 +1,7 @@
 import { CircleDot, FileWarning } from 'lucide-react'
 import { CompactionEntryBlock } from '@/features/ai/runtime/thread-panel/messages/CompactionEntryBlock'
 import { NotificationEntryBlock } from '@/features/ai/runtime/thread-panel/messages/NotificationEntryBlock'
+import { SystemMessageCard } from '@/features/ai/runtime/thread-panel/messages/SystemMessageCard'
 import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
 /**
@@ -17,6 +18,20 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
         message={message}
         notification={message.notification ?? { kind: '', sourceThreadId: null }}
       />
+    )
+  }
+  if (message.kind === 'fork') {
+    return (
+      <SystemMessageCard
+        className="thread-notification thread-fork-entry"
+        data-entry-kind="fork"
+        data-fork-mode={message.fork?.mode ?? ''}
+        title={message.title}
+      >
+        <div className="thread-notification-body thread-notification-text">
+          {message.text}
+        </div>
+      </SystemMessageCard>
     )
   }
   const singleLine = message.kind === 'root'

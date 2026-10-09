@@ -2369,6 +2369,117 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
   })
 
+  it('opens a local FORK_SESSION_DRAFT from a closed boundary in HistoryTree and submits NEW_FORKED_SESSION idempotently across retries', async () => {
+    const user = userEvent.setup()
+    bindPaneTarget()
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([
+      {
+        entryId: 'entry-root',
+        sessionId: 'session-1',
+        parentEntryId: null,
+        entryType: 'ROOT',
+        payloadJson: JSON.stringify({
+          settings: {
+            agentName: 'assistant',
+            model: { providerName: 'provider-1', modelName: 'model-1', variant: 'default' },
+            environmentName: null,
+          },
+        }),
+        createTime: null,
+      },
+      {
+        entryId: 'entry-user-1',
+        sessionId: 'session-1',
+        parentEntryId: 'entry-root',
+        entryType: 'MESSAGE',
+        payloadJson: JSON.stringify({
+          message: { role: 'USER', contents: [{ type: 'text', text: 'first prompt' }] },
+        }),
+        createTime: null,
+      },
+      {
+        entryId: 'entry-turn-end-1',
+        sessionId: 'session-1',
+        parentEntryId: 'entry-user-1',
+        entryType: 'TURN_END',
+        payloadJson: JSON.stringify({ turnStartEntryId: 'entry-root', outcome: 'COMPLETED', continueModel: false }),
+        createTime: null,
+      },
+    ])
+    renderPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/history{Enter}')
+
+    const rows = await waitFor(() => {
+      const found = document.querySelectorAll('.history-tree-entry')
+      expect(found).toHaveLength(3)
+      return found
+    })
+    const forkSessionButton = screen.getByRole('button', { name: '从此处新建会话' })
+    const branchButton = screen.getByRole('button', { name: '从此处分支' })
+
+    // 非闭合边界（MESSAGE 行）两个分叉动作都必须禁用。
+    await user.click(rows[1] as HTMLElement)
+    expect(rows[1]?.getAttribute('data-can-fork')).toBe('false')
+    expect(forkSessionButton).toBeDisabled()
+    expect(branchButton).toBeDisabled()
+
+    // 选中已关闭 TURN_END：点击“从此处新建会话”只切本地 FORK_SESSION_DRAFT，不预创建 Session/Thread。
+    await user.click(rows[2] as HTMLElement)
+    expect(rows[2]?.getAttribute('data-can-fork')).toBe('true')
+    expect(forkSessionButton).toBeEnabled()
+    await user.click(forkSessionButton)
+
+    const targetKey = `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`
+    expect(JSON.parse(localStorage.getItem(targetKey) ?? 'null')).toEqual({
+      kind: 'FORK_SESSION_DRAFT',
+      sessionId: 'session-1',
+      sourceThreadId: THREAD_ID,
+      startEntryId: 'entry-turn-end-1',
+    })
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+
+    // 首次发送遇到网络超时（未知结果），重试必须复用同一组客户端预分配的 sessionId/threadId 与命令幂等键。
+    vi.mocked(harnessService.acceptCommandBatch)
+      .mockRejectedValueOnce(new Error('network timeout'))
+      .mockResolvedValueOnce({
+        sessionId: 'forked-session-1',
+        thread: thread({
+          threadId: 'forked-thread-1',
+          sessionId: 'forked-session-1',
+          name: 'main',
+        }),
+        acceptedCommands: [],
+      })
+
+    const draftComposer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(draftComposer)
+    await user.type(draftComposer, 'hello forked session{Enter}')
+
+    const retryButton = await screen.findByRole('button', { name: '重试' })
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+    const firstRequest = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
+    expect(firstRequest?.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
+    expect(firstRequest?.target).toMatchObject({
+      type: 'NEW_FORKED_SESSION',
+      sourceThreadId: THREAD_ID,
+      startEntryId: 'entry-turn-end-1',
+      yoloEnabled: false,
+    })
+
+    await user.click(retryButton)
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+    const secondRequest = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
+    expect(secondRequest).toEqual(firstRequest)
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(targetKey) ?? 'null')).toEqual({
+        kind: 'BOUND_THREAD',
+        threadId: 'forked-thread-1',
+      })
+    })
+  })
+
   it('returns from Debug through the read-only toolbar and keeps the draft and binding', async () => {
     // Debug 覆盖整个 pane 且底部控制区被隐藏，返回必须由 Debug 自身的工具条提供。
     const user = userEvent.setup()
