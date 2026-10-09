@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.share.notification;
 
 import java.time.Duration;
 
-/** Single budget for publication, subscriber mailboxes and PG reassembly. */
+/** Single budget for publication, subscriber mailboxes and shared transport reassembly. */
 public record NotificationLimits(
     int maxMessageBytes,
     int pendingBytes,
@@ -31,6 +31,7 @@ public record NotificationLimits(
 
   public NotificationLimits {
     if (maxMessageBytes <= 0
+        || maxMessageBytes > DEFAULT_MAX_MESSAGE_BYTES
         || pendingBytes < maxMessageBytes
         || queueCapacity <= 0
         || reassemblyBytes < maxMessageBytes

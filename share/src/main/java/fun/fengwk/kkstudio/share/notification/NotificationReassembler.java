@@ -13,7 +13,7 @@ import java.util.function.LongSupplier;
 /**
  * Thread-safe bounded reassembler shared by every transfer. It reserves the entire logical size
  * before accepting a fragment, keeps only bounded completion tombstones, and delivers a complete
- * {@link NotificationPacket} exactly once per logical message.
+ * {@link NotificationPacket} once while its bounded completion tombstone is retained.
  *
  * <p>Contradictory headers, conflicting duplicate fragments, expired or over-budget messages
  * release the whole packet and request a resync of the owning topic; a byte-identical duplicate is
@@ -81,7 +81,8 @@ public final class NotificationReassembler {
     }
     Pending message = pending.get(key);
     if (message == null) {
-      if (pending.size() >= limits.reassemblyMessages()
+      if (frame.totalBytes() > limits.maxMessageBytes()
+          || pending.size() >= limits.reassemblyMessages()
           || frame.totalBytes() > limits.reassemblyBytes() - reservedBytes) {
         remember(key);
         resync.accept(frame.topic());

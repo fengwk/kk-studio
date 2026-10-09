@@ -16,8 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Reassembly contract shared by every transport: out-of-order delivery, bounded budgets, expiry,
- * conflicting fragments, self-echo and two independent receivers. Migrated from the former
- * notification-private ReassemblerTest.
+ * conflicting fragments, self-echo and two independent receivers.
  */
 class NotificationReassemblerTest {
   private static final String TOPIC = "test.events";
@@ -149,6 +148,18 @@ class NotificationReassemblerTest {
     bounded.accept(chunk);
     assertEquals(List.of(TOPIC), resyncs);
     assertEquals(0, bounded.reservedBytes());
+    assertTrue(delivered.isEmpty());
+  }
+
+  @Test
+  void logicalLimitAppliesEvenWhenAggregateReassemblyBudgetHasRoom() {
+    // Aggregate room cannot authorize a body larger than the per-message budget.
+    NotificationPacket message = packet(UUID.randomUUID(), self, "z".repeat(30000));
+    for (int index = 0; index < NotificationCarrier.count(message.byteLength()); index++) {
+      assembler.accept(NotificationCarrier.chunk(message, index));
+    }
+    assertEquals(List.of(TOPIC), resyncs);
+    assertEquals(0, assembler.reservedBytes());
     assertTrue(delivered.isEmpty());
   }
 

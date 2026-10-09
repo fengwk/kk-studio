@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * Carrier framing contract for every transport: one format, canonical fields, defensive copies and
- * fixed, payload-free errors. Migrated from the former notification-private CarrierTest.
+ * fixed, payload-free errors.
  */
 class NotificationCarrierTest {
   private static final String TOPIC = "test.events";
@@ -253,6 +253,17 @@ class NotificationCarrierTest {
 
   @Test
   void limitsRejectZeroAndUnderSizedBudgets() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new NotificationLimits(
+                NotificationLimits.DEFAULT_MAX_MESSAGE_BYTES + 1,
+                32 * 1024 * 1024,
+                1,
+                32 * 1024 * 1024,
+                1,
+                Duration.ofSeconds(1),
+                1));
     assertThrows(
         IllegalArgumentException.class,
         () -> new NotificationLimits(1, 1, 1, 1, 1, Duration.ZERO, 1));
