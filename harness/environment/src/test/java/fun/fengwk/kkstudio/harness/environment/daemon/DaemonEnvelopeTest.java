@@ -69,10 +69,26 @@ class DaemonEnvelopeTest {
         DaemonProtocol.VERSION,
         new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, "{}")
             .protocolVersion());
-    for (int version : new int[] {0, 1, 3}) {
+    for (int version : new int[] {0, 2, 4}) {
       assertThrows(
           IllegalArgumentException.class,
           () -> new DaemonEnvelope(version, DaemonMessageType.READY, ID, null, "{}"));
+    }
+  }
+
+  /** shell 控制/事件必须携带非空 scope，且禁止 invocationId。 */
+  @Test
+  void shellMessagesRequireScopeAndForbidInvocationId() {
+    for (DaemonMessageType type :
+        new DaemonMessageType[] {DaemonMessageType.SHELL_COMMAND, DaemonMessageType.SHELL_EVENT}) {
+      assertEquals(
+          ID, new DaemonEnvelope(DaemonProtocol.VERSION, type, ID, null, "{}").environmentId());
+      assertThrows(
+          NullPointerException.class,
+          () -> new DaemonEnvelope(DaemonProtocol.VERSION, type, null, null, "{}"));
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new DaemonEnvelope(DaemonProtocol.VERSION, type, ID, "invocation", "{}"));
     }
   }
 }

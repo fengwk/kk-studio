@@ -33,6 +33,14 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalListener;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.TerminalDispatch;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalCommand;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalControlCodec;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalEvent;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalIdentity;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalRequest;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalResponse;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -99,6 +107,7 @@ public final class EnvironmentDaemonServer
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
   private final EnvironmentSessionListener sessionListener;
+  private final EnvironmentTerminalListener terminalListener;
   private final DaemonResourceTicketService ticketService;
   private final Supplier<EnvironmentServerSettings> settings;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -107,6 +116,7 @@ public final class EnvironmentDaemonServer
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonResourceTransferCodec transferCodec = new DaemonResourceTransferCodec();
+  private final TerminalControlCodec controlCodec = new TerminalControlCodec();
 
   /** 保护环境/连接目录与 invocation 目录；绝不在持有该锁时获取任何连接锁或访问外部端口。 */
   private final Object inventory = new Object();
@@ -122,12 +132,14 @@ public final class EnvironmentDaemonServer
       DaemonLeaseStore leaseStore,
       DaemonRegistrationDirectory registrationDirectory,
       EnvironmentSessionListener sessionListener,
+      EnvironmentTerminalListener terminalListener,
       DaemonResourceTicketService ticketService,
       Supplier<EnvironmentServerSettings> settings) {
     this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
     this.registrationDirectory =
         Objects.requireNonNull(registrationDirectory, "registrationDirectory");
     this.sessionListener = Objects.requireNonNull(sessionListener, "sessionListener");
+    this.terminalListener = Objects.requireNonNull(terminalListener, "terminalListener");
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
     this.settings = Objects.requireNonNull(settings, "settings");
   }
@@ -413,6 +425,84 @@ public final class EnvironmentDaemonServer
     releaseAllTransfers(active);
   }
 
+  /**
+   * 把一次 shell 控制请求投递给本节点该 Environment 当前的 READY Daemon 连接。
+   *
+   * <p>先取本节点当前 READY 连接与 READY 时冻结的 lease token，并要求 dispatch 的 expected token
+   * 与之一致。OPEN/ATTACH/CLAIM/ TAKEOVER/RELEASE/INPUT/RESIZE/KEEPALIVE/CLOSE 这类带副作用命令在锁外以 PG {@code
+   * holdsReadyLease} 做权威准入； DETACH/VIEW_APPLIED 只作用于当前本地 READY 连接与相同 lease，不逐包查询
+   * PG。发送前在连接锁内复核连接代际/READY/token。返回 {@link DaemonOfferResult#CLOSED}/{@link
+   * DaemonOfferResult#BUSY} 都表示帧肯定未递交；租约存储不可用时 fail-closed 返回 CLOSED，不重试。
+   */
+  public DaemonOfferResult sendShell(TerminalDispatch dispatch) {
+    Objects.requireNonNull(dispatch, "dispatch");
+    UUID leaseToken = dispatch.leaseToken();
+    TerminalRequest request = dispatch.request();
+    EnvironmentId environmentId = EnvironmentId.of(request.command().environmentId());
+
+    ConnectionState state;
+    UUID currentToken;
+    synchronized (inventory) {
+      state = connectionOf(environmentId);
+      currentToken = state == null ? null : state.leaseToken;
+    }
+    if (state == null
+        || currentToken == null
+        || !leaseToken.equals(currentToken)
+        || !state.isReady()) {
+      return DaemonOfferResult.CLOSED;
+    }
+
+    if (requiresReadyLease(request.command().payload())) {
+      // 权威准入（可能跨进程/网络）绝不在核心状态锁内执行；查询失败 fail-closed。
+      boolean holdsReady;
+      try {
+        holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
+      } catch (RuntimeException error) {
+        return DaemonOfferResult.CLOSED;
+      }
+      if (!holdsReady) {
+        return DaemonOfferResult.CLOSED;
+      }
+    }
+
+    String payloadJson = controlCodec.encodeRequest(request);
+    long generation = state.generation;
+    DaemonOfferResult outcome = null;
+    RuntimeException sendFailure = null;
+    synchronized (state) {
+      // PG 权威准入在锁外完成，可能跨越连接换代；回到连接锁后必须重新确认缓存的 state 仍是该 Environment 的
+      // 当前连接（真实代次），而不是只比较可能已被替换的 cached 对象，否则已替换连接仍会收到 offer。
+      ConnectionState current;
+      synchronized (inventory) {
+        current = connectionOf(environmentId);
+      }
+      if (current != state
+          || state.generation != generation
+          || !state.isReady()
+          || !leaseToken.equals(state.leaseToken)) {
+        return DaemonOfferResult.CLOSED;
+      }
+      try {
+        outcome = state.offer(DaemonMessageType.SHELL_COMMAND, null, payloadJson);
+      } catch (RuntimeException error) {
+        sendFailure = error;
+      }
+    }
+    if (sendFailure != null) {
+      // 传输在递交过程中失败：连接失效，帧确定未进入本地队列。
+      close(state.connection.connectionId());
+      return DaemonOfferResult.CLOSED;
+    }
+    return outcome;
+  }
+
+  /** 只有 DETACH/VIEW_APPLIED 不逐包查询 PG，其余 shell 命令都要求 PG READY 权威准入。 */
+  private static boolean requiresReadyLease(TerminalCommand.Payload payload) {
+    return !(payload instanceof TerminalCommand.Detach)
+        && !(payload instanceof TerminalCommand.ViewApplied);
+  }
+
   private void register(ActiveInvocation active) {
     synchronized (inventory) {
       LinkedHashMap<UUID, ActiveInvocation> invocations =
@@ -502,9 +592,14 @@ public final class EnvironmentDaemonServer
       case FAILED -> handleFailed(state, envelope, deferred);
       case CANCELLED -> handleCancelled(state, envelope, deferred);
       case ERROR -> handleError(state, envelope);
+      case SHELL_EVENT -> handleShellEvent(state, envelope, deferred);
       case RESOURCE_UPLOAD_REQUEST, RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
           "resource upload control is handled by the connection gate");
-      case WELCOME, INVOKE, CANCEL, RESOURCE_UPLOAD_TICKET -> throw new DaemonProtocolException(
+      case WELCOME,
+          INVOKE,
+          CANCEL,
+          SHELL_COMMAND,
+          RESOURCE_UPLOAD_TICKET -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to server");
     }
   }
@@ -737,6 +832,58 @@ public final class EnvironmentDaemonServer
     }
     deferred.add(() -> notifyEnvironmentReady(environmentId));
     resendActiveInvocations(state, environmentId);
+  }
+
+  /**
+   * 处理 daemon 回传的 shell 事件：只接受认证当前 READY 绑定，scope 必须与绑定一致；事件声明的 {@code identity.daemonInstanceId} 非
+   * {@code null} 时必须与绑定一致。
+   *
+   * <p>校验在 {@code gate} 内完成，listener 回调只入队、在锁外按处理顺序执行；不逐包查询 PG，也不把控制 payload 记入日志。按既有 {@link
+   * TerminalEvent} 契约，ERROR 事件的 {@code identity} 允许为 {@code null}（例如 OPEN 前或 mailbox
+   * 准入失败），这里必须保留而非拒绝； 回调始终携带服务端认证的 READY 绑定实例，而不是可选的事件 body identity。
+   */
+  private void handleShellEvent(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    requireReady(state);
+    requireNoInvocationId(envelope);
+    EnvironmentId environmentId = state.environmentId;
+    UUID leaseToken = state.leaseToken;
+    if (leaseToken == null) {
+      throw new DaemonProtocolException("leaseToken missing on SHELL_EVENT");
+    }
+    TerminalResponse response = controlCodec.decodeResponse(envelope.payloadJson());
+    TerminalEvent event = response.event();
+    if (!environmentId.equals(EnvironmentId.of(event.environmentId()))) {
+      throw new DaemonProtocolException(
+          "SHELL_EVENT environmentId does not match the bound connection");
+    }
+    String boundInstanceId = boundDaemonInstanceId(state);
+    if (boundInstanceId == null) {
+      throw new DaemonProtocolException("SHELL_EVENT has no authenticated READY binding");
+    }
+    TerminalIdentity identity = event.identity();
+    if (identity != null && !boundInstanceId.equals(identity.daemonInstanceId().toString())) {
+      throw new DaemonProtocolException(
+          "SHELL_EVENT daemonInstanceId does not match the READY binding");
+    }
+    UUID daemonInstanceId = UUID.fromString(boundInstanceId);
+    deferred.add(
+        () -> {
+          if (boundInstanceId.equals(boundDaemonInstanceId(state))
+              && leaseToken.equals(state.leaseToken)) {
+            terminalListener.onTerminalResponse(leaseToken, daemonInstanceId, response);
+          }
+        });
+  }
+
+  /** 当前 Environment 认证的 Daemon 实例身份；未绑定时为 {@code null}。 */
+  private String boundDaemonInstanceId(ConnectionState state) {
+    synchronized (inventory) {
+      EnvironmentState environment = environments.get(state.environmentId);
+      return environment == null || environment.connection != state || !state.isReady()
+          ? null
+          : environment.daemonInstanceId;
+    }
   }
 
   /**

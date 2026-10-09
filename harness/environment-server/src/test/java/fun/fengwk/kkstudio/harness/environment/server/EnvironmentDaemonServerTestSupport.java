@@ -22,6 +22,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalControlCodec;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalResponse;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -32,6 +34,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * 核心测试的内存基座：可控 fake channel / lease store，以及握手与帧构造辅助。
@@ -59,6 +62,7 @@ final class EnvironmentDaemonServerTestSupport {
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
   private static final DaemonCapabilityResultCodec RESULT_CODEC = new DaemonCapabilityResultCodec();
+  private static final TerminalControlCodec CONTROL_CODEC = new TerminalControlCodec();
 
   static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
@@ -135,12 +139,19 @@ final class EnvironmentDaemonServerTestSupport {
         Duration.ofSeconds(5));
   }
 
-  /** 测试夹具：一个核心实例 + 可控租约存储 + 会话监听记录。 */
+  /** 测试夹具：一个核心实例 + 可控租约存储 + 会话监听记录 + 终端响应记录。 */
   static final class Fixture {
 
     final FakeLeaseStore leaseStore = new FakeLeaseStore();
     final FakeTicketService ticketService = new FakeTicketService();
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
+
+    /** 认证后的 shell 事件回调记录：租约、实例身份与响应按到达顺序追加。 */
+    final List<UUID> terminalLeaseTokens = new ArrayList<>();
+
+    final List<UUID> terminalDaemonInstanceIds = new ArrayList<>();
+    final List<TerminalResponse> terminalResponses = new ArrayList<>();
+    Consumer<TerminalResponse> onTerminalResponse = response -> {};
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
 
@@ -161,6 +172,12 @@ final class EnvironmentDaemonServerTestSupport {
                 return Optional.empty();
               },
               readyNotifications::add,
+              (leaseToken, daemonInstanceId, response) -> {
+                terminalLeaseTokens.add(leaseToken);
+                terminalDaemonInstanceIds.add(daemonInstanceId);
+                terminalResponses.add(response);
+                onTerminalResponse.accept(response);
+              },
               ticketService,
               () -> new EnvironmentServerSettings(Duration.ofSeconds(60), 16L * 1024 * 1024));
     }
@@ -212,6 +229,20 @@ final class EnvironmentDaemonServerTestSupport {
           channel.boundEnvironmentId != null ? channel.boundEnvironmentId : ENVIRONMENT_ID;
       server.receive(channel.connectionId(), encode(scope, type, invocationId, payload));
     }
+
+    /** 投递一条 SHELL_EVENT：用当前绑定 scope 与显式 terminalListener 回调记录，便于身份/scope 断言。 */
+    void receiveShellEvent(FakeChannel channel, TerminalResponse response) {
+      EnvironmentId scope =
+          channel.boundEnvironmentId != null ? channel.boundEnvironmentId : ENVIRONMENT_ID;
+      receiveShellEvent(channel, scope, response);
+    }
+
+    void receiveShellEvent(FakeChannel channel, EnvironmentId scope, TerminalResponse response) {
+      server.receive(
+          channel.connectionId(),
+          encode(
+              scope, DaemonMessageType.SHELL_EVENT, null, CONTROL_CODEC.encodeResponse(response)));
+    }
   }
 
   /** 可控租约存储：租约状态可随时整体切换，用于验证围栏语义；只表达核心依赖的围栏返回值。 */
@@ -227,6 +258,15 @@ final class EnvironmentDaemonServerTestSupport {
     boolean rejected;
     boolean retryLater;
     DaemonCapabilities readyCapabilities;
+
+    /** 最近一次 tryAcquire 发放的租约 token，供测试构造与 READY 绑定一致的 dispatch。 */
+    UUID lastLeaseToken;
+
+    /** holdsReadyLease 被调用的次数，用于断言 observe-only 命令不逐包查询 PG。 */
+    int holdsReadyLeaseCalls;
+
+    /** 在 holdsReadyLease 内执行的回调，用于制造「PG 查询期间连接被替换」的竞态窗口。 */
+    Runnable onHoldsReadyLease;
 
     @Override
     public LeaseBindResult tryAcquire(
@@ -244,7 +284,8 @@ final class EnvironmentDaemonServerTestSupport {
         return new LeaseBindResult.Rejected("invalid registration token");
       }
       acquired = true;
-      return new LeaseBindResult.Acquired(UUID.randomUUID());
+      lastLeaseToken = UUID.randomUUID();
+      return new LeaseBindResult.Acquired(lastLeaseToken);
     }
 
     @Override
@@ -277,6 +318,12 @@ final class EnvironmentDaemonServerTestSupport {
 
     @Override
     public boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken) {
+      holdsReadyLeaseCalls++;
+      Runnable hook = onHoldsReadyLease;
+      if (hook != null) {
+        onHoldsReadyLease = null;
+        hook.run();
+      }
       if (databaseUnavailable) {
         throw new IllegalStateException("database unavailable");
       }

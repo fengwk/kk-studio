@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalListener;
 import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -66,6 +67,11 @@ public class PlatformHarnessTestConfiguration {
   @Bean
   public EnvironmentSessionListener environmentSessionListener() {
     return ignoredEnvironmentId -> {};
+  }
+
+  @Bean
+  public EnvironmentTerminalListener environmentTerminalListener() {
+    return (leaseToken, daemonInstanceId, response) -> {};
   }
 
   @Bean

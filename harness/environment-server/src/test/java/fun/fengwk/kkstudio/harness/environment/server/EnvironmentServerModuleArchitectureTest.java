@@ -18,8 +18,8 @@ import java.util.stream.Stream;
 /**
  * Environment Server 核心的架构守卫。
  *
- * <p>主源码只允许依赖 JDK、Jackson、harness.common 与 harness.environment； 禁止 Spring、持久化实现、传输容器、产品适配层与
- * harness.tool/runtime/daemon。模块 POM 也只允许这些生产依赖。
+ * <p>主源码只允许依赖 JDK、Jackson、harness.common、harness.environment 与 share 通知 API； 禁止
+ * Spring、持久化实现、传输容器、产品适配层与 harness.tool/runtime/daemon。模块 POM 也只允许这些生产依赖。
  */
 class EnvironmentServerModuleArchitectureTest {
 
@@ -65,6 +65,7 @@ class EnvironmentServerModuleArchitectureTest {
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
+            "fun.fengwk.kk-studio:kk-studio-share",
             "com.fasterxml.jackson.core:jackson-databind");
     while (matcher.find()) {
       String dependency = matcher.group(1);
@@ -120,7 +121,8 @@ class EnvironmentServerModuleArchitectureTest {
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
-        || imported.startsWith("fun.fengwk.kkstudio.harness.environment.");
+        || imported.startsWith("fun.fengwk.kkstudio.harness.environment.")
+        || imported.startsWith("fun.fengwk.kkstudio.share.notification.");
   }
 
   private static String normalizeImport(String importLine) {

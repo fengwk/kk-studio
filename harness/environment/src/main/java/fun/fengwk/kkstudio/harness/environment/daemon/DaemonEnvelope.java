@@ -16,7 +16,8 @@ import java.util.Set;
  * RESOURCE_UPLOAD_COMMIT}）以 {@code invocationId} 关联到具体调用，但 {@code transferId} 由 payload
  * 承载：同一调用可以有多个 并发/串行传输，因此它们不是「调用编号别名」。
  *
- * <p>本协议没有全局序号或 ACK：消息可靠性来自 invocationId 与 Daemon journal，而不是传输层确认。
+ * <p>外壳不定义全局序号或 ACK。调用消息由 invocationId 与 Daemon journal 关联；人工 shell 控制独立于 invocation，其请求、writer
+ * 序号和画面确认由终端控制协议拥有。
  */
 public record DaemonEnvelope(
     int protocolVersion,
@@ -39,7 +40,9 @@ public record DaemonEnvelope(
           DaemonMessageType.CANCELLED,
           DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
           DaemonMessageType.RESOURCE_UPLOAD_TICKET,
-          DaemonMessageType.RESOURCE_UPLOAD_COMMIT);
+          DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
+          DaemonMessageType.SHELL_COMMAND,
+          DaemonMessageType.SHELL_EVENT);
 
   private static final Set<DaemonMessageType> INVOCATION_MESSAGES =
       Set.of(
@@ -53,6 +56,10 @@ public record DaemonEnvelope(
           DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
           DaemonMessageType.RESOURCE_UPLOAD_TICKET,
           DaemonMessageType.RESOURCE_UPLOAD_COMMIT);
+
+  /** 人工 shell 控制/事件：绑定 Environment scope 且禁止 invocationId。 */
+  private static final Set<DaemonMessageType> SHELL_MESSAGES =
+      Set.of(DaemonMessageType.SHELL_COMMAND, DaemonMessageType.SHELL_EVENT);
 
   public DaemonEnvelope {
     if (protocolVersion != DaemonProtocol.VERSION) {
@@ -68,6 +75,10 @@ public record DaemonEnvelope(
     }
     if (INVOCATION_MESSAGES.contains(messageType)) {
       invocationId = requireNonBlank(invocationId, "invocationId");
+    } else if (SHELL_MESSAGES.contains(messageType)) {
+      if (invocationId != null) {
+        throw new IllegalArgumentException(messageType + " must not declare invocationId");
+      }
     } else if (invocationId != null && invocationId.isBlank()) {
       throw new IllegalArgumentException("invocationId must not be blank when present");
     }

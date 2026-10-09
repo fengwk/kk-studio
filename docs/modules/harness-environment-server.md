@@ -4,7 +4,7 @@
 [Harness Environment](harness-environment.md) 单独维护，本文件只描述服务端如何裁决；
 宿主进程侧的对应实现见 [Harness Daemon](harness-daemon.md)。
 
-生产依赖为 `harness-common`、`harness-environment` 与 Jackson。会话状态机通过 lease、registration、channel 和 ticket 端口消费宿主能力，可用内存 fake 在普通单元测试中驱动；生产装配见 [Platform](platform.md) 与 [Web](web.md)。
+生产依赖为 `harness-common`、`harness-environment`、`share` 与 Jackson。会话状态机通过 lease、registration、channel、ticket 和 terminal listener 端口消费宿主能力，可用内存 fake 在普通单元测试中驱动；生产装配见 [Platform](platform.md) 与 [Web](web.md)。
 
 ## 会话建立与租约围栏
 
@@ -49,6 +49,23 @@ close(connectionId)
 | `CLOSED` | [`EnvironmentCapabilityUnavailableException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityUnavailableException.java) | 帧确定未发送，调用确定未执行 |
 
 同一 Environment 内重复使用相同活动 `invocationId` 属于调用方错误，在发送任何帧之前即被拒绝。传输递交时抛错会关闭连接，但返回活动句柄，等待同实例恢复；不能把这条路径解释为确定未执行。恢复时，未取消的调用只向尚未发送过它的新连接代际重放 INVOKE，已取消的调用只重发 CANCEL，不再重发 INVOKE。取消意图与成功递交代际分别记录，BUSY/CLOSED 不算送达，也不靠空转轮询重试。
+
+## 人工终端路由
+
+[`sendShell`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 接收 [`TerminalDispatch`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/terminal/TerminalDispatch.java)，向本节点当前 READY 连接递交 `SHELL_COMMAND`，不登记 capability 调用或持久化终端内容。
+
+- `OPEN`、`ATTACH`、`CLAIM`、`TAKEOVER`、`RELEASE`、`INPUT`、`RESIZE`、`KEEPALIVE`、`CLOSE` 在锁外查询 `holdsReadyLease`，数据库不可用即返回 `CLOSED`。
+- `DETACH` 与 `VIEW_APPLIED` 只作用当前本地 READY 连接和相同 lease，不逐包访问数据库。
+- 发送锁内复核当前连接对象、generation、READY 和 lease token。换代或围栏失效不得向旧连接递交；`BUSY`、`CLOSED` 均表示未递交，不自动重试。
+
+入站 `SHELL_EVENT` 必须与当前认证 READY 连接的 Environment、Daemon 实例匹配。核心按连接顺序向 [`EnvironmentTerminalListener`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/terminal/EnvironmentTerminalListener.java) 回调，携带认证绑定的 lease token 与 Daemon 实例；回调排队期间若发生接管，尚未开始的旧连接事件被丢弃，已开始的回调不撤销。
+
+跨节点采用 [`ShellTopics`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/terminal/ShellTopics.java) 的两个固定、非 hint topic：
+
+- `shell.command`：`{leaseToken,request}`，目标为 Daemon owner 节点。
+- `shell.event`：`{ownerNodeId,leaseToken,daemonInstanceId,response}`，目标为 `response.route.appNodeId`。
+
+codec 拒绝未知字段、重复键、尾随 token 与非 canonical UUID；内层只复用 `TerminalControlCodec`。元数据与 payload 不在 `toString` 或解码异常中回显。
 
 ## 资源上传控制面
 
@@ -129,6 +146,7 @@ COMPLETED
 | 包路径 | 职责与边界 |
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.environment.server` | 会话、调用、transfer 与围栏裁决；外部 I/O 通过 transport、lease、registration、ticket 端口接入，不引入产品 DTO 或框架 |
+| `fun.fengwk.kkstudio.harness.environment.server.terminal` | 人工终端固定 topic、严格 codec、认证围栏元数据与监听端口；不拥有 PTY、VT 或持久化 |
 
 ## 源码与测试
 
@@ -138,6 +156,8 @@ COMPLETED
 
 - [`EnvironmentDaemonServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 验证握手/租约围栏、并发调用、终态与 expire 竞争、同实例恢复/异实例接管、上传幂等/绑定校验/清理，以及回调保序、重入和积压超限失败关闭。
 - [`EnvironmentDaemonServerTestSupport.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTestSupport.java)：测试基座，只表达核心真正依赖的窄端口语义，不模拟 SQL 或 WebSocket。
+- [`EnvironmentShellServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentShellServerTest.java)：shell READY 准入、查询期间换代、观测命令免查库、入站身份与排队回执围栏。
+- [`ShellTopicsCodecTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/terminal/ShellTopicsCodecTest.java)：固定 topic、字段与 UUID 校验、重复键拒绝及异常去敏。
 - [`EnvironmentServerModuleArchitectureTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerModuleArchitectureTest.java)：守卫主源码 import 白名单与 POM 生产依赖白名单。
 
 模块级覆盖率门禁为本模块 POM 中绑定到 `verify` 的 JaCoCo `check`：`EnvironmentDaemonServer` 行覆盖率不低于 `0.90`。

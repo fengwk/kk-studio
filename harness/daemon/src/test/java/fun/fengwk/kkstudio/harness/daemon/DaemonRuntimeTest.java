@@ -651,7 +651,7 @@ class DaemonRuntimeTest {
     completeHandshake();
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\","
             + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"arguments\":{},\"timeoutMillis\":1000}}");

@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalListener;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -225,13 +226,24 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     EnvironmentSessionListener sessionListener = env -> {};
+    EnvironmentTerminalListener terminalListener = (leaseToken, daemonInstanceId, response) -> {};
     EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
     this.serverNode1 =
         serverConfiguration.environmentDaemonServer(
-            registryNode1, environmentRepository, sessionListener, UNUSED_TICKET_SERVICE, snapshot);
+            registryNode1,
+            environmentRepository,
+            sessionListener,
+            terminalListener,
+            UNUSED_TICKET_SERVICE,
+            snapshot);
     this.serverNode2 =
         serverConfiguration.environmentDaemonServer(
-            registryNode2, environmentRepository, sessionListener, UNUSED_TICKET_SERVICE, snapshot);
+            registryNode2,
+            environmentRepository,
+            sessionListener,
+            terminalListener,
+            UNUSED_TICKET_SERVICE,
+            snapshot);
   }
 
   @AfterEach

@@ -8,9 +8,11 @@ public final class DaemonProtocol {
    *
    * <p>本版本只有固定的五个 envelope 字段（{@code protocolVersion}、{@code messageType}、nullable {@code
    * environmentId}、nullable {@code invocationId}、{@code payload}）、HELLO 携带的 {@code
-   * daemonInstanceId} 与 强制协商的 {@code permessage-deflate}。其他版本帧一律拒绝，不做双协议 fallback。
+   * daemonInstanceId} 与 强制协商的 {@code permessage-deflate}。人工 shell 控制/事件复用 {@link
+   * DaemonMessageType#SHELL_COMMAND}/{@link DaemonMessageType#SHELL_EVENT}：两者都要求非空 Environment
+   * scope、禁止 invocationId，payload 直接是终端控制 Request/Response 对象。其他版本帧一律拒绝，不做双协议 fallback。
    */
-  public static final int VERSION = 2;
+  public static final int VERSION = 3;
 
   /**
    * ERROR payload 的可选 {@code code}：目标 Environment 当前已有活跃连接租约，daemon 应按配置退避重连 （同 registration token

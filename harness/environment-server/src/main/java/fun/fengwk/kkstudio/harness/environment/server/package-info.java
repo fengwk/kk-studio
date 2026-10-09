@@ -4,13 +4,14 @@
  * HELLO/WELCOME/READY/HEARTBEAT/INVOKE 等 daemon 协议会话状态、租约围栏（{@link
  * fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore}）以及按 invocation 维度的在途调用生命周期。
  *
- * <p>边界与职责：本包只依赖 JDK、Jackson、harness.common 与 harness.environment；连接注册解析、租约存储、传输通道与 READY
- * 事件均由调用方通过窄端口注入（{@link
+ * <p>边界与职责：本模块只依赖 JDK、Jackson、harness.common、harness.environment 与 share 通知 API；连接注册解析、租约存储、传输通道与
+ * READY 事件均由调用方通过窄端口注入（{@link
  * fun.fengwk.kkstudio.harness.environment.server.DaemonRegistrationDirectory}、{@link
  * fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore}、{@link
  * fun.fengwk.kkstudio.harness.environment.server.DaemonChannel}、{@link
- * fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener}），因此核心不感知 Spring
- * 与持久化实现。
+ * fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener}、 {@link
+ * fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalListener}），因此核心不感知
+ * Spring 与持久化实现。
  *
  * <p>并发模型：同一 Environment 允许任意数量的 invocation 并发在途，仅以 invocationId 区分；不存在按 Environment
  * 的容量、信号量或排队。同一连接上的并发 {@code receive} 由 {@code gate} 串行化状态推进，listener 回调按该顺序由单一 drainer
