@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.ReadCapability;
 import fun.fengwk.kkstudio.harness.daemon.coding.TestCodingConfig;
+import fun.fengwk.kkstudio.harness.daemon.coding.TextOutputStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
@@ -100,6 +101,9 @@ class DaemonRuntimeTest {
 
   /** WELCOME 通告的资源字节预算；足够覆盖测试中的小资源。 */
   private static final long MAX_RESOURCE_BYTES = 1024L * 1024L;
+
+  private static final long TEMPORARY_RESOURCE_TTL_SECONDS = 3600L;
+  private static final long TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS = 60L;
 
   private static final EnvironmentId ENVIRONMENT_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
@@ -467,6 +471,7 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
+                (TextOutputStore) null,
                 (registry, executor, scheduler, lspExecutor) -> {
                   registry.register(new TestCapability());
                   return null;
@@ -516,6 +521,7 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
+                (TextOutputStore) null,
                 (registry, executor, scheduler, lspExecutor) -> {
                   executorRef.set(executor);
                   schedulerRef.set(scheduler);
@@ -2005,12 +2011,13 @@ class DaemonRuntimeTest {
     assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
     assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, payload.path("daemonVersion").asText());
     JsonNode environment = payload.path("environment");
-    assertEquals(5, environment.size());
+    assertEquals(6, environment.size());
     assertTrue(environment.path("operatingSystem").isTextual());
     assertTrue(environment.path("timeZone").isTextual());
     assertTrue(environment.path("userName").isTextual());
     assertTrue(environment.path("homeDirectory").isTextual());
     assertTrue(environment.path("note").isTextual());
+    assertTrue(environment.path("tempDirectory").isTextual());
     assertTrue(environment.path("rootPath").isMissingNode());
     assertTrue(environment.path("workingDirectory").isMissingNode());
     // 严格 wire 形状：必须能被共享 codec 往返解码。
@@ -2515,6 +2522,79 @@ class DaemonRuntimeTest {
     }
   }
 
+  /** 意图：已 READY 连接收到 TEMPORARY_RESOURCE_POLICY 控制帧后立即应用新策略（同一控制通道热更）。 */
+  @Test
+  void readyConnectionAppliesPushedTemporaryResourcePolicy() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+
+    transport.receive(policyMessage(120L, 30L));
+
+    assertEquals(120L, runtime.temporaryResourceTtlSeconds());
+    assertEquals(30L, runtime.temporaryResourceCleanupIntervalSeconds());
+  }
+
+  /** 意图：READY 之前收到策略帧是协议违规，必须回 ERROR 且不改变尚未绑定的策略。 */
+  @Test
+  void temporaryResourcePolicyBeforeReadyIsProtocolError() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.start();
+    transport.awaitNextMessageType(HELLO);
+    transport.takeMessages(1);
+
+    transport.receive(policyMessage(120L, 30L));
+
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(0L, runtime.temporaryResourceTtlSeconds());
+  }
+
+  /** 意图：策略帧必须绑定到本连接 Environment；scope 不匹配会被控制通道认证拒绝。 */
+  @Test
+  void temporaryResourcePolicyWithForeignScopeIsRejected() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION,
+            DaemonMessageType.TEMPORARY_RESOURCE_POLICY,
+            EnvironmentId.parse("22222222-2222-2222-2222-222222222222"),
+            null,
+            policyPayload(120L, 30L)));
+
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(TEMPORARY_RESOURCE_TTL_SECONDS, runtime.temporaryResourceTtlSeconds());
+    assertEquals(
+        TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS,
+        runtime.temporaryResourceCleanupIntervalSeconds());
+  }
+
+  private DaemonEnvelope policyMessage(long ttlSeconds, long cleanupIntervalSeconds) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION,
+        DaemonMessageType.TEMPORARY_RESOURCE_POLICY,
+        ENVIRONMENT_ID,
+        null,
+        policyPayload(ttlSeconds, cleanupIntervalSeconds));
+  }
+
+  private static String policyPayload(long ttlSeconds, long cleanupIntervalSeconds) {
+    return "{\"temporaryResourceTtlSeconds\":"
+        + ttlSeconds
+        + ",\"temporaryResourceCleanupIntervalSeconds\":"
+        + cleanupIntervalSeconds
+        + "}";
+  }
+
   /** 模拟 Gateway 完成 HELLO/WELCOME 握手：发送 WELCOME 让 daemon 推进到 READY。 */
   private void completeHandshake() throws InterruptedException {
     handshakeTransport.awaitNextMessageType(DaemonMessageType.HELLO);
@@ -2587,14 +2667,20 @@ class DaemonRuntimeTest {
   }
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType) {
-    // WELCOME 必须通告正的资源字节预算（协议要求）；其余平台消息只承载空 payload。
+    // WELCOME 必须通告正的资源字节预算与临时资源策略（协议要求）；其余平台消息只承载空 payload。
     if (messageType == DaemonMessageType.WELCOME) {
       return new DaemonEnvelope(
           DaemonProtocol.VERSION,
           messageType,
           ENVIRONMENT_ID,
           null,
-          "{\"maxResourceBytes\":" + MAX_RESOURCE_BYTES + "}");
+          "{\"maxResourceBytes\":"
+              + MAX_RESOURCE_BYTES
+              + ",\"temporaryResourceTtlSeconds\":"
+              + TEMPORARY_RESOURCE_TTL_SECONDS
+              + ",\"temporaryResourceCleanupIntervalSeconds\":"
+              + TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS
+              + "}");
     }
     return new DaemonEnvelope(DaemonProtocol.VERSION, messageType, ENVIRONMENT_ID, null, "{}");
   }

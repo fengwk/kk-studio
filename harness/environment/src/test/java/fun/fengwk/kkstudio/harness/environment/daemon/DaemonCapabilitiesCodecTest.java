@@ -12,13 +12,20 @@ import org.junit.jupiter.api.Test;
 class DaemonCapabilitiesCodecTest {
 
   private static final String DAEMON_VERSION = "1.0.9";
+  private static final String TEMP_DIRECTORY = "/tmp/kk-studio";
   private static final DaemonEnvironmentInfo ENVIRONMENT =
       new DaemonEnvironmentInfo(
-          DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Linux environment.");
+          DaemonOperatingSystem.LINUX,
+          "Asia/Shanghai",
+          "dev",
+          "/home/dev",
+          "Linux environment.",
+          TEMP_DIRECTORY);
   private static final String ENVIRONMENT_JSON =
       "\"environment\":{\"operatingSystem\":\"linux\","
           + "\"timeZone\":\"Asia/Shanghai\",\"userName\":\"dev\","
-          + "\"homeDirectory\":\"/home/dev\",\"note\":\"Linux environment.\"}";
+          + "\"homeDirectory\":\"/home/dev\",\"note\":\"Linux environment.\","
+          + "\"tempDirectory\":\"/tmp/kk-studio\"}";
   private static final String DAEMON_VERSION_JSON = "\"daemonVersion\":\"" + DAEMON_VERSION + "\",";
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -34,7 +41,7 @@ class DaemonCapabilitiesCodecTest {
     String encoded = codec.encode(original);
 
     assertEquals(original, codec.decode(encoded));
-    assertEquals("{\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}", encoded);
+    assertEquals("{\"version\":4," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}", encoded);
   }
 
   /** Windows HOME 必须按目标 Daemon 语法校验，不能被 Linux Platform 的 Path 语义误拒绝。 */
@@ -42,7 +49,12 @@ class DaemonCapabilitiesCodecTest {
   void acceptsWindowsHomeDirectoryOnAnyPlatformHost() {
     DaemonEnvironmentInfo windows =
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.WINDOWS, "UTC", "dev", "C:\\Users\\dev", "Windows environment.");
+            DaemonOperatingSystem.WINDOWS,
+            "UTC",
+            "dev",
+            "C:\\Users\\dev",
+            "Windows environment.",
+            "C:\\Users\\dev\\AppData\\Local\\Temp");
 
     assertEquals("C:\\Users\\dev", windows.homeDirectory());
     assertEquals(
@@ -56,7 +68,12 @@ class DaemonCapabilitiesCodecTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "UTC", "dev", "C:\\Users\\dev", "Linux environment."));
+                DaemonOperatingSystem.LINUX,
+                "UTC",
+                "dev",
+                "C:\\Users\\dev",
+                "Linux environment.",
+                TEMP_DIRECTORY));
   }
 
   /** 历史上的 sourceSetVersion / skillSources 都是未知字段，必须在 wire 边界拒绝而不是忽略。 */
@@ -66,7 +83,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"sourceSetVersion\":0,\"skillSources\":[]}"));
@@ -74,7 +91,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"skillSources\":[{\"sourceId\":\"x\"}]}"));
@@ -82,7 +99,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"sourceSetVersion\":0,\"skills\":[]}"));
@@ -106,11 +123,12 @@ class DaemonCapabilitiesCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.decode(
-                    "{\"version\":3,"
+                    "{\"version\":4,"
                         + DAEMON_VERSION_JSON
                         + "\"environment\":{\"operatingSystem\":\"linux\","
                         + "\"timeZone\":\"Asia/Shanghai\",\"userName\":\"dev\","
                         + "\"homeDirectory\":\"/home/dev\",\"note\":\"Linux environment.\","
+                        + "\"tempDirectory\":\"/tmp/kk-studio\","
                         + "\"rootPath\":\"/home/dev\"}}"));
     assertTrue(
         error.getMessage().contains("unexpected READY environment field: rootPath"),
@@ -120,7 +138,8 @@ class DaemonCapabilitiesCodecTest {
   /** 非当前版本、非整数版本与非法 environment 形状都按协议错误拒绝。 */
   @Test
   void rejectsUnsupportedVersionsAndShapes() {
-    for (String version : new String[] {"0", "1", "2", "4", "\"3\"", "null", "true", "{}", "[]"}) {
+    for (String version :
+        new String[] {"0", "1", "2", "3", "5", "\"4\"", "null", "true", "{}", "[]"}) {
       assertThrows(
           DaemonProtocolException.class,
           () ->
@@ -133,14 +152,14 @@ class DaemonCapabilitiesCodecTest {
         () -> codec.decode("{" + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":3," + ENVIRONMENT_JSON + "}"));
+        () -> codec.decode("{\"version\":4," + ENVIRONMENT_JSON + "}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":3," + DAEMON_VERSION_JSON + "\"environment\":null}"));
-    assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"version\":3}"));
+        () -> codec.decode("{\"version\":4," + DAEMON_VERSION_JSON + "\"environment\":null}"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"version\":4}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":3," + DAEMON_VERSION_JSON + "\"environment\":[]}"));
+        () -> codec.decode("{\"version\":4," + DAEMON_VERSION_JSON + "\"environment\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> new DaemonCapabilities(2, DAEMON_VERSION, ENVIRONMENT));
@@ -161,14 +180,14 @@ class DaemonCapabilitiesCodecTest {
           DaemonProtocolException.class,
           () ->
               codec.decode(
-                  "{\"version\":3,\"daemonVersion\":\"" + invalid + "\"," + ENVIRONMENT_JSON + "}"),
+                  "{\"version\":4,\"daemonVersion\":\"" + invalid + "\"," + ENVIRONMENT_JSON + "}"),
           invalid);
     }
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"daemonVersion\":\""
+                "{\"version\":4,\"daemonVersion\":\""
                     + "x".repeat(DaemonCapabilities.MAX_DAEMON_VERSION_CHARS + 1)
                     + "\","
                     + ENVIRONMENT_JSON
@@ -188,85 +207,94 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + ",\"secret\":\"x\"}"));
+                "{\"version\":4," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + ",\"secret\":\"x\"}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "} x"));
+        () -> codec.decode("{\"version\":4," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "} x"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + DAEMON_VERSION_JSON
                     + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
-                    + "\"note\":\"Linux environment.\",\"extra\":\"x\"}}"));
+                    + "\"note\":\"Linux environment.\",\"tempDirectory\":\"/tmp/kk-studio\","
+                    + "\"extra\":\"x\"}}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + DAEMON_VERSION_JSON
                     + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
                     + "\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
-                    + "\"note\":\"Linux environment.\"}}"));
+                    + "\"note\":\"Linux environment.\",\"tempDirectory\":\"/tmp/kk-studio\"}}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + DAEMON_VERSION_JSON
                     + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
-                    + "\"note\":\"one\",\"note\":\"two\"}}"));
+                    + "\"note\":\"one\",\"note\":\"two\",\"tempDirectory\":\"/tmp/kk-studio\"}}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
+                "{\"version\":4,\"version\":4," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + DAEMON_VERSION_JSON
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + "}"));
   }
 
-  /** environment 的五个字段缺一不可，且都必须是 non-blank 文本。 */
+  /** environment 的六个字段缺一不可，且都必须是 non-blank 文本。 */
   @Test
   void rejectsMissingEnvironmentFields() {
     for (String omitted :
-        new String[] {"operatingSystem", "timeZone", "userName", "homeDirectory", "note"}) {
+        new String[] {
+          "operatingSystem", "timeZone", "userName", "homeDirectory", "note", "tempDirectory"
+        }) {
       assertThrows(
           DaemonProtocolException.class,
           () ->
               codec.decode(
-                  "{\"version\":3," + DAEMON_VERSION_JSON + environmentWithout(omitted) + "}"),
+                  "{\"version\":4," + DAEMON_VERSION_JSON + environmentWithout(omitted) + "}"),
           omitted);
       assertThrows(
           DaemonProtocolException.class,
           () ->
               codec.decode(
-                  "{\"version\":3," + DAEMON_VERSION_JSON + environmentBlank(omitted) + "}"),
+                  "{\"version\":4," + DAEMON_VERSION_JSON + environmentBlank(omitted) + "}"),
           omitted);
     }
   }
 
   @Test
   void rejectsInvalidEnvironmentMetadata() {
-    assertInvalidEnvironment("plan9", "UTC", "dev", "/home/dev", "Local environment.");
-    assertInvalidEnvironment("linux", "Not/AZone", "dev", "/home/dev", "Linux environment.");
-    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "");
-    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", " ");
-    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", " leading");
-    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "trailing ");
-    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "first\nsecond");
-    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "first\u2028second");
-    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "control\u0000value");
+    assertInvalidEnvironment(
+        "plan9", "UTC", "dev", "/home/dev", "Local environment.", TEMP_DIRECTORY);
+    assertInvalidEnvironment(
+        "linux", "Not/AZone", "dev", "/home/dev", "Linux environment.", TEMP_DIRECTORY);
+    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "", TEMP_DIRECTORY);
+    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", " ", TEMP_DIRECTORY);
+    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", " leading", TEMP_DIRECTORY);
+    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "trailing ", TEMP_DIRECTORY);
+    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "first\nsecond", TEMP_DIRECTORY);
+    assertInvalidEnvironment(
+        "linux", "UTC", "dev", "/home/dev", "first\u2028second", TEMP_DIRECTORY);
+    assertInvalidEnvironment(
+        "linux", "UTC", "dev", "/home/dev", "control\u0000value", TEMP_DIRECTORY);
+    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "Linux environment.", "relative");
+    assertInvalidEnvironment("linux", "UTC", "dev", "/home/dev", "Linux environment.", "");
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -275,7 +303,8 @@ class DaemonCapabilitiesCodecTest {
                 "UTC",
                 "dev",
                 "/home/dev",
-                "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1)));
+                "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1),
+                TEMP_DIRECTORY));
 
     // userName 校验：空白、周边空白、换行、控制字符
     assertInvalidUserName("");
@@ -288,7 +317,7 @@ class DaemonCapabilitiesCodecTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "UTC", null, "/home/dev", "Note"));
+                DaemonOperatingSystem.LINUX, "UTC", null, "/home/dev", "Note", TEMP_DIRECTORY));
 
     // homeDirectory 校验：空白、周边空白、换行、控制字符、非绝对路径
     assertInvalidHomeDirectory("");
@@ -301,7 +330,28 @@ class DaemonCapabilitiesCodecTest {
     assertInvalidHomeDirectory("./home/dev");
     assertThrows(
         IllegalArgumentException.class,
-        () -> new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "dev", null, "Note"));
+        () ->
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "UTC", "dev", null, "Note", TEMP_DIRECTORY));
+
+    // tempDirectory 校验：空白、周边空白、换行、控制字符、非绝对路径；跨 OS 绝对路径都接受
+    assertInvalidTempDirectory("");
+    assertInvalidTempDirectory(" ");
+    assertInvalidTempDirectory(" /tmp/kk-studio");
+    assertInvalidTempDirectory("/tmp/kk-studio ");
+    assertInvalidTempDirectory("/tmp/kk-studio\n");
+    assertInvalidTempDirectory("/tmp/kk-studio\u0000x");
+    assertInvalidTempDirectory("tmp/kk-studio");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Note", null));
+    assertEquals(
+        "C:\\Temp",
+        new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Note", "C:\\Temp")
+            .tempDirectory());
   }
 
   @Test
@@ -312,7 +362,12 @@ class DaemonCapabilitiesCodecTest {
   }
 
   private void assertInvalidEnvironment(
-      String operatingSystem, String timeZone, String userName, String homeDirectory, String note) {
+      String operatingSystem,
+      String timeZone,
+      String userName,
+      String homeDirectory,
+      String note,
+      String tempDirectory) {
     ObjectNode root = readyRoot();
     ObjectNode environment = root.putObject("environment");
     environment.put("operatingSystem", operatingSystem);
@@ -320,6 +375,7 @@ class DaemonCapabilitiesCodecTest {
     environment.put("userName", userName);
     environment.put("homeDirectory", homeDirectory);
     environment.put("note", note);
+    environment.put("tempDirectory", tempDirectory);
     assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
   }
 
@@ -331,6 +387,7 @@ class DaemonCapabilitiesCodecTest {
     environment.put("userName", userName);
     environment.put("homeDirectory", "/home/dev");
     environment.put("note", "Linux environment.");
+    environment.put("tempDirectory", TEMP_DIRECTORY);
     assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
   }
 
@@ -342,6 +399,19 @@ class DaemonCapabilitiesCodecTest {
     environment.put("userName", "dev");
     environment.put("homeDirectory", homeDirectory);
     environment.put("note", "Linux environment.");
+    environment.put("tempDirectory", TEMP_DIRECTORY);
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
+  }
+
+  private void assertInvalidTempDirectory(String tempDirectory) {
+    ObjectNode root = readyRoot();
+    ObjectNode environment = root.putObject("environment");
+    environment.put("operatingSystem", "linux");
+    environment.put("timeZone", "UTC");
+    environment.put("userName", "dev");
+    environment.put("homeDirectory", "/home/dev");
+    environment.put("note", "Linux environment.");
+    environment.put("tempDirectory", tempDirectory);
     assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
   }
 
@@ -355,8 +425,7 @@ class DaemonCapabilitiesCodecTest {
   private static String environmentWithout(String omitted) {
     StringBuilder sb = new StringBuilder("\"environment\":{");
     boolean first = true;
-    for (String field :
-        new String[] {"operatingSystem", "timeZone", "userName", "homeDirectory", "note"}) {
+    for (String field : environmentFields()) {
       if (field.equals(omitted)) {
         continue;
       }
@@ -372,8 +441,7 @@ class DaemonCapabilitiesCodecTest {
   private static String environmentBlank(String blankField) {
     StringBuilder sb = new StringBuilder("\"environment\":{");
     boolean first = true;
-    for (String field :
-        new String[] {"operatingSystem", "timeZone", "userName", "homeDirectory", "note"}) {
+    for (String field : environmentFields()) {
       if (!first) {
         sb.append(',');
       }
@@ -387,6 +455,12 @@ class DaemonCapabilitiesCodecTest {
     return sb.append('}').toString();
   }
 
+  private static String[] environmentFields() {
+    return new String[] {
+      "operatingSystem", "timeZone", "userName", "homeDirectory", "note", "tempDirectory"
+    };
+  }
+
   private static String valueOf(String field) {
     return switch (field) {
       case "operatingSystem" -> "linux";
@@ -394,6 +468,7 @@ class DaemonCapabilitiesCodecTest {
       case "userName" -> "dev";
       case "homeDirectory" -> "/home/dev";
       case "note" -> "Linux environment.";
+      case "tempDirectory" -> TEMP_DIRECTORY;
       default -> throw new IllegalArgumentException(field);
     };
   }

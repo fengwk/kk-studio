@@ -410,9 +410,7 @@ class CodingCapabilitiesTest {
   /** 验证输出体积永远不终止进程：超过捕获预算时只停止文件捕获并补发 SNAPSHOT，命令仍跑到最后一行。 */
   @Test
   void bashTruncatedCaptureEmitsSnapshotAndNeverKillsTheProcess() throws Exception {
-    TextOutputStore smallBudget =
-        TextOutputStore.open(
-            workspaceRoot.resolve("budget/text"), workspaceRoot.resolve("budget/staging"), 2048);
+    TextOutputStore smallBudget = TextOutputStore.open(workspaceRoot.resolve("budget"), 2048);
     CodingToolsConfig budgetConfig =
         new CodingToolsConfig(
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
@@ -475,10 +473,9 @@ class CodingCapabilitiesTest {
         FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
         "需要 POSIX 权限位来构造确定性的本地写入失败");
     Path resources = Files.createDirectories(workspaceRoot.resolve("broken/resources"));
-    TextOutputStore brokenStore =
-        TextOutputStore.open(resources.resolve("text"), resources.resolve("staging"));
+    TextOutputStore brokenStore = TextOutputStore.open(resources);
     Files.setPosixFilePermissions(
-        brokenStore.stagingDirectory(),
+        brokenStore.root(),
         Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
     CodingToolsConfig brokenConfig =
         new CodingToolsConfig(
@@ -703,9 +700,7 @@ class CodingCapabilitiesTest {
   /** 达到捕获预算只停止文件捕获并明确报告截断，命令本身仍必须跑完，退出码仍然有效。 */
   @Test
   void bashCaptureBudgetStopsCaptureWithoutStoppingTheProcess() throws Exception {
-    TextOutputStore smallBudget =
-        TextOutputStore.open(
-            workspaceRoot.resolve("budget/text"), workspaceRoot.resolve("budget/staging"), 4096);
+    TextOutputStore smallBudget = TextOutputStore.open(workspaceRoot.resolve("budget"), 4096);
     CodingToolsConfig budgetConfig =
         new CodingToolsConfig(
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,

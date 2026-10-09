@@ -168,7 +168,9 @@ public class S3PresignServiceTest {
 
       // 热更新默认有效期为 900s：下一次签名立即生效。
       snapshot.replace(
-          settingsWith(new SystemSettings.StorageMedia(86_400L, 900L, 3_600L, 30_000L, 512, 80)));
+          settingsWith(
+              new SystemSettings.StorageMedia(
+                  86_400L, 900L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L)));
       long secondBefore = System.currentTimeMillis();
       S3PresignedUrl second = context.service.presignDownload("docs/live.md", null);
       long secondDelta = Instant.parse(second.getExpiresAt()).toEpochMilli() - secondBefore;
@@ -201,7 +203,7 @@ public class S3PresignServiceTest {
   public void testRejectsExpiresOverMax() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, false);
     SystemSettings.StorageMedia storageMedia =
-        new SystemSettings.StorageMedia(3_600L, 600L, 7_200L, 30_000L, 512, 80);
+        new SystemSettings.StorageMedia(3_600L, 600L, 7_200L, 30_000L, 512, 80, 259_200L, 1_800L);
     try (TestContext context = new TestContext(props, storageMedia)) {
       assertThrows(
           IllegalArgumentException.class,

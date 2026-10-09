@@ -37,7 +37,7 @@ class OutputSpoolTest {
   @TempDir Path root;
 
   private TextOutputStore store() {
-    return TextOutputStore.open(root.resolve("text"), root.resolve("staging"));
+    return TextOutputStore.open(root.resolve("tmp"));
   }
 
   /** 空输出内联返回：0 字节、0 物理行、不落盘，且 details 仍是合法 JSON 对象。 */
@@ -57,8 +57,7 @@ class OutputSpoolTest {
       assertEquals("", text(result));
       assertEquals("{}", result.detailsJson());
     }
-    assertTrue(listDirectory(root.resolve("text")).isEmpty(), "小输出不得产生 durable 文件");
-    assertTrue(listDirectory(root.resolve("staging")).isEmpty(), "小输出不得产生中转文件");
+    assertTrue(listDirectory(root.resolve("tmp").resolve("workspaces")).isEmpty(), "小输出不得产生任何临时文件");
   }
 
   /** 物理行计数规则：空文本 0、单行无 LF 为 1、CRLF 计 1、末尾有无 LF 与分块写入都要正确。 */
@@ -149,7 +148,7 @@ class OutputSpoolTest {
       assertFalse(Files.exists(stagingPath));
       assertNull(spool.stagingFile());
     }
-    assertEquals(1, listDirectory(root.resolve("text")).size());
+    assertEquals(1, store.publishedFiles().size());
   }
 
   /** 跨越行数阈值同样落盘（不能只按字节判断，否则少量超长行会绕过内联上界）。 */
@@ -216,10 +215,9 @@ class OutputSpoolTest {
   void localStorageFailureDegradesToBoundedPreviewWithoutThrowing() throws IOException {
     assumeTrue(isPosixSupported(), "需要 POSIX 权限位来构造确定性的本地写入失败");
     TextOutputStore store = store();
-    // 让 staging 目录不可写：创建中转文件必然以 IOException 失败，且不需要任何 mock。
+    // 让受控 workspace 根不可写：登记新 workspace 必然以 IOException 失败，且不需要任何 mock。
     Files.setPosixFilePermissions(
-        store.stagingDirectory(),
-        Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
+        store.root(), Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
 
     try (OutputSpool spool = new OutputSpool(store, "call-broken", 10, 100, 4096)) {
       spool.write("0123456789abcdef".getBytes(StandardCharsets.UTF_8));
@@ -241,9 +239,7 @@ class OutputSpoolTest {
       assertTrue(textOutput.path("captureFailed").asBoolean());
       assertTrue(textOutput.path("path").isMissingNode(), "失败时不得给出不存在的路径");
     }
-    try (var entries = Files.list(store.textDirectory())) {
-      assertEquals(0, entries.count(), "失败不得留下任何 durable 文件");
-    }
+    assertTrue(store.publishedFiles().isEmpty(), "失败不得留下任何 durable 文件");
   }
 
   /** 未 finish 就 close 时必须清理未发布中转文件；已发布全文不受 close 影响。 */
@@ -266,9 +262,7 @@ class OutputSpoolTest {
       spool.write("1234567890".getBytes(StandardCharsets.UTF_8));
       spool.finish(false);
     }
-    try (var entries = Files.list(publishedStore.textDirectory())) {
-      published = entries.findFirst().orElseThrow();
-    }
+    published = publishedStore.publishedFiles().getFirst();
     assertTrue(Files.exists(published), "已发布的 durable 全文不得被 close 删除");
   }
 
@@ -453,10 +447,9 @@ class OutputSpoolTest {
   void storageFailureLeavesNoResidualFilesAndNeverThrows() throws IOException {
     assumeTrue(isPosixSupported(), "需要 POSIX 权限位来构造确定性的本地写入失败");
     TextOutputStore store = store();
-    // 让 staging 目录不可写：中转文件创建必然失败。
+    // 让受控 workspace 根不可写：登记新 workspace 必然失败。
     Files.setPosixFilePermissions(
-        store.stagingDirectory(),
-        Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
+        store.root(), Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
 
     OutputSpool spool = new OutputSpool(store, "call-cleanup", 16, 1, 4096);
     spool.write("y".repeat(4096).getBytes(StandardCharsets.UTF_8));
@@ -470,8 +463,8 @@ class OutputSpoolTest {
     spool.close();
     spool.close();
 
-    assertTrue(listDirectory(store.textDirectory()).isEmpty(), "失败不得留下 durable 文件");
-    assertTrue(listDirectory(store.stagingDirectory()).isEmpty(), "失败不得留下中转文件");
+    assertTrue(store.publishedFiles().isEmpty(), "失败不得留下 durable 文件");
+    assertTrue(store.partialFiles().isEmpty(), "失败不得留下中转文件");
   }
 
   /** 终态说明只在显式提供时追加；内联正文不以换行结尾时必须补换行，说明自成一行。 */
@@ -490,19 +483,22 @@ class OutputSpoolTest {
   }
 
   /**
-   * durable 发布失败必须降级为无路径的有界预览，并清理中转文件。
+   * durable 发布失败必须降级为无路径的有界预览，不抛出且不产生 durable 文件。
    *
-   * <p>用「text 目录被替换为普通文件」构造确定性的发布失败，不需要 mock：它就是本地存储被破坏时的真实形态。
+   * <p>用「workspace 目录在中转文件创建后被置为只读」构造确定性的发布失败，不需要 mock：发布 move 需要目录写权限，只读就是本地存储被破坏时的真实形态。 未能清理的
+   * {@code .part} 仍留在登记过的 workspace 内，由保留期清扫回收，不会成为普通目录里的孤儿文件。
    */
   @Test
-  void publishFailureDegradesToPreviewAndRemovesStagingFile() throws IOException {
+  void publishFailureDegradesToPreviewWithoutDurableFile() throws IOException {
+    assumeTrue(isPosixSupported(), "需要 POSIX 权限位来构造确定性的发布失败");
     TextOutputStore store = store();
-    Files.delete(store.textDirectory());
-    Files.createFile(store.textDirectory());
 
     try (OutputSpool spool = new OutputSpool(store, "call-publish-failed", 16, 100, 4096)) {
       spool.write("z".repeat(64).getBytes(StandardCharsets.UTF_8));
       assertTrue(spool.isSpilled(), "超阈值输出必须落盘");
+      Path workspace = spool.stagingFile().getParent();
+      Files.setPosixFilePermissions(
+          workspace, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
 
       EnvironmentCapabilityResult result = spool.finish(false);
 
@@ -515,19 +511,21 @@ class OutputSpoolTest {
       assertTrue(textOutput.path("captureFailed").asBoolean(), textOutput.toString());
       assertTrue(textOutput.path("path").isMissingNode(), "发布失败不得给出不存在的 durable 路径");
     }
-    assertTrue(listDirectory(store.stagingDirectory()).isEmpty(), "发布失败不得残留中转文件");
+    assertTrue(store.publishedFiles().isEmpty(), "发布失败不得残留 durable 文件");
   }
 
   /** 捕获被预算截断且发布失败时，预览必须同时报告两种降级，并保留终态说明。 */
   @Test
   void publishFailurePreviewStillReportsCaptureTruncation() throws IOException {
+    assumeTrue(isPosixSupported(), "需要 POSIX 权限位来构造确定性的发布失败");
     TextOutputStore store = store();
-    Files.delete(store.textDirectory());
-    Files.createFile(store.textDirectory());
 
     try (OutputSpool spool = new OutputSpool(store, "call-publish-truncated", 16, 100, 32)) {
       spool.write("q".repeat(128).getBytes(StandardCharsets.UTF_8));
       assertTrue(spool.isCaptureTruncated(), "超出捕获预算必须标记为截断");
+      Path workspace = spool.stagingFile().getParent();
+      Files.setPosixFilePermissions(
+          workspace, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
 
       EnvironmentCapabilityResult result = spool.finish(true, "[Command exited with code 7.]");
 
@@ -537,6 +535,7 @@ class OutputSpoolTest {
       assertTrue(preview.contains("Capture stopped at the local 32-byte daemon budget"), preview);
       assertTrue(preview.contains("[Command exited with code 7.]"), preview);
     }
+    assertTrue(store.publishedFiles().isEmpty(), "发布失败不得残留 durable 文件");
   }
 
   /** 通过 {@link TextStreams} 逐行扫描统计文件行数，作为行数语义的独立事实源。 */

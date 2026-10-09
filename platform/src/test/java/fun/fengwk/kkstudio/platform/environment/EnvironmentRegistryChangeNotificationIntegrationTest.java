@@ -57,7 +57,12 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
           DaemonCapabilities.VERSION,
           "1.0.9",
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "notify test daemon."));
+              DaemonOperatingSystem.LINUX,
+              "UTC",
+              "dev",
+              "/home/dev",
+              "notify test daemon.",
+              "/tmp/kk-studio"));
 
   @Autowired private EnvironmentRegistry environmentRegistry;
 
