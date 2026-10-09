@@ -243,6 +243,7 @@ function agent() {
     name: 'default-assistant',
     description: null,
     systemPrompt: null,
+    type: 'USER' as const,
     model: 'model-1',
     variant: 'default',
     config: {
