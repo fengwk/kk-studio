@@ -71,7 +71,8 @@ public class PostgresqlEnvironmentUpdateRepository implements EnvironmentUpdateR
 
   @Override
   public Optional<EnvironmentUpdateOperation> find(String operationId) {
-    List<EnvironmentUpdateOperation> rows = jdbcTemplate.query(FIND_SQL, ROW_MAPPER, operationId);
+    List<EnvironmentUpdateOperation> rows =
+        jdbcTemplate.query(FIND_SQL, ROW_MAPPER, UUID.fromString(operationId));
     return rows.stream().findFirst();
   }
 
