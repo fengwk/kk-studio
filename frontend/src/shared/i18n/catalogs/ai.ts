@@ -3007,6 +3007,46 @@ export const aiCatalog = {
     'en-US': 'Process User',
     'zh-CN': '进程用户',
   },
+  'ai.environment.daemonVersion': {
+    'en-US': 'Daemon Version',
+    'zh-CN': 'Daemon 版本',
+  },
+  'ai.environment.update': {
+    'en-US': 'Update Daemon',
+    'zh-CN': '更新 Daemon',
+  },
+  'ai.environment.updateConfirm': {
+    'en-US': 'Update the Daemon for environment "{{name}}" to the latest release? The service will restart and reconnect.',
+    'zh-CN': '确认将环境「{{name}}」的 Daemon 更新至最新发布版本？服务将重启并重新连接。',
+  },
+  'ai.environment.updateStatus': {
+    'en-US': 'Update Status',
+    'zh-CN': '更新状态',
+  },
+  'ai.environment.update.phase.PENDING': {
+    'en-US': 'Pending',
+    'zh-CN': '等待中',
+  },
+  'ai.environment.update.phase.RUNNING': {
+    'en-US': 'Running',
+    'zh-CN': '更新中',
+  },
+  'ai.environment.update.phase.PREPARED': {
+    'en-US': 'Prepared',
+    'zh-CN': '准备切换',
+  },
+  'ai.environment.update.phase.SUCCEEDED': {
+    'en-US': 'Succeeded',
+    'zh-CN': '更新成功',
+  },
+  'ai.environment.update.phase.FAILED': {
+    'en-US': 'Failed',
+    'zh-CN': '更新失败',
+  },
+  'ai.environment.update.phase.UNKNOWN': {
+    'en-US': 'Awaiting Reconnect',
+    'zh-CN': '等待重连确认',
+  },
   'ai.environment.manage': {
     'en-US': 'Manage',
     'zh-CN': '管理',
@@ -3018,6 +3058,10 @@ export const aiCatalog = {
   'ai.environment.runtime.title': {
     'en-US': 'Host Information',
     'zh-CN': '宿主信息',
+  },
+  'ai.environment.runtime.daemonVersion': {
+    'en-US': 'Daemon Version',
+    'zh-CN': 'Daemon 版本',
   },
   'ai.environment.runtime.operatingSystem': {
     'en-US': 'Operating System',

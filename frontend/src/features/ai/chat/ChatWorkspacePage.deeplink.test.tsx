@@ -20,7 +20,11 @@ vi.mock('@/shared/api/chat-service', () => ({
   chatService: { getChat: vi.fn() },
 }))
 vi.mock('@/shared/api/environment-service', () => ({
-  environmentService: { listEnvironments: vi.fn() },
+  environmentService: {
+    listEnvironments: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
+  },
 }))
 
 // 手动确认消费，确定性保留尚未清除的 query，检验父页面的目标 pane 归属。

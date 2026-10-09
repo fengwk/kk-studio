@@ -435,6 +435,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setNote(host == null ? null : host.note());
     dto.setUserName(host == null ? null : host.userName());
     dto.setHomeDirectory(host == null ? null : host.homeDirectory());
+    dto.setDaemonVersion(conn.daemonVersion());
     dto.setCapabilities(
         statusValid
             ? conn.capabilities().stream()

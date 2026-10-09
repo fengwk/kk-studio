@@ -9,6 +9,8 @@ import type { EnvironmentCardDTO, EnvironmentEventDTO } from '@/shared/api/contr
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironmentEvents: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
   },
 }))
 
@@ -21,6 +23,7 @@ function testEnvironment(overrides: Partial<EnvironmentCardDTO> = {}): Environme
     operatingSystem: 'Linux 5.15.0',
     timeZone: 'Asia/Shanghai',
     note: 'Production host',
+    daemonVersion: '1.2.3',
     status: 'READY',
     ready: true,
     lastSeen: '2026-07-20T02:00:00.000Z',
@@ -65,6 +68,9 @@ describe('EnvironmentManagementModal', () => {
 
     expect(screen.getByText('Linux 5.15.0')).toBeInTheDocument()
     expect(screen.getByText('Asia/Shanghai')).toBeInTheDocument()
+    // 宿主信息展示实际 daemon 构建版本，与 CAS 配置版本不是同一事实。
+    expect(screen.getByText('Daemon 版本')).toBeInTheDocument()
+    expect(screen.getByText('1.2.3')).toBeInTheDocument()
     // 宿主信息展示最近一次 READY 的进程用户与 HOME，不再展示任何 Root 路径。
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('/home/dev')).toBeInTheDocument()

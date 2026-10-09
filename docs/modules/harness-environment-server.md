@@ -14,12 +14,12 @@
 
 ```text
 open(channel)
-Daemon -> HELLO(registrationToken, daemonInstanceId)
+Daemon -> HELLO(registrationToken, capabilityCatalogVersion, daemonVersion, daemonInstanceId)
   核心 -> registrationDirectory.findByRegistrationToken   # 解析 environmentId
   核心 -> leaseStore.hasActiveLeaseToken                 # 本节点同节点活跃连接防冲突
   核心 -> leaseStore.tryAcquire                          # 原子抢占/接管
   Gateway -> WELCOME(environmentId, name, maxResourceBytes)
-Daemon -> READY(version, environment)
+Daemon -> READY(version, daemonVersion, environment)
   -> leaseStore.markReady                                # 围栏失效即协议错误
   -> 重放未在当前连接代际发出的 INVOKE
 Daemon -> HEARTBEAT*
@@ -75,6 +75,20 @@ COMPLETED
 票据服务异常统一转换为固定的 `resource upload is unavailable` 失败回执：预签名 URL、签名 header 与存储异常原文都不进入控制面反馈。`FAILED` 票据不缓存，允许在 invocation deadline 内再次触达服务；`FAILED`/`CANCELLED`、接管、`expire` 与调用放弃都幂等释放全部未消费上传，而 `COMPLETED` 只释放未被结果引用的上传。
 
 二进制字节不经过会话核心：核心只处理有界元数据与票据，并在任何外部 I/O 之前完成作用域、预算与绑定校验。
+
+## 受管更新与准入
+
+`EnvironmentDaemonServer` 额外承载专用管理通道（`UPDATE` / `UPDATE_RESULT`），它不经过 capability 目录，因此即使 Daemon 声明的
+`capabilityCatalogVersion` 与本地目录不一致，连接仍可完成认证并承载版本查询与受管更新；只有普通 capability 调用在起点被拒绝。
+
+- `beginUpdate(environmentId, operationId)`：要求当前节点 READY、无在途调用、无其它活动 operation；成功后登记该 operation，此后该
+  Environment 的普通调用（含 Skill 同步）在起点 busy。同一 operationId 重复准入幂等。
+- `sendUpdate(environmentId, command)`：只在同一 operation 已准入时下发 `UPDATE`；命令未进入传输时按 BUSY/UNAVAILABLE 收敛。
+- `endUpdate(environmentId, operationId)`：只有与当前登记一致的 operationId 才释放准入，旧 operation 不能释放新 operation。
+- `UPDATE_RESULT` 只做协议校验后转交 `EnvironmentUpdateListener` 在核心锁外消费；核心不判定最终成功。
+
+「一个 Environment 同一时刻至多一次更新」由内存准入与 Platform 侧持久 operation 行（部分唯一索引）双重保证；更新期间对旧二进制的
+任何替换都由 Daemon 与独立 OS 更新器完成，核心只负责准入、下发与回执转发。
 
 ## 终态唯一与迟到帧
 

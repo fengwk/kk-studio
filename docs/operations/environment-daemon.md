@@ -363,14 +363,40 @@ HOME 也不是默认工作目录。
 
 ## 改配置、轮换 token 与更新
 
-没有单独的 upgrade 动作：`install` 每次都会从 latest official release 解析并安装，并**整体替换
-程序、配置与 token 后重启**，保留数据目录与日志。因此：
+改配置与轮换 token 仍走 `install`：在 Web 弹窗修改后重新“保存并复制安装命令”，在目标主机执行
+同一条 `install`，它会**整体替换程序、配置与 token 后重启**，保留数据目录与日志。
 
 - 改配置：在 Web 弹窗修改后重新“保存并复制安装命令”，在目标主机执行同一条 `install`。
-- 更新程序：重新复制并执行安装命令（或带相同稳定契约的本地安装），即得到最新正式版本。
 - 轮换 token：环境 ID 不变，但旧安装 code 立即失效；在 Web 重新复制并执行安装命令，
-  或安全更新 `daemon.token` 文件后重启
-  受管服务。Daemon 每次 HELLO 前读取 token 文件；已被拒绝而退出的进程需要重启。
+  或安全更新 `daemon.token` 文件后重启受管服务。Daemon 每次 HELLO 前读取 token 文件；已被拒绝
+  而退出的进程需要重启。
+
+### 受管在线更新
+
+已受管的安装还可以从 Web 直接触发一次**二进制在线更新**，无需重新执行安装命令：
+
+| 入口 | 契约 |
+| --- | --- |
+| `POST /api/harness/environments/{id}/update` | 发起一次受管更新；目标版本由运行中 Platform 的打包版本决定。目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝 |
+| `GET /api/harness/environments/{id}/update` | 只读最近一次更新投影（`operationId`、`targetVersion`、`phase`、可选 `error`、时间戳）；从未更新时为 null |
+
+更新目标不是“最新版”也不是浏览者提供的 URL，而是 **运行中 Platform 版本对应的官方 GitHub Release**：
+必须是非草稿、tag 匹配、五件套资产齐全（jar、其 `.sha256`、确定性元数据、`LICENSE`、
+`THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到命令后再次校验 URL 形状、
+SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 预检，任何一步失败都不改动旧二进制。
+
+- 一个 Environment 同一时刻至多一次更新：内存准入与持久 operation 行双重保证；更新期间普通
+  capability 调用在起点被 busy 拒绝，连接仍保持认证（catalog 版本不一致时只禁止普通工具，不影响
+  版本查询与更新）。
+- 只有受管安装（存在 `lib/kk-studio-daemon.jar` 与同目录 `daemon.json`）接受更新；更新只替换
+  `lib` 下的二进制，`daemon.json`、`daemon.token`、技能与数据都不改动，也不隐式重跑已保存的安装配置。
+- 下载/预检/备份后，Daemon 把制品交给一个 **OS 级独立、短生命周期的更新器**（Linux `systemd-run`
+  瞬时单元、macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务）完成替换与重启。
+  更新器不常驻、不提权、不自动回滚；受管服务定义缺失或归属标记不匹配时 fail closed，不改动二进制。
+- **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
+  连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
+  SUCCEEDED / FAILED`。
+- 尚未具备该协议的旧 Daemon 不能远程更新，需要先手工执行一次安装命令完成引导。
 
 重启会中断在途工具调用，进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。
 更新后重新确认 Studio `READY`。

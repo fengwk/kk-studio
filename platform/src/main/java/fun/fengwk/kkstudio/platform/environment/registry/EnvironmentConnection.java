@@ -60,6 +60,11 @@ public record EnvironmentConnection(
     return daemonCapabilities == null ? null : daemonCapabilities.environment().homeDirectory();
   }
 
+  /** 连接行保留的最近一次 READY 上报的实际 Daemon 构建版本；从未 READY 时为 null。 */
+  public String daemonVersion() {
+    return daemonCapabilities == null ? null : daemonCapabilities.daemonVersion();
+  }
+
   /** 指定 Package 的同步投影；从未同步过时为空。 */
   public Optional<EnvironmentSkillState> skillStateOf(String packageName) {
     return skillState.stream().filter(state -> state.packageName().equals(packageName)).findFirst();

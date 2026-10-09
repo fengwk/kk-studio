@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -63,6 +65,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
+          "1.0.9",
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment."));
 
@@ -215,10 +218,20 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
     this.serverNode1 =
         serverConfiguration.environmentDaemonServer(
-            registryNode1, environmentRepository, sessionListener, UNUSED_TICKET_SERVICE, snapshot);
+            registryNode1,
+            environmentRepository,
+            sessionListener,
+            new StaticObjectProvider<>(null),
+            UNUSED_TICKET_SERVICE,
+            snapshot);
     this.serverNode2 =
         serverConfiguration.environmentDaemonServer(
-            registryNode2, environmentRepository, sessionListener, UNUSED_TICKET_SERVICE, snapshot);
+            registryNode2,
+            environmentRepository,
+            sessionListener,
+            new StaticObjectProvider<>(null),
+            UNUSED_TICKET_SERVICE,
+            snapshot);
   }
 
   @Test
@@ -411,7 +424,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
                 + DaemonProtocol.VERSION
                 + ",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"registrationToken\":\""
+                + "\",\"daemonVersion\":\"1.0.9\""
+                + ",\"registrationToken\":\""
                 + token
                 + "\",\"daemonInstanceId\":\""
                 + DAEMON_INSTANCE_ID
@@ -480,4 +494,32 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   }
 
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
+
+  /** 固定取值的 {@link ObjectProvider}：测试用它表达「没有装配受管更新监听器」。 */
+  private static final class StaticObjectProvider<T> implements ObjectProvider<T> {
+
+    private final T value;
+
+    private StaticObjectProvider(T value) {
+      this.value = value;
+    }
+
+    @Override
+    public T getObject() {
+      if (value == null) {
+        throw new NoSuchBeanDefinitionException(Object.class);
+      }
+      return value;
+    }
+
+    @Override
+    public T getObject(Object... args) {
+      return getObject();
+    }
+
+    @Override
+    public T getIfAvailable() {
+      return value;
+    }
+  }
 }

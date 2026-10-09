@@ -211,6 +211,7 @@ class EnvironmentServiceImplTest {
             LiveEnvironmentStatus.READY,
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
+                "1.0.9",
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
             List.of(),
@@ -306,6 +307,7 @@ class EnvironmentServiceImplTest {
             LiveEnvironmentStatus.CONNECTING,
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
+                "1.0.9",
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.WSL,
                     "Asia/Shanghai",
@@ -1111,6 +1113,7 @@ class EnvironmentServiceImplTest {
         LiveEnvironmentStatus.READY,
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
+            "1.0.9",
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
         List.of(),
@@ -1128,6 +1131,7 @@ class EnvironmentServiceImplTest {
         status,
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
+            "1.0.9",
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
         List.of(),
