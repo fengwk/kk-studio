@@ -103,7 +103,9 @@ helper 命令行只携带固定入口与私有状态目录；工作目录和 arg
 
 每个内核拥有一个投影器，按实际观察到的 JediTerm 行对象身份分配从 1 开始的单调正数 `id`。同一行滚入历史时保留身份，文本相同的新行获得新号，不以文本重叠猜测滚动。捕获成功后引用映射只保留当前活动历史与屏幕行，最多为 `history + rows`；真实尺寸或主/备用屏切换时清空引用但不重用行号，切换期间不捕获也会重置。旧画面只保存不可变 id 与数值槽，不持有模拟器行引用；身份变化本身不改变输入模式版本。
 
-数值投影、样式、历史与缓冲切换由 [`TerminalKernelTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelTest.java) 和 [`TerminalSnapshotProjectorTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalSnapshotProjectorTest.java) 验证；分块调度、预算、满队列、关闭与异常传播由 [`TerminalKernelSchedulingTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelSchedulingTest.java) 验证。
+单个观察流由 [`TerminalViewStream`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalViewStream.java) 归约：调用方串行提供捕获画面，流内只保留一份已确认基线、一个在途更新与其版本，不缓存 delta 链或「最新待发」字段。新流首条是 `version=1` 的 RESET，只有精确匹配 `streamId + 在途版本` 的 ACK 才提升基线并归还额度，陈旧、重复或错流 ACK 一律不推进也不清理。增量只使用实际行身份：尺寸或主/备用屏变化、两版画面没有任何共享行 id、历史无法用 id + 整行相等证明连续时退回 RESET；仅 cursor/mode 变化产生 metadata-only PATCH，完全相同画面返回空且不推进版本，历史裁剪与追加由 `historyTrim/historyAppend` 有界描述。
+
+数值投影、样式、历史与缓冲切换由 [`TerminalKernelTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelTest.java) 和 [`TerminalSnapshotProjectorTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalSnapshotProjectorTest.java) 验证；分块调度、预算、满队列、关闭与异常传播由 [`TerminalKernelSchedulingTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalKernelSchedulingTest.java) 验证；RESET/PATCH 归约、单在途额度与 ACK 围栏由 [`TerminalViewStreamTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalViewStreamTest.java) 验证。
 
 ### 文件与检索
 
