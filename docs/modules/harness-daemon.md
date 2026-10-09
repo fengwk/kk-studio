@@ -19,15 +19,14 @@ Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原�
 ```text
 <data-dir>/
   daemon.lock
-  resources/text/           # 已发布大文本
-  resources/staging/        # 上传/输出中转 *.part
-  skills/<package>/         # 已安装技能包
-  skill-work/cache/         # bare Git 缓存
-  skill-work/staging/       # 安装暂存
-  skill-work/backup/        # 替换备份
+  tmp/workspaces/<uuid>/     # 受控临时 workspace（*.part 中转 → 原子发布 *.log）
+  skills/<package>/          # 已安装技能包
+  skill-work/cache/          # bare Git 缓存
+  skill-work/staging/        # 安装暂存
+  skill-work/backup/         # 替换备份
 ```
 
-POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File` 的 owner-only 设置，不等同于安装器对 token 的显式 Windows DACL 校验。数据目录启动时只清理遗留资源 `.part`；技能安装器另行恢复或清理 staging/backup。已发布全文、已安装包与 Git 缓存不会随服务卸载自动删除。
+POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File` 的 owner-only 设置，不等同于安装器对 token 的显式 Windows DACL 校验。`tmp/workspaces` 的清理由受控临时存储承担（见下）；数据目录启动时不再扫描或删除遗留 `.part`，技能安装器另行恢复或清理 staging/backup，已发布全文、已安装包与 Git 缓存都不随服务卸载自动删除。
 
 ## 能力注册与调度
 
@@ -63,7 +62,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 ## 本地存储与文本输出
 
-[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 把超阈值命令与检索输出先写 staging，再发布为 `resources/text/*.log`。全文是本地 durable 事实，不是内容寻址 Resource；历史可能仍引用绝对路径，不隐式删除。发布优先原子 move，文件系统不支持时使用普通 move。
+[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 把超阈值命令与检索输出先写 `tmp/workspaces/<uuid>/<name>.part`，再同一目录内原子发布为 `*.log`；每次外化登记一个新 workspace。全文是本地 durable 事实，不是内容寻址 Resource；历史可能仍引用绝对路径，不会隐式删除，只在超过当前保留期（默认 3 天）且未被使用时由定时清扫（默认 30 分钟一次）回收整个 workspace，不跟随符号链接、不越受控根、不删除仍持有 in-use lease 的资源。
 
 小输出内联，超过 50 KiB 或 2000 行时返回有界 head/tail、绝对路径、字节与行数，以及 read/grep 指引。预览不截断多字节字符，不重复重叠窗口；CR、LF、CRLF 的行数与文件读取一致。默认捕获预算为 1 GiB，达到预算只停止文件捕获，继续排空与统计；磁盘失败降级为无路径预览，不因输出量或磁盘错误杀死命令。结果明确区分完整捕获、截断与捕获失败。
 
@@ -77,7 +76,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 [`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java) 用本次 arguments 定位路径。相对 path 要求绝对、现存、可读 workdir；绝对 path 可直接定位，process.exec 始终要求 workdir。目录校验失败即拒绝本次调用，每次调用独立解析目录。
 
-workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿主权限来自运行用户，业务授权由 Platform 判定。READY 的进程用户、时区、OS、HOME 和可信 note 仅为宿主展示事实，HOME canonical 化失败时退回绝对规范路径，不是执行默认值。
+workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿主权限来自运行用户，业务授权由 Platform 判定。READY 的进程用户、时区、OS、HOME、可信 note 与受控临时目录 `tempDirectory` 仅为宿主展示事实，HOME canonical 化失败时退回绝对规范路径，不是执行默认值。
 
 ### 进程执行范围
 
