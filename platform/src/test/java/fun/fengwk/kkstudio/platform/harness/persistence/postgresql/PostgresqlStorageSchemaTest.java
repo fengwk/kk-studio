@@ -133,10 +133,6 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           conn,
           "ck_storage_upload_sha256",
           () -> insertUpload(conn, UUID.randomUUID(), "a.png", "image/png", 1L, "not-a-hash"));
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_storage_upload_expiry",
-          () -> insertUpload(conn, UUID.randomUUID(), "a.png", "image/png", 1L, sha256, true));
       insertUpload(conn, UUID.randomUUID(), "lease.png", "image/png", 1L, sha256);
       assertTransactionConstraintViolation(
           conn,
@@ -227,7 +223,7 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           queryLong(conn, commentCount("storage_upload", 0)),
           "storage_upload table comment is missing");
       assertEquals(
-          12L,
+          11L,
           queryLong(conn, commentCount("storage_upload", 1)),
           "every storage_upload column must be commented");
       assertEquals(
@@ -364,7 +360,7 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
   private static void insertUpload(
       Connection conn, UUID id, String filename, String mediaType, long size, String sha256)
       throws SQLException {
-    insertUpload(conn, id, filename, mediaType, size, sha256, null, false);
+    insertUpload(conn, id, filename, mediaType, size, sha256, null);
   }
 
   private static void insertUpload(
@@ -376,41 +372,12 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
       String sha256,
       UUID blobId)
       throws SQLException {
-    insertUpload(conn, id, filename, mediaType, size, sha256, blobId, false);
-  }
-
-  private static void insertUpload(
-      Connection conn,
-      UUID id,
-      String filename,
-      String mediaType,
-      long size,
-      String sha256,
-      boolean expired)
-      throws SQLException {
-    insertUpload(conn, id, filename, mediaType, size, sha256, null, expired);
-  }
-
-  private static void insertUpload(
-      Connection conn,
-      UUID id,
-      String filename,
-      String mediaType,
-      long size,
-      String sha256,
-      UUID blobId,
-      boolean expired)
-      throws SQLException {
-    // expires_at <= created_at 的行触发 ck_storage_upload_expiry；表达式直接内联以保持参数占位符稳定。
-    String expiresAt =
-        expired ? "current_timestamp - interval '1 hour'" : "current_timestamp + interval '1 hour'";
-    String createdSql =
-        "insert into storage_upload (id, candidate_blob_id, blob_id, filename,"
-            + " declared_media_type, declared_size, declared_sha256, expires_at, created_at)"
-            + " values (?, ?, ?, ?, ?, ?, ?, "
-            + expiresAt
-            + ", current_timestamp)";
-    try (PreparedStatement ps = conn.prepareStatement(createdSql)) {
+    // 过期事实是 created_at + 当前 upload TTL，不再是持久列；因此这里只写声明字段与 created_at。
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into storage_upload (id, candidate_blob_id, blob_id, filename,"
+                + " declared_media_type, declared_size, declared_sha256, created_at)"
+                + " values (?, ?, ?, ?, ?, ?, ?, current_timestamp)")) {
       ps.setObject(1, id);
       ps.setObject(2, UUID.randomUUID());
       ps.setObject(3, blobId);

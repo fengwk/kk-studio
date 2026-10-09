@@ -56,6 +56,13 @@ column	environment_connection	recent_events	type=jsonb notnull=t default='[]'::j
 column	environment_connection	runtime_info	type=jsonb notnull=f default=<null> generated= collation=-
 column	environment_connection	skill_state	type=jsonb notnull=t default='[]'::jsonb generated= collation=-
 column	environment_connection	status	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	environment_update_operation	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	environment_update_operation	environment_id	type=uuid notnull=t default=<null> generated= collation=-
+column	environment_update_operation	error	type=character varying(500) notnull=f default=<null> generated= collation="default"
+column	environment_update_operation	operation_id	type=uuid notnull=t default=<null> generated= collation=-
+column	environment_update_operation	phase	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	environment_update_operation	target_version	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	environment_update_operation	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	harness_entry	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_entry	entry_type	type=character varying(32) notnull=t default=<null> generated= collation="default"
 column	harness_entry	id	type=uuid notnull=t default=<null> generated= collation=-
@@ -113,9 +120,11 @@ column	harness_thread_join	final_answer_entry_id	type=uuid notnull=f default=<nu
 column	harness_thread_join	invocation_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_thread_join	max_turns	type=integer notnull=f default=<null> generated= collation=-
 column	harness_thread_join	parent_thread_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_thread_join	purpose	type=character varying(32) notnull=t default='task'::character varying generated= collation="default"
 column	harness_thread_join	reminder_turn	type=bigint notnull=t default=0 generated= collation=-
 column	harness_thread_join	request_hash	type=character(64) notnull=t default=<null> generated= collation="default"
 column	harness_thread_join	source_command_sequence	type=bigint notnull=t default=<null> generated= collation=-
+column	harness_thread_join	superseded_by_invocation_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_join	terminal_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_join	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread_stop_receipt	cancelled_command_count	type=integer notnull=t default=<null> generated= collation=-
@@ -182,6 +191,7 @@ column	skill_package	branch	type=character varying(255) notnull=t default=<null>
 column	skill_package	create_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	skill_package	current_commit	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	skill_package	description	type=text notnull=f default=<null> generated= collation="default"
+column	skill_package	encrypted_token	type=bytea notnull=f default=<null> generated= collation=-
 column	skill_package	head_check_error	type=text notnull=f default=<null> generated= collation="default"
 column	skill_package	head_checked_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
 column	skill_package	observed_head_commit	type=character varying(64) notnull=f default=<null> generated= collation="default"
@@ -212,7 +222,6 @@ column	storage_upload	created_at	type=timestamp(3) with time zone notnull=t defa
 column	storage_upload	declared_media_type	type=character varying(256) notnull=t default=<null> generated= collation="default"
 column	storage_upload	declared_sha256	type=character(64) notnull=t default=<null> generated= collation="default"
 column	storage_upload	declared_size	type=bigint notnull=t default=<null> generated= collation=-
-column	storage_upload	expires_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	storage_upload	filename	type=character varying(512) notnull=t default=<null> generated= collation="default"
 column	storage_upload	id	type=uuid notnull=t default=<null> generated= collation=-
 column	system_setting	config	type=jsonb notnull=t default=<null> generated= collation=-
@@ -251,6 +260,13 @@ constraint	environment_connection	ck_environment_connection_skill_state	CHECK ((
 constraint	environment_connection	ck_environment_connection_status	CHECK (((status)::text = ANY ((ARRAY['CONNECTING'::character varying, 'READY'::character varying])::text[])))
 constraint	environment_connection	environment_connection_pkey	PRIMARY KEY (environment_id)
 constraint	environment_connection	fk_environment_connection_environment	FOREIGN KEY (environment_id) REFERENCES environment(id) ON DELETE CASCADE
+constraint	environment_update_operation	ck_environment_update_operation_error	CHECK (((error IS NULL) OR ((btrim((error)::text) <> ''::text) AND (char_length((error)::text) <= 500) AND ((error)::text !~ '[\x00-\x1F\x7F]'::text))))
+constraint	environment_update_operation	ck_environment_update_operation_phase	CHECK (((phase)::text = ANY ((ARRAY['PENDING'::character varying, 'RUNNING'::character varying, 'PREPARED'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying])::text[])))
+constraint	environment_update_operation	ck_environment_update_operation_target_version	CHECK ((((target_version)::text = btrim((target_version)::text)) AND ((char_length((target_version)::text) >= 1) AND (char_length((target_version)::text) <= 64)) AND ((target_version)::text ~ '^[0-9A-Za-z._+-]+$'::text)))
+constraint	environment_update_operation	ck_environment_update_operation_terminal_error	CHECK ((((phase)::text <> 'FAILED'::text) OR (error IS NOT NULL)))
+constraint	environment_update_operation	ck_environment_update_operation_updated	CHECK ((updated_at >= created_at))
+constraint	environment_update_operation	environment_update_operation_pkey	PRIMARY KEY (operation_id)
+constraint	environment_update_operation	fk_environment_update_operation_environment	FOREIGN KEY (environment_id) REFERENCES environment(id) ON DELETE CASCADE
 constraint	harness_entry	ck_harness_entry_parent_not_self	CHECK (((parent_entry_id IS NULL) OR (parent_entry_id <> id)))
 constraint	harness_entry	ck_harness_entry_parent_shape	CHECK (((((entry_type)::text = 'ROOT'::text) AND (parent_entry_id IS NULL)) OR (((entry_type)::text <> 'ROOT'::text) AND (parent_entry_id IS NOT NULL))))
 constraint	harness_entry	ck_harness_entry_provider_replay_state	CHECK (((provider_replay_state IS NULL) OR ((jsonb_typeof(provider_replay_state) = 'object'::text) AND ((entry_type)::text = 'MESSAGE'::text) AND (((payload -> 'message'::text) ->> 'role'::text) = 'ASSISTANT'::text))))
@@ -313,14 +329,17 @@ constraint	harness_thread_join	ck_harness_thread_join_delivery	CHECK (((delivery
 constraint	harness_thread_join	ck_harness_thread_join_final_answer	CHECK (((final_answer_entry_id IS NULL) OR (terminal_entry_id IS NOT NULL)))
 constraint	harness_thread_join	ck_harness_thread_join_max_turns	CHECK (((max_turns IS NULL) OR (max_turns > 0)))
 constraint	harness_thread_join	ck_harness_thread_join_parent_not_child	CHECK (((parent_thread_id IS NULL) OR (parent_thread_id <> child_thread_id)))
+constraint	harness_thread_join	ck_harness_thread_join_purpose	CHECK (((purpose)::text = ANY ((ARRAY['task'::character varying, 'compaction'::character varying])::text[])))
 constraint	harness_thread_join	ck_harness_thread_join_reminder_turn	CHECK ((reminder_turn >= 0))
 constraint	harness_thread_join	ck_harness_thread_join_request_hash	CHECK ((request_hash ~ '^[0-9a-f]{64}$'::text))
+constraint	harness_thread_join	ck_harness_thread_join_superseded	CHECK (((superseded_by_invocation_id IS NULL) OR ((superseded_by_invocation_id <> invocation_id) AND (terminal_entry_id IS NULL))))
 constraint	harness_thread_join	ck_harness_thread_join_time_order	CHECK ((updated_at >= created_at))
 constraint	harness_thread_join	fk_harness_thread_join_child_thread	FOREIGN KEY (child_thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread_join	fk_harness_thread_join_delivery_command	FOREIGN KEY (parent_thread_id, delivery_command_sequence) REFERENCES harness_thread_command(thread_id, sequence)
 constraint	harness_thread_join	fk_harness_thread_join_final_answer_entry	FOREIGN KEY (final_answer_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_join	fk_harness_thread_join_parent_thread	FOREIGN KEY (parent_thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread_join	fk_harness_thread_join_source_command	FOREIGN KEY (child_thread_id, source_command_sequence) REFERENCES harness_thread_command(thread_id, sequence)
+constraint	harness_thread_join	fk_harness_thread_join_superseded_by	FOREIGN KEY (superseded_by_invocation_id) REFERENCES harness_thread_join(invocation_id)
 constraint	harness_thread_join	fk_harness_thread_join_terminal_entry	FOREIGN KEY (terminal_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_join	harness_thread_join_pkey	PRIMARY KEY (invocation_id)
 constraint	harness_thread_join	harness_thread_join_source_command_sequence_check	CHECK ((source_command_sequence > 0))
@@ -384,6 +403,7 @@ constraint	session_blob_ref	pk_session_blob_ref	PRIMARY KEY (session_id, blob_id
 constraint	skill_package	ck_skill_package_branch	CHECK ((((branch)::text = btrim((branch)::text)) AND (char_length((branch)::text) > 0) AND ((branch)::text !~ '[[:cntrl:]]'::text)))
 constraint	skill_package	ck_skill_package_current_commit	CHECK (((current_commit)::text ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'::text))
 constraint	skill_package	ck_skill_package_description	CHECK (((description IS NULL) OR ((description = btrim(description)) AND (char_length(description) > 0))))
+constraint	skill_package	ck_skill_package_encrypted_token	CHECK (((encrypted_token IS NULL) OR (octet_length(encrypted_token) > 0)))
 constraint	skill_package	ck_skill_package_head_check_error	CHECK (((head_check_error IS NULL) OR ((head_check_error = btrim(head_check_error)) AND (char_length(head_check_error) > 0) AND (octet_length(head_check_error) <= 4096))))
 constraint	skill_package	ck_skill_package_name	CHECK ((((package_name)::text = btrim((package_name)::text)) AND (char_length((package_name)::text) > 0) AND ((package_name)::text !~ '[[:cntrl:]]'::text) AND (POSITION((':'::text) IN (package_name)) = 0) AND (POSITION(('/'::text) IN (package_name)) = 0) AND (POSITION(('@'::text) IN (package_name)) = 0) AND (POSITION(('\'::text) IN (package_name)) = 0)))
 constraint	skill_package	ck_skill_package_observed_head_commit	CHECK (((observed_head_commit IS NULL) OR ((observed_head_commit)::text ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'::text)))
@@ -404,7 +424,6 @@ constraint	storage_object_cleanup	ck_storage_object_cleanup_key_nonblank	CHECK (
 constraint	storage_object_cleanup	pk_storage_object_cleanup	PRIMARY KEY (key)
 constraint	storage_upload	ck_storage_upload_cleanup_pair	CHECK (((cleanup_token IS NULL) = (cleanup_until IS NULL)))
 constraint	storage_upload	ck_storage_upload_cleanup_token	CHECK (((cleanup_token IS NULL) OR ((btrim((cleanup_token)::text) <> ''::text) AND ((cleanup_token)::text = btrim((cleanup_token)::text)) AND (char_length((cleanup_token)::text) <= 128))))
-constraint	storage_upload	ck_storage_upload_expiry	CHECK ((expires_at > created_at))
 constraint	storage_upload	ck_storage_upload_filename_nonblank	CHECK ((btrim((filename)::text) <> ''::text))
 constraint	storage_upload	ck_storage_upload_media_type_nonblank	CHECK ((btrim((declared_media_type)::text) <> ''::text))
 constraint	storage_upload	ck_storage_upload_sha256	CHECK ((declared_sha256 ~ '^[0-9a-f]{64}$'::text))
@@ -430,6 +449,9 @@ index	environment	uk_environment_registration_token	CREATE UNIQUE INDEX uk_envir
 index	environment_connection	environment_connection_pkey	CREATE UNIQUE INDEX environment_connection_pkey ON public.environment_connection USING btree (environment_id)
 index	environment_connection	idx_environment_connection_lease_until	CREATE INDEX idx_environment_connection_lease_until ON public.environment_connection USING btree (lease_until)
 index	environment_connection	idx_environment_connection_owner	CREATE INDEX idx_environment_connection_owner ON public.environment_connection USING btree (owner_node_id)
+index	environment_update_operation	environment_update_operation_pkey	CREATE UNIQUE INDEX environment_update_operation_pkey ON public.environment_update_operation USING btree (operation_id)
+index	environment_update_operation	idx_environment_update_operation_recent	CREATE INDEX idx_environment_update_operation_recent ON public.environment_update_operation USING btree (environment_id, created_at DESC, operation_id DESC)
+index	environment_update_operation	uk_environment_update_active	CREATE UNIQUE INDEX uk_environment_update_active ON public.environment_update_operation USING btree (environment_id) WHERE ((phase)::text = ANY ((ARRAY['PENDING'::character varying, 'RUNNING'::character varying, 'PREPARED'::character varying])::text[]))
 index	harness_entry	harness_entry_pkey	CREATE UNIQUE INDEX harness_entry_pkey ON public.harness_entry USING btree (id)
 index	harness_entry	idx_harness_entry_parent	CREATE INDEX idx_harness_entry_parent ON public.harness_entry USING btree (session_id, parent_entry_id)
 index	harness_entry	uk_harness_entry_session_id	CREATE UNIQUE INDEX uk_harness_entry_session_id ON public.harness_entry USING btree (session_id, id)
@@ -448,8 +470,8 @@ index	harness_thread_command	idx_harness_thread_command_queued	CREATE INDEX idx_
 index	harness_thread_command	idx_harness_thread_command_stop_request	CREATE INDEX idx_harness_thread_command_stop_request ON public.harness_thread_command USING btree (thread_id, stop_request_id, sequence) WHERE (stop_request_id IS NOT NULL)
 index	harness_thread_command	uk_harness_thread_command_idempotency	CREATE UNIQUE INDEX uk_harness_thread_command_idempotency ON public.harness_thread_command USING btree (thread_id, idempotency_key)
 index	harness_thread_join	harness_thread_join_pkey	CREATE UNIQUE INDEX harness_thread_join_pkey ON public.harness_thread_join USING btree (invocation_id)
-index	harness_thread_join	idx_harness_thread_join_child_pending	CREATE INDEX idx_harness_thread_join_child_pending ON public.harness_thread_join USING btree (child_thread_id) WHERE (terminal_entry_id IS NULL)
-index	harness_thread_join	idx_harness_thread_join_parent_pending	CREATE INDEX idx_harness_thread_join_parent_pending ON public.harness_thread_join USING btree (parent_thread_id) WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL))
+index	harness_thread_join	idx_harness_thread_join_child_pending	CREATE INDEX idx_harness_thread_join_child_pending ON public.harness_thread_join USING btree (child_thread_id) WHERE ((terminal_entry_id IS NULL) AND (superseded_by_invocation_id IS NULL))
+index	harness_thread_join	idx_harness_thread_join_parent_pending	CREATE INDEX idx_harness_thread_join_parent_pending ON public.harness_thread_join USING btree (parent_thread_id) WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL) AND ((purpose)::text = 'task'::text) AND (superseded_by_invocation_id IS NULL))
 index	harness_thread_stop_receipt	idx_harness_thread_stop_receipt_root	CREATE INDEX idx_harness_thread_stop_receipt_root ON public.harness_thread_stop_receipt USING btree (root_thread_id, root_stop_request_id)
 index	harness_thread_stop_receipt	pk_harness_thread_stop_receipt	CREATE UNIQUE INDEX pk_harness_thread_stop_receipt ON public.harness_thread_stop_receipt USING btree (thread_id, stop_request_id)
 index	harness_tool_invocation	harness_tool_invocation_pkey	CREATE UNIQUE INDEX harness_tool_invocation_pkey ON public.harness_tool_invocation USING btree (id)
@@ -471,7 +493,7 @@ index	storage_blob	storage_blob_pkey	CREATE UNIQUE INDEX storage_blob_pkey ON pu
 index	storage_blob	uk_storage_blob_active_hash	CREATE UNIQUE INDEX uk_storage_blob_active_hash ON public.storage_blob USING btree (sha256, size_bytes) WHERE ((state)::text = 'ACTIVE'::text)
 index	storage_object_cleanup	idx_storage_object_cleanup_due	CREATE INDEX idx_storage_object_cleanup_due ON public.storage_object_cleanup USING btree (next_attempt_at, key)
 index	storage_object_cleanup	pk_storage_object_cleanup	CREATE UNIQUE INDEX pk_storage_object_cleanup ON public.storage_object_cleanup USING btree (key)
-index	storage_upload	idx_storage_upload_cleanup_claim	CREATE INDEX idx_storage_upload_cleanup_claim ON public.storage_upload USING btree (cleanup_requested_at, expires_at, cleanup_until, id)
+index	storage_upload	idx_storage_upload_cleanup_claim	CREATE INDEX idx_storage_upload_cleanup_claim ON public.storage_upload USING btree (cleanup_requested_at, created_at, cleanup_until, id)
 index	storage_upload	storage_upload_pkey	CREATE UNIQUE INDEX storage_upload_pkey ON public.storage_upload USING btree (id)
 index	storage_upload	uk_storage_upload_candidate	CREATE UNIQUE INDEX uk_storage_upload_candidate ON public.storage_upload USING btree (candidate_blob_id)
 index	system_setting	system_setting_pkey	CREATE UNIQUE INDEX system_setting_pkey ON public.system_setting USING btree (id)
@@ -481,6 +503,7 @@ table	agent_provider		preserved
 table	chat		preserved
 table	environment		preserved
 table	environment_connection		preserved
+table	environment_update_operation		preserved
 table	harness_entry		preserved
 table	harness_model_invocation		preserved
 table	harness_session		preserved
