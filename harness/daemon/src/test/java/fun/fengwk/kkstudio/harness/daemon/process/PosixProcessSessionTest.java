@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.sun.jna.Native;
+import com.sun.jna.platform.mac.SystemB;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -112,7 +114,7 @@ class PosixProcessSessionTest {
     if (isLinux() || isMac()) {
       List<PosixProcessSession.GroupMember> members =
           PosixProcessSession.membersSnapshot(session, PosixProcessSession.NO_PROCESS);
-      assertNotNull(members, "具备内核查询能力的平台必须能枚举会话成员");
+      assertNotNull(members, () -> "具备内核查询能力的平台必须能枚举会话成员" + macEnumerationDiagnostics(session));
       assertTrue(
           members.stream().anyMatch(member -> member.pid() == ProcessHandle.current().pid()),
           "当前进程必须出现在自己的会话里");
@@ -177,6 +179,74 @@ class PosixProcessSessionTest {
     command.add(PosixProcessSessionFixture.class.getName());
     command.add(marker.toString());
     return command;
+  }
+
+  /** 失败后重新采样内核查询，只输出数字；不读取命令、环境变量或终端流。 */
+  private static String macEnumerationDiagnostics(long session) {
+    if (!isMac()) {
+      return "";
+    }
+    int requested = SystemB.INSTANCE.proc_listpids(SystemB.PROC_ALL_PIDS, 0, null, 0);
+    if (requested <= 0 || requested % Integer.BYTES != 0) {
+      return " (resample: requestedBytes=" + requested + ", errno=" + Native.getLastError() + ")";
+    }
+    int[] pids = new int[Math.min(8192, requested / Integer.BYTES + 256)];
+    int written =
+        SystemB.INSTANCE.proc_listpids(SystemB.PROC_ALL_PIDS, 0, pids, pids.length * Integer.BYTES);
+    StringBuilder diagnostics =
+        new StringBuilder(
+            " (resample: sid="
+                + session
+                + ", requestedBytes="
+                + requested
+                + ", writtenBytes="
+                + written);
+    int faultCount = 0;
+    int memberCount = 0;
+    for (int index = 0; index < Math.min(pids.length, written / Integer.BYTES); index++) {
+      int pid = pids[index];
+      if (pid <= 0) {
+        continue;
+      }
+      int sid = PosixProcessSession.LibC.INSTANCE.getsid(pid);
+      int error = Native.getLastError();
+      if (sid < 0) {
+        if (faultCount++ < 8) {
+          diagnostics
+              .append(", getsid=")
+              .append(pid)
+              .append("/")
+              .append(sid)
+              .append("/")
+              .append(error);
+        }
+        continue;
+      }
+      if (Integer.toUnsignedLong(sid) != session) {
+        continue;
+      }
+      memberCount++;
+      SystemB.ProcBsdInfo info = new SystemB.ProcBsdInfo();
+      int bytes =
+          SystemB.INSTANCE.proc_pidinfo(pid, SystemB.PROC_PIDTBSDINFO, 0, info, info.size());
+      error = Native.getLastError();
+      if (bytes != info.size() && faultCount++ < 8) {
+        diagnostics
+            .append(", bsdinfo=")
+            .append(pid)
+            .append("/")
+            .append(bytes)
+            .append("/")
+            .append(error);
+      }
+    }
+    return diagnostics
+        .append(", members=")
+        .append(memberCount)
+        .append(", faults=")
+        .append(faultCount)
+        .append(")")
+        .toString();
   }
 
   private Path statFile(String content) throws IOException {

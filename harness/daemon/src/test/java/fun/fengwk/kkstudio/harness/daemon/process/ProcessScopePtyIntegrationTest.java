@@ -17,7 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -77,7 +76,8 @@ class ProcessScopePtyIntegrationTest {
     ProcessScope scope =
         ProcessScope.startPty(
             workdir,
-            fixture("pty-probe", pidFile.toString(), resultFile.toString()),
+            ProcessScopeFixtureMain.fixtureCommand(
+                "pty-probe", pidFile.toString(), resultFile.toString()),
             80,
             24,
             System.getenv(),
@@ -180,7 +180,7 @@ class ProcessScopePtyIntegrationTest {
     ProcessScope scope =
         ProcessScope.startPty(
             workdir,
-            fixture("pty-exit", pidFile.toString(), "7"),
+            ProcessScopeFixtureMain.fixtureCommand("pty-exit", pidFile.toString(), "7"),
             80,
             24,
             System.getenv(),
@@ -240,17 +240,6 @@ class ProcessScopePtyIntegrationTest {
     return isWindows()
         ? List.of("cmd", "/c", "echo never > \"" + marker + "\"")
         : List.of("sh", "-c", "touch '" + marker + "'");
-  }
-
-  private List<String> fixture(String... arguments) {
-    List<String> command = new ArrayList<>();
-    command.add(System.getProperty("java.home") + "/bin/java");
-    command.addAll(TestCoverageAgentArguments.forwarded());
-    command.add("-cp");
-    command.add(System.getProperty("java.class.path"));
-    command.add(ProcessScopeFixtureMain.class.getName());
-    command.addAll(List.of(arguments));
-    return command;
   }
 
   private static Map<String, String> readFacts(Path file) throws IOException {
