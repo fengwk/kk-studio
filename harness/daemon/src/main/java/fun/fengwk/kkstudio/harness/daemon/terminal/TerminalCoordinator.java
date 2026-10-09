@@ -1045,6 +1045,8 @@ public final class TerminalCoordinator implements AutoCloseable {
             resolveStart(token);
             enqueueControl(() -> onStarted(created, token, runtime));
           } else {
+            // owner 已可能拒绝所有回调；停止信号不能依赖它接纳迟到的启动结果。
+            runtime.stop();
             resolveStart(token);
             enqueueControl(() -> onAbandonedStart(created, runtime));
           }

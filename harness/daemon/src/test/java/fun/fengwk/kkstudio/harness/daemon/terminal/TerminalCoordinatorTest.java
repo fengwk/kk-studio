@@ -1474,6 +1474,47 @@ class TerminalCoordinatorTest {
   }
 
   @Test
+  void ownerFatalThenLiveRuntimeReturnsStopsWithoutOwnerCallback() throws Exception {
+    ManualExecutor owner = manualExecutor();
+    ScriptedRuntimeFactory factory =
+        scriptedFactory(new BlockingInputStream(), new RecordingOutputStream());
+    factory.holdStart();
+    factory.ignoreGate();
+    Harness harness =
+        new Harness(
+            owner,
+            vtExecutor(),
+            ioExecutor(),
+            scheduler(),
+            factory,
+            defaultSpec(),
+            new RecordingEmitter());
+    harness.coordinator.bind(ENV_A, GEN);
+    owner.runAll();
+    harness.coordinator.receive(GEN, harness.request(VIEWER_A, new TerminalCommand.Open(null)));
+    owner.runAll();
+    harness.awaitTrue(() -> factory.starts() == 1);
+    owner.shutdown();
+    assertThrows(
+        ExecutionException.class,
+        () ->
+            harness
+                .coordinator
+                .receive(GEN, harness.request(VIEWER_A, keepalive()))
+                .get(WAIT_SECONDS, TimeUnit.SECONDS));
+    factory.releaseStart();
+
+    // 创建结果迟于 fatal：owner 已无法处理 onAbandonedStart，IO 回调必须直接发非阻塞停止信号。
+    ExecutionException failure =
+        assertThrows(
+            ExecutionException.class,
+            () -> harness.coordinator.termination().get(WAIT_SECONDS, TimeUnit.SECONDS));
+    assertTrue(failure.getCause() instanceof RejectedExecutionException);
+    assertTrue(factory.runtime(0).termination().isDone(), "迟到的活 runtime 必须收敛后再终结协调器");
+    assertEquals(0, harness.emitter.ofType(TerminalEvent.Type.ATTACHED).size());
+  }
+
+  @Test
   void fatalDuringPendingRebindTerminatesAcceptedRebindFuture() throws Exception {
     ManualExecutor owner = manualExecutor();
     ScriptedRuntimeFactory factory =
