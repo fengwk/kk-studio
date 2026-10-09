@@ -117,6 +117,10 @@ public final class ConfigSyncExporter {
     putIfNotNull(map, "credential", provider.getCredential());
     map.put("modelCallTimeoutMillis", timeout.modelCallTimeout().toMillis());
     map.put("modelCallIdleTimeoutMillis", timeout.modelCallIdleTimeout().toMillis());
+    putIfNotNull(
+        map,
+        "modelHttpRetryStatusCodes",
+        providerConfigurationCodec.readHttpRetryStatusCodes(provider.getConfigJson()));
     return map;
   }
 

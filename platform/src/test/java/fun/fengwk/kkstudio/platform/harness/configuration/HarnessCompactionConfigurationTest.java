@@ -65,7 +65,8 @@ class HarnessCompactionConfigurationTest {
             SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns());
+            SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns(),
+            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
     new ApplicationContextRunner()
         .withUserConfiguration(HarnessCompactionConfiguration.class)
         .withBean(
@@ -104,7 +105,8 @@ class HarnessCompactionConfigurationTest {
             SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns());
+            SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns(),
+            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
     return new SystemSettings(
         SystemSettings.Tool.DEFAULT,
         aiRuntime,

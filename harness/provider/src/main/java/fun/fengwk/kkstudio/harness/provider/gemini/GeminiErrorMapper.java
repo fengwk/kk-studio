@@ -71,7 +71,7 @@ final class GeminiErrorMapper {
       ProviderErrorKind kind = classify(status, errorStatus);
       String fallback = fallbackForKind(kind);
       String message = ProviderErrorHelper.formatHttpErrorMessage(exception, fallback);
-      return new ProviderException(kind, message);
+      return new ProviderException(kind, message, ProviderErrorHelper.httpErrorStatus(status));
     }
     return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
   }
@@ -96,7 +96,8 @@ final class GeminiErrorMapper {
       }
     }
     ProviderErrorKind kind = classify(statusCode, errorStatus);
-    return new ProviderException(kind, errorEventNode.toString());
+    return new ProviderException(
+        kind, errorEventNode.toString(), ProviderErrorHelper.httpErrorStatus(statusCode));
   }
 
   static ProviderException fromHttp(int statusCode, String errorJson) {
@@ -106,7 +107,7 @@ final class GeminiErrorMapper {
     String fallback = fallbackForKind(kind);
     String message =
         ProviderErrorHelper.formatHttpErrorMessage(statusCode, errorJson, false, fallback);
-    return new ProviderException(kind, message);
+    return new ProviderException(kind, message, ProviderErrorHelper.httpErrorStatus(statusCode));
   }
 
   static ProviderException fromThrowable(Throwable throwable) {

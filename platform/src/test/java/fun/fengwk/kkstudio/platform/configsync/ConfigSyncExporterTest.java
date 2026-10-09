@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -47,6 +48,43 @@ class ConfigSyncExporterTest {
         List.of(environment("env")),
         List.of(mcpServer("mcp", true)),
         List.of(mcpTool("tool_x", "mcp")));
+  }
+
+  @Test
+  void exportIncludesProviderHttpRetryOverride() {
+    AgentProvider p = provider("p");
+    p.setConfigJson("{\"modelHttpRetryStatusCodes\":[408,429]}");
+    ConfigSyncSnapshot snapshot =
+        snapshot(List.of(p), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+
+    String yamlText =
+        exporter.export(snapshot, List.of(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
+    Map<String, Object> document = yaml.parse(yamlText);
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> providers = (List<Map<String, Object>>) document.get("providers");
+    assertEquals(List.of(408, 429), providers.get(0).get("modelHttpRetryStatusCodes"));
+  }
+
+  @Test
+  void exportOmitsAbsentProviderHttpRetryOverride() {
+    ConfigSyncSnapshot snapshot =
+        snapshot(
+            List.of(provider("p")),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of());
+
+    String yamlText =
+        exporter.export(snapshot, List.of(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
+    Map<String, Object> document = yaml.parse(yamlText);
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> providers = (List<Map<String, Object>>) document.get("providers");
+    assertFalse(providers.get(0).containsKey("modelHttpRetryStatusCodes"));
   }
 
   @Test
