@@ -165,9 +165,10 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
   /**
    * 复用一个已授权的 Session Blob 作为 durable 工具结果资源。
    *
-   * <p>只按权威 blob 事实复核 {@code ref} 的媒体类型/体积/摘要与终态声明完全一致，并复用既有 Session 引用（{@link
-   * SessionBlobRefManager#retainRef} 对同一 Session/Blob 幂等），绝不读取或写入对象存储、绝不重新上传。只接受可送达模型的媒体类型 （{@code
-   * image/*}、{@code audio/*}、{@code video/*} 与 {@code application/pdf}），任意其它文件一律拒绝。
+   * <p>只复用当前 Session 已授权的既有 Blob，并按权威 blob 事实复核 {@code ref} 的媒体类型/体积/摘要与终态声明完全一致；随后复用既有 Session
+   * 引用（{@link SessionBlobRefManager#retainRef} 对同一 Session/Blob 幂等），绝不读取或写入对象存储、绝不重新上传。未授权（含 Daemon
+   * 注入此 scheme）与不存在的 Blob 在任何元数据读取或引用写入之前以不可区分的错误拒绝。只接受可送达模型的媒体类型（{@code image/*}、{@code
+   * audio/*}、{@code video/*} 与 {@code application/pdf}），任意其它文件一律拒绝。
    */
   private ResourceMessageContent reuseSessionResource(
       UUID sessionId, ResourceResultContent resource) {
@@ -178,6 +179,11 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     }
     if (resource.textMetadata() != null) {
       throw new IllegalArgumentException("session media resource must not declare text metadata");
+    }
+    // kkstudio 引用只可复用当前 Session 已有的授权：调用方是否已鉴权不改变本边界的职责，且 Daemon 结果也可能注入此 scheme。
+    // 未授权与不存在返回不可区分的错误，且发生在任何元数据读取 / retainRef / 资源写入之前。
+    if (!refManager.contains(sessionId, blobId)) {
+      throw new IllegalArgumentException("session resource is not referenced by this session");
     }
     StorageBlob blob = blobManager.getBlob(blobId);
     if (blob == null

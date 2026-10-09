@@ -265,8 +265,8 @@ public class PlatformResourceContentReader {
     } catch (PlatformReadException e) {
       throw e;
     } catch (Exception e) {
-      throw new PlatformReadException(
-          "failed to read resource: " + blobId + ": " + e.getMessage(), e);
+      // 固定安全英文失败消息：S3/OS 原始错误只保留在 cause 异常链，绝不进入模型可见文本。
+      throw new PlatformReadException("failed to read resource: " + blobId, e);
     }
   }
 

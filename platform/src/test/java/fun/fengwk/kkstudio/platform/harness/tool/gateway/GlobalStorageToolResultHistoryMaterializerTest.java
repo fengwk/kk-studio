@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -124,6 +126,7 @@ class GlobalStorageToolResultHistoryMaterializerTest {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
     stubBlob(blobManager, blobId, "image/png", 9L);
+    when(refManager.contains(sessionId, blobId)).thenReturn(true);
     GlobalStorageToolResultHistoryMaterializer materializer =
         materializer(uploadService, blobManager, refManager);
     ResourceResultContent sessionResource = sessionResource(blobId, "image/png", 9L, "preview");
@@ -147,14 +150,19 @@ class GlobalStorageToolResultHistoryMaterializerTest {
     verifyNoInteractions(uploadService);
   }
 
-  /** 意图：ref 声明的 MIME 与权威 blob 不一致（事实被篡改）时拒绝，不产生 history 也不 retain。 */
+  /**
+   * 意图：kkstudio 引用只可复用当前 Session 已有的授权；合法且 ACTIVE 的 Blob 在 Session 未引用时也必须拒绝，且必须在读取任何元数据、 retainRef
+   * 或资源写入之前失败（不可区分错误）。
+   */
   @Test
-  void rejectsSessionResourceWithMismatchedMetadata() {
+  void rejectsSessionResourceWithoutExistingAuthorization() {
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     StorageUploadService uploadService = mock(StorageUploadService.class);
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
-    stubBlob(blobManager, blobId, "audio/mpeg", 9L);
+    stubBlob(blobManager, blobId, "image/png", 9L);
+    when(refManager.contains(sessionId, blobId)).thenReturn(false);
     GlobalStorageToolResultHistoryMaterializer materializer =
         materializer(uploadService, blobManager, refManager);
     ResourceResultContent sessionResource = sessionResource(blobId, "image/png", 9L, "preview");
@@ -164,21 +172,53 @@ class GlobalStorageToolResultHistoryMaterializerTest {
             IllegalArgumentException.class,
             () ->
                 materializer.materialize(
-                    UUID.randomUUID(),
+                    sessionId,
+                    "read",
+                    new ToolResult("call", List.of(sessionResource), false, "{}")));
+
+    assertEquals("session resource is not referenced by this session", error.getMessage());
+    verify(blobManager, never()).getBlob(any());
+    verify(refManager, never()).retainRef(any(), any());
+    verifyNoInteractions(uploadService);
+  }
+
+  /** 意图：ref 声明的 MIME 与权威 blob 不一致（事实被篡改）时拒绝，不产生 history 也不 retain。 */
+  @Test
+  void rejectsSessionResourceWithMismatchedMetadata() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    StorageUploadService uploadService = mock(StorageUploadService.class);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
+    stubBlob(blobManager, blobId, "audio/mpeg", 9L);
+    when(refManager.contains(sessionId, blobId)).thenReturn(true);
+    GlobalStorageToolResultHistoryMaterializer materializer =
+        materializer(uploadService, blobManager, refManager);
+    ResourceResultContent sessionResource = sessionResource(blobId, "image/png", 9L, "preview");
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer.materialize(
+                    sessionId,
                     "read",
                     new ToolResult("call", List.of(sessionResource), false, "{}")));
     assertEquals("session resource failed integrity validation", error.getMessage());
-    verifyNoInteractions(refManager, uploadService);
+    verify(refManager, never()).retainRef(any(), any());
+    verifyNoInteractions(uploadService);
   }
 
   /** 意图：Session 资源只接受可送达模型的媒体类型；任意其它文件（如 CSV）一律拒绝。 */
   @Test
   void rejectsSessionResourceOfNonModelMediaType() {
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     StorageUploadService uploadService = mock(StorageUploadService.class);
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
     stubBlob(blobManager, blobId, "text/csv", 9L);
+    when(refManager.contains(sessionId, blobId)).thenReturn(true);
     GlobalStorageToolResultHistoryMaterializer materializer =
         materializer(uploadService, blobManager, refManager);
     ResourceResultContent sessionResource = sessionResource(blobId, "text/csv", 9L, "preview");
@@ -188,11 +228,12 @@ class GlobalStorageToolResultHistoryMaterializerTest {
             IllegalArgumentException.class,
             () ->
                 materializer.materialize(
-                    UUID.randomUUID(),
+                    sessionId,
                     "read",
                     new ToolResult("call", List.of(sessionResource), false, "{}")));
     assertEquals("session resource is not a supported model media type", error.getMessage());
-    verifyNoInteractions(refManager, uploadService);
+    verify(refManager, never()).retainRef(any(), any());
+    verifyNoInteractions(uploadService);
   }
 
   private static GlobalStorageToolResultHistoryMaterializer materializer(
