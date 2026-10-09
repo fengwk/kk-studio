@@ -61,6 +61,10 @@ public class StudioHarnessCommandBatchController {
                   HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
               if (command.target() instanceof AcceptCommandsTarget.NewThread fork) {
                 ManualThreadControlGuard.requireForkRootSession(runtime, fork.sessionId());
+              } else if (command.target()
+                  instanceof AcceptCommandsTarget.NewForkedSession forkedSession) {
+                ManualThreadControlGuard.requireForkRootSourceThread(
+                    runtime, forkedSession.sourceThreadId());
               }
               AcceptedCommands accepted = acceptanceService.accept(owner, command);
               ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());

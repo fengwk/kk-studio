@@ -25,7 +25,9 @@ public enum EntryType {
   /** 系统通知 Entry：可位于回合之间或 INPUT 输入段，对模型是上下文，不提升权限。 */
   NOTIFICATION,
   /** 安全边界上 append 的 branch settings 应用快照：不参与 turn grammar，不调度模型。 */
-  SETTINGS;
+  SETTINGS,
+  /** fork 事实节点：记录本次 fork 的来源与模式；只在回合之间出现，仅陈述事实，不携带执行控制或谱系。 */
+  FORK;
 
   /** 是否为 Session Tree 的语义根。 */
   public boolean isRoot() {

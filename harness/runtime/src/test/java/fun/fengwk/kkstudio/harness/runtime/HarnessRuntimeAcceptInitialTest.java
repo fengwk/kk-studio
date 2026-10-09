@@ -9,6 +9,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.syst
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,6 +25,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.ForkMode;
+import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -511,9 +514,12 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
   }
 
-  /** ENTRY：KEY SHARE 锁 session、验证 start Entry 同 Session、插入 Thread+Commands+Work；不复制 Entry。 */
+  /**
+   * NEW_THREAD：KEY SHARE 锁 session、验证 start Entry 同 Session、插入 FORK 事实节点 +
+   * Thread+Commands+Work；不复制共享前缀。
+   */
   @Test
-  void entryAcceptsNewThreadUnderExistingSessionWithoutCopyingEntries() {
+  void entryAcceptsNewThreadUnderExistingSessionAppendingForkFactOnly() {
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
     AcceptedCommands result =
         runtime.acceptCommands(
@@ -527,10 +533,14 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(baseline.sessionId(), result.session().id());
     assertEquals(baseline.rootEntryId(), result.rootEntry().id());
     ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(203)).orElseThrow());
-    // head 直接指向既有 start Entry：不复制 Entry，Session 内仍只有 ROOT。
-    assertEquals(baseline.rootEntryId(), thread.headEntryId());
+    // head 是 FORK 事实节点：parent 指向既有 start Entry，不复制共享前缀。
+    Entry fork = store.transaction(tx -> tx.findEntry(thread.headEntryId())).orElseThrow();
+    ForkPayload forkPayload = assertInstanceOf(ForkPayload.class, fork.payload());
+    assertEquals(ForkMode.BRANCH, forkPayload.mode());
+    assertEquals(baseline.rootEntryId(), forkPayload.sourceEntryId());
+    assertEquals(baseline.rootEntryId(), fork.parentEntryId());
     List<Entry> entries = store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId()));
-    assertEquals(1, entries.size());
+    assertEquals(2, entries.size());
     assertEquals(1L, thread.version());
     assertEquals(2L, thread.nextCommandSequence());
     assertTrue(
@@ -651,10 +661,10 @@ class HarnessRuntimeAcceptInitialTest {
 
   /**
    * 合法 fork 边界只有 ROOT 与已闭合 TURN_END：ROOT、多工具结果后的 COMPLETED TURN_END（即最新边界）、FAILED 与 STOPPED
-   * TURN_END 都可 fork；新 Thread head 直接指向边界，不复制 Entry。
+   * TURN_END 都可 fork；每个 fork 只追加一个 FORK 事实节点（parent 指向该边界），绝不复制共享前缀。
    */
   @Test
-  void entryForksAtRootAndClosedTurnEndBoundariesWithoutCopyingEntries() {
+  void entryForksAtRootAndClosedTurnEndBoundariesAppendingForkFacts() {
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
     SeededTurn completed = seedCompletedTurnWithToolResults(baseline, 2);
     UUID failedBoundary = seedFailedTurn(baseline);
@@ -677,18 +687,22 @@ class HarnessRuntimeAcceptInitialTest {
               AcceptancePreflight.IDENTITY);
       assertFalse(result.replayed());
       ThreadState thread = store.transaction(tx -> tx.findThread(threadId).orElseThrow());
-      assertEquals(boundary, thread.headEntryId());
+      Entry fork = store.transaction(tx -> tx.findEntry(thread.headEntryId())).orElseThrow();
+      ForkPayload forkPayload = assertInstanceOf(ForkPayload.class, fork.payload());
+      assertEquals(ForkMode.BRANCH, forkPayload.mode());
+      assertEquals(boundary, forkPayload.sourceEntryId());
+      assertEquals(boundary, fork.parentEntryId());
       assertEquals(1L, thread.version());
       assertEquals(1, store.transaction(tx -> tx.loadCommandsByThread(threadId)).size());
     }
 
-    // fork 不复制任何 Entry。
+    // 每次 fork 只追加一个 FORK 事实节点，绝不复制共享前缀。
     assertEquals(
-        entriesBefore,
+        entriesBefore + boundaries.size(),
         store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId())).size());
   }
 
-  /** 正常关闭的 STOPPED 边界不是未闭合屏障：fork 到该边界照常成立，新 Thread head 直接指向它。 */
+  /** 正常关闭的 STOPPED 边界不是未闭合屏障：fork 到该边界照常成立，并追加 FORK 事实节点。 */
   @Test
   void entryForksAtAClosedStopBoundary() {
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
@@ -704,7 +718,11 @@ class HarnessRuntimeAcceptInitialTest {
 
     assertFalse(result.replayed());
     ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(203)).orElseThrow());
-    assertEquals(boundary, thread.headEntryId());
+    Entry fork = store.transaction(tx -> tx.findEntry(thread.headEntryId())).orElseThrow();
+    ForkPayload forkPayload = assertInstanceOf(ForkPayload.class, fork.payload());
+    assertEquals(ForkMode.BRANCH, forkPayload.mode());
+    assertEquals(boundary, forkPayload.sourceEntryId());
+    assertEquals(boundary, fork.parentEntryId());
     assertEquals(1L, thread.version());
   }
 

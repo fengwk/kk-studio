@@ -79,6 +79,27 @@ public final class ThreadCreationRequestHash {
     return digest(envelope);
   }
 
+  /**
+   * 计算 NEW_FORKED_SESSION target 的 creation request hash：来源 Thread、切点、新 Session/Thread、YOLO policy
+   * 与 ordered 命令对。同一 raw 请求稳定得到同一 hash，内容变化（含切点或命令顺序）得到不同 hash。
+   */
+  public static String forNewForkedSession(
+      UUID sourceThreadId,
+      UUID startEntryId,
+      UUID sessionId,
+      UUID threadId,
+      ThreadYoloPolicy yoloPolicy,
+      List<NewThreadCommand> commands) {
+    ObjectNode envelope = envelope("NEW_FORKED_SESSION");
+    envelope.put("sourceThreadId", requireId(sourceThreadId, "sourceThreadId").toString());
+    envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
+    envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
+    envelope.put("threadId", requireId(threadId, "threadId").toString());
+    envelope.set("yolo", yoloNode(yoloPolicy));
+    envelope.set("commands", commandsNode(commands));
+    return digest(envelope);
+  }
+
   /** 稳定的 YOLO policy 描述：根为 mode，子代理额外带不可变 Follow 目标。 */
   private static JsonNode yoloNode(ThreadYoloPolicy yoloPolicy) {
     ObjectNode node = NODES.objectNode();

@@ -31,6 +31,10 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -39,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -94,6 +99,12 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final UUID BLOB_ID = id(9);
   private static final UUID PROJECT_ID = id(10);
   private static final UUID ISSUE_ID = id(11);
+  private static final UUID SOURCE_THREAD_ID = id(40);
+  private static final UUID NEW_SESSION_ID = id(41);
+  private static final UUID NEW_THREAD_ID = id(42);
+  private static final UUID COPIED_BLOB_ID = id(43);
+  private static final UUID NESTED_BLOB_ID = id(44);
+  private static final UUID FOREIGN_BLOB_ID = id(45);
   private static final String AGENT_NAME = "executor";
   private static final OwnerRef CHAT_OWNER = new OwnerRef.Chat(CHAT_ID);
   private static final OwnerRef ISSUE_AGENT_OWNER = new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
@@ -702,6 +713,149 @@ class HarnessCommandAcceptanceOrchestratorTest {
         NullPointerException.class,
         () -> service.accept(null, newSession(THREAD_ID, user(new TextMessageContent("null")))));
     assertThrows(NullPointerException.class, () -> service.accept(CHAT_OWNER, null));
+  }
+
+  /**
+   * 会话 fork：preflight 为新 Session 建立 Chat 归属，并把被复制消息引用的 blob（含 tool result 内嵌）重新 retain 到新 Session。
+   */
+  @Test
+  void sessionForkCreatesChatOwnershipAndRetainsCopiedResources() {
+    stubOwnedSourceSession(SESSION_ID);
+    when(chatSessionRepository.insert(NEW_SESSION_ID, CHAT_ID)).thenReturn(true);
+    when(transaction.loadEntriesBySessionId(NEW_SESSION_ID))
+        .thenReturn(List.of(copiedResourceEntry(), copiedToolResultEntry()));
+    AcceptCommandsCommand command = sessionFork(user(new TextMessageContent("fork")));
+
+    AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
+    List<NewThreadCommand> prepared =
+        preflight.prepare(
+            transaction, new Session(NEW_SESSION_ID, "forked", NOW), command.commands());
+
+    assertEquals(1, prepared.size());
+    verify(chatSessionRepository).insert(NEW_SESSION_ID, CHAT_ID);
+    verify(refManager).retainRef(NEW_SESSION_ID, COPIED_BLOB_ID);
+    verify(refManager).retainRef(NEW_SESSION_ID, NESTED_BLOB_ID);
+  }
+
+  /** 会话 fork 的初始消息可复用本 Session 已复制的 blob，但任何未持有（跨 owner）的 blob 必须拒绝。 */
+  @Test
+  void sessionForkInitialMessageMayReuseCopiedBlobButRejectsForeignBlob() {
+    stubOwnedSourceSession(SESSION_ID);
+    when(chatSessionRepository.insert(NEW_SESSION_ID, CHAT_ID)).thenReturn(true);
+    when(transaction.loadEntriesBySessionId(NEW_SESSION_ID))
+        .thenReturn(List.of(copiedResourceEntry()));
+    when(refManager.contains(NEW_SESSION_ID, COPIED_BLOB_ID)).thenReturn(true);
+    when(refManager.contains(NEW_SESSION_ID, FOREIGN_BLOB_ID)).thenReturn(false);
+
+    AcceptCommandsCommand reuse =
+        sessionFork(user(ResourceMessageContent.media(COPIED_BLOB_ID, "copied.txt")));
+    AcceptancePreflight reusePreflight = acceptAndCapturePreflight(CHAT_OWNER, reuse);
+    List<NewThreadCommand> prepared =
+        reusePreflight.prepare(
+            transaction, new Session(NEW_SESSION_ID, "forked", NOW), reuse.commands());
+    assertEquals(1, prepared.size());
+
+    AcceptCommandsCommand foreign =
+        sessionFork(user(ResourceMessageContent.media(FOREIGN_BLOB_ID, "foreign.txt")));
+    AcceptancePreflight foreignPreflight = acceptAndCapturePreflight(CHAT_OWNER, foreign);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            foreignPreflight.prepare(
+                transaction, new Session(NEW_SESSION_ID, "forked", NOW), foreign.commands()));
+
+    verify(refManager, never()).retainRef(NEW_SESSION_ID, FOREIGN_BLOB_ID);
+  }
+
+  /** 会话 fork 只服务 Chat：Issue+Agent 不支持，且必须在任何写入与 Runtime 调用之前拒绝。 */
+  @Test
+  void rejectsIssueAgentSessionForkBeforeAnySideEffect() {
+    AcceptCommandsCommand command = sessionFork(user(new TextMessageContent("fork")));
+
+    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
+
+    verify(runtime, never()).acceptCommands(any(), any());
+    verify(chatSessionRepository, never()).insert(any(), any());
+    verify(refManager, never()).retainRef(any(), any());
+  }
+
+  /** 会话 fork 的来源 Session 必须由该 Chat 持有：别人的 Session 一律拒绝且零写入。 */
+  @Test
+  void rejectsSessionForkOfUnownedSourceSession() {
+    when(transaction.findThread(SOURCE_THREAD_ID))
+        .thenReturn(Optional.of(thread(SOURCE_THREAD_ID, SESSION_ID)));
+    when(chatSessionRepository.findBySessionId(SESSION_ID))
+        .thenReturn(new ChatSession(SESSION_ID, OTHER_CHAT_ID));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> service.accept(CHAT_OWNER, sessionFork(user(new TextMessageContent("fork")))));
+
+    verify(runtime, never()).acceptCommands(any(), any());
+    verify(chatSessionRepository, never()).insert(any(), any());
+    verify(refManager, never()).retainRef(any(), any());
+  }
+
+  /** 来源 Thread 不可解析说明归属事实不一致：fail closed 且零写入。 */
+  @Test
+  void rejectsSessionForkWithUnresolvableSourceThread() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> service.accept(CHAT_OWNER, sessionFork(user(new TextMessageContent("fork")))));
+
+    verify(runtime, never()).acceptCommands(any(), any());
+    verify(chatSessionRepository, never()).insert(any(), any());
+    verify(refManager, never()).retainRef(any(), any());
+  }
+
+  private void stubOwnedSourceSession(UUID sessionId) {
+    when(transaction.findThread(SOURCE_THREAD_ID))
+        .thenReturn(Optional.of(thread(SOURCE_THREAD_ID, sessionId)));
+    when(chatSessionRepository.findBySessionId(sessionId))
+        .thenReturn(new ChatSession(sessionId, CHAT_ID));
+  }
+
+  private static AcceptCommandsCommand sessionFork(NewThreadCommand... commands) {
+    return new AcceptCommandsCommand(
+        new AcceptCommandsTarget.NewForkedSession(
+            SOURCE_THREAD_ID, ENTRY_ID, NEW_SESSION_ID, NEW_THREAD_ID, false),
+        List.of(commands));
+  }
+
+  private static Entry copiedResourceEntry() {
+    return new Entry(
+        id(70),
+        NEW_SESSION_ID,
+        ENTRY_ID,
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(ResourceMessageContent.media(COPIED_BLOB_ID, "copied.txt"))),
+            null,
+            null),
+        NOW);
+  }
+
+  /** tool result 内嵌 Resource：fork retain 必须递归进入 tool result 内容，不能漏掉。 */
+  private static Entry copiedToolResultEntry() {
+    ToolResultMessageContent result =
+        new ToolResultMessageContent(
+            "call-1",
+            "bash",
+            "bash",
+            List.of(ResourceMessageContent.media(NESTED_BLOB_ID, "nested.txt")),
+            false,
+            "{}");
+    return new Entry(
+        id(71),
+        NEW_SESSION_ID,
+        ENTRY_ID,
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.TOOL, List.of(result)),
+            null,
+            new ToolResultMetadata(
+                id(72), ENTRY_ID, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null)),
+        NOW);
   }
 
   private ImageInputTier preparedAttachmentTier(long key, AttachmentMessageContent attachment) {

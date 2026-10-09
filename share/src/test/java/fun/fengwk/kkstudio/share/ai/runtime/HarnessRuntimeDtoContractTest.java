@@ -90,6 +90,27 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("branch", target.getThreadName());
   }
 
+  /** 会话 fork target 的 sourceThreadId 也按 presence 跟踪：显式 null 不能让禁用字段校验被绕过。 */
+  @Test
+  void creationTargetTracksSourceThreadIdFieldPresence() {
+    HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
+    target.setType("NEW_FORKED_SESSION");
+    target.setSourceThreadId(null);
+
+    assertTrue(target.hasSourceThreadIdField());
+    assertNull(target.getSourceThreadId());
+    assertFalse(new HarnessCommandTargetDTO().hasSourceThreadIdField());
+
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"type":"NEW_FORKED_SESSION","sourceThreadId":1}
+                """,
+                HarnessCommandTargetDTO.class));
+  }
+
   @Test
   void threadCommandBatchTracksCursorAndImmutableCommandDefaults() {
     HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
