@@ -39,7 +39,9 @@ public record DaemonEnvelope(
           DaemonMessageType.CANCELLED,
           DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
           DaemonMessageType.RESOURCE_UPLOAD_TICKET,
-          DaemonMessageType.RESOURCE_UPLOAD_COMMIT);
+          DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
+          DaemonMessageType.UPDATE,
+          DaemonMessageType.UPDATE_RESULT);
 
   private static final Set<DaemonMessageType> INVOCATION_MESSAGES =
       Set.of(

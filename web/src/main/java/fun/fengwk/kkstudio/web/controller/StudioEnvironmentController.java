@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
+import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
@@ -27,6 +28,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeRequestDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -49,15 +51,16 @@ public class StudioEnvironmentController {
       new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8);
 
   private final EnvironmentService environmentService;
+  private final EnvironmentUpdateService environmentUpdateService;
 
   @GetMapping
   public Result<List<EnvironmentCardDTO>> listEnvironments() {
-    return Results.ok(environmentService.list());
+    return Results.ok(environmentService.list().stream().map(this::withUpdate).toList());
   }
 
   @GetMapping("/{environmentId}")
   public Result<EnvironmentCardDTO> getEnvironment(@PathVariable String environmentId) {
-    return Results.ok(environmentService.get(parseEnvironmentId(environmentId)));
+    return Results.ok(withUpdate(environmentService.get(parseEnvironmentId(environmentId))));
   }
 
   @PostMapping
@@ -71,6 +74,29 @@ public class StudioEnvironmentController {
   public Result<List<EnvironmentEventDTO>> listEnvironmentEvents(
       @PathVariable String environmentId) {
     return Results.ok(environmentService.listEvents(parseEnvironmentId(environmentId)));
+  }
+
+  /**
+   * 只读该 Environment 最近一次受管更新操作；从未更新时 body 为 null。
+   *
+   * <p>它是持久事实投影：不触发任何探测，也不改变准入。
+   */
+  @GetMapping("/{environmentId}/update")
+  public Result<EnvironmentUpdateDTO> getEnvironmentUpdate(@PathVariable String environmentId) {
+    return Results.ok(
+        environmentUpdateService.describe(parseEnvironmentId(environmentId)).orElse(null));
+  }
+
+  /**
+   * 发起一次受管 Daemon 更新：目标版本由平台固定官方发布决定，请求体不接受版本或 URL。
+   *
+   * <p>这是专用管理路径（不是 Agent 工具，也不经 process.exec）；目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝。
+   */
+  @PostMapping("/{environmentId}/update")
+  public Result<EnvironmentCardDTO> startEnvironmentUpdate(@PathVariable String environmentId) {
+    EnvironmentId id = parseEnvironmentId(environmentId);
+    environmentUpdateService.startUpdate(id);
+    return Results.ok(withUpdate(environmentService.get(id)));
   }
 
   /** 签发五分钟安装 code；校验当前版本和已保存设置，不写环境状态。 */
@@ -136,6 +162,12 @@ public class StudioEnvironmentController {
     } catch (IllegalArgumentException e) {
       throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
     }
+  }
+
+  /** 在稳定 Card 上叠加最近一次更新投影：更新事实持久在 operation 行，Card 只做只读合并，不改变任何 Environment 状态。 */
+  private EnvironmentCardDTO withUpdate(EnvironmentCardDTO card) {
+    environmentUpdateService.describe(EnvironmentId.parse(card.getId())).ifPresent(card::setUpdate);
+    return card;
   }
 
   /** 脚本按原文字节返回，禁止缓存，并阻止浏览器按附件内容嗅探。 */

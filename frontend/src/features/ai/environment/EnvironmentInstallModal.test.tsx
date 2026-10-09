@@ -11,7 +11,13 @@ import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { EnvironmentCardDTO, EnvironmentInstallConfigDTO } from '@/shared/api/contracts/ai-environment'
 
 vi.mock('@/shared/api/environment-service', () => ({
-  environmentService: { getEnvironment: vi.fn(), saveInstallConfig: vi.fn(), createInstallCode: vi.fn() },
+  environmentService: {
+    getEnvironment: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
+    saveInstallConfig: vi.fn(),
+    createInstallCode: vi.fn(),
+  },
 }))
 vi.mock('./clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
