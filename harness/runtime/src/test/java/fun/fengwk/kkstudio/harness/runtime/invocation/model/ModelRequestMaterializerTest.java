@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -13,10 +14,8 @@ import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
@@ -234,27 +233,21 @@ class ModelRequestMaterializerTest {
     assertEquals("cleared reply", textOf(after.messages().get(after.messages().size() - 1)));
   }
 
+  /** 只读历史规划仍从 basis head 恢复压缩事实：仅 owned COMPACTION TURN_START 命中，普通 head 返回 null。 */
   @Test
-  void compactionRequestRebuildsTheSameSummaryPromptFromEntryIds() {
-    EntryPath history = conversationPath(2);
+  void compactionStartAtHeadRecoversOnlyOwnedCompactionTurnStart() {
+    EntryPath history = conversationPath(1);
+    assertNull(ModelRequestMaterializer.compactionStartAtHead(history));
+
     CompactionStart compaction =
         CompactionStart.pending(
             CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     List<Entry> entries = new ArrayList<>(history.entries());
     entries.add(
         entry(id(10L), history.head().id(), resolvedStart(TurnStartReason.COMPACTION, compaction)));
-    EntryPath path = new EntryPath(entries);
-    CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
-    ModelRequestSpec spec = compactionSpec();
 
-    ProviderRequest request = MATERIALIZER.materialize(path, spec);
-
-    assertEquals(1, request.messages().size());
-    assertEquals(spec.systemInstruction(), request.systemInstruction());
     assertEquals(
-        CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary()),
-        textOf(request.messages().get(0)));
-    assertTrue(request.tools().isEmpty());
+        compaction, ModelRequestMaterializer.compactionStartAtHead(new EntryPath(entries)));
   }
 
   @Test
@@ -479,19 +472,6 @@ class ModelRequestMaterializerTest {
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(),
-        ProviderCacheControl.none());
-  }
-
-  private static ModelRequestSpec compactionSpec() {
-    return new ModelRequestSpec(
-        ProviderType.OPENAI,
-        new UUID(0L, 1L),
-        descriptor(),
-        variant(),
-        1024,
-        "Test system instruction.",
-        List.of(),
         List.of(),
         ProviderCacheControl.none());
   }

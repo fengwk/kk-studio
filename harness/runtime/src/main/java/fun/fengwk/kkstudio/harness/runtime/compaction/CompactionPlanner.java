@@ -223,48 +223,6 @@ public final class CompactionPlanner {
   }
 
   /**
-   * 按已冻结的 {@link CompactionStart} Entry IDs 重建摘要输入，不重新运行 cut selection。
-   *
-   * <p>FULL/HISTORY 从最新 complete 压缩的 cut 之后取到 historyEnd；TURN_PREFIX 只取 prefix..cut。previousSummary
-   * 仅 FULL/HISTORY 且路径上存在 complete 压缩时非空。
-   */
-  public static CompactionSummaryInput reconstructSummaryInput(
-      EntryPath path, CompactionStart start) {
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(start, "start");
-    List<Entry> entries = path.entries();
-    boolean[] visible = visibilityMask(entries);
-    int cutIndex = indexOfId(entries, start.cutEntryId());
-    if (cutIndex < 0) {
-      throw new IllegalStateException(
-          "compaction cutEntryId is not on the current path: " + start.cutEntryId());
-    }
-    if (start.phase() == CompactionPhase.TURN_PREFIX) {
-      int prefixIndex = indexOfId(entries, start.turnPrefixStartEntryId());
-      if (prefixIndex < 0 || prefixIndex >= cutIndex) {
-        throw new IllegalStateException(
-            "TURN_PREFIX compaction requires turnPrefixStartEntryId on the current path before cut");
-      }
-      List<AgentMessage> messages = contextMessages(entries, visible, prefixIndex, cutIndex);
-      if (messages.isEmpty()) {
-        throw new IllegalStateException("compaction prefix range contains no context messages");
-      }
-      return new CompactionSummaryInput(messages, null);
-    }
-    int boundaryStart = boundaryStartIndex(entries);
-    String previousSummary = previousSummary(entries);
-    int historyEnd =
-        start.phase() == CompactionPhase.HISTORY
-            ? indexOfId(entries, start.turnPrefixStartEntryId())
-            : cutIndex;
-    List<AgentMessage> messages = contextMessages(entries, visible, boundaryStart, historyEnd);
-    if (messages.isEmpty()) {
-      throw new IllegalStateException("compaction history range contains no context messages");
-    }
-    return new CompactionSummaryInput(messages, previousSummary);
-  }
-
-  /**
    * 估算一次普通请求的输入 token：调用方准备好的 system instruction 与当前 path 的可见对话投影之和。供 Resolver 计算
    * “剩余上下文”输出预算，不参与压缩切分。
    */
@@ -327,16 +285,6 @@ public final class CompactionPlanner {
       tokens = Math.addExact(tokens, visible[i] ? estimateTokens(entries.get(i)) : 0L);
     }
     return tokens;
-  }
-
-  private static int boundaryStartIndex(List<Entry> entries) {
-    var path = new EntryPath(entries);
-    Optional<CompactionTurns.CompactionTurn> latest = CompactionTurns.latestComplete(path);
-    if (latest.isEmpty()) {
-      return 0;
-    }
-    CompactionTurns.CompactionTurn complete = latest.get();
-    return cutIndex(entries, complete);
   }
 
   private static int cutIndex(List<Entry> entries, CompactionTurns.CompactionTurn complete) {

@@ -221,43 +221,6 @@ class ModelAttemptMaterializationTest {
         () -> ModelAttemptMaterialization.validate(ready, stopped, inputPath(cancellationBarrier)));
   }
 
-  @Test
-  void compactionRetriesRemainInvocationOnlyUntilTerminalErrorMaterialization() {
-    ModelAttemptFailure failure = failure();
-    ModelInvocationError terminalError =
-        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "summarization failed");
-    CompactionStart compaction = fullCompactionStart();
-    ModelInvocation stored =
-        new ModelInvocation(
-            id(10L),
-            id(20L),
-            id(2L),
-            id(2L),
-            requestSpec(),
-            ModelInvocationStatus.FAILED,
-            2,
-            null,
-            null,
-            terminalError,
-            null,
-            List.of(failure),
-            T2,
-            T6);
-    Entry result =
-        assistantError(id(3L), id(2L), terminalError, new ModelAttemptSnapshot(2, 0, "", ""), T6);
-    EntryPath path =
-        new EntryPath(
-            List.of(
-                root(),
-                new Entry(id(2L), id(100L), id(1L), resolvedCompactionTurnStart(compaction), T1),
-                result));
-
-    assertDoesNotThrow(
-        () ->
-            ModelAttemptMaterialization.validate(
-                stored, stored.attachResultEntry(result.id(), T6), path));
-  }
-
   /** validateAttached：Tool batch apply / Stop 删除 parent 前重放 attached durable 事实的最小严格校验。 */
   @Test
   void acceptsValidAttachedToolPhaseModel() {
@@ -725,7 +688,10 @@ class ModelAttemptMaterializationTest {
             () ->
                 ModelAttemptMaterialization.validate(
                     stored, stored.attachResultEntry(result.id(), T6), path));
-    assertEquals("compaction turn must not have model invocations", error.getMessage());
+    assertEquals(
+        "a COMPACTION turn must not have model invocations; compaction runs in a child runtime"
+            + " thread",
+        error.getMessage());
   }
 
   /** SUCCEEDED compaction invocation：requestHead = TURN_START id(2)，result = 固定摘要文本快照。 */
@@ -1033,11 +999,6 @@ class ModelAttemptMaterializationTest {
   private static TurnStartPayload resolvedCompactionTurnStart(CompactionStart compaction) {
     return new TurnStartPayload(
         TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, compaction);
-  }
-
-  private static CompactionStart fullCompactionStart() {
-    return CompactionStart.pending(
-        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(1L), null, null);
   }
 
   private static CompactionStart historyCompactionStart() {

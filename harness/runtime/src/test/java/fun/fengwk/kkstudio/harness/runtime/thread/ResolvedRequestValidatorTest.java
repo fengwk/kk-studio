@@ -93,7 +93,7 @@ class ResolvedRequestValidatorTest {
         assertThrows(
             IllegalStateException.class,
             () -> ResolvedRequestValidator.validate(path, resolved(normalSpec(SETTINGS))));
-    assertEquals("a normal turn must not carry compaction TURN_START metadata", error.getMessage());
+    assertEquals("a normal turn must not carry a COMPACTION TURN_START", error.getMessage());
   }
 
   @Test

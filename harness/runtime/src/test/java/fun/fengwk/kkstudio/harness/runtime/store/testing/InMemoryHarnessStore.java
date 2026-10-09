@@ -1713,14 +1713,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
         return;
       }
       Entry result = requireExistingEntry(resultEntryId);
-      boolean compactionInvocation = isCompactionInvocation(invocation);
-      if (!isModelResultEntry(result, compactionInvocation)) {
+      if (!isModelResultEntry(result)) {
         throw new IllegalArgumentException(
-            compactionInvocation
-                ? "model resultEntryId must reference a compaction, assistant-error or"
-                    + " assistant-aborted entry for a compaction invocation"
-                : "model resultEntryId must reference an assistant, assistant-error or"
-                    + " assistant-aborted entry");
+            "model resultEntryId must reference an assistant, assistant-error or"
+                + " assistant-aborted entry");
       }
       if (resultEntryId.equals(invocation.requestHeadEntryId())) {
         throw new IllegalArgumentException(
@@ -1747,21 +1743,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    private boolean isCompactionInvocation(ModelInvocation invocation) {
-      Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
-      if (!(turnStart.payload() instanceof TurnStartPayload payload)) {
-        throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
-      }
-      return payload.compaction() != null;
-    }
-
-    private static boolean isModelResultEntry(Entry entry, boolean compactionInvocation) {
+    private static boolean isModelResultEntry(Entry entry) {
       return switch (entry.payload().type()) {
         case ASSISTANT_ERROR, ASSISTANT_ABORTED -> true;
-        case MESSAGE -> !compactionInvocation
-            && entry.payload() instanceof MessagePayload message
+        case MESSAGE -> entry.payload() instanceof MessagePayload message
             && message.message().role() == AgentMessageRole.ASSISTANT;
-        case COMPACTION -> compactionInvocation;
         default -> false;
       };
     }

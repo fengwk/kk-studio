@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
@@ -697,8 +696,7 @@ public final class HarnessRuntime {
 
   private static List<ModelAttemptFailureProjection> projectModelAttemptFailures(
       ModelInvocation invocation, EntryPath path) {
-    if (ModelAttemptMaterialization.isCompactionInvocation(invocation, path)
-        || invocation.failedAttempts().isEmpty()) {
+    if (invocation.failedAttempts().isEmpty()) {
       return List.of();
     }
     List<ModelAttemptFailureProjection> projections = new ArrayList<>();

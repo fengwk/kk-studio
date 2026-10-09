@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -35,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAcces
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
@@ -113,10 +113,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
  * closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED / terminal failure / cancel /
  * unknown / compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有
- * queued user demand、HISTORY / OVERFLOW obligation、fallback、hard overflow 或 CONTINUE 的
- * continueModel obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft threshold 自唤醒。失败 / 停止 / complete
- * COMPACTION 由 planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求 THREAD 再 complete，下一 claim
- * 才由 durable continuation 启动续写；Tool sibling batch 追加 outcome 后追加 continueModel=true TURN_END 并同事务删除
+ * queued user demand、HISTORY / OVERFLOW obligation、hard overflow 或 CONTINUE 的 continueModel
+ * obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft threshold 自唤醒。失败 / 停止 / complete COMPACTION 由
+ * planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求 THREAD 再 complete，下一 claim 才由 durable
+ * continuation 启动续写；Tool sibling batch 追加 outcome 后追加 continueModel=true TURN_END 并同事务删除
  * children+parent。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
  * （terminal apply 会按 queued 快照重建 wake）；rejected 只在仍保留合法 deferred messages 时先请求 THREAD 再
  * complete，绝不立即重排同一压缩。
@@ -125,8 +125,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * reschedule 始终使用未抬升的本地 lease clock，避免未来持久化时间改变 lease 语义。
  *
  * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时门控；hard overflow 立即压缩并只恢复一次。
- * 所有 trigger 共用 MODEL Work、一次 fallback 与 deterministic no-gain；切分先 HISTORY 再以 continueModel
- * obligation 机械启动 TURN_PREFIX。 压缩消费零 queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
+ * 所有 trigger 共用 MODEL Work 与 deterministic no-gain，且统一在隔离的 child Runtime Thread 内执行（父 durable
+ * wait、无父 ModelInvocation）；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
+ * Command，另一 Thread 拥有的共享历史 turn 不压缩，COMPACTION 子执行树内绝不再次规划压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -299,7 +300,7 @@ public final class ThreadProcessor {
         // owned HISTORY 机械续作仍由 compactionPreparation 保持最高优先级；普通 continuation
         // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
         CompactionPreparation preparation =
-            !isInCompactionChildTree(tx, thread)
+            !CompactionChildScope.isInCompactionChildTree(tx, thread)
                 ? automaticCompactionPlanner.plan(
                     thread, path, config.compactionProvider().compactionConfig(), true)
                 : null;
@@ -319,7 +320,7 @@ public final class ThreadProcessor {
         boolean userDemand = ThreadInputDemand.hasInputDemand(tx, thread);
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
-            !isInCompactionChildTree(tx, thread)
+            !CompactionChildScope.isInCompactionChildTree(tx, thread)
                 ? automaticCompactionPlanner.plan(
                     thread, path, config.compactionProvider().compactionConfig(), userDemand)
                 : null;
@@ -470,13 +471,17 @@ public final class ThreadProcessor {
       // 无新 demand 时不 self-wake。CONTINUE 例外：必须机械请求 THREAD，下一 claim 才偿还 continueModel
       // obligation 并启动续写。
       advancedThread = thread.advanceHead(head, mutationNow);
+      // hard overflow / fallback obligation 与 idle soft threshold 都必须遵守同一条祖先链 guard：位于 COMPACTION
+      // 子执行树内的
+      // Thread（含压缩子自身的超限失败回合）绝不再次规划压缩，从而不产生递归压缩子、也不原样重复超限请求。
       boolean compactionDue =
-          automaticCompactionPlanner.plan(
-                  advancedThread,
-                  tx.loadEntryPath(head),
-                  config.compactionProvider().compactionConfig(),
-                  hasQueuedMessage)
-              != null;
+          !CompactionChildScope.isInCompactionChildTree(tx, advancedThread)
+              && automaticCompactionPlanner.plan(
+                      advancedThread,
+                      tx.loadEntryPath(head),
+                      config.compactionProvider().compactionConfig(),
+                      hasQueuedMessage)
+                  != null;
       requestThread = continueModel || hasQueuedMessage || compactionDue;
       tx.updateThread(advancedThread);
       if (continueModel) {
@@ -604,7 +609,7 @@ public final class ThreadProcessor {
     boolean hasQueuedDemand = ThreadInputDemand.hasQueuedDemand(tx.loadQueuedCommands(thread.id()));
     boolean compactionDue =
         !stopped
-            && !isInCompactionChildTree(tx, thread)
+            && !CompactionChildScope.isInCompactionChildTree(tx, thread)
             && automaticCompactionPlanner.plan(
                     advanced,
                     tx.loadEntryPath(turnEndId),
@@ -628,23 +633,6 @@ public final class ThreadProcessor {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     }
     tx.completeWork(claim, now);
-  }
-
-  /**
-   * 防递归：只有位于 COMPACTION 子执行树内（自身或任一祖先持有尚未结算的 COMPACTION Join）的 Thread 才禁止再规划压缩。父 Thread 自己运行的
-   * subagent task 与其他未结算 Join 都不构成阻塞，也不引入任何持久化标志：判定只复用既有 Join purpose 事实。
-   *
-   * <p>包内可见以供判定本身有聚焦测试。
-   */
-  static boolean isInCompactionChildTree(HarnessStore.Transaction tx, ThreadState thread) {
-    for (UUID ancestorThreadId : tx.findAncestorChain(thread.id())) {
-      for (ThreadJoin join : tx.loadIncompleteJoins(ancestorThreadId)) {
-        if (join.purpose() == JoinPurpose.COMPACTION) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   /**

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
@@ -141,6 +142,9 @@ final class ManualCompactionControl {
     if (!(context instanceof ThreadContext.IdleOrHistorical)
         || path.openTurnStart().isPresent()
         || !tx.loadIncompleteJoins(thread.id()).isEmpty()
+        // 手动入口使用与自动压缩相同的祖先链 guard：位于 COMPACTION 子执行树内（压缩子自身或其后代）的 Thread 一律不可手动压缩，
+        // 不依赖上层调用方（Web root guard）拦截，runtime primitive 自身绝不递归创建压缩子。
+        || CompactionChildScope.isInCompactionChildTree(tx, thread)
         || automaticPlanner.plan(thread, path, compactionConfig, false) != null) {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
     }
