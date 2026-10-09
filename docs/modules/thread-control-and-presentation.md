@@ -217,10 +217,12 @@ Thread 链接和结果/错误/partial，不重复铺开 task prompt。信封只�
 Footer 不改变当前 Thread 的统计口径：
 
 ```text
-archlinux ∣ ctx 245k/272k ∣ ↑1.4k · ↓1.8k · R244k · $0.055 · cache 99% · 75 tok/s
+archlinux ∣ ctx 245k/272k ∣ ↑1.4k · ↓1.8k · R244k · W0 · $0.055 · cache 99% · 75 tok/s
+archlinux ∣ ctx 0/256k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s
 ```
 
-组间使用 U+2223，统计项使用 U+00B7，环境没有 `env:`。保留未知值、环境不可用、
+组间使用 U+2223，统计项使用 U+00B7，环境没有 `env:`。数值缺失默认显示 0，不省略 R/W；
+hover 保留未计量状态，环境不可用、
 窄屏完整信息及中英文语义一致性；金额、上下文占用与累计口径见
 [Frontend](frontend.md#用量与状态-footer)。
 

@@ -69,6 +69,11 @@ final class OpenAiChatStreamAccumulator {
   /** {@code choices[0]} 首个有效 finish_reason 之后语义封闭：只允许无语义尾帧，绝不再改写任何已累积事实。 */
   private boolean choiceFinalized = false;
 
+  /** 冻结时的原始 finish_reason 文本与 choices[0] index，用于判定重复终止标记是否为幂等冗余。 */
+  private String finalizedFinishReason = null;
+
+  private int finalizedChoiceIndex = 0;
+
   private final StringBuilder contentBuilder = new StringBuilder();
   private final StringBuilder refusalBuilder = new StringBuilder();
   private final StringBuilder reasoningContentBuilder = new StringBuilder();
@@ -167,15 +172,21 @@ final class OpenAiChatStreamAccumulator {
 
   private void parseChoice(JsonNode choice) {
     if (choiceFinalized) {
-      // 语义终态已封闭：此后只允许 usage-only 空 choices、无语义尾帧（如 provider 尾帧）与 [DONE]/keepalive，
-      // 任何非空 delta（包括仅 native 字段）或再次出现的 finish_reason 都 fail closed。
-      if (carriesFinishReason(choice)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "finish_reason repeated after finalized choice");
-      }
+      // 语义终态已封闭：重复终止标记只有与冻结结果完全一致（同一有效 finish_reason、同一有效 choice index、无 delta）
+      // 才是幂等冗余，不追加内容/增量/改写 replay；任何语义 delta、变更 reason 或不同 index 都 fail closed。
+      boolean carriesReason = carriesFinishReason(choice);
       if (!isEmptyTailDelta(choice)) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE, "semantic delta received after finalized choice");
+      }
+      if (carriesReason) {
+        String repeatedReason = choice.get("finish_reason").textValue();
+        if (!repeatedReason.equals(finalizedFinishReason)
+            || choiceIndexOf(choice) != finalizedChoiceIndex) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE,
+              "conflicting finish_reason after finalized choice");
+        }
       }
       return;
     }
@@ -302,8 +313,23 @@ final class OpenAiChatStreamAccumulator {
             ProviderErrorKind.INVALID_RESPONSE, "unsupported finish_reason: " + reasonText);
       }
       this.stopReason = mapFinishReason(reasonText);
+      this.finalizedFinishReason = reasonText;
+      this.finalizedChoiceIndex = choiceIndexOf(choice);
       this.choiceFinalized = true;
     }
+  }
+
+  /** 缺失 index 视为主 choice 默认 0；一旦提供，必须是可转 int 的非负整数，否则 fail closed 且不回显原始值。 */
+  private static int choiceIndexOf(JsonNode choice) {
+    JsonNode index = choice.get("index");
+    if (index == null) {
+      return 0;
+    }
+    if (!index.isIntegralNumber() || !index.canConvertToInt() || index.intValue() < 0) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "choice index must be a non-negative integer");
+    }
+    return index.intValue();
   }
 
   /**

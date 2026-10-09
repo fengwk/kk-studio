@@ -55,12 +55,15 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
@@ -313,34 +316,48 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** 真实历史物化遇到被移除的工具及 opaque replay：不得启动网关或留在 DISPATCHING/UNKNOWN。 */
+  /** 历史物化遇到被移除的工具与 opaque replay：放弃不兼容 replay、按合法语义降级投影，网关收到该请求并 start。 */
   @Test
-  void replayProjectionFailureRejectsDispatchBeforeGatewayStart() {
+  void incompatibleOpaqueReplayProjectsSemanticFallbackThenStarts() {
     ReplayHistory history = seedReplayHistory();
     InMemoryHarnessStore store = history.store();
     UserBasis basis = history.basis();
     UUID invocationId = history.invocationId();
     FakeGateway gateway = new FakeGateway();
+    gateway.queue(new ModelGateway.Started(new FakeHandle()));
     ModelProcessor processor = projectionProcessor(store, gateway);
 
-    assertEquals(ProcessResult.TERMINATED, processor.process(claim(store, invocationId, NOW)));
-    ModelInvocation failed = model(store, invocationId);
-    assertEquals(ModelInvocationStatus.FAILED, failed.status());
-    assertEquals(0, failed.attempt());
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, failed.error().kind());
-    assertTrue(failed.error().message().contains("restore original tool bindings/environment"));
-    assertFalse(failed.error().message().contains("secret"));
-    assertFalse(failed.error().message().contains("bash"));
-    assertEquals(0, gateway.startCalls);
-    assertNull(work(store, new WorkTarget(WorkTargetType.MODEL, invocationId)));
+    assertEquals(ProcessResult.STARTED, processor.process(claim(store, invocationId, NOW)));
+
+    assertEquals(1, gateway.startCalls);
+    ModelGateway.Execution execution = gateway.executions.get(0);
+    assertEquals(invocationId, execution.invocationId());
+    assertEquals(1, execution.proposedAttempt());
+    // 降级语义投影：保留 assistant 文本，原 bash 调用并入 USER 上下文并逐字保留 arguments，不再有 native replay。
+    List<ProviderMessage> messages = execution.request().messages();
+    assertEquals(3, messages.size());
     assertEquals(
-        2, work(store, new WorkTarget(WorkTargetType.THREAD, basis.threadId())).wakeVersion());
-    assertFalse(processor.hasActiveExecution());
+        List.of(ProviderMessageRole.USER, ProviderMessageRole.ASSISTANT, ProviderMessageRole.USER),
+        messages.stream().map(ProviderMessage::role).toList());
+    assertEquals("answer", ((ProviderTextBlock) messages.get(1).contents().get(0)).text());
+    String fallback = ((ProviderTextBlock) messages.get(2).contents().get(0)).text();
+    assertTrue(fallback.startsWith("Previous context:"));
+    assertTrue(fallback.contains("{\"secret\":1}"));
+    assertTrue(messages.stream().noneMatch(ProviderMessage::hasReplayState));
+
+    ModelInvocation running = model(store, invocationId);
+    assertEquals(ModelInvocationStatus.RUNNING, running.status());
+    assertEquals(1, running.attempt());
+    assertNull(running.error());
+    assertEquals(3, thread(store, basis.threadId()).version());
+    assertEquals(
+        1, work(store, new WorkTarget(WorkTargetType.THREAD, basis.threadId())).wakeVersion());
+    assertTrue(processor.hasActiveExecution());
   }
 
-  /** 加载历史后丢失 claim，即使 replay 投影随后失败也不得把别人的执行标记为 FAILED。 */
+  /** 加载历史后丢失 claim：即使随后投影要放弃 replay，也不得把别人的执行标记为 FAILED，零 gateway 启动、零 mutation。 */
   @Test
-  void replayProjectionFailureAfterOwnershipLossDoesNotRejectDispatch() {
+  void ownershipLossDuringMaterializationDoesNotWriteOrDispatch() {
     ReplayHistory history = seedReplayHistory();
     InMemoryHarnessStore store = history.store();
     WorkTarget target = new WorkTarget(WorkTargetType.MODEL, history.invocationId());

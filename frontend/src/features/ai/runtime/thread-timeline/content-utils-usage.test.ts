@@ -246,7 +246,7 @@ describe('content-utils usage & speed & cache calculations', () => {
     })
   })
 
-  // 每回合 meta usage 摘要：主行保持紧凑；无定价显示 "—"（绝不伪造成 $0）
+  // 缺失指标的展示默认值不改变原始 usage facts。
   describe('formatTurnUsageText', () => {
     it('formats turn usage with cache, cost and tok/s', () => {
       const text = formatTurnUsageText({
@@ -258,13 +258,20 @@ describe('content-utils usage & speed & cache calculations', () => {
         decodeTokens: 50,
         decodeDurationMillis: 1000,
       })
-      expect(text).toBe('↑100 · ↓50 · R50 · $0.005 · cache 33% · 50 tok/s')
+      expect(text).toBe('↑100 · ↓50 · R50 · W0 · $0.005 · cache 33% · 50 tok/s')
     })
 
-    it('formats a missing price as em dash and empty states as placeholders', () => {
+    it('defaults missing metrics to zero without assuming a currency', () => {
       expect(formatTurnUsageText({
         input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null,
-      })).toBe('↑0 · ↓0 · — · cache — · — tok/s')
+      })).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s')
+    })
+
+    it('keeps the same fields when only cache write has usage', () => {
+      expect(formatTurnUsageText({
+        input: 100, output: 50, cacheRead: 0, cacheWrite: 20,
+        cost: { currency: 'USD', amount: '0.005' },
+      })).toBe('↑100 · ↓50 · R0 · W20 · $0.005 · cache 0% · 0 tok/s')
     })
   })
 })

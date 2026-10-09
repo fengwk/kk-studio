@@ -25,7 +25,7 @@ describe('ThreadStatusFooter', () => {
       />,
     )
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('ctx —/128k')
+    expect(footer).toHaveTextContent('ctx 0/128k')
     const title = hoverLines(lineOf(footer))
     expect(title).toHaveLength(5)
     expect(title[0]).toBe('未选择环境')
@@ -42,8 +42,8 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
-    // 无可用定价显示 "—"，绝不伪装成 $0
-    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · — · cache — · — tok/s')
+    // 缺失的数值默认显示 0，不为未知定价假定币种。
+    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
   })
@@ -173,7 +173,7 @@ describe('ThreadStatusFooter', () => {
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · — · cache — · — tok/s',
+      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s',
     )
     // 零用量/无定价/无测速样本时 hover 仍有完整 5 行结构（缺失项由 catalog 文案标注暂无数据）。
     expect(hoverLines(lines[0])).toHaveLength(5)
@@ -191,7 +191,7 @@ describe('ThreadStatusFooter', () => {
     act(() => setLocale('en-US'))
     const line = lineOf(screen.getByLabelText('Thread status'))
     expect(line.textContent).toBe(
-      'dev (unavailable) ∣ ctx —/128k ∣ ↑0 · ↓0 · — · cache — · — tok/s',
+      'dev (unavailable) ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s',
     )
     const unavailableTitle = hoverLines(line)
     expect(unavailableTitle).toHaveLength(5)

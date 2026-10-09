@@ -88,7 +88,7 @@ export function buildThreadStatusModel(
     segments.push({
       key: 'context',
       text: t('ai.runtime.status.contextText', {
-        used: hasContext ? formatCompactNumber(usedContext) : '—',
+        used: hasContext ? formatCompactNumber(usedContext) : '0',
         total: formatCompactNumber(contextWindow),
       }),
       title: hasContext

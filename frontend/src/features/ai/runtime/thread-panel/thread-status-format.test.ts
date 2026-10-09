@@ -78,7 +78,7 @@ describe('thread status formatting', () => {
   ])('formats context window %s as %s', (contextWindow, text) => {
     const context = buildThreadStatusModel({ contextWindow }, t).segments
       .find((segment) => segment.key === 'context')
-    expect(context?.text).toBe(`ctx —/${text}`)
+    expect(context?.text).toBe(`ctx 0/${text}`)
   })
 
   // 上下文占用：已知/未知必须区分，且只使用最近一次调用的估计，绝不用累计输入冒充
@@ -123,15 +123,27 @@ describe('thread status formatting', () => {
     expect(usage?.title).not.toContain('累计')
   })
 
-  // 缺失定价/测速样本时如实标注暂无数据，绝不伪造成 $0
-  it('reports missing price and speed as no-data instead of a fake zero', () => {
+  // 默认数值仅用于摘要展示；hover 仍区分未计量的事实。
+  it('defaults missing metrics to zero while preserving no-data details', () => {
     const usage = buildThreadStatusModel({
       branchUsage: { ...EMPTY_USAGE, contextInputTokens: 0 },
     }, t).segments.find((segment) => segment.key === 'usage')
 
-    expect(usage?.text).toBe('↑0 · ↓0 · — · cache — · — tok/s')
+    expect(usage?.text).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s')
     expect(usage?.title).toContain('估算费用：暂无数据；缓存命中率：暂无数据；生成速度：暂无数据')
   })
+
+  it.each([undefined, null, -1, NaN, Infinity])(
+    'defaults a missing or invalid context estimate to zero: %s',
+    (contextInputTokens) => {
+      const branchUsage = { ...EMPTY_USAGE, input: 100, contextInputTokens }
+      const context = buildThreadStatusModel({ contextWindow: 256_000, branchUsage }, t)
+        .segments.find((segment) => segment.key === 'context')
+
+      expect(context?.text).toBe('ctx 0/256k')
+      expect(branchUsage.contextInputTokens).toBe(contextInputTokens)
+    },
+  )
 })
 
 /** 单回合 hover 与 Footer 累计共用同一份详情格式化，必须逐字一致。 */

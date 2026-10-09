@@ -235,10 +235,13 @@ attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas Inf
 ## 用量与状态 Footer
 
 Footer 的 token 与费用只取 Entry 的读取投影事实：费用只来自 `usageCost` 投影，绝不从 assistant
-metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回历史，无法定价时如实待定而非 $0。
+metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回历史，无法定价时保留 null。
 金额先用精确十进制求和，再统一四舍五入到最多 6 位小数并去掉尾随 0；精确值落在 (0, 0.000001)
 时显示 `<$0.000001`，精确 0 才是 `$0`。上下文占用只使用最近一次模型调用的输入估计
-（input + cacheRead + cacheWrite），缺失时显示未知，绝不用分支累计量替代。
+（input + cacheRead + cacheWrite），绝不用分支累计量替代。
+摘要固定保留 `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N% · X tok/s`
+全部字段，R/W 为零时也不省略。缺失的上下文估计、费用、缓存比例与速率默认显示 `0`，
+费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
 单行保留全部事实并由 CSS 省略，hover 给出环境、上下文与用量三组完整数字（含推理与缓存分项），
 措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。累计口径覆盖全部 Entry，
 包括正常对话里不投影的压缩回合；它与对话内已关闭 TURN_END 的回合 footer 是两件事。

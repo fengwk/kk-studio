@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -245,6 +246,39 @@ class HarnessRuntimeStopModelTest {
     TurnEndPayload stopEnd = (TurnEndPayload) path.head().payload();
     assertEquals(TurnEndOutcome.STOPPED, stopEnd.outcome());
     assertNull(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).orElse(null));
+  }
+
+  /** 已提交的 terminal Model 携带超大上游错误正文时，Stop 的历史物化必须完整落库并正常停止。 */
+  @Test
+  void terminalPendingModelWithLargeUpstreamErrorMaterializesThenStops() {
+    HarnessRuntimeTestSupport.ModelBaseline baseline =
+        seedModel(store, ModelInvocationStatus.RUNNING);
+    String message = "HTTP 404\n\n<!DOCTYPE html>\n" + "not found ".repeat(600) + "错误\n</html>\n  ";
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation model = tx.lockModelInvocation(baseline.modelId()).orElseThrow();
+          tx.updateModelInvocation(
+              model.fail(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, message), T5));
+        });
+    seedThreadWork(store, baseline.threadId());
+    seedModelWork(store, baseline.modelId());
+
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
+
+    assertStopped(result);
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
+    EntryPath path = pathOf(baseline.threadId());
+    // 完整上游错误正文被原样物化为 ASSISTANT_ERROR，而不是被截断或导致 Stop 抛异常。
+    AssistantErrorPayload materialized =
+        path.entries().stream()
+            .filter(e -> e.payload() instanceof AssistantErrorPayload)
+            .map(e -> (AssistantErrorPayload) e.payload())
+            .findFirst()
+            .orElseThrow();
+    assertEquals("INVALID_REQUEST", materialized.error().code());
+    assertEquals(message, materialized.error().message());
+    assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) path.head().payload()).outcome());
   }
 
   private ModelInvocation storedModel(UUID modelId) {
