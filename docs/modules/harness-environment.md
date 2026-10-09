@@ -104,6 +104,7 @@ HELLO / WELCOME / READY / HEARTBEAT
 INVOKE / STARTED / PROGRESS / COMPLETED / FAILED
 CANCEL / CANCELLED / ERROR
 RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
+TEMPORARY_RESOURCE_POLICY / UPDATE / UPDATE_RESULT
 ```
 
 [`DaemonEnvelope`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelope.java) 的固定字段为：
@@ -112,7 +113,7 @@ RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
 protocolVersion / messageType / environmentId / invocationId? / payload
 ```
 
-`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR` 外的全部消息都必须携带非空的 `invocationId`，资源上传控制消息也以它关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
+`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR`、`TEMPORARY_RESOURCE_POLICY` 外的全部消息都必须携带非空的 `invocationId`；`TEMPORARY_RESOURCE_POLICY` 由已绑定连接发出，只携带非空 `environmentId`，`invocationId` 为 null。资源上传控制消息也以 `invocationId` 关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
 
 重连去重以 invocationId 与 Daemon journal 关联消息，各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion。同实例恢复的进程生命周期限制见下文。
 
@@ -120,8 +121,8 @@ protocolVersion / messageType / environmentId / invocationId? / payload
 
 ```text
 Daemon -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=2, daemonVersion, daemonInstanceId)
-Gateway -> WELCOME(environmentId, name, maxResourceBytes)
-Daemon -> READY(version=3, daemonVersion, environment)
+Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
+Daemon -> READY(version=4, daemonVersion, environment)
 Daemon -> HEARTBEAT*
 
 Gateway -> INVOKE
@@ -137,7 +138,7 @@ Gateway -> CANCEL
 Daemon -> CANCELLED | 已冻结的终态重放
 ```
 
-`WELCOME` payload 携带认证结果 `environmentId`、展示用 `name` 与本连接的资源字节预算 `maxResourceBytes`；Daemon 在收到它之前不接受任何 resource/binary 结果。
+`WELCOME` payload 携带认证结果 `environmentId`、展示用 `name`、本连接的资源字节预算 `maxResourceBytes` 与临时资源 `temporaryResourceTtlSeconds` / `temporaryResourceCleanupIntervalSeconds`（缺失或非正数是协议错误）；Daemon 在收到它之前不接受任何 resource/binary 结果。TTL 或扫描间隔变化时 Gateway 在同一心跳通道推送 `TEMPORARY_RESOURCE_POLICY`，热更只作用于尚未回收的 workspace。
 
 `daemonInstanceId` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Gateway 保有在途记录时，同实例重连以相同 `invocationId` 恢复（已取消的调用只重发 CANCEL），Daemon journal 去重，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启或迁移的执行恢复。握手失败时 Gateway 以 `ERROR` 收尾，`REGISTRATION_REJECTED` 与 `RETRY_LATER` 是仅有的两个冻结错误码。
 
@@ -148,17 +149,17 @@ Daemon -> CANCELLED | 已冻结的终态重放
 [`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码 READY 载荷：
 
 ```text
-version=3
+version=4
 daemonVersion=构建版本
-environment: operatingSystem / timeZone / userName / homeDirectory / note
+environment: operatingSystem / timeZone / userName / homeDirectory / note / tempDirectory
 ```
 
-READY 只公开宿主侧的五项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 shaded JAR manifest 的
+READY 只公开宿主侧的六项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 shaded JAR manifest 的
 `Implementation-Version`，未打包运行时为固定标记 `development`（明确表示不是发布版本），与 Card 上的 CAS
-`version` 是两个不同事实。五项数据为目标操作系统、时区、Daemon 进程用户、该用户的
-HOME 与可信操作者备注（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
+`version` 是两个不同事实。六项数据为目标操作系统、时区、Daemon 进程用户、该用户的
+HOME、可信操作者备注与受控临时目录 `tempDirectory`（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
 OS 依据；`userName` 与 `homeDirectory` 只用于 Card 和当前 Environment Prompt 展示，
-不构成 cwd、默认 workdir 或沙箱。`environment` 是必填对象且字段固定；未知字段、必填
+不构成 cwd、默认 workdir 或沙箱；`tempDirectory` 是受控临时 workspace 的 canonical 绝对路径，同样只是展示事实。`environment` 是必填对象且字段固定；未知字段、必填
 字段缺失或类型错误都是协议错误。
 
 载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符；未指定 note 时 Daemon 按 OS 生成默认说明。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；

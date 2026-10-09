@@ -408,9 +408,10 @@ SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 
 卸载不会删除任何 Studio Environment 记录，也不清理 token、数据与日志；彻底删除前先评估历史
 引用，并按需手动清理。
 
-数据目录持有 `daemon.lock`，同一目录只允许一个 Daemon。`resources/text` 保存命令与检索的大文本
-全文，模型历史可能仍引用其绝对路径，不会自动删除；`skills` 保存已安装包，`skill-work` 保存 Git
-缓存及安装中间产物。启动清理遗留资源 `.part`，技能安装器恢复或清理 staging/backup，但保留发布后
+数据目录持有 `daemon.lock`，同一目录只允许一个 Daemon。`tmp/workspaces/<uuid>` 保存命令与检索的大文本
+全文（`*.part` 中转后原子发布 `*.log`），模型历史可能仍引用其绝对路径；它不会隐式删除，只在超过当前保留期
+（默认 3 天）且未被使用时由定时清扫（默认 30 分钟一次）回收。`skills` 保存已安装包，`skill-work` 保存 Git
+缓存及安装中间产物。启动不再清理遗留 `.part`，技能安装器恢复或清理 staging/backup，但保留发布后
 的全文与技能。
 
 ## 参数与排错

@@ -111,7 +111,8 @@ Docker 不可用时的跳过不算数据库事务已验证。
 
 `ThreadJoinCompletionRendererTest` 只生成内层 `<subagent_result>`：
 任务与结果分开，失败有 `<error>` 与可选 `<partial_result>`，XML 特殊字符转义，缺文本有明确占位，
-长正文不截断。该渲染结果就是 `SUBAGENT_RESULT` `NOTIFICATION` 命令的正文，由
+只有失败的 `<error>` 详情截断到最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），
+任务原文、成功报告与普通 partial_result 不截断。该渲染结果就是 `SUBAGENT_RESULT` `NOTIFICATION` 命令的正文，由
 [`ThreadJoinCompletion`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinCompletion.java)
 构造并冻结，notificationId 由 invocationId 确定性派生，重复交付幂等、不从子最新 head 重建旧结果。
 `SystemReminderTest` 单独覆盖运行时的 system reminder 识别，与 join 交付是两条独立证据链。

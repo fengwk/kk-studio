@@ -18,11 +18,12 @@ Daemon -> HELLO(registrationToken, capabilityCatalogVersion, daemonVersion, daem
   核心 -> registrationDirectory.findByRegistrationToken   # 解析 environmentId
   核心 -> leaseStore.hasActiveLeaseToken                 # 本节点同节点活跃连接防冲突
   核心 -> leaseStore.tryAcquire                          # 原子抢占/接管
-  Gateway -> WELCOME(environmentId, name, maxResourceBytes)
+  Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
 Daemon -> READY(version, daemonVersion, environment)
   -> leaseStore.markReady                                # 围栏失效即协议错误
   -> 重放未在当前连接代际发出的 INVOKE
 Daemon -> HEARTBEAT*
+  -> reconcileTemporaryResourcePolicy                    # TTL/扫描间隔变化时推送 TEMPORARY_RESOURCE_POLICY
   -> leaseStore.heartbeat                                # 围栏失效即协议错误
 close(connectionId)
   -> leaseStore.disconnect                               # 幂等，保留重连宽限
@@ -117,7 +118,7 @@ COMPLETED
 | monitor | 保护对象 |
 | --- | --- |
 | 每个连接代际的 `gate` | 该连接的入站协议处理序列与该连接待执行回调批次的排队 |
-| `ConnectionState` 自身 | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS） |
+| `ConnectionState` 自身 | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS）与该连接最近送达的临时资源 TTL/扫描间隔基线 |
 | 核心 `inventory` | 环境目录、连接目录、`invocationId` 目录与 tombstone |
 | 每个 `ActiveInvocation` | 其 transfer 集合与取消意图（终态标记是无锁 `AtomicBoolean`） |
 | 每个 `TransferBinding` | 该 transfer 的请求事实、已签发 uploadId、票据缓存与释放标记 |
@@ -131,8 +132,8 @@ COMPLETED
 构造器只接收五个依赖：`DaemonLeaseStore`、`DaemonRegistrationDirectory`、`EnvironmentSessionListener`、`DaemonResourceTicketService` 与 `Supplier<EnvironmentServerSettings>`。
 
 [`EnvironmentServerSettings`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerSettings.java)
-携带心跳超时（同时用作租约期限）与资源字节上限，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
-生效，核心不缓存配置。[`EnvironmentSessionListener`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)
+携带心跳超时（同时用作租约期限）、资源字节上限与临时资源 TTL/扫描间隔，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
+生效，核心不缓存配置；临时资源策略在同一连接的心跳通道按需推送 `TEMPORARY_RESOURCE_POLICY`，只对尚未回收的 workspace 生效。[`EnvironmentSessionListener`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)
 在每次 READY 后于锁外唤醒宿主；生产组合 listener 同时唤醒 Harness Work dispatcher 与
 异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。
 

@@ -31,7 +31,7 @@ lsp: supported (typescript)
 
 未截断时省略 truncated、truncation_reason、next 和尾部警告；range 保留。LSP 是 header 最后一行，仅在文件有对应可用服务器时输出。正文只能包含实际文件内容，不夹带截断标记，不生成下一次工具调用教程。ends_with_newline 描述整个文件；不得将片段结束当作文件结尾。元数据所需扫描保持有界内存并支持取消。
 
-本地文本与受管文本通过 `TextReadWindow` 共用分页契约。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；为准确报告文件级元数据仍需扫描到 EOF，超时或取消直接中止连接。受管资源按当前 Thread 所属 Session 的 Blob 引用鉴权，不能凭另一 Session 的 Blob UUID 跨会话读取。
+本地文本与受管文本通过 `TextReadWindow` 共用分页契约。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；为准确报告文件级元数据仍需扫描到 EOF，超时或取消直接中止连接。受管资源按当前 Thread 所属 Session 的 Blob 引用鉴权，不能凭另一 Session 的 Blob UUID 跨会话读取。权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前用本次调用冻结的模型模态声明、adapter 合法位置与 MIME 及内联预算校验，不支持则明确失败，通过后返回真实媒体字节（不是上传成功文本）。
 
 Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，可信内置 `read` 放宽为 320 KiB / 2020 行，以容纳完整读取窗口及 header/footer，仍受终态 JSON 与资源硬上限约束。目录清单的展示上界为 48 KiB，分页默认和最大 2000；图片与目录维持独立返回语义。
 
@@ -61,11 +61,11 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 忙时继续不打断当前模型或工具调用，也不覆盖其冻结请求；目标 settings 与新 prompt 一起入队，在后续 INPUT 边界消费。若同一子 Thread 上有多条尚未结算的委派，它们可以在整体收敛后共用同一个最终回答，各按自己的 invocation 身份和任务原文交付一次；这不是每个 prompt 独立产出报告的保证。
 
-从历史边界 fork 的 Thread 是独立执行根，只共享边界之前的 Entry 路径，不继承源 Thread 的待处理命令、子执行或 Join 订阅。原有子任务之后的回执仍交给原父 Thread；新分支不能通过旧 thread_id 接管原有子执行。已在分叉前进入共享历史的回执仍可见。
+从历史边界 fork 的 Thread 是独立执行根：分支 fork 的 head 是一个只记录 `mode`/切点的新 `FORK` Entry，会话 fork 则把切点处的有效上下文复制到新 Session，两者都追加固定英文 FORK 通知（只陈述事实）。它不继承源 Thread 的待处理命令、子执行或 Join 订阅；原有子任务之后的回执仍交给原父 Thread，新分支不能通过旧 thread_id 接管原有子执行，已在分叉前进入共享历史的回执仍可见。
 
 持久接受后返回 JSON `{"thread_id":"...","status":"accepted"}`，不等待结果。即时回执不重复 prompt；tool_result 的 details 带 `kind=task.accepted` 供 UI 识别，其 thread_id / status 与回执一致，另附会话与幂等元数据。
 
-完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
+完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；模型的 `<error>` 详情最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），任务原文、成功报告与普通 partial_result 不截断；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
 
 完成结果不是原 `task` 调用返回的第二个结果：`task` 只返回接受回执，子 Thread 在源输入应用后、且没有未完成直接子 Join / 未送达子回执 / 待处理输入时，以最终回答或不可继续失败冻结 `terminalEntryId` / `finalAnswerEntryId` 结算 join；Stop 强制结算不受上述收敛条件限制。结算结果再以一条 `NOTIFICATION` 命令进入父的下一安全轮次。父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史，接受新任务输入后才继续模型。多条结果可以合并处理，父仍负责最终验收。
 
