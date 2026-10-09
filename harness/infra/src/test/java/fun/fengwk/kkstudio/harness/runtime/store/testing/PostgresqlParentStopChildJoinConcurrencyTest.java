@@ -267,7 +267,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         new ThreadProcessorConfig(
             new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
             Duration.ofSeconds(5),
-            () -> new CompactionConfig(20_000, null)),
+            () -> new CompactionConfig(20_000)),
         Clock.fixed(now, ZoneOffset.UTC),
         scheduler,
         Runnable::run);

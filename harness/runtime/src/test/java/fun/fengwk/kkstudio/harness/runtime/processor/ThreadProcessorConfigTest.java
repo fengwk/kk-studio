@@ -15,7 +15,7 @@ class ThreadProcessorConfigTest {
   private static final ProcessorLeaseConfig LEASE =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
 
-  private static final CompactionConfig COMPACTION = new CompactionConfig(20_000, null);
+  private static final CompactionConfig COMPACTION = new CompactionConfig(20_000);
 
   @Test
   void acceptsMillisecondResolutionDelay() {

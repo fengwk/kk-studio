@@ -8,11 +8,9 @@ import {
   type ApplyTiming,
 } from '@/features/settings/settings-primitives'
 import { PermissionEditor } from '@/features/settings/permission/PermissionEditor'
-import { ModelSelectionEditor } from '@/features/settings/model-selection/ModelSelectionEditor'
 import {
   getDraftValue,
   setDraftValue,
-  type ModelSelectionDraft,
   type PermissionGroupDraft,
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
@@ -158,17 +156,6 @@ function SchemaField({
             onChange={update}
           />
         </div>
-      )
-    case 'MODEL_SELECTION':
-      return (
-        <ModelSelectionEditor
-          path={field.path}
-          value={value as ModelSelectionDraft | null}
-          labelKey={field.labelKey}
-          hint={hint ?? null}
-          nullable={field.nullable}
-          onChange={update}
-        />
       )
   }
 }

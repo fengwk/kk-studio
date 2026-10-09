@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -10,16 +9,15 @@ import org.junit.jupiter.api.Test;
 class CompactionConfigTest {
 
   @Test
-  void defaultsExposeOnlyKeepAndOptionalFallback() {
-    // 部署配置不再持久化 enabled/reserve/maxRecent 等重复策略字段。
+  void defaultsExposeOnlyKeep() {
+    // 部署配置不再持久化 enabled/reserve/maxRecent/模型选择等重复策略字段。
     assertEquals(20_000, CompactionConfig.DEFAULT.keepRecentTokens());
-    assertNull(CompactionConfig.DEFAULT.fallbackModel());
   }
 
   @Test
   void computesKeepReserveThresholdAndManualMinimum() {
     // 30k window：keep 与 manual 都受 C/2 限制；soft threshold 不低于 effectiveKeep。
-    CompactionConfig config = new CompactionConfig(20_000, null);
+    CompactionConfig config = new CompactionConfig(20_000);
     assertEquals(15_000L, config.effectiveKeep(30_000));
     assertEquals(15_000L, config.manualMinimum(30_000));
     assertEquals(16_384L, config.effectiveReserve(50_000));
@@ -33,7 +31,7 @@ class CompactionConfigTest {
 
   @Test
   void outputBudgetUsesPhaseRatioAndRemovedPrefixCap() {
-    CompactionConfig config = new CompactionConfig(20_000, null);
+    CompactionConfig config = new CompactionConfig(20_000);
 
     assertEquals(13_107L, config.outputBudget(CompactionPhase.FULL, 20_000, 50_000));
     assertEquals(8_192L, config.outputBudget(CompactionPhase.TURN_PREFIX, 20_000, 50_000));
@@ -42,8 +40,8 @@ class CompactionConfigTest {
 
   @Test
   void rejectsNonPositiveInputs() {
-    CompactionConfig config = new CompactionConfig(20_000, null);
-    assertThrows(IllegalArgumentException.class, () -> new CompactionConfig(0, null));
+    CompactionConfig config = new CompactionConfig(20_000);
+    assertThrows(IllegalArgumentException.class, () -> new CompactionConfig(0));
     assertThrows(IllegalArgumentException.class, () -> config.effectiveKeep(0));
     assertThrows(IllegalArgumentException.class, () -> config.effectiveReserve(0));
     assertThrows(IllegalArgumentException.class, () -> config.softThreshold(1, 0));

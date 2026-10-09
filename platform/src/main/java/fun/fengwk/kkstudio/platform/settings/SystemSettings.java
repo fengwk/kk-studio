@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
@@ -107,14 +106,13 @@ public record SystemSettings(
     }
   }
 
-  /** aiRuntime section：共享调用重试、自动压缩 fallback、subagent 预算。 */
+  /** aiRuntime section：共享调用重试、自动压缩保留量、subagent 预算。 */
   public record AiRuntime(
       int retryMaxRetries,
       InvocationRetryBackoffStrategy retryBackoffStrategy,
       long retryBaseDelayMillis,
       long retryMaxDelayMillis,
       int compactionKeepRecentTokens,
-      ModelSelection compactionFallbackModel,
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
@@ -122,16 +120,7 @@ public record SystemSettings(
 
     public static final AiRuntime DEFAULT =
         new AiRuntime(
-            3,
-            InvocationRetryBackoffStrategy.EXPONENTIAL,
-            2_000L,
-            60_000L,
-            20_000,
-            null,
-            2,
-            10,
-            0,
-            50);
+            3, InvocationRetryBackoffStrategy.EXPONENTIAL, 2_000L, 60_000L, 20_000, 2, 10, 0, 50);
 
     public AiRuntime {
       SystemSettingsValidation.requireNonNegativeInt(retryMaxRetries, "aiRuntime.retryMaxRetries");

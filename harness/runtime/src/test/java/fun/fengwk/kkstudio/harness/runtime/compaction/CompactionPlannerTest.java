@@ -56,7 +56,7 @@ class CompactionPlannerTest {
 
   private static final ModelSelection SETTINGS_MODEL =
       new ModelSelection("provider", "model", "v1");
-  private static final CompactionConfig CONFIG = new CompactionConfig(20_000, null);
+  private static final CompactionConfig CONFIG = new CompactionConfig(20_000);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
   @Test
@@ -462,7 +462,7 @@ class CompactionPlannerTest {
   }
 
   @Test
-  void continuationAndFallbackRequireTheirExactTerminalOutcomes() {
+  void continuationRequiresItsExactTerminalOutcome() {
     PathBuilder historyPath = closedTurnPath();
     CompactionTurns.CompactionTurn completedHistory =
         historyPath.completedCompaction(historyStart(id(4L), id(3L)), "history");
@@ -478,13 +478,6 @@ class CompactionPlannerTest {
     assertThrows(
         IllegalStateException.class,
         () -> planner().prepareTurnPrefix(historyPath.path(), stoppedHistory));
-
-    CompactionPlanner fallbackPlanner =
-        new CompactionPlanner(
-            new CompactionConfig(20_000, new ModelSelection("fallback", "summary", "v2")));
-    assertThrows(
-        IllegalStateException.class,
-        () -> fallbackPlanner.prepareFallback(historyPath.path(), completedHistory));
   }
 
   @Test

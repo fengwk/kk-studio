@@ -1418,7 +1418,7 @@ class ModelProcessorTest {
             store,
             (threadId, path, preparation) -> null,
             new ThreadProcessorConfig(
-                LEASE_CONFIG, FALLBACK_DELAY, () -> new CompactionConfig(20_000, null)),
+                LEASE_CONFIG, FALLBACK_DELAY, () -> new CompactionConfig(20_000)),
             clock,
             newScheduler(),
             Runnable::run);
