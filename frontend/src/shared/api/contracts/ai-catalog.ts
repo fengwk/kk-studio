@@ -149,6 +149,7 @@ export interface SkillPackageDTO {
   description: string | null
   repositoryUrl: string
   branch: string
+  hasToken: boolean
   currentCommit: string
   observedHeadCommit: string | null
   headCheckedAt: string | null
@@ -165,12 +166,14 @@ export interface SkillPackageCreateDTO {
   description?: string | null
   repositoryUrl: string
   branch: string
+  token?: string | null
 }
 
 export interface SkillPackageEditDTO {
   expectedVersion: string
   description?: string | null
   branch: string
+  token?: string | null
 }
 
 export interface SkillPackageCheckDTO {

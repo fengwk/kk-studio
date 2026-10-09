@@ -57,7 +57,9 @@ public class PlatformSkillContentReader {
     }
 
     try {
-      gitCache.ensureCommit(packageName, pkg.getRepositoryUrl(), currentCommit);
+      // 冷启动也必须成功：从当前发布事实解析令牌（未配置为 null），绝不因 cache miss 而放弃私有仓库鉴权。
+      gitCache.ensureCommit(
+          packageName, pkg.getRepositoryUrl(), currentCommit, queryService.resolveAccessToken(pkg));
     } catch (Exception e) {
       throw new PlatformReadException("skill content is unavailable: " + e.getMessage(), e);
     }

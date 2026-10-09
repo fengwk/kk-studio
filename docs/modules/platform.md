@@ -264,7 +264,7 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 
 `ConfigSyncService` 提供条目清单、选择导出、导入检查与 YAML 导入。清单和检查结果不含配置值；
 导出在单一只读数据库快照中沿依赖边补齐选择，循环 Subagent 去重，不做反向扩展。
-YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌与保存的安装设置，以及 MCP headers。
+YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌、Skill Package 私有仓库访问令牌与保存的安装设置，以及 MCP headers。
 运行态、数据库身份、版本和时间戳不进入文件。
 
 导入检查复用写入路径的字段与 codec 校验，在一次计划快照上分类新增、覆盖和跳过，不写数据库。

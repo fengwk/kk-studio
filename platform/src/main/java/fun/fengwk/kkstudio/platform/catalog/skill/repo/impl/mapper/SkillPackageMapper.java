@@ -36,6 +36,7 @@ public interface SkillPackageMapper extends BaseMapper {
         @Result(column = "head_checked_at", property = "headCheckedAt"),
         @Result(column = "head_check_error", property = "headCheckError"),
         @Result(column = "skills", property = "skillsJson"),
+        @Result(column = "encrypted_token", property = "encryptedToken"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
@@ -43,7 +44,7 @@ public interface SkillPackageMapper extends BaseMapper {
   @Select(
       """
       select package_name, description, repository_url, branch, current_commit,
-             observed_head_commit, head_checked_at, head_check_error, skills, version,
+             observed_head_commit, head_checked_at, head_check_error, skills, encrypted_token, version,
              create_time, update_time
       from skill_package
       where package_name = #{packageName}
@@ -54,7 +55,7 @@ public interface SkillPackageMapper extends BaseMapper {
   @Select(
       """
       select package_name, description, repository_url, branch, current_commit,
-             observed_head_commit, head_checked_at, head_check_error, skills, version,
+             observed_head_commit, head_checked_at, head_check_error, skills, encrypted_token, version,
              create_time, update_time
       from skill_package
       where package_name = #{packageName}
@@ -66,7 +67,7 @@ public interface SkillPackageMapper extends BaseMapper {
   @Select(
       """
       select package_name, description, repository_url, branch, current_commit,
-             observed_head_commit, head_checked_at, head_check_error, skills, version,
+             observed_head_commit, head_checked_at, head_check_error, skills, encrypted_token, version,
              create_time, update_time
       from skill_package
       where package_name = #{packageName}
@@ -78,7 +79,7 @@ public interface SkillPackageMapper extends BaseMapper {
   @Select(
       """
       select package_name, description, repository_url, branch, current_commit,
-             observed_head_commit, head_checked_at, head_check_error, skills, version,
+             observed_head_commit, head_checked_at, head_check_error, skills, encrypted_token, version,
              create_time, update_time
       from skill_package
       order by package_name asc
@@ -89,13 +90,14 @@ public interface SkillPackageMapper extends BaseMapper {
       """
       insert into skill_package (
           package_name, description, repository_url, branch, current_commit,
-          observed_head_commit, head_checked_at, head_check_error, skills, version,
+          observed_head_commit, head_checked_at, head_check_error, skills, encrypted_token, version,
           create_time, update_time
       ) values (
           #{skillPackage.packageName}, #{skillPackage.description}, #{skillPackage.repositoryUrl},
           #{skillPackage.branch}, #{skillPackage.currentCommit}, #{skillPackage.observedHeadCommit},
           #{skillPackage.headCheckedAt}, #{skillPackage.headCheckError},
-          cast(#{skillPackage.skillsJson} as jsonb), #{skillPackage.version},
+          cast(#{skillPackage.skillsJson} as jsonb),
+          #{skillPackage.encryptedToken,jdbcType=BINARY}, #{skillPackage.version},
           current_timestamp, current_timestamp
       )
       """)
@@ -111,6 +113,7 @@ public interface SkillPackageMapper extends BaseMapper {
           head_checked_at = #{skillPackage.headCheckedAt},
           head_check_error = #{skillPackage.headCheckError},
           skills = cast(#{skillPackage.skillsJson} as jsonb),
+          encrypted_token = #{skillPackage.encryptedToken,jdbcType=BINARY},
           version = version + 1,
           update_time = greatest(update_time, current_timestamp)
       where package_name = #{skillPackage.packageName} and version = #{expectedVersion}
