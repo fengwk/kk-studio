@@ -135,6 +135,17 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(completedEnd, CODEC.decode(EntryType.TURN_END, CODEC.encode(completedEnd)));
   }
 
+  /** ASSISTANT_ERROR message 与 ModelInvocationError 非 blank 契约对齐：超长含换行/首尾空白的完整正文 codec 无损往返。 */
+  @Test
+  void roundTripsAssistantErrorWithFullRawErrorMessage() {
+    String body = "\nHTTP 404\n" + "x".repeat(64 * 1024) + "\n  ";
+    EntryPayload payload =
+        new AssistantErrorPayload(new AssistantError("INVALID_REQUEST", body), null);
+
+    assertEquals(payload, CODEC.decode(payload.type(), CODEC.encode(payload)));
+    assertEquals(payload, CODEC.decodeNode(payload.type(), CODEC.encodeNode(payload)));
+  }
+
   /**
    * 意图：ASSISTANT metadata 的流式生成计时可选可空——带计时精确往返（canonical 字段序），旧历史缺失该字段仍可解码为 null，且重编码与旧 JSON
    * 逐字一致（不引入版本别名）。
@@ -614,11 +625,13 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ASSISTANT_ERROR,
                 "{\"error\":{\"code\":\"lowercase\",\"message\":\"m\"}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
+    // message 仅要求非 blank：首尾空白与长度均原样保留（与 ModelInvocationError 契约一致）。
+    AssistantErrorPayload padded =
+        (AssistantErrorPayload)
             CODEC.decode(
-                EntryType.ASSISTANT_ERROR, "{\"error\":{\"code\":\"CODE\",\"message\":\" m\"}}"));
+                EntryType.ASSISTANT_ERROR,
+                "{\"error\":{\"code\":\"CODE\",\"message\":\" m\"},\"attempt\":null}");
+    assertEquals(" m", padded.error().message());
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(EntryType.ASSISTANT_ERROR, "{\"error\":[]}"));

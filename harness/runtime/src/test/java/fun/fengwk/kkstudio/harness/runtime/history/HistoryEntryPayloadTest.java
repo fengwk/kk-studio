@@ -291,9 +291,15 @@ class HistoryEntryPayloadTest {
     assertThrows(IllegalArgumentException.class, () -> new AssistantError("1A", "m"));
     assertThrows(IllegalArgumentException.class, () -> new AssistantError("A".repeat(65), "m"));
     assertThrows(IllegalArgumentException.class, () -> new AssistantError("CODE", " "));
-    assertThrows(IllegalArgumentException.class, () -> new AssistantError("CODE", " padded "));
-    assertThrows(
-        IllegalArgumentException.class, () -> new AssistantError("CODE", "m".repeat(2049)));
+  }
+
+  /** message 与 ModelInvocationError 非 blank 契约对齐：原样保留含换行与首尾空白的长错误正文。 */
+  @Test
+  void assistantErrorMessagePreservesFullRawErrorBody() {
+    String htmlBody = "\n<html>\n  404 Not Found\n</html>\n  ";
+    assertEquals(htmlBody, new AssistantError("INVALID_REQUEST", htmlBody).message());
+    String hugeBody = "HTTP 404\n" + "x".repeat(64 * 1024);
+    assertEquals(hugeBody, new AssistantError("INVALID_REQUEST", hugeBody).message());
   }
 
   @Test
