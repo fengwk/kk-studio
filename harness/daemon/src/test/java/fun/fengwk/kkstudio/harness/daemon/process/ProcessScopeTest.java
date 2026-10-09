@@ -312,26 +312,30 @@ class ProcessScopeTest {
   @Test
   void terminateLetsTheCommandRunItsTerminationTrap() throws Exception {
     assumeFalse(isWindows(), "需要 POSIX 信号语义：Windows 的终止没有可执行的温和阶段");
-    Path marker = workdir.resolve("term-marker.txt");
-    Path pidFile = workdir.resolve("term.pid");
-    ProcessScope scope =
-        ProcessScope.start(
-            workdir,
-            List.of(
-                "sh",
-                "-c",
-                "trap 'printf term > \""
-                    + marker
-                    + "\"; exit 0' TERM; echo $$ >> '"
-                    + pidFile
-                    + "'; while true; do sleep 0.05; done"));
-    try {
-      // pid 文件在 trap 安装后才发布，出现即证明命令已准备好处理 TERM。
-      awaitFile(pidFile);
-      assertTrue(scope.terminate(), "终止后整组必须由内核确认收敛");
-      assertEquals("term", Files.readString(marker), "命令必须先收到 SIGTERM 并执行自己的清理");
-    } finally {
-      scope.close();
+    // 独立重复多次：内核给出的成员枚举顺序（macOS 尤其）不保证父进程先出现，一次偶然的「父先子后」不能证明顺序稳定。
+    // 每次都用独立命名的 marker/pid 文件，且不做任何重试或兜底——只发强杀信号也能让「进程已经消失」成立，标记文件才是判据。
+    for (int iteration = 0; iteration < 8; iteration++) {
+      Path marker = workdir.resolve("term-marker-" + iteration + ".txt");
+      Path pidFile = workdir.resolve("term-" + iteration + ".pid");
+      ProcessScope scope =
+          ProcessScope.start(
+              workdir,
+              List.of(
+                  "sh",
+                  "-c",
+                  "trap 'printf term > \""
+                      + marker
+                      + "\"; exit 0' TERM; echo $$ >> '"
+                      + pidFile
+                      + "'; while true; do sleep 0.05; done"));
+      try {
+        // pid 文件在 trap 安装后才发布，出现即证明命令已准备好处理 TERM。
+        awaitFile(pidFile);
+        assertTrue(scope.terminate(), "终止后整组必须由内核确认收敛");
+        assertEquals("term", Files.readString(marker), "命令必须先收到 SIGTERM 并执行自己的清理");
+      } finally {
+        scope.close();
+      }
     }
   }
 
@@ -498,12 +502,15 @@ class ProcessScopeTest {
       ProcessHandle foreign = foreignProcess.toHandle();
       Instant foreignStart = PosixProcessSession.processStart(foreign.pid());
       assertNotNull(foreignStart, "必须能读到范围外进程的启动身份");
+      long foreignParent = foreign.parent().map(ProcessHandle::pid).orElse(0L);
       // 启动时刻不符：同一个 pid 但换了进程（pid 复用）时绝不能动手。
       scope.killVerifiedMember(
-          new PosixProcessSession.GroupMember(foreign.pid(), foreignStart.plusSeconds(60)));
+          new PosixProcessSession.GroupMember(
+              foreign.pid(), foreignStart.plusSeconds(60), foreignParent));
       assertTrue(foreign.isAlive(), "启动时刻不符时绝不能发信号");
       // 身份对得上、但不属于本次调用的进程组：同样绝不能动手。
-      scope.killVerifiedMember(new PosixProcessSession.GroupMember(foreign.pid(), foreignStart));
+      scope.killVerifiedMember(
+          new PosixProcessSession.GroupMember(foreign.pid(), foreignStart, foreignParent));
       assertTrue(foreign.isAlive(), "不属于本次范围的进程绝不能发信号");
     } finally {
       foreignProcess.destroyForcibly();

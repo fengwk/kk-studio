@@ -72,7 +72,7 @@ jobs:
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             # macOS 跑执行范围相关的全部类：POSIX shell 语义由系统 bash 承担，编码能力的边界用例因此同样有证据。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           else
@@ -82,7 +82,7 @@ jobs:
             # BashCapabilityTest 照常在 Windows 上验收（它按平台前置条件跳过的 12 条是它自己的既有约定，断言脚本另外点名
             # 要求其中两条在 Windows 上必须真跑）。helper 覆盖率同样打开：helper 的平台分支只有在对应平台上才会被执行。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           fi

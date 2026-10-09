@@ -40,6 +40,7 @@ class PosixProcessSessionTest {
     PosixProcessSession.ProcessStat parsed = PosixProcessSession.readProcessStat(stat);
     assertNotNull(parsed);
     assertEquals('S', parsed.state());
+    assertEquals(1L, parsed.parent());
     assertEquals(1234L, parsed.session());
   }
 
@@ -50,6 +51,7 @@ class PosixProcessSessionTest {
     PosixProcessSession.ProcessStat parsed = PosixProcessSession.readProcessStat(stat);
     assertNotNull(parsed);
     assertEquals('Z', parsed.state());
+    assertEquals(1L, parsed.parent());
     assertEquals(42L, parsed.session());
   }
 

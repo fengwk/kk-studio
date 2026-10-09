@@ -23,6 +23,7 @@ PROCESS_PACKAGE_CLASSES = frozenset(
         "ProcessScopeInteractivePtyTest",
         "ProcessScopeConPtyIntegrationTest",
         "PosixProcessSessionTest",
+        "PosixProcessSignalOrderTest",
         "WindowsCommandLineTest",
         "WindowsJobScopeTest",
     }
@@ -92,6 +93,15 @@ ALL_PLATFORM_REQUIRED_CASES = {
         "ptyUnpermittedStartNeverRunsTheCommand",
         "ptyRejectsNonPositiveInitialSize",
     },
+    # 发信号前的父子排序是纯逻辑，不依赖任何平台命令或内核查询：三平台都必须真跑全部用例。
+    PROCESS_PACKAGE + "PosixProcessSignalOrderTest": {
+        "ordersScrambledInputParentsBeforeChildren",
+        "ordersNestedForestParentsBeforeChildren",
+        "ordersWrappingNumericPidsParentsBeforeChildren",
+        "emptyInputYieldsEmptyOrder",
+        "duplicatePidsAreRejected",
+        "parentCyclesAreRejected",
+    },
 }
 
 # 其余被选中的用例各自带平台前置条件（POSIX shell、Windows Job 语义），因此只要求真的执行过且没有失败。
@@ -104,6 +114,7 @@ SELECTED_CLASSES = (
     "ProcessScopeInteractivePtyTest",
     "ProcessScopeConPtyIntegrationTest",
     "PosixProcessSessionTest",
+    "PosixProcessSignalOrderTest",
     "BashCapabilityTest",
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",

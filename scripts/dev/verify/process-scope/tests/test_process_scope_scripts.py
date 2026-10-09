@@ -24,6 +24,7 @@ PROCESS_CLASSES = frozenset(
         "ProcessScopeInteractivePtyTest",
         "ProcessScopeConPtyIntegrationTest",
         "PosixProcessSessionTest",
+        "PosixProcessSignalOrderTest",
         "WindowsCommandLineTest",
         "WindowsJobScopeTest",
     }
@@ -48,6 +49,7 @@ SELECTED_CLASSES = (
     "ProcessScopeStateTest",
     "ProcessScopeHelperFailureTest",
     "PosixProcessSessionTest",
+    "PosixProcessSignalOrderTest",
     "ProcessScopePtyIntegrationTest",
     "ProcessScopeInteractivePtyTest",
     "ProcessScopeConPtyIntegrationTest",
@@ -82,6 +84,15 @@ PTY_CASES = (
     "ptyRunsAJvmFixtureAndKeepsItsExitCode",
     "ptyUnpermittedStartNeverRunsTheCommand",
     "ptyRejectsNonPositiveInitialSize",
+)
+# 发信号前的父子排序是纯逻辑：三平台都必须真跑全部用例。
+SIGNAL_ORDER_CASES = (
+    "ordersScrambledInputParentsBeforeChildren",
+    "ordersNestedForestParentsBeforeChildren",
+    "ordersWrappingNumericPidsParentsBeforeChildren",
+    "emptyInputYieldsEmptyOrder",
+    "duplicatePidsAreRejected",
+    "parentCyclesAreRejected",
 )
 WINDOWS_REQUIRED_BASH_CASES = (
     "closesStdinSoCommandsWaitingForEofFinishNaturally",
@@ -158,6 +169,8 @@ def write_complete_reports(
             cases = CONPTY_CASES
         elif class_name == "ProcessScopePtyIntegrationTest":
             cases = PTY_CASES
+        elif class_name == "PosixProcessSignalOrderTest":
+            cases = SIGNAL_ORDER_CASES
         elif class_name == "WindowsJobScopeTest":
             cases = ("realKernelReportsMissingExecutableWorkdirAndJobName",)
         elif class_name == "PosixProcessSessionTest":
@@ -361,6 +374,25 @@ class AssertSurefireReportsTest(unittest.TestCase):
                         result = run_script("assert-surefire-reports.py", reports, os_label)
                         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
                         self.assertIn(PTY_CASES[-1], result.stdout)
+
+    def test_every_platform_requires_the_signal_order_cases(self):
+        """发信号前的父子排序是纯逻辑用例，三平台都必须真跑，缺失或跳过都不能通过门禁。"""
+        for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            for missing in (False, True):
+                with self.subTest(os_label=os_label, missing=missing):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        write_surefire_report(
+                            reports,
+                            "PosixProcessSignalOrderTest",
+                            SIGNAL_ORDER_CASES[:-1] if missing else SIGNAL_ORDER_CASES,
+                            skipped=0 if missing else 1,
+                            skipped_cases=() if missing else (SIGNAL_ORDER_CASES[-1],),
+                        )
+                        result = run_script("assert-surefire-reports.py", reports, os_label)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(SIGNAL_ORDER_CASES[-1], result.stdout)
 
     def test_fails_when_a_required_case_is_duplicated(self):
         """重复的用例不能代替「每项只执行一次」的验收事实。"""

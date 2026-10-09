@@ -15,8 +15,13 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * POSIX **会话**原语：父进程与 scope helper 都只通过这里触达 libc / libproc。
@@ -142,11 +147,12 @@ final class PosixProcessSession {
   }
 
   /**
-   * 会内成员的快照项：pid 与它在快照时刻的身份（启动时刻）。
+   * 会内成员的快照项：pid、它在快照时刻的身份（启动时刻），以及同一快照里读到的父进程 pid。
    *
-   * <p>只带 pid 的快照无法对抗 pid 复用：调用方必须在强杀之前重新核验身份。
+   * <p>只带 pid 的快照无法对抗 pid 复用：调用方必须在强杀之前重新核验身份。父进程 pid 也必须来自同一份内核快照（Linux 的 {@code /proc/<pid>/stat}
+   * ppid、macOS 的 {@code pbi_ppid}）：它只用于把信号排成「父先子后」，不能事后另查，否则父身份与成员身份 就不是同一时刻的事实。
    */
-  record GroupMember(long pid, Instant start) {}
+  record GroupMember(long pid, Instant start, long parentPid) {}
 
   /**
    * 会话里当前活着（非僵尸）的成员的快照，排除 {@code excludedPid}。
@@ -185,6 +191,9 @@ final class PosixProcessSession {
    *
    * <p>快照与发信号之间存在时间差，pid/sid 可能已经被回收；因此这里同时核验「所属会话仍然是本会话」与「启动时刻与快照一致」。
    * 核验不通过就不发信号：宁可报告未收敛，也绝不杀错进程。返回是否至少交付了一个信号。
+   *
+   * <p>发信号之前先按内核快照里的父子关系排成「父先子后」：内核（尤其 macOS 的 {@code proc_listpids}）不保证父进程先被列出，而先给子进程
+   * 发信号可能让父进程来不及执行自己的清理。快照无法消歧（PID 重复或成环）时整次调用不向任何 pid 发信号并返回 {@code false}。
    */
   static boolean signalSession(long session, int signal) {
     return signalSession(session, signal, NO_PROCESS);
@@ -196,8 +205,12 @@ final class PosixProcessSession {
     if (members == null) {
       return false;
     }
+    List<GroupMember> ordered = parentsBeforeChildren(members);
+    if (ordered == null) {
+      return false;
+    }
     boolean delivered = false;
-    for (GroupMember member : members) {
+    for (GroupMember member : ordered) {
       Instant now = processStart(member.pid());
       if (now == null || !now.equals(member.start()) || sessionOf(member.pid()) != session) {
         continue;
@@ -207,6 +220,48 @@ final class PosixProcessSession {
       }
     }
     return delivered;
+  }
+
+  /**
+   * 把成员快照重排成「父进程先于子进程」的顺序，供逐个发信号使用。
+   *
+   * <p>这是纯粹的拓扑排序，不改变任何成员归属与身份：每个成员在发信号之前仍然各自重新核验一次「仍属于本会话且启动身份未变」。顺序完全由父子 拓扑决定，绝不按 PID 数值排——PID
+   * 会回绕和复用，数值大小与父子关系无关。互不相连的根节点保持输入中的相遇顺序。
+   *
+   * <p>只有明确的一棵树/森林才会给出可发信号的顺序：PID 重复或父指针成环时整份快照无法消歧，返回 {@code null}（调用方据此绝不发信号）。 空输入返回空列表。
+   */
+  static List<GroupMember> parentsBeforeChildren(List<GroupMember> members) {
+    if (members.isEmpty()) {
+      return List.of();
+    }
+    Set<Long> pids = new HashSet<>(members.size());
+    for (GroupMember member : members) {
+      if (!pids.add(member.pid())) {
+        // 同一个 pid 出现两次：无法判断谁是谁，整份快照不可用。
+        return null;
+      }
+    }
+    Map<Long, List<GroupMember>> children = new HashMap<>();
+    ArrayDeque<GroupMember> roots = new ArrayDeque<>();
+    for (GroupMember member : members) {
+      if (pids.contains(member.parentPid())) {
+        children.computeIfAbsent(member.parentPid(), parent -> new ArrayList<>()).add(member);
+      } else {
+        // 父进程不在快照里（已被排除、已退出或属于 helper）：它在本快照内就是一个根。
+        roots.addLast(member);
+      }
+    }
+    List<GroupMember> ordered = new ArrayList<>(members.size());
+    while (!roots.isEmpty()) {
+      GroupMember member = roots.removeFirst();
+      ordered.add(member);
+      List<GroupMember> descendants = children.get(member.pid());
+      if (descendants != null) {
+        roots.addAll(descendants);
+      }
+    }
+    // 有成员从任何根都到达不了，只能说明父指针成环：返回 null 而不是部分顺序。
+    return ordered.size() == members.size() ? ordered : null;
   }
 
   /**
@@ -282,7 +337,7 @@ final class PosixProcessSession {
           undecidable = true;
           continue;
         }
-        members.add(new GroupMember(pid, start));
+        members.add(new GroupMember(pid, start, stat.parent()));
       }
     } catch (IOException error) {
       return null;
@@ -332,7 +387,7 @@ final class PosixProcessSession {
       if (info.pbi_status == MAC_STATUS_ZOMBIE) {
         continue;
       }
-      members.add(new GroupMember(pid, macStart(info)));
+      members.add(new GroupMember(pid, macStart(info), Integer.toUnsignedLong(info.pbi_ppid)));
     }
     return undecidable ? null : members;
   }
@@ -407,7 +462,10 @@ final class PosixProcessSession {
         return null;
       }
       return new ProcessStat(
-          fields[0].charAt(0), Long.parseLong(fields[2]), Long.parseLong(fields[3]));
+          fields[0].charAt(0),
+          Long.parseLong(fields[1]),
+          Long.parseLong(fields[2]),
+          Long.parseLong(fields[3]));
     } catch (IOException | RuntimeException error) {
       return null;
     }
@@ -432,8 +490,8 @@ final class PosixProcessSession {
     return DaemonOperatingSystemDetector.detectCurrent() == DaemonOperatingSystem.MACOS;
   }
 
-  /** {@code /proc/<pid>/stat} 的投影：状态、进程组与会话。 */
-  record ProcessStat(char state, long group, long session) {}
+  /** {@code /proc/<pid>/stat} 的投影：状态、父进程、进程组与会话。 */
+  record ProcessStat(char state, long parent, long group, long session) {}
 
   /** libc 绑定；只在对应 POSIX 平台访问，因此其它平台不会初始化它。 */
   interface LibC extends Library {
