@@ -44,8 +44,10 @@ import java.util.Set;
 /** 测试意图：全面验证 OpenAI Chat 流式累积器状态机、事件派发、终态映射、截断诊断、互斥用量度量及 Replay 保真。 */
 class OpenAiChatStreamAccumulatorTest {
 
-  private static final String MSG_REPEATED_FINISH_REASON =
-      "finish_reason repeated after finalized choice";
+  private static final String MSG_CONFLICTING_FINISH_REASON =
+      "conflicting finish_reason after finalized choice";
+  private static final String MSG_INVALID_CHOICE_INDEX =
+      "choice index must be a non-negative integer";
   private static final String MSG_SEMANTIC_DELTA_AFTER_FINALIZE =
       "semantic delta received after finalized choice";
 
@@ -113,8 +115,9 @@ class OpenAiChatStreamAccumulatorTest {
   }
 
   /**
-   * 测试意图：choice 首个有效 finish_reason 后语义封闭——usage-only 空 choices、无语义尾帧与重复 [DONE] 仍合法；
-   * 之后的文本/refusal/reasoning/tool/native-only 增量或重复、变更的 finish_reason 一律 fail closed，且已累积结果不可改写。
+   * 测试意图：choice 首个有效 finish_reason 后语义封闭——usage-only 空 choices、无语义尾帧、与冻结结果完全一致的 重复终止标记（同 choice
+   * index、同 finish_reason、无 delta）以及重复 [DONE] 都合法；之后的文本/refusal/reasoning/ tool/native-only 增量、变更的
+   * finish_reason 或不同 choice index 一律 fail closed，且已累积结果不可改写。
    */
   @Test
   void finalizesChoiceAfterFirstFinishReasonAndRejectsLaterSemanticFrames() {
@@ -130,6 +133,12 @@ class OpenAiChatStreamAccumulatorTest {
         "{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}");
     accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}]}");
     accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"}}]}");
+
+    // 幂等冗余终止标记：与冻结结果同一 choice index、同一 finish_reason 且无 delta，不追加内容也不重发增量
+    int eventsAfterFinalize = recordedEvents.size();
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}");
+    assertEquals(eventsAfterFinalize, recordedEvents.size());
 
     // 封闭后的语义帧：content / refusal / reasoning_content / reasoning_details / tool_calls / native-only
     assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"content\":\" more\"}}]}");
@@ -148,11 +157,19 @@ class OpenAiChatStreamAccumulatorTest {
     assertSemanticDeltaRejected(
         accumulator, "{\"choices\":[{\"delta\":{\"vendor_nested\":{\"inner\":\"x\"}}}]}");
     assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"vendor_count\":3}}]}");
-    // 重复同一 finish_reason 与变更 finish_reason 都不允许
+    // 重复但已变更的 finish_reason（含映射到同一 COMPLETE 的 tool_calls）与不同 choice index 都不允许
     assertInvalidAfterFinalize(
-        accumulator, "{\"choices\":[{\"finish_reason\":\"stop\"}]}", MSG_REPEATED_FINISH_REASON);
+        accumulator,
+        "{\"choices\":[{\"finish_reason\":\"length\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
     assertInvalidAfterFinalize(
-        accumulator, "{\"choices\":[{\"finish_reason\":\"length\"}]}", MSG_REPEATED_FINISH_REASON);
+        accumulator,
+        "{\"choices\":[{\"finish_reason\":\"tool_calls\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
+    assertInvalidAfterFinalize(
+        accumulator,
+        "{\"choices\":[{\"index\":1,\"finish_reason\":\"stop\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
 
     // finish_reason 闸门之后仍允许 [DONE] 与重复 [DONE]，且已封闭事实保持第一份
     accumulator.handleData("[DONE]");
@@ -162,6 +179,106 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
     assertEquals(4L, completion.response().usage().totalTokens());
     assertEquals("hi", completion.replayState().payload().path("content").asText());
+  }
+
+  /**
+   * 测试意图：真实形态的重复终止标记——完整文本后同帧/尾帧重复 finish_reason=stop（其中一帧同行携带 usage）必须正常完成， 只派发一次文本增量并保留
+   * usage，不产生第二次终态。
+   */
+  @Test
+  void redundantRepeatedFinishStopWithUsageCompletesNormally() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},"
+            + "\"finish_reason\":null}]}");
+    accumulator.handleData(
+        "{\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}");
+    // 同一 usage 的再次重复终止标记：usage 允许更新，但语义载荷与增量不得变化
+    accumulator.handleData(
+        "{\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("hi", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(4L, completion.response().usage().totalTokens());
+    assertEquals(1, recordedEvents.size());
+    assertEquals("hi", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
+    assertEquals("hi", completion.replayState().payload().path("content").asText());
+  }
+
+  /** 测试意图：tool_calls 终态后的冗余 finish_reason=tool_calls 幂等——不重复累积工具调用，也不重发 ToolCallDelta。 */
+  @Test
+  void redundantRepeatedToolCallsFinishDoesNotDuplicateToolCalls() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
+            + "\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]},"
+            + "\"finish_reason\":\"tool_calls\"}]}");
+    int eventsAfterFinalize = recordedEvents.size();
+    accumulator.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("call_1", completion.response().toolCalls().get(0).id());
+    assertEquals(eventsAfterFinalize, recordedEvents.size());
+  }
+
+  /** 测试意图：length / content_filter 终态后的同一 stop reason 冗余标记幂等，变更 reason 仍 fail closed。 */
+  @Test
+  void redundantRepeatedLengthAndFilteredFinishReasonsRemainConsistent() {
+    OpenAiChatStreamAccumulator length = createAccumulator();
+    length.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}");
+    length.handleData("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}");
+    assertInvalidAfterFinalize(
+        length,
+        "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
+    length.handleData("[DONE]");
+    assertEquals(GenerationStopReason.LENGTH, length.finish().response().stopReason());
+
+    OpenAiChatStreamAccumulator filtered = createAccumulator();
+    filtered.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"censored\"},"
+            + "\"finish_reason\":\"content_filter\"}]}");
+    filtered.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"content_filter\"}]}");
+    filtered.handleData("[DONE]");
+    ProviderCompletion completion = filtered.finish();
+    assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
+    assertNull(completion.replayState());
+  }
+
+  /**
+   * 测试意图：index 缺失视为主 choice 默认 0；一旦显式提供，畸形形态（显式 null/字符串/布尔/小数/负数/超 int）在首次 冻结与重复终止标记两条路径都必须 fail
+   * closed 且不回显原始值；缺失 index 与 index:0 视为同一 choice 仍接受。
+   */
+  @Test
+  void rejectsMalformedChoiceIndexOnFreezeAndRepeat() {
+    for (String index : List.of("null", "\"abc\"", "true", "1.5", "-1", "4294967296")) {
+      assertInvalidAfterFinalize(
+          createAccumulator(),
+          "{\"choices\":[{\"index\":" + index + ",\"finish_reason\":\"stop\"}]}",
+          MSG_INVALID_CHOICE_INDEX);
+      OpenAiChatStreamAccumulator repeated = createAccumulator();
+      repeated.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+      assertInvalidAfterFinalize(
+          repeated,
+          "{\"choices\":[{\"index\":" + index + ",\"finish_reason\":\"stop\"}]}",
+          MSG_INVALID_CHOICE_INDEX);
+    }
+
+    // 缺失 index 与显式 index:0 都视为主 choice，冗余重复标记依旧幂等接受
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"choices\":[{\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("[DONE]");
+    assertEquals(GenerationStopReason.COMPLETE, accumulator.finish().response().stopReason());
   }
 
   /** 测试意图：finish_reason 的非字符串形态绝不被 asText 静默吞掉；null 与空白字符串仍是合法无语义尾帧。 */
