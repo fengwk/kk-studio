@@ -13,7 +13,7 @@ public class HarnessThreadCompactResultDTO {
   /** 本次压缩 Turn 的 start Entry。 */
   private String turnStartEntryId;
 
-  /** Resolver 接受时的 Model invocation；业务拒绝时为 null。 */
+  /** 创建的独立压缩子 Thread ID；Resolver 业务拒绝时为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String modelInvocationId;
+  private String childThreadId;
 }

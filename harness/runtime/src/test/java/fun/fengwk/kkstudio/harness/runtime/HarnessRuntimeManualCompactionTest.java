@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -108,7 +109,7 @@ class HarnessRuntimeManualCompactionTest {
         fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
     assertEquals(1L, result.thread().version());
-    assertNotNull(result.modelInvocationId());
+    assertNotNull(result.childThreadId());
     EntryPath path = path(fixture.store, baseline.threadId());
     TurnStartPayload start = (TurnStartPayload) path.head().payload();
     assertEquals(result.turnStartEntryId(), path.head().id());
@@ -117,7 +118,7 @@ class HarnessRuntimeManualCompactionTest {
     assertNotNull(start.contextWindow());
     assertNotNull(start.maxOutputTokens());
     assertNotNull(
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, result.modelInvocationId())));
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, result.childThreadId())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
@@ -132,7 +133,7 @@ class HarnessRuntimeManualCompactionTest {
     CompactThreadResult result =
         fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
-    assertNotNull(result.modelInvocationId());
+    assertNotNull(result.childThreadId());
   }
 
   @Test
@@ -169,7 +170,7 @@ class HarnessRuntimeManualCompactionTest {
     CompactThreadResult result =
         fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
-    assertNull(result.modelInvocationId());
+    assertNull(result.childThreadId());
     assertEquals(1L, result.thread().version());
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(12, path.entries().size());
@@ -463,8 +464,16 @@ class HarnessRuntimeManualCompactionTest {
         onResolve.run();
       }
       if (autoConsistent) {
-        return new Resolved(
-            HarnessRuntimeTestSupport.modelRequest(), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);
+        return new CompactionResolved(
+            HarnessRuntimeTestSupport.settings().model(),
+            4096L,
+            CONTEXT_WINDOW,
+            MAX_OUTPUT_TOKENS,
+            new BranchSettings(
+                "compaction",
+                HarnessRuntimeTestSupport.settings().model(),
+                HarnessRuntimeTestSupport.settings().environmentName(),
+                null));
       }
       return results.poll();
     }

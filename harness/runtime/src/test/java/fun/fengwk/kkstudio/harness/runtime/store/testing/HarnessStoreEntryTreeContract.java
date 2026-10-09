@@ -1097,10 +1097,9 @@ public abstract class HarnessStoreEntryTreeContract {
                           StoreTestSupport.OWNER_THREAD_ID,
                           StoreTestSupport.CONTEXT_WINDOW,
                           StoreTestSupport.MAX_OUTPUT_TOKENS,
-                          new CompactionStart(
+                          CompactionStart.pending(
                               CompactionPhase.FULL,
                               CompactionTrigger.MANUAL,
-                              compactionSettings.model(),
                               inputTurnEnd,
                               null,
                               null)),

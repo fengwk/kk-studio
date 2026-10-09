@@ -155,10 +155,9 @@ class HarnessRuntimeStopContinuationTest {
                       new TurnEndPayload(inputStartId, TurnEndOutcome.COMPLETED, false, null, null),
                       T5));
               CompactionStart history =
-                  new CompactionStart(
+                  CompactionStart.pending(
                       CompactionPhase.HISTORY,
                       CompactionTrigger.THRESHOLD,
-                      settings().model(),
                       assistantId,
                       userId,
                       null);

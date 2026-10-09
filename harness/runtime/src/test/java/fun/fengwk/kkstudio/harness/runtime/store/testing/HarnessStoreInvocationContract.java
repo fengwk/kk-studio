@@ -2417,13 +2417,8 @@ public abstract class HarnessStoreInvocationContract {
           UUID cutEntryId = requestedCutEntryId == null ? endEntryId : requestedCutEntryId;
           UUID turnPrefixStartEntryId = phase == CompactionPhase.FULL ? null : userEntryId;
           CompactionStart compaction =
-              new CompactionStart(
-                  phase,
-                  CompactionTrigger.THRESHOLD,
-                  StoreTestSupport.branchSettings().model(),
-                  cutEntryId,
-                  turnPrefixStartEntryId,
-                  null);
+              CompactionStart.pending(
+                  phase, CompactionTrigger.THRESHOLD, cutEntryId, turnPrefixStartEntryId, null);
           tx.insertEntry(
               new Entry(
                   start,
@@ -2506,6 +2501,75 @@ public abstract class HarnessStoreInvocationContract {
         });
   }
 
+  private UUID seedDurableCompletedCompactionTurn(CompactionPayload resultPayload) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  baseline.turnStartEntryId(),
+                  userMessagePayload(),
+                  T1));
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
+          UUID endEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  endEntryId,
+                  baseline.sessionId(),
+                  assistantEntryId,
+                  new TurnEndPayload(
+                      baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          UUID start = tx.nextId();
+          UUID cutEntryId = endEntryId;
+          UUID childThreadId = tx.nextId();
+          UUID joinInvocationId = tx.nextId();
+          CompactionStart compaction =
+              new CompactionStart(
+                  CompactionPhase.FULL,
+                  CompactionTrigger.THRESHOLD,
+                  StoreTestSupport.branchSettings().model(),
+                  4096L,
+                  cutEntryId,
+                  null,
+                  null,
+                  childThreadId,
+                  joinInvocationId);
+          tx.insertEntry(
+              new Entry(
+                  start,
+                  baseline.sessionId(),
+                  endEntryId,
+                  new TurnStartPayload(
+                      TurnStartReason.COMPACTION,
+                      StoreTestSupport.branchSettings(),
+                      baseline.threadId(),
+                      StoreTestSupport.CONTEXT_WINDOW,
+                      16_384,
+                      compaction),
+                  T1));
+          UUID resultEntryId = tx.nextId();
+          tx.insertEntry(new Entry(resultEntryId, baseline.sessionId(), start, resultPayload, T2));
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  baseline.sessionId(),
+                  resultEntryId,
+                  new TurnEndPayload(start, TurnEndOutcome.COMPLETED, false, null, null),
+                  T2));
+          tx.updateThread(
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(turnEndId, T2));
+          return resultEntryId;
+        });
+  }
+
   private static ProviderResponse successResponse() {
     return new ProviderResponse(
         "summary",
@@ -2551,15 +2615,18 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void compactionInvocationAcceptsExactSucceededSummary() {
-    // compactionRequest() 是不含压缩字段的普通 ModelRequestSpec；用途只由 TURN_START.compaction() 决定。
+    // 压缩 turn 绝不允许 ModelInvocation，任何尝试挂载被确定性拒绝
     ModelRequestSpec requestSpec = compactionRequest();
     CompactionPayload result = new CompactionPayload("summary", null);
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> seedCompletedCompactionTurn(requestSpec, result));
+    assertTrue(ex.getMessage().contains("compaction turn must not have model invocations"));
 
-    UUID modelId = seedCompletedCompactionTurn(requestSpec, result);
-
-    ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
-    assertEquals(ModelInvocationStatus.SUCCEEDED, stored.status());
-    assertTrue(stored.resultEntryId() != null);
+    // 保留压缩结果 payload 的既有断言（用新的 durable 事实构造：父 TURN_START 的 run group + CompactionPayload/TurnEnd）
+    UUID resultEntryId = seedDurableCompletedCompactionTurn(result);
+    Entry stored = store.transaction(tx -> tx.findEntry(resultEntryId).orElseThrow());
+    assertEquals(result, stored.payload());
   }
 
   @Test
@@ -2598,9 +2665,9 @@ public abstract class HarnessStoreInvocationContract {
   void compactionResultRejectsPathDriftThroughSharedMaterializationEvaluator() {
     ModelRequestSpec requestSpec = compactionRequest();
 
-    // FULL 的 cutEntryId 不在 result path 上，路径事实由共享 materialization evaluator 拒绝。
+    // FULL 的 cutEntryId 不在 result path 上，路径事实由 shared materialization / 压缩校验拒绝。
     assertThrows(
-        IllegalStateException.class,
+        IllegalArgumentException.class,
         () ->
             seedCompletedCompactionTurn(
                 requestSpec,

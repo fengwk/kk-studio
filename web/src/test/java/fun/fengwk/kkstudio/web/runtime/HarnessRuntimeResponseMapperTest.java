@@ -440,15 +440,15 @@ class HarnessRuntimeResponseMapperTest {
   }
 
   @Test
-  void projectsCompactResultNullableInvocationAndRejectsThreadMismatch() {
-    // Resolver 拒绝时 modelInvocationId 显式 null；接受时保持 invocation id。
+  void projectsCompactResultNullableChildThreadAndRejectsThreadMismatch() {
+    // Resolver 拒绝时 childThreadId 显式 null；接受时保持子 Thread id。
     CompactThreadResult rejected =
         new CompactThreadResult(HarnessRuntimeTestFixtures.thread(id(1)), id(2), null);
     HarnessThreadCompactResultDTO rejectedDto =
         HarnessRuntimeResponseMapper.toCompactResultDto(
             rejected, HarnessRuntimeTestFixtures.idleSnapshot());
     assertEquals(idText(2), rejectedDto.getTurnStartEntryId());
-    assertNull(rejectedDto.getModelInvocationId());
+    assertNull(rejectedDto.getChildThreadId());
 
     CompactThreadResult accepted =
         new CompactThreadResult(HarnessRuntimeTestFixtures.thread(id(1)), id(2), id(10));
@@ -456,7 +456,7 @@ class HarnessRuntimeResponseMapperTest {
         idText(10),
         HarnessRuntimeResponseMapper.toCompactResultDto(
                 accepted, HarnessRuntimeTestFixtures.idleSnapshot())
-            .getModelInvocationId());
+            .getChildThreadId());
     assertThrows(
         IllegalArgumentException.class,
         () ->

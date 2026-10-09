@@ -383,9 +383,12 @@ class UsageCostProjectionServiceTest {
                 CompactionPhase.FULL,
                 CompactionTrigger.THRESHOLD,
                 new ModelSelection("provider-b", "model-b", "default"),
+                1024L,
                 ROOT_ID,
                 null,
-                null)),
+                null,
+                new UUID(0L, 50L),
+                new UUID(0L, 51L))),
         NOW);
   }
 

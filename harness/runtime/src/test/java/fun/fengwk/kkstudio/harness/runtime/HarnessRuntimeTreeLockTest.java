@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.TestClock;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -43,6 +44,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.lang.reflect.Proxy;
 import java.time.Clock;
@@ -378,6 +381,23 @@ class HarnessRuntimeTreeLockTest {
     CompactThreadResult result =
         recordingRuntime.compactThread(new CompactThreadCommand(baseline.threadId(), 0L));
     assertNotNull(result);
+    assertNotNull(result.childThreadId());
+    assertTrue(
+        fixture
+            .store
+            .transaction(
+                tx -> tx.findModelInvocationByTurn(baseline.threadId(), result.turnStartEntryId()))
+            .isEmpty());
+    assertNotNull(
+        fixture.store.transaction(
+            tx ->
+                tx.findWork(new WorkTarget(WorkTargetType.THREAD, result.childThreadId()))
+                    .orElse(null)));
+    assertNull(
+        fixture.store.transaction(
+            tx ->
+                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    .orElse(null)));
 
     // 应该按顺序在第一阶段获取 tree -> session -> thread，在第二阶段再次获取 tree -> session -> thread
     assertEquals(
@@ -523,8 +543,22 @@ class HarnessRuntimeTreeLockTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
     TurnResolver resolver =
-        (threadId, candidatePath, preparation) ->
-            new TurnResolver.Resolved(HarnessRuntimeTestSupport.modelRequest(), 100_000, 16_384);
+        (threadId, candidatePath, preparation) -> {
+          if (preparation != null) {
+            return new TurnResolver.CompactionResolved(
+                HarnessRuntimeTestSupport.settings().model(),
+                4096L,
+                100_000,
+                16_384,
+                new BranchSettings(
+                    "compaction",
+                    HarnessRuntimeTestSupport.settings().model(),
+                    HarnessRuntimeTestSupport.settings().environmentName(),
+                    null));
+          }
+          return new TurnResolver.Resolved(
+              HarnessRuntimeTestSupport.modelRequest(), 100_000, 16_384);
+        };
     CompactionConfigProvider provider = () -> CompactionConfig.DEFAULT;
     return new Fixture(store, clock, resolver, provider);
   }
@@ -538,20 +572,20 @@ class HarnessRuntimeTreeLockTest {
   private record ClosedTurnBaseline(UUID sessionId, UUID threadId, UUID turnEndId) {}
 
   private static ClosedTurnBaseline seedCompactionEligibleTurn(InMemoryHarnessStore store) {
-    UUID sessionId = TestIds.id(1);
-    UUID threadId = TestIds.id(2);
-    UUID rootEntryId = TestIds.id(3);
-    UUID firstStartId = TestIds.id(4);
-    UUID firstUserId = TestIds.id(5);
-    UUID firstAssistantId = TestIds.id(6);
-    UUID firstEndId = TestIds.id(7);
-    UUID secondStartId = TestIds.id(8);
-    UUID secondUserId = TestIds.id(9);
-    UUID secondAssistantId = TestIds.id(10);
-    UUID secondEndId = TestIds.id(11);
     Instant now = T0;
     return store.transaction(
         tx -> {
+          UUID sessionId = tx.nextId();
+          UUID threadId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID firstStartId = tx.nextId();
+          UUID firstUserId = tx.nextId();
+          UUID firstAssistantId = tx.nextId();
+          UUID firstEndId = tx.nextId();
+          UUID secondStartId = tx.nextId();
+          UUID secondUserId = tx.nextId();
+          UUID secondAssistantId = tx.nextId();
+          UUID secondEndId = tx.nextId();
           tx.insertSession(new Session(sessionId, "main", now));
           tx.insertEntry(
               new Entry(

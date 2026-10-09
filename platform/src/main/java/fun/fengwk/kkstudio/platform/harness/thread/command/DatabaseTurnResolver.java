@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -33,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -166,7 +166,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(path, "path");
     try {
       if (compactionPreparation != null) {
-        return resolveCompaction(compactionPreparation);
+        return resolveCompaction(path, compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
       return resolved(plan(path, clock.instant()));
@@ -344,10 +344,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
             contextWindow,
             CompactionPlanner.estimateRequestTokens(path, systemInstruction));
     ProviderCacheControl cacheControl =
-        ProviderCacheControl.session(
-            promptCacheRetention(
-                providerFactory, provider.getConfigJson(), selection.providerName()),
-            sessionId.toString());
+        isCompactorSettings(settings)
+            ? ProviderCacheControl.none()
+            : ProviderCacheControl.session(
+                promptCacheRetention(
+                    providerFactory, provider.getConfigJson(), selection.providerName()),
+                sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
             providerType,
@@ -362,6 +364,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
         contextWindow,
         tools.candidates(),
         skills);
+  }
+
+  /**
+   * 分支是否内置压缩 Agent：压缩执行的每一次请求（含普通工具 loop turn 与失败重试）都固定携带 NONE cache hint，绝不落到会话级 cache key 或
+   * Provider 自动缓存档位。压缩子 Thread 的 ROOT branch settings 即系统保留的 compaction Agent 名称。
+   */
+  private static boolean isCompactorSettings(BranchSettings settings) {
+    return JoinPurpose.COMPACTION.wireName().equals(settings.agentName());
   }
 
   /**
@@ -385,24 +395,70 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前
    * config 与 removedPrefixTokens 现算。
    */
-  private Result resolveCompaction(CompactionPreparation preparation) {
-    LiveTurnPlan.Planned plan =
-        compactionPlan(
-            preparation.executionModel(),
-            parsedModel -> {
-              long budget =
-                  compactionConfigProvider
-                      .compactionConfig()
-                      .outputBudget(
-                          preparation.phase(),
-                          outputTokens(parsedModel),
-                          preparation.removedPrefixTokens());
-              if (budget <= 0 || budget > Integer.MAX_VALUE) {
-                throw rejection("compaction output budget must be a positive int, got " + budget);
-              }
-              return (int) budget;
-            });
-    return new TurnResolver.Resolved(plan.spec(), plan.contextWindow(), plan.spec().outputTokens());
+  private Result resolveCompaction(EntryPath parentPath, CompactionPreparation preparation) {
+    String compactionAgentName = JoinPurpose.COMPACTION.wireName();
+    AgentDefinition agent =
+        require(
+            agentDefinitionRepository.getByName(compactionAgentName),
+            "agent not found: " + compactionAgentName);
+    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+      throw rejection("compaction agent has no configured model");
+    }
+    AgentProvider provider =
+        require(
+            providerRepository.getByName(agent.getModelProviderName()),
+            "provider not found: " + agent.getModelProviderName());
+    ProviderType providerType = provider.getProviderType();
+    if (providerType == null) {
+      throw rejection("provider type must not be null");
+    }
+    UUID providerConnectionGenerationId =
+        require(
+            provider.getConnectionGenerationId(),
+            "provider connection generation id must not be null");
+    AgentModel model =
+        require(
+            modelRepository.getByProviderNameAndName(
+                agent.getModelProviderName(), agent.getModelName()),
+            "model not found: " + agent.getModelProviderName() + "/" + agent.getModelName());
+    ParsedAgentModelConfig parsedModel = parseModel(model);
+    String variantName =
+        agent.getVariant() != null && !agent.getVariant().isBlank()
+            ? agent.getVariant()
+            : parsedModel.defaultVariant();
+    ModelVariant variant = findVariant(parsedModel, variantName);
+    if (variant == null) {
+      throw rejection(
+          "model variant not found: "
+              + agent.getModelProviderName()
+              + "/"
+              + agent.getModelName()
+              + " variant="
+              + variantName);
+    }
+    if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
+      throw rejection(
+          "model does not support reasoning: "
+              + agent.getModelProviderName()
+              + "/"
+              + agent.getModelName());
+    }
+    ModelSelection compactorModel =
+        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variant.id());
+    int maxOutputTokens = outputTokens(parsedModel);
+    long outputBudget =
+        compactionConfigProvider
+            .compactionConfig()
+            .outputBudget(preparation.phase(), maxOutputTokens, preparation.removedPrefixTokens());
+    if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
+      throw rejection("compaction output budget must be a positive int, got " + outputBudget);
+    }
+    int contextWindow = contextWindow(parsedModel);
+    BranchSettings childSettings =
+        new BranchSettings(
+            compactionAgentName, compactorModel, parentPath.baseSettings().environmentName(), null);
+    return new TurnResolver.CompactionResolved(
+        compactorModel, outputBudget, contextWindow, maxOutputTokens, childSettings);
   }
 
   /**
@@ -462,13 +518,24 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 parsedModel.reasoning()),
             variant,
             outputBudget.applyAsInt(parsedModel),
-            CompactionPrompts.summarizationSystemPrompt(),
+            compactionAgentSystemPrompt(),
             List.of(),
             List.of(),
             ProviderCacheControl.none()),
         contextWindow(parsedModel),
         List.of(),
         List.of());
+  }
+
+  /**
+   * 内置 compaction Agent 的 system prompt：历史压缩预览按普通 Agent 目录读取同一份 catalog prompt，运行时不再持有或暴露该 prompt
+   * 常量。内置 Agent 由系统初始化且不可删除，缺失即确定性拒绝。
+   */
+  private String compactionAgentSystemPrompt() {
+    String agentName = JoinPurpose.COMPACTION.wireName();
+    AgentDefinition agent =
+        require(agentDefinitionRepository.getByName(agentName), "agent not found: " + agentName);
+    return agent.getSystemPrompt();
   }
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */

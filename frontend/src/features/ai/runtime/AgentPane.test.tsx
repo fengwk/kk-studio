@@ -811,7 +811,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.compactThread).mockResolvedValueOnce({
       thread: thread({ version: '1' }),
       turnStartEntryId: 'turn-start-1',
-      modelInvocationId: 'model-1',
+      childThreadId: 'child-1',
     })
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

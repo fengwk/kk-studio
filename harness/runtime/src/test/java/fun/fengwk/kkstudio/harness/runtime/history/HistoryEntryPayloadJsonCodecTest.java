@@ -372,12 +372,15 @@ class HistoryEntryPayloadJsonCodecTest {
 
   @Test
   void roundTripsCompactionStartMetadataInsideTurnStart() {
-    // Compaction 的全部执行事实只在 TURN_START 冻结一次。
+    // Compaction 的全部执行事实只在 TURN_START 冻结一次（测试完整 run group 往返）。
     CompactionStart start =
         new CompactionStart(
             CompactionPhase.TURN_PREFIX,
             CompactionTrigger.MANUAL,
             settings().model(),
+            2048L,
+            id(50L),
+            id(51L),
             id(4L),
             id(3L),
             id(2L));
@@ -387,6 +390,18 @@ class HistoryEntryPayloadJsonCodecTest {
 
     assertEquals(payload, CODEC.decode(EntryType.TURN_START, CODEC.encode(payload)));
     assertEquals(payload, CODEC.decodeNode(EntryType.TURN_START, CODEC.encodeNode(payload)));
+
+    // pending compaction start（run group 全 null）往返
+    CompactionStart pending =
+        CompactionStart.pending(
+            CompactionPhase.TURN_PREFIX, CompactionTrigger.MANUAL, id(4L), id(3L), id(2L));
+    TurnStartPayload pendingPayload =
+        new TurnStartPayload(
+            TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, pending);
+
+    assertEquals(pendingPayload, CODEC.decode(EntryType.TURN_START, CODEC.encode(pendingPayload)));
+    assertEquals(
+        pendingPayload, CODEC.decodeNode(EntryType.TURN_START, CODEC.encodeNode(pendingPayload)));
   }
 
   @Test

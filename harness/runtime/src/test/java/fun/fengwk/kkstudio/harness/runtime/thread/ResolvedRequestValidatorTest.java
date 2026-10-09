@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -27,11 +26,9 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -44,7 +41,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn、压缩 turn 和环境边界。 */
+/** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn 和环境边界。 */
 class ResolvedRequestValidatorTest {
   private static final BranchSettings SETTINGS =
       new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
@@ -64,10 +61,10 @@ class ResolvedRequestValidatorTest {
     // 参数缺失必须在读取 path/resolved 字段前失败，保持边界契约清晰。
     assertThrows(
         NullPointerException.class,
-        () -> ResolvedRequestValidator.validate(null, null, resolved(normalSpec(SETTINGS))));
+        () -> ResolvedRequestValidator.validate(null, resolved(normalSpec(SETTINGS))));
     assertThrows(
         NullPointerException.class,
-        () -> ResolvedRequestValidator.validate(normalPath(SETTINGS), null, null));
+        () -> ResolvedRequestValidator.validate(normalPath(SETTINGS), null));
   }
 
   @Test
@@ -81,96 +78,22 @@ class ResolvedRequestValidatorTest {
 
     // 正常 turn 允许匹配 candidate environment 的 tool binding。
     assertDoesNotThrow(
-        () -> ResolvedRequestValidator.validate(normalPath(SETTINGS), null, resolved(spec)));
+        () -> ResolvedRequestValidator.validate(normalPath(SETTINGS), resolved(spec)));
   }
 
   @Test
   void rejectsNormalTurnThatCarriesCompactionMetadata() {
-    CompactionPreparation preparation = preparation();
-    EntryPath path = compactionPath(SETTINGS, preparation.frozenStart());
+    CompactionStart start =
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, CUT_ENTRY_ID, null, null);
+    EntryPath path = compactionPath(SETTINGS, start);
 
     // normal 校验不得借 candidate path 末尾的 COMPACTION TURN_START 携带压缩元数据。
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
-            () -> ResolvedRequestValidator.validate(path, null, resolved(normalSpec(SETTINGS))));
+            () -> ResolvedRequestValidator.validate(path, resolved(normalSpec(SETTINGS))));
     assertEquals("a normal turn must not carry compaction TURN_START metadata", error.getMessage());
-  }
-
-  @Test
-  void rejectsCompactionCandidateWithDifferentFrozenMetadata() {
-    CompactionPreparation preparation = preparation();
-    CompactionStart mismatchedStart =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            preparation.executionModel(),
-            new UUID(0L, 6L),
-            null,
-            null);
-
-    // candidate TURN_START 必须原样携带 planner 冻结的切分事实，不能只匹配 phase。
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                ResolvedRequestValidator.validate(
-                    compactionPath(SETTINGS, mismatchedStart),
-                    preparation,
-                    resolved(compactionSpec(preparation))));
-    assertEquals(
-        "a compaction candidate TURN_START must carry the exact frozen preparation metadata",
-        error.getMessage());
-  }
-
-  @Test
-  void rejectsCacheControlOnCompactionRequest() {
-    // 压缩请求必须禁用 cache，携带任何非 none 的 cache control 都会被拒绝。
-    assertCompactionRejects(
-        preparation(),
-        List.of(),
-        List.of(),
-        ProviderCacheControl.session(PromptCacheRetention.SHORT, "key"));
-  }
-
-  @Test
-  void rejectsToolBindingOnCompactionRequest() {
-    // 压缩只发送 model/variant，不能把任何 tool binding 带入 Provider 请求。
-    assertCompactionRejects(
-        preparation(), List.of(hostTool()), List.of(), ProviderCacheControl.none());
-  }
-
-  @Test
-  void rejectsSubagentBindingOnCompactionRequest() {
-    // 压缩摘要不应携带子 Agent 委派能力。
-    assertCompactionRejects(
-        preparation(),
-        List.of(),
-        List.of(new SubagentBinding("reviewer", "review the summary")),
-        ProviderCacheControl.none());
-  }
-
-  @Test
-  void rejectsProviderCacheControlOnCompactionRequest() {
-    // 压缩请求必须禁用 Provider cache，避免摘要请求复用正常 turn 的缓存策略。
-    assertCompactionRejects(
-        preparation(),
-        List.of(),
-        List.of(),
-        ProviderCacheControl.session(PromptCacheRetention.SHORT, "compaction-cache"));
-  }
-
-  @Test
-  void acceptsValidCompactionRequestWithFrozenExecutionModel() {
-    CompactionPreparation preparation = preparation();
-
-    // executionModel、冻结元数据及空 binding/cache none 全部一致时，压缩候选应通过校验。
-    assertDoesNotThrow(
-        () ->
-            ResolvedRequestValidator.validate(
-                compactionPath(SETTINGS, preparation.frozenStart()),
-                preparation,
-                resolved(compactionSpec(preparation))));
   }
 
   @Test
@@ -181,32 +104,12 @@ class ResolvedRequestValidatorTest {
         () ->
             ResolvedRequestValidator.validate(
                 normalPath(SETTINGS),
-                null,
                 resolved(
                     normalSpec(
                         SETTINGS,
                         List.of(environmentTool(OTHER_ENVIRONMENT_ID)),
                         List.of(),
                         ProviderCacheControl.none()))));
-  }
-
-  private static void assertCompactionRejects(
-      CompactionPreparation preparation,
-      List<ToolBinding> tools,
-      List<SubagentBinding> subagents,
-      ProviderCacheControl cacheControl) {
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                ResolvedRequestValidator.validate(
-                    compactionPath(SETTINGS, preparation.frozenStart()),
-                    preparation,
-                    resolved(
-                        normalSpec(preparation.executionModel(), tools, subagents, cacheControl))));
-    assertEquals(
-        "compaction requests must carry only model/variant with cache disabled",
-        error.getMessage());
   }
 
   private static TurnResolver.Resolved resolved(ModelRequestSpec spec) {
@@ -229,24 +132,6 @@ class ResolvedRequestValidatorTest {
                 new TurnStartPayload(
                     TurnStartReason.COMPACTION, settings, THREAD_ID, 100_000, 16_384, compaction),
                 NOW)));
-  }
-
-  private static CompactionPreparation preparation() {
-    return new CompactionPreparation(
-        CompactionPhase.FULL,
-        CompactionTrigger.THRESHOLD,
-        SETTINGS.model(),
-        CUT_ENTRY_ID,
-        null,
-        null,
-        null,
-        List.of(AgentMessage.user("history")),
-        100L);
-  }
-
-  private static ModelRequestSpec compactionSpec(CompactionPreparation preparation) {
-    return normalSpec(
-        preparation.executionModel(), List.of(), List.of(), ProviderCacheControl.none());
   }
 
   private static ModelRequestSpec normalSpec(BranchSettings settings) {
@@ -291,15 +176,6 @@ class ResolvedRequestValidatorTest {
         EnvironmentSupport.REQUIRED,
         environment,
         "dev");
-  }
-
-  private static ToolBinding hostTool() {
-    return new ToolBinding(
-        toolDefinition("test.bash"),
-        new ContributorBinding("core", "bash", List.of()),
-        EnvironmentSupport.NONE,
-        null,
-        null);
   }
 
   private static AgentToolDefinition toolDefinition(String id) {

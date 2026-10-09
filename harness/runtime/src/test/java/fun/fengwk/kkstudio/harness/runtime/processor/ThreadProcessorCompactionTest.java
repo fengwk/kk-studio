@@ -6,7 +6,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.MAX_OUTPUT_TOKENS;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.branchSettings;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.compactionRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.compactionUserText;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
@@ -23,18 +22,23 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
+import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionNoGain;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -54,7 +58,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -69,7 +74,14 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -122,17 +134,65 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   .anyMatch(c -> c.idempotencyKey().equals(userCommand));
             });
     assertTrue(inputStillQueued);
-    // resolved 压缩不制造 active 期无意义 THREAD Work：本 claim 的 THREAD 行已 complete 删除（deferred input
-    // 由压缩关闭时的 queued 快照重建 wake）。
+    // resolved 压缩不制造 active 期无意义 THREAD Work：父 THREAD 行已 complete 删除。
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
-    ModelInvocation compactionInvocation =
+
+    // 1. 父 TURN_START 落完整 run group（executionModel / outputBudget / childThreadId /
+    // joinInvocationId）
+    CompactionStart compaction = start.compaction();
+    assertNotNull(compaction);
+    assertNotNull(compaction.executionModel());
+    assertNotNull(compaction.outputBudget());
+    assertTrue(compaction.outputBudget() > 0);
+    assertNotNull(compaction.childThreadId());
+    assertNotNull(compaction.joinInvocationId());
+    assertEquals(CompactionPhase.FULL, compaction.phase());
+    assertEquals(CompactionTrigger.THRESHOLD, compaction.trigger());
+
+    // 2. 父 Thread 无 ModelInvocation
+    assertTrue(
         fixture
             .store
             .transaction(
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), path.entries().get(9).id()))
-            .orElseThrow();
-    assertEquals(CompactionPhase.FULL, start.compaction().phase());
-    assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
+            .isEmpty());
+
+    // 3. store 里确实创建了子 Session / ROOT / 子 Thread / 第一条摘要 command / COMPACTION join
+    fixture.store.transaction(
+        tx -> {
+          ThreadState childThread = tx.lockThread(compaction.childThreadId()).orElseThrow();
+          assertEquals(baseline.threadId(), childThread.parentThreadId());
+          Session childSession = tx.findSession(childThread.sessionId()).orElseThrow();
+          assertNotNull(childSession);
+          Entry rootEntry = tx.findEntry(childThread.headEntryId()).orElseThrow();
+          assertInstanceOf(RootPayload.class, rootEntry.payload());
+
+          // 第一条 command 是 CustomMessageCommand，带压缩 prompts
+          List<ThreadCommand> commands = tx.loadQueuedCommands(compaction.childThreadId());
+          assertEquals(1, commands.size());
+          assertInstanceOf(CustomMessageCommandPayload.class, commands.getFirst().payload());
+
+          // COMPACTION join
+          ThreadJoin join = tx.findJoin(compaction.joinInvocationId()).orElseThrow();
+          assertEquals(JoinPurpose.COMPACTION, join.purpose());
+          assertEquals(baseline.threadId(), join.parentThreadId());
+          assertEquals(compaction.childThreadId(), join.childThreadId());
+          assertFalse(join.matched());
+          return null;
+        });
+
+    // 4. 请求了子 THREAD Work，且父 THREAD Work 为 null（父不自唤醒忙轮询）
+    assertNotNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, compaction.childThreadId())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+
+    // 5. durable wait：子未结算时，父再次 claim 不产生新 Work，不写 TURN_END
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath waitPath = path(fixture.store, baseline.threadId());
+    assertEquals(10, waitPath.entries().size());
+    assertEquals(
+        TurnStartReason.COMPACTION, ((TurnStartPayload) waitPath.head().payload()).reason());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
   /** 普通成功 turn 越过 threshold 后保持 idle；下一条真实 user demand 到达时才先压缩。 */
@@ -224,26 +284,26 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
     EntryPath planned = path(fixture.store, baseline.threadId());
     Entry start = planned.entries().get(9);
-    ModelInvocation invocation =
-        fixture
-            .store
-            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), start.id()))
-            .orElseThrow();
-    // 推进压缩调用成功（COMPLETED + 非空摘要文本）。
-    transitionModel(fixture.store, invocation.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, invocation.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store, invocation.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
+    TurnStartPayload compactionStart = (TurnStartPayload) start.payload();
+    CompactionStart compaction = compactionStart.compaction();
 
-    // 一个 claim：THRESHOLD FULL 完成压缩关闭 turn（不继续，直接 complete）。
+    // 推进子 Thread 压缩执行成功（COMPLETED + 非空摘要文本），并通过 matchAndDeliverTerminalJoins 冻结 COMPACTION join
+    // 并唤醒父 Thread
+    settleCompactionChildSuccess(
+        fixture,
+        compaction.childThreadId(),
+        compaction.joinInvocationId(),
+        "response text",
+        GenerationStopReason.COMPLETE,
+        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L));
+
+    // 一个 claim：THRESHOLD FULL 消费已完成 join，完成压缩关闭 turn（不继续，直接 complete）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath applied = path(fixture.store, baseline.threadId());
     assertEquals(12, applied.entries().size());
     Entry result = applied.entries().get(10);
     CompactionPayload payload = (CompactionPayload) result.payload();
-    TurnStartPayload compactionStart = (TurnStartPayload) start.payload();
     assertEquals(CompactionPhase.FULL, compactionStart.compaction().phase());
     assertEquals(CompactionTrigger.THRESHOLD, compactionStart.compaction().trigger());
     assertTrue(payload.summaryText().contains("response text"));
@@ -255,9 +315,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     String durableJson = codec.encode(payload);
     assertEquals(payload, codec.decode(EntryType.COMPACTION, durableJson));
     assertFalse(durableJson.contains("cost"), durableJson);
-    // COMPLETED 无 tool 的压缩 turn 已关闭：Model 行被物理删除（closed turn 不保留 Invocation）。
-    assertNull(
-        fixture.store.transaction(tx -> tx.findModelInvocation(invocation.id())).orElse(null));
     TurnEndPayload end = (TurnEndPayload) applied.entries().get(11).payload();
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
     assertFalse(end.continueModel()); // THRESHOLD 完成压缩不继续。
@@ -274,16 +331,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // claim1：active continuation 越阈，先启动 FULL 压缩。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     Entry start = path(fixture.store, baseline.threadId()).head();
-    ModelInvocation compaction =
-        fixture
-            .store
-            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), start.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, compaction.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, compaction.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store, compaction.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
+    TurnStartPayload compactionStart = (TurnStartPayload) start.payload();
+    settleCompactionChildSuccess(
+        fixture,
+        compactionStart.compaction().childThreadId(),
+        compactionStart.compaction().joinInvocationId(),
+        "response text",
+        GenerationStopReason.COMPLETE,
+        usage());
 
     // claim2：成功 checkpoint 必须把原 continuation obligation 重写到自己的 TURN_END。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -312,17 +367,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     Entry compactionStart = path(fixture.store, baseline.threadId()).head();
-    ModelInvocation compaction =
-        fixture
-            .store
-            .transaction(
-                tx -> tx.findModelInvocationByTurn(baseline.threadId(), compactionStart.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, compaction.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, compaction.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store, compaction.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
+    TurnStartPayload startPayload = (TurnStartPayload) compactionStart.payload();
+    settleCompactionChildSuccess(
+        fixture,
+        startPayload.compaction().childThreadId(),
+        startPayload.compaction().joinInvocationId(),
+        "response text",
+        GenerationStopReason.COMPLETE,
+        usage());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     // 完整压缩后的下一个 claim：此前保留的 queued USER 启动 INPUT（不再触发压缩）。
@@ -371,13 +423,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(13, path.entries().size());
     TurnStartPayload start = (TurnStartPayload) path.entries().get(12).payload();
     assertEquals(TurnStartReason.COMPACTION, start.reason());
-    ModelInvocation continuation =
+    assertTrue(
         fixture
             .store
             .transaction(
                 tx ->
                     tx.findModelInvocationByTurn(baseline.threadId(), path.entries().get(12).id()))
-            .orElseThrow();
+            .isEmpty());
+    assertNotNull(start.compaction().childThreadId());
+    assertNotNull(start.compaction().joinInvocationId());
     assertEquals(CompactionPhase.TURN_PREFIX, start.compaction().phase());
     // 冻结复用 HISTORY TURN_START 的切分事实（seed 布局：ROOT=2/TS1=3/USER1=4/ASST1=5）。
     assertEquals(id(5L), start.compaction().cutEntryId());
@@ -397,19 +451,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath planned = path(fixture.store, baseline.threadId());
-    ModelInvocation continuation =
-        fixture
-            .store
-            .transaction(
-                tx ->
-                    tx.findModelInvocationByTurn(
-                        baseline.threadId(), planned.entries().get(12).id()))
-            .orElseThrow();
-    transitionModel(fixture.store, continuation.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, continuation.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store, continuation.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
+    TurnStartPayload prefixStart = (TurnStartPayload) planned.entries().get(12).payload();
+    settleCompactionChildSuccess(
+        fixture,
+        prefixStart.compaction().childThreadId(),
+        prefixStart.compaction().joinInvocationId(),
+        "response text",
+        GenerationStopReason.COMPLETE,
+        usage());
 
     // 一个 claim：TURN_PREFIX 完整 payload 应用并关闭。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -418,7 +467,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(15, applied.entries().size());
     Entry result = applied.entries().get(13);
     CompactionPayload payload = (CompactionPayload) result.payload();
-    TurnStartPayload prefixStart = (TurnStartPayload) planned.entries().get(12).payload();
     assertEquals(CompactionPhase.TURN_PREFIX, prefixStart.compaction().phase());
     assertEquals(
         "history summary\n\n---\n\n**Turn Context (split turn):**\n\nresponse text",
@@ -444,39 +492,43 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
     fixture.resolver.autoConsistent = true;
-    CompactionPreparation preparation = historyPreparation();
-    // 手工打开一个 HISTORY 阶段 COMPACTION turn（模拟 planner 对切分事实的 HISTORY 阶段派生）。
-    UUID turnStartId =
+    TurnResolver.CompactionResolved compResolved =
+        new TurnResolver.CompactionResolved(
+            branchSettings().model(),
+            4096L,
+            CONTEXT_WINDOW,
+            MAX_OUTPUT_TOKENS,
+            new BranchSettings(
+                "compaction", branchSettings().model(), branchSettings().environmentName(), null));
+    CompactionPreparation historyPrep = historyPreparation();
+    CompactionChildStarter.CompactionChild child =
         inTx(
             fixture,
             tx -> {
-              tx.lockThread(baseline.threadId());
-              UUID id = tx.nextId();
+              ThreadState parent = tx.lockThread(baseline.threadId()).orElseThrow();
+              EntryPath parentPath = tx.loadEntryPath(parent.headEntryId());
+              CompactionChildStarter.CompactionChild c =
+                  CompactionChildStarter.start(
+                      tx, parent, parentPath, compResolved, historyPrep, NOW);
+              UUID tsId = tx.nextId();
               tx.insertEntry(
                   new Entry(
-                      id,
+                      tsId,
                       baseline.sessionId(),
                       baseline.turnEndEntryId(),
-                      resolvedCompactionTurnStart(baseline.threadId(), preparation.frozenStart()),
+                      resolvedCompactionTurnStart(baseline.threadId(), c.frozenStart()),
                       NOW));
-              tx.updateThread(
-                  tx.findThread(baseline.threadId()).orElseThrow().advanceHead(id, NOW));
-              return id;
+              tx.updateThread(parent.advanceHead(tsId, NOW));
+              return c;
             });
-    ModelRequestSpec requestSpec = compactionRequest(preparation);
-    ProviderResponse response =
-        successResponse("history summary", List.of(), GenerationStopReason.COMPLETE);
-    UUID modelId =
-        seedModelInvocation(
-            fixture.store,
-            baseline.threadId(),
-            turnStartId,
-            turnStartId,
-            ModelInvocationStatus.SUCCEEDED,
-            requestSpec,
-            response,
-            null);
-    requestThreadWork(fixture.store, baseline.threadId());
+
+    settleCompactionChildSuccess(
+        fixture,
+        child.childThreadId(),
+        child.joinInvocationId(),
+        "history summary",
+        GenerationStopReason.COMPLETE,
+        usage());
 
     // 一个 claim：HISTORY 成功 apply 关闭 turn，但 compactionWake=true -> 先请求 THREAD 再 complete。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -493,8 +545,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
     assertNotNull(threadWork);
     assertNull(threadWork.leaseToken());
-    // 关闭的 HISTORY turn 不保留 invocation。
-    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
 
     // claim2：下一 claim 才机械延续 TURN_PREFIX（冻结原切分事实）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -502,14 +552,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(13, planned.entries().size());
     TurnStartPayload nextStart = (TurnStartPayload) planned.entries().get(12).payload();
     assertEquals(TurnStartReason.COMPACTION, nextStart.reason());
-    ModelInvocation prefix =
+    assertTrue(
         fixture
             .store
             .transaction(
                 tx ->
                     tx.findModelInvocationByTurn(
                         baseline.threadId(), planned.entries().get(12).id()))
-            .orElseThrow();
+            .isEmpty());
     assertEquals(CompactionPhase.TURN_PREFIX, nextStart.compaction().phase());
     assertEquals(id(5L), nextStart.compaction().cutEntryId());
     assertEquals(id(4L), nextStart.compaction().turnPrefixStartEntryId());
@@ -538,19 +588,16 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     Entry startEntry = planned.entries().get(9);
     TurnStartPayload start = (TurnStartPayload) startEntry.payload();
     assertEquals(TurnStartReason.COMPACTION, start.reason());
-    ModelInvocation invocation =
-        fixture
-            .store
-            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), startEntry.id()))
-            .orElseThrow();
     assertEquals(CompactionTrigger.OVERFLOW, start.compaction().trigger());
 
     // OVERFLOW 完成的压缩：TURN_END.continueModel=true，先请求 THREAD 再 complete。
-    transitionModel(fixture.store, invocation.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, invocation.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store, invocation.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
+    settleCompactionChildSuccess(
+        fixture,
+        start.compaction().childThreadId(),
+        start.compaction().joinInvocationId(),
+        "response text",
+        GenerationStopReason.COMPLETE,
+        usage());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath applied = path(fixture.store, baseline.threadId());
@@ -581,17 +628,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
     EntryPath compactionPlanned = path(fixture.store, baseline.threadId());
     Entry compactionStart = compactionPlanned.head();
-    ModelInvocation compaction =
-        fixture
-            .store
-            .transaction(
-                tx -> tx.findModelInvocationByTurn(baseline.threadId(), compactionStart.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, compaction.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, compaction.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store, compaction.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
+    TurnStartPayload startPayload = (TurnStartPayload) compactionStart.payload();
+    settleCompactionChildSuccess(
+        fixture,
+        startPayload.compaction().childThreadId(),
+        startPayload.compaction().joinInvocationId(),
+        "response text",
+        GenerationStopReason.COMPLETE,
+        usage());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     // 下一 claim：OVERFLOW 完成压缩保留的 CONTINUATION 义务。
@@ -957,17 +1001,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     Entry start = path(fixture.store, baseline.threadId()).head();
-    ModelInvocation invocation =
-        fixture
-            .store
-            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), start.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, invocation.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, invocation.id(), m -> m.markRunning(NOW));
-    ProviderResponse oversizedSummary =
-        successResponse("summary".repeat(60_000), List.of(), GenerationStopReason.COMPLETE);
-    transitionModel(fixture.store, invocation.id(), m -> m.succeed(oversizedSummary, NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
+    TurnStartPayload startPayload = (TurnStartPayload) start.payload();
+    settleCompactionChildSuccess(
+        fixture,
+        startPayload.compaction().childThreadId(),
+        startPayload.compaction().joinInvocationId(),
+        "summary".repeat(60_000),
+        GenerationStopReason.COMPLETE,
+        usage());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath failed = path(fixture.store, baseline.threadId());
@@ -981,6 +1022,76 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(
         TurnStartReason.INPUT,
         ((TurnStartPayload) inputPath.openTurnStart().orElseThrow().payload()).reason());
+  }
+
+  @Test
+  void childFailureOrCancellationTerminatesParentTurnWithoutCompactionPayload() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage("user input")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    // claim 1: 启动压缩
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath planned = path(fixture.store, baseline.threadId());
+    TurnStartPayload start = (TurnStartPayload) planned.head().payload();
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    CompactionStart compaction = start.compaction();
+
+    // 模拟子 Thread 失败 (FAILED)
+    settleCompactionChildFailure(
+        fixture,
+        compaction.childThreadId(),
+        compaction.joinInvocationId(),
+        TurnEndOutcome.FAILED,
+        "CHILD_FAILED",
+        "child compaction thread failed");
+
+    // claim 2: 父 Thread 结算失败
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath failedPath = path(fixture.store, baseline.threadId());
+    Entry endEntry = failedPath.head();
+    assertInstanceOf(TurnEndPayload.class, endEntry.payload());
+    assertEquals(TurnEndOutcome.FAILED, ((TurnEndPayload) endEntry.payload()).outcome());
+
+    Entry errorEntry = failedPath.entries().get(failedPath.entries().size() - 2);
+    assertInstanceOf(AssistantErrorPayload.class, errorEntry.payload());
+    // 绝不包含 CompactionPayload
+    assertTrue(
+        failedPath.entries().stream().noneMatch(e -> e.payload() instanceof CompactionPayload));
+  }
+
+  @Test
+  void childEmptyOrTruncatedOrOverBudgetTerminatesParentTurnWithoutCompactionPayload() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage("user input")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    // (a) 验证空摘要文本拒绝
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    CompactionStart compaction =
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).compaction();
+    settleCompactionChildSuccess(
+        fixture,
+        compaction.childThreadId(),
+        compaction.joinInvocationId(),
+        "   ",
+        GenerationStopReason.COMPLETE,
+        usage());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath emptyPath = path(fixture.store, baseline.threadId());
+    assertEquals(TurnEndOutcome.FAILED, ((TurnEndPayload) emptyPath.head().payload()).outcome());
+    assertTrue(
+        emptyPath.entries().stream().noneMatch(e -> e.payload() instanceof CompactionPayload));
   }
 
   /**
@@ -1074,7 +1185,19 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     UUID headId = baseline.turnEndEntryId();
     UUID[] ids = new UUID[2]; // [turnStart, result]
     // 冻结切分事实；HISTORY 响应文本即 partial 的 summary（assembler 重放必须与真实 apply 一致）。
-    CompactionPreparation preparation = historyPreparation();
+    UUID childThreadId = id(900L);
+    UUID joinInvocationId = id(901L);
+    CompactionStart frozenStart =
+        new CompactionStart(
+            CompactionPhase.HISTORY,
+            CompactionTrigger.THRESHOLD,
+            branchSettings().model(),
+            4096L,
+            id(5L),
+            id(4L),
+            null,
+            childThreadId,
+            joinInvocationId);
     ProviderResponse response =
         successResponse("history summary", List.of(), GenerationStopReason.COMPLETE);
     fixture.store.transaction(
@@ -1086,7 +1209,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ids[0],
                   sessionId,
                   headId,
-                  resolvedCompactionTurnStart(baseline.threadId(), preparation.frozenStart()),
+                  resolvedCompactionTurnStart(baseline.threadId(), frozenStart),
                   NOW));
           // 与真实 commit 一致：head 先推进到 TURN_START。
           tx.updateThread(
@@ -1097,7 +1220,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // head==TURN_START 的路径）。
     CompactionPayload resultPayload =
         CompactionSummaryAssembler.resultPayload(
-            path(fixture.store, baseline.threadId()), preparation.frozenStart(), response.text());
+            path(fixture.store, baseline.threadId()), frozenStart, response.text());
     fixture.store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -1399,6 +1522,284 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         });
   }
 
+  /**
+   * 意图：父 Thread 在压缩子执行期间进入 durable STOPPED 后，子终态只固化压缩结果（CompactionPayload + TURN_END），不请求任何
+   * Work、不消费队列中的 user 输入、不续作模型；重复 claim 也不重复结算。
+   */
+  @Test
+  void stoppedParentSettlesCompactionResultWithoutWorkOrQueuedInputConsumption() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    UUID queuedCommand =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new UserMessageCommandPayload(userMessage("queued while child runs")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    CompactionStart compaction =
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).compaction();
+    // 子执行期间父被置为 STOPPED（durable 执行控制）。
+    setStopped(fixture.store, baseline.threadId());
+
+    settleCompactionChildSuccess(
+        fixture,
+        compaction.childThreadId(),
+        compaction.joinInvocationId(),
+        "stopped parent summary",
+        GenerationStopReason.COMPLETE,
+        usage());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath settled = path(fixture.store, baseline.threadId());
+    assertInstanceOf(
+        CompactionPayload.class, settled.entries().get(settled.entries().size() - 2).payload());
+    assertEquals(TurnEndOutcome.COMPLETED, ((TurnEndPayload) settled.head().payload()).outcome());
+    assertEquals(
+        ThreadExecutionControl.STOPPED, executionControl(fixture.store, baseline.threadId()));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    assertTrue(isQueued(fixture.store, baseline.threadId(), queuedCommand));
+
+    // 重复 claim：STOPPED 只完成 fencing，不再产生任何 durable mutation 或新结算。
+    requestThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    assertEquals(
+        settled.entries().size(), path(fixture.store, baseline.threadId()).entries().size());
+  }
+
+  /** 意图：等待子执行期间到达的用户输入绝不进入冻结摘要，也不在等待 claim 中被消费；结算后作为新的 INPUT turn 正常处理。 */
+  @Test
+  void queuedInputArrivingDuringWaitStaysOutOfFrozenSummaryAndIsConsumedAfterSettlement() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage("trigger demand")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    CompactionStart compaction =
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).compaction();
+    String frozenPrompt = childFirstCommandText(fixture.store, compaction.childThreadId());
+
+    // 等待期间到达的输入：durable wait 的 claim 不消费它，也不改父历史。
+    UUID lateCommand =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new UserMessageCommandPayload(userMessage("late steering input")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    int waitingSize = path(fixture.store, baseline.threadId()).entries().size();
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    assertEquals(waitingSize, path(fixture.store, baseline.threadId()).entries().size());
+    assertTrue(isQueued(fixture.store, baseline.threadId(), lateCommand));
+
+    settleCompactionChildSuccess(
+        fixture,
+        compaction.childThreadId(),
+        compaction.joinInvocationId(),
+        "summary after late input",
+        GenerationStopReason.COMPLETE,
+        usage());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath settled = path(fixture.store, baseline.threadId());
+    assertInstanceOf(
+        CompactionPayload.class, settled.entries().get(settled.entries().size() - 2).payload());
+    assertFalse(frozenPrompt.contains("late steering input"));
+
+    // 结算后存在 queued demand：请求父 Work，下一 claim 以 INPUT turn 消费该输入。
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    TurnStartPayload inputStart =
+        (TurnStartPayload)
+            path(fixture.store, baseline.threadId()).openTurnStart().orElseThrow().payload();
+    assertEquals(TurnStartReason.INPUT, inputStart.reason());
+  }
+
+  /** 意图：子被取消（STOPPED 子终态）时父只落一次 durable 失败终态，绝不提交 CompactionPayload，也不回退父模型；重复 claim 幂等。 */
+  @Test
+  void cancelledChildSettlesParentExactlyOnceWithoutCompactionPayload() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage("trigger demand")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    CompactionStart compaction =
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).compaction();
+    settleCompactionChildFailure(
+        fixture,
+        compaction.childThreadId(),
+        compaction.joinInvocationId(),
+        TurnEndOutcome.STOPPED,
+        "COMPACTION_CHILD_CANCELLED",
+        "compaction child cancelled");
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath failed = path(fixture.store, baseline.threadId());
+    assertInstanceOf(
+        AssistantErrorPayload.class, failed.entries().get(failed.entries().size() - 2).payload());
+    assertEquals(TurnEndOutcome.FAILED, ((TurnEndPayload) failed.head().payload()).outcome());
+    assertTrue(failed.entries().stream().noneMatch(e -> e.payload() instanceof CompactionPayload));
+
+    // exactly once：后续 claim（含队列输入作为普通 INPUT turn）绝不产生第二个压缩失败终态。
+    assertTrue(path(fixture.store, baseline.threadId()).openTurnStart().isEmpty());
+    requestThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    assertEquals(1, compactionFailureCount(fixture.store, baseline.threadId()));
+  }
+
+  /**
+   * 意图：防递归只限定 COMPACTION 子执行树——只有自身或祖先持有未结算 COMPACTION join 的 Thread 才禁止再规划压缩；压缩子的后代 同样被覆盖，而未结算的
+   * TASK subagent join 与普通 Thread 都不构成阻塞。
+   */
+  @Test
+  void compactionChildTreeGuardBlocksOnlyCompactionJoinOwners() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage("trigger demand")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    UUID compactionChild =
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload())
+            .compaction()
+            .childThreadId();
+    UUID taskChild = seedJoinChildThread(fixture.store, baseline.threadId(), JoinPurpose.TASK);
+    UUID compactionDescendant =
+        seedJoinChildThread(fixture.store, compactionChild, JoinPurpose.TASK);
+
+    assertTrue(guardBlocks(fixture.store, compactionChild));
+    assertTrue(guardBlocks(fixture.store, compactionDescendant));
+    assertFalse(guardBlocks(fixture.store, baseline.threadId()));
+    assertFalse(guardBlocks(fixture.store, taskChild));
+  }
+
+  private static long compactionFailureCount(InMemoryHarnessStore store, UUID threadId) {
+    return store.transaction(
+        tx ->
+            tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()).entries().stream()
+                .filter(
+                    entry ->
+                        entry.payload() instanceof AssistantErrorPayload error
+                            && "COMPACTION_FAILED".equals(error.error().code()))
+                .count());
+  }
+
+  private static boolean guardBlocks(InMemoryHarnessStore store, UUID threadId) {
+    return store.transaction(
+        tx -> ThreadProcessor.isInCompactionChildTree(tx, tx.findThread(threadId).orElseThrow()));
+  }
+
+  private static void setStopped(InMemoryHarnessStore store, UUID threadId) {
+    store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          tx.updateThread(
+              thread.changeExecutionControl(ThreadExecutionControl.STOPPED, thread.updatedAt()));
+          return null;
+        });
+  }
+
+  private static ThreadExecutionControl executionControl(
+      InMemoryHarnessStore store, UUID threadId) {
+    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().executionControl());
+  }
+
+  private static boolean isQueued(InMemoryHarnessStore store, UUID threadId, UUID commandId) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          return tx.loadQueuedCommands(threadId).stream()
+              .anyMatch(command -> command.idempotencyKey().equals(commandId));
+        });
+  }
+
+  private static String childFirstCommandText(InMemoryHarnessStore store, UUID childThreadId) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(childThreadId);
+          CustomMessageCommandPayload payload =
+              (CustomMessageCommandPayload)
+                  tx.loadQueuedCommands(childThreadId).getFirst().payload();
+          return payload.message().contents().stream()
+              .map(content -> content instanceof TextMessageContent text ? text.text() : "")
+              .reduce("", String::concat);
+        });
+  }
+
+  /** 手工创建带未结算 Join 的直接子线程（独立 Session），用于按 Join purpose 验证防递归判定。 */
+  private static UUID seedJoinChildThread(
+      InMemoryHarnessStore store, UUID parentThreadId, JoinPurpose purpose) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(parentThreadId);
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          UUID invocationId = tx.nextId();
+          tx.insertSession(new Session(sessionId, "child-" + sessionId, NOW));
+          tx.insertEntry(
+              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          List<UUID> ancestors = tx.findAncestorChain(parentThreadId);
+          UUID rootThreadId =
+              ancestors.isEmpty() ? parentThreadId : ancestors.get(ancestors.size() - 1);
+          ThreadState child =
+              new ThreadState(
+                  threadId,
+                  sessionId,
+                  parentThreadId,
+                  rootEntryId,
+                  ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                  "child",
+                  ThreadYoloPolicy.follow(rootThreadId),
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
+                  2L,
+                  0L,
+                  NOW,
+                  NOW);
+          tx.insertThread(child);
+          CustomMessageCommandPayload payload =
+              new CustomMessageCommandPayload(AgentMessage.user("child instruction"));
+          String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      threadId, 1L, payload, invocationId, requestHash, null, null, null, NOW)));
+          tx.insertJoin(
+              new ThreadJoin(
+                  invocationId,
+                  requestHash,
+                  parentThreadId,
+                  threadId,
+                  1L,
+                  "child",
+                  null,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  NOW,
+                  NOW,
+                  purpose,
+                  null));
+          return threadId;
+        });
+  }
+
   private static ModelUsage usage() {
     return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
   }
@@ -1415,6 +1816,170 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         BigDecimal.ZERO);
   }
 
+  private static void settleCompactionChildSuccess(
+      Fixture fixture,
+      UUID childThreadId,
+      UUID joinInvocationId,
+      String summaryText,
+      GenerationStopReason stopReason,
+      ModelUsage usage) {
+    fixture.store.transaction(
+        tx -> {
+          UUID parentThreadId = tx.findThread(childThreadId).orElseThrow().parentThreadId();
+          ThreadTreeLocks.lockForThread(tx, childThreadId);
+          ThreadState child = null;
+          for (UUID threadId :
+              List.of(childThreadId, parentThreadId).stream()
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList()) {
+            ThreadState locked = tx.lockThread(threadId).orElseThrow();
+            if (threadId.equals(childThreadId)) {
+              child = locked;
+            }
+          }
+          UUID startId = tx.nextId();
+          UUID inputMsgId = tx.nextId();
+          UUID asstId = tx.nextId();
+          UUID endId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  startId,
+                  child.sessionId(),
+                  child.headEntryId(),
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT,
+                      branchSettings(),
+                      childThreadId,
+                      CONTEXT_WINDOW,
+                      MAX_OUTPUT_TOKENS,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  inputMsgId,
+                  child.sessionId(),
+                  startId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(new TextMessageContent("compaction instruction"))),
+                      null,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  asstId,
+                  child.sessionId(),
+                  inputMsgId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(summaryText))),
+                      new AssistantMessageMetadata(stopReason, usage),
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  endId,
+                  child.sessionId(),
+                  asstId,
+                  new TurnEndPayload(startId, TurnEndOutcome.COMPLETED, false, null, null),
+                  NOW));
+          tx.loadQueuedCommands(childThreadId);
+          ThreadCommand sourceCmd = tx.findCommand(childThreadId, 1L).orElse(null);
+          ThreadState advanced = child.advanceHead(endId, NOW);
+          if (sourceCmd != null) {
+            tx.updateCommands(List.of(sourceCmd.markApplied(startId)));
+          }
+          tx.updateThread(advanced);
+          ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+              tx, advanced, endId, asstId, NOW, true);
+          return null;
+        });
+  }
+
+  private static void settleCompactionChildFailure(
+      Fixture fixture,
+      UUID childThreadId,
+      UUID joinInvocationId,
+      TurnEndOutcome outcome,
+      String errorCode,
+      String errorMessage) {
+    fixture.store.transaction(
+        tx -> {
+          UUID parentThreadId = tx.findThread(childThreadId).orElseThrow().parentThreadId();
+          ThreadTreeLocks.lockForThread(tx, childThreadId);
+          ThreadState child = null;
+          for (UUID threadId :
+              List.of(childThreadId, parentThreadId).stream()
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList()) {
+            ThreadState locked = tx.lockThread(threadId).orElseThrow();
+            if (threadId.equals(childThreadId)) {
+              child = locked;
+            }
+          }
+          UUID startId = tx.nextId();
+          UUID inputMsgId = tx.nextId();
+          UUID errId = tx.nextId();
+          UUID endId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  startId,
+                  child.sessionId(),
+                  child.headEntryId(),
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT,
+                      branchSettings(),
+                      childThreadId,
+                      CONTEXT_WINDOW,
+                      MAX_OUTPUT_TOKENS,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  inputMsgId,
+                  child.sessionId(),
+                  startId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(new TextMessageContent("compaction instruction"))),
+                      null,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  errId,
+                  child.sessionId(),
+                  inputMsgId,
+                  new AssistantErrorPayload(new AssistantError(errorCode, errorMessage), null),
+                  NOW));
+          // STOPPED 终态必须携带 stop request id（与 seedStoppedCompactionTurn 一致）。
+          TurnEndReason reason =
+              outcome == TurnEndOutcome.STOPPED
+                  ? TurnEndReason.USER_STOP
+                  : TurnEndReason.TURN_FAILED;
+          UUID closeRequestId = outcome == TurnEndOutcome.STOPPED ? id(1L) : null;
+          tx.insertEntry(
+              new Entry(
+                  endId,
+                  child.sessionId(),
+                  errId,
+                  new TurnEndPayload(startId, outcome, false, reason, closeRequestId),
+                  NOW));
+          tx.loadQueuedCommands(childThreadId);
+          ThreadCommand sourceCmd = tx.findCommand(childThreadId, 1L).orElse(null);
+          ThreadState advanced = child.advanceHead(endId, NOW);
+          if (sourceCmd != null) {
+            tx.updateCommands(List.of(sourceCmd.markApplied(startId)));
+          }
+          tx.updateThread(advanced);
+          ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+              tx, advanced, endId, null, NOW, true);
+          return null;
+        });
+  }
+
   /**
    * 与 seedCompactionReadyClosedTurn 形状一致的 HISTORY preparation 事实（1..4 为 ROOT/TS/USER/ASSISTANT）。
    */
@@ -1422,22 +1987,16 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     return new CompactionPreparation(
         CompactionPhase.HISTORY,
         CompactionTrigger.THRESHOLD,
-        branchSettings().model(),
         id(5L),
         id(4L),
         null,
-        null,
+        "instructions",
         List.of(userMessage("history")),
         100L);
   }
 
   private static CompactionStart fullStart(UUID cutEntryId) {
-    return new CompactionStart(
-        CompactionPhase.FULL,
-        CompactionTrigger.THRESHOLD,
-        branchSettings().model(),
-        cutEntryId,
-        null,
-        null);
+    return CompactionStart.pending(
+        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, cutEntryId, null, null);
   }
 }

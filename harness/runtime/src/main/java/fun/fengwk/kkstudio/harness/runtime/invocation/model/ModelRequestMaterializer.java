@@ -92,7 +92,10 @@ public final class ModelRequestMaterializer {
         spec.cacheControl());
   }
 
-  /** 摘要调用：summarization system prompt 是唯一 systemInstruction，conversation 是一个 USER 消息。 */
+  /**
+   * 摘要调用：systemInstruction 直接取解析出的 spec（内置 compaction Agent 的 catalog prompt），conversation 是一个 USER
+   * 消息。
+   */
   private ProviderRequest materializeCompaction(
       EntryPath path, ModelRequestSpec spec, CompactionStart compaction) {
     CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
@@ -105,7 +108,7 @@ public final class ModelRequestMaterializer {
         spec.model(),
         spec.variant(),
         spec.outputTokens(),
-        CompactionPrompts.summarizationSystemPrompt(),
+        spec.systemInstruction(),
         projector.project(List.of(AgentMessage.user(userPrompt))),
         List.of(),
         spec.cacheControl());

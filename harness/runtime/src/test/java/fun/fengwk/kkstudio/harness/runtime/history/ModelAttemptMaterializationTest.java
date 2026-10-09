@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -11,7 +12,6 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -712,106 +712,20 @@ class ModelAttemptMaterializationTest {
     }
   }
 
-  /** attach 转换的 compaction 成功结果：必须完整等于装配 result payload（preResultPath 去 head 重放 apply 上下文）。 */
   @Test
-  void acceptsExactCompactionSuccessResultAndRejectsSummaryDrift() {
-    CompactionStart compaction = historyCompactionStart();
-    // compaction 结果必须位于 COMPACTION turn 内（TurnPathValidator），requestHead = TURN_START id(2)。
-    ModelInvocation stored = compactionSucceededInvocation();
-    EntryPath preResult =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
-    CompactionPayload exact =
-        (CompactionPayload)
-            CompactionResultEvaluator.evaluate(preResult, compaction, stored.result());
-    Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
-    EntryPath path =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
-    assertDoesNotThrow(
-        () ->
-            ModelAttemptMaterialization.validate(
-                stored, stored.attachResultEntry(result.id(), T6), path));
-
-    // summaryText 漂移（同一 phase/trigger/tokens，仅文本不同）必须被拒。
-    Entry drifted =
-        new Entry(
-            id(4L),
-            id(100L),
-            id(2L),
-            new CompactionPayload("drifted summary", exact.assistantMetadata()),
-            T6);
-    EntryPath driftedPath =
-        new EntryPath(
-            List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), drifted));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ModelAttemptMaterialization.validate(
-                stored, stored.attachResultEntry(drifted.id(), T6), driftedPath),
-        "compaction result must match the assembled summary exactly");
-  }
-
-  /** 测试意图：压缩结果只持久化摘要，不能将 provider 的原生 replay state 强制转移到非 Assistant Entry。 */
-  @Test
-  void compactionMayDiscardProviderReplayState() {
-    CompactionStart compaction = historyCompactionStart();
-    ModelInvocation base = compactionSucceededInvocation();
-    ModelInvocation stored =
-        new ModelInvocation(
-            base.id(),
-            base.threadId(),
-            base.turnStartEntryId(),
-            base.requestHeadEntryId(),
-            base.requestSpec(),
-            base.status(),
-            base.attempt(),
-            base.streamCheckpoint(),
-            base.result(),
-            base.error(),
-            base.resultEntryId(),
-            base.failedAttempts(),
-            base.createdAt(),
-            base.updatedAt(),
-            sampleReplayState());
-    EntryPath preResult =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
-    Entry result =
-        new Entry(
-            id(4L),
-            id(100L),
-            id(2L),
-            CompactionResultEvaluator.evaluate(preResult, compaction, stored.result()),
-            T6);
-    EntryPath path =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
-
-    assertDoesNotThrow(
-        () ->
-            ModelAttemptMaterialization.validate(
-                stored, stored.attachResultEntry(result.id(), T6), path));
-  }
-
-  /**
-   * preResultPath 下界：compaction 成功结果前的 preResult 前缀必须至少保留 ROOT + requestHead（即 resultPath 至少 3 项）。
-   */
-  @Test
-  void compactionSuccessResultRequiresNonTrivialPreResultPath() {
+  void rejectsModelInvocationOnCompactionTurn() {
     CompactionStart compaction = historyCompactionStart();
     ModelInvocation stored = compactionSucceededInvocation();
-    // 最短合法形状恰为 [ROOT, TURN_START, result]：preResult = [ROOT, TURN_START]（ROOT+requestHead 两项）是 <3
-    // 下界守卫允许的边界；更短（只剩 ROOT）的前缀无法由 EntryPath 构造（ROOT-first + COMPACTION 必须在 open TURN_START
-    // 内），该守卫仅作不可达防御。
-    EntryPath preResult =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
-    CompactionPayload exact =
-        (CompactionPayload)
-            CompactionResultEvaluator.evaluate(preResult, compaction, stored.result());
-    Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
-    EntryPath minimum =
+    Entry result = new Entry(id(4L), id(100L), id(2L), new CompactionPayload("summary", null), T6);
+    EntryPath path =
         new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
-    assertDoesNotThrow(
-        () ->
-            ModelAttemptMaterialization.validate(
-                stored, stored.attachResultEntry(result.id(), T6), minimum));
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ModelAttemptMaterialization.validate(
+                    stored, stored.attachResultEntry(result.id(), T6), path));
+    assertEquals("compaction turn must not have model invocations", error.getMessage());
   }
 
   /** SUCCEEDED compaction invocation：requestHead = TURN_START id(2)，result = 固定摘要文本快照。 */
@@ -1122,18 +1036,13 @@ class ModelAttemptMaterializationTest {
   }
 
   private static CompactionStart fullCompactionStart() {
-    return new CompactionStart(
-        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, SETTINGS.model(), id(1L), null, null);
+    return CompactionStart.pending(
+        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(1L), null, null);
   }
 
   private static CompactionStart historyCompactionStart() {
-    return new CompactionStart(
-        CompactionPhase.HISTORY,
-        CompactionTrigger.THRESHOLD,
-        SETTINGS.model(),
-        id(1L),
-        id(1L),
-        null);
+    return CompactionStart.pending(
+        CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, id(1L), id(1L), null);
   }
 
   private static Entry assistantToolMessage(UUID entryId, UUID parentId) {

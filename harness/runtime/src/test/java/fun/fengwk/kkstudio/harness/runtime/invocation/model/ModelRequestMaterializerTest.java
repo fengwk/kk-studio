@@ -141,13 +141,8 @@ class ModelRequestMaterializerTest {
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
     CompactionStart completed =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("kept summary", null)));
     entries.add(
@@ -243,13 +238,8 @@ class ModelRequestMaterializerTest {
   void compactionRequestRebuildsTheSameSummaryPromptFromEntryIds() {
     EntryPath history = conversationPath(2);
     CompactionStart compaction =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     List<Entry> entries = new ArrayList<>(history.entries());
     entries.add(
         entry(id(10L), history.head().id(), resolvedStart(TurnStartReason.COMPACTION, compaction)));
@@ -260,7 +250,7 @@ class ModelRequestMaterializerTest {
     ProviderRequest request = MATERIALIZER.materialize(path, spec);
 
     assertEquals(1, request.messages().size());
-    assertEquals(CompactionPrompts.summarizationSystemPrompt(), request.systemInstruction());
+    assertEquals(spec.systemInstruction(), request.systemInstruction());
     assertEquals(
         CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary()),
         textOf(request.messages().get(0)));
@@ -305,13 +295,8 @@ class ModelRequestMaterializerTest {
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
 
     CompactionStart completed =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("summary", null)));
     entries.add(
@@ -552,13 +537,8 @@ class ModelRequestMaterializerTest {
       boundarySettings = clearedSettings;
     }
     CompactionStart compaction =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(cutId),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(cutId), null, null);
     entries.add(
         entry(
             id(compactionTurnStart),

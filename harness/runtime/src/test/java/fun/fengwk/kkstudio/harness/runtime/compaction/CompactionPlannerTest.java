@@ -205,7 +205,6 @@ class CompactionPlannerTest {
     assertNull(preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
     assertTrue(preparation.removedPrefixTokens() > 0);
-    assertEquals(SETTINGS_MODEL, preparation.executionModel());
   }
 
   @Test
@@ -252,7 +251,7 @@ class CompactionPlannerTest {
     // TURN_PREFIX 延续冻结复用同一 enclosing TURN_START 事实，绝不重新选 cut。
     path.closeTurn();
     CompactionTurns.CompactionTurn historyTurn =
-        path.completedCompaction(history.frozenStart(), "history summary");
+        path.completedCompaction(history.pendingStart(), "history summary");
     CompactionPreparation prefix = planner().prepareTurnPrefix(path.path(), historyTurn);
     assertEquals(CompactionPhase.TURN_PREFIX, prefix.phase());
     assertEquals(history.cutEntryId(), prefix.cutEntryId());
@@ -265,11 +264,11 @@ class CompactionPlannerTest {
     assertTrue(contentText(prefix.messagesToSummarize().get(0)).contains("split turn"));
 
     CompactionSummaryInput reconstructedHistory =
-        CompactionPlanner.reconstructSummaryInput(path.path(), history.frozenStart());
+        CompactionPlanner.reconstructSummaryInput(path.path(), history.pendingStart());
     assertEquals(history.messagesToSummarize(), reconstructedHistory.messages());
     assertNull(reconstructedHistory.previousSummary());
     CompactionSummaryInput reconstructedPrefix =
-        CompactionPlanner.reconstructSummaryInput(path.path(), prefix.frozenStart());
+        CompactionPlanner.reconstructSummaryInput(path.path(), prefix.pendingStart());
     assertEquals(prefix.messagesToSummarize(), reconstructedPrefix.messages());
     assertNull(reconstructedPrefix.previousSummary());
   }
@@ -499,7 +498,7 @@ class CompactionPlannerTest {
     assertEquals("carried summary", preparation.previousSummary());
     assertTrue(preparation.removedPrefixTokens() > 0);
     CompactionSummaryInput reconstructed =
-        CompactionPlanner.reconstructSummaryInput(path.path(), preparation.frozenStart());
+        CompactionPlanner.reconstructSummaryInput(path.path(), preparation.pendingStart());
     assertEquals(preparation.messagesToSummarize(), reconstructed.messages());
     assertEquals("carried summary", reconstructed.previousSummary());
   }
@@ -514,7 +513,7 @@ class CompactionPlannerTest {
     path.turn("second");
     path.assistant("second reply");
     CompactionPreparation preparation = plan(path, 80L).orElseThrow();
-    CompactionStart start = preparation.frozenStart();
+    CompactionStart start = preparation.pendingStart();
 
     path.closeTurn();
     path.turn("later user");
@@ -586,15 +585,14 @@ class CompactionPlannerTest {
   }
 
   private static CompactionStart fullStart(UUID cutEntryId) {
-    return new CompactionStart(
-        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, SETTINGS_MODEL, cutEntryId, null, null);
+    return CompactionStart.pending(
+        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, cutEntryId, null, null);
   }
 
   private static CompactionStart historyStart(UUID cutEntryId, UUID turnPrefixStartEntryId) {
-    return new CompactionStart(
+    return CompactionStart.pending(
         CompactionPhase.HISTORY,
         CompactionTrigger.THRESHOLD,
-        SETTINGS_MODEL,
         cutEntryId,
         turnPrefixStartEntryId,
         null);
