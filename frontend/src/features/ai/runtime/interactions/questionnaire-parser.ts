@@ -5,9 +5,6 @@ import type {
   QuestionDraft,
 } from './questionnaire-types'
 
-export const MAX_ANSWER_CHARACTERS = 4096
-export const MAX_TOTAL_ANSWER_CHARACTERS = 64 * 1024
-
 /**
  * 健壮解析 JSON 中的问卷定义。
  */
@@ -100,7 +97,6 @@ export function normalizeAnswers(
   }
 
   const results: string[][] = []
-  let totalCharacters = 0
 
   for (let i = 0; i < questionnaire.questions.length; i++) {
     const question = questionnaire.questions[i]
@@ -140,19 +136,7 @@ export function normalizeAnswers(
       questionAnswers.push(...Array.from(set))
     }
 
-    // 检查字符数
-    for (const ans of questionAnswers) {
-      if (ans.length > MAX_ANSWER_CHARACTERS) {
-        return null
-      }
-      totalCharacters += ans.length
-    }
-
     results.push(questionAnswers)
-  }
-
-  if (totalCharacters > MAX_TOTAL_ANSWER_CHARACTERS) {
-    return null
   }
 
   return results
