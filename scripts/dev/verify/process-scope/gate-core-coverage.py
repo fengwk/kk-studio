@@ -10,6 +10,9 @@
 
 只有平台专属分支会在对应平台上被执行（Windows Job 语义、macOS 的非 Linux 分支、Linux 的 `/proc` 判定），因此输入必须是
 三平台合并后的报告：核心类在报告里缺席就意味着合并丢了数据，必须显式失败，而不是当成「没有这个类」。
+
+Daemon 侧单 owner 协调器另有一条独立门禁：它必须在合并报告里出现，且自身行覆盖达到同一目标；它不并入核心合计，避免
+协调器的高覆盖稀释原七类门禁的信号，反之亦然。
 """
 
 import sys
@@ -25,6 +28,10 @@ CORE_CLASSES = (
     "WindowsCommandLine",
     "BashCapability",
 )
+
+# Daemon 侧单 owner 协调器独立门禁：它必须出现在合并报告里且自身行覆盖达标，但不并入上面的核心合计，
+# 否则协调器会稀释原七类门禁的信号。
+COORDINATOR_CLASS = "TerminalCoordinator"
 
 # 仓库对核心路径的目标。
 TARGET = 90.0
@@ -69,6 +76,36 @@ def main() -> int:
     if aggregate_total == 0:
         print("FAIL the merged report contains no core class at all")
         return 1
+
+    # 协调器独立门禁：缺失、零计数与低于目标都显式失败，且不并入下面的核心合计。
+    coordinator = coverage.get(COORDINATOR_CLASS)
+    if coordinator is None:
+        failures.append(
+            f"{COORDINATOR_CLASS}: missing from the merged report (merged data was dropped)"
+        )
+    else:
+        coordinator_covered, coordinator_missed = coordinator
+        coordinator_total = coordinator_covered + coordinator_missed
+        coordinator_percentage = 100.0 * coordinator_covered / coordinator_total
+        print(
+            "%-22s line %5.1f%% (%d/%d)"
+            % (
+                COORDINATOR_CLASS,
+                coordinator_percentage,
+                coordinator_covered,
+                coordinator_total,
+            )
+        )
+        if coordinator_covered == 0:
+            failures.append(
+                f"{COORDINATOR_CLASS}: no lines were executed in the merged report"
+            )
+        elif coordinator_percentage < TARGET:
+            failures.append(
+                "%s line coverage %.1f%% is below %.1f%%"
+                % (COORDINATOR_CLASS, coordinator_percentage, TARGET)
+            )
+
     percentage = 100.0 * aggregate_covered / aggregate_total
     summary = "核心路径合计            line %5.1f%% (%d/%d)" % (
         percentage,

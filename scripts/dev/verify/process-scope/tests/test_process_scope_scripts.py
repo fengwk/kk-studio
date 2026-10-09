@@ -41,6 +41,7 @@ TERMINAL_CLASSES = frozenset(
         "TerminalRuntimeDeterministicTest",
         "TerminalRuntimeRealPtyTest",
         "TerminalWriterTest",
+        "TerminalCoordinatorTest",
     }
 )
 
@@ -85,6 +86,7 @@ SELECTED_CLASSES = (
     "TerminalRuntimeDeterministicTest",
     "TerminalRuntimeRealPtyTest",
     "TerminalWriterTest",
+    "TerminalCoordinatorTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -198,6 +200,27 @@ TERMINAL_WRITER_CASES = (
     "requestConflictDoesNotPolluteFirstRequestReplay",
     "grantedReplayAfterFreezeIsFrozenAndStateHidesAuthority",
 )
+# Daemon 侧单 owner 协调器的核心用例：启动/迟到 runtime 收敛、owner 失效与重绑、view credit、有界 mailbox、
+# writer/输入围栏与 snapshot 失败，都是确定性或用真实 PTY 的用例，三平台都必须真跑且不得跳过。
+TERMINAL_COORDINATOR_CASES = (
+    "openStartsSingleSessionAndAttaches",
+    "lateReturnedTerminatedRuntimeStillConverges",
+    "shutdownDuringHandedInStartStopsRuntimeAndConverges",
+    "ownerFatalThenLiveRuntimeReturnsStopsWithoutOwnerCallback",
+    "realPtyInputReachesCommandAndOutputReturns",
+    "realPtyNaturalExitPreservesExitCodeAndFinalScreen",
+    "realPtyDisconnectKeepsShellAliveAndReattaches",
+    "productionConstructorStartsRealRuntime",
+    "ownerRejectionAfterAttachFailsCoordinatorAndReleasesStreams",
+    "bindDifferentEnvironmentStopsOldSessionAndRebinds",
+    "slowObserverIsRevokedByViewAppliedTimeout",
+    "mailboxOverflowRejectsImmediatelyWithoutDroppingReceived",
+    "mailboxByteBudgetBoundsLargeInputsBeforeCapacity",
+    "takeoverAndReleaseTransferSingleWriterWithEpochCas",
+    "inputAdmissionRejectsNonOwnerAndSeqGap",
+    "staleGenerationReceiveHasNoSideEffect",
+    "snapshotFailureEmitsFixedErrorAndRejectsLaterAttach",
+)
 CORE_CLASSES = (
     "ProcessScope",
     "ProcessScopeHelper",
@@ -207,6 +230,8 @@ CORE_CLASSES = (
     "WindowsCommandLine",
     "BashCapability",
 )
+# 协调器是独立门禁：必须出现且自身 >=90%，不并入上面的核心合计。
+COORDINATOR_CLASS = "TerminalCoordinator"
 
 
 def repository_root():
@@ -293,6 +318,8 @@ def write_complete_reports(
             cases = TERMINAL_RUNTIME_PTY_CASES
         elif class_name == "TerminalWriterTest":
             cases = TERMINAL_WRITER_CASES
+        elif class_name == "TerminalCoordinatorTest":
+            cases = TERMINAL_COORDINATOR_CASES + ("someOtherCoordinatorCase",)
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -588,6 +615,7 @@ class AssertSurefireReportsTest(unittest.TestCase):
             ("TerminalRuntimeDeterministicTest", TERMINAL_RUNTIME_CASES, TERMINAL_RUNTIME_CASES),
             ("TerminalRuntimeRealPtyTest", TERMINAL_RUNTIME_PTY_CASES, TERMINAL_RUNTIME_PTY_CASES),
             ("TerminalWriterTest", TERMINAL_WRITER_CASES, TERMINAL_WRITER_CASES),
+            ("TerminalCoordinatorTest", TERMINAL_COORDINATOR_CASES, TERMINAL_COORDINATOR_CASES[-2:]),
         )
         for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
             for class_name, all_cases, required_cases in selected:
@@ -653,6 +681,51 @@ class AssertSurefireReportsTest(unittest.TestCase):
             self.assertIn("required cases did not run", result.stdout)
             self.assertIn(TERMINAL_SCHEDULING_CASES[0], result.stdout)
 
+    def test_every_platform_requires_the_coordinator_to_run_without_skips(self):
+        """协调器是三平台都必须真跑的核心：报告缺失、漏跑、跳过或重复都不能通过门禁。"""
+        for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            for cases, skipped_cases in (
+                (TERMINAL_COORDINATOR_CASES[:-1], ()),
+                (TERMINAL_COORDINATOR_CASES, (TERMINAL_COORDINATOR_CASES[0],)),
+                (TERMINAL_COORDINATOR_CASES + (TERMINAL_COORDINATOR_CASES[0],), ()),
+            ):
+                with self.subTest(os_label=os_label, cases=cases, skipped_cases=skipped_cases):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        write_surefire_report(
+                            reports,
+                            "TerminalCoordinatorTest",
+                            cases,
+                            skipped=len(skipped_cases),
+                            skipped_cases=skipped_cases,
+                        )
+                        result = run_script("assert-surefire-reports.py", reports, os_label)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn("TerminalCoordinatorTest", result.stdout)
+            with self.subTest(os_label=os_label, missing_report=True):
+                with tempfile.TemporaryDirectory() as tmp:
+                    reports = Path(tmp)
+                    write_complete_reports(reports)
+                    (reports / f"TEST-{TERMINAL_PACKAGE}.TerminalCoordinatorTest.xml").unlink()
+                    result = run_script("assert-surefire-reports.py", reports, os_label)
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    self.assertIn(
+                        f"TerminalCoordinatorTest: missing surefire report on {os_label}",
+                        result.stdout,
+                    )
+
+    def test_coordinator_required_methods_exist_in_the_real_source_without_os_assume(self):
+        """点名的方法必须真的出现在协调器测试源码里，且源码不得用 OS assume 把用例按平台跳过。"""
+        source = (
+            REPOSITORY_ROOT
+            / "harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/terminal/TerminalCoordinatorTest.java"
+        ).read_text(encoding="utf-8")
+        for case in TERMINAL_COORDINATOR_CASES:
+            self.assertIn("void " + case + "(", source, case)
+        for forbidden in ("assumeTrue(", "assumeFalse(", "Assumptions.", "@Disabled"):
+            self.assertNotIn(forbidden, source, forbidden)
+
 
 class CollectCoverageInputsTest(unittest.TestCase):
     """合并前必须证明三平台的类文件一致，否则 JaCoCo 会按 class id 静默丢 session。"""
@@ -717,12 +790,17 @@ def write_jacoco_report(path, coverage):
     )
 
 
-def core_coverage(total_per_class=200, covered_per_class=185):
-    return {name: (covered_per_class, total_per_class - covered_per_class) for name in CORE_CLASSES}
+def core_coverage(total_per_class=200, covered_per_class=185, coordinator=(185, 15)):
+    coverage = {
+        name: (covered_per_class, total_per_class - covered_per_class) for name in CORE_CLASSES
+    }
+    # 协调器与核心合计是两条独立门禁：默认给健康值，负向用例单独压低或删除它。
+    coverage[COORDINATOR_CLASS] = coordinator
+    return coverage
 
 
 class GateCoreCoverageTest(unittest.TestCase):
-    """门禁必须覆盖整条核心路径：漏类即失败，合计不足 90% 即失败，且必须逐个类打印数字。"""
+    """门禁必须覆盖整条核心路径：漏类即失败，合计不足 90% 即失败，且必须逐个类打印数字；协调器另有独立门禁。"""
 
     def gate(self, coverage):
         with tempfile.TemporaryDirectory() as tmp:
@@ -735,6 +813,7 @@ class GateCoreCoverageTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         for name in CORE_CLASSES:
             self.assertIn(name, result.stdout)
+        self.assertIn(COORDINATOR_CLASS, result.stdout)
         self.assertIn("PASS core path line coverage", result.stdout)
 
     def test_fails_below_the_target(self):
@@ -756,6 +835,32 @@ class GateCoreCoverageTest(unittest.TestCase):
         del coverage["BashCapability"]
         result = self.gate(coverage)
         self.assertEqual(1, result.returncode)
+
+    def test_fails_when_the_coordinator_is_missing_from_the_merged_report(self):
+        coverage = core_coverage()
+        del coverage[COORDINATOR_CLASS]
+        result = self.gate(coverage)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn(COORDINATOR_CLASS, result.stdout)
+        self.assertIn("merged data was dropped", result.stdout)
+
+    def test_fails_when_the_coordinator_is_below_the_target(self):
+        result = self.gate(core_coverage(coordinator=(170, 30)))
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn(f"{COORDINATOR_CLASS} line coverage", result.stdout)
+        self.assertIn("is below 90.0%", result.stdout)
+
+    def test_fails_when_the_coordinator_has_no_executed_lines(self):
+        result = self.gate(core_coverage(coordinator=(0, 200)))
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn(f"{COORDINATOR_CLASS}: no lines were executed", result.stdout)
+
+    def test_coordinator_does_not_dilute_the_core_aggregate(self):
+        """协调器即使完美，也不能掩盖原核心合计不足：两条门禁必须彼此独立。"""
+        coverage = core_coverage(total_per_class=200, covered_per_class=170, coordinator=(500, 0))
+        result = self.gate(coverage)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("FAIL core path line coverage", result.stdout)
 
 
 if __name__ == "__main__":
