@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.notification;
+package fun.fengwk.kkstudio.share.notification;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -11,19 +11,31 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 /**
- * Reserves the entire logical size before accepting a fragment, with bounded completion tombstones.
+ * Thread-safe bounded reassembler shared by every transfer. It reserves the entire logical size
+ * before accepting a fragment, keeps only bounded completion tombstones, and delivers a complete
+ * {@link NotificationPacket} exactly once per logical message.
+ *
+ * <p>Contradictory headers, conflicting duplicate fragments, expired or over-budget messages
+ * release the whole packet and request a resync of the owning topic; a byte-identical duplicate is
+ * ignored instead of re-delivered. {@code count=1} and empty payloads take the same path.
+ *
+ * <p>Callbacks run inside the caller's {@code accept}/{@code expire} call: they must not block and
+ * are invoked serially under the reassembler monitor, so a delivery handler must never call back
+ * into another reassembler operation. {@code accept} only accepts carriers produced by the shared
+ * factory; the value's constructor already enforces the header, bounds and fragment-length
+ * invariants, so a hand-built carrier cannot inflate reassembly allocation.
  */
-final class Reassembler {
+public final class NotificationReassembler {
   private record Key(UUID publisher, UUID id) {}
 
   private static final class Pending {
-    final Carrier first;
+    final NotificationCarrier first;
     final byte[] bytes;
     final boolean[] received;
     final long deadline;
     int remaining;
 
-    Pending(Carrier first, long deadline) {
+    Pending(NotificationCarrier first, long deadline) {
       this.first = first;
       this.bytes = new byte[first.totalBytes()];
       this.received = new boolean[first.count()];
@@ -35,17 +47,17 @@ final class Reassembler {
   private final UUID self;
   private final NotificationLimits limits;
   private final LongSupplier clock;
-  private final Consumer<WireMessage> delivery;
+  private final Consumer<NotificationPacket> delivery;
   private final Consumer<String> resync;
   private final Map<Key, Pending> pending = new HashMap<>();
   private final Map<Key, Long> finished = new LinkedHashMap<>();
   private int reservedBytes;
 
-  Reassembler(
+  public NotificationReassembler(
       UUID self,
       NotificationLimits limits,
       LongSupplier clock,
-      Consumer<WireMessage> delivery,
+      Consumer<NotificationPacket> delivery,
       Consumer<String> resync) {
     this.self = self;
     this.limits = limits;
@@ -54,7 +66,7 @@ final class Reassembler {
     this.resync = resync;
   }
 
-  synchronized void accept(Carrier frame) {
+  public synchronized void accept(NotificationCarrier frame) {
     // Own echoes are discarded before expiry, lookup, or any allocation.
     if (self.equals(frame.publisher())) {
       return;
@@ -83,7 +95,7 @@ final class Reassembler {
       resync.accept(frame.topic());
       return;
     }
-    int offset = frame.index() * Carrier.CHUNK_BYTES;
+    int offset = frame.index() * NotificationCarrier.CHUNK_BYTES;
     if (message.received[frame.index()]) {
       if (!Arrays.equals(
           message.bytes,
@@ -102,12 +114,12 @@ final class Reassembler {
       remove(key, message);
       remember(key);
       delivery.accept(
-          new WireMessage(
+          new NotificationPacket(
               frame.publisher(), frame.target(), frame.topic(), frame.messageId(), message.bytes));
     }
   }
 
-  synchronized void expire() {
+  public synchronized void expire() {
     long now = clock.getAsLong();
     finished.values().removeIf(deadline -> deadline <= now);
     Iterator<Map.Entry<Key, Pending>> iterator = pending.entrySet().iterator();
@@ -123,13 +135,13 @@ final class Reassembler {
     }
   }
 
-  synchronized void clear() {
+  public synchronized void clear() {
     pending.clear();
     finished.clear();
     reservedBytes = 0;
   }
 
-  synchronized int reservedBytes() {
+  public synchronized int reservedBytes() {
     return reservedBytes;
   }
 
@@ -151,7 +163,7 @@ final class Reassembler {
     finished.put(key, clock.getAsLong() + limits.reassemblyTimeout().toNanos());
   }
 
-  private static boolean sameHeader(Carrier a, Carrier b) {
+  private static boolean sameHeader(NotificationCarrier a, NotificationCarrier b) {
     return Objects.equals(a.target(), b.target())
         && a.topic().equals(b.topic())
         && a.count() == b.count()

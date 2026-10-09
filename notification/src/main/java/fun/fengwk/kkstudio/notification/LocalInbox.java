@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.notification;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.share.notification.Notification;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 import fun.fengwk.kkstudio.share.notification.NotificationTopic;
 

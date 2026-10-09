@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.notification;
+package fun.fengwk.kkstudio.share.notification;
 
 import java.time.Duration;
 
@@ -11,9 +11,22 @@ public record NotificationLimits(
     int reassemblyMessages,
     Duration reassemblyTimeout,
     int sendBatchFrames) {
+  /**
+   * Hard wire limit for one logical message. {@code defaults()} uses it, and the shared packet and
+   * carrier value objects always reject a larger logical body regardless of the per-instance
+   * budget, so a hand-built value can never escape the framing format.
+   */
+  public static final int DEFAULT_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+
   public static NotificationLimits defaults() {
     return new NotificationLimits(
-        8 * 1024 * 1024, 32 * 1024 * 1024, 256, 32 * 1024 * 1024, 8, Duration.ofSeconds(5), 32);
+        DEFAULT_MAX_MESSAGE_BYTES,
+        32 * 1024 * 1024,
+        256,
+        32 * 1024 * 1024,
+        8,
+        Duration.ofSeconds(5),
+        32);
   }
 
   public NotificationLimits {

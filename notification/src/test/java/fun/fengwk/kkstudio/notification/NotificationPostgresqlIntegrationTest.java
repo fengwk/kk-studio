@@ -19,6 +19,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import fun.fengwk.kkstudio.share.notification.NotificationAddress;
+import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
+import fun.fengwk.kkstudio.share.notification.NotificationPacket;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
@@ -317,12 +319,12 @@ class NotificationPostgresqlIntegrationTest {
       while (take(resyncs) < 3 || !bus.healthy()) {
         // The next control marker is generated only once the new LISTEN has succeeded.
       }
-      WireMessage frame = wire(UUID.randomUUID(), bus.nodeId(), "after-reconnect");
+      NotificationPacket frame = wire(UUID.randomUUID(), bus.nodeId(), "after-reconnect");
       jdbc.queryForObject(
           "select pg_notify(?, ?)",
           Object.class,
           PgTransport.inboxChannel(bus.nodeId()),
-          Carrier.chunk(frame, 0).encode());
+          NotificationCarrier.chunk(frame, 0).encode());
       assertEquals("after-reconnect", take(values));
       long started = System.nanoTime();
       bus.close();
@@ -384,11 +386,11 @@ class NotificationPostgresqlIntegrationTest {
       assertFalse(take(healthAtRecovery), "validation failure invalidates listener health");
       assertTrue(take(healthAtRecovery), "recovery follows re-established LISTEN");
       assertEquals(1, source.failedValidationTimeout.get());
-      WireMessage frame = wire(UUID.randomUUID(), node, "after-idle-recovery");
+      NotificationPacket frame = wire(UUID.randomUUID(), node, "after-idle-recovery");
       sendRaw(
           new JdbcTemplate(source),
           PgTransport.inboxChannel(node),
-          Carrier.chunk(frame, 0).encode());
+          NotificationCarrier.chunk(frame, 0).encode());
       assertEquals("after-idle-recovery", take(values));
     }
   }
@@ -541,25 +543,36 @@ class NotificationPostgresqlIntegrationTest {
       JdbcTemplate jdbc = new JdbcTemplate(source);
       sendRaw(jdbc, PgTransport.inboxChannel(bus.nodeId()), "bad-carrier");
       assertEquals(3, take(recoveries));
-      WireMessage invalid =
-          new WireMessage(
+      NotificationPacket invalid =
+          new NotificationPacket(
               UUID.randomUUID(),
               bus.nodeId(),
               EVENTS.name(),
               UUID.randomUUID(),
               new byte[] {(byte) 0xFF});
-      sendRaw(jdbc, PgTransport.inboxChannel(bus.nodeId()), Carrier.chunk(invalid, 0).encode());
-      assertEquals(4, take(recoveries));
-      WireMessage wrongAddress = wire(UUID.randomUUID(), null, "wrong-channel");
       sendRaw(
-          jdbc, PgTransport.inboxChannel(bus.nodeId()), Carrier.chunk(wrongAddress, 0).encode());
+          jdbc,
+          PgTransport.inboxChannel(bus.nodeId()),
+          NotificationCarrier.chunk(invalid, 0).encode());
+      assertEquals(4, take(recoveries));
+      NotificationPacket wrongAddress = wire(UUID.randomUUID(), null, "wrong-channel");
+      sendRaw(
+          jdbc,
+          PgTransport.inboxChannel(bus.nodeId()),
+          NotificationCarrier.chunk(wrongAddress, 0).encode());
       assertEquals(5, take(recoveries));
-      WireMessage unknown =
-          new WireMessage(
+      NotificationPacket unknown =
+          new NotificationPacket(
               UUID.randomUUID(), bus.nodeId(), "unknown.topic", UUID.randomUUID(), new byte[] {1});
-      sendRaw(jdbc, PgTransport.inboxChannel(bus.nodeId()), Carrier.chunk(unknown, 0).encode());
-      WireMessage valid = wire(UUID.randomUUID(), bus.nodeId(), "valid");
-      sendRaw(jdbc, PgTransport.inboxChannel(bus.nodeId()), Carrier.chunk(valid, 0).encode());
+      sendRaw(
+          jdbc,
+          PgTransport.inboxChannel(bus.nodeId()),
+          NotificationCarrier.chunk(unknown, 0).encode());
+      NotificationPacket valid = wire(UUID.randomUUID(), bus.nodeId(), "valid");
+      sendRaw(
+          jdbc,
+          PgTransport.inboxChannel(bus.nodeId()),
+          NotificationCarrier.chunk(valid, 0).encode());
       assertEquals("valid", take(values));
       assertTrue(values.isEmpty());
     }
@@ -598,7 +611,7 @@ class NotificationPostgresqlIntegrationTest {
             recoveries::add,
             () -> {});
     try (transport) {
-      WireMessage first = wire(UUID.randomUUID(), null, "first");
+      NotificationPacket first = wire(UUID.randomUUID(), null, "first");
       transport.send(first, false);
       assertThrows(
           IllegalStateException.class,
@@ -620,8 +633,8 @@ class NotificationPostgresqlIntegrationTest {
   void transientFragmentSenderRotatesBeforeLargeMessageCompletes() throws Exception {
     CountingDataSource source = dataSource();
     UUID receiver = UUID.randomUUID();
-    WireMessage large = wire(UUID.randomUUID(), receiver, "x".repeat(18000));
-    WireMessage control = wire(UUID.randomUUID(), receiver, "control");
+    NotificationPacket large = wire(UUID.randomUUID(), receiver, "x".repeat(18000));
+    NotificationPacket control = wire(UUID.randomUUID(), receiver, "control");
     CountDownLatch firstSending = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     source.notifyStarted = firstSending;
@@ -644,12 +657,13 @@ class NotificationPostgresqlIntegrationTest {
       await(firstSending);
       transport.send(control, false);
       release.countDown();
-      List<Carrier> frames = new ArrayList<>();
+      List<NotificationCarrier> frames = new ArrayList<>();
       while (frames.size() < 5) {
         var notifications = listener.unwrap(PGConnection.class).getNotifications(5000);
         assertNotNull(notifications);
         for (var notification : notifications) {
-          frames.add(Carrier.decode(notification.getParameter(), smallLimits(8), receiver));
+          frames.add(
+              NotificationCarrier.decode(notification.getParameter(), smallLimits(8), receiver));
         }
       }
       assertEquals(large.messageId(), frames.get(0).messageId());
@@ -712,7 +726,7 @@ class NotificationPostgresqlIntegrationTest {
                 ignored -> {},
                 ignored -> {},
                 () -> {});
-        WireMessage message = wire(UUID.randomUUID(), null, "blocking");
+        NotificationPacket message = wire(UUID.randomUUID(), null, "blocking");
         transport.send(message, false);
         transport.start();
         long waitDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

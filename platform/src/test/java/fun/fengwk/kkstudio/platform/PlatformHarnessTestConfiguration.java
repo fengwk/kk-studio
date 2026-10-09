@@ -16,11 +16,11 @@ import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
 import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 import fun.fengwk.kkstudio.project.notification.ProjectNotifications;
 import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 
 import javax.sql.DataSource;
 

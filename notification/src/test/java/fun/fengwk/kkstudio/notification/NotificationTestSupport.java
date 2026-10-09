@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.kkstudio.share.notification.Notification;
 import fun.fengwk.kkstudio.share.notification.NotificationAddress;
 import fun.fengwk.kkstudio.share.notification.NotificationCodec;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationPacket;
 import fun.fengwk.kkstudio.share.notification.NotificationTopic;
 
 import java.nio.ByteBuffer;
@@ -50,8 +52,8 @@ final class NotificationTestSupport {
     return new NotificationLimits(20000, 40000, capacity, 40000, 2, Duration.ofSeconds(5), 1);
   }
 
-  static WireMessage wire(UUID publisher, UUID target, String payload) {
-    return new WireMessage(
+  static NotificationPacket wire(UUID publisher, UUID target, String payload) {
+    return new NotificationPacket(
         publisher, target, EVENTS.name(), UUID.randomUUID(), EVENTS.codec().encode(payload));
   }
 

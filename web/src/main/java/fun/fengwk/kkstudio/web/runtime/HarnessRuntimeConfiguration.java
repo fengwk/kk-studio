@@ -37,7 +37,6 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
@@ -57,6 +56,7 @@ import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 
 import javax.sql.DataSource;
 

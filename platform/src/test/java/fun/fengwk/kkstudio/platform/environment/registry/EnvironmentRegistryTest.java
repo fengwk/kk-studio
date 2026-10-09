@@ -21,11 +21,11 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 
 import java.sql.Connection;
 import java.sql.SQLException;

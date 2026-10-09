@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.share.notification.NotificationTopic;
 
 import javax.sql.DataSource;

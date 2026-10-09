@@ -28,7 +28,7 @@ PG reader 在解析 publisher UUID 后无条件直接丢弃自身回声，不解
 
 ## 资源与恢复
 
-[`NotificationLimits`](../../notification/src/main/java/fun/fengwk/kkstudio/notification/NotificationLimits.java)
+[`NotificationLimits`](../../share/src/main/java/fun/fengwk/kkstudio/share/notification/NotificationLimits.java)
 是唯一的限额来源，集中限制逻辑消息、事务及发送待处理字节、队列、订阅者、重组并发与截止时间。Inbox 字节预算
 涵盖所有订阅者正在执行和排队的普通消息。每个订阅者的恢复标记拥有独立控制槽：
 普通队列溢出时清空待处理普通消息，优先回读权威状态；恢复回调失败后订阅状态进入 `FAILED` 终态，
@@ -45,6 +45,8 @@ PG reader 在解析 publisher UUID 后无条件直接丢弃自身回声，不解
 index/count 和逻辑总字节数。`count=1` 也遵守同一校验。carrier 文本使用严格 UTF-8：编码拒绝 lone surrogate，解码拒绝坏字节与截断序列，绝不静默替换成 replacement character 后再参与 canonical 比对。最终 UTF-8 carrier 小于 7900 字节；
 数据按字节分片，仅在完整重组后调用领域 codec。重复片必须一致，矛盾、缺片、超时与资源溢出
 丢弃整包并请求恢复。瞬态发送按有界分片批次轮转，大消息不能独占发送队列。
+分片与重组是 Share 的公共纯 JDK 原语 [`NotificationCarrier` / `NotificationReassembler`](../../share/src/main/java/fun/fengwk/kkstudio/share/notification/)，
+PG 与两条 WS 通道直接复用同一算法，不复制第二套实现；公共 carrier/packet 深不可变、错误只描述字段或规则且不回显输入。
 
 默认预算由 `NotificationLimits.defaults()` 提供：单逻辑消息 8 MiB、发送/Inbox 各 32 MiB、重组 32 MiB、8 条并发重组及 5 秒截止；
 生产负载的最终预算仍需依据基准结果锁定。PG NOTIFY 队列有容量上限，可使用临时磁盘；
@@ -54,13 +56,12 @@ index/count 和逻辑总字节数。`count=1` 也遵守同一校验。carrier �
 
 [`NotificationPostgresqlIntegrationTest`](../../notification/src/test/java/fun/fengwk/kkstudio/notification/NotificationPostgresqlIntegrationTest.java)
 使用隔离 Testcontainers PG 验证物理提交/回滚、SQL poisoning、同源回声、双节点与重连。
-单测覆盖 UTF-8 carrier、重组与 Inbox 的顺序、溢出和恢复状态。
+分片与重组的正负单测随公共原语放在 Share（[`NotificationCarrierTest` / `NotificationReassemblerTest`](../../share/src/test/java/fun/fengwk/kkstudio/share/notification/)），
+notification 侧单测覆盖 Inbox 的顺序、溢出和恢复状态。
 
 ```bash
-env JAVA_HOME=$JAVA_HOME_21 mvn -pl notification -am test \
-  -Dtest=CarrierTest,ReassemblerTest,LocalInboxTest,NotificationPostgresqlIntegrationTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
+env JAVA_HOME=$JAVA_HOME_21 mvn -B -ntp -pl notification -am test
 ```
 
-JaCoCo 实测报告位于 `notification/target/site/jacoco/`。这个命令不安装共享 Maven 制品，
-不需要运行全仓验证。
+JaCoCo 实测报告位于 `notification/target/site/jacoco/`，公共分片/重组原语的报告位于
+`share/target/site/jacoco/`。这个命令不安装共享 Maven 制品，不需要运行全仓验证。

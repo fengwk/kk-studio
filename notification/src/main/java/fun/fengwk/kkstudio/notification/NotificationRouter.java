@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.notification;
 
 import fun.fengwk.kkstudio.share.notification.Notification;
+import fun.fengwk.kkstudio.share.notification.NotificationPacket;
 
 import java.util.UUID;
 
@@ -16,7 +17,7 @@ final class NotificationRouter {
     this.transport = transport;
   }
 
-  void remote(WireMessage message, boolean transactional) {
+  void remote(NotificationPacket message, boolean transactional) {
     if (!self.equals(message.target())) {
       transport.send(message, transactional);
     }

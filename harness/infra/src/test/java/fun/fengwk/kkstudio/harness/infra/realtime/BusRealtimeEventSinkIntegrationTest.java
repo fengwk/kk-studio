@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlHarnessStoreFixture;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 
 import javax.sql.DataSource;

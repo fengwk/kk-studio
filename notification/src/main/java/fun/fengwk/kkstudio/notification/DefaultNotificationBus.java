@@ -8,6 +8,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import fun.fengwk.kkstudio.share.notification.Notification;
 import fun.fengwk.kkstudio.share.notification.NotificationAddress;
 import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationPacket;
 import fun.fengwk.kkstudio.share.notification.NotificationSubscription;
 import fun.fengwk.kkstudio.share.notification.NotificationTopic;
 
@@ -28,10 +30,10 @@ import java.util.function.Consumer;
 /** One bus recognizes only the actual Spring physical transaction for its own DataSource. */
 @Slf4j
 public final class DefaultNotificationBus implements NotificationBus {
-  private record Publication(Notification<?> notification, WireMessage wire) {}
+  private record Publication(Notification<?> notification, NotificationPacket wire) {}
 
   private record Hint(String topic, UUID target, byte[] bytes) {
-    static Hint of(WireMessage wire) {
+    static Hint of(NotificationPacket wire) {
       return new Hint(wire.topic(), wire.target(), wire.bytes());
     }
 
@@ -128,16 +130,15 @@ public final class DefaultNotificationBus implements NotificationBus {
       }
       UUID id = UUID.randomUUID();
       Notification<T> notification = new Notification<>(id, nodeId, address, topic, payload);
-      WireMessage wire =
-          new WireMessage(
-              nodeId, address.nodeId(), topic.name(), id, Arrays.copyOf(encoded, encoded.length));
+      NotificationPacket wire =
+          new NotificationPacket(nodeId, address.nodeId(), topic.name(), id, encoded);
       publications.add(new Publication(notification, wire));
     }
     ConnectionHolder holder = physicalTransaction();
     if (holder == null) {
       for (Publication publication : publications) {
         router.remote(publication.wire(), false);
-        router.local(publication.notification(), publication.wire().bytes().length);
+        router.local(publication.notification(), publication.wire().byteLength());
       }
     } else {
       CommitBatch batch = commitBatch();
@@ -161,7 +162,7 @@ public final class DefaultNotificationBus implements NotificationBus {
     return inbox.subscribe(topic, Objects.requireNonNull(consumer), Objects.requireNonNull(resync));
   }
 
-  private void receive(WireMessage wire) {
+  private void receive(NotificationPacket wire) {
     NotificationTopic<?> topic = topics.get(wire.topic());
     if (topic != null) {
       try {
@@ -176,7 +177,7 @@ public final class DefaultNotificationBus implements NotificationBus {
     }
   }
 
-  private <T> void decodeAndAccept(NotificationTopic<T> topic, WireMessage wire) {
+  private <T> void decodeAndAccept(NotificationTopic<T> topic, NotificationPacket wire) {
     T payload = topic.codec().decode(wire.bytes());
     Notification<T> notification =
         new Notification<>(
@@ -185,7 +186,7 @@ public final class DefaultNotificationBus implements NotificationBus {
             new NotificationAddress(wire.target()),
             topic,
             payload);
-    inbox.accept(notification, wire.bytes().length);
+    inbox.accept(notification, wire.byteLength());
   }
 
   private ConnectionHolder physicalTransaction() {
@@ -277,11 +278,11 @@ public final class DefaultNotificationBus implements NotificationBus {
         return false;
       }
       if (publications.size() >= limits.queueCapacity()
-          || publication.wire().bytes().length > limits.pendingBytes() - bytes) {
+          || publication.wire().byteLength() > limits.pendingBytes() - bytes) {
         throw new IllegalStateException("transaction notification budget exceeded");
       }
       publications.add(publication);
-      bytes += publication.wire().bytes().length;
+      bytes += publication.wire().byteLength();
       if (hint != null) {
         hints.put(hint, publication);
       }
@@ -292,7 +293,7 @@ public final class DefaultNotificationBus implements NotificationBus {
     public void afterCommit() {
       committed = true;
       for (Publication publication : publications) {
-        router.local(publication.notification(), publication.wire().bytes().length);
+        router.local(publication.notification(), publication.wire().byteLength());
       }
     }
 

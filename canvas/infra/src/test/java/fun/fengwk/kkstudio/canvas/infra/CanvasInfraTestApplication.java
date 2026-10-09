@@ -10,7 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import fun.fengwk.kkstudio.canvas.CanvasBlobReleaser;
 import fun.fengwk.kkstudio.canvas.notification.CanvasNotifications;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 
 import javax.sql.DataSource;
 

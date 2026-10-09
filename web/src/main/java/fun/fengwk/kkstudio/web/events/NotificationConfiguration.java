@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.notification.HarnessNotifications;
 import fun.fengwk.kkstudio.harness.infra.realtime.BusRealtimeEventSource;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
 import fun.fengwk.kkstudio.notification.NotificationTransactionManager;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
@@ -20,6 +19,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.project.notification.ProjectNotifications;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.share.notification.NotificationTopic;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 

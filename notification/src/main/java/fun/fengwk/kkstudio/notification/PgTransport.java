@@ -6,6 +6,11 @@ import org.postgresql.PGNotification;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationPacket;
+import fun.fengwk.kkstudio.share.notification.NotificationReassembler;
+
 import javax.sql.DataSource;
 
 import java.sql.Connection;
@@ -28,10 +33,10 @@ final class PgTransport implements CrossNodeTransport {
       "select pg_notify(?, payload) from unnest(?::text[]) with ordinality as n(payload, ord) order by ord";
 
   private static final class Cursor {
-    final WireMessage message;
+    final NotificationPacket message;
     int index;
 
-    Cursor(WireMessage message) {
+    Cursor(NotificationPacket message) {
       this.message = message;
     }
   }
@@ -42,7 +47,7 @@ final class PgTransport implements CrossNodeTransport {
   private final NotificationLimits limits;
   private final int pollMillis;
   private final long reconnectMillis;
-  private final Reassembler reassembler;
+  private final NotificationReassembler reassembler;
   private final Consumer<String> resync;
   private final Runnable resyncAll;
   private final ArrayDeque<Cursor> pending = new ArrayDeque<>();
@@ -64,7 +69,7 @@ final class PgTransport implements CrossNodeTransport {
       NotificationLimits limits,
       Duration pollInterval,
       Duration reconnectBackoff,
-      Consumer<WireMessage> delivery,
+      Consumer<NotificationPacket> delivery,
       Consumer<String> resync,
       Runnable resyncAll) {
     this.dataSource = Objects.requireNonNull(dataSource);
@@ -75,7 +80,8 @@ final class PgTransport implements CrossNodeTransport {
     this.reconnectMillis = positiveMillis(reconnectBackoff);
     this.resync = resync;
     this.resyncAll = resyncAll;
-    this.reassembler = new Reassembler(self, limits, System::nanoTime, delivery, resync);
+    this.reassembler =
+        new NotificationReassembler(self, limits, System::nanoTime, delivery, resync);
   }
 
   @Override
@@ -92,16 +98,16 @@ final class PgTransport implements CrossNodeTransport {
   }
 
   @Override
-  public void send(WireMessage message, boolean transactional) {
+  public void send(NotificationPacket message, boolean transactional) {
     if (transactional) {
       synchronized (this) {
         if (closed) {
           throw new IllegalStateException("transport closed");
         }
       }
-      List<String> frames = new ArrayList<>(Carrier.count(message.bytes().length));
-      for (int index = 0; index < Carrier.count(message.bytes().length); index++) {
-        frames.add(Carrier.chunk(message, index).encode());
+      List<String> frames = new ArrayList<>(NotificationCarrier.count(message.byteLength()));
+      for (int index = 0; index < NotificationCarrier.count(message.byteLength()); index++) {
+        frames.add(NotificationCarrier.chunk(message, index).encode());
       }
       sendTransactionalFrames(message.target(), frames);
     } else {
@@ -110,12 +116,12 @@ final class PgTransport implements CrossNodeTransport {
           throw new IllegalStateException("transport closed");
         }
         if (pendingMessages >= limits.queueCapacity()
-            || message.bytes().length > limits.pendingBytes() - pendingBytes) {
+            || message.byteLength() > limits.pendingBytes() - pendingBytes) {
           resync.accept(message.topic());
           throw new IllegalStateException("transient notification outbox budget exceeded");
         }
         pending.addLast(new Cursor(message));
-        pendingBytes += message.bytes().length;
+        pendingBytes += message.byteLength();
         pendingMessages++;
         notifyAll();
       }
@@ -198,10 +204,10 @@ final class PgTransport implements CrossNodeTransport {
           List<String> frames = new ArrayList<>();
           int end =
               Math.min(
-                  Carrier.count(cursor.message.bytes().length),
+                  NotificationCarrier.count(cursor.message.byteLength()),
                   cursor.index + limits.sendBatchFrames());
           while (cursor.index < end) {
-            frames.add(Carrier.chunk(cursor.message, cursor.index++).encode());
+            frames.add(NotificationCarrier.chunk(cursor.message, cursor.index++).encode());
           }
           sendPendingFrames(cursor.message.target(), frames);
           senderHealthy = true;
@@ -218,8 +224,8 @@ final class PgTransport implements CrossNodeTransport {
           if (closed) {
             return;
           }
-          if (failed || cursor.index == Carrier.count(cursor.message.bytes().length)) {
-            pendingBytes -= cursor.message.bytes().length;
+          if (failed || cursor.index == NotificationCarrier.count(cursor.message.byteLength())) {
+            pendingBytes -= cursor.message.byteLength();
             pendingMessages--;
           } else {
             pending.addLast(cursor);
@@ -260,7 +266,8 @@ final class PgTransport implements CrossNodeTransport {
           if (notifications != null) {
             for (PGNotification notification : notifications) {
               try {
-                Carrier carrier = Carrier.decode(notification.getParameter(), limits, self);
+                NotificationCarrier carrier =
+                    NotificationCarrier.decode(notification.getParameter(), limits, self);
                 if (carrier == null) {
                   continue;
                 }

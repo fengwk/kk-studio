@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketServic
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
-import fun.fengwk.kkstudio.notification.NotificationLimits;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -42,6 +41,7 @@ import fun.fengwk.kkstudio.platform.notification.PlatformNotifications;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 
 import java.sql.Connection;
 import java.sql.SQLException;
