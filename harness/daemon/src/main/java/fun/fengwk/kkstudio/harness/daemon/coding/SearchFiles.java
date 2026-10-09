@@ -128,10 +128,10 @@ final class SearchFiles {
 
   private static void requireReadableDirectory(Path directory) {
     if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
-      throw new IllegalArgumentException("path must be a directory");
+      throw new ToolInputRejectedException("path must be a directory");
     }
     if (!Files.isReadable(directory)) {
-      throw new IllegalArgumentException("path is not readable: " + directory);
+      throw new ToolInputRejectedException("path is not readable: " + directory);
     }
   }
 }

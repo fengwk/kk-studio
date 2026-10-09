@@ -37,11 +37,11 @@ public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapabilit
     Path path = EnvironmentPaths.existing(string(args, "path"));
     String query = string(args, "query");
     if (query.isBlank()) {
-      throw new IllegalArgumentException("query must not be blank");
+      throw new ToolInputRejectedException("query must not be blank");
     }
     int limit = optionalNonNegativeInt(args, "limit", DEFAULT_LIMIT);
     if (limit > MAX_LIMIT) {
-      throw new IllegalArgumentException("limit must be <= " + MAX_LIMIT);
+      throw new ToolInputRejectedException("limit must be <= " + MAX_LIMIT);
     }
     if (execution.isCancelled()) {
       throw new InterruptedException();

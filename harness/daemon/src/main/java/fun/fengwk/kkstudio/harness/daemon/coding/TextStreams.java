@@ -140,7 +140,7 @@ final class TextStreams {
    *
    * <p>是 {@link IllegalArgumentException} 的子类，使调用方能把它与超时等其它非法参数错误区分开，从而在目录扫描中按二进制静默跳过，而把超时如实上报。
    */
-  static final class DecodeException extends IllegalArgumentException {
+  static final class DecodeException extends ToolRunFailureException {
 
     private static final long serialVersionUID = 1L;
 

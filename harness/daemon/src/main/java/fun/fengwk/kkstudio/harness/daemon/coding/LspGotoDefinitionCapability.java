@@ -33,7 +33,7 @@ public final class LspGotoDefinitionCapability extends AbstractCodingCapability 
     JsonNode args = arguments(request);
     Path path = EnvironmentPaths.existing(string(args, "path"));
     if (Files.isDirectory(path)) {
-      throw new IllegalArgumentException("path must be a file: " + path);
+      throw new ToolInputRejectedException("path must be a file: " + path);
     }
     int line = requiredPositiveInt(args, "line");
     int character = optionalNonNegativeInt(args, "character", 0);
