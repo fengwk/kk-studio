@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   branchDraftFromThread,
   branchDraftsEqual,
+  buildBranchDiffCommands,
   materializeAgentBranchDraft,
   projectPendingTarget,
   type BranchDraft,
@@ -9,15 +11,23 @@ import {
 import {
   buildGoalBatchPlan,
   buildMessageBatchPlan,
+  createCommandId,
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  HarnessThreadCommandDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import {
   useAgentThreadController,
 } from '@/features/ai/runtime/useAgentThreadController'
+import { buildThreadCommandBatchRequest } from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
 import { harnessService } from '@/shared/api/harness-service'
+import { isConflictReason } from '@/shared/api/client'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { translate } from '@/shared/i18n'
 import {
   presentConflict,
@@ -36,6 +46,48 @@ interface BoundBranchState {
   threadId: string
   base: BranchDraft
   draft: BranchDraft
+}
+
+/**
+ * 本地已提交、但服务器尚未回读到 snapshot 的 SET_* 命令 overlay。
+ *
+ * watermarkVersion 记录接受响应里权威 Thread 的 version：command 的持久化与 version
+ * 在同一事务内提交，因此任何 version 达到该水位的快照都已包含该命令（排队中或已应用）。
+ * 达到水位后条目即失效，绝不长期遮挡服务器的最新事实。按 (threadId, sequence) 由
+ * idempotencyKey 与快照排队命令去重。
+ */
+interface SettingsOverlayEntry {
+  threadId: string
+  command: HarnessThreadCommandDTO
+  watermarkVersion: string
+}
+
+/** 仅 STALE_COMMAND_CURSOR 允许借既有冲突回读机制重建一次 cursor/diff，不另造任意重试。 */
+const MAX_STALE_SETTINGS_CURSOR_RETRIES = 2
+
+/** Thread 是否运行中：只有 IDLE/STOPPED 是静止态，其余（排队/模型/工具/应用）都表示 busy。 */
+function isBusyThread(thread: HarnessThreadDTO): boolean {
+  return thread.processing || (thread.status !== 'IDLE' && thread.status !== 'STOPPED')
+}
+
+/**
+ * 把本地 overlay 命令并入服务器排队命令供 projection 使用：服务器已回读的命令以服务器
+ * 事实为准（按 idempotencyKey 去重），overlay 只补尚未回读的差集。
+ */
+function mergeQueuedCommands(
+  serverQueued: readonly HarnessThreadCommandDTO[],
+  overlay: readonly SettingsOverlayEntry[],
+  threadId: string,
+): HarnessThreadCommandDTO[] {
+  if (overlay.length === 0) {
+    return [...serverQueued]
+  }
+  const observed = new Set(serverQueued.map((command) => command.idempotencyKey))
+  const extra = overlay
+    .filter((entry) => entry.threadId === threadId)
+    .map((entry) => entry.command)
+    .filter((command) => !observed.has(command.idempotencyKey))
+  return extra.length === 0 ? [...serverQueued] : [...serverQueued, ...extra]
 }
 
 /** 请求失败时把原始错误映射为可读 message（与 controller 同风格）。 */
@@ -109,8 +161,11 @@ export function useBoundBranchPanel({
   )
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
   const [yoloError, setYoloError] = useState<string | null>(null)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const [settingsOverlay, setSettingsOverlay] = useState<SettingsOverlayEntry[]>([])
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   const boundThreadIdRef = useRef<string | null>(null)
+  const queryClient = useQueryClient()
   // YOLO 直接控制面的权威 Thread 状态（version + yolo policy）：来自 /yolo 成功
   // 响应，或非回退的 snapshot。后续每次 CAS 都基于它，而不是可能滞后的
   // controller snapshot —— 连续切换不会因 version 过期而互相踩踏。
@@ -122,6 +177,17 @@ export function useBoundBranchPanel({
   // YOLO 更新 generation：每次重新绑定到另一个 Thread 时递增，使旧 Thread 的迟到
   // 成功/失败都无法污染新面板（不改 draft、不设 yoloError）。
   const yoloGenerationRef = useRef(0)
+  // 设置即时提交：与 YOLO 同构的串行 latest-intent 结构（独立，不与 composer 输入
+  // 的 pending message 合并）。settingsIntentRef 只保留最新目标选择。
+  const settingsIntentRef = useRef<BranchDraft | null>(null)
+  const settingsDrainingRef = useRef(false)
+  const settingsGenerationRef = useRef(0)
+  // 每次 render 同步最新值，供 drain 的 await 之后读取（避免闭包/迟到渲染读数过期）。
+  const boundThreadRef = useRef<HarnessThreadDTO | null>(null)
+  const baseRef = useRef<BranchDraft | null>(null)
+  const draftRef = useRef<BranchDraft | null>(null)
+  const queuedCommandsRef = useRef<readonly HarnessThreadCommandDTO[]>([])
+  const overlayRef = useRef<SettingsOverlayEntry[]>([])
 
   // 重新绑定到另一个 Thread 时清空面板本地 draft，并从新 snapshot 重新初始化
   //（controller 也会重置其 stop/decision replay 状态）。Interaction/错误/确认等
@@ -132,12 +198,17 @@ export function useBoundBranchPanel({
       return
     }
     boundThreadIdRef.current = threadId
-    // 使旧 Thread 的在途 YOLO 请求全部失效，并丢弃陈旧权威 version / 未发意图。
+    // 使旧 Thread 的在途 YOLO / 设置请求全部失效，并丢弃陈旧权威 version / 未发意图 / overlay。
     yoloGenerationRef.current += 1
     authoritativeThreadRef.current = null
     yoloPendingRef.current = null
+    settingsGenerationRef.current += 1
+    settingsIntentRef.current = null
+    overlayRef.current = []
     setBranchState(null)
     setYoloError(null)
+    setSettingsOverlay([])
+    setSettingsError(null)
     setConflict(null)
   }, [threadId])
 
@@ -175,12 +246,64 @@ export function useBoundBranchPanel({
   const boundThread = controller.thread?.threadId === threadId ? controller.thread : null
   const boundBranchState = branchState?.threadId === threadId ? branchState : null
 
+  // overlay 只在快照尚未达到其水位时有效：达到后服务器排队命令即权威事实。
+  const boundThreadVersion = boundThread?.version
+  const activeOverlay = useMemo(
+    () => settingsOverlay.filter((entry) =>
+      entry.threadId === threadId
+      && boundThreadVersion != null
+      && compareDecimalVersions(boundThreadVersion, entry.watermarkVersion) < 0),
+    [boundThreadVersion, settingsOverlay, threadId],
+  )
+  useEffect(() => {
+    if (settingsOverlay.length === 0) {
+      return
+    }
+    const next = settingsOverlay.filter((entry) =>
+      entry.threadId === threadId
+      && boundThreadVersion != null
+      && compareDecimalVersions(boundThreadVersion, entry.watermarkVersion) < 0)
+    if (next.length !== settingsOverlay.length) {
+      setSettingsOverlay(next)
+    }
+  }, [boundThreadVersion, settingsOverlay, threadId])
+
+  // 服务器排队命令 + 尚未回读的本地 overlay：连续选择在 snapshot 刷新前也不会重复携带同一 diff。
+  const queuedForProjection = useMemo(
+    () => mergeQueuedCommands(controller.queuedCommands, activeOverlay, threadId),
+    [activeOverlay, controller.queuedCommands, threadId],
+  )
+
   const effectiveBase = useMemo(
     () => (boundBranchState == null || boundThread == null
       ? null
-      : projectPendingTarget(boundBranchState.base, controller.queuedCommands)),
-    [boundBranchState, boundThread, controller.queuedCommands],
+      : projectPendingTarget(boundBranchState.base, queuedForProjection)),
+    [boundBranchState, boundThread, queuedForProjection],
   )
+
+  useEffect(() => {
+    boundThreadRef.current = boundThread
+    baseRef.current = boundBranchState?.base ?? null
+    draftRef.current = boundBranchState?.draft ?? null
+    queuedCommandsRef.current = controller.queuedCommands
+    overlayRef.current = activeOverlay
+  })
+
+  /**
+   * drain 在 await 之后按最新镜像重算 effective base（服务器排队命令 + 尚未回读的 overlay），
+   * 不依赖上一次 render 的闭包值，连续提交之间不会重复携带同一 SET diff。
+   */
+  function computeEffectiveBase(): BranchDraft | null {
+    const base = baseRef.current
+    const currentThreadId = boundThreadIdRef.current
+    if (base == null || currentThreadId == null) {
+      return null
+    }
+    return projectPendingTarget(
+      base,
+      mergeQueuedCommands(queuedCommandsRef.current, overlayRef.current, currentThreadId),
+    )
+  }
 
   const buildBatch = useCallback(
     (parts: ComposerPart[]): CommandBatchPlan | null => {
@@ -222,19 +345,59 @@ export function useBoundBranchPanel({
     && effectiveBase != null
     && !branchDraftsEqual(effectiveBase, boundBranchState.draft)
 
-  function editDraft(patch: Partial<BranchDraft>) {
+  // 待生效：仍有 SET_* 命令排队（服务器已回读或本地 overlay 尚未回读）。
+  const settingsPending = queuedForProjection.some((command) =>
+    command.state === 'QUEUED' && command.type.startsWith('SET_'))
+  const settingsStatus: 'draft' | 'pending' | null =
+    boundBranchState == null || boundThread == null
+      ? null
+      : settingsPending
+        ? 'pending'
+        : dirty
+          ? 'draft'
+          : null
+
+  /**
+   * 同步更新本地 draft 的 state 与 ref 镜像：同一批次内连续选择（setState 尚未提交）也能
+   * 看到彼此的结果，绝不会用渲染闭包里的旧值互相覆盖。
+   */
+  function applyDraft(next: BranchDraft) {
+    draftRef.current = next
     setBranchState((current) =>
       current == null || current.threadId !== threadId
         ? current
-        : { ...current, draft: { ...current.draft, ...patch } },
+        : { ...current, draft: next },
     )
+  }
+
+  function editDraft(patch: Partial<BranchDraft>) {
+    const current = draftRef.current
+    if (current == null) {
+      return
+    }
+    applyDraft({ ...current, ...patch })
+  }
+
+  /**
+   * 应用一次面板本地选择：busy Thread 立即提交 standalone SET-only 批次（等待安全点生效，
+   * 以 pending 展示）；idle/uncreated/stopped 保持本地草稿，随下一条输入一起提交。
+   */
+  function commitDraft(next: BranchDraft) {
+    applyDraft(next)
+    if (boundThread == null || !isBusyThread(boundThread)) {
+      return
+    }
+    setSettingsError(null)
+    settingsIntentRef.current = next
+    void drainSettings()
   }
 
   /**
    * 解析目标 Agent 的模型后原子更新选择；未就绪或配置无效时保留原草稿。
    */
   function selectAgent(agentName: string): boolean {
-    if (boundBranchState == null || boundThread == null) {
+    const currentDraft = draftRef.current
+    if (currentDraft == null || boundThread == null) {
       return false
     }
     const agent = controller.agents.find((candidate) => candidate.name === agentName)
@@ -244,12 +407,12 @@ export function useBoundBranchPanel({
     const draft = materializeAgentBranchDraft(
       agent,
       controller.models,
-      boundBranchState.draft,
+      currentDraft,
     )
     if (draft == null) {
       return false
     }
-    editDraft({ agentName: draft.agentName, model: draft.model })
+    commitDraft(draft)
     return true
   }
 
@@ -384,11 +547,122 @@ export function useBoundBranchPanel({
   }
 
   function selectModel(model: BranchDraft['model']) {
-    editDraft({ model })
+    const current = draftRef.current
+    if (current == null) {
+      return
+    }
+    commitDraft({ ...current, model })
   }
 
   function selectEnvironment(environmentName: string | null) {
-    editDraft({ environmentName })
+    const current = draftRef.current
+    if (current == null) {
+      return
+    }
+    commitDraft({ ...current, environmentName })
+  }
+
+  /** 串行执行设置提交：同一时刻至多一个在途请求，快速连续选择合并到最新目标（latest intent wins）。 */
+  async function drainSettings() {
+    if (settingsDrainingRef.current) {
+      return
+    }
+    settingsDrainingRef.current = true
+    try {
+      while (settingsIntentRef.current != null) {
+        const generation = settingsGenerationRef.current
+        const target = settingsIntentRef.current
+        settingsIntentRef.current = null
+        await writeSettings(generation, target)
+      }
+    } finally {
+      settingsDrainingRef.current = false
+    }
+  }
+
+  /**
+   * 发出一次 standalone SET-only 批次。cursor 复用权威 Thread（含 /yolo 与上次接受响应）；
+   * 仅 STALE_COMMAND_CURSOR 借既有冲突回读机制重建 diff 基准与 cursor 后重试，绝不任意重试。
+   * 失败时保留用户选择为本地草稿（随下一条输入提交），并暴露错误。
+   */
+  async function writeSettings(generation: number, target: BranchDraft) {
+    const originThreadId = boundThreadIdRef.current
+    for (let attempt = 0; ; attempt += 1) {
+      if (generation !== settingsGenerationRef.current || boundThreadIdRef.current !== originThreadId) {
+        return
+      }
+      const sourceThread = authoritativeThreadRef.current ?? boundThreadRef.current
+      const base = computeEffectiveBase()
+      if (
+        originThreadId == null
+        || sourceThread == null
+        || base == null
+        || sourceThread.threadId !== originThreadId
+      ) {
+        return
+      }
+      const commands = buildBranchDiffCommands(base, target, createCommandId)
+      if (commands.length === 0) {
+        return
+      }
+      const request = buildThreadCommandBatchRequest(sourceThread, commands)
+      try {
+        const response = await harnessService.acceptThreadCommandBatch(originThreadId, request)
+        if (generation !== settingsGenerationRef.current || boundThreadIdRef.current !== originThreadId) {
+          return
+        }
+        adoptAuthoritative(response.thread)
+        const accepted = response.acceptedCommands.filter((command) => command.type.startsWith('SET_'))
+        if (accepted.length > 0) {
+          const entries = accepted.map((command) => ({
+            threadId: originThreadId,
+            command,
+            watermarkVersion: response.thread.version,
+          }))
+          overlayRef.current = [...overlayRef.current, ...entries]
+          setSettingsOverlay((current) => [...current, ...entries])
+        }
+        setSettingsError(null)
+        setConflict(null)
+        await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(originThreadId) })
+        return
+      } catch (error) {
+        if (generation !== settingsGenerationRef.current || boundThreadIdRef.current !== originThreadId) {
+          return
+        }
+        if (attempt < MAX_STALE_SETTINGS_CURSOR_RETRIES && isConflictReason(error, 'STALE_COMMAND_CURSOR')) {
+          let latest: HarnessThreadSnapshotDTO | null
+          try {
+            latest = await harnessService.getThreadSnapshot(originThreadId)
+          } catch {
+            latest = null
+          }
+          if (
+            latest != null
+            && generation === settingsGenerationRef.current
+            && boundThreadIdRef.current === originThreadId
+          ) {
+            queryClient.setQueryData(queryKeys.threads.snapshot(originThreadId), latest)
+            adoptAuthoritative(latest.thread)
+            // 用服务端最新事实重建 diff 基准：下一次尝试读取新 cursor 与已回读的排队命令。
+            baseRef.current = branchDraftFromThread(latest.thread)
+            queuedCommandsRef.current = latest.queuedCommands
+            boundThreadRef.current = latest.thread
+            continue
+          }
+        }
+        // 失败：保留用户选择为本地草稿（绝不丢输入），并暴露错误/冲突提示。
+        const presentation = presentConflict(error)
+        if (presentation != null) {
+          setConflict(presentation)
+          setSettingsError(null)
+        } else {
+          setConflict(null)
+          setSettingsError(errorMessage(error))
+        }
+        return
+      }
+    }
   }
 
   /**
@@ -411,6 +685,9 @@ export function useBoundBranchPanel({
     effectiveBase,
     draft: boundBranchState?.draft,
     dirty,
+    settingsStatus,
+    settingsError,
+    dismissSettingsError: () => setSettingsError(null),
     yoloError,
     dismissYoloError: () => setYoloError(null),
     conflict,

@@ -511,4 +511,39 @@ describe('ThreadComposerControls environment menu', () => {
     await user.keyboard('{Escape}')
     expect(onMenuChange).toHaveBeenCalledWith(null, true)
   })
+
+  it('renders the draft / pending settings status chip and omits it when applied', () => {
+    const { rerender } = render(
+      <ThreadComposerControls
+        settings={createSettings({ status: 'draft' })}
+        menu={null}
+        disabled={false}
+        onMenuChange={vi.fn()}
+      />,
+    )
+    const draftChip = screen.getByText('草稿')
+    expect(draftChip).toHaveAttribute('data-settings-status', 'draft')
+
+    rerender(
+      <ThreadComposerControls
+        settings={createSettings({ status: 'pending' })}
+        menu={null}
+        disabled={false}
+        onMenuChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('待生效')).toHaveAttribute('data-settings-status', 'pending')
+
+    // applied / 无 diff 时不常驻展示状态。
+    rerender(
+      <ThreadComposerControls
+        settings={createSettings({ status: null })}
+        menu={null}
+        disabled={false}
+        onMenuChange={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText('草稿')).toBeNull()
+    expect(screen.queryByText('待生效')).toBeNull()
+  })
 })
