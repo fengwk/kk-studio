@@ -22,10 +22,14 @@ public class AgentDefinitionConverter {
     }
     AgentDefinitionDTO dto = new AgentDefinitionDTO();
     dto.setName(definition.getName());
+    dto.setType(definition.getType());
     dto.setDescription(definition.getDescription());
     dto.setSystemPrompt(definition.getSystemPrompt());
     dto.setModel(
-        new ModelRef(definition.getModelProviderName(), definition.getModelName()).toString());
+        definition.getModelProviderName() == null
+            ? null
+            : new ModelRef(definition.getModelProviderName(), definition.getModelName())
+                .toString());
     dto.setVariant(definition.getVariant());
     dto.setConfig(configCodec.decode(definition.getConfigJson()));
     dto.setVersion(CatalogVersions.format(definition.getVersion()));

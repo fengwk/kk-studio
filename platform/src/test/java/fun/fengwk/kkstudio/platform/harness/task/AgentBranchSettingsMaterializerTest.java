@@ -170,6 +170,19 @@ class AgentBranchSettingsMaterializerTest {
     assertInstanceOf(IllegalStateException.class, error.getCause());
   }
 
+  /** 测试意图：未配置模型的内置 Agent（两列同为 null）被明确拒绝，而不是 NPE 或回退到其它模型。 */
+  @Test
+  void rejectsUnconfiguredAgentModelExplicitly() {
+    AgentDefinition unconfigured = new AgentDefinition();
+    unconfigured.setName("compaction");
+    unconfigured.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
+    when(agentRepository.getByName("compaction")).thenReturn(unconfigured);
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("compaction"));
+    assertTrue(error.getMessage().contains("agent model is not configured: compaction"));
+  }
+
   private static String validModelConfig() {
     return "{\"limit\":{\"context\":128000,\"output\":8192},"
         + "\"abilities\":{\"tools\":true,\"reasoning\":true,"

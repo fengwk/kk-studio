@@ -7,6 +7,7 @@ import java.time.Instant;
 @Data
 public class AgentDefinitionDO {
   private String name;
+  private String type;
   private String description;
   private String systemPrompt;
   private String modelProviderName;

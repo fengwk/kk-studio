@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -11,13 +12,17 @@ public class AgentDefinitionDTO {
   /** Agent 唯一名（资源路由身份）：非空白、不得包含 {@code '/'}、≤64 字符。 */
   private String name;
 
+  /** 系统持有的所有权类型；用户创建的 Agent 为 {@link AgentDefinitionType#USER}，内置 Agent 为 BUILTIN。 */
+  private AgentDefinitionType type;
+
   /** 可空描述（text，无长度上限）。 */
   private String description;
 
   /** 可空系统提示词。 */
   private String systemPrompt;
 
-  /** 当前绑定的模型引用，序列化形式为 {@code providerName/modelName}。 */
+  /** 当前绑定的模型引用，序列化形式为 {@code providerName/modelName}；未配置模型的内置 Agent 显式序列化为 {@code null}，与字段缺失区分。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String model;
 
   /** 当前生效的模型变体 id；null 表示未显式指定（运行时解析 model config 的 defaultVariant）。 */
