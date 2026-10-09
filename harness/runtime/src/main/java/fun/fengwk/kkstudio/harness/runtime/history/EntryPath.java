@@ -74,11 +74,15 @@ public record EntryPath(List<Entry> entries) {
     return entries.get(entries.size() - 1);
   }
 
-  /** 返回跳过尾部 {@link NotificationPayload} 后的最近 Entry：系统通知可追加在回合之间，判定续写义务等回合锚点必须看到其之前的 TURN_END。 */
-  public Entry headIgnoringTrailingNotifications() {
+  /**
+   * 返回跳过尾部控制 Entry（{@link NotificationPayload} 与 {@link SettingsPayload}）后的最近 Entry：系统通知与安全边界上
+   * append 的 settings 应用快照都可追加在回合之间，判定续写义务等回合锚点必须看到其之前的 TURN_END。
+   */
+  public Entry headIgnoringTrailingControlEntries() {
     for (int i = entries.size() - 1; i >= 0; i--) {
       Entry entry = entries.get(i);
-      if (!(entry.payload() instanceof NotificationPayload)) {
+      if (!(entry.payload() instanceof NotificationPayload)
+          && !(entry.payload() instanceof SettingsPayload)) {
         return entry;
       }
     }
@@ -92,6 +96,8 @@ public record EntryPath(List<Entry> entries) {
       if (entry.payload() instanceof TurnStartPayload start
           && start.reason() != TurnStartReason.COMPACTION) {
         settings = start.settings();
+      } else if (entry.payload() instanceof SettingsPayload applied) {
+        settings = applied.settings();
       }
     }
     return settings;

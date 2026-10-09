@@ -8,12 +8,15 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -25,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAcces
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -34,7 +38,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -97,8 +103,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * COMPACTION 由 planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求 THREAD 再 complete，下一 claim
  * 才由 durable continuation 启动续写；Tool sibling batch 追加 outcome 后追加 continueModel=true TURN_END 并同事务删除
  * children+parent。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
- * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现 compaction action 时先请求
- * THREAD 再 complete。
+ * （terminal apply 会按 queued 快照重建 wake）；rejected 只在仍保留合法 deferred messages 时先请求 THREAD 再
+ * complete，绝不立即重排同一压缩。
  *
  * <p>持久化变更时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、 complete、request 与
  * reschedule 始终使用未抬升的本地 lease clock，避免未来持久化时间改变 lease 语义。
@@ -110,6 +116,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public final class ThreadProcessor {
 
+  /** 确定性 resolver 失败落成的稳定 durable AssistantError：不泄露 raw cause，只说明本轮规划失败与恢复方式。 */
+  private static final AssistantError DETERMINISTIC_FAILURE =
+      new AssistantError(
+          "TURN_RESOLVE_FAILED",
+          "Turn planning failed before the model was invoked. Send a new message to retry.");
+
   private final HarnessStore store;
   private final TurnResolver resolver;
   private final ThreadProcessorConfig config;
@@ -118,6 +130,7 @@ public final class ThreadProcessor {
   private final Executor heartbeatWorker;
   private final ModelOutcomeAppender modelOutcomeAppender;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
+  private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ThreadContextProbe threadContextProbe = new ThreadContextProbe();
   private final AutomaticCompactionPlanner automaticCompactionPlanner =
@@ -202,6 +215,13 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    // 安全边界（无 open Turn）先应用 queued 的全部 SET_* 设置：standalone 设置不创建模型、不 resume STOPPED，只 append 一个
+    // SETTINGS 快照 Entry（CONTRIBUTOR_STATE 另按原序追加 CUSTOM Entry）并标记命令 applied；随后同一 Thread 被显式唤醒，让
+    // input / 自动压缩在同一安全边界继续。STOPPED 且无 open Turn 时同样应用，否则 UI pending 永不 settle；STOPPED 且存在冻结
+    // open model / tool 请求时 openTurnStart 非空，绝不触碰。
+    if (path.openTurnStart().isEmpty() && applyPendingSettings(tx, claim, thread, path, now)) {
+      return null;
+    }
     // STOPPED 是持久的执行控制：停止后只固化通知，绝不自动启动模型；只有显式新人工/可信输入在 accept 阶段恢复
     // RUNNABLE 后才会再次进入这里。残留 claim 在这里完成 fencing，不产生任何 durable mutation。
     if (thread.executionControl().isStopped()) {
@@ -293,6 +313,74 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     tx.completeWork(claim, now);
+  }
+
+  /**
+   * 安全边界上应用 queued 的全部 standalone 设置（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）：从整段 queued snapshot
+   * 按原序 提取这些命令，归约成完整 {@link BranchSettings} 快照并 append 一个 {@link SettingsPayload} Entry，标记命令
+   * applied（指向该 SETTINGS Entry）后推进 head。绝不打开 / 关闭 Turn、绝不创建 ModelInvocation，也绝不 resume STOPPED
+   * Thread——只有显式新输入才会 恢复 RUNNABLE。
+   *
+   * <p>从整段 snapshot 提取而非前导前缀：{@code [USER, SET_MODEL]} 这类交错必须让设置先于任何 input / 压缩生效，同时保留设置内部
+   * 相对顺序；其它输入仍 queued 且输入水位不前进，随后的 INPUT / CONTINUATION 按原序消费，绝不跳过尚未处理的输入。
+   *
+   * <p>SET_CONTRIBUTOR_STATE 不是 standalone 设置：它只在本 Thread 的普通 turn 内作为有序 CUSTOM state Entry 物化，因此留给
+   * 后续 turn，绝不在回合之间越界追加。
+   *
+   * <p>返回 false 表示没有可应用的设置，调用方继续正常分类。
+   */
+  private boolean applyPendingSettings(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      EntryPath path,
+      Instant now) {
+    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    List<ThreadCommand> settings = new ArrayList<>();
+    for (ThreadCommand command : queued) {
+      if (isStandaloneSetting(command.type())) {
+        settings.add(command);
+      }
+    }
+    if (settings.isEmpty()) {
+      return false;
+    }
+    Instant mutationNow =
+        HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
+    BranchSettings applied =
+        settingsReducer.reduce(thread.id(), path.baseSettings(), settings, tx::nextId);
+    UUID settingsEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            settingsEntryId,
+            thread.sessionId(),
+            path.head().id(),
+            new SettingsPayload(applied, thread.id()),
+            mutationNow));
+    List<ThreadCommand> consumed = new ArrayList<>(settings.size());
+    for (ThreadCommand command : settings) {
+      consumed.add(command.markApplied(settingsEntryId));
+    }
+    tx.updateCommands(consumed);
+    tx.updateThread(thread.advanceHead(settingsEntryId, mutationNow));
+    // final fence 最后执行：损失抛内部信号整事务回滚，绝无带 mutation 的 LOST 提交。
+    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
+    // STOPPED 上只落 durable 设置，不唤醒：显式新输入才是恢复 RUNNABLE 的唯一入口。
+    if (!thread.executionControl().isStopped()) {
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+    }
+    tx.completeWork(claim, now);
+    return true;
+  }
+
+  /**
+   * standalone 设置 = branch settings（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）；SET_CONTRIBUTOR_STATE
+   * 不属于此列。
+   */
+  private static boolean isStandaloneSetting(ThreadCommandType type) {
+    return type.isSetting() && type != ThreadCommandType.SET_CONTRIBUTOR_STATE;
   }
 
   /**
@@ -537,7 +625,7 @@ public final class ThreadProcessor {
     // 回合之间可追加已物化系统通知；续写义务锚点必须看到通知之前的 TURN_END。
     if (reason == TurnStartReason.CONTINUATION
         && (path.openTurnStart().isPresent()
-            || !(path.headIgnoringTrailingNotifications().payload() instanceof TurnEndPayload end
+            || !(path.headIgnoringTrailingControlEntries().payload() instanceof TurnEndPayload end
                 && end.continueModel()))) {
       throw new IllegalStateException(
           "continuation preconditions changed under the same transaction for thread "
@@ -569,9 +657,11 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 事务外解析 + 第二事务 CAS 提交：Resolver 异常 / null / heartbeat 调度失败按失败延迟 reschedule（零 durable mutation）；提交
-   * CAS（source head / cutoff 内 Command 快照 / claim）失败抛 {@link ClaimLostSignal} 由 {@link #process}
-   * 映射为 LOST。YOLO 变化不使 plan 失效：commit 以第二事务锁到的 Thread 当前 YOLO 为准。成功后本 claim 已消费，返回 COMPLETED。
+   * 事务外解析 + 第二事务 CAS 提交：只有显式 typed {@link TurnResolveTransientException}（DB / 网络瞬断）按失败延迟
+   * reschedule（零 durable mutation）；确定性 resolver 异常 / null 结果 / validator 契约失败都落成 durable
+   * AssistantError + FAILED TURN_END 并结算 Join，绝不无限重排，也不把 raw cause 写入 durable。提交 CAS（source head /
+   * cutoff 内 Command 快照 / claim）失败抛 {@link ClaimLostSignal} 由 {@link #process} 映射为 LOST。YOLO 变化不使
+   * plan 失效：commit 以第二事务锁到的 Thread 当前 YOLO 为准。成功后本 claim 已消费，返回 COMPLETED。
    */
   private ThreadProcessResult resolveAndCommit(ClaimedWork claim, TurnPlan plan) {
     AtomicBoolean heartbeatLost = new AtomicBoolean();
@@ -592,23 +682,57 @@ public final class ThreadProcessor {
     TurnResolver.Result result;
     try {
       result = resolver.resolve(plan.threadId(), plan.candidatePath(), plan.preparation());
-    } catch (RuntimeException failure) {
+    } catch (TurnResolveTransientException transientFailure) {
       log.warn(
-          "turn resolver failed for thread {}; rescheduling its work", plan.threadId(), failure);
-      result = null;
+          "turn resolver infrastructure unavailable for thread {}; rescheduling its work",
+          plan.threadId(),
+          transientFailure);
+      return rescheduleIfOwned(claim, config.resolveFailureDelay())
+          ? ThreadProcessResult.RESCHEDULED
+          : ThreadProcessResult.LOST_OWNERSHIP;
+    } catch (RuntimeException deterministicFailure) {
+      // 确定性 resolver 失败（含编程 / 契约错误）：落 durable FAILED 并结算 Join，绝不无限 reschedule。
+      log.warn(
+          "turn resolver failed deterministically for thread {}; failing the turn",
+          plan.threadId(),
+          deterministicFailure);
+      return commitDeterministicFailure(claim, plan);
     } finally {
       heartbeat.stop();
     }
-    if (result == null || heartbeatLost.get()) {
+    if (heartbeatLost.get()) {
       return rescheduleIfOwned(claim, config.resolveFailureDelay())
           ? ThreadProcessResult.RESCHEDULED
           : ThreadProcessResult.LOST_OWNERSHIP;
     }
+    if (result == null) {
+      // null 违反 Resolver 契约：确定性失败，落 durable FAILED 而非无限重排。
+      log.warn("turn resolver returned null for thread {}; failing the turn", plan.threadId());
+      return commitDeterministicFailure(claim, plan);
+    }
     if (result instanceof TurnResolver.Resolved resolved) {
-      // Harness 边界校验：任何不一致都是 Resolver 契约错误，抛 ISE 且此刻零 durable mutation（绝不转 typed rejection）。
-      ResolvedRequestValidator.validate(plan.candidatePath(), plan.preparation(), resolved);
+      try {
+        // Harness 边界校验：不一致即 Resolver 契约错误，此刻零 durable mutation，转为 typed FAILED 而非抛异常。
+        ResolvedRequestValidator.validate(plan.candidatePath(), plan.preparation(), resolved);
+      } catch (RuntimeException contractFailure) {
+        log.warn(
+            "resolved request violated the harness contract for thread {}; failing the turn",
+            plan.threadId(),
+            contractFailure);
+        return commitDeterministicFailure(claim, plan);
+      }
     }
     commit(claim, plan, result);
+    return ThreadProcessResult.COMPLETED;
+  }
+
+  /**
+   * 把确定性 resolver 失败落成 durable AssistantError + FAILED TURN_END 并结算 Join：复用 {@link
+   * TurnResolver.Rejected} 的 提交流程，durable 文本稳定且绝不泄露 raw cause。若该轮有 deferred user input，commit 会重新请求
+   * Thread 处理它。
+   */
+  private ThreadProcessResult commitDeterministicFailure(ClaimedWork claim, TurnPlan plan) {
+    commit(claim, plan, new TurnResolver.Rejected(DETERMINISTIC_FAILURE));
     return ThreadProcessResult.COMPLETED;
   }
 
@@ -703,17 +827,10 @@ public final class ThreadProcessor {
                   TurnEndReason.TURN_FAILED,
                   null),
               mutationNow));
-      // Rejected turn 本身没有 resolved budgets；仅 deferred demand 或更早的 fallback/hard-overflow 事实可重建
-      // wake。
-      boolean deferredUserDemand = plan.hasDeferredUserMessages();
-      boolean compactionDue =
-          automaticCompactionPlanner.plan(
-                  thread.advanceHead(turnEndId, mutationNow),
-                  tx.loadEntryPath(turnEndId),
-                  config.compactionProvider().compactionConfig(),
-                  deferredUserDemand)
-              != null;
-      boolean requestThread = deferredUserDemand || compactionDue;
+      // 确定性 Rejected 失败绝不立即 self-wake 同一自动压缩：失败 turn 已落 durable，马上重排可能再次规划同一压缩而空转。
+      // 只保留合法 queued user 需求——它会在下一 claim 作为 INPUT 正常处理（或同样落 durable 失败）；新的自动压缩只由后续真实
+      // 输入 / 唤醒重新驱动。
+      boolean requestThread = plan.hasDeferredUserMessages();
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(
               turnEndId, nextWatermark(plan, thread), mutationNow);
@@ -724,7 +841,7 @@ public final class ThreadProcessor {
       if (tx.lockClaimedWork(claim, now).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      // rejected：保留 deferred user 或已确定 compaction obligation 时先请求 THREAD 再 complete。
+      // rejected：仅在仍有合法 user 需求时先请求 THREAD 再 complete。
       if (requestThread) {
         tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
       }

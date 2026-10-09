@@ -63,7 +63,7 @@ public final class ThreadContextClassifier {
     if (openTurn.isEmpty()) {
       // 规则 1：无 open Turn 时不允许携带任何 Model/Tool 输入。回合之间的系统通知不改变续写义务锚点。
       requireNoModelOrSiblings(model, toolSiblings, "without an open turn");
-      Entry head = path.headIgnoringTrailingNotifications();
+      Entry head = path.headIgnoringTrailingControlEntries();
       if (head.payload() instanceof TurnEndPayload end && end.continueModel()) {
         // owner-aware continuation：只有被引用 TURN_START 的 ownerThreadId 等于当前 Thread 时才承担该
         // obligation；foreign continuation（另一 Thread 创建的 obligation）对本 Thread 视为历史。

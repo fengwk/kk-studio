@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.thread.command;
 
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
@@ -37,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -167,9 +171,23 @@ public final class DatabaseTurnResolver implements TurnResolver {
       Objects.requireNonNull(threadId, "threadId");
       return resolved(plan(path, clock.instant()));
     } catch (Rejection rejection) {
-      // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常原样传播。
+      // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
+    } catch (DataAccessException failure) {
+      if (isTransientInfrastructure(failure)) {
+        // 数据库瞬断（连接失败 / 可重试数据访问）：适配为显式 typed transient，由 Processor reschedule，绝不判成用户错误。
+        throw new TurnResolveTransientException(
+            "turn resolution infrastructure unavailable", failure);
+      }
+      // 非瞬时的数据访问错误（如数据完整性）：确定性失败，交由 Processor 落 durable FAILED。
+      throw failure;
     }
+  }
+
+  /** Spring SQLState 分类下属于瞬时基础设施不可用的数据访问异常。 */
+  private static boolean isTransientInfrastructure(DataAccessException failure) {
+    return failure instanceof TransientDataAccessException
+        || failure instanceof DataAccessResourceFailureException;
   }
 
   /**
@@ -737,10 +755,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
     PromptCacheRetention retention;
     try {
       retention = providerFactory.promptCacheRetention(configJson);
-      if (retention == null) {
-        throw new IllegalStateException("promptCacheRetention returned null");
-      }
-    } catch (Exception error) {
+    } catch (IllegalArgumentException error) {
+      // 只把配置非法 / 解析失败当确定性拒绝；其它异常（含基础设施）照常传播，绝不伪装成 planning 失败。
+      throw rejection("invalid prompt cache configuration for provider: " + providerName);
+    }
+    if (retention == null) {
       throw rejection("invalid prompt cache configuration for provider: " + providerName);
     }
     return retention;
