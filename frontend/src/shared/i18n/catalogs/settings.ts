@@ -265,6 +265,34 @@ export const settingsCatalog = {
     'en-US': 'The fallback model selection is incomplete; fill in all three fields or clear all of them.',
     'zh-CN': '回退模型选择不完整，请填齐三个字段或全部清空。',
   },
+  'settings.error.httpStatusNotInteger': {
+    'en-US': 'HTTP status codes must be integers without decimals or empty entries.',
+    'zh-CN': 'HTTP 状态码必须为整数，不能包含小数、非法字符或空条目。',
+  },
+  'settings.error.httpStatusOutOfRange': {
+    'en-US': 'HTTP status codes must be between 400 and 599.',
+    'zh-CN': 'HTTP 状态码必须在 400 至 599 之间。',
+  },
+  'settings.error.httpStatusDuplicate': {
+    'en-US': 'HTTP status code list contains duplicate entries.',
+    'zh-CN': 'HTTP 状态码列表中包含重复的状态码。',
+  },
+  'settings.error.integerListEmptyToken': {
+    'en-US': 'Contains an empty or incomplete status code entry.',
+    'zh-CN': '包含未完成或空的状态码条目。',
+  },
+  'settings.error.integerListInvalidToken': {
+    'en-US': '"{{token}}" is not a valid integer status code.',
+    'zh-CN': '“{{token}}”不是有效的整数状态码。',
+  },
+  'settings.error.integerListOutOfRange': {
+    'en-US': '"{{token}}" is outside the valid range ({{min}}–{{max}}).',
+    'zh-CN': '“{{token}}”超出有效范围（{{min}}–{{max}}）。',
+  },
+  'settings.error.integerListDuplicate': {
+    'en-US': 'Duplicate status code: "{{token}}".',
+    'zh-CN': '状态码“{{token}}”重复出现。',
+  },
 
   // --- General / notifications / shortcuts ---
   'settings.notifications.title': {
@@ -461,6 +489,22 @@ export const settingsCatalog = {
   'settings.option.retryBackoff.exponential': {
     'en-US': 'Exponential',
     'zh-CN': '指数',
+  },
+  'settings.section.aiRuntime.httpErrors.title': {
+    'en-US': 'HTTP error policy',
+    'zh-CN': 'HTTP 错误策略',
+  },
+  'settings.section.aiRuntime.httpErrors.description': {
+    'en-US': 'Configure retry behavior for model HTTP errors. Takes effect on next invocation.',
+    'zh-CN': '配置模型调用遇到 HTTP 错误时的重试行为。下次调用生效。',
+  },
+  'settings.field.aiRuntime.modelHttpRetryStatusCodes': {
+    'en-US': 'Retry HTTP status codes',
+    'zh-CN': '重试 HTTP 状态码',
+  },
+  'settings.field.aiRuntime.modelHttpRetryStatusCodes.hint': {
+    'en-US': 'HTTP errors matching this list retry within existing attempt and backoff budgets. Unlisted HTTP errors fail directly. Takes effect on next invocation.',
+    'zh-CN': '匹配此列表的 HTTP 错误在现有重试次数与退避预算内自动重试；未列出的 HTTP 错误直接失败。下次调用生效。',
   },
 
   // --- Tools & Permissions ---

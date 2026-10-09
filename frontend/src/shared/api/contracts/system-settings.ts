@@ -41,6 +41,7 @@ export interface SystemSettingsAiRuntimeDTO {
   /** 0 表示不额外限制（无 cap）。 */
   subagentMaxTotalConcurrency: number
   subagentMaxTurns: number
+  modelHttpRetryStatusCodes: number[]
 }
 
 export interface SystemSettingsEnvironmentDTO {
@@ -167,6 +168,7 @@ export type SystemSettingsSchemaFieldType =
   | 'ENUM'
   | 'PERMISSION'
   | 'MODEL_SELECTION'
+  | 'INTEGER_LIST'
 
 export type SystemSettingsSchemaApplyTiming = 'NEXT_INVOCATION' | 'NEXT_CHAT' | 'RESTART'
 

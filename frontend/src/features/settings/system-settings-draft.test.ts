@@ -305,5 +305,41 @@ describe('system settings draft codec', () => {
     // draft leaf 枚举与 schema 语义一致：两个 custom atomic leaf 各算一个 leaf。
     expect(draftLeafPaths(draft)).toContain('tool.permission')
     expect(draftLeafPaths(draft)).toContain('aiRuntime.compactionFallbackModel')
+    expect(draftLeafPaths(draft)).toContain('aiRuntime.modelHttpRetryStatusCodes')
+  })
+
+  it('assembles and validates modelHttpRetryStatusCodes correctly', () => {
+    const draft = settingsSectionsToDraft(makeSettingsDto())
+    draft.aiRuntime.modelHttpRetryStatusCodes = [408, '429', 500, '502', 503, 504]
+    const update = assembleSettingsUpdate(draft, '0')
+    expect(update.aiRuntime.modelHttpRetryStatusCodes).toEqual([408, 429, 500, 502, 503, 504])
+
+    // Duplicate check
+    draft.aiRuntime.modelHttpRetryStatusCodes = [429, 500, '500']
+    expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
+      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusDuplicate' }),
+    )
+
+    // Out of range check
+    draft.aiRuntime.modelHttpRetryStatusCodes = [200]
+    expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
+      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusOutOfRange' }),
+    )
+
+    draft.aiRuntime.modelHttpRetryStatusCodes = [600]
+    expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
+      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusOutOfRange' }),
+    )
+
+    // Non-integer check
+    draft.aiRuntime.modelHttpRetryStatusCodes = ['abc']
+    expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
+      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusNotInteger' }),
+    )
+
+    draft.aiRuntime.modelHttpRetryStatusCodes = [500.5]
+    expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
+      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusNotInteger' }),
+    )
   })
 })

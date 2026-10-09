@@ -19,6 +19,7 @@ const FIELD_TYPES = new Set<SystemSettingsSchemaFieldType>([
   'ENUM',
   'PERMISSION',
   'MODEL_SELECTION',
+  'INTEGER_LIST',
 ])
 
 const APPLY_TIMINGS = new Set<SystemSettingsSchemaApplyTiming>([
@@ -167,6 +168,8 @@ function matchesFieldType(
     case 'ENUM':
       return typeof value === 'string'
     case 'PERMISSION':
+      return Array.isArray(value)
+    case 'INTEGER_LIST':
       return Array.isArray(value)
     case 'MODEL_SELECTION':
       return value == null ? nullable : isModelSelectionDraft(value)

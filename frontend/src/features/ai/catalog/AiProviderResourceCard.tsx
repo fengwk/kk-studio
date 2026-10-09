@@ -48,6 +48,14 @@ export function ProviderResourceCard({
             { label: t('ai.catalog.card.idle'), value: formatMs(provider.modelCallIdleTimeoutMillis) },
           ],
         },
+        [
+          t('ai.catalog.card.httpRetry'),
+          provider.modelHttpRetryStatusCodes == null
+            ? t('ai.catalog.card.httpRetryInherit')
+            : (provider.modelHttpRetryStatusCodes.length === 0
+                ? t('ai.catalog.card.httpRetryDisabled')
+                : provider.modelHttpRetryStatusCodes.join(', ')),
+        ],
       ]}
       onEdit={onEdit}
       onDelete={onDelete}
