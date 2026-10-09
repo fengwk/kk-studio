@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
@@ -25,11 +26,14 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -233,14 +237,12 @@ class CodingCapabilitiesEdgeTest {
     IllegalArgumentException relativeExisting =
         assertThrows(
             IllegalArgumentException.class, () -> EnvironmentPaths.existing("relative.txt"));
-    assertTrue(
-        relativeExisting.getMessage().contains("path must be an absolute path: relative.txt"));
+    assertTrue(relativeExisting.getMessage().contains("path must be an absolute path"));
 
     IllegalArgumentException relativeWritable =
         assertThrows(
             IllegalArgumentException.class, () -> EnvironmentPaths.writable("relative.txt"));
-    assertTrue(
-        relativeWritable.getMessage().contains("path must be an absolute path: relative.txt"));
+    assertTrue(relativeWritable.getMessage().contains("path must be an absolute path"));
 
     assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing(""));
     assertThrows(
@@ -458,7 +460,7 @@ class CodingCapabilitiesEdgeTest {
         new LspGotoDefinitionCapability(config, lspService, executor);
     EnvironmentCapabilityResult relPath = invoke(gotoDef, "{\"path\":\"src/App.java\",\"line\":1}");
     assertTrue(relPath.error());
-    assertTrue(text(relPath).contains("path must be an absolute path: src/App.java"));
+    assertTrue(text(relPath).contains("path must be an absolute path"));
 
     EnvironmentCapabilityResult missingFile =
         invoke(
@@ -591,6 +593,45 @@ class CodingCapabilitiesEdgeTest {
 
   private WriteCapability write(CodingToolsConfig config) {
     return new WriteCapability(config, executor);
+  }
+
+  /** 越界窗口参数是派发前输入拒绝：声明未执行，只给出字段要求，不回显原始字段值。 */
+  @Test
+  void invalidWindowParameterIsRejectedBeforeExecution() throws Exception {
+    Path file = workspaceRoot.resolve("window-param.txt");
+    Files.writeString(file, "content\n");
+    EnvironmentCapabilityResult result =
+        invoke(
+            new ReadCapability(config(2000, 60000), executor),
+            "{\"path\":" + json(file.toString()) + ",\"offset\":0}");
+
+    assertTrue(result.error(), text(result));
+    assertTrue(text(result).contains("The tool was not executed."), text(result));
+    assertTrue(text(result).contains("offset must be a positive integer"), text(result));
+  }
+
+  /** 不在本模块失败产生点生成的未知运行异常（这里由 JDK 文件访问抛出）必须用固定安全文案：声明结果不可确认，且绝不回显可能内联路径/凭据的原始 message。 */
+  @Test
+  void unknownRuntimeFailureDoesNotEchoRawMessage() throws Exception {
+    assumeTrue(
+        FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+        "需要 POSIX 权限位来构造确定性的 JDK 侧文件访问失败");
+    Path canary = workspaceRoot.resolve("unknown-failure-canary.txt");
+    Files.writeString(canary, "canary");
+    Files.setPosixFilePermissions(canary, Set.of());
+    try {
+      EnvironmentCapabilityResult result =
+          invoke(
+              new ReadCapability(config(2000, 60000), executor),
+              "{\"path\":" + json(canary.toString()) + "}");
+
+      assertTrue(result.error(), text(result));
+      assertTrue(text(result).contains("cannot be confirmed"), text(result));
+      assertFalse(text(result).contains("The tool was not executed."), text(result));
+      assertFalse(text(result).contains("unknown-failure-canary.txt"), text(result));
+    } finally {
+      Files.setPosixFilePermissions(canary, PosixFilePermissions.fromString("rw-------"));
+    }
   }
 
   private EditCapability edit(CodingToolsConfig config) {

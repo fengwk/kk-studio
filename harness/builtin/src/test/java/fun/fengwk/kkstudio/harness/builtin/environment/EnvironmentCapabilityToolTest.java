@@ -127,9 +127,11 @@ class EnvironmentCapabilityToolTest {
     assertFalse(handle.isCancelled());
     assertNotNull(outcomeRef.get());
     assertTrue(outcomeRef.get().result().error());
-    assertEquals(
-        "No environment bound in execution context",
-        ((TextResultContent) outcomeRef.get().result().contents().get(0)).text());
+    String message = ((TextResultContent) outcomeRef.get().result().contents().get(0)).text();
+    assertTrue(message.contains("No Environment is bound in the execution context"), message);
+    // 缺少环境绑定是派发前确定性结果：必须声明未执行并给出下一步。
+    assertTrue(message.contains("The tool was not executed."), message);
+    assertTrue(message.contains("Select an Environment"), message);
   }
 
   /** 显式 timeout_seconds 严格覆盖 capability 默认超时：更短与更长都必须原样生效，不做 min clamp。 */

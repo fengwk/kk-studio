@@ -336,23 +336,21 @@ class LspCapabilitiesTest {
             new LspGotoDefinitionCapability(config, service, executor),
             "{\"path\":\"App.java\",\"line\":1}");
     assertTrue(definition.error(), text(definition));
-    assertTrue(
-        text(definition).contains("path must be an absolute path: App.java"), text(definition));
+    assertTrue(text(definition).contains("path must be an absolute path"), text(definition));
 
     EnvironmentCapabilityResult symbols =
         invoke(
             new LspWorkspaceSymbolsCapability(config, service, executor),
             "{\"path\":\"App.java\",\"query\":\"A\"}");
     assertTrue(symbols.error(), text(symbols));
-    assertTrue(text(symbols).contains("path must be an absolute path: App.java"), text(symbols));
+    assertTrue(text(symbols).contains("path must be an absolute path"), text(symbols));
 
     EnvironmentCapabilityResult decompiled =
         invoke(
             new LspJavaDecompileCapability(config, service, executor),
             "{\"path\":\"App.java\",\"target\":\"jdt://contents/App.class\"}");
     assertTrue(decompiled.error(), text(decompiled));
-    assertTrue(
-        text(decompiled).contains("path must be an absolute path: App.java"), text(decompiled));
+    assertTrue(text(decompiled).contains("path must be an absolute path"), text(decompiled));
 
     assertTrue(FakeLspServers.events(transcript).isEmpty(), "相对路径被拒不得启动服务器");
     assertEquals(0, service.activeClientCount(), "相对路径被拒不得占用客户端");

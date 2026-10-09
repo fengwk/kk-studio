@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -12,6 +14,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.TreeSet;
 
 /**
  * 纯函数：把已经通过 {@link ModelResponseValidator} canonical 校验的 {@link ProviderResponse} 规划为 Thread 可执行
@@ -58,7 +61,7 @@ public final class ModelResponsePlanner {
                 rawCall,
                 null,
                 ToolInvocationStatus.FAILED,
-                new ToolInvocationError(UNKNOWN_TOOL, "unknown tool: " + call.name())));
+                unknownTool(call.name(), frozenBindings)));
         continue;
       }
       try {
@@ -89,7 +92,10 @@ public final class ModelResponsePlanner {
               ToolInvocationStatus.FAILED,
               new ToolInvocationError(
                   MODEL_OUTPUT_TRUNCATED,
-                  "model output truncated; tool call not executed: " + call.name())));
+                  ToolErrorGuidance.message(
+                      "model output truncated; tool call not executed: " + call.name(),
+                      ExecutionFact.NOT_EXECUTED,
+                      "Reduce the response size and call the tool again"))));
     }
     return new ModelResponsePlan.ToolBatch(List.copyOf(slots));
   }
@@ -113,10 +119,35 @@ public final class ModelResponsePlanner {
   private static ToolInvocationError invalidArguments(IllegalArgumentException failure) {
     // ToolInvocationError 拒绝 blank message：schema 校验失败 message 可能为空。
     String message = failure.getMessage();
-    return new ToolInvocationError(
-        INVALID_TOOL_ARGUMENTS,
+    String whatFailed =
         message == null || message.isBlank()
             ? "tool arguments do not conform to the tool schema"
-            : message);
+            : message;
+    return new ToolInvocationError(
+        INVALID_TOOL_ARGUMENTS,
+        ToolErrorGuidance.message(
+            whatFailed,
+            ExecutionFact.NOT_EXECUTED,
+            "Correct the arguments to match the tool schema, then call the tool again"));
+  }
+
+  /**
+   * unknown call 的模型可见错误：只列出冻结 spec 允许的工具（不是 live catalog），并明确未执行与下一步。
+   *
+   * <p>列表按名称排序去重；冻结集合为空时显式写 {@code none}，不伪装成任意工具可用。
+   */
+  private static ToolInvocationError unknownTool(
+      String toolName, List<ToolBinding> frozenBindings) {
+    TreeSet<String> allowed = new TreeSet<>();
+    for (ToolBinding binding : frozenBindings) {
+      allowed.add(binding.descriptor().name());
+    }
+    String allowedNames = allowed.isEmpty() ? "none" : String.join(", ", allowed);
+    return new ToolInvocationError(
+        UNKNOWN_TOOL,
+        ToolErrorGuidance.message(
+            "unknown tool \"" + toolName + "\"; allowed tools: " + allowedNames,
+            ExecutionFact.NOT_EXECUTED,
+            "Call one of the allowed tools"));
   }
 }

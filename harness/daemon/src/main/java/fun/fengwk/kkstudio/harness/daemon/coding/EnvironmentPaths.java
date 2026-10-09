@@ -28,27 +28,41 @@ final class EnvironmentPaths {
    * <p>不做 home/环境变量展开、不自动 mkdir、不回退到 Environment Root 或任何会话默认值；每次调用独立解析。
    */
   static Path workdir(String rawWorkdir) {
-    String validated =
-        DaemonWorkdirSyntax.requireAbsolute(
-            rawWorkdir, DaemonOperatingSystemDetector.detectCurrent());
+    String validated;
+    try {
+      validated =
+          DaemonWorkdirSyntax.requireAbsolute(
+              rawWorkdir, DaemonOperatingSystemDetector.detectCurrent());
+    } catch (IllegalArgumentException error) {
+      throw new ToolInputRejectedException(rejectWorkdir(rawWorkdir));
+    }
     Path candidate = parse(validated, "workdir");
     if (!candidate.isAbsolute()) {
-      throw new IllegalArgumentException("workdir must be an absolute path: " + rawWorkdir);
+      throw new ToolInputRejectedException(
+          "workdir must be an absolute path (a relative or non-absolute value was given)");
     }
     if (!Files.isDirectory(candidate)) {
-      throw new IllegalArgumentException("workdir must be an existing directory: " + rawWorkdir);
+      throw new ToolInputRejectedException("workdir must be an existing directory: " + rawWorkdir);
     }
     if (!Files.isReadable(candidate)) {
-      throw new IllegalArgumentException("workdir must be a readable directory: " + rawWorkdir);
+      throw new ToolInputRejectedException("workdir must be a readable directory: " + rawWorkdir);
     }
     return canonicalExisting(candidate, "workdir");
+  }
+
+  /** workdir 词法校验的拒绝文案：空值说明字段要求；其余只指出绝对路径要求，不回显调用方给出的原始值（词法校验自身会内联该值）。 */
+  private static String rejectWorkdir(String rawWorkdir) {
+    if (rawWorkdir == null || rawWorkdir.isBlank()) {
+      return "workdir must be a non-blank absolute directory path";
+    }
+    return "workdir must be an absolute path (a relative or non-absolute value was given)";
   }
 
   /** 解析已存在的文件或目录；{@code rawPath} 必须是绝对路径，返回其真实路径。 */
   static Path existing(String rawPath) {
     Path candidate = requireAbsolute(rawPath, "path");
     if (!Files.exists(candidate)) {
-      throw new IllegalArgumentException("path does not exist: " + display(rawPath));
+      throw new ToolInputRejectedException("path does not exist: " + display(rawPath));
     }
     return canonicalExisting(candidate, "path");
   }
@@ -68,7 +82,7 @@ final class EnvironmentPaths {
       ancestor = ancestor.getParent();
     }
     if (ancestor == null) {
-      throw new IllegalArgumentException("path has no existing ancestor: " + display(rawPath));
+      throw new ToolInputRejectedException("path has no existing ancestor: " + display(rawPath));
     }
     return canonicalExisting(ancestor, "path ancestor")
         .resolve(ancestor.relativize(candidate))
@@ -79,7 +93,8 @@ final class EnvironmentPaths {
     requirePath(raw, name);
     Path requested = parse(raw, name);
     if (!requested.isAbsolute()) {
-      throw new IllegalArgumentException(name + " must be an absolute path: " + raw);
+      throw new ToolInputRejectedException(
+          name + " must be an absolute path (a relative or non-absolute value was given)");
     }
     return requested.normalize();
   }
@@ -88,7 +103,7 @@ final class EnvironmentPaths {
     try {
       return Path.of(raw);
     } catch (RuntimeException error) {
-      throw new IllegalArgumentException(name + " is not a valid path: " + raw, error);
+      throw new ToolInputRejectedException(name + " is not a valid path", error);
     }
   }
 
@@ -96,13 +111,13 @@ final class EnvironmentPaths {
     try {
       return candidate.toRealPath();
     } catch (IOException error) {
-      throw new IllegalArgumentException(name + " must exist: " + candidate, error);
+      throw new ToolInputRejectedException(name + " must exist: " + candidate, error);
     }
   }
 
   private static void requirePath(String raw, String name) {
     if (raw == null || raw.isBlank()) {
-      throw new IllegalArgumentException(name + " is required");
+      throw new ToolInputRejectedException(name + " is required");
     }
   }
 

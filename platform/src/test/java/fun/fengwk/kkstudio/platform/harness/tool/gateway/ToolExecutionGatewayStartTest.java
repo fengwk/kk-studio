@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -488,7 +489,7 @@ class ToolExecutionGatewayStartTest {
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("ENVIRONMENT_NOT_SELECTED", rejected.error().kind());
     assertTrue(
-        rejected.error().message().contains("select an Environment"), rejected.error().message());
+        rejected.error().message().contains("Select an Environment"), rejected.error().message());
     // 未向 Environment transport 发送任何调用，也没有新提交的执行任务或结果写入。
     assertTrue(transport.invocations.isEmpty());
     assertEquals(queuedBefore, executor.queued.size());
@@ -742,7 +743,10 @@ class ToolExecutionGatewayStartTest {
     ToolGateway.Indeterminate indeterminate =
         assertInstanceOf(ToolGateway.Indeterminate.class, result);
     assertEquals("EXECUTION_FAILED", indeterminate.error().kind());
-    assertEquals("executor broken", indeterminate.error().message());
+    // 提交结果不确定：不得声称未执行，原始 executor 异常只进日志。
+    assertTrue(indeterminate.error().message().contains("submission failed"));
+    assertTrue(indeterminate.error().message().contains("cannot be confirmed"));
+    assertFalse(indeterminate.error().message().contains("executor broken"));
   }
 
   @Test

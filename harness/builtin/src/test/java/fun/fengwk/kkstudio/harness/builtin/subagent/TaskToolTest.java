@@ -316,4 +316,23 @@ class TaskToolTest {
   private static String text(ToolResult result) {
     return ((TextResultContent) result.contents().get(0)).text();
   }
+
+  /** task 参数被拒：明确未执行、父线程保留，并列出继续参数 subagent_type/prompt/thread_id，不含重试倾向措辞。 */
+  @Test
+  void rejectionGuidanceStatesNotExecutedAndContinuationParameters() {
+    TaskTool tool = new TaskTool(request -> acceptance(false));
+    AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
+    ToolExecutionRequest request =
+        createRequest(tool, "call-guidance", "{\"subagent_type\":\" coder \",\"prompt\":\"p\"}");
+
+    tool.execute(request, createListener(outcomeRef));
+
+    String message = text(outcomeRef.get().result());
+    assertTrue(message.contains("subagent_type must not contain surrounding whitespace"), message);
+    assertTrue(message.contains("The tool was not executed."), message);
+    assertTrue(message.contains("subagent_type"), message);
+    assertTrue(message.contains("prompt"), message);
+    assertTrue(message.contains("thread_id"), message);
+    assertFalse(message.toLowerCase().contains("do not retry"), message);
+  }
 }
