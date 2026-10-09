@@ -6,6 +6,8 @@ import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
@@ -103,7 +105,23 @@ public final class ToolExecutionGateway implements ToolGateway {
   /** 回调桥缓冲队列的保守上限：gate 打开前的同步回调绝不能无界缓冲。 */
   static final int MAX_BUFFERED_SIGNALS = 256;
 
-  private static final String PERMISSION_DENIED_MESSAGE = "Tool permission was denied.";
+  private static final String PERMISSION_DENIED_MESSAGE =
+      ToolErrorGuidance.message(
+          "Tool permission was denied",
+          ExecutionFact.NOT_EXECUTED,
+          "Request approval or adjust the tool permission policy");
+
+  /** 冻结定义与当前 catalog 不一致时的确定性下一步：模型无法原地修复，只能以新冻结重开。 */
+  private static final String DEFINITION_MISMATCH_NEXT_ACTION =
+      "Start a new thread so the frozen tool definition is re-frozen against the current catalog";
+
+  /** 确定性拒绝的下一步：同一调用在修复前会得到同样结果，不构成自动重试建议。 */
+  private static final String DETERMINISTIC_REJECTION_NEXT_ACTION =
+      "Correct the underlying contract violation before calling the tool again";
+
+  /** 结果不确定时的下一步：先核查副作用再决定，绝不能假设未执行。 */
+  private static final String VERIFY_EFFECT_NEXT_ACTION =
+      "Check whether the tool already took effect before calling it again";
 
   private final RuntimeToolCatalog toolCatalog;
   private final HarnessCatalog harnessCatalog;
@@ -161,14 +179,21 @@ public final class ToolExecutionGateway implements ToolGateway {
       return new ResolvedContribution(
           null,
           new ToolInvocationError(
-              TOOL_NOT_FOUND_KIND, "Frozen tool definition " + toolName + " is not registered."));
+              TOOL_NOT_FOUND_KIND,
+              ToolErrorGuidance.message(
+                  "Frozen tool definition " + toolName + " is not registered",
+                  ExecutionFact.NOT_EXECUTED,
+                  DEFINITION_MISMATCH_NEXT_ACTION)));
     }
     if (!contribution.definition().equals(frozenDefinition)) {
       return new ResolvedContribution(
           null,
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen tool definition " + toolName + " does not match its catalog definition."));
+              ToolErrorGuidance.message(
+                  "Frozen tool definition " + toolName + " does not match its catalog definition",
+                  ExecutionFact.NOT_EXECUTED,
+                  DEFINITION_MISMATCH_NEXT_ACTION)));
     }
     ContributorBinding frozenContributor = binding.contributor();
     ContributionId expectedContributionId =
@@ -179,11 +204,14 @@ public final class ToolExecutionGateway implements ToolGateway {
           null,
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen contributor binding "
-                  + frozenContributor.contributorId()
-                  + "/"
-                  + frozenContributor.localName()
-                  + " does not match the catalog contribution."));
+              ToolErrorGuidance.message(
+                  "Frozen contributor binding "
+                      + frozenContributor.contributorId()
+                      + "/"
+                      + frozenContributor.localName()
+                      + " does not match the catalog contribution",
+                  ExecutionFact.NOT_EXECUTED,
+                  DEFINITION_MISMATCH_NEXT_ACTION)));
     }
     ToolRequirements requirements = contribution.requirements();
     if (binding.environmentSupport() != requirements.environmentSupport()) {
@@ -191,8 +219,11 @@ public final class ToolExecutionGateway implements ToolGateway {
           null,
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen tool environment requirement does not match catalog requirements: "
-                  + toolName));
+              ToolErrorGuidance.message(
+                  "Frozen tool environment requirement does not match catalog requirements: "
+                      + toolName,
+                  ExecutionFact.NOT_EXECUTED,
+                  DEFINITION_MISMATCH_NEXT_ACTION)));
     }
     if (requirements.requiredEnvironmentId() != null
         && binding.environmentId() != null
@@ -201,19 +232,25 @@ public final class ToolExecutionGateway implements ToolGateway {
           null,
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen tool bound environment "
-                  + binding.environmentId()
-                  + " does not match catalog required environment: "
-                  + requirements.requiredEnvironmentId()));
+              ToolErrorGuidance.message(
+                  "Frozen tool bound environment "
+                      + binding.environmentId()
+                      + " does not match catalog required environment: "
+                      + requirements.requiredEnvironmentId(),
+                  ExecutionFact.NOT_EXECUTED,
+                  DEFINITION_MISMATCH_NEXT_ACTION)));
     }
     if (!stateAccessesMatch(frozenContributor, requirements)) {
       return new ResolvedContribution(
           null,
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Tool definition "
-                  + toolName
-                  + " no longer matches its frozen state access declaration."));
+              ToolErrorGuidance.message(
+                  "Tool definition "
+                      + toolName
+                      + " no longer matches its frozen state access declaration",
+                  ExecutionFact.NOT_EXECUTED,
+                  DEFINITION_MISMATCH_NEXT_ACTION)));
     }
     return new ResolvedContribution(contribution, null);
   }
@@ -231,10 +268,12 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
     return new ToolInvocationError(
         ENVIRONMENT_NOT_SELECTED_KIND,
-        "Tool "
-            + binding.descriptor().name()
-            + " requires an Environment but this branch has none selected; select an Environment "
-            + "for the branch and retry.");
+        ToolErrorGuidance.message(
+            "Tool "
+                + binding.descriptor().name()
+                + " requires an Environment but this branch has none selected",
+            ExecutionFact.NOT_EXECUTED,
+            "Select an Environment for the branch, then call the tool again"));
   }
 
   private static boolean stateAccessesMatch(
@@ -308,8 +347,11 @@ public final class ToolExecutionGateway implements ToolGateway {
         return new ToolGateway.Rejected(
             new ToolInvocationError(
                 TOOL_DEFINITION_MISMATCH_KIND,
-                "Registered tool descriptor does not match frozen descriptor: "
-                    + contribution.definition().descriptor().name()));
+                ToolErrorGuidance.message(
+                    "Registered tool descriptor does not match frozen descriptor: "
+                        + contribution.definition().descriptor().name(),
+                    ExecutionFact.NOT_EXECUTED,
+                    DEFINITION_MISMATCH_NEXT_ACTION)));
       }
       // preflight 已拦截的形态在此保留同样的 fail-safe：事务外仍有窄窗口，绝不能退化为普通 UNAVAILABLE。
       ToolInvocationError environmentNotSelected =
@@ -351,7 +393,11 @@ public final class ToolExecutionGateway implements ToolGateway {
         lease.close();
         return new ToolGateway.Rejected(
             new ToolInvocationError(
-                INVALID_REQUEST_KIND, failureMessage(invalidRequest, "Tool request is invalid.")));
+                INVALID_REQUEST_KIND,
+                ToolErrorGuidance.message(
+                    failureMessage(invalidRequest, "Tool request is invalid"),
+                    ExecutionFact.NOT_EXECUTED,
+                    "Correct the tool arguments, then call the tool again")));
       }
 
       GatedToolExecutionListener bridge =
@@ -434,8 +480,10 @@ public final class ToolExecutionGateway implements ToolGateway {
       return new ToolGateway.Indeterminate(
           new ToolInvocationError(
               EXECUTION_FAILED_KIND,
-              failureMessage(
-                  ambiguous, "Tool execution submission failed; outcome cannot be confirmed.")));
+              ToolErrorGuidance.message(
+                  "Tool execution submission failed",
+                  ExecutionFact.UNCERTAIN,
+                  VERIFY_EFFECT_NEXT_ACTION)));
     }
     return new ToolGateway.Started(handle);
   }
@@ -789,13 +837,12 @@ public final class ToolExecutionGateway implements ToolGateway {
               unknown(
                   new IllegalStateException(
                       "tool callback buffer exceeded " + MAX_BUFFERED_SIGNALS + " signals"),
-                  "tool callback buffer overflowed; outcome cannot be confirmed");
+                  "the tool callback buffer overflowed");
         } else {
           try {
             terminalSignal = process(signal);
           } catch (RuntimeException failure) {
-            terminalSignal =
-                unknown(failure, "tool callback dispatch failed; outcome cannot be confirmed");
+            terminalSignal = unknown(failure, "tool callback dispatch failed");
           }
         }
         if (terminalSignal) {
@@ -819,25 +866,20 @@ public final class ToolExecutionGateway implements ToolGateway {
 
     private boolean processPartial(ToolResult partial) {
       if (partial == null) {
-        return fail(new ToolInvocationError(INVALID_PARTIAL_KIND, "partial must not be null"));
+        return fail(invalidPartial("partial must not be null"));
       }
       if (!partial.toolCallId().equals(expectedCallId)) {
-        return fail(
-            new ToolInvocationError(
-                INVALID_PARTIAL_KIND, "partial toolCallId does not match the request call"));
+        return fail(invalidPartial("partial toolCallId does not match the request call"));
       }
       for (ResultContent content : partial.contents()) {
         if (content instanceof BinaryResultContent || content instanceof ResourceResultContent) {
-          return fail(
-              new ToolInvocationError(
-                  INVALID_PARTIAL_KIND, "partial must not carry binary or resource content"));
+          return fail(invalidPartial("partial must not carry binary or resource content"));
         }
       }
       if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
           partial, ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES)) {
         return fail(
-            new ToolInvocationError(
-                INVALID_PARTIAL_KIND,
+            invalidPartial(
                 "partial must not exceed "
                     + ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES
                     + " bytes of canonical tool result JSON"));
@@ -845,18 +887,28 @@ public final class ToolExecutionGateway implements ToolGateway {
       return deliverPartialOrUnknown(() -> listener.onPartial(partial));
     }
 
+    /** 工具已开始执行后产出非法 partial：不是派发前验证拒绝，只能声明结果未交付且不可确认，不能声称未执行。 */
+    private static ToolInvocationError invalidPartial(String whatFailed) {
+      return new ToolInvocationError(
+          INVALID_PARTIAL_KIND,
+          ToolErrorGuidance.message(
+              whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
+    }
+
+    private static ToolInvocationError invalidResult(String whatFailed) {
+      return new ToolInvocationError(
+          ToolResultFinalizer.INVALID_RESULT_KIND,
+          ToolErrorGuidance.message(
+              whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
+    }
+
     private boolean processComplete(ToolOutcome outcome) {
       if (outcome == null || outcome.result() == null) {
-        return fail(
-            new ToolInvocationError(
-                ToolResultFinalizer.INVALID_RESULT_KIND, "terminal result must not be null"));
+        return fail(invalidResult("terminal result must not be null"));
       }
       ToolResult result = outcome.result();
       if (!result.toolCallId().equals(expectedCallId)) {
-        return fail(
-            new ToolInvocationError(
-                ToolResultFinalizer.INVALID_RESULT_KIND,
-                "terminal result toolCallId does not match the request call"));
+        return fail(invalidResult("terminal result toolCallId does not match the request call"));
       }
       ToolEffectBatch effects;
       try {
@@ -865,13 +917,16 @@ public final class ToolExecutionGateway implements ToolGateway {
         return fail(
             new ToolInvocationError(
                 CONTRIBUTOR_CONTRACT_VIOLATION_KIND,
-                failureMessage(invalid, "Tool outcome returned invalid custom entries.")));
+                ToolErrorGuidance.message(
+                    failureMessage(invalid, "Tool outcome returned invalid custom entries"),
+                    ExecutionFact.UNCERTAIN,
+                    DETERMINISTIC_REJECTION_NEXT_ACTION)));
       }
       ToolResultFinalizer.Outcome finalized;
       try {
         finalized = finalizer.finalizeResult(toolName, result);
       } catch (RuntimeException failure) {
-        return unknown(failure, "tool result finalization failed; outcome cannot be confirmed");
+        return unknown(failure, "tool result finalization failed");
       }
       return switch (finalized) {
         case ToolResultFinalizer.Outcome.Success success -> {
@@ -926,14 +981,19 @@ public final class ToolExecutionGateway implements ToolGateway {
     /** 将执行异常映射为终态；远程发送不确定性必须保持为 {@code unknown}。 */
     private boolean processError(Throwable error) {
       if (error == null) {
-        return unknown(null, "tool reported a null error; outcome cannot be confirmed");
+        return unknown(null, "the tool reported a null error");
       }
       if (error instanceof EnvironmentCapabilityCancelledException cancelled) {
+        // 取消可能发生在副作用之后：只能声明结果未确认，绝不能声称未执行。
         deliverTerminal(
             () ->
                 listener.onCancelled(
                     new ToolInvocationError(
-                        CANCELLED_KIND, failureMessage(cancelled, "Tool execution cancelled."))));
+                        CANCELLED_KIND,
+                        ToolErrorGuidance.message(
+                            failureMessage(cancelled, "Tool execution was cancelled"),
+                            ExecutionFact.UNCERTAIN,
+                            VERIFY_EFFECT_NEXT_ACTION))));
         return true;
       }
       if (error instanceof EnvironmentCapabilityFailedException failed) {
@@ -943,7 +1003,11 @@ public final class ToolExecutionGateway implements ToolGateway {
                     new ToolGateway.Failure(
                         new ToolInvocationError(
                             EXECUTION_FAILED_KIND,
-                            failureMessage(failed, "Tool execution failed.")),
+                            ToolErrorGuidance.message(
+                                failureMessage(failed, "Tool execution failed"),
+                                ExecutionFact.FAILED,
+                                "Inspect the failure and adjust the request before calling the tool"
+                                    + " again")),
                         false)));
         return true;
       }
@@ -953,18 +1017,25 @@ public final class ToolExecutionGateway implements ToolGateway {
                 listener.onUnknown(
                     new ToolInvocationError(
                         REMOTE_UNCERTAIN_KIND,
-                        failureMessage(
-                            uncertain,
-                            "Remote tool outcome is uncertain; side effect result is unknown."))));
+                        ToolErrorGuidance.message(
+                            failureMessage(uncertain, "Remote tool outcome is uncertain"),
+                            ExecutionFact.UNCERTAIN,
+                            VERIFY_EFFECT_NEXT_ACTION))));
         return true;
       }
       if (error instanceof EnvironmentCapabilityUnavailableException unavailable) {
+        // transport 契约：unavailable 时调用肯定未执行。
         deliverTerminal(
             () ->
                 listener.onFailed(
                     new ToolGateway.Failure(
                         new ToolInvocationError(
-                            UNAVAILABLE_KIND, failureMessage(unavailable, "Tool is unavailable.")),
+                            UNAVAILABLE_KIND,
+                            ToolErrorGuidance.message(
+                                failureMessage(unavailable, "Tool is unavailable"),
+                                ExecutionFact.NOT_EXECUTED,
+                                "Wait for the Environment to become available, then call the tool"
+                                    + " again")),
                         true)));
         return true;
       }
@@ -974,11 +1045,16 @@ public final class ToolExecutionGateway implements ToolGateway {
                 listener.onFailed(
                     new ToolGateway.Failure(
                         new ToolInvocationError(
-                            UNAVAILABLE_KIND, failureMessage(busy, "Tool is busy.")),
+                            UNAVAILABLE_KIND,
+                            ToolErrorGuidance.message(
+                                failureMessage(busy, "Tool is busy"),
+                                ExecutionFact.NOT_EXECUTED,
+                                "Wait for the Environment to finish its current work, then call"
+                                    + " the tool again")),
                         true)));
         return true;
       }
-      return unknown(error, "unclassified tool failure; outcome cannot be confirmed");
+      return unknown(error, "the tool failed for an unclassified reason");
     }
 
     private boolean fail(ToolInvocationError error) {
@@ -991,8 +1067,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         callback.run();
         return false;
       } catch (RuntimeException failure) {
-        return unknown(
-            failure, "listener failed to process tool callback; outcome cannot be confirmed");
+        return unknown(failure, "the listener failed to process a tool callback");
       }
     }
 
@@ -1013,11 +1088,16 @@ public final class ToolExecutionGateway implements ToolGateway {
       }
     }
 
-    private boolean unknown(Throwable failure, String reason) {
-      String detail = safeMessage(failure);
+    private boolean unknown(Throwable failure, String whatFailed) {
+      if (failure != null) {
+        // 底层原始 message 只进日志，绝不进入模型可见错误文本。
+        log.warn("tool gateway unknown outcome for tool {}: {}", toolName, safeMessage(failure));
+      }
       ToolInvocationError error =
           new ToolInvocationError(
-              EXECUTION_FAILED_KIND, detail == null ? reason : reason + ": " + detail);
+              EXECUTION_FAILED_KIND,
+              ToolErrorGuidance.message(
+                  whatFailed, ExecutionFact.UNCERTAIN, VERIFY_EFFECT_NEXT_ACTION));
       deliverTerminal(() -> listener.onUnknown(error));
       return true;
     }

@@ -88,7 +88,11 @@ class ToolExecutionGatewayPreflightTest {
     ToolGateway.PreflightResult result = preflight(PermissionAction.DENY);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("PERMISSION_DENIED", deny.error().kind());
-    assertEquals("Tool permission was denied.", deny.error().message());
+    assertTrue(
+        deny.error().message().contains("Tool permission was denied"), deny.error().message());
+    // 权限拒绝是派发前确定性失败：必须明确未执行。
+    assertTrue(
+        deny.error().message().contains("The tool was not executed."), deny.error().message());
   }
 
   @Test
@@ -148,8 +152,12 @@ class ToolExecutionGatewayPreflightTest {
                         null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
-    assertEquals(
-        "Frozen tool definition missing is not registered.", unknownDeny.error().message());
+    assertTrue(
+        unknownDeny.error().message().contains("Frozen tool definition missing is not registered"),
+        unknownDeny.error().message());
+    assertTrue(
+        unknownDeny.error().message().contains("The tool was not executed."),
+        unknownDeny.error().message());
 
     ToolDescriptor mismatched = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGateway.Deny mismatchDeny =
@@ -165,8 +173,14 @@ class ToolExecutionGatewayPreflightTest {
                         null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
-    assertEquals(
-        "Frozen tool definition demo does not match its catalog definition.",
+    assertTrue(
+        mismatchDeny
+            .error()
+            .message()
+            .contains("Frozen tool definition demo does not match its catalog definition"),
+        mismatchDeny.error().message());
+    assertTrue(
+        mismatchDeny.error().message().contains("The tool was not executed."),
         mismatchDeny.error().message());
     verifyNoInteractions(evaluator);
   }
@@ -202,7 +216,7 @@ class ToolExecutionGatewayPreflightTest {
 
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("ENVIRONMENT_NOT_SELECTED", deny.error().kind());
-    assertTrue(deny.error().message().contains("select an Environment"), deny.error().message());
+    assertTrue(deny.error().message().contains("Select an Environment"), deny.error().message());
     // 权限策略未被读取，evaluator 也未被调用：绝不会把该错误伪装成审批或权限拒绝。
     verifyNoInteractions(evaluator);
     assertEquals(0, settingsProvider.readCount());

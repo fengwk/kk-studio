@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.builtin.environment;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -86,7 +88,12 @@ public final class EnvironmentCapabilityTool implements Tool {
       listener.onComplete(
           new ToolResult(
               request.call().id(),
-              List.of(new TextResultContent("No environment bound in execution context")),
+              List.of(
+                  new TextResultContent(
+                      ToolErrorGuidance.message(
+                          "No Environment is bound in the execution context",
+                          ExecutionFact.NOT_EXECUTED,
+                          "Select an Environment for the branch, then call the tool again"))),
               true,
               "{}"));
       return CompletedToolExecutionHandle.INSTANCE;
