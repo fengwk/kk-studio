@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -218,6 +220,32 @@ class PlatformResourceContentReaderMediaTest {
     ResourceRead.Text text = assertInstanceOf(ResourceRead.Text.class, read);
     assertTrue(text.text().contains("1|blob-content"), text.text());
     verify(blobs).withBlobStream(eq(blobId), any(), any());
+  }
+
+  /** 文本读取时任何底层 S3/OS 原始错误都必须收敛为固定安全英文消息，原始 cause 只留在异常链，绝不进入模型可见文本。 */
+  @Test
+  void textReadFailureHidesRawCauseFromModelFacingMessage() {
+    stubBlob("text/plain", 12L);
+    RuntimeException raw = new RuntimeException("sentinel-secret-7f3a");
+    when(blobs.withBlobStream(eq(blobId), any(), any())).thenThrow(raw);
+
+    PlatformReadException error =
+        assertThrows(
+            PlatformReadException.class,
+            () ->
+                reader.readResource(
+                    threadId,
+                    null,
+                    null,
+                    blobId,
+                    null,
+                    null,
+                    null,
+                    "kkstudio:/resources/" + blobId));
+
+    assertEquals("failed to read resource: " + blobId, error.getMessage());
+    assertFalse(error.getMessage().contains("sentinel-secret-7f3a"));
+    assertSame(raw, error.getCause());
   }
 
   private void stubBlob(String mediaType, long sizeBytes) {
