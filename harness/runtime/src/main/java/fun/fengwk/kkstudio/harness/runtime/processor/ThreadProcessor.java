@@ -215,10 +215,8 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    // 安全边界（无 open Turn）先应用 queued 的全部 SET_* 设置：standalone 设置不创建模型、不 resume STOPPED，只 append 一个
-    // SETTINGS 快照 Entry（CONTRIBUTOR_STATE 另按原序追加 CUSTOM Entry）并标记命令 applied；随后同一 Thread 被显式唤醒，让
-    // input / 自动压缩在同一安全边界继续。STOPPED 且无 open Turn 时同样应用，否则 UI pending 永不 settle；STOPPED 且存在冻结
-    // open model / tool 请求时 openTurnStart 非空，绝不触碰。
+    // 安全边界先应用全部 standalone 分支设置并追加 SETTINGS 快照；CONTRIBUTOR_STATE 留给普通输入 turn。
+    // STOPPED 线程只结算设置，不恢复执行；存在 open turn 时保留冻结请求。
     if (path.openTurnStart().isEmpty() && applyPendingSettings(tx, claim, thread, path, now)) {
       return null;
     }
