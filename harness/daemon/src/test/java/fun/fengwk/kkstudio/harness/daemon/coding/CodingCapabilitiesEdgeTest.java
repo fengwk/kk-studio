@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
@@ -25,11 +26,14 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -233,14 +237,12 @@ class CodingCapabilitiesEdgeTest {
     IllegalArgumentException relativeExisting =
         assertThrows(
             IllegalArgumentException.class, () -> EnvironmentPaths.existing("relative.txt"));
-    assertTrue(
-        relativeExisting.getMessage().contains("path must be an absolute path: relative.txt"));
+    assertTrue(relativeExisting.getMessage().contains("path must be an absolute path"));
 
     IllegalArgumentException relativeWritable =
         assertThrows(
             IllegalArgumentException.class, () -> EnvironmentPaths.writable("relative.txt"));
-    assertTrue(
-        relativeWritable.getMessage().contains("path must be an absolute path: relative.txt"));
+    assertTrue(relativeWritable.getMessage().contains("path must be an absolute path"));
 
     assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing(""));
     assertThrows(
@@ -457,7 +459,7 @@ class CodingCapabilitiesEdgeTest {
         new LspGotoDefinitionCapability(config, lspService, executor);
     EnvironmentCapabilityResult relPath = invoke(gotoDef, "{\"path\":\"src/App.java\",\"line\":1}");
     assertTrue(relPath.error());
-    assertTrue(text(relPath).contains("path must be an absolute path: src/App.java"));
+    assertTrue(text(relPath).contains("path must be an absolute path"));
 
     EnvironmentCapabilityResult missingFile =
         invoke(
@@ -592,6 +594,119 @@ class CodingCapabilitiesEdgeTest {
     return new WriteCapability(config, executor);
   }
 
+  /** 越界窗口参数是派发前输入拒绝：声明未执行，只给出字段要求，不回显原始字段值。 */
+  @Test
+  void invalidWindowParameterIsRejectedBeforeExecution() throws Exception {
+    Path file = workspaceRoot.resolve("window-param.txt");
+    Files.writeString(file, "content\n");
+    EnvironmentCapabilityResult result =
+        invoke(
+            new ReadCapability(config(2000, 60000), executor),
+            "{\"path\":" + json(file.toString()) + ",\"offset\":0}");
+
+    assertTrue(result.error(), text(result));
+    assertTrue(text(result).contains("The tool was not executed."), text(result));
+    assertTrue(text(result).contains("offset must be a positive integer"), text(result));
+  }
+
+  /** 不在本模块失败产生点生成的未知运行异常（这里由 JDK 文件访问抛出）必须用固定安全文案：声明结果不可确认，且绝不回显可能内联路径/凭据的原始 message。 */
+  @Test
+  void unknownRuntimeFailureDoesNotEchoRawMessage() throws Exception {
+    assumeTrue(
+        FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+        "需要 POSIX 权限位来构造确定性的 JDK 侧文件访问失败");
+    Path canary = workspaceRoot.resolve("unknown-failure-canary.txt");
+    Files.writeString(canary, "canary");
+    Files.setPosixFilePermissions(canary, Set.of());
+    try {
+      EnvironmentCapabilityResult result =
+          invoke(
+              new ReadCapability(config(2000, 60000), executor),
+              "{\"path\":" + json(canary.toString()) + "}");
+
+      assertTrue(result.error(), text(result));
+      assertTrue(text(result).contains("cannot be confirmed"), text(result));
+      assertFalse(text(result).contains("The tool was not executed."), text(result));
+      assertFalse(text(result).contains("unknown-failure-canary.txt"), text(result));
+    } finally {
+      Files.setPosixFilePermissions(canary, PosixFilePermissions.fromString("rw-------"));
+    }
+  }
+
+  /** 伪造受控来源的栈帧不能改变分类：只有显式受控类型保留文案，任意异常一律固定安全文案且不回显。 */
+  @Test
+  void forgedTopStackDoesNotMakeArbitraryMessageTrusted() throws Exception {
+    RuntimeException forged = new RuntimeException("secret-token-forged-4f2a");
+    forged.setStackTrace(
+        new StackTraceElement[] {
+          new StackTraceElement(
+              ProbeCapability.class.getPackageName() + ".NotATrustedOrigin", "run", "X.java", 1)
+        });
+    EnvironmentCapabilityResult result =
+        invoke(
+            new ProbeCapability(config(2000, 60000), executor, forged, null, null),
+            probeArguments());
+
+    assertTrue(result.error(), text(result));
+    assertTrue(text(result).contains("cannot be confirmed"), text(result));
+    assertFalse(text(result).contains("NotATrustedOrigin"), text(result));
+    assertFalse(text(result).contains("secret-token-forged-4f2a"), text(result));
+    assertFalse(text(result).contains("The tool was not executed."), text(result));
+  }
+
+  /** 显式受控类型（ToolRunFailureException）保留产生点给出的固定安全文案，并声明结果不可确认。 */
+  @Test
+  void controlledRunFailureKeepsItsSafeDiagnostic() throws Exception {
+    EnvironmentCapabilityResult result =
+        invoke(
+            new ProbeCapability(
+                config(2000, 60000),
+                executor,
+                new ToolRunFailureException("binary payload rejected"),
+                null,
+                null),
+            probeArguments());
+
+    assertTrue(result.error(), text(result));
+    assertTrue(text(result).contains("binary payload rejected"), text(result));
+    assertTrue(text(result).contains("cannot be confirmed"), text(result));
+    assertFalse(text(result).contains("The tool was not executed."), text(result));
+  }
+
+  /** 取消可能发生在副作用之后：终态恰好一次，且声明结果不可确认而不是未执行。 */
+  @Test
+  void cancellationReportsUncertainExactlyOnce() throws Exception {
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    RecordingListener listener = new RecordingListener();
+    listener.handle =
+        new ProbeCapability(config(2000, 60000), executor, null, entered, release)
+            .execute(
+                new EnvironmentCapabilityExecutionRequest(
+                    EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ),
+                    new EnvironmentCapabilityCall("cancel", probeArguments()),
+                    Duration.ZERO),
+                listener);
+
+    assertTrue(entered.await(5, TimeUnit.SECONDS));
+    listener.handle.cancel();
+    assertTrue(listener.await());
+    listener.handle.cancel();
+
+    assertTrue(text(listener.result).contains("Operation cancelled"), text(listener.result));
+    assertTrue(
+        text(listener.result).contains("Whether the tool took effect cannot be confirmed"),
+        text(listener.result));
+    assertFalse(
+        text(listener.result).contains("The tool was not executed."), text(listener.result));
+    assertEquals(1, listener.completions, "终态回调必须恰好一次");
+  }
+
+  /** 测试双使用的最小合法 fs.read 参数：只用于通过请求期 schema 校验，测试双不会访问文件系统。 */
+  private String probeArguments() {
+    return "{\"path\":\"" + workspaceRoot.resolve("probe.txt") + "\"}";
+  }
+
   private EditCapability edit(CodingToolsConfig config) {
     return new EditCapability(config, executor);
   }
@@ -644,6 +759,37 @@ class CodingCapabilitiesEdgeTest {
 
   private static String text(ResultContent content) {
     return content instanceof TextResultContent value ? value.text() : "";
+  }
+
+  /** 失败分类测试双：可抛出指定异常，或阻塞直到被中断（用于取消路径）。 */
+  private static final class ProbeCapability extends AbstractCodingCapability {
+    private final Exception failure;
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
+
+    private ProbeCapability(
+        CodingToolsConfig config,
+        ExecutorService executor,
+        Exception failure,
+        CountDownLatch entered,
+        CountDownLatch release) {
+      super(
+          config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ));
+      this.failure = failure;
+      this.entered = entered;
+      this.release = release;
+    }
+
+    @Override
+    EnvironmentCapabilityResult run(
+        EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
+      if (failure != null) {
+        throw failure;
+      }
+      entered.countDown();
+      release.await();
+      return success(request.call().id(), "done");
+    }
   }
 
   private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {

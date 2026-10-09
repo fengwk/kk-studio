@@ -483,13 +483,13 @@ class FindGrepCapabilitiesTest {
     EnvironmentCapabilityResult findRes =
         invoke(find, "{\"pattern\":\"*.txt\",\"path\":\"relative\"}");
     assertTrue(findRes.error());
-    assertTrue(text(findRes).contains("path must be an absolute path: relative"));
+    assertTrue(text(findRes).contains("path must be an absolute path"));
 
     GrepCapability grep = new GrepCapability(config(), executor);
     EnvironmentCapabilityResult grepRes =
         invoke(grep, "{\"pattern\":\"test\",\"path\":\"relative\"}");
     assertTrue(grepRes.error());
-    assertTrue(text(grepRes).contains("path must be an absolute path: relative"));
+    assertTrue(text(grepRes).contains("path must be an absolute path"));
   }
 
   /** 验证 SearchFiles 遍历不跟随符号链接，并校验目录参数。 */

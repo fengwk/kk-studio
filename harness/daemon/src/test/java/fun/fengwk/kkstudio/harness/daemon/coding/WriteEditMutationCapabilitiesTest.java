@@ -211,8 +211,7 @@ class WriteEditMutationCapabilitiesTest {
     EnvironmentCapabilityResult relative =
         invoke(write, "{\"path\":\"relative.txt\",\"content\":\"x\"}");
     assertTrue(relative.error(), text(relative));
-    assertTrue(
-        text(relative).contains("path must be an absolute path: relative.txt"), text(relative));
+    assertTrue(text(relative).contains("path must be an absolute path"), text(relative));
     assertFalse(Files.exists(workdir.resolve("relative.txt")));
   }
 
@@ -525,6 +524,12 @@ class WriteEditMutationCapabilitiesTest {
       assertTrue(listener.await());
       assertTrue(listener.result.error(), text(listener.result));
       assertTrue(text(listener.result).contains("Operation cancelled"), text(listener.result));
+      // 取消可能发生在写入之后：只能声明结果未确认，绝不能声称未执行。
+      assertTrue(
+          text(listener.result).contains("Whether the tool took effect cannot be confirmed"),
+          text(listener.result));
+      assertFalse(
+          text(listener.result).contains("The tool was not executed."), text(listener.result));
       assertFalse(Files.exists(workdir.resolve("blocked.txt")));
       // 释放后 worker 必须真的走进取消检查并退出临界区：能重新拿到锁即证明它没有继续提交。
       lock.unlock();
@@ -806,8 +811,7 @@ class WriteEditMutationCapabilitiesTest {
     EnvironmentCapabilityResult relative =
         invoke(edit, "{\"path\":\"absolute.ts\",\"old_string\":\"beta\",\"new_string\":\"gamma\"}");
     assertTrue(relative.error(), text(relative));
-    assertTrue(
-        text(relative).contains("path must be an absolute path: absolute.ts"), text(relative));
+    assertTrue(text(relative).contains("path must be an absolute path"), text(relative));
     assertEquals("beta\n", Files.readString(absolute));
   }
 

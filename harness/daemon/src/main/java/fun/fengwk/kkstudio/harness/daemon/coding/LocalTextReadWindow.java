@@ -71,6 +71,9 @@ final class LocalTextReadWindow {
           LocalTextReadWindow::checkInterrupted);
     } catch (ScanInterruptedException error) {
       throw new InterruptedException(error.getMessage());
+    } catch (IllegalArgumentException error) {
+      // 共享窗口核心的业务诊断（binary/编码/越界/预算）在这里绑定为受控类型：文案是固定说明，不含文件正文。
+      throw new ToolRunFailureException(error.getMessage(), error);
     }
   }
 

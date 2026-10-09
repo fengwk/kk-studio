@@ -57,7 +57,11 @@ class WorkdirPathSemanticsTest {
         invoke(new ReadCapability(config(), executor), "{\"path\":\"local.txt\"}");
 
     assertTrue(result.error());
-    assertTrue(text(result).contains("path must be an absolute path: local.txt"), text(result));
+    assertTrue(text(result).contains("path must be an absolute path"), text(result));
+    // 校验发生在任何文件系统访问之前：必须明确声明未执行，并给出下一步。
+    assertTrue(text(result).contains("The tool was not executed."), text(result));
+    // 非法相对值不回显，只指出字段与绝对路径要求。
+    assertFalse(text(result).contains("local.txt"), text(result));
     assertFalse(text(result).contains("from-workspace-root"));
     assertFalse(text(result).contains("from-explicit-workdir"));
   }
@@ -72,6 +76,7 @@ class WorkdirPathSemanticsTest {
 
     assertTrue(bash.error());
     assertTrue(text(bash).contains("workdir must be an absolute path"), text(bash));
+    assertTrue(text(bash).contains("The tool was not executed."), text(bash));
   }
 
   /** workdir 必须真实存在且为目录：不存在的路径与普通文件都在执行前被拒绝，也不会被自动创建。 */
@@ -167,9 +172,9 @@ class WorkdirPathSemanticsTest {
     assertFalse(absoluteWrite.error());
     assertEquals("written", Files.readString(Path.of(createdFile)));
     assertTrue(relativeRead.error());
-    assertTrue(text(relativeRead).contains("path must be an absolute path: outside.txt"));
+    assertTrue(text(relativeRead).contains("path must be an absolute path"));
     assertTrue(relativeWrite.error());
-    assertTrue(text(relativeWrite).contains("path must be an absolute path: created.txt"));
+    assertTrue(text(relativeWrite).contains("path must be an absolute path"));
   }
 
   /** 检索工具使用绝对路径检索目录。 */

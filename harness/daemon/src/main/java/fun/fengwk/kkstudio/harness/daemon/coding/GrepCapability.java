@@ -75,14 +75,14 @@ public final class GrepCapability extends AbstractCodingCapability {
 
     if (directFile) {
       if (!Files.isReadable(path)) {
-        throw new IllegalArgumentException("path is not readable: " + displayPath(path));
+        throw new ToolInputRejectedException("path is not readable: " + displayPath(path));
       }
       if (!SearchFiles.isGitMetadata(path)) {
         searchInFile(path, path.getParent(), true, include, pattern, multiline, control, results);
       }
     } else {
       if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-        throw new IllegalArgumentException("path must be a regular file or directory");
+        throw new ToolInputRejectedException("path must be a regular file or directory");
       }
       SearchFiles.Report report =
           SearchFiles.walk(
@@ -308,7 +308,7 @@ public final class GrepCapability extends AbstractCodingCapability {
     try {
       return Pattern.compile(literal ? Pattern.quote(source) : source, flags);
     } catch (PatternSyntaxException error) {
-      throw new IllegalArgumentException(
+      throw new ToolInputRejectedException(
           "Invalid regex: "
               + error.getMessage()
               + ". Use literal=true for exact text, or escape regex metacharacters.",
@@ -478,7 +478,7 @@ public final class GrepCapability extends AbstractCodingCapability {
    *
    * <p>{@code skipReason} 为 {@code null} 表示目录扫描中应静默跳过（二进制）；非 {@code null} 表示必须作为“未搜索”显式上报。
    */
-  private static final class SearchFailureException extends RuntimeException {
+  private static final class SearchFailureException extends ToolRunFailureException {
 
     private static final long serialVersionUID = 1L;
 

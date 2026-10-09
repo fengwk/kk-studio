@@ -1,8 +1,11 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
@@ -17,6 +20,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 文件系统 coding capability 的通用异步执行与严格 JSON 访问。 */
 abstract class AbstractCodingCapability implements EnvironmentCapability {
+
+  private static final String VERIFY_EFFECT_NEXT_ACTION =
+      "Verify whether the intended effect already took place before deciding what to do next";
 
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -55,12 +61,53 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
                 execution.complete(finalizeResult(result));
               } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
-                execution.complete(error(request.call().id(), "Operation cancelled"));
+                execution.complete(error(request.call().id(), cancelledMessage()));
               } catch (Exception error) {
-                execution.complete(error(request.call().id(), error.getMessage()));
+                execution.complete(error(request.call().id(), failureMessage(error)));
               }
             });
     return execution;
+  }
+
+  /** 取消可能发生在副作用之后：只声明结果未确认，绝不声称未执行。 */
+  private static String cancelledMessage() {
+    return ToolErrorGuidance.message(
+        "Operation cancelled",
+        ExecutionFact.UNCERTAIN,
+        "Check whether the operation already took effect before deciding what to do next");
+  }
+
+  /**
+   * capability 未被自身捕获的失败，按真实 stage 与失败产生点分类：
+   *
+   * <ul>
+   *   <li>{@link ToolInputRejectedException} 是本模块已确认的派发前输入拒绝，可以声明未执行；
+   *   <li>{@link ToolRunFailureException} / {@link ToolServiceFailureException}
+   *       是本模块在失败产生点给出的受控诊断，保留其固定安全文案，但因为可能发生在副作用之后，只声明结果不可确认；
+   *   <li>其余异常（Jackson、IO、JDK 子类等）的 message 可能内联参数片段或凭据，一律用固定安全文案，绝不回显。
+   * </ul>
+   */
+  private static String failureMessage(Exception error) {
+    if (error instanceof ToolInputRejectedException) {
+      return ToolErrorGuidance.message(
+          error.getMessage(),
+          ExecutionFact.NOT_EXECUTED,
+          "Correct the arguments to match the tool schema, then call the tool again");
+    }
+    if (error instanceof ToolRunFailureException || error instanceof ToolServiceFailureException) {
+      return ToolErrorGuidance.message(
+          nonBlank(error), ExecutionFact.UNCERTAIN, VERIFY_EFFECT_NEXT_ACTION);
+    }
+    return ToolErrorGuidance.message(
+        "The capability failed while running and the underlying error is not repeated to avoid"
+            + " leaking details",
+        ExecutionFact.UNCERTAIN,
+        VERIFY_EFFECT_NEXT_ACTION);
+  }
+
+  private static String nonBlank(Throwable error) {
+    String message = error.getMessage();
+    return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
   }
 
   /**
@@ -84,13 +131,18 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception;
 
   static JsonNode arguments(EnvironmentCapabilityExecutionRequest request) throws Exception {
-    return OBJECT_MAPPER.readTree(request.call().argumentsJson());
+    try {
+      return OBJECT_MAPPER.readTree(request.call().argumentsJson());
+    } catch (JsonProcessingException error) {
+      // Jackson 的解析异常 message 会内联原始 arguments 片段（可能含凭据），绝不能外发；这里只保留固定文案。
+      throw new ToolInputRejectedException("tool arguments could not be parsed as JSON");
+    }
   }
 
   static String string(JsonNode args, String name) {
     JsonNode value = args.get(name);
     if (value == null || !value.isTextual()) {
-      throw new IllegalArgumentException(name + " is required and must be a string");
+      throw new ToolInputRejectedException(name + " is required and must be a string");
     }
     return value.textValue();
   }
@@ -106,7 +158,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
       return defaultValue;
     }
     if (!value.isInt() || value.intValue() < 1 || value.intValue() > maximum) {
-      throw new IllegalArgumentException(name + " must be a positive integer <= " + maximum);
+      throw new ToolInputRejectedException(name + " must be a positive integer <= " + maximum);
     }
     return value.intValue();
   }
@@ -117,7 +169,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
         || !value.isIntegralNumber()
         || value.longValue() < 1
         || value.longValue() > Integer.MAX_VALUE) {
-      throw new IllegalArgumentException(name + " is required and must be a positive integer");
+      throw new ToolInputRejectedException(name + " is required and must be a positive integer");
     }
     return value.intValue();
   }
@@ -130,7 +182,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
     if (!value.isIntegralNumber()
         || value.longValue() < 0
         || value.longValue() > Integer.MAX_VALUE) {
-      throw new IllegalArgumentException(name + " must be a non-negative integer");
+      throw new ToolInputRejectedException(name + " must be a non-negative integer");
     }
     return value.intValue();
   }
@@ -168,7 +220,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
         if (current != null) {
           current.cancel(true);
         }
-        complete(error(callId, "Operation cancelled"));
+        complete(error(callId, cancelledMessage()));
       }
     }
 
