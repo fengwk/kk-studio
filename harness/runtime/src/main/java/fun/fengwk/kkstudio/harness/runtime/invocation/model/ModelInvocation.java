@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
@@ -351,18 +350,9 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "failed attempt must equal the attempt consumed by this retry");
     }
-    if (!isRetryable(appended.error())) {
+    if (!appended.error().retryCandidate()) {
       throw new IllegalArgumentException("failed attempt requires a retryable error");
     }
-  }
-
-  /**
-   * TRANSIENT 与 INVALID_RESPONSE 复用 {@link
-   * fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy}。
-   */
-  private static boolean isRetryable(ModelInvocationError error) {
-    return error.kind() == ProviderErrorKind.TRANSIENT
-        || error.kind() == ProviderErrorKind.INVALID_RESPONSE;
   }
 
   private static boolean isPrefix(String prefix, String value) {
@@ -420,8 +410,7 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "failed attempt must equal the current invocation attempt");
     }
-    if (failure.error().kind() != ProviderErrorKind.TRANSIENT
-        && failure.error().kind() != ProviderErrorKind.INVALID_RESPONSE) {
+    if (!failure.error().retryCandidate()) {
       throw new IllegalArgumentException("retryReady requires a retryable error");
     }
     List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);
@@ -443,8 +432,7 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "failed attempt must equal the unconfirmed dispatch attempt");
     }
-    if (failure.error().kind() != ProviderErrorKind.TRANSIENT
-        && failure.error().kind() != ProviderErrorKind.INVALID_RESPONSE) {
+    if (!failure.error().retryCandidate()) {
       throw new IllegalArgumentException("retryDispatched requires a retryable error");
     }
     List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);

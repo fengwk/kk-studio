@@ -734,7 +734,8 @@ public final class PlatformModelGateway implements ModelGateway {
 
   private static ModelInvocationError toInvocationError(ProviderException error) {
     // ProviderException 是 final 类，但其 message 提取仍走安全路径：任何渲染失败都不能 bypass 状态转换。
-    return new ModelInvocationError(error.kind(), message(error, "provider failure"));
+    return new ModelInvocationError(
+        error.kind(), message(error, "provider failure"), error.httpStatus());
   }
 
   /** 非抛出的消息提取：adversarial getMessage 只影响 UNKNOWN/FAILED 的 detail，绝不 bypass 状态转换。 */

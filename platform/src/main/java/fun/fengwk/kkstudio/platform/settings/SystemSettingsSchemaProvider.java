@@ -74,6 +74,20 @@ public class SystemSettingsSchemaProvider {
                         1,
                         null)),
                 group(
+                    "aiRuntime.httpErrors",
+                    "settings.section.aiRuntime.httpErrors.title",
+                    "settings.section.aiRuntime.httpErrors.description",
+                    false,
+                    ApplyTiming.NEXT_INVOCATION,
+                    field(
+                        "aiRuntime.modelHttpRetryStatusCodes",
+                        "settings.field.aiRuntime.modelHttpRetryStatusCodes",
+                        "settings.field.aiRuntime.modelHttpRetryStatusCodes.hint",
+                        FieldType.INTEGER_LIST,
+                        false,
+                        400,
+                        599)),
+                group(
                     "aiRuntime.compaction",
                     "settings.section.aiRuntime.compaction.title",
                     "settings.section.aiRuntime.compaction.description",

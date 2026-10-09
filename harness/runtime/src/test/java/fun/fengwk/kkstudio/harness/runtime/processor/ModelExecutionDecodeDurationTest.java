@@ -338,6 +338,7 @@ class ModelExecutionDecodeDurationTest {
                   () -> retryPolicy,
                   FALLBACK_DELAY,
                   FLUSH_CONFIG),
+              "test-provider",
               Clock.fixed(NOW, ZoneOffset.UTC),
               scheduler,
               Runnable::run,

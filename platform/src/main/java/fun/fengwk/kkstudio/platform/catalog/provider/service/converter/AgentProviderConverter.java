@@ -30,6 +30,8 @@ public class AgentProviderConverter {
     var timeoutPolicy = configurationCodec.readTimeoutPolicy(provider.getConfigJson());
     dto.setModelCallTimeoutMillis(timeoutPolicy.modelCallTimeout().toMillis());
     dto.setModelCallIdleTimeoutMillis(timeoutPolicy.modelCallIdleTimeout().toMillis());
+    dto.setModelHttpRetryStatusCodes(
+        configurationCodec.readHttpRetryStatusCodes(provider.getConfigJson()));
     dto.setVersion(CatalogVersions.format(provider.getVersion()));
     dto.setCreateTime(provider.getCreateTime());
     dto.setUpdateTime(provider.getUpdateTime());

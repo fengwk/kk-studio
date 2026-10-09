@@ -114,6 +114,7 @@ class ExecutionTreeLockRegressionTest {
             List.of(),
             new ModelProcessorConfig(
                 LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, StreamFlushConfig.IMMEDIATE),
+            "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
@@ -206,6 +207,7 @@ class ExecutionTreeLockRegressionTest {
             false,
             List.of(),
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,

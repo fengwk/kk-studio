@@ -61,14 +61,14 @@ public final class AgentProviderMutationFactory {
   private void update(
       AgentProvider provider,
       AgentProviderEditablePropertiesDTO properties,
-      boolean preserveMissingCredential) {
+      boolean preserveMissingEdits) {
     Mutation mutation =
         newMutation(
             properties,
             provider.getName(),
             provider.getCredential(),
             provider.getConfigJson(),
-            preserveMissingCredential);
+            preserveMissingEdits);
     boolean protocolChanged =
         !Objects.equals(provider.getProviderType(), mutation.providerType())
             || !Objects.equals(provider.getBaseUrl(), mutation.baseUrl())
@@ -95,7 +95,7 @@ public final class AgentProviderMutationFactory {
       String fallbackName,
       String existingCredential,
       String existingConfigJson,
-      boolean preserveMissingCredential) {
+      boolean preserveMissingEdits) {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
@@ -105,7 +105,7 @@ public final class AgentProviderMutationFactory {
       throw new AiValidationException(RESOURCE, RESOURCE + " providerType must not be blank");
     }
     String credential = editableSupport.trimToNull(properties.getCredential());
-    if (preserveMissingCredential && credential == null) {
+    if (preserveMissingEdits && credential == null) {
       credential = existingCredential;
     }
     String description = editableSupport.trimToNull(properties.getDescription());
@@ -119,6 +119,12 @@ public final class AgentProviderMutationFactory {
               existingConfigJson,
               properties.getModelCallTimeoutMillis(),
               properties.getModelCallIdleTimeoutMillis());
+      // 普通更新省略字段保留既有覆盖；导入与创建按文件/请求事实应用（缺失即视为无覆盖）。
+      boolean overrideProvided =
+          !preserveMissingEdits || properties.isModelHttpRetryStatusCodesProvided();
+      configJson =
+          configurationCodec.mergeHttpRetryStatusCodes(
+              configJson, overrideProvided, properties.getModelHttpRetryStatusCodes());
       return new Mutation(
           name,
           description,

@@ -211,6 +211,7 @@ public final class ModelProcessor implements AutoCloseable {
             dispatched.compaction(),
             dispatched.request().toolBindings(),
             config,
+            dispatched.request().model().providerName(),
             clock,
             scheduler,
             heartbeatWorker,
