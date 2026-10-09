@@ -29,6 +29,7 @@ const FOREIGN = 'c1d2e3f4-4444-4444-8444-000000000004'
 const MESSAGE_ID = 'b1c2d3e4-3333-4333-8333-000000000003'
 const MESSAGE_ID_ALT = 'b1c2d3e4-3333-4333-8333-00000000000a'
 const RANDOM_ID = 'b1c2d3e4-3333-4333-8333-00000000000b'
+const JAVA_INT_MAX = 2147483647
 
 interface RoundTripCase {
   name: string
@@ -138,6 +139,23 @@ function collector() {
   const delivered: NotificationPacket[] = []
   const resyncs: string[] = []
   return { delivered, resyncs }
+}
+
+/**
+ * A real `Uint8Array` subclass whose iterator is spied. The implementation must copy typed arrays
+ * through the native typed-array path, never through the iterator protocol, so the spy stays at 0.
+ */
+function spyBytes(length: number) {
+  const calls = { count: 0 }
+  class Spy extends Uint8Array {}
+  Object.defineProperty(Spy.prototype, Symbol.iterator, {
+    configurable: true,
+    value: function* iterate() {
+      calls.count += 1
+      yield 0
+    },
+  })
+  return { bytes: new Spy(length) as Uint8Array, calls }
 }
 
 describe('notification carrier interop fixture', () => {
@@ -336,6 +354,110 @@ describe('notification carrier', () => {
     expect(() => decodeNotificationCarrier('x', null as unknown as NotificationLimits)).toThrow(
       TypeError,
     )
+  })
+
+  it('keeps owned bytes unreachable through instance or prototype symbols', () => {
+    const message = packet(PUBLISHER, SELF, 'body')
+    const carrier = carrierChunk(message, 0)
+    // The old implementation exposed a symbol-keyed raw-bytes method; reflection must not find any
+    // way to reach the owned array and mutate an already queued body.
+    expect(Object.getOwnPropertySymbols(NotificationPacket.prototype)).toEqual([])
+    expect(Object.getOwnPropertySymbols(NotificationCarrier.prototype)).toEqual([])
+    expect(Object.getOwnPropertySymbols(message)).toEqual([])
+    expect(Object.getOwnPropertySymbols(carrier)).toEqual([])
+    expect(Reflect.ownKeys(message).filter((key) => typeof key === 'symbol')).toEqual([])
+    expect(Reflect.ownKeys(carrier).filter((key) => typeof key === 'symbol')).toEqual([])
+
+    const snapshot = message.bytes()
+    const frameBefore = carrier.encode()
+    snapshot[0] = 0
+    expect(bytesEqual(message.bytes(), utf8('body'))).toBe(true)
+    expect(carrier.encode()).toBe(frameBefore)
+  })
+
+  it('requires canonical UUID identities and rejects coercible values', () => {
+    const coercible = { toString: () => PUBLISHER } as unknown as string
+    expect(() => new NotificationPacket(coercible, null, TOPIC, MESSAGE_ID, utf8(''))).toThrow(
+      TypeError,
+    )
+    expect(() => new NotificationPacket('not-a-uuid', null, TOPIC, MESSAGE_ID, utf8(''))).toThrow(
+      RangeError,
+    )
+    expect(() =>
+      new NotificationPacket(PUBLISHER.toUpperCase(), null, TOPIC, MESSAGE_ID, utf8('')),
+    ).toThrow(RangeError)
+    expect(() => new NotificationPacket(PUBLISHER, 'not-a-uuid', TOPIC, MESSAGE_ID, utf8(''))).toThrow(
+      RangeError,
+    )
+    expect(() => new NotificationPacket(PUBLISHER, null, TOPIC, 'not-a-uuid', utf8(''))).toThrow(
+      RangeError,
+    )
+    expect(() => new NotificationCarrier(coercible, null, TOPIC, MESSAGE_ID, 0, 1, 0, utf8(''))).toThrow(
+      TypeError,
+    )
+    expect(() =>
+      new NotificationCarrier(PUBLISHER, coercible, TOPIC, MESSAGE_ID, 0, 1, 0, utf8('')),
+    ).toThrow(TypeError)
+    expect(() =>
+      new NotificationCarrier(PUBLISHER, null, TOPIC, 'not-a-uuid', 0, 1, 0, utf8('')),
+    ).toThrow(RangeError)
+
+    // A valid value can only ever encode a canonical header.
+    const frame = carrierChunk(packet(PUBLISHER, null, 'x'), 0).encode()
+    expect(frame.split('|')[1]).toBe(PUBLISHER)
+  })
+
+  it('rejects non-typed-array bytes and never copies before validating the length', () => {
+    const oversized = spyBytes(DEFAULT_MAX_MESSAGE_BYTES + 1)
+    expect(() =>
+      new NotificationPacket(PUBLISHER, null, TOPIC, MESSAGE_ID, oversized.bytes),
+    ).toThrow(RangeError)
+    expect(oversized.calls.count).toBe(0)
+
+    const wrongChunk = spyBytes(CHUNK_BYTES)
+    expect(() =>
+      new NotificationCarrier(PUBLISHER, null, TOPIC, MESSAGE_ID, 0, 1, 1, wrongChunk.bytes),
+    ).toThrow(RangeError)
+    expect(wrongChunk.calls.count).toBe(0)
+
+    const valid = spyBytes(4)
+    const copied = new NotificationPacket(PUBLISHER, null, TOPIC, MESSAGE_ID, valid.bytes)
+    expect(valid.calls.count).toBe(0)
+    expect(copied.byteLength()).toBe(4)
+
+    expect(() => new NotificationPacket(PUBLISHER, null, TOPIC, MESSAGE_ID, [1, 2, 3] as never)).toThrow(
+      TypeError,
+    )
+    expect(() =>
+      new NotificationPacket(PUBLISHER, null, TOPIC, MESSAGE_ID, { length: 3 } as never),
+    ).toThrow(TypeError)
+    expect(() =>
+      new NotificationCarrier(PUBLISHER, null, TOPIC, MESSAGE_ID, 0, 1, 0, null as never),
+    ).toThrow(TypeError)
+  })
+
+  it('requires verified packet instances instead of duck-typed carriers', () => {
+    const fake = {
+      byteLength: () => DEFAULT_MAX_MESSAGE_BYTES,
+      publisher: () => PUBLISHER,
+      target: () => null,
+      topic: () => TOPIC,
+      messageId: () => MESSAGE_ID,
+      index: () => 0,
+      count: () => 1,
+      totalBytes: () => DEFAULT_MAX_MESSAGE_BYTES,
+    }
+    expect(() => carrierChunk(fake as never, 0)).toThrow(TypeError)
+    const outbox = new NotificationOutbox(defaultNotificationLimits())
+    expect(() => outbox.offer(fake as never)).toThrow(TypeError)
+    const reassembler = new NotificationReassembler(
+      SELF,
+      defaultNotificationLimits(),
+      () => 0,
+      () => {},
+      () => {},
+    )
+    expect(() => reassembler.accept(fake as never)).toThrow(TypeError)
   })
 })
 
@@ -621,6 +743,33 @@ describe('notification reassembler', () => {
       TypeError,
     )
   })
+
+  it('owns its budgets so later caller mutation cannot change the bounds', () => {
+    const { delivered, resyncs } = collector()
+    const raw: NotificationLimits = {
+      maxMessageBytes: 20000,
+      pendingBytes: 40000,
+      queueCapacity: 4,
+      reassemblyBytes: 40000,
+      reassemblyMessages: 2,
+      reassemblyTimeoutMs: 5000,
+      sendBatchFrames: 1,
+    }
+    const reassembler = new NotificationReassembler(
+      SELF,
+      raw,
+      () => 0,
+      (value) => delivered.push(value),
+      (topic) => resyncs.push(topic),
+    )
+    raw.maxMessageBytes = 1
+    raw.reassemblyBytes = 1
+    reassembler.accept(carrierChunk(packet(PUBLISHER, null, 'x'.repeat(10000)), 0))
+    expect(reassembler.reservedBytes()).toBe(10000)
+    expect(resyncs).toHaveLength(0)
+    reassembler.clear()
+    expect(reassembler.reservedBytes()).toBe(0)
+  })
 })
 
 describe('notification outbox', () => {
@@ -824,6 +973,51 @@ describe('notification outbox', () => {
     expect(text).toContain(MESSAGE_ID)
   })
 
+  it('keeps the batch cursor non-rewritable so progress and budget cannot be perturbed', () => {
+    const outbox = new NotificationOutbox(outboxLimits(40000, 40000, 8, 1))
+    expect(outbox.offer(packet(PUBLISHER, SELF, 'x'.repeat(18000)))).toBe(true)
+    const batch = outbox.pollBatch()
+    expect(Object.isFrozen(batch)).toBe(true)
+    expect(Reflect.ownKeys(batch ?? {}).filter((key) => typeof key === 'symbol')).toEqual([])
+    // Reflection cannot move the reserved cursor; frozen instances reject any write attempt.
+    for (const key of Reflect.ownKeys(batch as object)) {
+      expect(() => {
+        ;(batch as unknown as Record<string | symbol, unknown>)[key] = 999
+      }).toThrow(TypeError)
+    }
+    expect(() => {
+      ;(batch as unknown as Record<string, unknown>).nextIndex = 999
+    }).toThrow(TypeError)
+    expect(outbox.complete(batch, true)).toBe(true)
+    // Only the first fragment advanced, so the whole 18000-byte packet stays reserved.
+    expect(outbox.pendingMessages()).toBe(1)
+    expect(outbox.pendingBytes()).toBe(18000)
+    for (let index = 0; index < 3; index += 1) {
+      expect(outbox.complete(outbox.pollBatch(), true)).toBe(true)
+    }
+    expect(outbox.pendingMessages()).toBe(0)
+    expect(outbox.pendingBytes()).toBe(0)
+  })
+
+  it('owns its budgets so later caller mutation cannot change the bounds', () => {
+    const raw: NotificationLimits = {
+      maxMessageBytes: 100,
+      pendingBytes: 1000,
+      queueCapacity: 4,
+      reassemblyBytes: 1000,
+      reassemblyMessages: 4,
+      reassemblyTimeoutMs: 5000,
+      sendBatchFrames: 1,
+    }
+    const outbox = new NotificationOutbox(raw)
+    raw.maxMessageBytes = 1
+    raw.pendingBytes = 0
+    raw.queueCapacity = 0
+    expect(outbox.offer(packet(PUBLISHER, SELF, 'a'.repeat(50)))).toBe(true)
+    expect(outbox.offer(packet(PUBLISHER, SELF, 'b'.repeat(50), MESSAGE_ID_ALT))).toBe(true)
+    expect(outbox.pendingBytes()).toBe(100)
+  })
+
   it('validates its construction argument', () => {
     expect(() => new NotificationOutbox(null as unknown as NotificationLimits)).toThrow(TypeError)
   })
@@ -867,5 +1061,35 @@ describe('notification limits', () => {
       RangeError,
     )
     expect(() => createNotificationLimits({ ...valid, sendBatchFrames: 0 })).toThrow(RangeError)
+  })
+
+  it('rejects unsafe, fractional and out-of-range integer budgets', () => {
+    const valid = defaultNotificationLimits()
+    expect(() => createNotificationLimits({ ...valid, pendingBytes: JAVA_INT_MAX + 1 })).toThrow(
+      RangeError,
+    )
+    expect(() =>
+      createNotificationLimits({ ...valid, queueCapacity: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow(RangeError)
+    expect(() => createNotificationLimits({ ...valid, queueCapacity: 1.5 })).toThrow(RangeError)
+    expect(() => createNotificationLimits({ ...valid, reassemblyMessages: 2 ** 53 })).toThrow(
+      RangeError,
+    )
+    expect(() =>
+      createNotificationLimits({ ...valid, reassemblyTimeoutMs: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow(RangeError)
+  })
+
+  it('rejects a decode budget that cannot bound the message', () => {
+    const frame = carrierChunk(packet(PUBLISHER, null, 'x'), 0).encode()
+    expect(() =>
+      decodeNotificationCarrier(frame, { maxMessageBytes: Number.NaN } as NotificationLimits, SELF),
+    ).toThrow(RangeError)
+    expect(() =>
+      decodeNotificationCarrier(frame, { maxMessageBytes: undefined } as unknown as NotificationLimits, SELF),
+    ).toThrow(RangeError)
+    expect(() =>
+      decodeNotificationCarrier(frame, { maxMessageBytes: JAVA_INT_MAX + 1 } as NotificationLimits, SELF),
+    ).toThrow(RangeError)
   })
 })

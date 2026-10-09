@@ -30,17 +30,38 @@ const CANONICAL_INT = /^(0|[1-9][0-9]{0,9})$/
 
 const textEncoder = new TextEncoder()
 
-/** Module-private accessor for the owned body; never handed to callers. */
-const RAW_BYTES = Symbol('notification.rawBytes')
-/** Module-private batch start index; never part of the public batch shape. */
-const BATCH_START = Symbol('notification.batchStart')
+/**
+ * Module-private ownership tables. The logical bytes are never reachable from outside the module:
+ * a private field cannot be read cross-class, so the framing/reassembly helpers use these tables
+ * instead of an exposed symbol-keyed method.
+ */
+const PACKET_BYTES = new WeakMap()
+const CARRIER_BYTES = new WeakMap()
+/** Module-private polled batch cursor; never an own property of the (frozen) batch. */
+const BATCH_START = new WeakMap()
 
 function utf8Length(value) {
   return textEncoder.encode(value).length
 }
 
-function toBytes(value) {
-  return Uint8Array.from(value)
+/**
+ * Requires a genuine `Uint8Array` (a subclass is fine) so a foreign iterable/array-like can never
+ * drive an unbounded allocation. `ArrayBuffer.isView` plus the proxy-proof `Uint8Array` tag is
+ * realm-independent, unlike `instanceof`, and still rejects every non-Uint8Array view. The caller
+ * must check the length before copying.
+ */
+const UINT8_TAG = '[object Uint8Array]'
+
+function requireBytes(value) {
+  if (!ArrayBuffer.isView(value) || Object.prototype.toString.call(value) !== UINT8_TAG) {
+    throw new TypeError('notification bytes must be a Uint8Array')
+  }
+  return value
+}
+
+/** Bounded native copy of a verified typed array; does not consult the iterator protocol. */
+function copyBytes(value) {
+  return new Uint8Array(value)
 }
 
 function encodeBase64(bytes) {
@@ -75,6 +96,21 @@ function canonicalUuid(field) {
     throw new RangeError('invalid notification carrier identity')
   }
   return field
+}
+
+/**
+ * Validates one owned value object's identity field: only a canonical lowercase UUID string is
+ * accepted, so an encoded header can never carry arbitrary metadata. Errors are fixed and never
+ * echo the rejected value.
+ */
+function requireUuid(value, message) {
+  if (typeof value !== 'string') {
+    throw new TypeError(message)
+  }
+  if (!CANONICAL_UUID.test(value)) {
+    throw new RangeError(message)
+  }
+  return value
 }
 
 /** Canonical non-negative decimal: no sign, no leading zeros and no integer overflow. */
@@ -121,27 +157,22 @@ export class NotificationPacket {
   #target
   #topic
   #messageId
-  #bytes
 
   constructor(publisher, target, topic, messageId, bytes) {
-    if (publisher == null) {
-      throw new TypeError('notification packet publisher is required')
-    }
-    if (messageId == null) {
-      throw new TypeError('notification packet messageId is required')
-    }
-    if (bytes == null) {
-      throw new TypeError('notification packet bytes are required')
-    }
-    const body = toBytes(bytes)
-    if (body.length > DEFAULT_MAX_MESSAGE_BYTES) {
+    const owner = requireUuid(publisher, 'invalid notification packet publisher')
+    const recipient =
+      target == null ? null : requireUuid(target, 'invalid notification packet target')
+    const id = requireUuid(messageId, 'invalid notification packet messageId')
+    const source = requireBytes(bytes)
+    // Reject the logical size before copying, so an oversized body is never cloned into the packet.
+    if (source.byteLength > DEFAULT_MAX_MESSAGE_BYTES) {
       throw new RangeError('notification packet exceeds logical message limit')
     }
-    this.#publisher = publisher
-    this.#target = target == null ? null : target
+    this.#publisher = owner
+    this.#target = recipient
     this.#topic = requireTopic(topic)
-    this.#messageId = messageId
-    this.#bytes = body
+    this.#messageId = id
+    PACKET_BYTES.set(this, copyBytes(source))
   }
 
   publisher() {
@@ -162,19 +193,15 @@ export class NotificationPacket {
   }
 
   bytes() {
-    return this.#bytes.slice()
+    return PACKET_BYTES.get(this).slice()
   }
 
   byteLength() {
-    return this.#bytes.length
-  }
-
-  [RAW_BYTES]() {
-    return this.#bytes
+    return PACKET_BYTES.get(this).length
   }
 
   toString() {
-    return `NotificationPacket[publisher=${this.#publisher}, target=${this.#target}, topic=${this.#topic}, messageId=${this.#messageId}, byteLength=${this.#bytes.length}]`
+    return `NotificationPacket[publisher=${this.#publisher}, target=${this.#target}, topic=${this.#topic}, messageId=${this.#messageId}, byteLength=${PACKET_BYTES.get(this).length}]`
   }
 }
 
@@ -191,18 +218,12 @@ export class NotificationCarrier {
   #index
   #count
   #totalBytes
-  #bytes
 
   constructor(publisher, target, topic, messageId, index, count, totalBytes, bytes) {
-    if (publisher == null) {
-      throw new TypeError('notification carrier publisher is required')
-    }
-    if (messageId == null) {
-      throw new TypeError('notification carrier messageId is required')
-    }
-    if (bytes == null) {
-      throw new TypeError('notification carrier bytes are required')
-    }
+    const owner = requireUuid(publisher, 'invalid notification carrier publisher')
+    const recipient =
+      target == null ? null : requireUuid(target, 'invalid notification carrier target')
+    const id = requireUuid(messageId, 'invalid notification carrier messageId')
     if (
       !Number.isInteger(totalBytes) ||
       totalBytes < 0 ||
@@ -215,19 +236,21 @@ export class NotificationCarrier {
     ) {
       throw new RangeError('invalid notification carrier dimensions')
     }
-    const owned = toBytes(bytes)
+    const source = requireBytes(bytes)
+    // Validate the expected fragment length before copying, so a hand-built value cannot make the
+    // carrier copy an arbitrary array.
     const expected = Math.min(CHUNK_BYTES, totalBytes - index * CHUNK_BYTES)
-    if (owned.length !== expected) {
+    if (source.byteLength !== expected) {
       throw new RangeError('invalid notification carrier chunk length')
     }
-    this.#publisher = publisher
-    this.#target = target == null ? null : target
+    this.#publisher = owner
+    this.#target = recipient
     this.#topic = requireTopic(topic)
-    this.#messageId = messageId
+    this.#messageId = id
     this.#index = index
     this.#count = count
     this.#totalBytes = totalBytes
-    this.#bytes = owned
+    CARRIER_BYTES.set(this, copyBytes(source))
   }
 
   publisher() {
@@ -260,17 +283,13 @@ export class NotificationCarrier {
   }
 
   bytes() {
-    return this.#bytes.slice()
-  }
-
-  [RAW_BYTES]() {
-    return this.#bytes
+    return CARRIER_BYTES.get(this).slice()
   }
 
   encode() {
     const encoded =
       `1|${this.#publisher}|${this.#target == null ? '*' : this.#target}|${this.#topic}|` +
-      `${this.#messageId}|${this.#index}|${this.#count}|${this.#totalBytes}|${encodeBase64(this.#bytes)}`
+      `${this.#messageId}|${this.#index}|${this.#count}|${this.#totalBytes}|${encodeBase64(CARRIER_BYTES.get(this))}`
     if (utf8Length(encoded) >= PAYLOAD_LIMIT) {
       throw new RangeError('notification carrier exceeds payload limit')
     }
@@ -287,10 +306,10 @@ export class NotificationCarrier {
  * so framing a large payload stays proportional to the fragment size.
  */
 export function carrierChunk(message, index) {
-  if (message == null) {
+  if (!(message instanceof NotificationPacket)) {
     throw new TypeError('notification packet is required')
   }
-  const payload = message[RAW_BYTES]()
+  const payload = PACKET_BYTES.get(message)
   const total = carrierCount(payload.length)
   if (!Number.isInteger(index) || index < 0 || index >= total) {
     throw new RangeError('invalid notification carrier index')
@@ -320,6 +339,10 @@ export function decodeNotificationCarrier(value, limits, self = null) {
   }
   if (limits == null) {
     throw new TypeError('notification limits are required')
+  }
+  // Never let a NaN/undefined/mutated budget silently bypass the dimension comparison.
+  if (!isPositiveInteger(limits.maxMessageBytes) || limits.maxMessageBytes > DEFAULT_MAX_MESSAGE_BYTES) {
+    throw new RangeError('invalid notification limits')
   }
   if (value.length >= PAYLOAD_LIMIT || utf8Length(value) >= PAYLOAD_LIMIT) {
     throw new RangeError('oversized notification carrier')
@@ -363,11 +386,16 @@ export function decodeNotificationCarrier(value, limits, self = null) {
 }
 
 function isPositiveInteger(value) {
-  return Number.isInteger(value) && value > 0
+  return Number.isSafeInteger(value) && value > 0 && value <= INT_MAX
 }
 
 function isNonNegativeInteger(value) {
-  return Number.isInteger(value) && value >= 0
+  return Number.isSafeInteger(value) && value >= 0 && value <= INT_MAX
+}
+
+/** Positive finite millisecond budget within the safe integer range. */
+function isValidTimeout(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= Number.MAX_SAFE_INTEGER
 }
 
 /** Canonical per-instance budgets; a smaller `maxMessageBytes` also bounds its packet/carrier values. */
@@ -393,9 +421,7 @@ export function createNotificationLimits(limits) {
     !isNonNegativeInteger(reassemblyBytes) ||
     reassemblyBytes < maxMessageBytes ||
     !isPositiveInteger(reassemblyMessages) ||
-    typeof reassemblyTimeoutMs !== 'number' ||
-    !Number.isFinite(reassemblyTimeoutMs) ||
-    reassemblyTimeoutMs <= 0 ||
+    !isValidTimeout(reassemblyTimeoutMs) ||
     !isPositiveInteger(sendBatchFrames)
   ) {
     throw new RangeError('invalid notification limits')
@@ -446,9 +472,6 @@ export class NotificationReassembler {
   #reservedBytes = 0
 
   constructor(self, limits, clock, delivery, resync) {
-    if (limits == null) {
-      throw new TypeError('notification limits are required')
-    }
     if (typeof delivery !== 'function') {
       throw new TypeError('notification delivery callback is required')
     }
@@ -456,14 +479,15 @@ export class NotificationReassembler {
       throw new TypeError('notification resync callback is required')
     }
     this.#self = self == null ? null : self
-    this.#limits = limits
+    // Own an immutable copy so later caller mutation cannot change the bounded budgets.
+    this.#limits = createNotificationLimits(limits)
     this.#clock = clock == null ? () => performance.now() : clock
     this.#delivery = delivery
     this.#resync = resync
   }
 
   accept(frame) {
-    if (frame == null) {
+    if (!(frame instanceof NotificationCarrier)) {
       throw new TypeError('notification carrier is required')
     }
     // Own echoes are discarded before expiry, lookup, or any allocation.
@@ -507,7 +531,7 @@ export class NotificationReassembler {
     }
     const index = frame.index()
     const offset = index * CHUNK_BYTES
-    const frameBytes = frame[RAW_BYTES]()
+    const frameBytes = CARRIER_BYTES.get(frame)
     if (message.received[index] === 1) {
       if (!bytesEqual(message.bytes, offset, frameBytes)) {
         this.#reject(key, message)
@@ -604,7 +628,8 @@ export class NotificationBatch {
     this.#messageId = packet.messageId()
     this.#totalBytes = packet.byteLength()
     this.#frames = Object.freeze(frames.slice())
-    this[BATCH_START] = startIndex
+    BATCH_START.set(this, startIndex)
+    Object.freeze(this)
   }
 
   publisher() {
@@ -653,10 +678,8 @@ export class NotificationOutbox {
   #closed = false
 
   constructor(limits) {
-    if (limits == null) {
-      throw new TypeError('notification limits are required')
-    }
-    this.#limits = limits
+    // Own an immutable copy so later caller mutation cannot change the bounded budgets.
+    this.#limits = createNotificationLimits(limits)
   }
 
   /**
@@ -665,7 +688,7 @@ export class NotificationOutbox {
    * fixed validation error. It does not retry, log payload or invoke callbacks.
    */
   offer(message) {
-    if (message == null) {
+    if (!(message instanceof NotificationPacket)) {
       throw new TypeError('notification packet is required')
     }
     if (
@@ -719,7 +742,7 @@ export class NotificationOutbox {
       this.#release(cursor.packet)
       return true
     }
-    const end = batch[BATCH_START] + batch.frameCount()
+    const end = BATCH_START.get(batch) + batch.frameCount()
     if (end >= carrierCount(cursor.packet.byteLength())) {
       this.#release(cursor.packet)
     } else {
