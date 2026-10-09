@@ -122,6 +122,8 @@ RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 
 `attempt` 在 `DISPATCHING -> RUNNING`、`-> UNKNOWN` 或 `-> CANCELLED` 上精确 +1：前者确认已启动，后两者保守计入可能已启动的恢复或 Stop 窗口；`Busy` 弹回与启动前拒绝都不增加它。`RUNNING -> READY` 重试时追加一条 `ModelAttemptFailure`（含 attempt、sequence、text、thinking、error、`failedAt`、`retryAt`）并清空活动 checkpoint，下次调度用同一冻结参数重新发起。checkpoint 只能在 `RUNNING -> RUNNING` 或 `RUNNING -> terminal` 中引入或增长；同 sequence 必须精确重放，更大 sequence 必须保留 text/thinking 原前缀且至少一项严格增长。离开 RUNNING 或处于终态内不能再增长 checkpoint，只能原样保留或清除；终态结果链接回 Entry 时同时清空 checkpoint 与失败审计。
 
+模型失败时，`TRANSIENT` 与 `INVALID_RESPONSE` 按重试预算重试；`INVALID_REQUEST` 等不可重试错误直接进入终态。Thread 消费终态时在同一事务追加 `ASSISTANT_ERROR` 与 `TURN_END(FAILED)`、推进 head 并清理 Invocation/Work；没有待处理输入时快照回到 `IDLE`。历史错误与 `ModelInvocationError` 使用相同的非空正文契约，原样保留长度、换行与首尾空白，响应体的资源限制由传输层承担。
+
 [`ModelRequestSpec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec.java) 冻结一次调用不可变的请求契约：
 
 ```text
@@ -146,7 +148,7 @@ durable 事实。Skill 的 name、description 与稳定 path 已经完整写入
 - **降级动作来源**：每个降级项形如 `<action>:`（失败时 `<action> failed:`）加该结果的可读内容。`<action>` 来自调用成功时冻结在 `ProviderToolCall.historyAction`（进而落入 durable `ToolCallMessageContent.historyAction`）的 Tool 语义动作；没有该动作时使用确定性中性回退 `external operation:`，逐字围栏保留全部 arguments，因此投影既不猜测第三方工具语义，也不需要重新调用 Tool 代码。未被任何结果配对的降级调用以 `No result provided` 表达，不合成 TOOL 结果。
 - **结果输出顺序**：同一 assistant 后的 native TOOL 结果先于降级 USER 上下文，保持 tool-call adjacency 和组内顺序。仅含降级调用的 assistant 由 USER 语义上下文替代。
 - **动态无标签围栏**：降级内容中的逐字 payload 使用动态围栏（反引号数取 `max(3, 内容中最长反引号连续段 + 1)`，不带语言标识），防止逐字 payload 中的反引号与空白被误读。
-- **回放状态控制**：以上动态降级仅适用于没有 `ProviderReplayState` 的 assistant 消息。携带 replay 的消息若需降级，在改写前以 `INVALID_REQUEST` 拒绝；Runtime 不解析或丢弃不透明的 native payload。未被改写的消息保留 replay state。物化失败在 Gateway 启动前收敛为 FAILED；失去 claim 时不改写其他执行者的状态。恢复方式是还原原工具绑定/环境，或在新上下文中显式提供摘要。
+- **回放状态控制**：携带 `ProviderReplayState` 的 assistant 消息若因工具绑定或环境变化需要改写，仅在本次请求中放弃该消息的不兼容 opaque replay，继续投影 durable 的可读语义；不解析、不解密、不改写历史原生 payload。未被改写的消息保留 replay state。真正的历史物化错误在 Gateway 启动前收敛为 FAILED；失去 claim 时不改写其他执行者的状态。
 - **未配对调用处理**：对当前连续 Tool chain 中未配对的 native ToolCall，在角色切换或 Context 结束前合成 error ToolResult `No result provided`（仅存在于本次 ProviderRequest，不写 Session Entry）；降级调用只在 USER 上下文中体现，不合成结果。
 
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java) 是 `harness_tool_invocation` 行的当前状态：冻结的 `ToolCall` 参数、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)、`assistantEntryId`、`callIndex`、审批记录、结果、副作用批次与错误描述。
