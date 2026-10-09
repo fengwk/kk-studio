@@ -156,25 +156,12 @@ public record SystemSettings(
       SystemSettingsValidation.requireAtLeast(
           subagentMaxTotalConcurrency, 0, "aiRuntime.subagentMaxTotalConcurrency");
       SystemSettingsValidation.requireAtLeast(subagentMaxTurns, 1, "aiRuntime.subagentMaxTurns");
+      // 白名单的唯一权威校验/规范化在 ModelHttpErrorPolicy：这里只复用，不再保留第二份 400–599 规则。
       modelHttpRetryStatusCodes =
-          requireHttpStatusCodes(modelHttpRetryStatusCodes, "aiRuntime.modelHttpRetryStatusCodes");
-    }
-
-    /** 仅接受 400–599 的整型状态；拒绝 null 元素、重复与越界，空列表合法（表示不自动重试任何 HTTP 错误）。 */
-    private static List<Integer> requireHttpStatusCodes(List<Integer> codes, String field) {
-      Objects.requireNonNull(codes, field);
-      List<Integer> copy = new ArrayList<>(codes.size());
-      for (Integer status : codes) {
-        if (status == null || status < 400 || status > 599) {
-          throw new IllegalArgumentException(
-              field + " must contain only HTTP error statuses 400-599");
-        }
-        if (copy.contains(status)) {
-          throw new IllegalArgumentException(field + " must not contain duplicate statuses");
-        }
-        copy.add(status);
-      }
-      return List.copyOf(copy);
+          new ModelHttpErrorPolicy(
+                  Objects.requireNonNull(
+                      modelHttpRetryStatusCodes, "aiRuntime.modelHttpRetryStatusCodes"))
+              .retryStatusCodes();
     }
   }
 

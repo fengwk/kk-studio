@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -30,7 +31,12 @@ public class AgentProviderDTO {
   /** 模型调用空闲超时（毫秒，正数）；未配置时由产品默认值填充。 */
   private Long modelCallIdleTimeoutMillis;
 
-  /** HTTP 重试白名单覆盖：null 表示继承系统名单，空数组表示不自动重试任何 HTTP 错误。 */
+  /**
+   * HTTP 重试白名单覆盖：null 表示继承系统名单，空数组表示不自动重试任何 HTTP 错误。
+   *
+   * <p>前端契约为 {@code number[] | null}：即便全局默认省略 null，本字段也必须显式输出 null。
+   */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private List<Integer> modelHttpRetryStatusCodes;
 
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */

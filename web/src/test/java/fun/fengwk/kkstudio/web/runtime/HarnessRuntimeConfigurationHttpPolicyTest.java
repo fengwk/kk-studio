@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,6 +58,13 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
   @Test
   void unknownProviderFallsBackToSystemList() {
     assertTrue(policyFor("missing").allowsRetry(429));
+  }
+
+  /** live 路径绝不允许 null/blank 冻结身份；未知名称才按“继承系统名单”处理。 */
+  @Test
+  void nullOrBlankProviderNameMustNotEnterLivePath() {
+    assertThrows(NullPointerException.class, () -> policyFor(null));
+    assertThrows(IllegalArgumentException.class, () -> policyFor("  "));
   }
 
   private ModelHttpErrorPolicy policyFor(String providerName) {

@@ -95,7 +95,7 @@ public final class ModelInvocationErrorJsonCodec {
     return value.textValue();
   }
 
-  /** 读取 required 的 {@code httpStatus}：显式 null 或 400–599 的整型 HTTP error 状态；其余一律拒绝。 */
+  /** 读取 required 的 {@code httpStatus}：显式 null 或 100–599 的整型 HTTP 状态；其余一律拒绝。 */
   private static Integer httpStatus(ObjectNode node) {
     JsonNode value = node.get("httpStatus");
     if (value.isNull()) {
