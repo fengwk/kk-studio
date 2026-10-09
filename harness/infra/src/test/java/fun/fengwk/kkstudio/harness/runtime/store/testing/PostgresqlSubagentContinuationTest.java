@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
@@ -210,35 +211,28 @@ class PostgresqlSubagentContinuationTest {
 
     ThreadJoin first = join(delegation.firstJoin());
     ThreadJoin second = join(secondJoin);
-    assertTrue(first.matched());
+    // 续接在同一父/子对上 supersede 旧未完成 join：旧 join 保留 invocation identity 与源命令，但不再产生独立交付；
+    // busy follow-up 只交付最新一次的一份汇总结果。
+    assertFalse(first.matched());
+    assertEquals(secondJoin, first.supersededByInvocationId());
     assertTrue(second.matched());
+    assertNull(second.supersededByInvocationId());
     assertEquals(1L, first.sourceCommandSequence());
     assertEquals(5L, second.sourceCommandSequence());
-    assertNotEquals(earlyTerminal, first.terminalEntryId());
-    assertEquals(latest.thread().headEntryId(), first.terminalEntryId());
-    assertEquals(first.terminalEntryId(), second.terminalEntryId());
-    assertNotNull(first.finalAnswerEntryId());
-    assertEquals(first.finalAnswerEntryId(), second.finalAnswerEntryId());
-    for (ThreadJoin settled : List.of(first, second)) {
-      var receipt = runtime.projectJoinReceipt(settled.invocationId()).orElseThrow();
-      assertEquals(ThreadJoinOutcome.COMPLETED, receipt.outcome());
-      assertEquals("second final", receipt.report());
-    }
+    assertNotEquals(earlyTerminal, second.terminalEntryId());
+    assertEquals(latest.thread().headEntryId(), second.terminalEntryId());
+    assertNotNull(second.finalAnswerEntryId());
+    assertTrue(runtime.projectJoinReceipt(first.invocationId()).isEmpty());
+    var receipt = runtime.projectJoinReceipt(second.invocationId()).orElseThrow();
+    assertEquals(ThreadJoinOutcome.COMPLETED, receipt.outcome());
+    assertEquals("second final", receipt.report());
     List<ThreadCommand> deliveries = notifications(parentId);
-    assertEquals(2, deliveries.size());
-    assertEquals(
-        Set.of(first.invocationId(), second.invocationId()),
-        deliveries.stream().map(ThreadCommand::idempotencyKey).collect(Collectors.toSet()));
-    for (ThreadJoin settled : List.of(first, second)) {
-      ThreadCommand delivery =
-          deliveries.stream()
-              .filter(command -> command.idempotencyKey().equals(settled.invocationId()))
-              .findFirst()
-              .orElseThrow();
-      assertEquals(settled.deliveryCommandSequence(), delivery.sequence());
-      assertEquals(ThreadCommandState.QUEUED, delivery.state());
-      assertEquals(childId, ((NotificationCommandPayload) delivery.payload()).sourceThreadId());
-    }
+    assertEquals(1, deliveries.size());
+    ThreadCommand delivery = deliveries.getFirst();
+    assertEquals(second.invocationId(), delivery.idempotencyKey());
+    assertEquals(second.deliveryCommandSequence(), delivery.sequence());
+    assertEquals(ThreadCommandState.QUEUED, delivery.state());
+    assertEquals(childId, ((NotificationCommandPayload) delivery.payload()).sourceThreadId());
     assertTrue(hasThreadWork(parentId));
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, processor.process(busyClaim));
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, processor.process(finalClaim));
@@ -364,7 +358,8 @@ class PostgresqlSubagentContinuationTest {
         10,
         3,
         3,
-        3);
+        3,
+        JoinPurpose.TASK);
   }
 
   private ThreadSnapshot snapshot(UUID threadId) {

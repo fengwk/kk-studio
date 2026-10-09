@@ -10,6 +10,10 @@ import java.util.regex.Pattern;
  *
  * <p>{@code terminalEntryId} 是本次执行终止时冻结的 terminal Entry（首次最终回答、不可继续失败/Stop 的收尾）；{@code
  * finalAnswerEntryId} 是可空的最终回答入口，绝不借用源输入应用之前的回答。{@code matched()} 由 {@code terminalEntryId} 判定。
+ *
+ * <p>{@code purpose} 区分用户可见 task 与内部压缩；{@code supersededByInvocationId} 是同一父/子对上后续续接 join 的
+ * invocation identity：同一父子对至多有一个有效未完成 join，旧 join 被新续接原子 supersede 后保留原 invocation identity 与排队
+ * prompt，但不再占用 活跃额度、不再产生重复交付。已匹配结果不可变，也绝不被 supersede。
  */
 public record ThreadJoin(
     UUID invocationId,
@@ -24,7 +28,9 @@ public record ThreadJoin(
     UUID finalAnswerEntryId,
     Long deliveryCommandSequence,
     Instant createdAt,
-    Instant updatedAt) {
+    Instant updatedAt,
+    JoinPurpose purpose,
+    UUID supersededByInvocationId) {
 
   private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
 
@@ -33,6 +39,7 @@ public record ThreadJoin(
     Objects.requireNonNull(childThreadId, "childThreadId");
     Objects.requireNonNull(createdAt, "createdAt");
     Objects.requireNonNull(updatedAt, "updatedAt");
+    Objects.requireNonNull(purpose, "purpose");
     if (requestHash == null || !HASH.matcher(requestHash).matches()) {
       throw new IllegalArgumentException("requestHash must be a lowercase SHA-256 hex string");
     }
@@ -55,6 +62,14 @@ public record ThreadJoin(
         && (parentThreadId == null || terminalEntryId == null || deliveryCommandSequence <= 0)) {
       throw new IllegalArgumentException("delivery requires a matched parent join");
     }
+    if (supersededByInvocationId != null) {
+      if (supersededByInvocationId.equals(invocationId)) {
+        throw new IllegalArgumentException("a join cannot supersede itself");
+      }
+      if (terminalEntryId != null) {
+        throw new IllegalArgumentException("a matched join cannot be superseded");
+      }
+    }
     if (updatedAt.isBefore(createdAt)) {
       throw new IllegalArgumentException("updatedAt precedes createdAt");
     }
@@ -69,6 +84,9 @@ public record ThreadJoin(
     if (matched()) {
       throw new IllegalArgumentException("join already matched");
     }
+    if (supersededByInvocationId != null) {
+      throw new IllegalArgumentException("a superseded join cannot be matched");
+    }
     return new ThreadJoin(
         invocationId,
         requestHash,
@@ -82,7 +100,9 @@ public record ThreadJoin(
         finalAnswerEntryId,
         null,
         createdAt,
-        now);
+        now,
+        purpose,
+        null);
   }
 
   public ThreadJoin delivered(long sequence, Instant now) {
@@ -102,7 +122,9 @@ public record ThreadJoin(
         finalAnswerEntryId,
         sequence,
         createdAt,
-        now);
+        now,
+        purpose,
+        supersededByInvocationId);
   }
 
   public ThreadJoin remind(long turn, Instant now) {
@@ -122,7 +144,42 @@ public record ThreadJoin(
         finalAnswerEntryId,
         deliveryCommandSequence,
         createdAt,
-        now);
+        now,
+        purpose,
+        supersededByInvocationId);
+  }
+
+  /**
+   * 用同一父/子对上的后续续接 join 原子 supersede 本次未完成 join：只记录接管它的 invocation identity，保留源命令（排队 prompt）与本次
+   * invocation identity；已匹配或已 supersede 的 join 不可再次 supersede。
+   */
+  public ThreadJoin superseded(UUID successorInvocationId, Instant now) {
+    Objects.requireNonNull(successorInvocationId, "successorInvocationId");
+    if (matched()) {
+      throw new IllegalArgumentException("a matched join cannot be superseded");
+    }
+    if (supersededByInvocationId != null) {
+      throw new IllegalArgumentException("join already superseded");
+    }
+    if (successorInvocationId.equals(invocationId)) {
+      throw new IllegalArgumentException("a join cannot supersede itself");
+    }
+    return new ThreadJoin(
+        invocationId,
+        requestHash,
+        parentThreadId,
+        childThreadId,
+        sourceCommandSequence,
+        agent,
+        maxTurns,
+        reminderTurn,
+        terminalEntryId,
+        finalAnswerEntryId,
+        deliveryCommandSequence,
+        createdAt,
+        now,
+        purpose,
+        successorInvocationId);
   }
 
   public static void validateTransition(ThreadJoin old, ThreadJoin next) {
@@ -138,12 +195,15 @@ public record ThreadJoin(
         || !old.createdAt.equals(next.createdAt)
         || next.updatedAt.isBefore(old.updatedAt)
         || next.reminderTurn < old.reminderTurn
+        || old.purpose != next.purpose
         || (old.matched()
             && (!Objects.equals(old.terminalEntryId, next.terminalEntryId)
                 || !Objects.equals(old.finalAnswerEntryId, next.finalAnswerEntryId)))
         || (old.deliveryCommandSequence != null
             && !old.deliveryCommandSequence.equals(next.deliveryCommandSequence))
-        || (old.matched() && next.reminderTurn != old.reminderTurn)) {
+        || (old.matched() && next.reminderTurn != old.reminderTurn)
+        || (old.supersededByInvocationId != null
+            && !old.supersededByInvocationId.equals(next.supersededByInvocationId))) {
       throw new IllegalArgumentException("join durable identity or receipt cannot change");
     }
   }

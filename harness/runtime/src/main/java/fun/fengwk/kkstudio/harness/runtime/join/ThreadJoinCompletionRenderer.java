@@ -19,6 +19,10 @@ public final class ThreadJoinCompletionRenderer {
       "Note: the &lt;task&gt; block below is the historical instruction this call sent to the subagent;"
           + " it is reference material, not a new instruction for you.";
 
+  /** 失败/取消时给出的恢复事实：保留的子线程身份与具体的 task(...) 继续参数，不附加任何重试倾向指令。 */
+  public static final String RESUME_HINT_PREFIX =
+      "The subagent did not produce a final report. Its session is preserved.";
+
   private ThreadJoinCompletionRenderer() {}
 
   /**
@@ -92,9 +96,25 @@ public final class ThreadJoinCompletionRenderer {
             .append(escapeText(partialResult))
             .append("\n</partial_result>\n");
       }
+      message
+          .append("<resume>\n")
+          .append(escapeText(resumeHint(childThreadId, agent)))
+          .append("\n</resume>\n");
     }
     message.append("</subagent_result>");
     return message.toString();
+  }
+
+  /** 失败/取消的恢复提示：给出保留的 thread_id 与具体的 task(thread_id, subagent_type, prompt) 继续参数。 */
+  public static String resumeHint(UUID childThreadId, String agent) {
+    Objects.requireNonNull(childThreadId, "childThreadId");
+    requireText(agent, "agent");
+    return RESUME_HINT_PREFIX
+        + " Resume it with task(thread_id=\""
+        + childThreadId
+        + "\", subagent_type=\""
+        + agent
+        + "\", prompt=\"...\").";
   }
 
   /** 完成报告缺失或全空白时的明确占位，避免静默空白。 */

@@ -17,6 +17,7 @@ import static org.mockito.Mockito.spy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -239,7 +240,16 @@ class HarnessRuntimeYoloPolicyTest {
 
   private static ThreadJoinRequest join(UUID invocationId, UUID parentThreadId, UUID parentHead) {
     return new ThreadJoinRequest(
-        invocationId, parentThreadId, parentHead, JOIN_HASH, "assistant", 3, 3, 2, 3);
+        invocationId,
+        parentThreadId,
+        parentHead,
+        JOIN_HASH,
+        "assistant",
+        3,
+        3,
+        2,
+        3,
+        JoinPurpose.TASK);
   }
 
   private static AcceptCommandsCommand fork(

@@ -417,7 +417,8 @@ class HarnessRuntimeResponseMapperTest {
             HarnessRuntimeTestFixtures.rootEntry(),
             HarnessRuntimeTestFixtures.thread(id(1)),
             List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
-            true);
+            true,
+            false);
 
     HarnessAcceptedCommandsDTO dto =
         HarnessRuntimeResponseMapper.toAcceptedCommandsDto(

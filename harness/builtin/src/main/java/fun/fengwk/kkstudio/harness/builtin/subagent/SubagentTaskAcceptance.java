@@ -12,8 +12,11 @@ import java.util.UUID;
  * @param childSessionId 子 Session UUID
  * @param childThreadId 子 Thread UUID（父调用后续用它继续该子执行）
  * @param replayed 该次接受是否命中了同 invocation 的既有持久记录（幂等重试）
+ * @param replaced 该次接受是否在同一父/子对上 supersede 了一个既有未完成 join（busy follow-up：旧 pending wait
+ *     被取代，只会有一份汇总结果）
  */
-public record SubagentTaskAcceptance(UUID childSessionId, UUID childThreadId, boolean replayed) {
+public record SubagentTaskAcceptance(
+    UUID childSessionId, UUID childThreadId, boolean replayed, boolean replaced) {
 
   public SubagentTaskAcceptance {
     Objects.requireNonNull(childSessionId, "childSessionId");

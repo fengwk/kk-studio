@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -289,7 +290,9 @@ abstract class HarnessStoreDeletionContract {
                   null,
                   null,
                   T1,
-                  T1);
+                  T1,
+                  JoinPurpose.TASK,
+                  null);
           tx.insertJoin(join);
           tx.updateJoin(join.match(resultHeadEntryId, null, T2));
         });

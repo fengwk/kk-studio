@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -335,7 +336,9 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
                   null,
                   null,
                   T0,
-                  T0);
+                  T0,
+                  JoinPurpose.TASK,
+                  null);
           tx.insertJoin(join);
           if (terminalEntryId != null) {
             // insertJoin 只接受未匹配记录；匹配是首次冻结终态 Entry 的单调推进。

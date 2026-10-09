@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -237,7 +238,9 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   null,
                   null,
                   now,
-                  now));
+                  now,
+                  JoinPurpose.TASK,
+                  null));
 
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId), now);
 

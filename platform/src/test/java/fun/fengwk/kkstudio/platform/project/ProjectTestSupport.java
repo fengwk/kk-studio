@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
@@ -539,7 +540,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                   ? null
                   : ((Number) row.get("delivery_command_sequence")).longValue(),
               ((Timestamp) row.get("created_at")).toInstant(),
-              ((Timestamp) row.get("updated_at")).toInstant()));
+              ((Timestamp) row.get("updated_at")).toInstant(),
+              JoinPurpose.TASK,
+              null));
     }
 
     /**
