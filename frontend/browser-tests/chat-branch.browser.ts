@@ -95,7 +95,7 @@ function entries(options: { usage?: boolean } = {}) {
   ]
 }
 
-function thread(headEntryId = 'entry-3') {
+function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
   return {
     name: 'thread-name',
     threadId: THREAD_ID,
@@ -105,8 +105,8 @@ function thread(headEntryId = 'entry-3') {
     yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
     nextCommandSequence: '1',
     version: '0',
-    status: 'IDLE',
-    processing: false,
+    status: options.busy ? 'MODEL_STREAM' : 'IDLE',
+    processing: options.busy === true,
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
@@ -127,7 +127,7 @@ interface Recorded {
 
 async function installChatApi(
   page: Page,
-  options: { usageEntries?: boolean; conflictFirstSend?: boolean; longHistory?: boolean } = {},
+  options: { usageEntries?: boolean; conflictFirstSend?: boolean; longHistory?: boolean; busyThread?: boolean } = {},
 ): Promise<Recorded> {
   const entryList = entries({ usage: options.usageEntries })
   if (options.longHistory) {
@@ -140,8 +140,15 @@ async function installChatApi(
       createTime: `2026-10-01T00:03:${String(index).padStart(2, '0')}Z`,
     })))
   }
-  const boundThread = thread(options.longHistory ? 'scroll-23' : options.usageEntries ? 'entry-turn' : 'entry-3')
+  const boundThread = thread(
+    options.longHistory ? 'scroll-23' : options.usageEntries ? 'entry-turn' : 'entry-3',
+    { busy: options.busyThread },
+  )
   let createdThread: ReturnType<typeof thread> | null = null
+  // 既有 Thread 的设置提交：接受响应推进 version 并回显 durable 的 SET 命令；后续快照读取
+  // 返回这些排队命令，使 chip 从「本地待生效」过渡为服务器已回读的待生效事实。
+  let boundVersion = 0
+  let queuedCommands: Array<Record<string, unknown>> = []
   let grandCompleted = false
   const sockets: WebSocketRoute[] = []
   const recorded: Recorded = {
@@ -225,28 +232,52 @@ async function installChatApi(
           data: {
             pageNumber: 1,
             pageSize: 50,
-            totalCount: 1,
-            results: [{
-              providerName: 'minimax',
-              name: 'MiniMax',
-              modelId: 'MiniMax-upstream',
-              description: null,
-              config: {
-                limit: { context: 128000, output: 8192 },
-                abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
-                defaultVariant: 'default',
-                variants: [{ id: 'default' }, { id: 'deep', reasoningEffort: 'high' }],
-                pricing: {
-                  currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
-                  version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
-                  cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
-                  cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
+            totalCount: 2,
+            results: [
+              {
+                providerName: 'minimax',
+                name: 'MiniMax',
+                modelId: 'MiniMax-upstream',
+                description: null,
+                config: {
+                  limit: { context: 128000, output: 8192 },
+                  abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
+                  defaultVariant: 'default',
+                  variants: [{ id: 'default' }, { id: 'deep', reasoningEffort: 'high' }],
+                  pricing: {
+                    currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
+                    version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
+                    cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
+                    cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
+                  },
                 },
+                version: '1',
+                createTime: null,
+                updateTime: null,
               },
-              version: '1',
-              createTime: null,
-              updateTime: null,
-            }],
+              {
+                // 单 variant 模型：一次点击即完成选择（无需进入二级 variant 菜单）。
+                providerName: 'minimax',
+                name: 'Echo',
+                modelId: 'Echo-upstream',
+                description: null,
+                config: {
+                  limit: { context: 32000, output: 4096 },
+                  abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+                  defaultVariant: 'default',
+                  variants: [{ id: 'default' }],
+                  pricing: {
+                    currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
+                    version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
+                    cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
+                    cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
+                  },
+                },
+                version: '1',
+                createTime: null,
+                updateTime: null,
+              },
+            ],
           },
         },
       })
@@ -322,14 +353,15 @@ async function installChatApi(
     }
     if (path === `/api/harness/threads/${THREAD_ID}` || (createdThread != null && path === `/api/harness/threads/${createdThread.threadId}`)) {
       const isCreated = createdThread != null && path.endsWith(createdThread.threadId)
+      const currentThread = isCreated ? createdThread! : { ...boundThread, version: String(boundVersion) }
       await route.fulfill({
         json: {
           status: 200,
           data: {
-            version: '0',
-            thread: isCreated ? createdThread : boundThread,
+            version: currentThread.version,
+            thread: currentThread,
             entries: isCreated ? entryList.filter((entry) => ['entry-1', 'entry-ancestor', 'entry-2'].includes(entry.entryId)) : entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
-            queuedCommands: [],
+            queuedCommands: isCreated ? [] : queuedCommands,
             modelInvocation: null,
             toolInvocations: [],
             modelAttemptFailures: [],
@@ -357,12 +389,46 @@ async function installChatApi(
       return
     }
     if (path.endsWith('/command-batches') && method === 'POST') {
-      recorded.commandBatches.push(request.postDataJSON())
+      const body = request.postDataJSON() as {
+        expectedHeadEntryId?: string
+        commands?: Array<Record<string, unknown>>
+        target?: { threadId: string; threadName: string; startEntryId: string }
+      }
+      recorded.commandBatches.push(body)
       if (options.conflictFirstSend && recorded.commandBatches.length === 1) {
         await route.fulfill({ status: 409, json: { status: 409, code: 'THREAD_NAME_CONFLICT', message: 'name conflict', errors: { reason: 'THREAD_NAME_CONFLICT' } } })
         return
       }
-      const body = request.postDataJSON() as { target: { threadId: string; threadName: string; startEntryId: string } }
+      if (body.target == null) {
+        // 既有 Thread 的纯设置批次：回显 durable SET 命令并推进 version，后续快照读回它们。
+        boundVersion += 1
+        const accepted = (body.commands ?? []).map((command, index) => {
+          const payload = command.type === 'SET_AGENT'
+            ? { agentName: command.agentName }
+            : command.type === 'SET_MODEL'
+              ? { model: command.model }
+              : { environmentName: command.environmentName ?? null }
+          return {
+            threadId: THREAD_ID,
+            sequence: String(index + 1),
+            type: command.type,
+            state: 'QUEUED',
+            idempotencyKey: command.idempotencyKey,
+            payloadJson: JSON.stringify(payload),
+            cancelledAt: null,
+            createTime: '2026-10-01T00:05:00Z',
+          }
+        })
+        queuedCommands = [...queuedCommands, ...accepted]
+        await route.fulfill({ json: { status: 200, data: {
+          session: { sessionId: SESSION_ID, name: 'Session One', createdAt: null },
+          rootEntry: entryList[0],
+          thread: { ...boundThread, version: String(boundVersion) },
+          acceptedCommands: accepted,
+          replayed: false,
+        } } })
+        return
+      }
       createdThread = { ...boundThread, threadId: body.target.threadId, name: body.target.threadName, headEntryId: body.target.startEntryId }
       await route.fulfill({ json: { status: 200, data: {
         session: { sessionId: SESSION_ID, name: 'Session One', createdAt: null },
@@ -874,3 +940,35 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await savedEditor?.dispose()
   })
 }
+
+/**
+ * busy Thread 的设置选择走真实浏览器路径：立即提交纯 SET 批次（无 USER_MESSAGE/GOAL），
+ * 并以「待生效」chip 展示。
+ */
+test('busy thread settings selection submits a standalone SET batch and shows the pending chip', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const recorded = await installChatApi(page, { busyThread: true })
+  await bindFirstPaneToThread(page)
+  await page.goto(HARNESS_URL)
+
+  const modelControl = page.getByRole('button', { name: 'Model 与 Variant' }).first()
+  await expect(modelControl).toBeVisible()
+  await modelControl.click()
+  await page.getByRole('option', { name: 'minimax/Echo' }).click()
+
+  await expect.poll(() => recorded.commandBatches.length).toBe(1)
+  const batch = recorded.commandBatches[0] as {
+    expectedHeadEntryId: string
+    commands: Array<Record<string, unknown>>
+  }
+  // 纯设置批次：固定顺序的 SET_MODEL，且没有伪造末尾 USER_MESSAGE/GOAL。
+  expect(batch.commands.map((command) => command.type)).toEqual(['SET_MODEL'])
+  expect(batch.expectedHeadEntryId).toBe('entry-3')
+
+  const chip = page.locator('.thread-composer-settings-status[data-settings-status="pending"]').first()
+  await expect(chip).toBeVisible()
+  await expect(chip).toHaveText('待生效')
+  await page.screenshot({ path: testInfo.outputPath('busy-settings-pending.png') })
+})
