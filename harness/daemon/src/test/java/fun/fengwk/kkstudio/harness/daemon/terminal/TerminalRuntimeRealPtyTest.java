@@ -51,8 +51,9 @@ class TerminalRuntimeRealPtyTest {
   void userWriteReachesTheCommandAndItsOutputReturnsThroughTheKernel() throws Exception {
     TerminalRuntime runtime = start(TerminalRuntimeFixtureMain.fixtureCommand("echo"));
     try {
+      // 终端 Enter 发 CR；ConPTY 的行输入不把单独 LF 当作按下 Enter。
       runtime
-          .writeInput("hello\n".getBytes(StandardCharsets.UTF_8), 1L)
+          .writeInput("hello\r".getBytes(StandardCharsets.UTF_8), 1L)
           .get(WAIT_SECONDS, TimeUnit.SECONDS);
       assertTrue(awaitProjected(runtime, "ECHO:hello"), "命令必须读到写入的字节并把回显经 PTY 传回内核画面");
     } finally {

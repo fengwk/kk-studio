@@ -898,9 +898,17 @@ class TerminalRuntimeDeterministicTest {
     Path missing = workdir.resolve("definitely-not-an-executable");
     TerminalLaunchSpec spec =
         new TerminalLaunchSpec(missing.toString(), List.of(), workdir.toAbsolutePath());
-    TerminalRuntime runtime =
-        TerminalRuntime.start(
-            spec, 20, 5, 8, System.getenv(), () -> true, vtExecutor(), ioExecutor(), scheduler());
+    TerminalRuntime runtime;
+    try {
+      runtime =
+          TerminalRuntime.start(
+              spec, 20, 5, 8, System.getenv(), () -> true, vtExecutor(), ioExecutor(), scheduler());
+    } catch (IOException | IllegalStateException failure) {
+      // Windows 在创建挂起命令时发现无效程序，POSIX helper 可在许可后异步失败。
+      assertEquals("terminal runtime could not be started", failure.getMessage());
+      assertNull(failure.getCause(), "启动失败不得携带含路径的 native cause");
+      return;
+    }
     try {
       ExecutionException failure =
           assertThrows(
