@@ -6,6 +6,7 @@ import type {
   EnvironmentInstallCodeDTO,
   EnvironmentInstallConfigDTO,
   EnvironmentRegistrationTokenDTO,
+  EnvironmentUpdateDTO,
 } from '@/shared/api/contracts/ai-environment'
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
@@ -17,6 +18,14 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
 
     getEnvironment: (id: string): Promise<EnvironmentCardDTO> =>
       client.get(`/harness/environments/${encodeURIComponent(id)}`),
+
+    /** Read the latest managed Daemon update operation; returns null when never updated. */
+    getEnvironmentUpdate: (id: string): Promise<EnvironmentUpdateDTO | null> =>
+      client.get(`/harness/environments/${encodeURIComponent(id)}/update`),
+
+    /** Start a managed Daemon update to the platform-controlled release and return the refreshed card. */
+    startEnvironmentUpdate: (id: string): Promise<EnvironmentCardDTO> =>
+      client.post(`/harness/environments/${encodeURIComponent(id)}/update`),
 
     createEnvironment: (data: EnvironmentCreateDTO): Promise<EnvironmentCardDTO> =>
       client.post('/harness/environments', data),

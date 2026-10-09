@@ -22,10 +22,44 @@ import { useApplicationEvents } from '@/shared/app-events'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentCardDTO,
+  EnvironmentUpdateDTO,
+  EnvironmentUpdatePhase,
+} from '@/shared/api/contracts/ai-environment'
 import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+
+const IN_PROGRESS_UPDATE_PHASES = new Set<string>([
+  'PENDING',
+  'RUNNING',
+  'PREPARED',
+  'UNKNOWN',
+])
+
+const UPDATE_PHASE_KEYS: Record<EnvironmentUpdatePhase, string> = {
+  PENDING: 'ai.environment.update.phase.PENDING',
+  RUNNING: 'ai.environment.update.phase.RUNNING',
+  PREPARED: 'ai.environment.update.phase.PREPARED',
+  SUCCEEDED: 'ai.environment.update.phase.SUCCEEDED',
+  FAILED: 'ai.environment.update.phase.FAILED',
+  UNKNOWN: 'ai.environment.update.phase.UNKNOWN',
+}
+
+function isUpdateInProgress(phase?: string | null): boolean {
+  return typeof phase === 'string' && IN_PROGRESS_UPDATE_PHASES.has(phase.toUpperCase())
+}
+
+function formatUpdateStatus(
+  update: EnvironmentUpdateDTO,
+  t: (key: string) => string,
+): string {
+  const phaseKey = UPDATE_PHASE_KEYS[update.phase]
+  const phaseLabel = phaseKey ? t(phaseKey) : update.phase
+  const errorText = update.error?.trim()
+  return errorText ? `${phaseLabel}: ${errorText}` : phaseLabel
+}
 
 /**
  * 状态截止点回读的容差：越过截止点一个很小的余量再回读，避免与服务端时钟在边界上竞争。
@@ -63,6 +97,8 @@ export function EnvironmentsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<EnvironmentCardDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [updateTarget, setUpdateTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
   const [rotateTarget, setRotateTarget] = useState<EnvironmentCardDTO | null>(null)
   const [rotateError, setRotateError] = useState<string | null>(null)
   const [manageTarget, setManageTarget] = useState<EnvironmentCardDTO | null>(null)
@@ -140,6 +176,24 @@ export function EnvironmentsPage() {
         return
       }
       setCreateError(err instanceof Error ? err.message : String(err))
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: (id: string) => environmentService.startEnvironmentUpdate(id),
+    onSuccess: () => {
+      setUpdateTarget(null)
+      setUpdateError(null)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
+    },
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setUpdateTarget(null)
+        setUpdateError(null)
+        return
+      }
+      setUpdateError(err instanceof Error ? err.message : String(err))
     },
   })
 
@@ -231,6 +285,12 @@ export function EnvironmentsPage() {
             const lastSeen = formatTimestamp(environment.lastSeen, locale)
 
             const rows: ResourceCardMetaRow[] = []
+            if (environment.daemonVersion) {
+              rows.push([t('ai.environment.daemonVersion'), environment.daemonVersion])
+            }
+            if (environment.update) {
+              rows.push([t('ai.environment.updateStatus'), formatUpdateStatus(environment.update, t)])
+            }
             if (environment.userName) {
               rows.push([t('ai.environment.userName'), environment.userName])
             }
@@ -279,6 +339,22 @@ export function EnvironmentsPage() {
                     >
                       <SlidersHorizontal aria-hidden="true" />
                       {t('ai.environment.manage')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="compact"
+                      aria-label={`${t('ai.environment.update')} ${environment.name}`}
+                      disabled={
+                        isUpdateInProgress(environment.update?.phase) ||
+                        (updateMutation.isPending && updateTarget?.id === environment.id)
+                      }
+                      onClick={() => {
+                        setConflict(null)
+                        setUpdateError(null)
+                        setUpdateTarget(environment)
+                      }}
+                    >
+                      {t('ai.environment.update')}
                     </Button>
                     <Button
                       variant="ghost"
@@ -362,6 +438,24 @@ export function EnvironmentsPage() {
         </Dialog>
       )}
 
+      {updateTarget && (
+        <ConfirmActionModal
+          modal={{
+            title: t('ai.environment.update'),
+            description: t('ai.environment.updateConfirm', { name: updateTarget.name }),
+            confirmLabel: t('ai.environment.update'),
+            icon: 'refresh',
+            error: updateError,
+            onConfirm: () => updateMutation.mutate(updateTarget.id),
+          }}
+          pending={updateMutation.isPending}
+          onClose={() => {
+            setUpdateTarget(null)
+            setUpdateError(null)
+          }}
+        />
+      )}
+
       {rotateTarget && (
         <ConfirmActionModal
           modal={{
@@ -423,6 +517,8 @@ export function EnvironmentsPage() {
           setConflict(null)
           setCreateModalOpen(false)
           setCreateError(null)
+          setUpdateTarget(null)
+          setUpdateError(null)
           setRotateTarget(null)
           setRotateError(null)
           setDeleteTarget(null)

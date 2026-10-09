@@ -32,6 +32,10 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
 
 import java.time.Duration;
@@ -99,6 +103,7 @@ public final class EnvironmentDaemonServer
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
   private final EnvironmentSessionListener sessionListener;
+  private final EnvironmentUpdateListener updateListener;
   private final DaemonResourceTicketService ticketService;
   private final Supplier<EnvironmentServerSettings> settings;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -107,6 +112,8 @@ public final class EnvironmentDaemonServer
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonResourceTransferCodec transferCodec = new DaemonResourceTransferCodec();
+  private final DaemonUpdateCommandCodec updateCommandCodec = new DaemonUpdateCommandCodec();
+  private final DaemonUpdateResultCodec updateResultCodec = new DaemonUpdateResultCodec();
 
   /** 保护环境/连接目录与 invocation 目录；绝不在持有该锁时获取任何连接锁或访问外部端口。 */
   private final Object inventory = new Object();
@@ -122,12 +129,14 @@ public final class EnvironmentDaemonServer
       DaemonLeaseStore leaseStore,
       DaemonRegistrationDirectory registrationDirectory,
       EnvironmentSessionListener sessionListener,
+      EnvironmentUpdateListener updateListener,
       DaemonResourceTicketService ticketService,
       Supplier<EnvironmentServerSettings> settings) {
     this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
     this.registrationDirectory =
         Objects.requireNonNull(registrationDirectory, "registrationDirectory");
     this.sessionListener = Objects.requireNonNull(sessionListener, "sessionListener");
+    this.updateListener = Objects.requireNonNull(updateListener, "updateListener");
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
     this.settings = Objects.requireNonNull(settings, "settings");
   }
@@ -300,6 +309,122 @@ public final class EnvironmentDaemonServer
     return Set.copyOf(ready);
   }
 
+  /**
+   * 开始一次受管更新的准入：要求目标 Environment 在当前节点 READY，且没有在途普通调用。
+   *
+   * <p>成功后在目录锁内登记 {@code operationId}，此后新的普通调用在起点即被拒绝（跨重启的持久事实由上层 operation 行承担）。同一 operationId
+   * 的重复准入是幂等的；已有其它 operation 或存在在途调用时拒绝，保证「一个 Environment 同一时刻至多一次更新」。
+   *
+   * @throws EnvironmentCapabilityUnavailableException 目标当前不在本节点 READY
+   * @throws EnvironmentCapabilityBusyException 已有其它更新在途或存在在途普通调用
+   */
+  public void beginUpdate(EnvironmentId environmentId, String operationId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(operationId, "operationId");
+    if (operationId.isBlank()) {
+      throw new IllegalArgumentException("operationId must not be blank");
+    }
+    synchronized (inventory) {
+      ConnectionState state = connectionOf(environmentId);
+      if (state == null || !state.isReady()) {
+        throw new EnvironmentCapabilityUnavailableException(
+            environmentId + " is not ready for update");
+      }
+      String current = updatingOperationIdOf(environmentId);
+      if (current != null) {
+        if (current.equals(operationId)) {
+          return;
+        }
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " already has an update in progress");
+      }
+      int inFlight = activeInvocationCountLocked(environmentId);
+      if (inFlight > 0) {
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " has " + inFlight + " in-flight invocations");
+      }
+      environmentOf(environmentId).updatingOperationId = operationId;
+    }
+  }
+
+  /** 结束一次受管更新的准入；只有与当前登记一致的 operationId 才清除，保证旧 operation 不能释放新 operation 的准入。 */
+  public void endUpdate(EnvironmentId environmentId, String operationId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(operationId, "operationId");
+    synchronized (inventory) {
+      EnvironmentState state = environments.get(environmentId);
+      if (state != null && operationId.equals(state.updatingOperationId)) {
+        state.updatingOperationId = null;
+      }
+    }
+  }
+
+  /** 该 Environment 当前是否有受管更新在途。 */
+  public boolean isUpdating(EnvironmentId environmentId) {
+    synchronized (inventory) {
+      return updatingOperationIdOf(environmentId) != null;
+    }
+  }
+
+  /** 该 Environment 在当前节点的在途普通调用数量（含 Skill 同步调用）。 */
+  public int activeInvocationCount(EnvironmentId environmentId) {
+    synchronized (inventory) {
+      return activeInvocationCountLocked(environmentId);
+    }
+  }
+
+  /**
+   * 在专用管理通道上向目标 Environment 下发一次受管更新命令。
+   *
+   * <p>只允许在该 Environment 正进行同一 operationId 的更新时发送；命令未进入传输时按 BUSY/UNAVAILABLE 收敛，绝不在断言未发送后重试。
+   */
+  public void sendUpdate(EnvironmentId environmentId, DaemonUpdateCommand command) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(command, "command");
+    ConnectionState state;
+    synchronized (inventory) {
+      EnvironmentState environment = environments.get(environmentId);
+      if (environment == null || !command.operationId().equals(environment.updatingOperationId)) {
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " is not in update " + command.operationId());
+      }
+      state = environment.connection;
+    }
+    if (state == null || !state.isReady()) {
+      throw new EnvironmentCapabilityUnavailableException(
+          environmentId + " is not ready for update");
+    }
+    String payload = updateCommandCodec.encode(command);
+    DaemonOfferResult outcome;
+    synchronized (state) {
+      if (!state.isReady()) {
+        throw new EnvironmentCapabilityUnavailableException(
+            environmentId + " is not ready for update");
+      }
+      outcome = state.offer(DaemonMessageType.UPDATE, null, payload);
+    }
+    if (outcome == DaemonOfferResult.ACCEPTED) {
+      return;
+    }
+    if (outcome == DaemonOfferResult.BUSY) {
+      throw new EnvironmentCapabilityBusyException(
+          "daemon outbound queue is full for environment " + environmentId);
+    }
+    throw new EnvironmentCapabilityUnavailableException(environmentId + " is not ready for update");
+  }
+
+  /** 调用方必须持有 {@code inventory}。 */
+  private String updatingOperationIdOf(EnvironmentId environmentId) {
+    EnvironmentState state = environments.get(environmentId);
+    return state == null ? null : state.updatingOperationId;
+  }
+
+  /** 调用方必须持有 {@code inventory}。 */
+  private int activeInvocationCountLocked(EnvironmentId environmentId) {
+    LinkedHashMap<UUID, ActiveInvocation> invocations = invocationsByEnvironment.get(environmentId);
+    return invocations == null ? 0 : invocations.size();
+  }
+
   @Override
   public EnvironmentCapabilityExecutionHandle invoke(
       EnvironmentId environmentId,
@@ -322,9 +447,19 @@ public final class EnvironmentDaemonServer
     synchronized (inventory) {
       state = connectionOf(environmentId);
       leaseToken = state == null ? null : state.leaseToken;
+      if (state != null && updatingOperationIdOf(environmentId) != null) {
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " is being updated");
+      }
     }
     if (state == null || leaseToken == null || !state.isReady()) {
       throw unavailable(environmentId, descriptor.id().value());
+    }
+    if (!state.catalogMatches()) {
+      throw new EnvironmentCapabilityUnavailableException(
+          environmentId
+              + " daemon capability catalog does not match the server catalog;"
+              + " ordinary capability calls are not allowed");
     }
     validateRequiredWorkdirShape(state, descriptor, request.call());
 
@@ -354,6 +489,12 @@ public final class EnvironmentDaemonServer
     synchronized (state) {
       if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
         throw unavailable(environmentId, descriptor.id().value());
+      }
+      synchronized (inventory) {
+        if (updatingOperationIdOf(environmentId) != null) {
+          throw new EnvironmentCapabilityBusyException(
+              "environment " + environmentId + " is being updated");
+        }
       }
       register(active);
       try {
@@ -502,11 +643,26 @@ public final class EnvironmentDaemonServer
       case FAILED -> handleFailed(state, envelope, deferred);
       case CANCELLED -> handleCancelled(state, envelope, deferred);
       case ERROR -> handleError(state, envelope);
+      case UPDATE_RESULT -> handleUpdateResult(state, envelope, deferred);
       case RESOURCE_UPLOAD_REQUEST, RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
           "resource upload control is handled by the connection gate");
-      case WELCOME, INVOKE, CANCEL, RESOURCE_UPLOAD_TICKET -> throw new DaemonProtocolException(
+      case WELCOME,
+          INVOKE,
+          CANCEL,
+          RESOURCE_UPLOAD_TICKET,
+          UPDATE -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to server");
     }
+  }
+
+  /** 处理 Daemon 的受管更新阶段回执：只做协议校验后转交宿主，不在此判定最终成功。 */
+  private void handleUpdateResult(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    requireReady(state);
+    requireNoInvocationId(envelope);
+    DaemonUpdateResult result = updateResultCodec.decode(envelope.payloadJson());
+    EnvironmentId environmentId = state.environmentId;
+    deferred.add(() -> updateListener.onUpdateResult(environmentId, result));
   }
 
   /** 处理 daemon 首帧 HELLO：解析实例身份与注册凭据、抢占路由租约并完成 WELCOME 回包。 */
@@ -523,16 +679,24 @@ public final class EnvironmentDaemonServer
     rejectUnexpectedFields(
         payload,
         Set.of(
-            "protocolVersion", "registrationToken", "capabilityCatalogVersion", "daemonInstanceId"),
+            "protocolVersion",
+            "registrationToken",
+            "capabilityCatalogVersion",
+            "daemonVersion",
+            "daemonInstanceId"),
         "HELLO payload");
     if (envelope.protocolVersion() != DaemonProtocol.VERSION
         || requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION) {
       throw new DaemonProtocolException("HELLO protocolVersion must be " + DaemonProtocol.VERSION);
     }
-    if (!EnvironmentCapabilityCatalog.version()
-        .equals(requiredText(payload, "capabilityCatalogVersion", "HELLO payload"))) {
-      throw new DaemonProtocolException(
-          "HELLO capabilityCatalogVersion does not match server catalog");
+    // 目录版本不匹配不再中断认证：连接仍可承载版本查询与受管更新，但普通 capability 调用被拒绝。
+    String capabilityCatalogVersion =
+        requiredText(payload, "capabilityCatalogVersion", "HELLO payload");
+    try {
+      DaemonCapabilities.validateDaemonVersion(
+          requiredText(payload, "daemonVersion", "HELLO payload"));
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("HELLO daemonVersion is invalid: " + error.getMessage());
     }
     String daemonInstanceId =
         parseUuid(requiredText(payload, "daemonInstanceId", "HELLO payload"), "daemonInstanceId")
@@ -582,6 +746,7 @@ public final class EnvironmentDaemonServer
               ? takeAbandonedInvocations(environmentId)
               : List.of();
       state.bind(environmentId, acquired.leaseToken());
+      state.capabilityCatalogVersion = capabilityCatalogVersion;
       synchronized (inventory) {
         environmentOf(environmentId).connection = state;
       }
@@ -1573,6 +1738,7 @@ public final class EnvironmentDaemonServer
     private volatile UUID leaseToken;
     private volatile EnvironmentId environmentId;
     private volatile boolean helloReceived;
+    private volatile String capabilityCatalogVersion;
     private volatile DaemonOperatingSystem daemonOperatingSystem;
     private volatile boolean ready;
     private volatile boolean cleaned;
@@ -1665,6 +1831,11 @@ public final class EnvironmentDaemonServer
           && leaseToken != null;
     }
 
+    /** 该连接在 HELLO 中声明的 capability catalog 版本是否与本地目录一致；不一致时不得执行普通能力调用。 */
+    private boolean catalogMatches() {
+      return EnvironmentCapabilityCatalog.version().equals(capabilityCatalogVersion);
+    }
+
     private synchronized DaemonOfferResult offer(
         DaemonMessageType type, String invocationId, String payloadJson) {
       if (cleaned || environmentId == null || leaseToken == null) {
@@ -1702,6 +1873,9 @@ public final class EnvironmentDaemonServer
   private static final class EnvironmentState {
     private String daemonInstanceId;
     private ConnectionState connection;
+
+    /** 当前登记的受管更新 operationId；null 表示没有更新在途。由 {@code inventory} 保护。 */
+    private String updatingOperationId;
   }
 
   /**

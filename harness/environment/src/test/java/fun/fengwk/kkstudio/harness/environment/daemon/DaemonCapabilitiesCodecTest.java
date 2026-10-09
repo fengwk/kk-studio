@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 /** READY capabilities codec 的严格版本、宿主 metadata 形状与未知字段拒绝契约。 */
 class DaemonCapabilitiesCodecTest {
 
+  private static final String DAEMON_VERSION = "1.0.9";
   private static final DaemonEnvironmentInfo ENVIRONMENT =
       new DaemonEnvironmentInfo(
           DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Linux environment.");
@@ -18,20 +19,22 @@ class DaemonCapabilitiesCodecTest {
       "\"environment\":{\"operatingSystem\":\"linux\","
           + "\"timeZone\":\"Asia/Shanghai\",\"userName\":\"dev\","
           + "\"homeDirectory\":\"/home/dev\",\"note\":\"Linux environment.\"}";
+  private static final String DAEMON_VERSION_JSON = "\"daemonVersion\":\"" + DAEMON_VERSION + "\",";
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private final DaemonCapabilitiesCodec codec = new DaemonCapabilitiesCodec();
 
-  /** READY 的唯一 wire 形状必须精确往返：只有 version 与 environment 两个顶层字段。 */
+  /** READY 的唯一 wire 形状必须精确往返：只有 version、daemonVersion 与 environment 三个顶层字段。 */
   @Test
-  void roundTripsHostMetadataOnly() {
-    DaemonCapabilities original = new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT);
+  void roundTripsHostMetadataAndDaemonVersion() {
+    DaemonCapabilities original =
+        new DaemonCapabilities(DaemonCapabilities.VERSION, DAEMON_VERSION, ENVIRONMENT);
 
     String encoded = codec.encode(original);
 
     assertEquals(original, codec.decode(encoded));
-    assertEquals("{\"version\":2," + ENVIRONMENT_JSON + "}", encoded);
+    assertEquals("{\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}", encoded);
   }
 
   /** Windows HOME 必须按目标 Daemon 语法校验，不能被 Linux Platform 的 Path 语义误拒绝。 */
@@ -45,7 +48,9 @@ class DaemonCapabilitiesCodecTest {
     assertEquals(
         windows,
         codec
-            .decode(codec.encode(new DaemonCapabilities(DaemonCapabilities.VERSION, windows)))
+            .decode(
+                codec.encode(
+                    new DaemonCapabilities(DaemonCapabilities.VERSION, DAEMON_VERSION, windows)))
             .environment());
     assertThrows(
         IllegalArgumentException.class,
@@ -61,21 +66,26 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":2,"
+                "{\"version\":3,"
+                    + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":2,"
+                "{\"version\":3,"
+                    + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"skillSources\":[{\"sourceId\":\"x\"}]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":2," + ENVIRONMENT_JSON + ",\"sourceSetVersion\":0,\"skills\":[]}"));
+                "{\"version\":3,"
+                    + DAEMON_VERSION_JSON
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":0,\"skills\":[]}"));
   }
 
   /** 严格拒绝已删除的 rootPath 元数据字段与历史 v1 payload。 */
@@ -96,7 +106,9 @@ class DaemonCapabilitiesCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.decode(
-                    "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                    "{\"version\":3,"
+                        + DAEMON_VERSION_JSON
+                        + "\"environment\":{\"operatingSystem\":\"linux\","
                         + "\"timeZone\":\"Asia/Shanghai\",\"userName\":\"dev\","
                         + "\"homeDirectory\":\"/home/dev\",\"note\":\"Linux environment.\","
                         + "\"rootPath\":\"/home/dev\"}}"));
@@ -108,23 +120,65 @@ class DaemonCapabilitiesCodecTest {
   /** 非当前版本、非整数版本与非法 environment 形状都按协议错误拒绝。 */
   @Test
   void rejectsUnsupportedVersionsAndShapes() {
-    for (String version : new String[] {"0", "1", "3", "\"2\"", "null", "true", "{}", "[]"}) {
+    for (String version : new String[] {"0", "1", "2", "4", "\"3\"", "null", "true", "{}", "[]"}) {
       assertThrows(
           DaemonProtocolException.class,
-          () -> codec.decode("{\"version\":" + version + "," + ENVIRONMENT_JSON + "}"),
+          () ->
+              codec.decode(
+                  "{\"version\":" + version + "," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"),
           version);
     }
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"environment\":" + ENVIRONMENT_JSON + "}"));
+        () -> codec.decode("{" + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
     assertThrows(
-        DaemonProtocolException.class, () -> codec.decode("{\"version\":2,\"environment\":null}"));
-    assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"version\":2}"));
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":3," + ENVIRONMENT_JSON + "}"));
     assertThrows(
-        DaemonProtocolException.class, () -> codec.decode("{\"version\":2,\"environment\":[]}"));
-    assertThrows(IllegalArgumentException.class, () -> new DaemonCapabilities(1, ENVIRONMENT));
-    assertThrows(IllegalArgumentException.class, () -> new DaemonCapabilities(3, ENVIRONMENT));
-    assertThrows(NullPointerException.class, () -> new DaemonCapabilities(2, null));
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":3," + DAEMON_VERSION_JSON + "\"environment\":null}"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"version\":3}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":3," + DAEMON_VERSION_JSON + "\"environment\":[]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonCapabilities(2, DAEMON_VERSION, ENVIRONMENT));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonCapabilities(DaemonCapabilities.VERSION + 1, DAEMON_VERSION, ENVIRONMENT));
+    assertThrows(
+        NullPointerException.class,
+        () -> new DaemonCapabilities(DaemonCapabilities.VERSION, DAEMON_VERSION, null));
+  }
+
+  /** daemonVersion 是构建事实，必须是受版本字符约束的单行文本。 */
+  @Test
+  void rejectsInvalidDaemonVersion() {
+    for (String invalid :
+        new String[] {"", " ", "1.0.9 ", " 1.0.9", "1 0", "1/0", "a\nb", "a\u0000b"}) {
+      assertThrows(
+          DaemonProtocolException.class,
+          () ->
+              codec.decode(
+                  "{\"version\":3,\"daemonVersion\":\"" + invalid + "\"," + ENVIRONMENT_JSON + "}"),
+          invalid);
+    }
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"version\":3,\"daemonVersion\":\""
+                    + "x".repeat(DaemonCapabilities.MAX_DAEMON_VERSION_CHARS + 1)
+                    + "\","
+                    + ENVIRONMENT_JSON
+                    + "}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonCapabilities(DaemonCapabilities.VERSION, " ", ENVIRONMENT));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonCapabilities(DaemonCapabilities.VERSION, null, ENVIRONMENT));
   }
 
   /** 顶层与 environment 都只接受固定字段：未知字段、重复键与尾随内容一律拒绝。 */
@@ -132,22 +186,28 @@ class DaemonCapabilitiesCodecTest {
   void rejectsUnknownDuplicateAndTrailingFields() {
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"secret\":\"x\"}"));
+        () ->
+            codec.decode(
+                "{\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + ",\"secret\":\"x\"}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + "} x"));
+        () -> codec.decode("{\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "} x"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":3,"
+                    + DAEMON_VERSION_JSON
+                    + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
                     + "\"note\":\"Linux environment.\",\"extra\":\"x\"}}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":3,"
+                    + DAEMON_VERSION_JSON
+                    + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
                     + "\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
                     + "\"note\":\"Linux environment.\"}}"));
@@ -155,12 +215,25 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":3,"
+                    + DAEMON_VERSION_JSON
+                    + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
                     + "\"note\":\"one\",\"note\":\"two\"}}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":2,\"version\":2," + ENVIRONMENT_JSON + "}"));
+        () ->
+            codec.decode(
+                "{\"version\":3,\"version\":3," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"version\":3,"
+                    + DAEMON_VERSION_JSON
+                    + DAEMON_VERSION_JSON
+                    + ENVIRONMENT_JSON
+                    + "}"));
   }
 
   /** environment 的五个字段缺一不可，且都必须是 non-blank 文本。 */
@@ -170,11 +243,15 @@ class DaemonCapabilitiesCodecTest {
         new String[] {"operatingSystem", "timeZone", "userName", "homeDirectory", "note"}) {
       assertThrows(
           DaemonProtocolException.class,
-          () -> codec.decode("{\"version\":2," + environmentWithout(omitted) + "}"),
+          () ->
+              codec.decode(
+                  "{\"version\":3," + DAEMON_VERSION_JSON + environmentWithout(omitted) + "}"),
           omitted);
       assertThrows(
           DaemonProtocolException.class,
-          () -> codec.decode("{\"version\":2," + environmentBlank(omitted) + "}"),
+          () ->
+              codec.decode(
+                  "{\"version\":3," + DAEMON_VERSION_JSON + environmentBlank(omitted) + "}"),
           omitted);
     }
   }
@@ -236,8 +313,7 @@ class DaemonCapabilitiesCodecTest {
 
   private void assertInvalidEnvironment(
       String operatingSystem, String timeZone, String userName, String homeDirectory, String note) {
-    ObjectNode root = OBJECT_MAPPER.createObjectNode();
-    root.put("version", DaemonCapabilities.VERSION);
+    ObjectNode root = readyRoot();
     ObjectNode environment = root.putObject("environment");
     environment.put("operatingSystem", operatingSystem);
     environment.put("timeZone", timeZone);
@@ -248,8 +324,7 @@ class DaemonCapabilitiesCodecTest {
   }
 
   private void assertInvalidUserName(String userName) {
-    ObjectNode root = OBJECT_MAPPER.createObjectNode();
-    root.put("version", DaemonCapabilities.VERSION);
+    ObjectNode root = readyRoot();
     ObjectNode environment = root.putObject("environment");
     environment.put("operatingSystem", "linux");
     environment.put("timeZone", "UTC");
@@ -260,8 +335,7 @@ class DaemonCapabilitiesCodecTest {
   }
 
   private void assertInvalidHomeDirectory(String homeDirectory) {
-    ObjectNode root = OBJECT_MAPPER.createObjectNode();
-    root.put("version", DaemonCapabilities.VERSION);
+    ObjectNode root = readyRoot();
     ObjectNode environment = root.putObject("environment");
     environment.put("operatingSystem", "linux");
     environment.put("timeZone", "UTC");
@@ -269,6 +343,13 @@ class DaemonCapabilitiesCodecTest {
     environment.put("homeDirectory", homeDirectory);
     environment.put("note", "Linux environment.");
     assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
+  }
+
+  private static ObjectNode readyRoot() {
+    ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("version", DaemonCapabilities.VERSION);
+    root.put("daemonVersion", DAEMON_VERSION);
+    return root;
   }
 
   private static String environmentWithout(String omitted) {

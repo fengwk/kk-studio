@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
+import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
@@ -45,13 +46,16 @@ class StudioEnvironmentControllerTest {
 
   private static final UUID ENV_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private EnvironmentService environmentService;
+  private EnvironmentUpdateService environmentUpdateService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     environmentService = mock(EnvironmentService.class);
+    environmentUpdateService = mock(EnvironmentUpdateService.class);
 
-    StudioEnvironmentController controller = new StudioEnvironmentController(environmentService);
+    StudioEnvironmentController controller =
+        new StudioEnvironmentController(environmentService, environmentUpdateService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(

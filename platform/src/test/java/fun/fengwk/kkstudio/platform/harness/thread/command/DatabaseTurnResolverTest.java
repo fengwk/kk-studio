@@ -3333,6 +3333,7 @@ class DatabaseTurnResolverTest {
               LiveEnvironmentStatus.CONNECTING,
               new DaemonCapabilities(
                   DaemonCapabilities.VERSION,
+                  "1.0.9",
                   new DaemonEnvironmentInfo(
                       DaemonOperatingSystem.WSL, "UTC", "dev-user", "/home/dev", "Retained note")),
               List.of(),
@@ -3380,6 +3381,7 @@ class DatabaseTurnResolverTest {
               LiveEnvironmentStatus.READY,
               new DaemonCapabilities(
                   DaemonCapabilities.VERSION,
+                  "1.0.9",
                   new DaemonEnvironmentInfo(
                       DaemonOperatingSystem.LINUX,
                       "UTC",
@@ -3425,7 +3427,7 @@ class DatabaseTurnResolverTest {
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
-              new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo),
+              new DaemonCapabilities(DaemonCapabilities.VERSION, "1.0.9", environmentInfo),
               List.of(),
               List.of(),
               lastSeenAt,

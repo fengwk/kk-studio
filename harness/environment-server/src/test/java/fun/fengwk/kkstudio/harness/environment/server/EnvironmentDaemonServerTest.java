@@ -42,6 +42,11 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeChannel;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
@@ -1354,17 +1359,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"daemonInstanceId\":\""
-                + INSTANCE_ID
-                + "\"}"));
-    assertTrue(
-        helloRejected(
-            "channel-catalog-mismatch",
-            "{\"protocolVersion\":"
-                + DaemonProtocol.VERSION
-                + ",\"registrationToken\":\""
-                + TOKEN
-                + "\",\"capabilityCatalogVersion\":\"999\",\"daemonInstanceId\":\""
+                + "\",\"daemonVersion\":\"1.0.9\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
                 + "\"}"));
     assertTrue(
@@ -1376,7 +1371,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"daemonInstanceId\":\""
+                + "\",\"daemonVersion\":\"1.0.9\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
                 + "\",\"extra\":true}"));
     assertTrue(
@@ -1384,7 +1379,7 @@ class EnvironmentDaemonServerTest {
             "channel-missing-token",
             "{\"protocolVersion\":"
                 + DaemonProtocol.VERSION
-                + ",\"capabilityCatalogVersion\":\""
+                + ",\"daemonVersion\":\"1.0.9\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
                 + "\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
@@ -1399,7 +1394,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\"}"));
+                + "\",\"daemonVersion\":\"1.0.9\"}"));
     assertTrue(
         helloRejected(
             "channel-non-canonical-instance",
@@ -1468,6 +1463,115 @@ class EnvironmentDaemonServerTest {
     assertFalse(channel.closed());
 
     fixture.receive(channel, DaemonMessageType.ERROR, null, "{\"message\":\"\",\"code\":\"X\"}");
+    assertTrue(channel.closed());
+  }
+
+  /**
+   * 测试意图：HELLO 声明的 capability catalog 与本地目录不一致时，连接仍完成认证（可承载版本查询与受管更新）， 但普通 capability
+   * 调用在起点被拒绝，绝不执行未知工具。
+   */
+  @Test
+  void catalogMismatchKeepsManagementAuthenticatedButRejectsTools() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReadyWithCatalog("channel-catalog-mismatch", "999");
+    assertFalse(channel.closed());
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () ->
+            fixture.server.invoke(
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
+
+    // 管理通道仍可用：目录不匹配的连接可以开始受管更新。
+    String operationId = UUID.randomUUID().toString();
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    assertTrue(fixture.server.isUpdating(ENVIRONMENT_ID));
+  }
+
+  /**
+   * 测试意图：受管更新期间普通 capability 调用在起点被 busy 拒绝，结束更新后恢复；同一 operation 重复准入幂等、不同 operation 被拒绝，保证「一个
+   * Environment 同一时刻至多一次更新」。
+   */
+  @Test
+  void updateAdmissionBlocksOrdinaryInvocationsUntilReleased() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-update-admission");
+    String operationId = UUID.randomUUID().toString();
+
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    assertTrue(fixture.server.isUpdating(ENVIRONMENT_ID));
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () ->
+            fixture.server.invoke(
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
+
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString()));
+
+    fixture.server.endUpdate(ENVIRONMENT_ID, operationId);
+    assertFalse(fixture.server.isUpdating(ENVIRONMENT_ID));
+
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+  }
+
+  /** 测试意图：存在在途普通调用时不得开始更新（busy），避免替换二进制打断执行。 */
+  @Test
+  void updateAdmissionRejectsWhenInvocationInFlight() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-update-inflight");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString()));
+    assertFalse(fixture.server.isUpdating(ENVIRONMENT_ID));
+  }
+
+  /** 测试意图：更新命令只在同一 operation 已准入时下发；下发即写出 UPDATE 帧，非活动 operation 被 busy 拒绝。 */
+  @Test
+  void sendUpdateRequiresActiveOperationAndWritesUpdateFrame() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-send-update");
+    String operationId = UUID.randomUUID().toString();
+    DaemonUpdateCommand command =
+        new DaemonUpdateCommand(
+            operationId, "1.0.9", DaemonUpdateArtifact.artifactUrl("1.0.9"), "a".repeat(64));
+
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.sendUpdate(ENVIRONMENT_ID, command));
+
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    fixture.server.sendUpdate(ENVIRONMENT_ID, command);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.UPDATE), channel.messageTypes());
+  }
+
+  /** 测试意图：daemon 上报的受管更新阶段回执只做协议校验后转交宿主；daemon 不得反向发送 UPDATE 命令。 */
+  @Test
+  void updateResultIsDeliveredToHostAndUpdateCommandFromDaemonIsRejected() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-update-result");
+    String operationId = UUID.randomUUID().toString();
+    DaemonUpdateResultCodec codec = new DaemonUpdateResultCodec();
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.UPDATE_RESULT,
+        null,
+        codec.encode(DaemonUpdateResult.prepared(operationId)));
+
+    assertFalse(channel.closed());
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.updateResultEnvironments);
+    assertEquals(DaemonUpdatePhase.PREPARED, fixture.updateResults.get(0).phase());
+
+    fixture.receive(channel, DaemonMessageType.UPDATE, null, "{}");
     assertTrue(channel.closed());
   }
 

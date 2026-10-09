@@ -54,6 +54,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -254,14 +260,16 @@ class DaemonRuntimeTest {
     assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
         EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, hello.path("daemonVersion").asText());
     assertTrue(hello.path("toolCatalogVersion").isMissingNode());
     DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
     DaemonEnvironmentInfo firstEnvironment =
         capabilitiesCodec.decode(handshake.get(1).payloadJson()).environment();
     assertEquals("Custom & stable environment.", firstEnvironment.note());
     JsonNode ready = codec.readPayload(handshake.get(1));
-    assertEquals(2, ready.size());
+    assertEquals(3, ready.size());
     assertEquals(DaemonCapabilities.VERSION, ready.path("version").asInt());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, ready.path("daemonVersion").asText());
     assertEquals(expectedProcessUserName(), ready.path("environment").path("userName").asText());
     assertEquals(
         expectedProcessHomeDirectory(), ready.path("environment").path("homeDirectory").asText());
@@ -274,6 +282,171 @@ class DaemonRuntimeTest {
     assertEquals(
         firstEnvironment, capabilitiesCodec.decode(reconnected.get(1).payloadJson()).environment());
     assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  /** 意图：受管更新命令先被立即接受（ACCEPTED），准备成功后回执 PREPARED，并把 handoff 交给分离更新器启动；daemon 只负责编排， 不代替更新器替换二进制。 */
+  @Test
+  void updateIsAcceptedThenPreparedAndLaunched() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    AtomicReference<ManagedUpdateOutcome.Prepared> launched = new AtomicReference<>();
+    runtime.setManagedUpdater(command -> preparedUpdate(command.operationId()));
+    runtime.setUpdateLauncher(
+        prepared -> {
+          launched.set(prepared);
+          return true;
+        });
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    List<DaemonEnvelope> results = transport.takeMessages(2);
+    assertMessageTypes(results, DaemonMessageType.UPDATE_RESULT, DaemonMessageType.UPDATE_RESULT);
+    DaemonUpdateResultCodec updateCodec = new DaemonUpdateResultCodec();
+    assertEquals(
+        DaemonUpdatePhase.ACCEPTED, updateCodec.decode(results.get(0).payloadJson()).phase());
+    assertEquals(
+        DaemonUpdatePhase.PREPARED, updateCodec.decode(results.get(1).payloadJson()).phase());
+    assertEquals(UPDATE_OP, launched.get().handoffDirectory().getFileName().toString());
+  }
+
+  /** 意图：同一 operation 的重发只重放冻结回执，不产生第二次准备（幂等）。 */
+  @Test
+  void duplicateUpdateReplaysResultWithoutRepreparing() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    AtomicInteger preparations = new AtomicInteger();
+    runtime.setManagedUpdater(
+        command -> {
+          preparations.incrementAndGet();
+          return preparedUpdate(command.operationId());
+        });
+    runtime.setUpdateLauncher(prepared -> true);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    List<DaemonEnvelope> replay = transport.takeMessages(1);
+    assertEquals(
+        DaemonUpdatePhase.PREPARED,
+        new DaemonUpdateResultCodec().decode(replay.get(0).payloadJson()).phase());
+    assertEquals(1, preparations.get());
+  }
+
+  /** 意图：分离更新器未能进入运行是确定失败，旧二进制保持不动，回执为 FAILED。 */
+  @Test
+  void launchFailureIsReportedAsFailed() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.setManagedUpdater(command -> preparedUpdate(command.operationId()));
+    runtime.setUpdateLauncher(prepared -> false);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    List<DaemonEnvelope> results = transport.takeMessages(2);
+    DaemonUpdateResultCodec updateCodec = new DaemonUpdateResultCodec();
+    assertEquals(
+        DaemonUpdatePhase.ACCEPTED, updateCodec.decode(results.get(0).payloadJson()).phase());
+    DaemonUpdateResult failed = updateCodec.decode(results.get(1).payloadJson());
+    assertEquals(DaemonUpdatePhase.FAILED, failed.phase());
+    assertEquals("detached updater could not be started", failed.message());
+  }
+
+  /** 意图：一个 Environment 同一时刻只允许一个更新 operation；在途期间的另一个 operation 是协议错误。 */
+  @Test
+  void differentUpdateWhileAnotherIsInFlightIsProtocolError() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    CountDownLatch release = new CountDownLatch(1);
+    runtime.setManagedUpdater(
+        command -> {
+          try {
+            release.await();
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          }
+          return preparedUpdate(command.operationId());
+        });
+    runtime.setUpdateLauncher(prepared -> true);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    transport.takeMessages(1);
+
+    transport.receive(updateCommand(UPDATE_OTHER_OP));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    release.countDown();
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.UPDATE_RESULT);
+  }
+
+  /** 意图：断开不改变已接受的更新事实；重连 READY 后必须重发已知回执，让 Platform 重新收敛而不是判定失败。 */
+  @Test
+  void reconnectResendsKnownUpdateResult() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.setManagedUpdater(command -> preparedUpdate(command.operationId()));
+    runtime.setUpdateLauncher(prepared -> true);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    transport.takeMessages(2);
+
+    transport.disconnect();
+    transport.awaitConnections(1);
+    completeHandshake();
+    List<DaemonEnvelope> reconnected = transport.takeMessages(3);
+    assertMessageTypes(reconnected, HELLO, READY, DaemonMessageType.UPDATE_RESULT);
+    assertEquals(
+        DaemonUpdatePhase.PREPARED,
+        new DaemonUpdateResultCodec().decode(reconnected.get(2).payloadJson()).phase());
+  }
+
+  private static final String UPDATE_OP = "11111111-1111-1111-1111-111111111111";
+  private static final String UPDATE_OTHER_OP = "22222222-2222-2222-2222-222222222222";
+
+  private DaemonEnvelope updateCommand(String operationId) {
+    DaemonUpdateCommand command =
+        new DaemonUpdateCommand(
+            operationId, "1.0.9", DaemonUpdateArtifact.artifactUrl("1.0.9"), "a".repeat(64));
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION,
+        DaemonMessageType.UPDATE,
+        ENVIRONMENT_ID,
+        null,
+        new DaemonUpdateCommandCodec().encode(command));
+  }
+
+  private static ManagedUpdateOutcome.Prepared preparedUpdate(String operationId) {
+    Path updateDirectory = Path.of("/var/lib/kk-studio/updates/" + operationId);
+    Path script = updateDirectory.resolve("kk-studio-daemon-update.sh");
+    return new ManagedUpdateOutcome.Prepared(
+        "1.0.9",
+        updateDirectory,
+        script,
+        updateDirectory.resolve("kk-studio-daemon-v1.0.9.jar"),
+        Path.of("/var/lib/kk-studio/lib/kk-studio-daemon.jar"));
   }
 
   /** 生产构造器不能为不完整的 registry 公布固定的 catalog。 */
@@ -1823,13 +1996,14 @@ class DaemonRuntimeTest {
     assertMessageTypes(handshake, HELLO, READY);
 
     JsonNode payload = codec.readPayload(handshake.get(1));
-    assertEquals(2, payload.size());
+    assertEquals(3, payload.size());
     assertFalse(payload.has("tools"));
     assertFalse(payload.has("skills"));
     assertFalse(payload.has("skillSources"));
     assertFalse(payload.has("sourceSetVersion"));
     assertFalse(payload.has("mcpServers"));
     assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, payload.path("daemonVersion").asText());
     JsonNode environment = payload.path("environment");
     assertEquals(5, environment.size());
     assertTrue(environment.path("operatingSystem").isTextual());

@@ -30,6 +30,8 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
   },
 }))
 

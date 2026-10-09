@@ -779,6 +779,12 @@ export async function listEnvironments(ctx) {
       typeof environment.name === 'string' && environment.name.trim().length > 0,
       `Environment name must be non-empty string: ${JSON.stringify(environment)}`,
     )
+    if (environment.daemonVersion != null) {
+      assert(
+        typeof environment.daemonVersion === 'string' && environment.daemonVersion.trim().length > 0,
+        `environment.daemonVersion must be a non-empty string when present: ${JSON.stringify(environment)}`,
+      )
+    }
     assert(typeof environment.ready === 'boolean', JSON.stringify(environment))
     assert(typeof environment.status === 'string', JSON.stringify(environment))
     assert(Object.hasOwn(environment, 'statusExpiresAt'), 'environment must expose statusExpiresAt')
