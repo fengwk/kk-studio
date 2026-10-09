@@ -134,14 +134,11 @@ class PostgresqlEnvironmentUpdateRepositoryIntegrationTest extends PostgresSprin
             "late",
             Set.of(EnvironmentUpdatePhase.PENDING)));
 
-    // 阶段由直接读取的持久事实确认：SUCCEEDED 未被迟到回执回退。
+    // 使用生产查询路径确认阶段，UUID 参数必须按 PostgreSQL uuid 类型绑定。
     assertEquals(
-        "SUCCEEDED",
-        jdbc.queryForObject(
-            "select phase from environment_update_operation where operation_id = '"
-                + operation.operationId()
-                + "'",
-            String.class));
+        EnvironmentUpdatePhase.SUCCEEDED,
+        repository.find(operation.operationId()).orElseThrow().phase());
+    assertTrue(repository.find(UUID.randomUUID().toString()).isEmpty());
     assertTrue(repository.findActive(environment).isEmpty());
   }
 
