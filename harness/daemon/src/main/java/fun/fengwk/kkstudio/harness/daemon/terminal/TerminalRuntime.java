@@ -319,6 +319,16 @@ public final class TerminalRuntime implements AutoCloseable {
     return terminated.copy();
   }
 
+  /**
+   * 非阻塞停止信号：只释放唯一停止信号并返回 {@link #termination()}，不在此等待收敛，也不复制任何收敛逻辑。
+   *
+   * <p>可从任意 owner 线程调用；{@link #close()} 在它之上追加有界等待，二者共用同一停止入口。
+   */
+  public CompletableFuture<Void> stop() {
+    requestStop(null);
+    return termination();
+  }
+
   /** 自然退出码；尚未自然退出时为 {@code null}。 */
   public Integer exitCode() {
     return exitCode;
@@ -329,10 +339,10 @@ public final class TerminalRuntime implements AutoCloseable {
     return finalView;
   }
 
-  /** 幂等且有界地收敛：终止进程范围、释放 PTY 与内核、终结全部未决操作。 */
+  /** 幂等且有界地收敛：发停止信号后等待进程范围、PTY 与内核释放，并终结全部未决操作。 */
   @Override
   public void close() {
-    requestStop(null);
+    stop();
     awaitConvergence();
   }
 
@@ -513,7 +523,7 @@ public final class TerminalRuntime implements AutoCloseable {
       return false;
     }
     if (current != frame.revision()) {
-      notExecuted(frame, STALE_MODE_MESSAGE);
+      notExecuted(frame, new StaleModeException());
       return false;
     }
     return true;
@@ -644,8 +654,13 @@ public final class TerminalRuntime implements AutoCloseable {
   }
 
   private void notExecuted(Operation operation, String message) {
+    notExecuted(operation, new IllegalStateException(message));
+  }
+
+  /** 以固定类型报告「进入 native 之前确定未执行」，避免调用方靠自由文本分类。 */
+  private void notExecuted(Operation operation, Throwable error) {
     if (resolve(operation) != null) {
-      operation.future.completeExceptionally(new IllegalStateException(message));
+      operation.future.completeExceptionally(error);
     }
   }
 
@@ -1004,6 +1019,18 @@ public final class TerminalRuntime implements AutoCloseable {
 
     OutcomeUnknownException(String message) {
       super(message);
+    }
+  }
+
+  /**
+   * 用户输入携带的输入模式版本已过期：进入 native 之前确定未执行，会话仍然存活。
+   *
+   * <p>固定无参构造与固定消息；调用方按类型分类，不得比对或向 wire 转发本异常的自由文本。
+   */
+  public static final class StaleModeException extends IllegalStateException {
+
+    StaleModeException() {
+      super(STALE_MODE_MESSAGE);
     }
   }
 }
