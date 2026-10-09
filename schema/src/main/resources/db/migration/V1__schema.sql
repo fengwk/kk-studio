@@ -172,6 +172,7 @@ create table skill_package (
     head_checked_at      timestamptz(3),
     head_check_error     text,
     skills               jsonb         not null default '[]'::jsonb,
+    encrypted_token      bytea,
     version              bigint        not null default 0,
     create_time          timestamptz(3) not null default current_timestamp,
     update_time          timestamptz(3) not null default current_timestamp,
@@ -217,6 +218,10 @@ create table skill_package (
         )
     ),
     constraint ck_skill_package_skills check (jsonb_typeof(skills) = 'array'),
+    constraint ck_skill_package_encrypted_token check (
+        encrypted_token is null
+        or octet_length(encrypted_token) > 0
+    ),
     constraint ck_skill_package_version check (version >= 0),
     constraint ck_skill_package_time_order check (update_time >= create_time)
 );
@@ -231,6 +236,7 @@ comment on column skill_package.observed_head_commit is '最近一次成功检�
 comment on column skill_package.head_checked_at is '最近一次检查时间（毫秒精度）；从未检查时为 null';
 comment on column skill_package.head_check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
 comment on column skill_package.skills is '从 current_commit 派生的 Skill manifest（JSON array，元素为 {name, description} 并按 name 排序）；元素形状由应用严格验证';
+comment on column skill_package.encrypted_token is '私有仓库访问令牌的 AES-256-GCM 二进制 envelope（格式版本 + 96-bit 随机 nonce + 认证密文，AAD 绑定命名空间与 packageName）；null 表示匿名访问，任何常规 DTO/预览/日志/模型上下文都不得返回';
 comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
 comment on column skill_package.create_time is '创建时间（毫秒精度）';
 comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
@@ -682,6 +688,56 @@ create index idx_environment_connection_lease_until
 
 create index idx_environment_connection_owner
     on environment_connection (owner_node_id);
+
+create table environment_update_operation (
+    operation_id   uuid           primary key,
+    environment_id uuid           not null,
+    target_version varchar(64)    not null,
+    phase          varchar(32)    not null,
+    error          varchar(500),
+    created_at     timestamptz(3) not null default current_timestamp,
+    updated_at     timestamptz(3) not null default current_timestamp,
+    constraint fk_environment_update_operation_environment foreign key (environment_id)
+        references environment (id) on delete cascade,
+    constraint ck_environment_update_operation_phase check (
+        phase in ('PENDING', 'RUNNING', 'PREPARED', 'SUCCEEDED', 'FAILED')
+    ),
+    constraint ck_environment_update_operation_target_version check (
+        target_version = btrim(target_version)
+        and char_length(target_version) between 1 and 64
+        and target_version ~ '^[0-9A-Za-z._+-]+$'
+    ),
+    constraint ck_environment_update_operation_error check (
+        error is null
+        or (
+            btrim(error) <> ''
+            and char_length(error) <= 500
+            and error !~ '[\x00-\x1F\x7F]'
+        )
+    ),
+    constraint ck_environment_update_operation_terminal_error check (
+        phase <> 'FAILED' or error is not null
+    ),
+    constraint ck_environment_update_operation_updated check (
+        updated_at >= created_at
+    )
+);
+
+comment on table environment_update_operation is '受管 Daemon 更新操作：唯一 operationId、固定目标版本、持久阶段与有界错误；活动行由部分唯一索引保证每个 Environment 至多一条';
+comment on column environment_update_operation.operation_id is '更新操作 UUID（平台生成，幂等键：同一 operation 的重发不产生第二次下载）';
+comment on column environment_update_operation.environment_id is '目标 Environment UUID（FK cascade）';
+comment on column environment_update_operation.target_version is '固定官方发布目标版本（与项目版本一致），不接受任意版本或 latest';
+comment on column environment_update_operation.phase is '持久阶段：PENDING / RUNNING / PREPARED / SUCCEEDED / FAILED；派生 UNKNOWN 不落库';
+comment on column environment_update_operation.error is '仅失败时的去敏有界说明（<= 500 字符，不含控制字符）';
+comment on column environment_update_operation.created_at is '创建时间（毫秒精度）';
+comment on column environment_update_operation.updated_at is '最后推进时间（毫秒精度）';
+
+create unique index uk_environment_update_active
+    on environment_update_operation (environment_id)
+    where phase in ('PENDING', 'RUNNING', 'PREPARED');
+
+create index idx_environment_update_operation_recent
+    on environment_update_operation (environment_id, created_at desc, operation_id desc);
 
 ------------------------------------------------------------------------------
 -- 1c. Singleton system settings (id=1)
@@ -1194,6 +1250,8 @@ create table harness_thread_join (
     child_thread_id uuid not null,
     source_command_sequence bigint not null check (source_command_sequence > 0),
     agent varchar(256) not null,
+    purpose varchar(32) not null default 'task',
+    superseded_by_invocation_id uuid,
     max_turns integer,
     reminder_turn bigint not null default 0,
     terminal_entry_id uuid,
@@ -1213,6 +1271,15 @@ create table harness_thread_join (
         references harness_entry (id),
     constraint fk_harness_thread_join_delivery_command foreign key (parent_thread_id, delivery_command_sequence)
         references harness_thread_command (thread_id, sequence),
+    constraint fk_harness_thread_join_superseded_by foreign key (superseded_by_invocation_id)
+        references harness_thread_join (invocation_id),
+    constraint ck_harness_thread_join_purpose check (
+        purpose in ('task', 'compaction')
+    ),
+    constraint ck_harness_thread_join_superseded check (
+        superseded_by_invocation_id is null
+        or (superseded_by_invocation_id <> invocation_id and terminal_entry_id is null)
+    ),
     constraint ck_harness_thread_join_request_hash check (
         request_hash ~ '^[0-9a-f]{64}$'
     ),
@@ -1247,6 +1314,8 @@ comment on column harness_thread_join.parent_thread_id is '父 Thread UUID（可
 comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID';
 comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
 comment on column harness_thread_join.agent is '本次执行的 Agent 名';
+comment on column harness_thread_join.purpose is 'Join 用途：task 投递父通知；compaction 仅冻结结果并唤醒压缩 owner';
+comment on column harness_thread_join.superseded_by_invocation_id is '接管本未完成 join 的后续 invocation UUID；被取代的 join 保留源命令与身份，不再占配额或交付';
 comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
 comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
 comment on column harness_thread_join.terminal_entry_id is '冻结的 terminal Entry UUID（可空，非空表示 matched）';
@@ -1257,13 +1326,14 @@ comment on column harness_thread_join.updated_at is '最后更新时间（毫秒
 
 create index idx_harness_thread_join_child_pending
     on harness_thread_join (child_thread_id)
-    where terminal_entry_id is null;
+    where terminal_entry_id is null and superseded_by_invocation_id is null;
 
 comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲或执行结束时检索等待匹配的 pending join';
 
 create index idx_harness_thread_join_parent_pending
     on harness_thread_join (parent_thread_id)
-    where terminal_entry_id is not null and delivery_command_sequence is null;
+    where terminal_entry_id is not null and delivery_command_sequence is null
+      and purpose = 'task' and superseded_by_invocation_id is null;
 
 comment on index idx_harness_thread_join_parent_pending is '父 Thread 恢复或接受输入时检索待交付给父的 pending join';
 
@@ -1693,7 +1763,6 @@ create table storage_upload (
     declared_media_type varchar(256)   not null,
     declared_size       bigint         not null,
     declared_sha256     char(64)       not null,
-    expires_at          timestamptz(3) not null,
     cleanup_requested_at timestamptz(3),
     cleanup_token       varchar(128),
     cleanup_until       timestamptz(3),
@@ -1703,7 +1772,6 @@ create table storage_upload (
     constraint ck_storage_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
     constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
     constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
-    constraint ck_storage_upload_expiry check (expires_at > created_at),
     constraint ck_storage_upload_cleanup_pair check (
         (cleanup_token is null) = (cleanup_until is null)
     ),
@@ -1719,7 +1787,7 @@ create table storage_upload (
 );
 
 create index idx_storage_upload_cleanup_claim
-    on storage_upload (cleanup_requested_at, expires_at, cleanup_until, id);
+    on storage_upload (cleanup_requested_at, created_at, cleanup_until, id);
 
 comment on table storage_blob is
     'Deduplicated immutable content address of the global blob storage: one'
@@ -1753,7 +1821,8 @@ comment on index uk_storage_blob_active_hash is
 
 comment on table storage_upload is
     'Per-upload contract: blob_id NULL = PENDING (client PUTs to'
-    ' uploads/{uploadId}/original), non-NULL = READY (blob is retained for this upload).';
+    ' uploads/{uploadId}/original), non-NULL = READY (blob is retained for this upload).'
+    ' Expiry is created_at + current upload TTL for unclaimed uploads.';
 
 comment on column storage_upload.id is
     'Upload id (uuid): the deterministic temp key uploads/{id}/original is derived from it.';
@@ -1767,9 +1836,6 @@ comment on column storage_upload.filename is 'Client-declared original filename 
 comment on column storage_upload.declared_media_type is 'Client-declared media type (non-blank, <= 256 chars).';
 comment on column storage_upload.declared_size is 'Client-declared content size in bytes (non-negative).';
 comment on column storage_upload.declared_sha256 is 'Client-declared lowercase hex SHA-256 (64 chars).';
-comment on column storage_upload.expires_at is
-    'Cleanup deadline: PENDING temp objects and rows, or READY rows plus the'
-    ' upload reference, are removed after this instant.';
 comment on column storage_upload.cleanup_requested_at is
     'Durable explicit cleanup request; NULL for active uploads and retained until'
     ' maintenance removes the upload row.';
@@ -1777,14 +1843,16 @@ comment on column storage_upload.cleanup_token is
     'Opaque cleanup ownership token; NULL when unclaimed and fenced on finalize/release.';
 comment on column storage_upload.cleanup_until is
     'Cleanup lease deadline paired with cleanup_token; an expired lease is reclaimable.';
-comment on column storage_upload.created_at is 'Row creation time (timestamptz, millisecond precision).';
+comment on column storage_upload.created_at is
+    'Row creation time (timestamptz, millisecond precision). Unclaimed uploads expire'
+    ' at created_at + current upload TTL; there is no persisted expiry column.';
 
 comment on index uk_storage_upload_candidate is
     'Every upload pre-assigns a distinct candidate blob id so PENDING rows can'
     ' never collide on the future blob identity.';
 comment on index idx_storage_upload_cleanup_claim is
-    'Storage Maintenance claim scan: requested or expired uploads with absent/expired'
-    ' leases, ordered by request/deadline time.';
+    'Storage Maintenance claim scan: requested, claimed or expired uploads with'
+    ' absent/expired leases; expiry compares created_at against now minus current TTL.';
 
 create table storage_object_cleanup (
     key              varchar(512)   not null,
