@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.daemon.terminal;
+package fun.fengwk.kkstudio.harness.environment.terminal;
 
 /**
  * 一次 INPUT/RESIZE 提交的准入决议。
@@ -6,6 +6,9 @@ package fun.fengwk.kkstudio.harness.daemon.terminal;
  * <p>{@link Kind#ACCEPTED} 是本 reducer 对某个 expected seq 唯一一次的正向决议，调用方只有拿到它才能调用 Runtime；{@link
  * Kind#PENDING} 表示相同在途操作仍在等待真实决议；{@link Kind#CONFIRMED} 表示该操作此前已决议，携带原结果，不再执行；{@link Kind#REJECTED}
  * 给出具体拒绝原因，且不消耗 seq。
+ *
+ * <p>构造时校验字段与类别一致：只有 {@link Kind#CONFIRMED} 携带 outcome，只有 {@link Kind#REJECTED} 携带 reason；除「格式非法」的
+ * INVALID 拒绝外，其余决议都必须携带摘要。工厂方法供 reducer 与 wire 编解码共用同一套决议构造。
  *
  * @param kind 决议类别
  * @param seq 本次操作的 seq
@@ -42,19 +45,36 @@ public record AdmissionResult(
     UNVERIFIABLE
   }
 
-  static AdmissionResult accepted(long seq, OperationDigest digest) {
+  public AdmissionResult {
+    if (kind == null) {
+      throw new IllegalArgumentException("kind must not be null");
+    }
+    if ((kind == Kind.CONFIRMED) != (outcome != null)) {
+      throw new IllegalArgumentException("only CONFIRMED carries an outcome");
+    }
+    if ((kind == Kind.REJECTED) != (reason != null)) {
+      throw new IllegalArgumentException("only REJECTED carries a reason");
+    }
+    boolean digestOptional = kind == Kind.REJECTED && reason == RejectReason.INVALID;
+    if (!digestOptional && digest == null) {
+      throw new IllegalArgumentException("digest is required unless the operation is INVALID");
+    }
+  }
+
+  public static AdmissionResult accepted(long seq, OperationDigest digest) {
     return new AdmissionResult(Kind.ACCEPTED, seq, digest, null, null);
   }
 
-  static AdmissionResult pending(long seq, OperationDigest digest) {
+  public static AdmissionResult pending(long seq, OperationDigest digest) {
     return new AdmissionResult(Kind.PENDING, seq, digest, null, null);
   }
 
-  static AdmissionResult confirmed(OperationOutcome outcome, long seq, OperationDigest digest) {
+  public static AdmissionResult confirmed(
+      OperationOutcome outcome, long seq, OperationDigest digest) {
     return new AdmissionResult(Kind.CONFIRMED, seq, digest, outcome, null);
   }
 
-  static AdmissionResult rejected(RejectReason reason, long seq, OperationDigest digest) {
+  public static AdmissionResult rejected(RejectReason reason, long seq, OperationDigest digest) {
     return new AdmissionResult(Kind.REJECTED, seq, digest, null, reason);
   }
 

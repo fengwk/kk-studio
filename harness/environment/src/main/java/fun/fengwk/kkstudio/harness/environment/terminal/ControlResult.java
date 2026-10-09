@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.daemon.terminal;
+package fun.fengwk.kkstudio.harness.environment.terminal;
 
 /**
  * 一次 writer 控制请求（CLAIM/TAKEOVER/recovery/RENEW/RELEASE）的结果。
@@ -6,6 +6,9 @@ package fun.fengwk.kkstudio.harness.daemon.terminal;
  * <p>{@link Status#GRANTED} 携带新授权的 epoch 与 token，以及跨连接恢复时核对出的旧操作决议 {@code recovered}；{@link
  * Status#RENEWED}/{@link Status#RELEASED} 表示续租/释放成功；{@link Status#BUSY} 表示存在未决操作、保守地保留现有围栏；{@link
  * Status#REJECTED} 给出具体拒绝原因。{@link #toString()} 不回显 token。
+ *
+ * <p>构造时校验字段与状态一致：只有 {@link Status#GRANTED} 携带 grant，只有 {@link Status#REJECTED} 携带 reason，{@code
+ * recovered} 只可能出现在 GRANTED。工厂方法供 reducer 与 wire 编解码共用同一套结果构造。
  *
  * @param status 结果类别
  * @param grant 授权成功时的 grant（含 token secret），否则为 {@code null}
@@ -44,23 +47,38 @@ public record ControlResult(
     REQUEST_CONFLICT
   }
 
-  static ControlResult granted(WriterGrant grant, OperationOutcome recovered) {
+  public ControlResult {
+    if (status == null) {
+      throw new IllegalArgumentException("status must not be null");
+    }
+    if ((status == Status.GRANTED) != (grant != null)) {
+      throw new IllegalArgumentException("only GRANTED carries a grant");
+    }
+    if ((status == Status.REJECTED) != (reason != null)) {
+      throw new IllegalArgumentException("only REJECTED carries a reason");
+    }
+    if (recovered != null && status != Status.GRANTED) {
+      throw new IllegalArgumentException("recovered outcome is only valid on GRANTED");
+    }
+  }
+
+  public static ControlResult granted(WriterGrant grant, OperationOutcome recovered) {
     return new ControlResult(Status.GRANTED, grant, recovered, null);
   }
 
-  static ControlResult renewed() {
+  public static ControlResult renewed() {
     return new ControlResult(Status.RENEWED, null, null, null);
   }
 
-  static ControlResult released() {
+  public static ControlResult released() {
     return new ControlResult(Status.RELEASED, null, null, null);
   }
 
-  static ControlResult busy() {
+  public static ControlResult busy() {
     return new ControlResult(Status.BUSY, null, null, null);
   }
 
-  static ControlResult rejected(RejectReason reason) {
+  public static ControlResult rejected(RejectReason reason) {
     return new ControlResult(Status.REJECTED, null, null, reason);
   }
 

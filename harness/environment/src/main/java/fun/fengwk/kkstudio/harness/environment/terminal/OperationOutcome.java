@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.daemon.terminal;
+package fun.fengwk.kkstudio.harness.environment.terminal;
 
 /**
  * 一次已准入操作经真实 Runtime 决议后的结果，或跨连接恢复时核对出的旧操作决议。

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.daemon.terminal;
+package fun.fengwk.kkstudio.harness.environment.terminal;
 
 import java.util.Arrays;
 

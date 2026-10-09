@@ -11,10 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.daemon.terminal.AdmissionResult.Kind;
-import fun.fengwk.kkstudio.harness.daemon.terminal.AdmissionResult.RejectReason;
-import fun.fengwk.kkstudio.harness.daemon.terminal.ControlResult.Status;
+import fun.fengwk.kkstudio.harness.environment.terminal.AdmissionResult;
+import fun.fengwk.kkstudio.harness.environment.terminal.AdmissionResult.Kind;
+import fun.fengwk.kkstudio.harness.environment.terminal.AdmissionResult.RejectReason;
+import fun.fengwk.kkstudio.harness.environment.terminal.ControlResult;
+import fun.fengwk.kkstudio.harness.environment.terminal.ControlResult.Status;
+import fun.fengwk.kkstudio.harness.environment.terminal.OperationDigest;
+import fun.fengwk.kkstudio.harness.environment.terminal.OperationOutcome;
 import fun.fengwk.kkstudio.harness.environment.terminal.TerminalLimits;
+import fun.fengwk.kkstudio.harness.environment.terminal.WriterGrant;
+import fun.fengwk.kkstudio.harness.environment.terminal.WriterState;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;

@@ -60,6 +60,20 @@
                                         </limit>
                                     </limits>
                                 </rule>
+                                <rule>
+                                    <!-- 控制协议 codec 与不可变模型按包聚合行覆盖率，避免对记录 boilerplate 逐类机械门禁。 -->
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>fun/fengwk/kkstudio/harness/environment/terminal</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
                             </rules>
                         </configuration>
                     </execution>
