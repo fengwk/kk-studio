@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.harness.environment.terminal;
 /**
  * 终端结构化画面协议的固定尺寸与预算常量。
  *
- * <p>这些值同时约束 {@link TerminalViewUpdate} 的模型校验与 {@link TerminalViewUpdateCodec} 的 wire 边界；本片
- * 不提供配置开关，也不存在随部署变化的第二组取值。
+ * <p>这些值同时约束 {@link TerminalViewUpdate} 的模型校验与 {@link TerminalViewUpdateCodec} 的 wire
+ * 边界；不提供配置开关，也不存在随部署变化的第二组取值。
  */
 public final class TerminalLimits {
 

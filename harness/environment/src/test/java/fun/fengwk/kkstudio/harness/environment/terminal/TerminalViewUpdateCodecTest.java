@@ -11,9 +11,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.DoubleNode;
 import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.LongNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.terminal.TerminalView.Color;
@@ -179,6 +181,39 @@ class TerminalViewUpdateCodecTest {
     assertThrows(INVALID, () -> CODEC.decode(setStyleIndex(valid, 0, 0, 1)));
     // 有槽却引用空字典。
     assertThrows(INVALID, () -> CODEC.decode(emptyStyles(valid)));
+  }
+
+  @Test
+  void rejectsStaticStyleValueViolations() {
+    String valid = CODEC.encode(TerminalViewSamples.reset());
+    // flags 越界：-1 与 256。
+    assertThrows(INVALID, () -> CODEC.decode(setStyleValue(valid, 0, 2, IntNode.valueOf(-1))));
+    assertThrows(INVALID, () -> CODEC.decode(setStyleValue(valid, 0, 2, IntNode.valueOf(256))));
+    // 颜色整数越界：-258 与 16777216。
+    assertThrows(INVALID, () -> CODEC.decode(setStyleValue(valid, 0, 0, IntNode.valueOf(-258))));
+    assertThrows(
+        INVALID, () -> CODEC.decode(setStyleValue(valid, 0, 0, IntNode.valueOf(16777216))));
+    // 非 integral JSON number：浮点与字符串数字。
+    assertThrows(INVALID, () -> CODEC.decode(setStyleValue(valid, 0, 0, DoubleNode.valueOf(1.0))));
+    assertThrows(INVALID, () -> CODEC.decode(setStyleValue(valid, 0, 0, TextNode.valueOf("1"))));
+  }
+
+  @Test
+  void rejectsDeclaredCountsBeforeExpansion() {
+    String patch = CODEC.encode(TerminalViewSamples.patch());
+    // historyAppend 超过声明的 history（2 > 0，全局上限未触及）。
+    assertThrows(INVALID, () -> CODEC.decode(withNumber(patch, "history", 0)));
+    // screenRows 超过声明的 rows（3 > 2，全局上限未触及）。
+    assertThrows(INVALID, () -> CODEC.decode(appendScreenRows(patch, 2)));
+  }
+
+  @Test
+  void rejectsStylesOverBudgetBeforeDecoding() {
+    String metadata = CODEC.encode(TerminalViewSamples.metadataOnlyPatch());
+    // metadata-only PATCH（historyNode/screenNode 均为 0）不允许任何字典项。
+    assertThrows(INVALID, () -> CODEC.decode(withStyles(metadata, "[[-1,-1,0]]")));
+    // 前导畸形样式项也必须在预算处先于样式解码被拒绝。
+    assertThrows(INVALID, () -> CODEC.decode(withStyles(metadata, "[[0]]")));
   }
 
   @Test
@@ -470,6 +505,39 @@ class TerminalViewUpdateCodecTest {
     ObjectNode root = read(json);
     root.set("styles", MAPPER.createArrayNode());
     return write(root);
+  }
+
+  private static String setStyleValue(String json, int entryIndex, int field, JsonNode value) {
+    ObjectNode root = read(json);
+    ArrayNode styles = (ArrayNode) root.get("styles");
+    ((ArrayNode) styles.get(entryIndex)).set(field, value);
+    return write(root);
+  }
+
+  private static String appendScreenRows(String json, int copies) {
+    ObjectNode root = read(json);
+    ArrayNode screenRows = (ArrayNode) root.get("screenRows");
+    long id = 900L;
+    for (int index = 0; index < copies; index++) {
+      ObjectNode copy = (ObjectNode) screenRows.get(0).deepCopy();
+      ((ArrayNode) copy.get("line")).set(0, LongNode.valueOf(id++));
+      screenRows.add(copy);
+    }
+    return write(root);
+  }
+
+  private static String withStyles(String json, String stylesJson) {
+    ObjectNode root = read(json);
+    root.set("styles", value(stylesJson));
+    return write(root);
+  }
+
+  private static JsonNode value(String json) {
+    try {
+      return MAPPER.readTree(json);
+    } catch (JsonProcessingException error) {
+      throw new UncheckedIOException(error);
+    }
   }
 
   private static String appendDuplicateRow(String json) {

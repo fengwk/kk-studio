@@ -215,12 +215,12 @@ public final class TerminalViewUpdateCodec {
     JsonNode historyNode = requireArray(root.get("historyAppend"));
     JsonNode screenNode = requireArray(root.get("screenRows"));
     JsonNode stylesNode = requireArray(root.get("styles"));
-    // 展开任何槽之前先按维度/历史/行替换预算校验，字典大小也不得超过本消息允许的槽总量。
-    if (historyNode.size() > TerminalLimits.MAX_HISTORY_LINES
-        || screenNode.size() > TerminalLimits.MAX_ROWS) {
+    // 展开任何槽之前先按声明的 history/rows 预算校验，字典大小也不得超过本消息实际接受的槽总量。
+    // 用实际数组长度计算预算，使 metadata-only PATCH 的非空字典在解码样式前即被拒绝。
+    if (historyNode.size() > history || screenNode.size() > rows) {
       throw new TerminalViewUpdateException(INVALID_ERROR);
     }
-    long slotBudget = (long) (history + rows) * columns;
+    long slotBudget = (long) (historyNode.size() + screenNode.size()) * columns;
     if (stylesNode.size() > slotBudget) {
       throw new TerminalViewUpdateException(INVALID_ERROR);
     }
@@ -261,7 +261,7 @@ public final class TerminalViewUpdateCodec {
           historyTrim,
           historyAppend,
           screenRows);
-    } catch (RuntimeException error) {
+    } catch (IllegalArgumentException error) {
       throw new TerminalViewUpdateException(INVALID_ERROR);
     }
   }

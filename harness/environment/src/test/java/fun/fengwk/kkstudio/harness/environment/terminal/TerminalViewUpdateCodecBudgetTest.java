@@ -23,9 +23,9 @@ class TerminalViewUpdateCodecBudgetTest {
     String json = codec.encode(update);
     int bytes = json.getBytes(StandardCharsets.UTF_8).length;
 
-    // 真实生成的最大尺寸必须落在 8 MiB 载体预算以内，且远非空/缺省桩（实测 7356173 字节）。
+    // 真实生成的最大尺寸锁定在 8 MiB 载体预算以内（实测 7356173 字节）。
     assertTrue(bytes < TerminalLimits.MAX_MESSAGE_BYTES, "encoded bytes=" + bytes);
-    assertTrue(bytes > 7_300_000, "worst-case payload must be meaningful, bytes=" + bytes);
+    assertEquals(7356173, bytes);
 
     JsonNode root = MAPPER.readTree(json);
     assertEquals(183600, root.get("styles").size());
