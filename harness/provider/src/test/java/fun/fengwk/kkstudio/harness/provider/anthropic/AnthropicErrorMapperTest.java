@@ -23,6 +23,30 @@ class AnthropicErrorMapperTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
+  /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
+  @Test
+  void propagatesStructuredHttpStatusMetadata() {
+    assertEquals(
+        401, AnthropicErrorMapper.mapTransportException(httpStatus(401, "{}")).httpStatus());
+    assertEquals(
+        503, AnthropicErrorMapper.mapTransportException(httpStatus(503, "{}")).httpStatus());
+    assertEquals(301, AnthropicErrorMapper.mapTransportException(httpStatus(301, "")).httpStatus());
+    assertNull(
+        AnthropicErrorMapper.mapTransportException(
+                new TransportException(TransportErrorKind.IO, "io", 0, null, null, null))
+            .httpStatus());
+  }
+
+  private static TransportException httpStatus(int status, String body) {
+    return new TransportException(
+        TransportErrorKind.HTTP_STATUS,
+        "status",
+        status,
+        body.getBytes(StandardCharsets.UTF_8),
+        null,
+        null);
+  }
+
   @Test
   void mapsOnlyCancelledToNullAndAdmissionFailuresToTransient() {
     TransportException cancelled =

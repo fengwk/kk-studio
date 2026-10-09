@@ -55,6 +55,57 @@ class ConfigSyncParserTest {
   }
 
   @Test
+  void providerHttpRetryOverrideIsParsedAsPresenceAwareList() {
+    var document =
+        parser.parse(
+            "providers:\n"
+                + "  - name: p\n"
+                + "    providerType: openai\n"
+                + "    modelHttpRetryStatusCodes: [500, 503]\n");
+
+    var properties = document.providers().get(0).properties();
+    assertTrue(properties.isModelHttpRetryStatusCodesProvided());
+    assertEquals(List.of(500, 503), properties.getModelHttpRetryStatusCodes());
+  }
+
+  @Test
+  void providerWithoutHttpRetryOverrideParsesAsClearedForImport() {
+    var document = parser.parse("providers:\n" + provider("p", "openai"));
+
+    var properties = document.providers().get(0).properties();
+    assertTrue(properties.isModelHttpRetryStatusCodesProvided());
+    assertNull(properties.getModelHttpRetryStatusCodes());
+  }
+
+  @Test
+  void providerWithInvalidHttpRetryOverrideIsHardRejected() {
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "providers:\n"
+                    + "  - name: p\n"
+                    + "    providerType: openai\n"
+                    + "    modelHttpRetryStatusCodes: [600]\n"));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "providers:\n"
+                    + "  - name: p\n"
+                    + "    providerType: openai\n"
+                    + "    modelHttpRetryStatusCodes: [429, 429]\n"));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "providers:\n"
+                    + "  - name: p\n"
+                    + "    providerType: openai\n"
+                    + "    modelHttpRetryStatusCodes: 429\n"));
+  }
+
+  @Test
   void paddedNamesCannotBypassDuplicateIdentityValidation() {
     // 目录服务会 strip 名称；文件不能用带空白的别名绕过同名条目的硬错误。
     assertThrows(

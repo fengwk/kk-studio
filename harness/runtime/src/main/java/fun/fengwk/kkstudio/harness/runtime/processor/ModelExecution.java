@@ -68,6 +68,10 @@ final class ModelExecution implements ModelGateway.Listener {
   private final boolean compaction;
   private final List<ToolBinding> bindings;
   private final ModelProcessorConfig config;
+
+  /** 冻结到本次 Invocation 的 Provider 名称；解析 HTTP 失败重试策略时读取其覆盖。 */
+  private final String providerName;
+
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
   private final ScheduledExecutorService scheduler;
@@ -123,6 +127,7 @@ final class ModelExecution implements ModelGateway.Listener {
         compaction,
         bindings,
         config,
+        null,
         clock,
         scheduler,
         heartbeatWorker,
@@ -131,7 +136,7 @@ final class ModelExecution implements ModelGateway.Listener {
         System::nanoTime);
   }
 
-  /** 完整构造器：{@code nanoTime} 是采集流式生成计时的单调时间源，生产默认 {@link System#nanoTime}，测试可注入可控来源。 */
+  /** 无冻结 Provider 身份的便利构造（仅测试使用）：解析 HTTP 策略时视为系统名单。 */
   ModelExecution(
       HarnessStore store,
       RealtimeEventSink realtimeEventSink,
@@ -147,6 +152,77 @@ final class ModelExecution implements ModelGateway.Listener {
       Executor flushExecutor,
       Consumer<ModelExecution> ownerRelease,
       LongSupplier nanoTime) {
+    this(
+        store,
+        realtimeEventSink,
+        claim,
+        threadId,
+        attempt,
+        compaction,
+        bindings,
+        config,
+        null,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        flushExecutor,
+        ownerRelease,
+        nanoTime);
+  }
+
+  /**
+   * 完整构造器：{@code providerName} 是本次 Invocation 冻结的 Provider 身份；{@code nanoTime} 是采集流式生成计时的单调时间源，生产默认
+   * {@link System#nanoTime}，测试可注入可控来源。
+   */
+  ModelExecution(
+      HarnessStore store,
+      RealtimeEventSink realtimeEventSink,
+      ClaimedWork claim,
+      UUID threadId,
+      int attempt,
+      boolean compaction,
+      List<ToolBinding> bindings,
+      ModelProcessorConfig config,
+      String providerName,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
+      Executor flushExecutor,
+      Consumer<ModelExecution> ownerRelease) {
+    this(
+        store,
+        realtimeEventSink,
+        claim,
+        threadId,
+        attempt,
+        compaction,
+        bindings,
+        config,
+        providerName,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        flushExecutor,
+        ownerRelease,
+        System::nanoTime);
+  }
+
+  ModelExecution(
+      HarnessStore store,
+      RealtimeEventSink realtimeEventSink,
+      ClaimedWork claim,
+      UUID threadId,
+      int attempt,
+      boolean compaction,
+      List<ToolBinding> bindings,
+      ModelProcessorConfig config,
+      String providerName,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
+      Executor flushExecutor,
+      Consumer<ModelExecution> ownerRelease,
+      LongSupplier nanoTime) {
     this.store = Objects.requireNonNull(store, "store");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.claim = Objects.requireNonNull(claim, "claim");
@@ -156,6 +232,7 @@ final class ModelExecution implements ModelGateway.Listener {
     this.compaction = compaction;
     this.bindings = List.copyOf(Objects.requireNonNull(bindings, "bindings"));
     this.config = Objects.requireNonNull(config, "config");
+    this.providerName = providerName;
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
@@ -966,10 +1043,19 @@ final class ModelExecution implements ModelGateway.Listener {
     return Applied.LOST;
   }
 
-  /** TRANSIENT 与 INVALID_RESPONSE 共享 {@link InvocationRetryPolicy}：两者耗尽后都转为 FAILED terminal。 */
-  private static boolean isRetryable(ModelInvocationError error) {
-    return error.kind() == ProviderErrorKind.TRANSIENT
-        || error.kind() == ProviderErrorKind.INVALID_RESPONSE;
+  /**
+   * 模型失败是否重试：先做统一候选判定（OVERFLOW/CANCELLED 排除，非 HTTP AUTHENTICATION/BILLING 排除），带 HTTP 状态时由现读的 {@link
+   * fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy} 唯一决定，其余非 HTTP
+   * TRANSIENT/INVALID_RESPONSE 走 共享 {@link InvocationRetryPolicy} 预算。
+   */
+  private boolean isRetryable(ModelInvocationError error) {
+    if (!error.retryCandidate()) {
+      return false;
+    }
+    if (error.httpStatus() != null) {
+      return config.httpErrorPolicyProvider().policy(providerName).allowsRetry(error.httpStatus());
+    }
+    return true;
   }
 
   private Applied finishUnknownLocked(ModelInvocationError error, List<Publish> publishes) {

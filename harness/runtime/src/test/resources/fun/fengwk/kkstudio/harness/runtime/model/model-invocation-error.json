@@ -1,4 +1,5 @@
 {
   "kind": "TRANSIENT",
-  "message": "provider temporarily unavailable"
+  "message": "provider temporarily unavailable",
+  "httpStatus": null
 }

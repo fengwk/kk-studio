@@ -25,6 +25,31 @@ class OpenAiChatErrorMapperTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
+  /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
+  @Test
+  void propagatesStructuredHttpStatusMetadata() {
+    assertEquals(
+        401, OpenAiChatErrorMapper.mapTransportException(httpStatus(401, "{}")).httpStatus());
+    assertEquals(
+        503, OpenAiChatErrorMapper.mapTransportException(httpStatus(503, "{}")).httpStatus());
+    assertEquals(
+        301, OpenAiChatErrorMapper.mapTransportException(httpStatus(301, "")).httpStatus());
+    assertNull(
+        OpenAiChatErrorMapper.mapTransportException(
+                new TransportException(TransportErrorKind.IO, "io", 0, null, null, null))
+            .httpStatus());
+  }
+
+  private static TransportException httpStatus(int status, String body) {
+    return new TransportException(
+        TransportErrorKind.HTTP_STATUS,
+        "status",
+        status,
+        body.getBytes(StandardCharsets.UTF_8),
+        null,
+        null);
+  }
+
   @Test
   @DisplayName("仅取消静默；执行器拒绝与回调失败进入脱敏终态")
   void silentOnlyOnCancelled() {

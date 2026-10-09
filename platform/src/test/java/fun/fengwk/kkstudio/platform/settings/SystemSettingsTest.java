@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -172,7 +173,8 @@ class SystemSettingsTest {
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                base.subagentMaxTurns()));
+                base.subagentMaxTurns(),
+                base.modelHttpRetryStatusCodes()));
   }
 
   @Test
@@ -191,7 +193,8 @@ class SystemSettingsTest {
                 0,
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                base.subagentMaxTurns()));
+                base.subagentMaxTurns(),
+                base.modelHttpRetryStatusCodes()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -205,7 +208,8 @@ class SystemSettingsTest {
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 -1,
-                base.subagentMaxTurns()));
+                base.subagentMaxTurns(),
+                base.modelHttpRetryStatusCodes()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -219,7 +223,54 @@ class SystemSettingsTest {
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                0));
+                0,
+                base.modelHttpRetryStatusCodes()));
+  }
+
+  @Test
+  void defaultHttpRetryListMatchesDocumentedDefault() {
+    assertEquals(
+        List.of(408, 429, 500, 502, 503, 504),
+        SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
+  }
+
+  @Test
+  void rejectsInvalidHttpRetryStatusList() {
+    SystemSettings.AiRuntime base = SystemSettings.DEFAULT.aiRuntime();
+    // 空列表合法：明确表示不自动重试任何 HTTP 错误。
+    assertEquals(
+        List.of(),
+        new SystemSettings.AiRuntime(
+                base.retryMaxRetries(),
+                base.retryBackoffStrategy(),
+                base.retryBaseDelayMillis(),
+                base.retryMaxDelayMillis(),
+                base.compactionKeepRecentTokens(),
+                base.compactionFallbackModel(),
+                base.subagentMaxDepth(),
+                base.subagentMaxConcurrency(),
+                base.subagentMaxTotalConcurrency(),
+                base.subagentMaxTurns(),
+                List.of())
+            .modelHttpRetryStatusCodes());
+    for (List<Integer> invalid :
+        List.of(Arrays.asList(429, null), List.of(399), List.of(600), List.of(429, 429))) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              new SystemSettings.AiRuntime(
+                  base.retryMaxRetries(),
+                  base.retryBackoffStrategy(),
+                  base.retryBaseDelayMillis(),
+                  base.retryMaxDelayMillis(),
+                  base.compactionKeepRecentTokens(),
+                  base.compactionFallbackModel(),
+                  base.subagentMaxDepth(),
+                  base.subagentMaxConcurrency(),
+                  base.subagentMaxTotalConcurrency(),
+                  base.subagentMaxTurns(),
+                  invalid));
+    }
   }
 
   @Test

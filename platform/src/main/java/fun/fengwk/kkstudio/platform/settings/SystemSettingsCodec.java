@@ -219,7 +219,9 @@ public class SystemSettingsCodec {
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
         requiredInt(dto.getSubagentMaxConcurrency(), "aiRuntime.subagentMaxConcurrency"),
         requiredInt(dto.getSubagentMaxTotalConcurrency(), "aiRuntime.subagentMaxTotalConcurrency"),
-        requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"));
+        requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"),
+        requiredStatusCodes(
+            dto.getModelHttpRetryStatusCodes(), "aiRuntime.modelHttpRetryStatusCodes"));
   }
 
   private static SystemSettings.Environment toEnvironment(SystemSettingsEnvironmentDTO dto) {
@@ -457,6 +459,7 @@ public class SystemSettingsCodec {
     dto.setSubagentMaxConcurrency(aiRuntime.subagentMaxConcurrency());
     dto.setSubagentMaxTotalConcurrency(aiRuntime.subagentMaxTotalConcurrency());
     dto.setSubagentMaxTurns(aiRuntime.subagentMaxTurns());
+    dto.setModelHttpRetryStatusCodes(aiRuntime.modelHttpRetryStatusCodes());
     return dto;
   }
 
@@ -616,6 +619,13 @@ public class SystemSettingsCodec {
   }
 
   private static String requiredText(String value, String field) {
+    if (value == null) {
+      throw new IllegalArgumentException(field + " is required");
+    }
+    return value;
+  }
+
+  private static List<Integer> requiredStatusCodes(List<Integer> value, String field) {
     if (value == null) {
       throw new IllegalArgumentException(field + " is required");
     }

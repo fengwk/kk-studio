@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -107,7 +108,7 @@ public record SystemSettings(
     }
   }
 
-  /** aiRuntime section：共享调用重试、自动压缩 fallback、subagent 预算。 */
+  /** aiRuntime section：共享调用重试、自动压缩 fallback、subagent 预算与模型 HTTP 重试状态白名单。 */
   public record AiRuntime(
       int retryMaxRetries,
       InvocationRetryBackoffStrategy retryBackoffStrategy,
@@ -118,7 +119,8 @@ public record SystemSettings(
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
-      int subagentMaxTurns) {
+      int subagentMaxTurns,
+      List<Integer> modelHttpRetryStatusCodes) {
 
     public static final AiRuntime DEFAULT =
         new AiRuntime(
@@ -131,7 +133,8 @@ public record SystemSettings(
             2,
             10,
             0,
-            50);
+            50,
+            ModelHttpErrorPolicy.DEFAULT_RETRY_STATUS_CODES);
 
     public AiRuntime {
       SystemSettingsValidation.requireNonNegativeInt(retryMaxRetries, "aiRuntime.retryMaxRetries");
@@ -153,6 +156,25 @@ public record SystemSettings(
       SystemSettingsValidation.requireAtLeast(
           subagentMaxTotalConcurrency, 0, "aiRuntime.subagentMaxTotalConcurrency");
       SystemSettingsValidation.requireAtLeast(subagentMaxTurns, 1, "aiRuntime.subagentMaxTurns");
+      modelHttpRetryStatusCodes =
+          requireHttpStatusCodes(modelHttpRetryStatusCodes, "aiRuntime.modelHttpRetryStatusCodes");
+    }
+
+    /** 仅接受 400–599 的整型状态；拒绝 null 元素、重复与越界，空列表合法（表示不自动重试任何 HTTP 错误）。 */
+    private static List<Integer> requireHttpStatusCodes(List<Integer> codes, String field) {
+      Objects.requireNonNull(codes, field);
+      List<Integer> copy = new ArrayList<>(codes.size());
+      for (Integer status : codes) {
+        if (status == null || status < 400 || status > 599) {
+          throw new IllegalArgumentException(
+              field + " must contain only HTTP error statuses 400-599");
+        }
+        if (copy.contains(status)) {
+          throw new IllegalArgumentException(field + " must not contain duplicate statuses");
+        }
+        copy.add(status);
+      }
+      return List.copyOf(copy);
     }
   }
 
