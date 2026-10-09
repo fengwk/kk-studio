@@ -37,9 +37,7 @@ public final class FindCapability extends AbstractCodingCapability {
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    String rawWorkdir = optionalString(args, "workdir");
-    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
-    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
+    Path path = EnvironmentPaths.existing(string(args, "path"));
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
     // 有效超时在 Platform 侧解析完成（definition 默认值或显式 timeout_seconds）；这里只消费它。
     Duration timeout = request.timeout();
@@ -61,7 +59,7 @@ public final class FindCapability extends AbstractCodingCapability {
               String searchRelative = SearchFiles.toPosix(path.relativize(file));
               String basename = file.getFileName().toString();
               if (pattern.matches(pathPattern ? searchRelative : basename)) {
-                matchedPaths.add(displayPath(workdir, file));
+                matchedPaths.add(displayPath(file));
                 if (matchedPaths.size() > limit) {
                   return false;
                 }
@@ -69,7 +67,7 @@ public final class FindCapability extends AbstractCodingCapability {
               return true;
             });
     for (Path unreadable : report.unreadable()) {
-      skipped.put(displayPath(workdir, unreadable), "could not be read");
+      skipped.put(displayPath(unreadable), "could not be read");
     }
 
     if (matchedPaths.isEmpty()) {
@@ -113,19 +111,9 @@ public final class FindCapability extends AbstractCodingCapability {
     }
   }
 
-  /**
-   * 展示路径：调用方给了 workdir 时保持相对 workdir 的展示（越界目标仍是 {@code ../} 形态）；没有 workdir，或目标与 workdir 跨根（Windows
-   * 上不同驱动器） 无法相对化时退化为目标的绝对路径。任何情况下都不回退到 cwd、HOME 或其它默认目录。
-   */
-  private static String displayPath(Path workdir, Path file) {
-    if (workdir == null) {
-      return SearchFiles.toPosix(file);
-    }
-    try {
-      return SearchFiles.toPosix(workdir.relativize(file));
-    } catch (IllegalArgumentException differentRoots) {
-      return SearchFiles.toPosix(file);
-    }
+  /** 展示路径：永远是目标的绝对路径。绝不回退到 cwd、HOME 或其它默认目录。 */
+  private static String displayPath(Path file) {
+    return SearchFiles.toPosix(file);
   }
 
   private static String describeSkipped(Map<String, String> skipped) {

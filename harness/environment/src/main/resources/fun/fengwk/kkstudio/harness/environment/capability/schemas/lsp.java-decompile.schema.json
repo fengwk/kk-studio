@@ -3,15 +3,11 @@
   "properties": {
     "path": {
       "type": "string",
-      "description": "Any local `.java` file in the target workspace. This path is used to infer the workspace root and locate JDTLS. Absolute paths need no `workdir`; a relative path requires one."
-    },
-    "workdir": {
-      "type": "string",
-      "description": "Optional absolute directory on the target daemon's file system, used only to resolve a relative `path` or `target`. Required when the given path is relative; never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Absolute path on the target daemon's file system of any local `.java` file in the target workspace. This path is used to infer the workspace root and locate JDTLS. Relative paths are rejected."
     },
     "target": {
       "type": "string",
-      "description": "A raw `jdt://` URI, a workspace symbol output line, or a `file://` / `.class` path. Prefer a `jdt://` URI or an absolute class path; a relative class path requires an explicit `workdir` and fails without one."
+      "description": "A raw `jdt://` URI, a complete workspace symbol / definition output line that contains such a URI, a `file://` URI, or an absolute `.class` path on the target daemon's file system. Relative class paths are rejected."
     }
   },
   "required": [

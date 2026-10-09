@@ -10,12 +10,9 @@ Usage:
 - `write` supports regular text files only. Directories, devices, FIFOs and binary files are
   rejected before any write.
 - `write` returns a success message only. If you need to inspect the resulting file content, use `read` afterward.
-- `workdir` is optional: pass it only to resolve a relative `path`. It must be an expanded
-  absolute directory on the target daemon's file system; no call inherits a previous directory,
-  session default, environment root, cwd, or home directory. An absolute `path` needs no
-  `workdir`; a relative `path` without an explicit `workdir` is rejected.
+- `path` must be an absolute path on the target Environment's file system. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project`.
 
 Examples:
 - `write({ path: "/srv/project/src/new-module.ts", content: "export const demo = 1;\n" })`
-- `write({ path: "docs/new-template.md", workdir: "/srv/project/packages/web", content: "# New template\n\nComplete file content.\n" })`
-- `write({ path: "generated/report.txt", workdir: "/tmp/agent-artifacts", content: "full generated report\n" })`
+- `write({ path: "/srv/project/packages/web/docs/new-template.md", content: "# New template\n\nComplete file content.\n" })`
+- `write({ path: "/tmp/agent-artifacts/generated/report.txt", content: "full generated report\n" })`

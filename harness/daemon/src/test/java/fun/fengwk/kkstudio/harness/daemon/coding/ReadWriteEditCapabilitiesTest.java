@@ -99,20 +99,25 @@ class ReadWriteEditCapabilitiesTest {
    * <p>显式钉住字段顺序：{@code path}/{@code ends_with_newline}/{@code range}（截断时再接 {@code truncated}/{@code
    * truncation_reason}/{@code next}），{@code lsp} 恒为最后一行 header；未截断时不输出任何尾部警告。
    */
-  private static String readHeader(String path, String range) {
+  private String pathStr(String path) {
+    Path p = Path.of(path);
+    return (p.isAbsolute() ? p : workdir.resolve(path)).normalize().toString().replace('\\', '/');
+  }
+
+  private String readHeader(String path, String range) {
     return String.join(
         "\n",
-        "path: " + path,
+        "path: " + pathStr(path),
         "ends_with_newline: yes",
         "range: " + range,
         "lsp: supported (" + TestCodingConfig.LSP_SERVER_ID + ")");
   }
 
   /** 截断窗口 header：截断元数据插在 lsp 之前，lsp 仍保持最后一行 header。 */
-  private static String truncatedReadHeader(String path, String range, String reason, String next) {
+  private String truncatedReadHeader(String path, String range, String reason, String next) {
     return String.join(
         "\n",
-        "path: " + path,
+        "path: " + pathStr(path),
         "ends_with_newline: yes",
         "range: " + range,
         "truncated: yes",
@@ -122,10 +127,10 @@ class ReadWriteEditCapabilitiesTest {
   }
 
   /** 空窗口 header：起点超过 EOF（含空文件）时输出 {@code range: empty} 且不输出任何编号正文。 */
-  private static String emptyReadHeader(String path) {
+  private String emptyReadHeader(String path) {
     return String.join(
         "\n",
-        "path: " + path,
+        "path: " + pathStr(path),
         "ends_with_newline: yes",
         "range: empty",
         "lsp: supported (" + TestCodingConfig.LSP_SERVER_ID + ")");
@@ -140,7 +145,7 @@ class ReadWriteEditCapabilitiesTest {
         + ".]";
   }
 
-  /** 验证绝对本地路径可省略 workdir，而相对路径仍必须显式声明解析目录。 */
+  /** 验证绝对本地路径可直接读取，而相对路径直接被拒绝。 */
   @Test
   void readAcceptsAbsolutePathWithoutWorkdirAndRejectsRelativePathWithoutIt() throws Exception {
     Path textFile = workdir.resolve("absolute.txt");
@@ -154,7 +159,7 @@ class ReadWriteEditCapabilitiesTest {
 
     EnvironmentCapabilityResult relative = invoke(read, "{\"path\":\"absolute.txt\"}");
     assertTrue(relative.error());
-    assertTrue(text(relative).contains("workdir is required"));
+    assertTrue(text(relative).contains("path must be an absolute path: absolute.txt"));
   }
 
   /** 验证 ReadCapability 读取目录的分页、边界越界提示与展示格式。 */
@@ -170,14 +175,10 @@ class ReadWriteEditCapabilitiesTest {
 
     // 正常分页
     EnvironmentCapabilityResult p1 =
-        invoke(
-            read,
-            "{\"path\":\"sub\",\"offset\":1,\"limit\":2,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(dir.toString()) + ",\"offset\":1,\"limit\":2}");
     assertFalse(p1.error());
     String t1 = text(p1);
-    assertTrue(t1.contains("path: sub"));
+    assertTrue(t1.contains("path: " + dir.toString().replace('\\', '/')));
     assertTrue(t1.contains("kind: directory"));
     assertTrue(t1.contains("fileA.txt"));
     assertTrue(t1.contains("fileB.txt"));
@@ -185,11 +186,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // offset 超限返回空
     EnvironmentCapabilityResult pEmpty =
-        invoke(
-            read,
-            "{\"path\":\"sub\",\"offset\":10,\"limit\":2,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(dir.toString()) + ",\"offset\":10,\"limit\":2}");
     assertFalse(pEmpty.error());
     assertTrue(text(pEmpty).contains("[Showing 0 entries of 3.]"));
   }
@@ -204,11 +201,7 @@ class ReadWriteEditCapabilitiesTest {
     ReadCapability read = new ReadCapability(config(), executor);
 
     EnvironmentCapabilityResult res =
-        invoke(
-            read,
-            "{\"path\":\"longline.txt\",\"offset\":1,\"limit\":10,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(textFile.toString()) + ",\"offset\":1,\"limit\":10}");
     assertFalse(res.error());
     String expected =
         readHeader("longline.txt", "1:1-3:3")
@@ -218,11 +211,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // offset > totalLines 返回空窗口（range: empty，且不输出编号正文）
     EnvironmentCapabilityResult beyond =
-        invoke(
-            read,
-            "{\"path\":\"longline.txt\",\"offset\":100,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(textFile.toString()) + ",\"offset\":100}");
     assertFalse(beyond.error());
     assertEquals(emptyReadHeader("longline.txt"), text(beyond));
   }
@@ -239,10 +228,7 @@ class ReadWriteEditCapabilitiesTest {
     // 1. 首个分片：命中 60000 码点预算，character_limit 指向下一个未返回列
     EnvironmentCapabilityResult firstFrag =
         invoke(
-            read,
-            "{\"path\":\"multi-fragment.txt\",\"offset\":2,\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            read, "{\"path\":" + json(textFile.toString()) + ",\"offset\":2,\"column_offset\":1}");
     assertFalse(firstFrag.error());
     String expectedFirst =
         truncatedReadHeader("multi-fragment.txt", "2:1-2:60000", "character_limit", "2:60001")
@@ -257,9 +243,9 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult nextFrag =
         invoke(
             read,
-            "{\"path\":\"multi-fragment.txt\",\"offset\":2,\"limit\":1,\"column_offset\":60001,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(textFile.toString())
+                + ",\"offset\":2,\"limit\":1,\"column_offset\":60001}");
     assertFalse(nextFrag.error());
     String expectedNext =
         truncatedReadHeader("multi-fragment.txt", "2:60001-2:120000", "character_limit", "2:120001")
@@ -274,9 +260,9 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult finalFrag =
         invoke(
             read,
-            "{\"path\":\"multi-fragment.txt\",\"offset\":2,\"limit\":1,\"column_offset\":120001,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(textFile.toString())
+                + ",\"offset\":2,\"limit\":1,\"column_offset\":120001}");
     assertFalse(finalFrag.error());
     String expectedFinal =
         readHeader("multi-fragment.txt", "2:120001-2:130000") + "\n\n" + "2|" + "a".repeat(10000);
@@ -286,9 +272,9 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult beyondFrag =
         invoke(
             read,
-            "{\"path\":\"multi-fragment.txt\",\"offset\":2,\"limit\":1,\"column_offset\":130001,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(textFile.toString())
+                + ",\"offset\":2,\"limit\":1,\"column_offset\":130001}");
     assertTrue(beyondFrag.error());
     assertTrue(
         text(beyondFrag)
@@ -301,9 +287,7 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult emptyLineRes =
         invoke(
             read,
-            "{\"path\":\"empty-line.txt\",\"offset\":1,\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":" + json(emptyLineFile.toString()) + ",\"offset\":1,\"column_offset\":1}");
     assertFalse(emptyLineRes.error());
     String expectedEmptyLine = readHeader("empty-line.txt", "1:1-1:1") + "\n\n" + "1|";
     assertEquals(expectedEmptyLine, text(emptyLineRes));
@@ -324,9 +308,9 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult p1 =
         invoke(
             read,
-            "{\"path\":\"unicode-line.txt\",\"offset\":1,\"limit\":1,\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(unicodeFile.toString())
+                + ",\"offset\":1,\"limit\":1,\"column_offset\":1}");
     assertFalse(p1.error());
     String out1 = text(p1);
     String expectedOut1 =
@@ -348,9 +332,9 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult p2 =
         invoke(
             read,
-            "{\"path\":\"unicode-line.txt\",\"offset\":1,\"limit\":1,\"column_offset\":60001,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(unicodeFile.toString())
+                + ",\"offset\":1,\"limit\":1,\"column_offset\":60001}");
     assertFalse(p2.error());
     String expectedOut2 =
         readHeader("unicode-line.txt", "1:60001-1:60101") + "\n\n" + "1|" + "🚀" + "B".repeat(100);
@@ -378,40 +362,28 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult multiLine =
         invoke(
             read,
-            "{\"path\":\"valid.txt\",\"offset\":1,\"limit\":2,\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"offset\":1,\"limit\":2,\"column_offset\":1}");
     assertFalse(multiLine.error());
     assertTrue(text(multiLine).contains("1|content"));
     assertTrue(text(multiLine).contains("2|more"));
 
     // 2. 非正数 column_offset 被拒绝
     EnvironmentCapabilityResult zeroOffset =
-        invoke(
-            read,
-            "{\"path\":\"valid.txt\",\"offset\":1,\"column_offset\":0,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"column_offset\":0}");
     assertTrue(zeroOffset.error());
     assertTrue(text(zeroOffset).contains("column_offset must be a positive integer"));
 
     // 3. 目录请求指定合法 column_offset 被忽略：按目录语义正常返回
     EnvironmentCapabilityResult dirRes =
-        invoke(
-            read,
-            "{\"path\":\"sub-dir\",\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(dir.toString()) + ",\"column_offset\":1}");
     assertFalse(dirRes.error(), text(dirRes));
     assertTrue(text(dirRes).contains("kind: directory"), text(dirRes));
 
     // 4. 图片请求指定合法 column_offset 被忽略：仍按二进制资源返回
     EnvironmentCapabilityResult imgRes =
-        invoke(
-            read,
-            "{\"path\":\"sample.png\",\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(img.toString()) + ",\"column_offset\":1}");
     assertFalse(imgRes.error());
     assertEquals("image/png", ((BinaryResultContent) imgRes.contents().getFirst()).mediaType());
 
@@ -419,19 +391,16 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult nullLimit =
         invoke(
             read,
-            "{\"path\":\"valid.txt\",\"offset\":1,\"limit\":null,\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"offset\":1,\"limit\":null,\"column_offset\":1}");
     assertFalse(nullLimit.error());
     assertTrue(text(nullLimit).contains("1|content"));
 
     // 6. 显式 null column_offset 被 InputNormalizer 静默归一化为缺省，按普通模式读取成功
     EnvironmentCapabilityResult nullColOffset =
         invoke(
-            read,
-            "{\"path\":\"valid.txt\",\"offset\":1,\"column_offset\":null,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            read, "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"column_offset\":null}");
     assertFalse(nullColOffset.error());
     assertTrue(text(nullColOffset).contains("1|content"));
 
@@ -441,27 +410,19 @@ class ReadWriteEditCapabilitiesTest {
         () ->
             invoke(
                 read,
-                "{\"path\":\"valid.txt\",\"offset\":1,\"column_offset\":\"abc\",\"workdir\":"
-                    + json(workdir.toString())
-                    + "}"));
+                "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"column_offset\":\"abc\"}"));
 
     // 8. 超出 Integer.MAX_VALUE 的 column_offset 被拒绝
     EnvironmentCapabilityResult overflowColOffset =
         invoke(
             read,
-            "{\"path\":\"valid.txt\",\"offset\":1,\"column_offset\":2147483648,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"column_offset\":2147483648}");
     assertTrue(overflowColOffset.error());
     assertTrue(text(overflowColOffset).contains("column_offset must be a positive integer"));
 
     // 9. 负数 column_offset 被拒绝
     EnvironmentCapabilityResult negativeColOffset =
-        invoke(
-            read,
-            "{\"path\":\"valid.txt\",\"offset\":1,\"column_offset\":-1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"column_offset\":-1}");
     assertTrue(negativeColOffset.error());
     assertTrue(text(negativeColOffset).contains("column_offset must be a positive integer"));
   }
@@ -481,11 +442,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // 1. 恰好 60000 码点，默认读取：命中预算但已到 EOF，无截断、无尾部警告
     EnvironmentCapabilityResult res60000Default =
-        invoke(
-            read,
-            "{\"path\":\"exact-60000.txt\",\"offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file60000.toString()) + ",\"offset\":1}");
     assertFalse(res60000Default.error());
     String expected60000 = readHeader("exact-60000.txt", "1:1-1:60000") + "\n\n" + "1|" + line60000;
     assertEquals(expected60000, text(res60000Default));
@@ -493,10 +450,7 @@ class ReadWriteEditCapabilitiesTest {
     // 2. 恰好 60000 码点，携带 column_offset=1：整行返回，依旧无截断
     EnvironmentCapabilityResult res60000Col1 =
         invoke(
-            read,
-            "{\"path\":\"exact-60000.txt\",\"offset\":1,\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            read, "{\"path\":" + json(file60000.toString()) + ",\"offset\":1,\"column_offset\":1}");
     assertFalse(res60000Col1.error());
     assertEquals(expected60000, text(res60000Col1));
 
@@ -504,9 +458,7 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult res60000ColBeyond =
         invoke(
             read,
-            "{\"path\":\"exact-60000.txt\",\"offset\":1,\"column_offset\":60001,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":" + json(file60000.toString()) + ",\"offset\":1,\"column_offset\":60001}");
     assertTrue(res60000ColBeyond.error());
     assertTrue(
         text(res60000ColBeyond)
@@ -515,11 +467,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // 4. 60001 码点，默认读取：character_limit 截断至 60000，续读指向第 60001 列
     EnvironmentCapabilityResult res60001Default =
-        invoke(
-            read,
-            "{\"path\":\"exact-60001.txt\",\"offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file60001.toString()) + ",\"offset\":1}");
     assertFalse(res60001Default.error());
     String expected60001Default =
         truncatedReadHeader("exact-60001.txt", "1:1-1:60000", "character_limit", "1:60001")
@@ -534,9 +482,7 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult res60001Tail =
         invoke(
             read,
-            "{\"path\":\"exact-60001.txt\",\"offset\":1,\"column_offset\":60001,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":" + json(file60001.toString()) + ",\"offset\":1,\"column_offset\":60001}");
     assertFalse(res60001Tail.error());
     String expected60001Tail = readHeader("exact-60001.txt", "1:60001-1:60001") + "\n\n" + "1|Z";
     assertEquals(expected60001Tail, text(res60001Tail));
@@ -556,11 +502,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // 1. 读取文本：验证 exact content 保留制表符和 ANSI 转义字符，正文不转义为 \\0 或 \\r
     EnvironmentCapabilityResult readRes =
-        invoke(
-            read,
-            "{\"path\":\"crlf-control.txt\",\"offset\":1,\"limit\":2,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"limit\":2}");
     assertFalse(readRes.error());
     String out = text(readRes);
     String expectedRead =
@@ -573,12 +515,12 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult editRes =
         invoke(
             edit,
-            "{\"path\":\"crlf-control.txt\",\"old_string\":"
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"old_string\":"
                 + json(line1)
                 + ",\"new_string\":"
                 + json("col1\tcol2\t\u001b[32mgreen\u001b[0m")
-                + ",\"workdir\":"
-                + json(workdir.toString())
                 + "}");
     assertFalse(editRes.error(), text(editRes));
 
@@ -597,11 +539,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // 1. offset = Integer.MAX_VALUE：确定性返回 range: empty
     EnvironmentCapabilityResult maxOffsetRes =
-        invoke(
-            read,
-            "{\"path\":\"sample.txt\",\"offset\":2147483647,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":2147483647}");
     assertFalse(maxOffsetRes.error());
     assertEquals(emptyReadHeader("sample.txt"), text(maxOffsetRes));
 
@@ -609,9 +547,7 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult maxColRes =
         invoke(
             read,
-            "{\"path\":\"sample.txt\",\"offset\":1,\"column_offset\":2147483647,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"column_offset\":2147483647}");
     assertTrue(maxColRes.error());
     assertTrue(
         text(maxColRes).contains("column_offset 2147483647 is out of range: line 1 has 5 columns"),
@@ -619,11 +555,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // 3. offset 越界 (offset > totalLines) 且携带 column_offset：统一由 offset 越界优先拦截
     EnvironmentCapabilityResult beyondLineWithCol =
-        invoke(
-            read,
-            "{\"path\":\"sample.txt\",\"offset\":5,\"column_offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":5,\"column_offset\":1}");
     assertFalse(beyondLineWithCol.error());
     assertEquals(emptyReadHeader("sample.txt"), text(beyondLineWithCol));
   }
@@ -640,11 +572,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // 1. 读取长行整行（60000 码点预算下一行完整返回，不再按 2000 码点截断）
     EnvironmentCapabilityResult readRes =
-        invoke(
-            read,
-            "{\"path\":\"roundtrip.txt\",\"offset\":2,\"limit\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":2,\"limit\":1}");
     assertFalse(readRes.error());
     String readOut = text(readRes);
     String exactFragment =
@@ -655,11 +583,11 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult editRes =
         invoke(
             edit,
-            "{\"path\":\"roundtrip.txt\",\"old_string\":"
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"old_string\":"
                 + json(exactFragment)
-                + ",\"new_string\":\"REPLACED_CHUNK\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+                + ",\"new_string\":\"REPLACED_CHUNK\"}");
     assertFalse(editRes.error(), text(editRes));
     String updated = Files.readString(file);
     assertEquals("head\nREPLACED_CHUNK\ntail\n", updated);
@@ -675,11 +603,7 @@ class ReadWriteEditCapabilitiesTest {
 
     ReadCapability read = new ReadCapability(config(), executor);
     EnvironmentCapabilityResult res =
-        invoke(
-            read,
-            "{\"path\":\"huge-cjk.txt\",\"offset\":1,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":1}");
     assertFalse(res.error());
     String out = text(res);
     byte[] utf8 = out.getBytes(StandardCharsets.UTF_8);
@@ -703,9 +627,7 @@ class ReadWriteEditCapabilitiesTest {
 
     // 首切片：60000 个 🚀 码点，严格在 Unicode 码点边界切断，无半代理项
     EnvironmentCapabilityResult res1 =
-        invoke(
-            read,
-            "{\"path\":\"rocket.txt\",\"offset\":1,\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":1}");
     assertFalse(res1.error());
     String text1 = text(res1);
     assertTrue(text1.contains("range: 1:1-1:60000"), text1);
@@ -720,9 +642,9 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult res2 =
         invoke(
             read,
-            "{\"path\":\"rocket.txt\",\"offset\":1,\"limit\":1,\"column_offset\":60001,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"offset\":1,\"limit\":1,\"column_offset\":60001}");
     assertFalse(res2.error());
     String text2 = text(res2);
     assertTrue(text2.contains("range: 1:60001-1:70000"), text2);
@@ -746,11 +668,7 @@ class ReadWriteEditCapabilitiesTest {
 
     ReadCapability read = new ReadCapability(config(), executor);
     EnvironmentCapabilityResult res =
-        invoke(
-            read,
-            "{\"path\":\"pack.txt\",\"offset\":1,\"limit\":30,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"limit\":30}");
     assertFalse(res.error());
     String out = text(res);
 
@@ -771,15 +689,14 @@ class ReadWriteEditCapabilitiesTest {
     Files.write(file, new byte[] {'h', 'e', 'l', 'l', 'o', 0, 'w', 'o', 'r', 'l', 'd'});
 
     ReadCapability read = new ReadCapability(config(), executor);
-    EnvironmentCapabilityResult res =
-        invoke(read, "{\"path\":\"binary-nul.txt\",\"workdir\":" + json(workdir.toString()) + "}");
+    EnvironmentCapabilityResult res = invoke(read, "{\"path\":" + json(file.toString()) + "}");
     assertTrue(res.error());
     assertTrue(text(res).contains("file appears to be binary"));
 
     Path utf16File = workdir.resolve("utf16-nul.txt");
     Files.write(utf16File, TextFileCodec.encode("hello\u0000world", StandardCharsets.UTF_16LE, 2));
     EnvironmentCapabilityResult utf16Res =
-        invoke(read, "{\"path\":\"utf16-nul.txt\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(read, "{\"path\":" + json(utf16File.toString()) + "}");
     assertTrue(utf16Res.error());
     assertTrue(text(utf16Res).contains("file appears to be binary"));
   }
@@ -825,11 +742,7 @@ class ReadWriteEditCapabilitiesTest {
     ReadCapability read = new ReadCapability(config(), executor);
     // 头部读取：range/next header 精确给出已返回窗口与续读位置，不再有 "of N" 总行数展示
     EnvironmentCapabilityResult head =
-        invoke(
-            read,
-            "{\"path\":\"huge.log\",\"offset\":1,\"limit\":3,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(read, "{\"path\":" + json(file.toString()) + ",\"offset\":1,\"limit\":3}");
     assertFalse(head.error(), text(head));
     assertTrue(text(head).contains("1|line-0-"), text(head));
     assertTrue(text(head).contains("range: 1:1-3:77"), text(head));
@@ -842,11 +755,7 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult tail =
         invoke(
             read,
-            "{\"path\":\"huge.log\",\"offset\":"
-                + lineCount
-                + ",\"limit\":2,\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":" + json(file.toString()) + ",\"offset\":" + lineCount + ",\"limit\":2}");
     assertFalse(tail.error(), text(tail));
     assertTrue(text(tail).contains("range: " + lineCount + ":1-"), text(tail));
     assertTrue(text(tail).contains(lineCount + "|line-" + (lineCount - 1) + "-"), text(tail));
@@ -854,8 +763,7 @@ class ReadWriteEditCapabilitiesTest {
     // 图片附件行为不受影响。
     Path png = workdir.resolve("pic.png");
     Files.write(png, new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4});
-    EnvironmentCapabilityResult image =
-        invoke(read, "{\"path\":\"pic.png\",\"workdir\":" + json(workdir.toString()) + "}");
+    EnvironmentCapabilityResult image = invoke(read, "{\"path\":" + json(png.toString()) + "}");
     assertFalse(image.error());
     assertTrue(image.contents().getFirst() instanceof BinaryResultContent);
   }
@@ -867,8 +775,7 @@ class ReadWriteEditCapabilitiesTest {
     // JPEG
     Path jpg = workdir.resolve("test.jpg");
     Files.write(jpg, new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1, 2, 3});
-    EnvironmentCapabilityResult rJpg =
-        invoke(read, "{\"path\":\"test.jpg\",\"workdir\":" + json(workdir.toString()) + "}");
+    EnvironmentCapabilityResult rJpg = invoke(read, "{\"path\":" + json(jpg.toString()) + "}");
     assertFalse(rJpg.error());
     assertTrue(rJpg.contents().getFirst() instanceof BinaryResultContent);
     assertEquals("image/jpeg", ((BinaryResultContent) rJpg.contents().getFirst()).mediaType());
@@ -876,16 +783,14 @@ class ReadWriteEditCapabilitiesTest {
     // GIF
     Path gif = workdir.resolve("test.gif");
     Files.write(gif, new byte[] {'G', 'I', 'F', '8', '9', 'a', 1, 2});
-    EnvironmentCapabilityResult rGif =
-        invoke(read, "{\"path\":\"test.gif\",\"workdir\":" + json(workdir.toString()) + "}");
+    EnvironmentCapabilityResult rGif = invoke(read, "{\"path\":" + json(gif.toString()) + "}");
     assertFalse(rGif.error());
     assertEquals("image/gif", ((BinaryResultContent) rGif.contents().getFirst()).mediaType());
 
     // WEBP
     Path webp = workdir.resolve("test.webp");
     Files.write(webp, new byte[] {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'E', 'B', 'P'});
-    EnvironmentCapabilityResult rWebp =
-        invoke(read, "{\"path\":\"test.webp\",\"workdir\":" + json(workdir.toString()) + "}");
+    EnvironmentCapabilityResult rWebp = invoke(read, "{\"path\":" + json(webp.toString()) + "}");
     assertFalse(rWebp.error());
     assertEquals("image/webp", ((BinaryResultContent) rWebp.contents().getFirst()).mediaType());
   }
@@ -899,11 +804,7 @@ class ReadWriteEditCapabilitiesTest {
     Path crlfFile = workdir.resolve("crlf.txt");
     Files.writeString(crlfFile, "line1\r\nline2\r\n");
     EnvironmentCapabilityResult resCrlf =
-        invoke(
-            write,
-            "{\"path\":\"crlf.txt\",\"content\":\"a\\nb\\n\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(write, "{\"path\":" + json(crlfFile.toString()) + ",\"content\":\"a\\nb\\n\"}");
     assertFalse(resCrlf.error());
     assertEquals("a\nb\n", Files.readString(crlfFile));
 
@@ -911,11 +812,7 @@ class ReadWriteEditCapabilitiesTest {
     Path crFile = workdir.resolve("cr.txt");
     Files.write(crFile, "line1\rline2\r".getBytes(StandardCharsets.UTF_8));
     EnvironmentCapabilityResult resCr =
-        invoke(
-            write,
-            "{\"path\":\"cr.txt\",\"content\":\"a\\nb\\n\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+        invoke(write, "{\"path\":" + json(crFile.toString()) + ",\"content\":\"a\\nb\\n\"}");
     assertFalse(resCr.error());
     assertArrayEquals("a\nb\n".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(crFile));
 
@@ -923,9 +820,7 @@ class ReadWriteEditCapabilitiesTest {
     Path dir = workdir.resolve("mydir");
     Files.createDirectory(dir);
     EnvironmentCapabilityResult resDir =
-        invoke(
-            write,
-            "{\"path\":\"mydir\",\"content\":\"x\",\"workdir\":" + json(workdir.toString()) + "}");
+        invoke(write, "{\"path\":" + json(dir.toString()) + ",\"content\":\"x\"}");
     assertTrue(resDir.error());
     assertTrue(text(resDir).contains("path is a directory"));
   }
@@ -941,12 +836,12 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult res =
         invoke(
             edit,
-            "{\"path\":\"sample.txt\",\"old_string\":\"line 3\",\"new_string\":\"LINE 3\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(target.toString())
+                + ",\"old_string\":\"line 3\",\"new_string\":\"LINE 3\"}");
     assertFalse(res.error());
     String diff = text(res);
-    assertTrue(diff.contains("Edited sample.txt successfully."));
+    assertTrue(diff.contains("Edited " + target.toString().replace('\\', '/') + " successfully."));
     assertTrue(diff.contains("- 3|line 3"));
     assertTrue(diff.contains("+ 3|LINE 3"));
     assertTrue(diff.contains(" 2|line 2"));
@@ -956,9 +851,9 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult notFound =
         invoke(
             edit,
-            "{\"path\":\"sample.txt\",\"old_string\":\"SECRET_PASSWORD_123\",\"new_string\":\"x\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+            "{\"path\":"
+                + json(target.toString())
+                + ",\"old_string\":\"SECRET_PASSWORD_123\",\"new_string\":\"x\"}");
     assertTrue(notFound.error());
     assertTrue(text(notFound).contains("Could not find old_string"));
     assertFalse(text(notFound).contains("SECRET_PASSWORD_123"));

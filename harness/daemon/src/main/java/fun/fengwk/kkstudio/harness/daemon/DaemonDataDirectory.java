@@ -21,11 +21,12 @@ import java.util.Set;
 /**
  * Daemon 私有本地数据目录：owner-only 目录布局加进程级独占锁。
  *
- * <p>目录布局固定为 {@code <data-dir>/{daemon.lock,resources/{text,staging}}}。锁文件 {@code daemon.lock}
- * 由本进程在打开期间以 {@link FileChannel#tryLock()} 持有；同一目录上的第二个 Daemon 立即以明确错误失败，而不是并发写同一份数据。
+ * <p>目录布局固定为 {@code <data-dir>/{daemon.lock,tmp/{text,staging}}}。锁文件 {@code daemon.lock} 由本进程在打开期间以
+ * {@link FileChannel#tryLock()} 持有；同一目录上的第二个 Daemon 立即以明确错误失败，而不是并发写同一份数据。
  *
- * <p>启动时只清理 {@code resources/staging} 下遗留的 {@code *.part} 中转文件（上一次进程崩溃的残留）；已发布的 {@code
- * resources/text} 永不自动删除，durable history 可能仍引用其中的路径。
+ * <p>{@code tmp} 是受控临时产物根：工具外化的全文落在 {@code tmp/text}，未发布中转文件落在 {@code tmp/staging}。本类当前只负责目录创建与
+ * owner-only 权限；临时产物的 TTL 与扫描策略不属于本切片。启动时只清理 {@code tmp/staging} 下遗留的 {@code *.part}
+ * 中转文件（上一次进程崩溃的残留）；已发布的 {@code tmp/text} 全文不在这里删除，durable history 可能仍引用其中的路径。
  *
  * <p>目录与文件权限在支持 POSIX 的文件系统上显式收敛为 owner-only（目录 0700、文件 0600）。
  */
@@ -37,7 +38,7 @@ public final class DaemonDataDirectory implements AutoCloseable {
   /** 默认数据目录：启动用户 HOME 下的 {@code .kk-studio}。 */
   public static final String DEFAULT_DIRECTORY_NAME = ".kk-studio";
 
-  private static final String RESOURCES = "resources";
+  private static final String TMP = "tmp";
   private static final String TEXT = "text";
   private static final String STAGING = "staging";
   private static final String STAGING_SUFFIX = ".part";
@@ -47,7 +48,7 @@ public final class DaemonDataDirectory implements AutoCloseable {
   private static final String BACKUP = "backup";
 
   private final Path root;
-  private final Path resources;
+  private final Path tmp;
   private final Path text;
   private final Path staging;
   private final Path skills;
@@ -60,7 +61,7 @@ public final class DaemonDataDirectory implements AutoCloseable {
 
   private DaemonDataDirectory(
       Path root,
-      Path resources,
+      Path tmp,
       Path text,
       Path staging,
       Path skills,
@@ -71,7 +72,7 @@ public final class DaemonDataDirectory implements AutoCloseable {
       FileChannel lockChannel,
       FileLock lock) {
     this.root = root;
-    this.resources = resources;
+    this.tmp = tmp;
     this.text = text;
     this.staging = staging;
     this.skills = skills;
@@ -97,9 +98,9 @@ public final class DaemonDataDirectory implements AutoCloseable {
     Path root = configured.normalize();
     try {
       createOwnerOnlyDirectory(root);
-      Path resources = createOwnerOnlyDirectory(root.resolve(RESOURCES));
-      Path text = createOwnerOnlyDirectory(resources.resolve(TEXT));
-      Path staging = createOwnerOnlyDirectory(resources.resolve(STAGING));
+      Path tmp = createOwnerOnlyDirectory(root.resolve(TMP));
+      Path text = createOwnerOnlyDirectory(tmp.resolve(TEXT));
+      Path staging = createOwnerOnlyDirectory(tmp.resolve(STAGING));
       Path skills = createOwnerOnlyDirectory(root.resolve(SKILLS));
       Path skillWork = createOwnerOnlyDirectory(root.resolve(SKILL_WORK));
       Path skillCache = createOwnerOnlyDirectory(skillWork.resolve(CACHE));
@@ -120,7 +121,7 @@ public final class DaemonDataDirectory implements AutoCloseable {
       DaemonDataDirectory directory =
           new DaemonDataDirectory(
               root,
-              resources,
+              tmp,
               text,
               staging,
               skills,
@@ -156,17 +157,17 @@ public final class DaemonDataDirectory implements AutoCloseable {
     return root;
   }
 
-  /** 全部本地资源根目录（不含锁文件）。 */
-  public Path resources() {
-    return resources;
+  /** 受控临时产物根目录（{@code <data-dir>/tmp}）。 */
+  public Path tmp() {
+    return tmp;
   }
 
-  /** 已发布的 durable 全文目录；内容只在显式清理时才可删除。 */
+  /** 工具外化全文目录（{@code <data-dir>/tmp/text}）；内容只在显式清理时才可删除。 */
   public Path text() {
     return text;
   }
 
-  /** owner-only 中转目录，只允许出现未发布的 {@code *.part} 文件。 */
+  /** owner-only 中转目录（{@code <data-dir>/tmp/staging}），只允许出现未发布的 {@code *.part} 文件。 */
   public Path staging() {
     return staging;
   }

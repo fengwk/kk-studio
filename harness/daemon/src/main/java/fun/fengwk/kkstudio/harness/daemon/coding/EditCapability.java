@@ -59,10 +59,8 @@ public final class EditCapability extends AbstractCodingCapability {
               + " normalization");
     }
 
-    String rawWorkdir = optionalString(args, "workdir");
-    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
-    Path path = EnvironmentPaths.existing(rawPath, workdir);
-    String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
+    Path path = EnvironmentPaths.existing(rawPath);
+    String displayPath = EnvironmentPaths.displayPath(path, rawPath);
     if (Files.isDirectory(path)) {
       throw new IllegalArgumentException("path must be a file: " + displayPath);
     }

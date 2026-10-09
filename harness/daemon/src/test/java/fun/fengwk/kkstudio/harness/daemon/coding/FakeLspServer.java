@@ -29,6 +29,9 @@ public final class FakeLspServer {
   /** 假服务器返回的反编译源码，同时用于断言源码正文不被路径改写。 */
   public static final String DECOMPILED_SOURCE = "class Decompiled {}\n";
 
+  /** {@code large-decompile} 模式返回的反编译源码：行数与字节数都超过结果级外化的内联阈值。 */
+  public static final String LARGE_DECOMPILED_SOURCE = "// decompiled line\n".repeat(3000);
+
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final int DEFINITION_LINE = 9;
   private static final int DEFINITION_CHARACTER = 5;
@@ -174,16 +177,21 @@ public final class FakeLspServer {
             default -> symbols();
           });
       case "java/classFileContents" -> sendResult(
-          out, id, MAPPER.getNodeFactory().textNode(DECOMPILED_SOURCE));
+          out, id, MAPPER.getNodeFactory().textNode(decompiledSource()));
       case "workspace/executeCommand" -> sendResult(
-          out,
-          id,
-          MAPPER
-              .getNodeFactory()
-              .textNode(mode.equals("empty-decompile") ? "" : DECOMPILED_SOURCE));
+          out, id, MAPPER.getNodeFactory().textNode(decompiledSource()));
       default -> sendError(out, id, -32601, "Method not found: " + method);
     }
     return true;
+  }
+
+  /** 反编译应答正文：{@code large-decompile} 模式给出超阈值源码，{@code empty-decompile} 给出空串，其余给出常规小源码。 */
+  private String decompiledSource() {
+    return switch (mode) {
+      case "large-decompile" -> LARGE_DECOMPILED_SOURCE;
+      case "empty-decompile" -> "";
+      default -> DECOMPILED_SOURCE;
+    };
   }
 
   private void handleDefinition(JsonNode message, JsonNode id, OutputStream out)

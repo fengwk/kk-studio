@@ -19,6 +19,6 @@ final class PermissionPathMatcher {
     Objects.requireNonNull(target, "target");
     PermissionPathPattern compiled =
         compiledPatterns.computeIfAbsent(pattern, PermissionPathPattern::of);
-    return compiled.matches(target.relativePosixPath(), target.directory());
+    return compiled.matches(target.posixPath(), target.directory());
   }
 }

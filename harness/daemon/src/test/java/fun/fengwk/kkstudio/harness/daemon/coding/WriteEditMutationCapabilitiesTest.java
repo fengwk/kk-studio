@@ -108,27 +108,21 @@ class WriteEditMutationCapabilitiesTest {
   }
 
   private String writeArguments(String path, String content) {
-    return "{\"path\":"
-        + json(path)
-        + ",\"content\":"
-        + json(content)
-        + ",\"workdir\":"
-        + json(workdir.toString())
-        + "}";
+    Path target = Path.of(path).isAbsolute() ? Path.of(path) : workdir.resolve(path);
+    return "{\"path\":" + json(target.toString()) + ",\"content\":" + json(content) + "}";
   }
 
   private String editArguments(
       String path, String oldString, String newString, boolean replaceAll) {
+    Path target = Path.of(path).isAbsolute() ? Path.of(path) : workdir.resolve(path);
     return "{\"path\":"
-        + json(path)
+        + json(target.toString())
         + ",\"old_string\":"
         + json(oldString)
         + ",\"new_string\":"
         + json(newString)
         + ",\"replace_all\":"
         + replaceAll
-        + ",\"workdir\":"
-        + json(workdir.toString())
         + "}";
   }
 
@@ -188,17 +182,13 @@ class WriteEditMutationCapabilitiesTest {
   void writesToExplicitWorkdirAndRejectsMissingArguments() throws Exception {
     WriteCapability write = write();
     IllegalArgumentException missingPath =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                request(write, "{\"content\":\"x\",\"workdir\":" + json(workdir.toString()) + "}"));
+        assertThrows(IllegalArgumentException.class, () -> request(write, "{\"content\":\"x\"}"));
     assertTrue(missingPath.getMessage().contains("$.path is required"), missingPath.getMessage());
 
     IllegalArgumentException missingContent =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                request(write, "{\"path\":\"x.ts\",\"workdir\":" + json(workdir.toString()) + "}"));
+            () -> request(write, "{\"path\":" + json(workdir.resolve("x.ts").toString()) + "}"));
     assertTrue(
         missingContent.getMessage().contains("$.content is required"), missingContent.getMessage());
 
@@ -207,7 +197,7 @@ class WriteEditMutationCapabilitiesTest {
     assertEquals("x", Files.readString(workdir.resolve("x.ts")));
   }
 
-  /** workdir 对 write 是可选的：绝对 path 直接解析，相对 path 缺少显式 workdir 则在执行前拒绝且不回退到 cwd/HOME 或任何默认目录。 */
+  /** 绝对 path 直接解析，相对 path 则在执行前拒绝且不回退到 cwd/HOME 或任何默认目录。 */
   @Test
   void writeAcceptsAbsolutePathWithoutWorkdirAndRejectsRelativePathWithoutIt() throws Exception {
     Path absolute = workdir.resolve("absolute.txt");
@@ -221,7 +211,8 @@ class WriteEditMutationCapabilitiesTest {
     EnvironmentCapabilityResult relative =
         invoke(write, "{\"path\":\"relative.txt\",\"content\":\"x\"}");
     assertTrue(relative.error(), text(relative));
-    assertTrue(text(relative).contains("workdir is required"), text(relative));
+    assertTrue(
+        text(relative).contains("path must be an absolute path: relative.txt"), text(relative));
     assertFalse(Files.exists(workdir.resolve("relative.txt")));
   }
 
@@ -231,13 +222,19 @@ class WriteEditMutationCapabilitiesTest {
     EnvironmentCapabilityResult created =
         invoke(write(), writeArguments("src/new.ts", "export const demo = 1;\n"));
     assertFalse(created.error(), text(created));
-    assertEquals("Created src/new.ts successfully.", text(created));
+    assertEquals(
+        "Created " + workdir.resolve("src/new.ts").toString().replace('\\', '/') + " successfully.",
+        text(created));
     assertEquals("export const demo = 1;\n", Files.readString(workdir.resolve("src/new.ts")));
 
     EnvironmentCapabilityResult overwritten =
         invoke(write(), writeArguments("src/new.ts", "export const demo = 2;\n"));
     assertFalse(overwritten.error(), text(overwritten));
-    assertEquals("Overwrote src/new.ts successfully.", text(overwritten));
+    assertEquals(
+        "Overwrote "
+            + workdir.resolve("src/new.ts").toString().replace('\\', '/')
+            + " successfully.",
+        text(overwritten));
     assertEquals("export const demo = 2;\n", Files.readString(workdir.resolve("src/new.ts")));
   }
 
@@ -582,7 +579,13 @@ class WriteEditMutationCapabilitiesTest {
             editArguments("src.ts", "export const demo = 1;", "export const demo = 2;", false));
 
     assertFalse(result.error(), text(result));
-    assertTrue(text(result).contains("Edited src.ts successfully."), text(result));
+    assertTrue(
+        text(result)
+            .contains(
+                "Edited "
+                    + workdir.resolve("src.ts").toString().replace('\\', '/')
+                    + " successfully."),
+        text(result));
     assertTrue(text(result).contains("Replacements: 1"), text(result));
     assertEquals("export const demo = 2;\n", Files.readString(workdir.resolve("src.ts")));
   }
@@ -744,9 +747,9 @@ class WriteEditMutationCapabilitiesTest {
             () ->
                 request(
                     edit,
-                    "{\"path\":\"example.ts\",\"old_string\":\"alpha\",\"workdir\":"
-                        + json(workdir.toString())
-                        + "}"));
+                    "{\"path\":"
+                        + json(workdir.resolve("example.ts").toString())
+                        + ",\"old_string\":\"alpha\"}"));
 
     assertTrue(error.getMessage().contains("$.new_string is required"), error.getMessage());
     assertEquals("alpha\n", Files.readString(workdir.resolve("example.ts")));
@@ -759,12 +762,7 @@ class WriteEditMutationCapabilitiesTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                request(
-                    edit,
-                    "{\"old_string\":\"a\",\"new_string\":\"b\",\"workdir\":"
-                        + json(workdir.toString())
-                        + "}"));
+            () -> request(edit, "{\"old_string\":\"a\",\"new_string\":\"b\"}"));
 
     assertTrue(error.getMessage().contains("$.path is required"), error.getMessage());
   }
@@ -789,7 +787,7 @@ class WriteEditMutationCapabilitiesTest {
             .required());
   }
 
-  /** workdir 对 edit 同样可选：绝对 path 直接编辑，相对 path 缺少显式 workdir 则在执行前拒绝。 */
+  /** 绝对 path 直接编辑，相对 path 则在执行前拒绝。 */
   @Test
   void editAcceptsAbsolutePathWithoutWorkdirAndRejectsRelativePathWithoutIt() throws Exception {
     Path absolute = workdir.resolve("absolute.ts");
@@ -808,7 +806,8 @@ class WriteEditMutationCapabilitiesTest {
     EnvironmentCapabilityResult relative =
         invoke(edit, "{\"path\":\"absolute.ts\",\"old_string\":\"beta\",\"new_string\":\"gamma\"}");
     assertTrue(relative.error(), text(relative));
-    assertTrue(text(relative).contains("workdir is required"), text(relative));
+    assertTrue(
+        text(relative).contains("path must be an absolute path: absolute.ts"), text(relative));
     assertEquals("beta\n", Files.readString(absolute));
   }
 

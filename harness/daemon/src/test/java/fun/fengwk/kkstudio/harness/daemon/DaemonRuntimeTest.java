@@ -541,13 +541,13 @@ class DaemonRuntimeTest {
   }
 
   /**
-   * 测试意图：相对本地路径的 workdir 只来自该次调用 arguments，缺失时在 capability 执行期确定性拒绝，且绝不回退到任何默认路径。
+   * 测试意图：文件工具只接受绝对路径，相对 path 在 capability 执行期确定性拒绝，且绝不回退到任何默认路径。
    *
    * <p>用真实 {@link ReadCapability}：临时目录下放置同名文件；若实现发生回退，capability 就能读到该文件并在 COMPLETED
    * 内容中出现其文本，从而被本测试捕获。
    */
   @Test
-  void omittedWorkdirIsRejectedWithoutDefaultFallback() throws Exception {
+  void relativePathIsRejectedWithoutDefaultFallback() throws Exception {
     Path root = Files.createTempDirectory("daemon-workdir-root");
     try {
       Files.writeString(root.resolve("local.txt"), "from-local-dir");
@@ -563,10 +563,10 @@ class DaemonRuntimeTest {
       completeHandshake();
       transport.takeMessages(2);
 
-      // 相对 path 省略 workdir：请求形状合法，但执行期拒绝且绝不回退到任何默认目录。
+      // 相对 path：请求形状合法，但执行期拒绝且绝不回退到任何默认目录。
       transport.receive(
           invoke(
-              "missing-workdir",
+              "relative-path",
               "fs.read",
               EnvironmentCapabilityCatalog.version(),
               100,
@@ -574,17 +574,17 @@ class DaemonRuntimeTest {
       List<DaemonEnvelope> missing = transport.takeMessages(2);
       assertMessageTypes(missing, STARTED, DaemonMessageType.COMPLETED);
       String failure = missing.get(1).payloadJson();
-      assertTrue(failure.contains("workdir"), failure);
+      assertTrue(failure.contains("must be an absolute path"), failure);
       assertFalse(failure.contains("from-local-dir"), failure);
 
-      // 显式绝对 workdir 正常执行并读到该目录下的文件；可见内容证明目录来自 arguments 而非 Environment Root。
+      // 显式绝对 path 正常执行并读到该目录下的文件；可见内容证明路径来自 arguments 而非 Environment Root。
       transport.receive(
           invoke(
-              "explicit-workdir",
+              "explicit-path",
               "fs.read",
               EnvironmentCapabilityCatalog.version(),
               100,
-              "{\"path\":\"local.txt\",\"workdir\":\"" + jsonEscape(root.toString()) + "\"}"));
+              "{\"path\":\"" + jsonEscape(root.resolve("local.txt").toString()) + "\"}"));
       assertMessageTypes(transport.takeMessages(2), STARTED, DaemonMessageType.COMPLETED);
     } finally {
       deleteRecursively(root);
@@ -1108,9 +1108,9 @@ class DaemonRuntimeTest {
               "fs.write",
               EnvironmentCapabilityCatalog.version(),
               100,
-              "{\"workdir\":\""
-                  + jsonEscape(root.toString())
-                  + "\",\"path\":\"timeout.txt\",\"content\":\"must not be written\"}"));
+              "{\"path\":\""
+                  + jsonEscape(root.resolve("timeout.txt").toString())
+                  + "\",\"content\":\"must not be written\"}"));
 
       assertMessageTypes(transport.takeMessages(1), STARTED);
       List<DaemonEnvelope> terminal = transport.takeMessages(1);

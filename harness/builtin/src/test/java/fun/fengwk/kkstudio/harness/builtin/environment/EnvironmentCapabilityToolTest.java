@@ -119,7 +119,7 @@ class EnvironmentCapabilityToolTest {
     ToolExecutionRequest requestWithoutContext =
         new ToolExecutionRequest(
             descriptor,
-            new ToolCall("call-1", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}"),
+            new ToolCall("call-1", "read", "{\"path\":\"/srv/repo/demo.txt\"}"),
             Duration.ZERO);
 
     ToolExecutionHandle handle = tool.execute(requestWithoutContext, listener);
@@ -199,7 +199,7 @@ class EnvironmentCapabilityToolTest {
 
     assertEquals(
         Duration.ofMinutes(1),
-        read.resolveTimeout(call("read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}")));
+        read.resolveTimeout(call("read", "{\"path\":\"/srv/repo/demo.txt\"}")));
   }
 
   /** 以 capability schema 构造 bash Tool，用于验证 arguments 级超时解析。 */
@@ -245,7 +245,7 @@ class EnvironmentCapabilityToolTest {
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             descriptor,
-            new ToolCall("call-2", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}"),
+            new ToolCall("call-2", "read", "{\"path\":\"/srv/repo/demo.txt\"}"),
             Duration.ZERO,
             context);
 
@@ -254,5 +254,38 @@ class EnvironmentCapabilityToolTest {
     ToolExecutionHandle returnedHandle = tool.execute(request, listener);
     assertEquals(mockHandle, returnedHandle);
     verify(boundEnv).execute(FS_READ, request, listener);
+  }
+
+  /** 验证 process.exec（bash）请求在缺少必填 workdir 时在构造期被拒绝。 */
+  @Test
+  void requestCreationRejectsMissingWorkdirForProcessExec() {
+    EnvironmentCapabilityTool bash = bashTool();
+    ToolCall callWithoutWorkdir = new ToolCall("call-bash", "bash", "{\"command\":\"true\"}");
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ToolExecutionRequest(bash.descriptor(), callWithoutWorkdir, Duration.ZERO));
+    assertTrue(error.getMessage().contains("workdir is required"), error.getMessage());
+  }
+
+  /** 验证文件能力请求携带已废弃的 workdir 时在构造期被拒绝。 */
+  @Test
+  void requestCreationRejectsWorkdirForFileTools() {
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "read",
+            "read file",
+            "read",
+            FS_READ.inputSchema(),
+            ToolSideEffect.READ_ONLY,
+            FS_READ.defaultTimeout());
+    ToolCall callWithWorkdir =
+        new ToolCall(
+            "call-read", "read", "{\"path\":\"/srv/repo/demo.txt\",\"workdir\":\"/srv/repo\"}");
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ToolExecutionRequest(descriptor, callWithWorkdir, Duration.ZERO));
+    assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
   }
 }

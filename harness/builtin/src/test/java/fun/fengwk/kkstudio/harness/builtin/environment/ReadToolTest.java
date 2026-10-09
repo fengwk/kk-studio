@@ -56,6 +56,12 @@ class ReadToolTest {
     assertFalse(descriptor.description().isBlank());
     assertEquals(FS_READ.inputSchema(), descriptor.inputSchema());
     assertEquals(FS_READ.defaultTimeout(), descriptor.defaultTimeout());
+    assertFalse(descriptor.inputSchema().properties().containsKey("workdir"));
+    assertFalse(descriptor.inputSchema().required().contains("workdir"));
+    assertTrue(descriptor.description().contains("kkstudio:/resources/<blobId>"));
+    assertTrue(
+        descriptor.description().contains("kkstudio:/skills/<package>/<skill>/<relativePath>"));
+    assertFalse(descriptor.description().contains("workdir"));
   }
 
   /** 验证 requirements 声明为 optionalEnvironment（无绑定时由实现方处理，有绑定时可使用 BoundEnvironment）。 */
@@ -120,7 +126,7 @@ class ReadToolTest {
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             tool.descriptor(),
-            new ToolCall("c1", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"file.txt\"}"),
+            new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\"}"),
             Duration.ZERO);
     ToolExecutionListener listener = mock(ToolExecutionListener.class);
 
@@ -138,7 +144,7 @@ class ReadToolTest {
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             tool.descriptor(),
-            new ToolCall("c1", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"file.txt\"}"),
+            new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\"}"),
             Duration.ZERO);
     ToolExecutionListener listener = mock(ToolExecutionListener.class);
 
@@ -159,12 +165,57 @@ class ReadToolTest {
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             tool.descriptor(),
-            new ToolCall("c1", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"file.txt\"}"),
+            new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\"}"),
             Duration.ZERO);
     ToolExecutionListener listener = mock(ToolExecutionListener.class);
 
     IllegalStateException thrown =
         assertThrows(IllegalStateException.class, () -> tool.execute(request, listener));
     assertSame(failure, thrown);
+  }
+
+  /** 验证 read 工具参数中携带已废弃的 workdir 时，在请求构造期抛出 IllegalArgumentException。 */
+  @Test
+  void executeRejectsWorkdirInArguments() {
+    ReadTool tool = new ReadTool((request, listener) -> null);
+    ToolCall callWithWorkdir =
+        new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\",\"workdir\":\"/srv/repo\"}");
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ToolExecutionRequest(tool.descriptor(), callWithWorkdir, Duration.ZERO));
+    assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
+  }
+
+  /** 验证 read 工具参数接受 kkstudio: resources 与 skills 两种稳定 URI 格式并成功构造委托请求。 */
+  @Test
+  void executeAcceptsKkstudioResourceAndSkillUris() {
+    AtomicReference<ToolExecutionRequest> capturedRequest = new AtomicReference<>();
+    ToolExecutionHandle mockHandle = mock(ToolExecutionHandle.class);
+    ReadTool tool =
+        new ReadTool(
+            (request, listener) -> {
+              capturedRequest.set(request);
+              return mockHandle;
+            });
+
+    String resourceUri = "kkstudio:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f";
+    ToolExecutionRequest resourceRequest =
+        new ToolExecutionRequest(
+            tool.descriptor(),
+            new ToolCall("c1", "read", "{\"path\":\"" + resourceUri + "\"}"),
+            Duration.ZERO);
+    assertSame(mockHandle, tool.execute(resourceRequest, mock(ToolExecutionListener.class)));
+    assertEquals(
+        resourceUri,
+        capturedRequest.get().call().argumentsJson().contains(resourceUri) ? resourceUri : null);
+
+    String skillUri = "kkstudio:/skills/review/checklist/SKILL.md";
+    ToolExecutionRequest skillRequest =
+        new ToolExecutionRequest(
+            tool.descriptor(),
+            new ToolCall("c2", "read", "{\"path\":\"" + skillUri + "\"}"),
+            Duration.ZERO);
+    assertSame(mockHandle, tool.execute(skillRequest, mock(ToolExecutionListener.class)));
   }
 }
