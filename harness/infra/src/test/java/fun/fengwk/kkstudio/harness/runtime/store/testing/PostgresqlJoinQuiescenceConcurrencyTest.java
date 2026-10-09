@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -232,7 +233,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   null,
                   null,
                   now,
-                  now));
+                  now,
+                  JoinPurpose.TASK,
+                  null));
           UUID joinBC = tx.nextId();
           tx.insertJoin(
               new ThreadJoin(
@@ -248,7 +251,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   null,
                   null,
                   now,
-                  now));
+                  now,
+                  JoinPurpose.TASK,
+                  null));
 
           if (bTerminalPending) {
             insertSucceededModel(tx, threadB, bStart, bUser, now);

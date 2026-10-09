@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -317,7 +318,7 @@ class SubagentTaskRunnerTest {
 
   @Test
   void busyChildAcceptsAdditionalPromptWithoutPriorDeliveryAndWithFixedPrefix() {
-    // resume 不要求前一次 join 已交付，也不要求子线程 idle：格式化前缀按目标 settings 固定发出。
+    // resume 不要求前一次 join 已交付，也不要求子线程 idle：只追加 agent/model/prompt，绝不改写既有子环境。
     stubParent(List.of(AGENT));
     UUID childThreadId = UUID.randomUUID();
     ThreadSnapshot child = child(childThreadId, parentThreadId, 9L);
@@ -335,12 +336,43 @@ class SubagentTaskRunnerTest {
     assertEquals(childThreadId, target.threadId());
     assertEquals(9L, target.expectedNextCommandSequence());
     List<NewThreadCommand> commands = command.getValue().commands();
-    assertEquals(4, commands.size());
-    // SET_* 前缀无条件完整发出：batch 指纹只由本次目标 settings 决定，与子线程当前 head settings 无关。
+    assertEquals(3, commands.size());
+    // 续接前缀只由本次目标 settings 决定：SET_AGENT + SET_MODEL + prompt。
     assertEquals(new SetAgentCommandPayload(AGENT), commands.get(0).payload());
     assertEquals(new SetModelCommandPayload(MODEL), commands.get(1).payload());
-    assertEquals(new SetEnvironmentCommandPayload("env"), commands.get(2).payload());
-    assertTrue(commands.get(3).payload() instanceof CustomMessageCommandPayload);
+    assertTrue(commands.get(2).payload() instanceof CustomMessageCommandPayload);
+    // 关键契约：既有子 Thread 保留自身环境。父环境 "parent-env" 与子环境 "child-env" 不同，
+    // 因此续接绝不重发 SET_ENVIRONMENT，避免把父环境写进既有子。
+    assertTrue(
+        commands.stream().noneMatch(c -> c.payload() instanceof SetEnvironmentCommandPayload),
+        commands.toString());
+  }
+
+  @Test
+  void busyResumeReplayWithChangedAgentIsRejectedInsteadOfRewritingChild() {
+    // 同一 invocation 的 busy 续接重放必须命中同一份委派：agent 变更属于另一次委派，
+    // 必须拒绝而不是给既有子线程换 agent（resume 的 SET_AGENT 只用于同一委派的重放场景）。
+    UUID childThreadId = UUID.randomUUID();
+    SubagentTaskRequest original = request(null, childThreadId);
+    when(runtime.findJoin(invocationId))
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(original),
+                    AGENT,
+                    10)));
+    SubagentTaskRequest changedAgent =
+        new SubagentTaskRequest(
+            invocationId, parentThreadId, "do the work", "beta", null, childThreadId);
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class, () -> runner(config()).accept(changedAgent));
+
+    assertTrue(rejected.getMessage().contains("different delegation"), rejected.getMessage());
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
   }
 
   @Test
@@ -604,7 +636,9 @@ class SubagentTaskRunnerTest {
         null,
         null,
         NOW,
-        NOW);
+        NOW,
+        JoinPurpose.TASK,
+        null);
   }
 
   private static ThreadSnapshot child(UUID childThreadId, UUID parentThreadId, long nextSequence) {

@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -405,7 +406,9 @@ class HarnessRuntimeStopSubtreeTest {
                   null,
                   null,
                   T0,
-                  T0));
+                  T0,
+                  JoinPurpose.TASK,
+                  null));
           return modelId;
         });
   }
@@ -453,7 +456,9 @@ class HarnessRuntimeStopSubtreeTest {
                   null,
                   null,
                   T0,
-                  T0));
+                  T0,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
   }
