@@ -33,6 +33,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 核心测试的内存基座：可控 fake channel / lease store，以及握手与帧构造辅助。
@@ -69,7 +70,12 @@ final class EnvironmentDaemonServerTestSupport {
           DaemonCapabilities.VERSION,
           DAEMON_VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "note"));
+              DaemonOperatingSystem.LINUX,
+              "Asia/Shanghai",
+              "dev",
+              "/home/dev",
+              "note",
+              "/tmp/kk-studio"));
 
   /** 测试用单条/聚合资源字节预算：与生产 16 MiB 业务上限一致。 */
   static final long MAX_RESOURCE_BYTES = 16L * 1024 * 1024;
@@ -154,6 +160,8 @@ final class EnvironmentDaemonServerTestSupport {
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
     final List<EnvironmentId> updateResultEnvironments = new ArrayList<>();
     final List<DaemonUpdateResult> updateResults = new ArrayList<>();
+    final AtomicReference<EnvironmentServerSettings> settings =
+        new AtomicReference<>(defaultSettings());
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
 
@@ -179,7 +187,19 @@ final class EnvironmentDaemonServerTestSupport {
                 updateResults.add(result);
               },
               ticketService,
-              () -> new EnvironmentServerSettings(Duration.ofSeconds(60), 16L * 1024 * 1024));
+              settings::get);
+    }
+
+    /** 热更当前运行期设置；用于验证策略热更经同一控制通道推送到已 READY 连接。 */
+    void updateSettings(long ttlSeconds, long cleanupIntervalSeconds) {
+      settings.set(
+          new EnvironmentServerSettings(
+              Duration.ofSeconds(60), 16L * 1024 * 1024, ttlSeconds, cleanupIntervalSeconds));
+    }
+
+    private static EnvironmentServerSettings defaultSettings() {
+      return new EnvironmentServerSettings(
+          Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L);
     }
 
     void failRegistrationDirectory() {

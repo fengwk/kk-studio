@@ -690,9 +690,9 @@ class ReadCapabilityTest {
     assertFalse(result.error());
     assertTrue(text(result).length() > 1024);
     assertFalse(result.detailsJson().contains("textOutput"), result.detailsJson());
-    Path textDir = config.textOutputStore().textDirectory();
-    if (Files.isDirectory(textDir)) {
-      try (var entries = Files.list(textDir)) {
+    Path workspaces = config.textOutputStore().root();
+    if (Files.isDirectory(workspaces)) {
+      try (var entries = Files.list(workspaces)) {
         assertEquals(0, entries.count());
       }
     }
@@ -793,6 +793,29 @@ class ReadCapabilityTest {
           fragments.get(index + 1).toString(),
           "第 " + (index + 1) + " 行必须逐字符重构");
     }
+  }
+
+  /**
+   * 读取受控临时全文期间持有与 {@code read} 相同的 in-use 租约：进行中的读取不会被定时清扫删除。
+   *
+   * <p>用例把 workspace 的创建登记回填为远早时刻使其立即“过期”，再证明：持租约时清扫不删、且读取照常成功；租约释放后过期 workspace 才被回收。
+   */
+  @Test
+  void readOfControlledTemporaryTextIsProtectedFromSweep() throws Exception {
+    CodingToolsConfig config = TestCodingConfig.withoutLsp(workdir);
+    TextOutputStore store = config.textOutputStore();
+    Path staging = store.createStagingFile("read-lease");
+    Files.writeString(staging, "line one\nline two\n");
+    Path published = store.publish(staging);
+    Files.writeString(published.getParent().resolve("created-at"), "0");
+
+    try (TextOutputStore.Lease lease = store.acquire(published)) {
+      assertEquals(0, store.sweep(1), "在途读取持有的租约必须阻止清扫");
+      String output = text(read(config, published.toString(), ""));
+      assertTrue(output.contains("line one"), output);
+      assertTrue(output.contains("line two"), output);
+    }
+    assertEquals(1, store.sweep(1), "租约释放后过期 workspace 才可回收");
   }
 
   /** 把一次响应中的所有编号正文行片段按行号累加，用于验证续读不丢字符、不重复。 */

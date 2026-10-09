@@ -125,8 +125,8 @@ class BashCapabilityTest {
     assertTrue(process.path("exitCode").isMissingNode(), "被杀进程的退出码不是命令的事实:" + process);
 
     assertEquals(1, listener.completions, "每次调用只能有一个终态回调");
-    assertTrue(listFiles(config.textOutputStore().textDirectory()).isEmpty(), "小输出不得产生 durable 文件");
-    assertTrue(listFiles(config.textOutputStore().stagingDirectory()).isEmpty(), "收尾不得残留未发布中转文件");
+    assertTrue(config.textOutputStore().publishedFiles().isEmpty(), "小输出不得产生 durable 文件");
+    assertTrue(config.textOutputStore().partialFiles().isEmpty(), "收尾不得残留未发布中转文件");
   }
 
   /**
@@ -172,7 +172,7 @@ class BashCapabilityTest {
     assertEquals("1", lines.getFirst());
     assertEquals("5000", lines.getLast(), "durable 全文必须是纯进程输出，不含终态说明");
     assertTrue(text(result).contains(published.toString()), "预览必须内联已发布路径：" + text(result));
-    assertTrue(listFiles(config.textOutputStore().stagingDirectory()).isEmpty(), "发布后不得残留中转文件");
+    assertTrue(config.textOutputStore().partialFiles().isEmpty(), "发布后不得残留中转文件");
   }
 
   /** 取消与超时对称：即使没有 deadline，取消也保留已捕获输出、只回调一次，并把取消与退出码区分开。 */
@@ -332,8 +332,7 @@ class BashCapabilityTest {
     assertTrue(result.error());
     assertTrue(text(result).contains("kk-studio-missing-bash"), text(result));
     assertEquals("{}", result.detailsJson(), "启动失败时没有捕获事实可报告");
-    assertTrue(
-        listFiles(missingShell.textOutputStore().stagingDirectory()).isEmpty(), "启动失败不得留下幽灵中转文件");
+    assertTrue(missingShell.textOutputStore().partialFiles().isEmpty(), "启动失败不得留下幽灵中转文件");
   }
 
   /**
@@ -371,8 +370,8 @@ class BashCapabilityTest {
           "CANCELLED", details(result).path("process").path("outcome").asText(), text(result));
       assertEquals(1, listener.completions, "启动前的收尾同样只能有一个终态回调");
       assertFalse(Files.exists(marker), "已取消的调用不得执行命令，也不得留下命令副作用");
-      assertTrue(listFiles(config.textOutputStore().stagingDirectory()).isEmpty(), "不得创建中转文件");
-      assertTrue(listFiles(config.textOutputStore().textDirectory()).isEmpty(), "不得创建 durable 文件");
+      assertTrue(config.textOutputStore().partialFiles().isEmpty(), "不得创建中转文件");
+      assertTrue(config.textOutputStore().publishedFiles().isEmpty(), "不得创建 durable 文件");
     } finally {
       release.countDown();
       gated.shutdownNow();
@@ -410,7 +409,7 @@ class BashCapabilityTest {
       assertFalse(text.contains("Operation cancelled"), "超时不得被报告成取消：" + text);
       assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asText(), text);
       assertFalse(Files.exists(marker), "超时收尾不得执行命令副作用");
-      assertTrue(listFiles(config.textOutputStore().stagingDirectory()).isEmpty());
+      assertTrue(config.textOutputStore().partialFiles().isEmpty());
     } finally {
       release.countDown();
       gated.shutdownNow();
@@ -628,8 +627,8 @@ class BashCapabilityTest {
       assertTrue(text(result).contains("Error:"), text(result));
       assertEquals(1, listener.completions, "调度失败同样只能有一个终态回调");
       assertEquals(List.of(), aliveAtCompletion.get(), "终态通知时整棵进程树必须已经收敛：" + tree);
-      assertTrue(listFiles(config.textOutputStore().stagingDirectory()).isEmpty(), "不得残留中转文件");
-      assertTrue(listFiles(config.textOutputStore().textDirectory()).isEmpty(), "不得创建 durable 文件");
+      assertTrue(config.textOutputStore().partialFiles().isEmpty(), "不得残留中转文件");
+      assertTrue(config.textOutputStore().publishedFiles().isEmpty(), "不得创建 durable 文件");
     } finally {
       gate.countDown();
       gated.shutdownNow();
@@ -1139,14 +1138,6 @@ class BashCapabilityTest {
 
   private static String json(Path value) throws Exception {
     return AbstractCodingCapability.OBJECT_MAPPER.writeValueAsString(value.toString());
-  }
-
-  private static List<Path> listFiles(Path directory) throws Exception {
-    try (var entries = Files.list(directory)) {
-      List<Path> files = new ArrayList<>();
-      entries.forEach(files::add);
-      return files;
-    }
   }
 
   /** 等待命令进入可取消阶段；超时上限保证失败时快速暴露而不是挂起测试。 */

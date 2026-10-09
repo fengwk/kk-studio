@@ -98,6 +98,8 @@ class SystemSettingsTest {
     assertEquals(30_000L, storageMedia.canvasMediaProcessTimeoutMillis());
     assertEquals(512, storageMedia.thumbnailMaxDimension());
     assertEquals(80, storageMedia.thumbnailQuality());
+    assertEquals(259_200L, storageMedia.temporaryResourceTtlSeconds());
+    assertEquals(1_800L, storageMedia.temporaryResourceCleanupIntervalSeconds());
 
     SystemSettings.Advanced advanced = defaults.advanced();
     assertEquals(16L * 1024 * 1024, advanced.resourceMaxBytes());
@@ -307,7 +309,9 @@ class SystemSettingsTest {
                 3_600L,
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
-                base.thumbnailQuality()));
+                base.thumbnailQuality(),
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -317,7 +321,9 @@ class SystemSettingsTest {
                 base.s3PresignMaxExpiresSeconds(),
                 0L,
                 base.thumbnailMaxDimension(),
-                base.thumbnailQuality()));
+                base.thumbnailQuality(),
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -327,7 +333,38 @@ class SystemSettingsTest {
                 base.s3PresignMaxExpiresSeconds(),
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
-                101));
+                101,
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds()));
+  }
+
+  @Test
+  void rejectsNonPositiveTemporaryResourcePolicy() {
+    SystemSettings.StorageMedia base = SystemSettings.DEFAULT.storageMedia();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.StorageMedia(
+                base.uploadExpiresSeconds(),
+                base.s3PresignDefaultExpiresSeconds(),
+                base.s3PresignMaxExpiresSeconds(),
+                base.canvasMediaProcessTimeoutMillis(),
+                base.thumbnailMaxDimension(),
+                base.thumbnailQuality(),
+                0L,
+                base.temporaryResourceCleanupIntervalSeconds()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.StorageMedia(
+                base.uploadExpiresSeconds(),
+                base.s3PresignDefaultExpiresSeconds(),
+                base.s3PresignMaxExpiresSeconds(),
+                base.canvasMediaProcessTimeoutMillis(),
+                base.thumbnailMaxDimension(),
+                base.thumbnailQuality(),
+                base.temporaryResourceTtlSeconds(),
+                0L));
   }
 
   @Test

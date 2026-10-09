@@ -227,7 +227,12 @@ class EnvironmentUpdateServiceTest {
             DaemonCapabilities.VERSION,
             daemonVersion,
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
+                DaemonOperatingSystem.LINUX,
+                "Asia/Shanghai",
+                "dev",
+                "/home/dev",
+                "Note",
+                "/tmp/kk-studio")),
         List.of(),
         List.of(),
         NOW,

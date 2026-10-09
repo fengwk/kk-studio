@@ -14,7 +14,7 @@ import java.util.Set;
  * Daemon READY 宿主 metadata payload 的严格 codec：版本化、类型化，拒绝未知字段、重复键、尾随内容与缺失字段。
  *
  * <p>wire shape：{@code
- * {"version":3,"daemonVersion":"1.0.10","environment":{"operatingSystem":...,"timeZone":...,"userName":...,"homeDirectory":...,"note":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
+ * {"version":4,"daemonVersion":"1.0.10","environment":{"operatingSystem":...,"timeZone":...,"userName":...,"homeDirectory":...,"note":...,"tempDirectory":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
  */
 public final class DaemonCapabilitiesCodec {
 
@@ -25,7 +25,7 @@ public final class DaemonCapabilitiesCodec {
 
   private static final Set<String> ROOT_FIELDS = Set.of("version", "daemonVersion", "environment");
   private static final Set<String> ENVIRONMENT_FIELDS =
-      Set.of("operatingSystem", "timeZone", "userName", "homeDirectory", "note");
+      Set.of("operatingSystem", "timeZone", "userName", "homeDirectory", "note", "tempDirectory");
 
   public String encode(DaemonCapabilities capabilities) {
     Objects.requireNonNull(capabilities, "capabilities");
@@ -38,6 +38,7 @@ public final class DaemonCapabilitiesCodec {
     environment.put("userName", capabilities.environment().userName());
     environment.put("homeDirectory", capabilities.environment().homeDirectory());
     environment.put("note", capabilities.environment().note());
+    environment.put("tempDirectory", capabilities.environment().tempDirectory());
     try {
       return MAPPER.writeValueAsString(root);
     } catch (JsonProcessingException error) {
@@ -106,13 +107,15 @@ public final class DaemonCapabilitiesCodec {
     String userName = text(node, "userName", "READY environment");
     String homeDirectory = text(node, "homeDirectory", "READY environment");
     String note = text(node, "note", "READY environment");
+    String tempDirectory = text(node, "tempDirectory", "READY environment");
     try {
       return new DaemonEnvironmentInfo(
           DaemonOperatingSystem.fromWireValue(operatingSystemText),
           timeZone,
           userName,
           homeDirectory,
-          note);
+          note,
+          tempDirectory);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           "READY environment validation failed: " + error.getMessage(), error);

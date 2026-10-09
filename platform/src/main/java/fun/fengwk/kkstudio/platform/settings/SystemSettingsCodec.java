@@ -353,7 +353,12 @@ public class SystemSettingsCodec {
             dto.getCanvasMediaProcessTimeoutMillis(),
             "storageMedia.canvasMediaProcessTimeoutMillis"),
         requiredInt(dto.getThumbnailMaxDimension(), "storageMedia.thumbnailMaxDimension"),
-        requiredInt(dto.getThumbnailQuality(), "storageMedia.thumbnailQuality"));
+        requiredInt(dto.getThumbnailQuality(), "storageMedia.thumbnailQuality"),
+        requiredMillis(
+            dto.getTemporaryResourceTtlSeconds(), "storageMedia.temporaryResourceTtlSeconds"),
+        requiredMillis(
+            dto.getTemporaryResourceCleanupIntervalSeconds(),
+            "storageMedia.temporaryResourceCleanupIntervalSeconds"));
   }
 
   private static SystemSettings.Advanced toAdvanced(SystemSettingsAdvancedDTO dto) {
@@ -575,6 +580,9 @@ public class SystemSettingsCodec {
     dto.setCanvasMediaProcessTimeoutMillis(storageMedia.canvasMediaProcessTimeoutMillis());
     dto.setThumbnailMaxDimension(storageMedia.thumbnailMaxDimension());
     dto.setThumbnailQuality(storageMedia.thumbnailQuality());
+    dto.setTemporaryResourceTtlSeconds(storageMedia.temporaryResourceTtlSeconds());
+    dto.setTemporaryResourceCleanupIntervalSeconds(
+        storageMedia.temporaryResourceCleanupIntervalSeconds());
     return dto;
   }
 

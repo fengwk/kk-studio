@@ -65,9 +65,22 @@ public final class ReadCapability extends AbstractCodingCapability {
     Integer columnOffset = parseOptionalPositiveInt(args, "column_offset");
     Path path = EnvironmentPaths.existing(rawPath);
     String displayPath = EnvironmentPaths.displayPath(path, rawPath);
+    // 读取受控临时产物期间持有 in-use lease，防止定时清扫删除在途读取的 workspace。
+    try (TextOutputStore.Lease ignored = config.textOutputStore().acquire(path)) {
+      return readExisting(request, path, displayPath, offset, limit, columnOffset);
+    }
+  }
 
+  private EnvironmentCapabilityResult readExisting(
+      EnvironmentCapabilityExecutionRequest request,
+      Path path,
+      String displayPath,
+      int offset,
+      int limit,
+      Integer columnOffset)
+      throws Exception {
     if (Files.isDirectory(path)) {
-      return directoryResponse(request, args, path, displayPath, offset, limit);
+      return directoryResponse(request, path, displayPath, offset, limit);
     }
 
     if (!Files.isRegularFile(path)) {
@@ -102,7 +115,6 @@ public final class ReadCapability extends AbstractCodingCapability {
 
   private EnvironmentCapabilityResult directoryResponse(
       EnvironmentCapabilityExecutionRequest request,
-      JsonNode args,
       Path path,
       String displayPath,
       int offset,

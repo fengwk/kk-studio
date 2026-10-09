@@ -14,7 +14,7 @@ public record DaemonCapabilities(
     int version, String daemonVersion, DaemonEnvironmentInfo environment) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 3;
+  public static final int VERSION = 4;
 
   /** daemon 构建版本上界；manifest 版本与 {@code development} 标记都远小于该值。 */
   public static final int MAX_DAEMON_VERSION_CHARS = 64;
