@@ -172,10 +172,8 @@ final class OpenAiChatStreamAccumulator {
 
   private void parseChoice(JsonNode choice) {
     if (choiceFinalized) {
-      // 语义终态已封闭：此后只允许 usage-only 空 choices、无语义尾帧与 [DONE]/keepalive。
-      // 重复终止标记只有与冻结结果完全一致时才是幂等冗余——同一 choice index、同一有效 finish_reason 且无任何
-      // 语义 delta；它不追加内容、不重发增量、不改写 native/replay 事实。任何语义 delta、变更的 finish_reason
-      // 或不同 choice index 都 fail closed。
+      // 语义终态已封闭：重复终止标记只有与冻结结果完全一致（同一有效 finish_reason、同一有效 choice index、无 delta）
+      // 才是幂等冗余，不追加内容/增量/改写 replay；任何语义 delta、变更 reason 或不同 index 都 fail closed。
       boolean carriesReason = carriesFinishReason(choice);
       if (!isEmptyTailDelta(choice)) {
         throw new ProviderException(
@@ -321,10 +319,17 @@ final class OpenAiChatStreamAccumulator {
     }
   }
 
-  /** choices[0] 的 wire index；缺失按主 choice 的默认 0 处理，供重复终止标记的同一性比较。 */
+  /** 缺失 index 视为主 choice 默认 0；一旦提供，必须是可转 int 的非负整数，否则 fail closed 且不回显原始值。 */
   private static int choiceIndexOf(JsonNode choice) {
     JsonNode index = choice.get("index");
-    return index != null && index.isIntegralNumber() ? index.asInt() : 0;
+    if (index == null) {
+      return 0;
+    }
+    if (!index.isIntegralNumber() || !index.canConvertToInt() || index.intValue() < 0) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "choice index must be a non-negative integer");
+    }
+    return index.intValue();
   }
 
   /**
