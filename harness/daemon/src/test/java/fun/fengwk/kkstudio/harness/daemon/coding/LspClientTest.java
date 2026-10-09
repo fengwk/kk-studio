@@ -201,14 +201,15 @@ class LspClientTest {
     LspClient client = start("normal");
     Path file = write("App.java", "class App {}\n");
 
-    IllegalArgumentException beyondLine =
+    // sync 已经对外打开文档：越界位置按服务失败报告，绝不再声称未执行。
+    IllegalStateException beyondLine =
         assertThrows(
-            IllegalArgumentException.class, () -> client.definition(file, 99, 0, REQUEST_TIMEOUT));
+            IllegalStateException.class, () -> client.definition(file, 99, 0, REQUEST_TIMEOUT));
     assertTrue(beyondLine.getMessage().contains("beyond the end"), beyondLine.getMessage());
 
-    IllegalArgumentException beyondColumn =
+    IllegalStateException beyondColumn =
         assertThrows(
-            IllegalArgumentException.class, () -> client.definition(file, 1, 99, REQUEST_TIMEOUT));
+            IllegalStateException.class, () -> client.definition(file, 1, 99, REQUEST_TIMEOUT));
     assertTrue(beyondColumn.getMessage().contains("beyond line"), beyondColumn.getMessage());
     assertTrue(FakeLspServers.received(transcript, "textDocument/definition").isEmpty());
   }
@@ -422,17 +423,18 @@ class LspClientTest {
     FakeLspServers.awaitProcessGone(child, Duration.ofSeconds(20));
   }
 
-  /** 意图：二进制文件在发送 didOpen 之前就被拒绝，不把字节当作文本发给服务器。 */
+  /** 意图：二进制文件在发送 didOpen 之前就被拒绝，不把字节当作文本发给服务器；错误文案只给固定说明，不回显文件路径。 */
   @Test
   void binaryDocumentIsRejected() throws Exception {
     LspClient client = start("normal");
     Path binary = root.resolve("App.java");
     Files.write(binary, new byte[] {'c', 0, 'x'});
 
-    IllegalArgumentException error =
+    IllegalStateException error =
         assertThrows(
-            IllegalArgumentException.class, () -> client.definition(binary, 1, 0, REQUEST_TIMEOUT));
-    assertTrue(error.getMessage().contains("cannot open binary file"), error.getMessage());
+            IllegalStateException.class, () -> client.definition(binary, 1, 0, REQUEST_TIMEOUT));
+    assertTrue(error.getMessage().contains("not valid text"), error.getMessage());
+    assertFalse(error.getMessage().contains(binary.toString()), error.getMessage());
     assertTrue(FakeLspServers.received(transcript, "textDocument/didOpen").isEmpty());
   }
 

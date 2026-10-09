@@ -138,7 +138,8 @@ final class TextStreams {
   /**
    * 严格解码判定为二进制/非法文本。
    *
-   * <p>是 {@link IllegalArgumentException} 的子类，使调用方能把它与超时等其它非法参数错误区分开，从而在目录扫描中按二进制静默跳过，而把超时如实上报。
+   * <p>是受控运行诊断 {@link ToolRunFailureException}
+   * 的子类：类型本身就是「文案受控」的声明，调用方据此把它与普通参数错误区分开，在目录扫描中按二进制静默跳过， 而把超时等其它失败如实上报。
    */
   static final class DecodeException extends ToolRunFailureException {
 
