@@ -764,10 +764,20 @@ public final class EnvironmentDaemonServer
       ObjectNode welcomePayload = envelopeCodec.createPayload();
       welcomePayload.put("environmentId", environmentId.toString());
       welcomePayload.put("name", registration.displayName());
-      welcomePayload.put("maxResourceBytes", settings().maxResourceBytes());
+      EnvironmentServerSettings current = settings();
+      welcomePayload.put("maxResourceBytes", current.maxResourceBytes());
+      welcomePayload.put("temporaryResourceTtlSeconds", current.temporaryResourceTtlSeconds());
+      welcomePayload.put(
+          "temporaryResourceCleanupIntervalSeconds",
+          current.temporaryResourceCleanupIntervalSeconds());
       if (!offer(state, DaemonMessageType.WELCOME, null, welcomePayload.toString())) {
         // WELCOME 未进入传输：连接不得停在已绑定但未完成握手的状态，关闭后由既有重连恢复。
         close(state.connection.connectionId());
+      } else {
+        // 记录 WELCOME 已通告的策略，作为后续心跳按需推送热更新的基线。
+        state.temporaryResourceTtlSeconds = current.temporaryResourceTtlSeconds();
+        state.temporaryResourceCleanupIntervalSeconds =
+            current.temporaryResourceCleanupIntervalSeconds();
       }
     }
   }
@@ -981,6 +991,31 @@ public final class EnvironmentDaemonServer
     boolean ok = leaseStore.heartbeat(environmentId, leaseToken, timeout());
     if (!ok) {
       throw new DaemonProtocolException("route fence lost for environment " + environmentId);
+    }
+    reconcileTemporaryResourcePolicy(state);
+  }
+
+  /**
+   * 心跳时按需把当前设置里的临时资源策略推送给已 READY 的连接。
+   *
+   * <p>WELCOME 只在建连时通告策略；已 READY 的连接不会再次收到 WELCOME，因此策略热更必须经同一控制通道在后续帧上送达。只在 ttl
+   * 或扫描间隔相对该连接最近一次已送达值发生变化时推送，避免每次心跳都产生冗余帧。
+   */
+  private void reconcileTemporaryResourcePolicy(ConnectionState state) {
+    EnvironmentServerSettings current = settings();
+    long ttlSeconds = current.temporaryResourceTtlSeconds();
+    long cleanupIntervalSeconds = current.temporaryResourceCleanupIntervalSeconds();
+    if (state.temporaryResourceTtlSeconds == ttlSeconds
+        && state.temporaryResourceCleanupIntervalSeconds == cleanupIntervalSeconds) {
+      return;
+    }
+    ObjectNode payload = envelopeCodec.createPayload();
+    payload.put("temporaryResourceTtlSeconds", ttlSeconds);
+    payload.put("temporaryResourceCleanupIntervalSeconds", cleanupIntervalSeconds);
+    if (state.offer(DaemonMessageType.TEMPORARY_RESOURCE_POLICY, null, payload.toString())
+        == DaemonOfferResult.ACCEPTED) {
+      state.temporaryResourceTtlSeconds = ttlSeconds;
+      state.temporaryResourceCleanupIntervalSeconds = cleanupIntervalSeconds;
     }
   }
 
@@ -1742,6 +1777,12 @@ public final class EnvironmentDaemonServer
     private volatile DaemonOperatingSystem daemonOperatingSystem;
     private volatile boolean ready;
     private volatile boolean cleaned;
+
+    /** 最近一次已成功通告/推送的临时资源策略；心跳按需把设置热更新到已 READY 的连接。 */
+    private volatile long temporaryResourceTtlSeconds;
+
+    private volatile long temporaryResourceCleanupIntervalSeconds;
+
     private boolean closeAfterFlush;
 
     /**

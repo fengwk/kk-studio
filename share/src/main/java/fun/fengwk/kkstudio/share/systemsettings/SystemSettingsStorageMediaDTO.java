@@ -19,6 +19,10 @@ public class SystemSettingsStorageMediaDTO {
 
   private Integer thumbnailQuality;
 
+  private Long temporaryResourceTtlSeconds;
+
+  private Long temporaryResourceCleanupIntervalSeconds;
+
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
     throw new IllegalArgumentException("unknown system settings storageMedia field: " + name);

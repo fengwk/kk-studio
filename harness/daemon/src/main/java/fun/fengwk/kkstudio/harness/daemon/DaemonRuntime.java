@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.LspService;
+import fun.fengwk.kkstudio.harness.daemon.coding.TextOutputStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalEntry;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
@@ -116,6 +117,9 @@ public final class DaemonRuntime implements AutoCloseable {
   /** capability 持有的进程内资源（当前是 LSP 客户端池）；由本运行时负责在 shutdown 时关闭。 */
   private final AutoCloseable capabilityResources;
 
+  /** 受控临时 workspace 存储；由 coding capabilities 共享，用于按最新策略清扫过期 workspace。测试构造下可为 {@code null}。 */
+  private final TextOutputStore textOutputStore;
+
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -127,6 +131,19 @@ public final class DaemonRuntime implements AutoCloseable {
 
   /** 本连接 WELCOME 通告的单条/聚合资源字节预算；用于本地预检，避免注定被服务端拒绝的上传。 */
   private final AtomicLong maxResourceBytes = new AtomicLong();
+
+  /** 最近一次 WELCOME 通告的临时资源保留期（秒）；0 表示尚未收到策略。 */
+  private volatile long temporaryResourceTtlSeconds;
+
+  /** 最近一次 WELCOME 通告的临时资源扫描间隔（秒）；用于按最新策略重排扫描任务。 */
+  private volatile long temporaryResourceCleanupIntervalSeconds;
+
+  private final Object temporaryResourcePolicyLock = new Object();
+
+  /** 当前已排定的清扫间隔（秒）；仅由 {@link #temporaryResourcePolicyLock} 保护，用于避免重复调度。 */
+  private long scheduledCleanupIntervalSeconds;
+
+  private ScheduledFuture<?> temporaryResourceSweep;
 
   /** 本 Daemon 进程的生命周期身份：构造期随机生成一次，所有重连复用，用于区分同实例恢复与换进程接管。 */
   private final String daemonInstanceId = UUID.randomUUID().toString();
@@ -182,6 +199,7 @@ public final class DaemonRuntime implements AutoCloseable {
     Objects.requireNonNull(dataDirectory, "dataDirectory");
     return create(
         config,
+        toolsConfig.textOutputStore(),
         (registry, executor, scheduler, lspExecutor) -> {
           // 先打开 Git 安装器（无持有资源），再创建 LSP：任一环节失败都不会留下需要 LSP 收尾的半成品。
           SkillPackageInstaller skillInstaller =
@@ -193,7 +211,8 @@ public final class DaemonRuntime implements AutoCloseable {
         });
   }
 
-  static DaemonRuntime create(DaemonConfig config, CapabilityRegistrar registrar) {
+  static DaemonRuntime create(
+      DaemonConfig config, TextOutputStore textOutputStore, CapabilityRegistrar registrar) {
     Objects.requireNonNull(config, "config");
     Objects.requireNonNull(registrar, "registrar");
     ScheduledThreadPoolExecutor scheduler = newScheduler();
@@ -219,6 +238,7 @@ public final class DaemonRuntime implements AutoCloseable {
               taskExecutor,
               lspExecutor,
               capabilityResources,
+              textOutputStore,
               true);
       completed = true;
       return runtime;
@@ -240,7 +260,16 @@ public final class DaemonRuntime implements AutoCloseable {
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor) {
     this(
-        config, transport, capabilityRegistry, journal, scheduler, taskExecutor, null, null, false);
+        config,
+        transport,
+        capabilityRegistry,
+        journal,
+        scheduler,
+        taskExecutor,
+        null,
+        null,
+        null,
+        false);
   }
 
   private DaemonRuntime(
@@ -252,6 +281,7 @@ public final class DaemonRuntime implements AutoCloseable {
       ExecutorService taskExecutor,
       ExecutorService lspExecutor,
       AutoCloseable capabilityResources,
+      TextOutputStore textOutputStore,
       boolean requireFixedCapabilityCatalog) {
     this.config = Objects.requireNonNull(config, "config");
     this.boundEnvironmentId = new AtomicReference<>();
@@ -262,6 +292,7 @@ public final class DaemonRuntime implements AutoCloseable {
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
     this.lspExecutor = lspExecutor;
     this.capabilityResources = capabilityResources;
+    this.textOutputStore = textOutputStore;
     this.resourceHttpClient =
         new OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
@@ -271,7 +302,9 @@ public final class DaemonRuntime implements AutoCloseable {
     this.resourceTransferClient =
         new DaemonResourceTransferClient(resourceHttpClient, this::sendTransferControl);
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
-    this.environmentInfo = detectEnvironmentInfo(config, operatingSystem);
+    this.environmentInfo =
+        detectEnvironmentInfo(
+            config, operatingSystem, controlledTemporaryDirectory(textOutputStore, config));
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedCapabilityCatalog
         && !List.copyOf(capabilityRegistry.descriptors()).equals(fixedCapabilityDescriptors())) {
@@ -287,18 +320,34 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   /**
-   * 采集真实进程宿主事实：进程用户与 canonical HOME。
+   * 采集真实进程宿主事实：进程用户、canonical HOME 与受控临时目录。
    *
-   * <p>这两项只是模型可见的展示事实，不构成 cwd、默认 workdir 或沙箱；HOME 无法 canonical 化时退化为绝对规范化路径， 宿主目录缺失不阻止 Daemon 启动。
+   * <p>这些只是模型可见的展示事实，不构成 cwd、默认 workdir 或沙箱；HOME 无法 canonical 化时退化为绝对规范化路径，宿主目录缺失不阻止 Daemon 启动。
    */
   private static DaemonEnvironmentInfo detectEnvironmentInfo(
-      DaemonConfig config, DaemonOperatingSystem operatingSystem) {
+      DaemonConfig config, DaemonOperatingSystem operatingSystem, String tempDirectory) {
     return new DaemonEnvironmentInfo(
         operatingSystem,
         ZoneId.systemDefault().getId(),
         requireHostProperty("user.name"),
         canonicalHomeDirectory(requireHostProperty("user.home")),
-        config.effectiveNote(operatingSystem));
+        config.effectiveNote(operatingSystem),
+        tempDirectory);
+  }
+
+  /**
+   * 上报的受控临时目录：优先取受控 workspace 根的父目录（{@code <canonical-data-root>/tmp}，已是 canonical 绝对路径）；
+   * 无受控存储（测试构造）时退化为配置数据目录下的 {@code tmp}。
+   */
+  private static String controlledTemporaryDirectory(
+      TextOutputStore textOutputStore, DaemonConfig config) {
+    if (textOutputStore != null) {
+      Path tmp = textOutputStore.root().getParent();
+      if (tmp != null) {
+        return tmp.toString();
+      }
+    }
+    return config.dataDir().toAbsolutePath().normalize().resolve("tmp").toString();
   }
 
   private static String requireHostProperty(String name) {
@@ -675,6 +724,7 @@ public final class DaemonRuntime implements AutoCloseable {
           handleCancel(envelope);
         }
         case WELCOME -> handleWelcome(connection, envelope);
+        case TEMPORARY_RESOURCE_POLICY -> handleTemporaryResourcePolicy(envelope);
         case ERROR -> handleError(connection, envelope);
         case UPDATE -> handleUpdate(envelope);
           // 上传票据是调用作用域的控制平面响应，绝不进入通用协议处理。
@@ -715,9 +765,13 @@ public final class DaemonRuntime implements AutoCloseable {
       }
       this.boundEnvironmentId.set(
           Objects.requireNonNull(envelope.environmentId(), "WELCOME environmentId"));
-      // 资源字节预算由服务端在 WELCOME 中通告；缺失或非正数时不接受任何 resource/binary 结果。
-      maxResourceBytes.set(
-          requiredPositiveLong(envelopeCodec.readPayload(envelope), "maxResourceBytes"));
+      ObjectNode payload = envelopeCodec.readPayload(envelope);
+      // 资源字节预算与临时资源策略由服务端在 WELCOME 中通告；缺失或非正数都 fail closed。
+      maxResourceBytes.set(requiredPositiveLong(payload, "WELCOME", "maxResourceBytes"));
+      long ttlSeconds = requiredPositiveLong(payload, "WELCOME", "temporaryResourceTtlSeconds");
+      long cleanupIntervalSeconds =
+          requiredPositiveLong(payload, "WELCOME", "temporaryResourceCleanupIntervalSeconds");
+      applyTemporaryResourcePolicy(ttlSeconds, cleanupIntervalSeconds);
       if (!sendReady(connection)) {
         // WELCOME 已接受但 READY 未进入传输：不得停在 CONNECTING，关闭后由既有重连恢复。
         if (activeConnection.get() == connection) {
@@ -747,16 +801,101 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   /** 严格读取一个正 long 字段：缺失、非整数或非正都是协议错误。 */
-  private static long requiredPositiveLong(ObjectNode payload, String field) {
+  private static long requiredPositiveLong(ObjectNode payload, String frame, String field) {
     JsonNode value = payload.get(field);
     if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new DaemonProtocolException("WELCOME must declare integer '" + field + "'");
+      throw new DaemonProtocolException(frame + " must declare integer '" + field + "'");
     }
     long parsed = value.longValue();
     if (parsed <= 0) {
-      throw new DaemonProtocolException("WELCOME '" + field + "' must be positive");
+      throw new DaemonProtocolException(frame + " '" + field + "' must be positive");
     }
     return parsed;
+  }
+
+  /**
+   * 应用服务端在同一控制通道上推送的临时资源策略热更新；只在 WELCOME 建立绑定后接受。
+   *
+   * <p>已 READY 的连接不会再次收到 WELCOME，因此设置热更经 {@code TEMPORARY_RESOURCE_POLICY} 帧到达，幂等地重排清扫任务。
+   */
+  private void handleTemporaryResourcePolicy(DaemonEnvelope envelope) {
+    if (state != DaemonRuntimeState.READY || envelope.environmentId() == null) {
+      throw new DaemonProtocolException(
+          "TEMPORARY_RESOURCE_POLICY requires a READY bound connection");
+    }
+    ObjectNode payload = envelopeCodec.readPayload(envelope);
+    long ttlSeconds =
+        requiredPositiveLong(payload, "TEMPORARY_RESOURCE_POLICY", "temporaryResourceTtlSeconds");
+    long cleanupIntervalSeconds =
+        requiredPositiveLong(
+            payload, "TEMPORARY_RESOURCE_POLICY", "temporaryResourceCleanupIntervalSeconds");
+    applyTemporaryResourcePolicy(ttlSeconds, cleanupIntervalSeconds);
+  }
+
+  /**
+   * 应用最新临时资源策略：记录保留期并按最新扫描间隔（重）排定时清扫；同一间隔下不重复调度。
+   *
+   * <p>热更只对未回收的旧 workspace 生效：下一次清扫读取最新保留期，仍在活动的 workspace 因 in-use lease 永不删除。测试构造无 workspace
+   * 存储时只记录策略、不调度。
+   */
+  private void applyTemporaryResourcePolicy(long ttlSeconds, long cleanupIntervalSeconds) {
+    temporaryResourceTtlSeconds = ttlSeconds;
+    temporaryResourceCleanupIntervalSeconds = cleanupIntervalSeconds;
+    if (textOutputStore == null) {
+      return;
+    }
+    synchronized (temporaryResourcePolicyLock) {
+      if (temporaryResourceSweep != null
+          && scheduledCleanupIntervalSeconds == cleanupIntervalSeconds) {
+        return;
+      }
+      scheduledCleanupIntervalSeconds = cleanupIntervalSeconds;
+      if (temporaryResourceSweep != null) {
+        temporaryResourceSweep.cancel(false);
+        temporaryResourceSweep = null;
+      }
+      try {
+        temporaryResourceSweep =
+            scheduler.scheduleWithFixedDelay(
+                this::submitTemporaryResourceSweep,
+                cleanupIntervalSeconds,
+                cleanupIntervalSeconds,
+                TimeUnit.SECONDS);
+      } catch (RejectedExecutionException ignored) {
+        temporaryResourceSweep = null;
+      }
+    }
+  }
+
+  /** 把清扫派发到任务执行器，避免文件删除拖慢承载 heartbeat/reconnect 的单线程 scheduler。 */
+  private void submitTemporaryResourceSweep() {
+    try {
+      taskExecutor.execute(this::sweepTemporaryResources);
+    } catch (RejectedExecutionException ignored) {
+      // 关闭中：忽略。
+    }
+  }
+
+  /** 按最新保留期清扫过期 workspace；保留期尚未通告时不动。 */
+  private void sweepTemporaryResources() {
+    if (textOutputStore == null) {
+      return;
+    }
+    long ttlSeconds = temporaryResourceTtlSeconds;
+    if (ttlSeconds <= 0) {
+      return;
+    }
+    textOutputStore.sweep(ttlSeconds);
+  }
+
+  /** 最近一次应用的临时资源保留期（秒）；仅用于测试断言策略热更是否生效。 */
+  long temporaryResourceTtlSeconds() {
+    return temporaryResourceTtlSeconds;
+  }
+
+  /** 最近一次应用的临时资源扫描间隔（秒）；仅用于测试断言策略热更是否生效。 */
+  long temporaryResourceCleanupIntervalSeconds() {
+    return temporaryResourceCleanupIntervalSeconds;
   }
 
   /** 递交一条上传票据：调用与传输共同关联，错误调用的票据不能完成其它调用的上传。 */
@@ -1178,9 +1317,20 @@ public final class DaemonRuntime implements AutoCloseable {
       running.clear();
       // LSP 等 capability 资源在 transport 与任务收敛之后、执行资源关闭之前收尾。
       closeQuietly(capabilityResources);
+      cancelTemporaryResourceSweep();
       shutdownExecutors(scheduler, taskExecutor, lspExecutor);
     } finally {
       termination.countDown();
+    }
+  }
+
+  /** 取消定时清扫任务；已关闭后的重复调用无副作用。 */
+  private void cancelTemporaryResourceSweep() {
+    synchronized (temporaryResourcePolicyLock) {
+      if (temporaryResourceSweep != null) {
+        temporaryResourceSweep.cancel(false);
+        temporaryResourceSweep = null;
+      }
     }
   }
 

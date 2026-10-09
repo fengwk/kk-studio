@@ -1020,6 +1020,40 @@ class EnvironmentDaemonServerTest {
     assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
   }
 
+  /** 测试意图：已 READY 连接不会再次收到 WELCOME，设置热更必须经同一控制通道在心跳上推送当前临时资源策略，且策略未变时不产生冗余帧。 */
+  @Test
+  void heartbeatPushesUpdatedTemporaryResourcePolicyToReadyConnection() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-policy-hot");
+    assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes(), "建连只通告一次策略");
+
+    // 设置未变：心跳不得产生策略帧。
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    assertEquals(0, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
+
+    // 设置热更后，下一次心跳把当前策略推送给已 READY 连接。
+    fixture.updateSettings(1L, 2L);
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+
+    assertEquals(1, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
+    DaemonEnvelope policy =
+        channel.envelopes().stream()
+            .filter(
+                envelope -> envelope.messageType() == DaemonMessageType.TEMPORARY_RESOURCE_POLICY)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(ENVIRONMENT_ID, policy.environmentId());
+    assertTrue(
+        policy.payloadJson().contains("\"temporaryResourceTtlSeconds\":1"), policy.payloadJson());
+    assertTrue(
+        policy.payloadJson().contains("\"temporaryResourceCleanupIntervalSeconds\":2"),
+        policy.payloadJson());
+
+    // 已送达的策略不再重复推送。
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    assertEquals(1, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
+  }
+
   /** 测试意图：READY 时围栏已失效不得进入 READY，必须按协议错误关闭连接。 */
   @Test
   void readyFenceLossClosesConnection() {
@@ -1831,18 +1865,28 @@ class EnvironmentDaemonServerTest {
     assertEquals(Set.of(ENVIRONMENT_ID), fixture.server.readyEnvironments());
   }
 
-  /** 测试意图：会话设置对象拒绝非正的心跳超时与资源上限，避免装配期静默使用无效边界。 */
+  /** 测试意图：会话设置对象拒绝非正的心跳超时、资源上限与临时资源策略，避免装配期静默使用无效边界。 */
   @Test
   void settingsRejectNonPositiveBounds() {
     assertThrows(
-        IllegalArgumentException.class, () -> new EnvironmentServerSettings(Duration.ZERO, 1024L));
+        IllegalArgumentException.class,
+        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L));
-    assertThrows(NullPointerException.class, () -> new EnvironmentServerSettings(null, 1024L));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L));
+    assertThrows(
+        NullPointerException.class,
+        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L));
     assertEquals(
         Duration.ofSeconds(1),
-        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L).heartbeatTimeout());
+        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L)
+            .heartbeatTimeout());
   }
 
   /** 测试意图：同一 transfer 的重复申请（含同实例重连后的重发）必须完全幂等——只发生一次 reserve，且回执同一 uploadId。 */

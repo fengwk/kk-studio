@@ -309,8 +309,7 @@ class CodingCapabilitiesEdgeTest {
       assertEquals("/usr/bin/bash", config.bashExecutable());
       assertEquals("test-ls", config.lsp().servers().getFirst().id());
       // 输出布局完全由数据目录决定；本地不再有二进制 resource 导出根。
-      assertEquals(tmp.resolve("text"), config.textOutputStore().textDirectory());
-      assertEquals(tmp.resolve("staging"), config.textOutputStore().stagingDirectory());
+      assertEquals(tmp.resolve("workspaces"), config.textOutputStore().root());
     } finally {
       for (int index = 0; index < removed.length; index++) {
         if (previous[index] == null) {

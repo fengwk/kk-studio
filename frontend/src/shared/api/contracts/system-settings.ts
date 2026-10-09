@@ -118,6 +118,8 @@ export interface SystemSettingsStorageMediaDTO {
   canvasMediaProcessTimeoutMillis: DecimalLong
   thumbnailMaxDimension: number
   thumbnailQuality: number
+  temporaryResourceTtlSeconds: DecimalLong
+  temporaryResourceCleanupIntervalSeconds: DecimalLong
 }
 
 export interface SystemSettingsAdvancedDTO {

@@ -69,7 +69,7 @@ class DaemonEnvelopeTest {
         DaemonProtocol.VERSION,
         new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, "{}")
             .protocolVersion());
-    for (int version : new int[] {0, 1, 3}) {
+    for (int version : new int[] {0, DaemonProtocol.VERSION - 1, DaemonProtocol.VERSION + 1}) {
       assertThrows(
           IllegalArgumentException.class,
           () -> new DaemonEnvelope(version, DaemonMessageType.READY, ID, null, "{}"));

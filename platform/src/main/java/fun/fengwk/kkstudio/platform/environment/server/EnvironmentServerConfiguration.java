@@ -66,7 +66,11 @@ public class EnvironmentServerConfiguration {
 
   private static EnvironmentServerSettings toSettings(SystemSettings settings) {
     SystemSettings.Environment environment = settings.environment();
+    SystemSettings.StorageMedia storageMedia = settings.storageMedia();
     return new EnvironmentServerSettings(
-        Duration.ofMillis(environment.heartbeatTimeoutMillis()), environment.maxResourceBytes());
+        Duration.ofMillis(environment.heartbeatTimeoutMillis()),
+        environment.maxResourceBytes(),
+        storageMedia.temporaryResourceTtlSeconds(),
+        storageMedia.temporaryResourceCleanupIntervalSeconds());
   }
 }

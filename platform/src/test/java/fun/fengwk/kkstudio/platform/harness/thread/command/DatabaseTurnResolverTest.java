@@ -381,7 +381,8 @@ class DatabaseTurnResolverTest {
             "America/Los_Angeles",
             "dev-user",
             "/home/dev",
-            "Custom <Linux> & tools."));
+            "Custom <Linux> & tools.",
+            "/tmp/kk-studio"));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     String prompt = instructionText(requestSpec);
@@ -413,7 +414,8 @@ class DatabaseTurnResolverTest {
             "Asia/Tokyo",
             "dev-user",
             "/home/dev",
-            "Stable WSL environment.");
+            "Stable WSL environment.",
+            "/tmp/kk-studio");
     Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready = instructionText(readyFixture.resolved(readyFixture.path(settings("default"))));
@@ -3335,7 +3337,12 @@ class DatabaseTurnResolverTest {
                   DaemonCapabilities.VERSION,
                   "1.0.9",
                   new DaemonEnvironmentInfo(
-                      DaemonOperatingSystem.WSL, "UTC", "dev-user", "/home/dev", "Retained note")),
+                      DaemonOperatingSystem.WSL,
+                      "UTC",
+                      "dev-user",
+                      "/home/dev",
+                      "Retained note",
+                      "/tmp/kk-studio")),
               List.of(),
               List.of(),
               NOW,
@@ -3353,7 +3360,12 @@ class DatabaseTurnResolverTest {
           environmentId,
           skills,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Linux environment."));
+              DaemonOperatingSystem.LINUX,
+              "UTC",
+              "dev-user",
+              "/home/dev",
+              "Linux environment.",
+              "/tmp/kk-studio"));
     }
 
     private void readyEnvironment(
@@ -3387,7 +3399,8 @@ class DatabaseTurnResolverTest {
                       "UTC",
                       "dev-user",
                       "/home/dev",
-                      "Linux environment.")),
+                      "Linux environment.",
+                      "/tmp/kk-studio")),
               skillState,
               List.of(),
               NOW,
@@ -3401,7 +3414,12 @@ class DatabaseTurnResolverTest {
           environmentId,
           skills,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Linux environment."));
+              DaemonOperatingSystem.LINUX,
+              "UTC",
+              "dev-user",
+              "/home/dev",
+              "Linux environment.",
+              "/tmp/kk-studio"));
     }
 
     /** 只注册该 Environment 的路由身份，不涉及任何 Skill 事实（Skill 只来自全局目录）。 */
@@ -3409,7 +3427,12 @@ class DatabaseTurnResolverTest {
       readyEnvironmentWithSkills(
           environmentId,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Linux environment."),
+              DaemonOperatingSystem.LINUX,
+              "UTC",
+              "dev-user",
+              "/home/dev",
+              "Linux environment.",
+              "/tmp/kk-studio"),
           NOW);
     }
 

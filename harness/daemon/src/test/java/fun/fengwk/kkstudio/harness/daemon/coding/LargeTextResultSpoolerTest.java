@@ -48,7 +48,7 @@ class LargeTextResultSpoolerTest {
   @TempDir Path root;
 
   private TextOutputStore store() {
-    return TextOutputStore.open(root.resolve("text"), root.resolve("staging"));
+    return TextOutputStore.open(root.resolve("tmp"));
   }
 
   private static String text(EnvironmentCapabilityResult result) {
@@ -73,8 +73,8 @@ class LargeTextResultSpoolerTest {
     assertTrue(result.error());
     assertEquals("small output\n", text(result));
     assertEquals("{\"k\":\"v\"}", result.detailsJson());
-    assertTrue(listFiles(store.textDirectory()).isEmpty());
-    assertTrue(listFiles(store.stagingDirectory()).isEmpty());
+    assertTrue(store.publishedFiles().isEmpty());
+    assertTrue(store.partialFiles().isEmpty());
   }
 
   /** 超过字节阈值：正文换成有界预览，全文发布为绝对路径文件，details 合并出 textOutput 事实。 */
@@ -105,7 +105,7 @@ class LargeTextResultSpoolerTest {
     assertEquals(
         payload.getBytes(StandardCharsets.UTF_8).length, textOutput.path("totalBytes").asLong());
     assertFalse(textOutput.path("captureFailed").asBoolean());
-    assertEquals(1, listFiles(store.textDirectory()).size());
+    assertEquals(1, store.publishedFiles().size());
   }
 
   /** 字节很小但行数超过阈值同样落盘：不能只按字节判断。 */
@@ -187,7 +187,7 @@ class LargeTextResultSpoolerTest {
     assertSame(json, LargeTextResultSpooler.spool(store, json));
     assertSame(binary, LargeTextResultSpooler.spool(store, binary));
     assertSame(multi, LargeTextResultSpooler.spool(store, multi));
-    assertTrue(listFiles(store.textDirectory()).isEmpty());
+    assertTrue(store.publishedFiles().isEmpty());
   }
 
   /** 已由 OutputSpool 外化的结果（details 带 textOutput）不得二次落盘。 */
@@ -200,7 +200,7 @@ class LargeTextResultSpoolerTest {
         textResult(preview, false, "{\"textOutput\":{\"path\":\"/existing.log\"}}");
 
     assertSame(already, LargeTextResultSpooler.spool(store, already));
-    assertTrue(listFiles(store.textDirectory()).isEmpty(), "不得为已外化结果再落一份全文");
+    assertTrue(store.publishedFiles().isEmpty(), "不得为已外化结果再落一份全文");
   }
 
   /** 本地存储不可用：明确说明全文无法保存、不给不存在的路径，并保留原有 error 标识。 */
@@ -209,8 +209,7 @@ class LargeTextResultSpoolerTest {
     assumeTrue(supportsPosix(), "需要 POSIX 权限位来构造确定性的本地写入失败");
     TextOutputStore store = store();
     Files.setPosixFilePermissions(
-        store.stagingDirectory(),
-        Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
+        store.root(), Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
 
     EnvironmentCapabilityResult result =
         LargeTextResultSpooler.spool(
@@ -223,7 +222,7 @@ class LargeTextResultSpoolerTest {
         AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
     assertTrue(textOutput.path("captureFailed").asBoolean());
     assertTrue(textOutput.path("path").isMissingNode(), "失败时不得给出不存在的路径");
-    assertTrue(listFiles(store.textDirectory()).isEmpty());
+    assertTrue(store.publishedFiles().isEmpty());
   }
 
   /** 验证 AbstractCodingCapability 执行链路上的大文本外化契约：只有单个 TextResultContent 的大文本被外化，非文本/多内容原样保留。 */

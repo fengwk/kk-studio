@@ -43,7 +43,12 @@ class SkillPromptPathResolverTest {
           DaemonCapabilities.VERSION,
           "1.0.9",
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment."));
+              DaemonOperatingSystem.LINUX,
+              "UTC",
+              "dev",
+              "/home/dev",
+              "Linux environment.",
+              "/tmp/kk-studio"));
 
   private EnvironmentRegistry registry;
   private SkillPromptPathResolver resolver;
