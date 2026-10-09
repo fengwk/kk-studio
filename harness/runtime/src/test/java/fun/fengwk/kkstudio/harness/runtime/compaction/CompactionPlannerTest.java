@@ -262,15 +262,6 @@ class CompactionPlannerTest {
     assertEquals(CompactionTrigger.THRESHOLD, prefix.trigger());
     assertEquals(1, prefix.messagesToSummarize().size());
     assertTrue(contentText(prefix.messagesToSummarize().get(0)).contains("split turn"));
-
-    CompactionSummaryInput reconstructedHistory =
-        CompactionPlanner.reconstructSummaryInput(path.path(), history.pendingStart());
-    assertEquals(history.messagesToSummarize(), reconstructedHistory.messages());
-    assertNull(reconstructedHistory.previousSummary());
-    CompactionSummaryInput reconstructedPrefix =
-        CompactionPlanner.reconstructSummaryInput(path.path(), prefix.pendingStart());
-    assertEquals(prefix.messagesToSummarize(), reconstructedPrefix.messages());
-    assertNull(reconstructedPrefix.previousSummary());
   }
 
   @Test
@@ -497,32 +488,6 @@ class CompactionPlannerTest {
     assertEquals(CompactionPhase.HISTORY, preparation.phase());
     assertEquals("carried summary", preparation.previousSummary());
     assertTrue(preparation.removedPrefixTokens() > 0);
-    CompactionSummaryInput reconstructed =
-        CompactionPlanner.reconstructSummaryInput(path.path(), preparation.pendingStart());
-    assertEquals(preparation.messagesToSummarize(), reconstructed.messages());
-    assertEquals("carried summary", reconstructed.previousSummary());
-  }
-
-  @Test
-  void reconstructSummaryInputDoesNotReselectCutAfterLaterMessages() {
-    PathBuilder path = new PathBuilder();
-    path.root();
-    path.turn("first");
-    path.assistant("first reply");
-    path.closeTurn();
-    path.turn("second");
-    path.assistant("second reply");
-    CompactionPreparation preparation = plan(path, 80L).orElseThrow();
-    CompactionStart start = preparation.pendingStart();
-
-    path.closeTurn();
-    path.turn("later user");
-    path.assistant("later reply");
-
-    CompactionSummaryInput reconstructed =
-        CompactionPlanner.reconstructSummaryInput(path.path(), start);
-    assertEquals(preparation.messagesToSummarize(), reconstructed.messages());
-    assertEquals(preparation.cutEntryId(), start.cutEntryId());
   }
 
   @Test

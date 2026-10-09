@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -39,17 +40,25 @@ import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -67,13 +76,22 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -85,10 +103,20 @@ class PostgresqlCompactionChildTest {
   private static final int CONTEXT_WINDOW = 100_000;
   private static final int MAX_OUTPUT_TOKENS = 16_384;
 
+  private static final InvocationRetryPolicy NO_RETRY =
+      new InvocationRetryPolicy(
+          0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));
+  private static final InvocationRetryPolicy RETRY_ONCE =
+      new InvocationRetryPolicy(
+          1, InvocationRetryBackoffStrategy.FIXED, Duration.ofMillis(1), Duration.ofMillis(1));
+
   private HarnessStore store;
   private HarnessRuntime runtime;
   private ThreadProcessor processor;
   private ScheduledExecutorService scheduler;
+  private ScriptedChildGateway gateway;
+  private ModelProcessor modelProcessor;
+  private volatile InvocationRetryPolicy retryPolicy = NO_RETRY;
 
   @BeforeEach
   void setUp() {
@@ -121,6 +149,20 @@ class PostgresqlCompactionChildTest {
                 () -> CompactionConfig.DEFAULT),
             clock,
             scheduler,
+            Runnable::run);
+    gateway = new ScriptedChildGateway();
+    modelProcessor =
+        new ModelProcessor(
+            store,
+            gateway,
+            event -> {},
+            new ModelProcessorConfig(
+                new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                () -> retryPolicy,
+                Duration.ofSeconds(5)),
+            clock,
+            scheduler,
+            Runnable::run,
             Runnable::run);
   }
 
@@ -282,6 +324,321 @@ class PostgresqlCompactionChildTest {
 
     // 父无 ModelInvocation
     assertTrue(findModelInvocationByTurn(parentId, compactionStartEntry.id()).isEmpty());
+  }
+
+  /**
+   * 子压缩调用真实经 ModelProcessor 收到不可重试的 OVERFLOW：子执行失败、父压缩 turn FAILED、不递归创建压缩子、不留残留 Work，
+   * 且原历史上下文不变。压缩子身份只由 durable COMPACTION Join 事实决定。
+   */
+  @Test
+  void compactionChildOverflowFailsParentWithoutRecursionOrResidualWork() {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    int parentEntryCountBefore = path(parentId).entries().size();
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    processNext(child.childThreadId());
+
+    // 子的模型调用真实经 ModelProcessor 发出，provider 报上下文超限（OVERFLOW 不可重试）。
+    UUID childModelId = openChildModel(child.childThreadId());
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context window exceeded"));
+    assertEquals(ModelInvocationStatus.FAILED, findModel(childModelId).status());
+    assertFalse(hasWork(WorkTargetType.MODEL, childModelId));
+
+    // 子结算失败回合：绝不因超限递归规划压缩子，也不残留 Work。
+    processNext(child.childThreadId());
+    assertNoRecursiveCompactionOnChild(child.childThreadId());
+    assertFalse(hasWork(WorkTargetType.THREAD, child.childThreadId()));
+
+    // JOIN 以失败回执冻结，父 THREAD 被唤醒。
+    assertTrue(findJoin(child.joinInvocationId()).matched());
+    assertTrue(hasWork(WorkTargetType.THREAD, parentId));
+
+    // 父结算：COMPACTION FAILED，不交付任何摘要，原历史上下文保持不变。
+    processNext(parentId);
+    EntryPath parentPath = path(parentId);
+    assertEquals(parentEntryCountBefore + 3, parentPath.entries().size());
+    assertEquals(child.turnStartEntryId(), parentPath.entries().get(parentEntryCountBefore).id());
+    Entry failureEntry = parentPath.entries().get(parentEntryCountBefore + 1);
+    assertInstanceOf(AssistantErrorPayload.class, failureEntry.payload());
+    assertEquals(
+        "COMPACTION_FAILED", ((AssistantErrorPayload) failureEntry.payload()).error().code());
+    Entry endEntry = parentPath.head();
+    assertInstanceOf(TurnEndPayload.class, endEntry.payload());
+    TurnEndPayload endPayload = (TurnEndPayload) endEntry.payload();
+    assertEquals(TurnEndOutcome.FAILED, endPayload.outcome());
+    assertEquals(child.turnStartEntryId(), endPayload.turnStartEntryId());
+    assertTrue(
+        parentPath.entries().stream()
+            .noneMatch(entry -> entry.payload() instanceof CompactionPayload));
+    assertTrue(findModelInvocationByTurn(parentId, child.turnStartEntryId()).isEmpty());
+    // 压缩失败不消费用户输入：父线程仍被唤醒去处理未消费的排队命令。
+    assertTrue(hasWork(WorkTargetType.THREAD, parentId));
+    List<ThreadCommand> stillQueued =
+        store.transaction(
+            tx -> {
+              tx.lockThread(parentId);
+              return tx.loadQueuedCommands(parentId);
+            });
+    assertEquals(1, stillQueued.size());
+  }
+
+  /** 子第一次调用被输出上限截断：截断结果绝不冻结为成功回执，走同一调用的既有重试（同一 attempt 预算、计数不重置）；第二次合法 摘要才由父一次提交，且父只有一条压缩摘要。 */
+  @Test
+  void compactionChildTruncatedAttemptRetriesThenParentCommitsOneSummary() {
+    retryPolicy = RETRY_ONCE;
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    processNext(child.childThreadId());
+    UUID childModelId = openChildModel(child.childThreadId());
+
+    // attempt 1：截断 final（LENGTH）→ INVALID_RESPONSE，绝不产生结果，也不交付父。
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse("truncated partial summary", GenerationStopReason.LENGTH));
+    ModelInvocation afterFirstAttempt = findModel(childModelId);
+    assertEquals(ModelInvocationStatus.READY, afterFirstAttempt.status());
+    assertEquals(1, afterFirstAttempt.attempt());
+    assertNull(afterFirstAttempt.resultEntryId());
+    assertEquals(1, afterFirstAttempt.failedAttempts().size());
+    assertEquals(
+        ProviderErrorKind.INVALID_RESPONSE,
+        afterFirstAttempt.failedAttempts().getFirst().error().kind());
+    assertFalse(hasWork(WorkTargetType.THREAD, parentId));
+
+    // attempt 2：合法摘要，attempt 计数不重置。
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    String summary = "durable compacted summary";
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse(summary, GenerationStopReason.COMPLETE));
+    ModelInvocation afterSecondAttempt = findModel(childModelId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, afterSecondAttempt.status());
+    assertEquals(2, afterSecondAttempt.attempt());
+
+    processNext(child.childThreadId());
+    assertTrue(findJoin(child.joinInvocationId()).matched());
+    processNext(parentId);
+
+    EntryPath parentPath = path(parentId);
+    assertInstanceOf(TurnEndPayload.class, parentPath.head().payload());
+    assertEquals(
+        TurnEndOutcome.COMPLETED, ((TurnEndPayload) parentPath.head().payload()).outcome());
+    Entry summaryEntry = parentPath.entries().get(parentPath.entries().size() - 2);
+    assertInstanceOf(CompactionPayload.class, summaryEntry.payload());
+    assertEquals(summary, ((CompactionPayload) summaryEntry.payload()).summaryText());
+    assertEquals(
+        1,
+        parentPath.entries().stream()
+            .filter(entry -> entry.payload() instanceof CompactionPayload)
+            .count());
+    // 压缩成功不消费用户输入：父线程仍被唤醒去处理排队命令。
+    assertTrue(hasWork(WorkTargetType.THREAD, parentId));
+    assertEquals(1, queuedCommandCount(parentId));
+  }
+
+  /** 截断重试耗尽：子 invocation FAILED、子回合 FAILED、父压缩 FAILED；旧的部分输出绝不作为摘要或部分报告交付，attempt 不被重置。 */
+  @Test
+  void compactionChildTruncationExhaustionFailsParentWithoutPartialSummary() {
+    retryPolicy = RETRY_ONCE;
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    processNext(child.childThreadId());
+    UUID childModelId = openChildModel(child.childThreadId());
+
+    String partial = "partial text that must never surface";
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse(partial, GenerationStopReason.LENGTH));
+    gateway.queueStarted();
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    gateway
+        .listener(childModelId)
+        .onSucceeded(providerResponse(partial, GenerationStopReason.LENGTH));
+
+    ModelInvocation exhausted = findModel(childModelId);
+    assertEquals(ModelInvocationStatus.FAILED, exhausted.status());
+    assertEquals(2, exhausted.attempt());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, exhausted.error().kind());
+    assertEquals(1, exhausted.failedAttempts().size());
+    assertEquals(
+        ProviderErrorKind.INVALID_RESPONSE, exhausted.failedAttempts().getFirst().error().kind());
+
+    processNext(child.childThreadId());
+    assertNoRecursiveCompactionOnChild(child.childThreadId());
+    processNext(parentId);
+
+    EntryPath parentPath = path(parentId);
+    assertInstanceOf(TurnEndPayload.class, parentPath.head().payload());
+    assertEquals(TurnEndOutcome.FAILED, ((TurnEndPayload) parentPath.head().payload()).outcome());
+    assertTrue(
+        parentPath.entries().stream()
+            .noneMatch(entry -> entry.payload() instanceof CompactionPayload));
+    assertFalse(containsText(parentPath, partial));
+    assertFalse(hasWork(WorkTargetType.THREAD, child.childThreadId()));
+    // 压缩失败不消费用户输入：父线程仍被唤醒去处理排队命令，且旧的部分输出绝不作为摘要交付。
+    assertTrue(hasWork(WorkTargetType.THREAD, parentId));
+    assertEquals(1, queuedCommandCount(parentId));
+  }
+
+  // ===== 压缩子驱动的真实模型执行辅助 =====
+
+  private record CompactionChild(
+      UUID childThreadId, UUID joinInvocationId, UUID turnStartEntryId) {}
+
+  /** 读取父 Thread 上刚提交的压缩子事实：子 Thread、durable COMPACTION Join 与父压缩 TURN_START。 */
+  private CompactionChild compactionChildOf(UUID parentId) {
+    return store.transaction(
+        tx -> {
+          ThreadState parent = tx.findThread(parentId).orElseThrow();
+          EntryPath parentPath = tx.loadEntryPath(parent.headEntryId());
+          Entry startEntry = parentPath.head();
+          assertInstanceOf(TurnStartPayload.class, startEntry.payload());
+          TurnStartPayload startPayload = (TurnStartPayload) startEntry.payload();
+          assertNotNull(startPayload.compaction(), "compaction turn must own a compaction child");
+          UUID childThreadId = startPayload.compaction().childThreadId();
+          ThreadJoin join = tx.findJoin(startPayload.compaction().joinInvocationId()).orElseThrow();
+          assertEquals(JoinPurpose.COMPACTION, join.purpose());
+          return new CompactionChild(childThreadId, join.invocationId(), startEntry.id());
+        });
+  }
+
+  /** 子 Thread 规划输入回合后 READY 的模型调用，全部经真实 ModelProcessor 执行。 */
+  private UUID openChildModel(UUID childThreadId) {
+    return store.transaction(
+        tx -> {
+          ThreadState child = tx.findThread(childThreadId).orElseThrow();
+          UUID childTurn = tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().id();
+          ModelInvocation invocation =
+              tx.findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
+          assertEquals(ModelInvocationStatus.READY, invocation.status());
+          return invocation.id();
+        });
+  }
+
+  /** claim 一次 MODEL Work 并交给真实 ModelProcessor：模型调用按 provider 回调推进。 */
+  private ProcessResult processModel(UUID invocationId, Instant now) {
+    ClaimedWork claim =
+        store
+            .transaction(
+                tx ->
+                    tx.claimNextWork(
+                        WorkTargetType.MODEL,
+                        now,
+                        UUID.randomUUID().toString(),
+                        Duration.ofSeconds(30)))
+            .orElseThrow();
+    assertEquals(invocationId, claim.target().id());
+    return modelProcessor.process(claim);
+  }
+
+  private ModelInvocation findModel(UUID invocationId) {
+    return store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+  }
+
+  /** 压缩子在 OVERFLOW 后不得递归创建压缩子，也不得出现第二条压缩 TURN_START。 */
+  private void assertNoRecursiveCompactionOnChild(UUID childThreadId) {
+    assertEquals(0, countJoinsByParent(childThreadId));
+    assertTrue(
+        path(childThreadId).entries().stream()
+            .noneMatch(
+                entry ->
+                    entry.payload() instanceof TurnStartPayload start
+                        && start.reason() == TurnStartReason.COMPACTION));
+  }
+
+  private long countJoinsByParent(UUID parentThreadId) {
+    try (Connection connection = PostgresqlHarnessStoreFixture.dataSource().getConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "select count(*) from harness_thread_join where parent_thread_id = ?")) {
+      statement.setObject(1, parentThreadId);
+      try (ResultSet rows = statement.executeQuery()) {
+        rows.next();
+        return rows.getLong(1);
+      }
+    } catch (SQLException error) {
+      throw new IllegalStateException("cannot count joins by parent", error);
+    }
+  }
+
+  private static boolean containsText(EntryPath path, String text) {
+    return path.entries().stream()
+        .filter(entry -> entry.payload() instanceof MessagePayload)
+        .map(entry -> (MessagePayload) entry.payload())
+        .flatMap(payload -> payload.message().contents().stream())
+        .anyMatch(
+            content ->
+                content instanceof TextMessageContent textContent
+                    && textContent.text().contains(text));
+  }
+
+  private static ProviderResponse providerResponse(String text, GenerationStopReason stopReason) {
+    return new ProviderResponse(
+        text,
+        "",
+        List.of(),
+        stopReason,
+        new ModelUsage(100L, 20L, 0L, 0L, 0L, 0L, 120L),
+        "req-compaction-child",
+        null,
+        "{}");
+  }
+
+  /** 脚本化子压缩 model gateway：测试驱动 Started 与 Provider 终态回调，覆盖截断 / 超限的真实 processor 路径。 */
+  private static final class ScriptedChildGateway implements ModelGateway {
+    private final Deque<Object> results = new ArrayDeque<>();
+    private final Map<UUID, Listener> listeners = new ConcurrentHashMap<>();
+
+    void queueStarted() {
+      results.add(new ModelGateway.Started(new FakeHandle()));
+    }
+
+    @Override
+    public StartResult start(Execution execution, Listener listener) {
+      listeners.put(execution.invocationId(), listener);
+      Object result = results.poll();
+      if (result == null) {
+        throw new IllegalStateException("no queued gateway start");
+      }
+      return (StartResult) result;
+    }
+
+    Listener listener(UUID invocationId) {
+      Listener listener = listeners.get(invocationId);
+      assertNotNull(listener, "gateway must have been asked to start " + invocationId);
+      return listener;
+    }
+  }
+
+  private static final class FakeHandle implements ModelGateway.Handle {
+    @Override
+    public void cancel() {}
+
+    @Override
+    public void activate() {}
   }
 
   private record ClosedTurnBaseline(
@@ -538,6 +895,14 @@ class PostgresqlCompactionChildTest {
         tx -> {
           ThreadState thread = tx.findThread(threadId).orElseThrow();
           return tx.loadEntryPath(thread.headEntryId());
+        });
+  }
+
+  private int queuedCommandCount(UUID threadId) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          return tx.loadQueuedCommands(threadId).size();
         });
   }
 

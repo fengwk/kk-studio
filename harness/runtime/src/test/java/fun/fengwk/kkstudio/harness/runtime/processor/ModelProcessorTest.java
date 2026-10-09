@@ -20,9 +20,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -45,6 +42,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -81,6 +80,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -855,8 +857,123 @@ class ModelProcessorTest {
     assertTrue(handle.isCancelled());
   }
 
+  /**
+   * 压缩子 final 被输出上限截断（LENGTH 且无 tool intent）：第一次 attempt 绝不落摘要，走既有调用重试（同一预算、attempt+1）； 第二次合法
+   * COMPLETE 摘要才 SUCCEEDED。重试期间不请求 THREAD wake，父 durable wait 不被子的重试唤醒。
+   */
   @Test
-  void compactionExecutionSuppressesRealtimeAndKeepsProviderTerminalForReducer() {
+  void compactionChildTruncatedFinalRetriesUnderTheSameBudgetThenCommitsSummary() {
+    Fixture fixture =
+        compactionFixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            StreamFlushConfig.IMMEDIATE);
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onEvent(new ProviderStreamEvent.TextDelta("truncated partial"));
+    listener.onSucceeded(
+        new ProviderCompletion(
+            response("truncated partial", GenerationStopReason.LENGTH), sampleReplayState()));
+
+    ModelInvocation afterFirst = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, afterFirst.status());
+    assertEquals(1, afterFirst.attempt());
+    assertNull(afterFirst.resultEntryId(), "a truncated final must not commit any summary");
+    assertEquals(1, afterFirst.failedAttempts().size());
+    assertEquals(1, afterFirst.failedAttempts().getFirst().attempt());
+    assertEquals("truncated partial", afterFirst.failedAttempts().getFirst().text());
+    assertEquals(
+        ProviderErrorKind.INVALID_RESPONSE, afterFirst.failedAttempts().getFirst().error().kind());
+    assertEquals(
+        "compaction model response was truncated before the summary completed",
+        afterFirst.failedAttempts().getFirst().error().message());
+    assertEquals(
+        1,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion(),
+        "a compaction child retry must not wake the parent thread");
+
+    // 第二次 attempt：合法摘要提交，attempt 计数不重置。
+    fixture.clock.advance(Duration.ofSeconds(5));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    ClaimedWork second = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
+    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+    secondListener.onSucceeded(
+        new ProviderCompletion(
+            response("valid summary", GenerationStopReason.COMPLETE), sampleReplayState()));
+
+    ModelInvocation terminal = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
+    assertEquals(2, terminal.attempt());
+    assertEquals("valid summary", terminal.result().text());
+    assertNotNull(terminal.providerReplayState(), "compaction child follows normal replay rules");
+  }
+
+  /** 截断 final 耗尽重试预算：第二次仍是截断 final 即 FAILED，保留 attempt 1 的失败审计，绝不交付部分摘要。 */
+  @Test
+  void compactionChildTruncatedFinalExhaustionTerminatesFailedWithoutPartialSummary() {
+    Fixture fixture =
+        compactionFixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    listener.onEvent(new ProviderStreamEvent.TextDelta("partial one"));
+    listener.onSucceeded(
+        new ProviderCompletion(
+            response("partial one", GenerationStopReason.LENGTH), sampleReplayState()));
+    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
+
+    fixture.clock.advance(Duration.ofSeconds(5));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    ClaimedWork second = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
+    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+    secondListener.onEvent(new ProviderStreamEvent.TextDelta("partial two"));
+    secondListener.onSucceeded(
+        new ProviderCompletion(
+            response("partial two", GenerationStopReason.LENGTH), sampleReplayState()));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(2, failed.attempt());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, failed.error().kind());
+    assertEquals(1, failed.failedAttempts().size());
+    assertEquals("partial one", failed.failedAttempts().getFirst().text());
+    assertNull(failed.resultEntryId());
+    Boolean assistantMaterialized =
+        fixture.store.transaction(
+            tx ->
+                tx
+                    .loadEntryPath(
+                        tx.findThread(fixture.baseline.threadId()).orElseThrow().headEntryId())
+                    .entries()
+                    .stream()
+                    .anyMatch(
+                        entry ->
+                            entry.payload() instanceof MessagePayload message
+                                && message.message().role() == AgentMessageRole.ASSISTANT));
+    assertFalse(
+        assistantMaterialized, "no partial text may ever be materialized as the child result");
+  }
+
+  /** 压缩子空 final（COMPLETE 且无 tool calls 且空文本）按 INVALID_RESPONSE 处理，不落空摘要。 */
+  @Test
+  void compactionChildEmptyCompleteFinalFailsAsInvalidResponse() {
     Fixture fixture = compactionFixture(NO_RETRY, StreamFlushConfig.IMMEDIATE);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
@@ -864,22 +981,188 @@ class ModelProcessorTest {
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("structured summary"));
+    listener.onSucceeded(
+        new ProviderCompletion(
+            new ProviderResponse(
+                "", null, List.of(), GenerationStopReason.COMPLETE, usage(), "req-1", null, null),
+            sampleReplayState()));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, failed.error().kind());
+    assertEquals("compaction model returned an empty summary", failed.error().message());
+    assertNull(failed.resultEntryId());
+  }
+
+  /** 压缩子 FILTERED 明确不可恢复：INVALID_REQUEST 直接 FAILED，保留同一 attempt（不重试、不落摘要），即使策略允许重试。 */
+  @Test
+  void compactionChildFilteredFinalFailsWithoutRetry() {
+    Fixture fixture =
+        compactionFixture(
+            new InvocationRetryPolicy(
+                3,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            StreamFlushConfig.IMMEDIATE);
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
-        "structured summary", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
-    assertTrue(deltas(fixture.sink).isEmpty());
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
 
     listener.onSucceeded(
-        response(
-            "structured summary\n\n<read-files>\nstale.txt\n</read-files>",
-            GenerationStopReason.COMPLETE));
+        new ProviderCompletion(
+            response("filtered text", GenerationStopReason.FILTERED), sampleReplayState()));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(1, failed.attempt());
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, failed.error().kind());
+    assertEquals(
+        "compaction model response was filtered and cannot be used as a summary",
+        failed.error().message());
+    assertEquals(1, fixture.gateway.startCalls, "a filtered result must never be replayed");
+    assertNull(failed.resultEntryId());
+  }
+
+  /** 配置了 tools 的压缩子合法 tool 回合（COMPLETE + tool calls）按普通 Runtime 推进，且不再抑制 replay 与实时 delta 发布。 */
+  @Test
+  void compactionChildToolTurnProceedsLikeOrdinaryRuntimeAndPublishesDeltas() {
+    Fixture fixture = compactionFixture(NO_RETRY, StreamFlushConfig.IMMEDIATE);
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onEvent(new ProviderStreamEvent.TextDelta("calling tool"));
+    listener.onSucceeded(
+        new ProviderCompletion(
+            new ProviderResponse(
+                "calling tool",
+                null,
+                List.of(new ProviderToolCall("call_1", "bash", "{\"command\":\"ls\"}")),
+                GenerationStopReason.COMPLETE,
+                usage(),
+                "req-1",
+                null,
+                null),
+            sampleReplayState()));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
+    assertEquals(1, terminal.result().toolCalls().size());
+    assertNotNull(terminal.providerReplayState());
+    assertEquals(List.of("calling tool"), deltaTexts(fixture.sink));
+  }
+
+  /** 压缩子 LENGTH 即使同时带 tool call 也是被截断的结果：截断的 tool intent 不是可执行意图，必须走 INVALID_RESPONSE 而不执行工具。 */
+  @Test
+  void compactionChildTruncatedToolIntentIsInvalidResponseWithoutExecutingTools() {
+    Fixture fixture = compactionFixture(NO_RETRY, StreamFlushConfig.IMMEDIATE);
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
-        "structured summary\n\n<read-files>\nstale.txt\n</read-files>", terminal.result().text());
-    assertEquals(terminal.result().text(), terminal.streamCheckpoint().text());
-    assertTrue(deltas(fixture.sink).isEmpty());
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onEvent(new ProviderStreamEvent.TextDelta("truncated call"));
+    listener.onSucceeded(
+        new ProviderCompletion(
+            new ProviderResponse(
+                "truncated call",
+                null,
+                List.of(new ProviderToolCall("call_1", "bash", "{\"command\":\"ls\"}")),
+                GenerationStopReason.LENGTH,
+                usage(),
+                "req-1",
+                null,
+                null),
+            sampleReplayState()));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, failed.error().kind());
+    assertEquals(
+        "compaction model response was truncated before the summary completed",
+        failed.error().message());
+    assertNull(failed.resultEntryId());
+    Boolean assistantMaterialized =
+        fixture.store.transaction(
+            tx ->
+                tx
+                    .loadEntryPath(
+                        tx.findThread(fixture.baseline.threadId()).orElseThrow().headEntryId())
+                    .entries()
+                    .stream()
+                    .anyMatch(entry -> entry.payload() instanceof MessagePayload));
+    assertFalse(
+        assistantMaterialized,
+        "a truncated tool intent must never be materialized as an executable tool invocation");
+  }
+
+  /** 普通 Agent（非压缩子）的截断 / 空 final 语义保持不变：LENGTH 与空 COMPLETE 仍按普通 Runtime 提交。 */
+  @Test
+  void ordinaryAgentTruncatedAndEmptyFinalsKeepExistingSemantics() {
+    Fixture truncated = fixture();
+    truncated.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        truncated.processor.process(claim(truncated.store, truncated.invocationId, NOW)));
+    truncated
+        .gateway
+        .listener(truncated.invocationId)
+        .onSucceeded(
+            new ProviderCompletion(
+                response("partial answer", GenerationStopReason.LENGTH), sampleReplayState()));
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED,
+        model(truncated.store, truncated.invocationId).status(),
+        "ordinary LENGTH semantics must not change");
+
+    Fixture empty = fixture();
+    empty.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        empty.processor.process(claim(empty.store, empty.invocationId, NOW)));
+    empty
+        .gateway
+        .listener(empty.invocationId)
+        .onSucceeded(
+            new ProviderCompletion(
+                new ProviderResponse(
+                    "",
+                    null,
+                    List.of(),
+                    GenerationStopReason.COMPLETE,
+                    usage(),
+                    "req-1",
+                    null,
+                    null),
+                sampleReplayState()));
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED,
+        model(empty.store, empty.invocationId).status(),
+        "ordinary empty COMPLETE semantics must not change");
+
+    // TASK Join 的 child 与普通 Thread 一样，不是压缩子：截断 final 不做摘要完整性校验。
+    Fixture taskChild = fixture();
+    seedJoin(taskChild.store, taskChild.baseline.threadId(), JoinPurpose.TASK);
+    taskChild.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        taskChild.processor.process(claim(taskChild.store, taskChild.invocationId, NOW)));
+    taskChild
+        .gateway
+        .listener(taskChild.invocationId)
+        .onSucceeded(
+            new ProviderCompletion(
+                response("task partial", GenerationStopReason.LENGTH), sampleReplayState()));
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED,
+        model(taskChild.store, taskChild.invocationId).status(),
+        "only COMPACTION purpose joins make a thread a compaction child");
   }
 
   /**
@@ -931,11 +1214,9 @@ class ModelProcessorTest {
         "LENGTH without diagnostics must persist replayState");
   }
 
-  /**
-   * 验证 ModelExecution 完成路径：FILTERED、compaction、含 incomplete tool diagnostics 时严格不持久化 replayState。
-   */
+  /** 验证 ModelExecution 完成路径：FILTERED 与含 incomplete tool diagnostics 时严格不持久化 replayState。 */
   @Test
-  void modelExecutionSuppressesReplayStateOnFilteredCompactionAndIncompleteDiagnostics() {
+  void modelExecutionSuppressesReplayStateOnFilteredAndIncompleteDiagnostics() {
     // 1. FILTERED 场景
     Fixture fixtureFiltered = fixture();
     fixtureFiltered.gateway.queue(new ModelGateway.Started(new FakeHandle()));
@@ -954,27 +1235,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.SUCCEEDED, modelFiltered.status());
     assertNull(modelFiltered.providerReplayState(), "FILTERED must not persist replayState");
 
-    // 2. compaction 场景
-    Fixture fixtureCompaction = compactionFixture(NO_RETRY);
-    fixtureCompaction.gateway.queue(new ModelGateway.Started(new FakeHandle()));
-    assertEquals(
-        ProcessResult.STARTED,
-        fixtureCompaction.processor.process(
-            claim(fixtureCompaction.store, fixtureCompaction.invocationId, NOW)));
-    ModelGateway.Listener listenerCompaction =
-        fixtureCompaction.gateway.listener(fixtureCompaction.invocationId);
-
-    listenerCompaction.onSucceeded(
-        new ProviderCompletion(
-            response("compacted summary", GenerationStopReason.COMPLETE), sampleReplayState()));
-
-    ModelInvocation modelCompaction =
-        model(fixtureCompaction.store, fixtureCompaction.invocationId);
-    assertEquals(ModelInvocationStatus.SUCCEEDED, modelCompaction.status());
-    assertNull(
-        modelCompaction.providerReplayState(), "Compaction execution must not persist replayState");
-
-    // 3. 含 incomplete tool diagnostics 场景
+    // 2. 含 incomplete tool diagnostics 场景
     Fixture fixtureDiag = fixture();
     fixtureDiag.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
@@ -3418,22 +3679,17 @@ class ModelProcessorTest {
   }
 
   private Fixture fixture(StreamFlushConfig flushConfig) {
-    return new Fixture(NO_RETRY, requestSpec(), newScheduler(), TurnStartReason.INPUT, flushConfig);
+    return new Fixture(NO_RETRY, requestSpec(), newScheduler(), false, flushConfig);
   }
 
+  /** 压缩子 fixture：fixture Thread 是本 fixture 自己创建的 COMPACTION Join 的 child。 */
   private Fixture compactionFixture(InvocationRetryPolicy retryPolicy) {
-    return new Fixture(
-        retryPolicy,
-        requestSpec(),
-        newScheduler(),
-        TurnStartReason.COMPACTION,
-        StreamFlushConfig.DEFAULT);
+    return compactionFixture(retryPolicy, StreamFlushConfig.DEFAULT);
   }
 
   private Fixture compactionFixture(
       InvocationRetryPolicy retryPolicy, StreamFlushConfig flushConfig) {
-    return new Fixture(
-        retryPolicy, requestSpec(), newScheduler(), TurnStartReason.COMPACTION, flushConfig);
+    return new Fixture(retryPolicy, requestSpec(), newScheduler(), true, flushConfig);
   }
 
   private Fixture fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec requestSpec) {
@@ -3444,8 +3700,7 @@ class ModelProcessorTest {
       InvocationRetryPolicy retryPolicy,
       ModelRequestSpec requestSpec,
       StreamFlushConfig flushConfig) {
-    return new Fixture(
-        retryPolicy, requestSpec, newScheduler(), TurnStartReason.INPUT, flushConfig);
+    return new Fixture(retryPolicy, requestSpec, newScheduler(), false, flushConfig);
   }
 
   private Fixture fixture(
@@ -3474,26 +3729,26 @@ class ModelProcessorTest {
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler) {
-      this(retryPolicy, requestSpec, scheduler, TurnStartReason.INPUT, StreamFlushConfig.DEFAULT);
+      this(retryPolicy, requestSpec, scheduler, false, StreamFlushConfig.DEFAULT);
     }
 
     Fixture(
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
-        TurnStartReason reason,
+        boolean compactionChild,
         StreamFlushConfig flushConfig) {
-      this(retryPolicy, requestSpec, scheduler, reason, flushConfig, Runnable::run);
+      this(retryPolicy, requestSpec, scheduler, compactionChild, flushConfig, Runnable::run);
     }
 
     Fixture(
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
-        TurnStartReason reason,
+        boolean compactionChild,
         StreamFlushConfig flushConfig,
         Executor flushExecutor) {
-      this(retryPolicy, requestSpec, scheduler, reason, flushConfig, flushExecutor, null);
+      this(retryPolicy, requestSpec, scheduler, compactionChild, flushConfig, flushExecutor, null);
     }
 
     Fixture(
@@ -3504,7 +3759,7 @@ class ModelProcessorTest {
           retryPolicy,
           requestSpec,
           newScheduler(),
-          TurnStartReason.INPUT,
+          false,
           StreamFlushConfig.DEFAULT,
           Runnable::run,
           toolHistoryActionResolver);
@@ -3514,13 +3769,16 @@ class ModelProcessorTest {
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
-        TurnStartReason reason,
+        boolean compactionChild,
         StreamFlushConfig flushConfig,
         Executor flushExecutor,
         ToolHistoryActionResolver toolHistoryActionResolver) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
-      this.baseline = seedBaseline(store, NOW, reason);
+      this.baseline = seedBaseline(store, NOW);
+      if (compactionChild) {
+        seedJoin(store, baseline.threadId(), JoinPurpose.COMPACTION);
+      }
       this.invocationId = seedInvocation(store, baseline, requestSpec, NOW);
       this.processor =
           new ModelProcessor(
@@ -3671,10 +3929,6 @@ class ModelProcessorTest {
   }
 
   private static Baseline seedBaseline(HarnessStore store, Instant now) {
-    return seedBaseline(store, now, TurnStartReason.INPUT);
-  }
-
-  private static Baseline seedBaseline(HarnessStore store, Instant now, TurnStartReason reason) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -3683,53 +3937,80 @@ class ModelProcessorTest {
           tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
-          UUID parentId = rootEntryId;
-          Instant turnStartAt = now.plusMillis(1);
-          CompactionStart compaction = null;
-          if (reason == TurnStartReason.COMPACTION) {
-            // 压缩 invocation 的 requestHead 是 COMPACTION TURN_START；摘要范围必须落在此前可见历史里。
-            UUID inputStart = tx.nextId();
-            UUID userId = tx.nextId();
-            UUID assistantId = tx.nextId();
-            UUID inputEnd = tx.nextId();
-            tx.insertEntry(
-                new Entry(
-                    inputStart,
-                    sessionId,
-                    rootEntryId,
-                    new TurnStartPayload(
-                        TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
-                    now.plusMillis(1)));
-            tx.insertEntry(
-                new Entry(userId, sessionId, inputStart, userMessagePayload(), now.plusMillis(2)));
-            tx.insertEntry(
-                new Entry(assistantId, sessionId, userId, assistantPayload(), now.plusMillis(3)));
-            tx.insertEntry(
-                new Entry(
-                    inputEnd,
-                    sessionId,
-                    assistantId,
-                    new TurnEndPayload(inputStart, TurnEndOutcome.COMPLETED, false, null, null),
-                    now.plusMillis(4)));
-            parentId = inputEnd;
-            turnStartAt = now.plusMillis(5);
-            compaction =
-                CompactionStart.pending(
-                    CompactionPhase.FULL, CompactionTrigger.THRESHOLD, inputEnd, null, null);
-          }
           UUID turnStartEntryId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   turnStartEntryId,
                   sessionId,
-                  parentId,
+                  rootEntryId,
                   new TurnStartPayload(
-                      reason, branchSettings(), threadId, 100_000, 16_384, compaction),
-                  turnStartAt));
+                      TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
+                  now.plusMillis(1)));
           tx.insertThread(
               ThreadProcessorTestSupport.threadState(threadId, sessionId, turnStartEntryId, now));
           return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
+  }
+
+  /**
+   * 给已存在的 Thread 插入一个 purpose 指定的未结算 Join（连同父 Thread 与子 source command），构造真实的 child 侧身份事实。
+   *
+   * <p>压缩子身份只能由 COMPACTION purpose 的未结算 Join 决定：TASK Join 的 child 与无 Join 的普通 Thread 都不是压缩子。
+   */
+  private static void seedJoin(
+      InMemoryHarnessStore store, UUID childThreadId, JoinPurpose purpose) {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childThreadId);
+          UUID parentThreadId = tx.nextId();
+          UUID parentSessionId = tx.nextId();
+          UUID parentRootEntryId = tx.nextId();
+          tx.insertSession(new Session(parentSessionId, "parent-" + parentSessionId, NOW));
+          tx.insertEntry(
+              new Entry(
+                  parentRootEntryId,
+                  parentSessionId,
+                  null,
+                  new RootPayload(branchSettings()),
+                  NOW));
+          tx.insertThread(
+              ThreadProcessorTestSupport.threadState(
+                  parentThreadId, parentSessionId, parentRootEntryId, NOW));
+          UUID commandId = tx.nextId();
+          CustomMessageCommandPayload payload =
+              new CustomMessageCommandPayload(AgentMessage.user("compaction instruction"));
+          String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      childThreadId, 1L, payload, commandId, requestHash, null, null, null, NOW)));
+          tx.insertJoin(
+              new ThreadJoin(
+                  commandId,
+                  requestHash,
+                  parentThreadId,
+                  childThreadId,
+                  1L,
+                  "compaction",
+                  null,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  NOW,
+                  NOW,
+                  purpose,
+                  null));
+          return null;
+        });
+  }
+
+  /** 已提交增量中的文本 delta（顺序即发布顺序）。 */
+  private static List<String> deltaTexts(RecordingSink sink) {
+    return deltas(sink).stream()
+        .filter(event -> event instanceof ProviderStreamEvent.TextDelta)
+        .map(event -> ((ProviderStreamEvent.TextDelta) event).text())
+        .toList();
   }
 
   private static UUID seedInvocation(

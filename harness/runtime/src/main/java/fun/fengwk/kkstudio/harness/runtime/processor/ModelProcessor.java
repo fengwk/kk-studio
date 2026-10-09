@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -208,7 +209,7 @@ public final class ModelProcessor implements AutoCloseable {
             claim,
             dispatched.threadId(),
             proposedAttempt,
-            dispatched.compaction(),
+            dispatched.compactionChild(),
             dispatched.request().toolBindings(),
             config,
             clock,
@@ -382,6 +383,8 @@ public final class ModelProcessor implements AutoCloseable {
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
     tx.updateModelInvocation(model.beginDispatch(now));
     tx.updateThread(thread.touchVersion(now));
+    // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：压缩子身份不再从 TURN_START payload 推导（父压缩 turn
+    // 不产生 ModelInvocation），但仍拒绝引用缺失 / 类型错误的 turn start。
     Entry turnStart =
         tx.findEntry(model.turnStartEntryId())
             .orElseThrow(
@@ -391,7 +394,7 @@ public final class ModelProcessor implements AutoCloseable {
                             + model.id()
                             + " references missing turn start "
                             + model.turnStartEntryId()));
-    if (!(turnStart.payload() instanceof TurnStartPayload start)) {
+    if (!(turnStart.payload() instanceof TurnStartPayload)) {
       throw new IllegalStateException(
           "model invocation " + model.id() + " turnStartEntryId does not reference a TURN_START");
     }
@@ -400,7 +403,7 @@ public final class ModelProcessor implements AutoCloseable {
         model.requestHeadEntryId(),
         model.attempt(),
         model.requestSpec(),
-        start.compaction() != null);
+        CompactionChildScope.isCompactionChild(tx, thread.id()));
   }
 
   /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
@@ -648,12 +651,13 @@ public final class ModelProcessor implements AutoCloseable {
     /** 失联恢复已按策略回到 READY 并重排 MODEL Work：不启动 Provider，不 request THREAD wake。 */
     record Retry() implements Prepare {}
 
+    /** 已冻结的 dispatch：{@code compactionChild} 是 prepare 时从未结算 COMPACTION Join 冻结的压缩子身份事实。 */
     record Dispatched(
         UUID threadId,
         UUID requestHeadEntryId,
         int attempt,
         ModelRequestSpec request,
-        boolean compaction)
+        boolean compactionChild)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionNoGain;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -1700,7 +1701,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
   private static boolean guardBlocks(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(
-        tx -> ThreadProcessor.isInCompactionChildTree(tx, tx.findThread(threadId).orElseThrow()));
+        tx ->
+            CompactionChildScope.isInCompactionChildTree(
+                tx, tx.findThread(threadId).orElseThrow()));
   }
 
   private static void setStopped(InMemoryHarnessStore store, UUID threadId) {

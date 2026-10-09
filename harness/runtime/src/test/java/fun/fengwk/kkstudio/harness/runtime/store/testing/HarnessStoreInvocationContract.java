@@ -74,7 +74,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
@@ -2464,43 +2463,6 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   /** 完整压缩 turn 种子：打开 COMPACTION turn、执行 invocation 并附加 SUCCEEDED result。 */
-  private UUID seedCompletedCompactionTurn(
-      ModelRequestSpec requestSpec, CompactionPayload resultPayload) {
-    return seedCompletedCompactionTurn(requestSpec, resultPayload, CompactionPhase.HISTORY, null);
-  }
-
-  private UUID seedCompletedCompactionTurn(
-      ModelRequestSpec requestSpec,
-      CompactionPayload resultPayload,
-      CompactionPhase phase,
-      UUID cutEntryId) {
-    UUID turnStart = openCompactionTurn(phase, cutEntryId);
-    UUID modelId = insertCompactionInvocation(turnStart, requestSpec);
-    ProviderResponse response = successResponse();
-    // 与生产 apply 同源：durable 结果 = 摘要文本 + 该次真实模型调用的 provider 元数据（stopReason / usage /
-    // decodeDuration），materialization evaluator 用同一事实机械重放。
-    CompactionPayload durable =
-        new CompactionPayload(
-            resultPayload.summaryText(),
-            new AssistantMessageMetadata(
-                response.stopReason(), response.usage(), response.decodeDurationMillis()));
-    return store.transaction(
-        tx -> {
-          tx.lockThread(baseline.threadId());
-          UUID resultEntryId = tx.nextId();
-          tx.insertEntry(new Entry(resultEntryId, baseline.sessionId(), turnStart, durable, T2));
-          ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.markRunning(T2));
-          current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.succeed(response, T3));
-          current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.attachResultEntry(resultEntryId, T3));
-          return modelId;
-        });
-  }
-
   private UUID seedDurableCompletedCompactionTurn(CompactionPayload resultPayload) {
     return store.transaction(
         tx -> {
@@ -2614,27 +2576,13 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   @Test
-  void compactionInvocationAcceptsExactSucceededSummary() {
-    // 压缩 turn 绝不允许 ModelInvocation，任何尝试挂载被确定性拒绝
-    ModelRequestSpec requestSpec = compactionRequest();
-    CompactionPayload result = new CompactionPayload("summary", null);
-    IllegalArgumentException ex =
-        assertThrows(
-            IllegalArgumentException.class, () -> seedCompletedCompactionTurn(requestSpec, result));
-    assertTrue(ex.getMessage().contains("compaction turn must not have model invocations"));
-
-    // 保留压缩结果 payload 的既有断言（用新的 durable 事实构造：父 TURN_START 的 run group + CompactionPayload/TurnEnd）
-    UUID resultEntryId = seedDurableCompletedCompactionTurn(result);
-    Entry stored = store.transaction(tx -> tx.findEntry(resultEntryId).orElseThrow());
-    assertEquals(result, stored.payload());
-  }
-
-  @Test
-  void compactionResultRejectsNonSucceededStatusAndSummaryDrift() {
+  void modelInvocationOnCompactionTurnCanNeverMaterializeAResult() {
+    // 父 COMPACTION turn 不创建 ModelInvocation：任何挂载结果的尝试都被确定性拒绝，唯一合法形状是
+    // 「TURN_START(run group) -> CompactionPayload -> TURN_END」这条无 invocation 的父回合路径。
     ModelRequestSpec requestSpec = compactionRequest();
     CompactionPayload result = new CompactionPayload("summary", null);
 
-    // FAILED invocation 携带 COMPACTION result -> 拒绝。
+    // FAILED invocation 携带 COMPACTION result -> 拒绝（result entry 形状不属于任何合法 model 结果）。
     UUID turnStart = openCompactionTurn();
     UUID modelId = insertCompactionInvocation(turnStart, requestSpec);
     assertThrows(
@@ -2655,36 +2603,43 @@ public abstract class HarnessStoreInvocationContract {
                   return null;
                 }));
 
-    // SUCCEEDED 但 summaryText 与 Provider terminal 不一致 -> 由共享 materialization evaluator 拒绝。
-    CompactionPayload drifted = new CompactionPayload("drifted summary", null);
-    assertThrows(
-        IllegalArgumentException.class, () -> seedCompletedCompactionTurn(requestSpec, drifted));
-  }
+    // SUCCEEDED invocation + ASSISTANT result 同样不允许：压缩 turn 的模型调用形状被物化校验确定性拒绝。
+    UUID succeededTurnStart = openCompactionTurn();
+    UUID succeededModelId = insertCompactionInvocation(succeededTurnStart, requestSpec);
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(baseline.threadId());
+                      UUID assistantEntryId = tx.nextId();
+                      tx.insertEntry(
+                          new Entry(
+                              assistantEntryId,
+                              baseline.sessionId(),
+                              succeededTurnStart,
+                              assistantPayload(),
+                              T2));
+                      ModelInvocation current =
+                          tx.lockModelInvocation(succeededModelId).orElseThrow();
+                      tx.updateModelInvocation(current.beginDispatch(T2));
+                      current = tx.lockModelInvocation(succeededModelId).orElseThrow();
+                      tx.updateModelInvocation(current.markRunning(T2));
+                      current = tx.lockModelInvocation(succeededModelId).orElseThrow();
+                      tx.updateModelInvocation(current.succeed(successResponse(), T3));
+                      current = tx.lockModelInvocation(succeededModelId).orElseThrow();
+                      tx.updateModelInvocation(current.attachResultEntry(assistantEntryId, T3));
+                      return null;
+                    }));
+    // 内存与 PG 共享同一结构性禁令（TurnPathValidator）：COMPACTION 父 turn 的结果只能是 COMPACTION payload，
+    // 任何 ASSISTANT 结果（无论是否来自 ModelInvocation）都被确定性拒绝。
+    assertTrue(ex.getMessage().contains("compaction turns require a COMPACTION result"));
 
-  @Test
-  void compactionResultRejectsPathDriftThroughSharedMaterializationEvaluator() {
-    ModelRequestSpec requestSpec = compactionRequest();
-
-    // FULL 的 cutEntryId 不在 result path 上，路径事实由 shared materialization / 压缩校验拒绝。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            seedCompletedCompactionTurn(
-                requestSpec,
-                new CompactionPayload("assistant reply", null),
-                CompactionPhase.FULL,
-                TestIds.id(999L)));
-  }
-
-  @Test
-  void compactionPurposeComesOnlyFromTurnStart() {
-    // ModelRequestSpec 不复制 compaction metadata；同一紧凑请求由 immutable TURN_START 决定执行用途。
-    UUID turnStart = openCompactionTurn();
-    UUID modelId = insertCompactionInvocation(turnStart, modelRequest());
-
-    ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
-    assertEquals(turnStart, stored.turnStartEntryId());
-    assertEquals(modelRequest(), stored.requestSpec());
+    // 唯一合法路径：父回合自身直接写入 CompactionPayload（无 ModelInvocation）。
+    UUID resultEntryId = seedDurableCompletedCompactionTurn(result);
+    Entry stored = store.transaction(tx -> tx.findEntry(resultEntryId).orElseThrow());
+    assertEquals(result, stored.payload());
   }
 
   // ---- 待处理 ToolInvocation 分页与结果反查 ----

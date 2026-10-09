@@ -122,7 +122,7 @@ class PostgresqlAssistantErrorSettlementTest {
         new ThreadProcessorConfig(
             new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
             Duration.ofSeconds(5),
-            () -> new CompactionConfig(20_000, null));
+            () -> new CompactionConfig(20_000));
     Clock clock = Clock.fixed(now, ZoneOffset.UTC);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {
@@ -154,7 +154,7 @@ class PostgresqlAssistantErrorSettlementTest {
 
       // durable 状态经既有 snapshot 投影读到 IDLE（不再 RUNNABLE/挂起）。
       HarnessRuntime snapshotRuntime =
-          new HarnessRuntime(store, clock, resolver, () -> new CompactionConfig(20_000, null));
+          new HarnessRuntime(store, clock, resolver, () -> new CompactionConfig(20_000));
       assertEquals(
           ThreadRuntimeStatus.IDLE,
           snapshotRuntime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
