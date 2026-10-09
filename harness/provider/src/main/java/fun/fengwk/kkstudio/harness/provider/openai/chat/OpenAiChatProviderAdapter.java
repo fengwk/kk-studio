@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
@@ -12,15 +11,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.URI;
 import java.util.Objects;
-import java.util.Set;
 
 /** OpenAI Chat Completions 协议适配器。 */
 public final class OpenAiChatProviderAdapter implements ProviderAdapter {
-
-  private static final ProviderMediaCapabilities MEDIA_CAPABILITIES =
-      new ProviderMediaCapabilities(
-          Set.of(ModelInputModality.IMAGE, ModelInputModality.AUDIO, ModelInputModality.DOCUMENT),
-          Set.of());
 
   private final JdkHttpSseTransport transport;
   private final String apiKey;
@@ -60,7 +53,7 @@ public final class OpenAiChatProviderAdapter implements ProviderAdapter {
    */
   @Override
   public ProviderMediaCapabilities mediaCapabilities() {
-    return MEDIA_CAPABILITIES;
+    return providerType().mediaCapabilities();
   }
 
   @Override

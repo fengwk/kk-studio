@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -34,6 +35,7 @@ class PlatformResourceContentReaderTest {
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
   private SessionBlobRefManager refs;
+  private StorageBlobManager blobManager;
   private StorageBlobContentService blobs;
   private PlatformResourceContentReader reader;
 
@@ -42,6 +44,7 @@ class PlatformResourceContentReaderTest {
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
     refs = mock(SessionBlobRefManager.class);
+    blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
     when(store.transaction(any()))
         .thenAnswer(
@@ -49,7 +52,7 @@ class PlatformResourceContentReaderTest {
               Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
               return callback.apply(transaction);
             });
-    reader = new PlatformResourceContentReader(() -> store, refs, blobs);
+    reader = new PlatformResourceContentReader(() -> store, refs, blobManager, blobs);
   }
 
   /** 测试意图：无效身份或不存在的 Thread 不允许进入存储层。 */
@@ -70,7 +73,7 @@ class PlatformResourceContentReaderTest {
   @Test
   void rejectsUnavailableStore() {
     PlatformResourceContentReader unavailable =
-        new PlatformResourceContentReader(() -> null, refs, blobs);
+        new PlatformResourceContentReader(() -> null, refs, blobManager, blobs);
     assertTrue(
         assertThrows(
                 PlatformReadException.class,
