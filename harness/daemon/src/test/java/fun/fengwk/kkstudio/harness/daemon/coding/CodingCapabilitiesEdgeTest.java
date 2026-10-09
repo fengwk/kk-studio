@@ -403,11 +403,13 @@ class CodingCapabilitiesEdgeTest {
   void bashReportsStartupAndNonZeroFailuresWithoutDuplicateTerminalCallbacks() throws Exception {
     BashCapability missing =
         bash(TestCodingConfig.withBash(workspaceRoot, 10, 100, "missing-bash"));
-    assertTrue(
-        text(invoke(
+    String startupFailure =
+        text(
+            invoke(
                 missing,
-                "{\"command\":\"echo x\",\"workdir\":" + json(workspaceRoot.toString()) + "}"))
-            .contains("missing-bash"));
+                "{\"command\":\"echo x\",\"workdir\":" + json(workspaceRoot.toString()) + "}"));
+    assertTrue(startupFailure.contains("could not be started"));
+    assertFalse(startupFailure.contains("missing-bash"));
     BashCapability bash = bash(config());
     EnvironmentCapabilityResult nonZero =
         invoke(

@@ -9,9 +9,33 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
+CODING_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.coding."
+PROCESS_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.process."
+
+# 进程基座类已经整体迁到 daemon.process；其余被选中的类仍在 daemon.coding。
+PROCESS_PACKAGE_CLASSES = frozenset(
+    {
+        "ProcessScopeTest",
+        "ProcessScopeCrossPlatformTest",
+        "ProcessScopeStateTest",
+        "ProcessScopeHelperFailureTest",
+        "ProcessScopePtyIntegrationTest",
+        "ProcessScopeInteractivePtyTest",
+        "ProcessScopeConPtyIntegrationTest",
+        "PosixProcessSessionTest",
+        "WindowsCommandLineTest",
+        "WindowsJobScopeTest",
+    }
+)
+
+
+def package_of(class_name: str) -> str:
+    return PROCESS_PACKAGE if class_name in PROCESS_PACKAGE_CLASSES else CODING_PACKAGE
+
+
 # 核心验收：只用 JDK 夹具造真实进程层级，任何平台都没有跳过它们的理由。
 REQUIRED_CASES = {
-    "fun.fengwk.kkstudio.harness.daemon.coding.ProcessScopeCrossPlatformTest": {
+    "fun.fengwk.kkstudio.harness.daemon.process.ProcessScopeCrossPlatformTest": {
         "naturalExitConvergesLiveChildren",
         "terminateConvergesNestedProcesses",
         "unpermittedStartNeverRunsTheFixture",
@@ -30,6 +54,37 @@ WINDOWS_REQUIRED_CASES = {
         "closesStdinSoCommandsWaitingForEofFinishNaturally",
         "unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout",
     },
+    PROCESS_PACKAGE + "WindowsJobScopeTest": {
+        "realKernelReportsMissingExecutableWorkdirAndJobName",
+    },
+}
+
+# Linux/macOS 腿必须真跑且不得跳过的交互式 shell 验收：产品要用的 job control 语义只能由交互式 bash 证明。
+POSIX_INTERACTIVE_REQUIRED_CASES = {
+    "fun.fengwk.kkstudio.harness.daemon.process.ProcessScopeInteractivePtyTest": {
+        "interactiveBashRunsWithJobControlAndMultiProcessGroupSession",
+        "controlCTerminatesOnlyTheForegroundJob",
+        "controlZThenBackgroundResumesTheJobProcessGroup",
+        "naturalExitConvergesBackgroundJobsIncludingTermIgnoringOnes",
+    },
+}
+
+# Windows 腿必须真跑且不得跳过的 ConPTY 验收：控制台继承与原生窗口尺寸只能在真实 Windows 上证明。
+WINDOWS_CONPTY_REQUIRED_CASES = {
+    "fun.fengwk.kkstudio.harness.daemon.process.ProcessScopeConPtyIntegrationTest": {
+        "conPtyIsUsedAndNativeWindowSizeFollowsResize",
+        "conPtySessionConvergesAChildThatOutlivesTheCommand",
+    },
+}
+
+# PTY 的平台无关契约必须在每条矩阵腿真跑，不能被同类的 POSIX 前置条件一起跳过。
+ALL_PLATFORM_REQUIRED_CASES = {
+    PROCESS_PACKAGE + "ProcessScopePtyIntegrationTest": {
+        "ptyCarriesCommandOutputAndKeepsTheExactExitCode",
+        "ptyRunsAJvmFixtureAndKeepsItsExitCode",
+        "ptyUnpermittedStartNeverRunsTheCommand",
+        "ptyRejectsNonPositiveInitialSize",
+    },
 }
 
 # 其余被选中的用例各自带平台前置条件（POSIX shell、Windows Job 语义），因此只要求真的执行过且没有失败。
@@ -38,7 +93,10 @@ SELECTED_CLASSES = (
     "ProcessScopeTest",
     "ProcessScopeStateTest",
     "ProcessScopeHelperFailureTest",
-    "PosixProcessGroupTest",
+    "ProcessScopePtyIntegrationTest",
+    "ProcessScopeInteractivePtyTest",
+    "ProcessScopeConPtyIntegrationTest",
+    "PosixProcessSessionTest",
     "BashCapabilityTest",
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",
@@ -68,7 +126,7 @@ def required_classes(os_label: str):
 
 
 def parse_report(reports_dir: Path, class_name: str):
-    report = reports_dir / ("TEST-fun.fengwk.kkstudio.harness.daemon.coding." + class_name + ".xml")
+    report = reports_dir / ("TEST-" + package_of(class_name) + class_name + ".xml")
     if not report.is_file():
         return None
     root = ElementTree.parse(report).getroot()
@@ -110,18 +168,23 @@ def main() -> int:
             continue
         counts, cases, skipped = parsed
         report(simple_name, counts, cases)
-        qualified = "fun.fengwk.kkstudio.harness.daemon.coding." + simple_name
+        qualified = package_of(simple_name) + simple_name
         strict = REQUIRED_CASES.get(qualified)
-        platform_cases = WINDOWS_REQUIRED_CASES.get(qualified) if os_label.startswith("windows") else None
-        if strict is None and not platform_cases:
-            continue
         if strict is not None:
             # 这一类是核心验收：它的每个用例在任何平台上都没有跳过的理由。
             if counts["skipped"]:
                 failures.append(f"{simple_name}: must not skip any case on {os_label}")
             required = strict
         else:
-            # 这一类整体允许跳过平台不适用用例，但被点名的那几条必须真的跑过。
+            # 这一类整体允许跳过平台不适用用例，但被点名的平台适用用例必须真的跑过。
+            platform_cases = set(ALL_PLATFORM_REQUIRED_CASES.get(qualified, ()))
+            if os_label.startswith("windows"):
+                platform_cases |= WINDOWS_REQUIRED_CASES.get(qualified, set())
+                platform_cases |= WINDOWS_CONPTY_REQUIRED_CASES.get(qualified, set())
+            else:
+                platform_cases |= POSIX_INTERACTIVE_REQUIRED_CASES.get(qualified, set())
+            if not platform_cases:
+                continue
             required = platform_cases
             skipped_required = sorted(platform_cases & skipped)
             if skipped_required:
@@ -131,6 +194,9 @@ def main() -> int:
         missing = sorted(required - set(cases))
         if missing:
             failures.append(f"{simple_name}: required cases did not run on {os_label}: {missing}")
+        duplicate = sorted(case for case in required if cases.count(case) > 1)
+        if duplicate:
+            failures.append(f"{simple_name}: required cases ran more than once on {os_label}: {duplicate}")
 
     if failures:
         for failure in failures:

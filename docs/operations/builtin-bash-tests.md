@@ -26,7 +26,11 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/runtime -am test \
 ```
 
 Daemon 的重点类是 `BashCapabilityTest`、`ProcessScopeTest`、`ProcessScopeCrossPlatformTest`、
-`ProcessScopeHelperFailureTest`、`PosixProcessGroupTest`、`ProcessScopeStateTest`、`WindowsCommandLineTest`、`WindowsJobScopeTest`、
+`ProcessScopeHelperFailureTest`、`PosixProcessSessionTest`、`ProcessScopeStateTest`、
+`ProcessScopePtyIntegrationTest`（三平台：伪终端输出与退出码；POSIX：TTY、resize、会话收敛；Linux：主端描述符回收）、
+`ProcessScopeInteractivePtyTest`（Linux/macOS：交互式 bash 的 monitor 模式、多进程组作业控制与终端信号）、
+`ProcessScopeConPtyIntegrationTest`（Windows：ConPTY 控制台继承、原生窗口尺寸与 Job 子进程收敛）、
+`WindowsCommandLineTest`、`WindowsJobScopeTest`、
 `OutputSpoolTest`、`TextOutputStoreTest` 和 `DaemonRuntimeTest`。只筛选某类时仍保留 `-am` 与
 `-Dsurefire.failIfNoSpecifiedTests=false`，并检查目标模块的 Surefire XML 确实执行了目标用例；
 上游模块没有同名测试不应导致失败，但目标用例缺失也不能当作通过。
@@ -59,10 +63,10 @@ Daemon 的重点类是 `BashCapabilityTest`、`ProcessScopeTest`、`ProcessScope
 
 ## 进程范围与清理
 
-[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java)
-与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java)
-使用 POSIX 进程组或 Windows 命名 Job Object。终态通知前必须确认整组收敛，首个进程退出并不充分。
-POSIX 先发 SIGTERM、等待宽限、再强杀；Windows 用 Job 的 `KILL_ON_JOB_CLOSE` 和活动成员计数确认收敛。
+[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScope.java)
+与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/process/ProcessScopeHelper.java)
+使用 POSIX 会话或 Windows 命名 Job Object。终态通知前必须确认整个范围收敛，首个进程退出并不充分。
+POSIX 覆盖会话内所有作业进程组，先发 SIGTERM、等待宽限、再强杀；Windows 显式终止 Job 并以活动成员计数确认收敛，`KILL_ON_JOB_CLOSE` 保证句柄释放时的生命周期。
 
 - 自然退出、后台作业持有 stdout、`disown` 和嵌套 fork：由 `BashCapabilityTest` 的
   `naturalExitReapsBackgroundDescendantsBeforeTerminalCallback`、
@@ -79,8 +83,8 @@ POSIX 先发 SIGTERM、等待宽限、再强杀；Windows 用 Job 的 `KILL_ON_J
   使用真实 Java 进程和原生 pid 验证。LSP 使用同一个范围的 `startDuplex` 模式，stdin/stdout/stderr 保持独立，
   相关启动失败与关闭清理由 `LspClientTest`、`LspClientPoolConcurrencyTest` 验证。
 
-范围不是恶意命令沙箱：命令主动 `setsid`、`set -m` 或交给其他 session 时不受这条边界约束。
-keeper 被外部强杀后的 POSIX 兜底依赖 Linux/WSL `/proc` 成员枚举，并逐个复核存活、启动时刻和组身份；
+范围不是恶意命令沙箱：命令主动 `setsid` 或交给其他 session 时可离开边界；`set -m` 创建的作业进程组仍在同一会话内，必须被收敛。
+keeper 被外部强杀后仍以内核会话枚举收敛（Linux/WSL `/proc`、macOS libproc），并逐个复核存活、启动时刻和会话归属；
 没有身份信息的平台不能把未确认的范围报告为已收敛，也不能盲目按旧 pid 快照发信号。
 
 ## 输出与协议终态

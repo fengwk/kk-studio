@@ -1,6 +1,6 @@
 # kk-studio process scope platform matrix.
 #
-# OS 级执行范围（POSIX 进程组 / Windows Job Object）只用一个平台验证不完：Linux 覆盖 POSIX
+# OS 级执行范围（POSIX 会话 / Windows Job Object）只用一个平台验证不完：Linux 覆盖 POSIX
 # 分支，macOS 覆盖同一套代码在另一种 POSIX 实现上的行为，Windows 覆盖 kernel32 的 Job 语义与
 # 命令行拼装。矩阵只跑与执行范围直接相关的测试，全部是本机进程行为，不需要外部服务、凭证或
 # 模型（真模型/L1 API 回归另见 `scripts/dev/verify/e2e/run.sh`）。
@@ -72,7 +72,7 @@ jobs:
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             # macOS 跑执行范围相关的全部类：POSIX shell 语义由系统 bash 承担，编码能力的边界用例因此同样有证据。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,PosixProcessGroupTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           else
@@ -82,7 +82,7 @@ jobs:
             # BashCapabilityTest 照常在 Windows 上验收（它按平台前置条件跳过的 12 条是它自己的既有约定，断言脚本另外点名
             # 要求其中两条在 Windows 上必须真跑）。helper 覆盖率同样打开：helper 的平台分支只有在对应平台上才会被执行。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,PosixProcessGroupTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           fi

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.daemon.coding;
+package fun.fengwk.kkstudio.harness.daemon.process;
 
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
@@ -146,7 +146,45 @@ public final class WindowsJobScope {
     try {
       scope.limitJobLifetimeToHandle();
       WinBase.PROCESS_INFORMATION information =
-          scope.createSuspendedProcess(command, workdir, duplex);
+          scope.createSuspendedProcess(command, workdir, duplex, false);
+      scope.process = information.hProcess;
+      scope.thread = information.hThread;
+      scope.processId = information.dwProcessId.longValue();
+      return scope;
+    } catch (RuntimeException error) {
+      scope.close();
+      throw error;
+    }
+  }
+
+  /**
+   * helper 侧（PTY / ConPTY）：建立命名 Job，并把首个进程放进 helper 的当前控制台（伪控制台）后再归属。
+   *
+   * <p>与捕获/双向模式的关键区别：命令**不**用 {@code STARTF_USESTDHANDLES} 与 {@code
+   * PROC_THREAD_ATTRIBUTE_HANDLE_LIST} 去显式接管标准句柄，因为 ConPTY 提供的控制台句柄不是普通可继承管道句柄。这里只保留 {@code
+   * PROC_THREAD_ATTRIBUTE_JOB_LIST} 与 {@code CREATE_SUSPENDED}：命令由内核在创建时直接进入 Job，并自动附着到 helper
+   * 当前的控制台（ConPTY），从而继承同一个交互终端。
+   */
+  static WindowsJobScope createSuspendedForConsole(
+      String jobName, List<String> command, Path workdir) {
+    return createSuspendedForConsole(WindowsKernel.INSTANCE, jobName, command, workdir);
+  }
+
+  /** 与 {@link #createSuspendedForConsole(String, List, Path)} 相同的实现，只是显式给出 kernel 绑定。 */
+  static WindowsJobScope createSuspendedForConsole(
+      WindowsKernel kernel, String jobName, List<String> command, Path workdir) {
+    if (command.isEmpty()) {
+      throw new IllegalArgumentException("command must not be empty");
+    }
+    HANDLE job = kernel.CreateJobObject(null, jobName);
+    if (job == null) {
+      throw new IllegalStateException("cannot create the scope job object: " + lastError());
+    }
+    WindowsJobScope scope = new WindowsJobScope(job, true, kernel);
+    try {
+      scope.limitJobLifetimeToHandle();
+      WinBase.PROCESS_INFORMATION information =
+          scope.createSuspendedProcess(command, workdir, false, true);
       scope.process = information.hProcess;
       scope.thread = information.hThread;
       scope.processId = information.dwProcessId.longValue();
@@ -281,89 +319,105 @@ public final class WindowsJobScope {
   }
 
   /**
-   * 按标准流模式以 suspended 状态创建命令进程。
+   * 以 suspended 状态创建命令进程；创建期间保持挂起，等父进程持有 Job 句柄后再恢复。
    *
-   * <p>捕获模式新建一条 stdin 管道（写端只留在 helper 手里，命令因此读到确定性 EOF），并把命令的 stderr 与 stdout 指向同一个
-   * 捕获句柄（两路输出因此合并）；双向模式不创建任何管道，命令直接继承 helper 自己的三条标准流。两种模式下 helper 自己的 stderr
-   * （诊断）都不传给命令，标准句柄都必须可继承——这里是显式校验/设置，而不是假定 Java 启动的进程一定给了可继承句柄。
+   * <p>三种标准流模式共用这一条创建路径（只有参数不同），因此「创建即归属」的保证只有一处实现：
+   *
+   * <ul>
+   *   <li>捕获模式：新建一条 stdin 管道（写端只留在 helper 手里，命令因此读到确定性 EOF），并把命令的 stderr 与 stdout 指向
+   *       同一个捕获句柄（两路输出因此合并）。
+   *   <li>双向模式：不创建任何管道，命令直接继承 helper 自己的三条标准流，stderr 与 stdout 保持独立。
+   *   <li>控制台模式（PTY/ConPTY）：不设置 {@code STARTF_USESTDHANDLES}、也不限制继承列表，命令附着到 helper 当前的控制台；
+   *       控制台句柄不是普通可继承管道句柄，因此这条路径既不带句柄列表也不打开句柄继承。
+   * </ul>
+   *
+   * <p>非控制台模式下 helper 自己的 stderr（诊断）都不传给命令，标准句柄都必须可继承——这里是显式校验/设置，而不是假定 Java 启动的进程一定给了可继承句柄。
    */
   private WinBase.PROCESS_INFORMATION createSuspendedProcess(
-      List<String> command, Path workdir, boolean duplex) {
-    if (duplex) {
-      // 双向模式：命令直接继承 helper 自己的三条标准流（父进程提供的管道），stderr 与 stdout 保持独立。这里没有需要创建或
-      // 关闭的管道，创建即归属仍然由 JOB_LIST 完成。
-      HANDLE standardInput = inheritableStandardHandle(kernel, STD_INPUT_HANDLE, "stdin");
-      HANDLE standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
-      HANDLE standardError = inheritableStandardHandle(kernel, STD_ERROR_HANDLE, "stderr");
-      return createSuspendedProcess(
-          command,
-          workdir,
-          standardInput,
-          standardOutput,
-          standardError,
-          // 三条流可能是同一个句柄（父进程把它们接到同一个管道）：句柄列表里重复会让创建失败。
-          distinct(standardInput, standardOutput, standardError));
-    }
+      List<String> command, Path workdir, boolean duplex, boolean console) {
     HANDLEByReference stdinRead = new HANDLEByReference();
     HANDLEByReference stdinWrite = new HANDLEByReference();
-    if (!kernel.CreatePipe(stdinRead, stdinWrite, inheritableAttributes(), 0)) {
-      throw new IllegalStateException("cannot create the command stdin pipe: " + lastError());
-    }
-    // 管道两端从这一刻起就属于这次调用：无论后面是校验标准句柄、创建属性列表还是创建进程失败，都必须交还给系统，
-    // 因此它们统一由这个 finally 关闭（而不是只在 CreateProcessW 附近关）。
+    boolean pipeCreated = false;
     try {
-      // 写端只留在 helper 手里（并且不可继承）：创建进程后立刻关闭，命令因此读到确定性的 EOF。
-      if (!kernel.SetHandleInformation(stdinWrite.getValue(), HANDLE_FLAG_INHERIT, 0)) {
-        throw new IllegalStateException(
-            "cannot make the command stdin write end private: " + lastError());
+      HANDLE standardInput = null;
+      HANDLE standardOutput = null;
+      HANDLE standardError = null;
+      HANDLE[] inherited = new HANDLE[0];
+      if (!console) {
+        if (duplex) {
+          // 双向模式：命令直接继承 helper 自己的三条标准流（父进程提供的管道）。
+          standardInput = inheritableStandardHandle(kernel, STD_INPUT_HANDLE, "stdin");
+          standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
+          standardError = inheritableStandardHandle(kernel, STD_ERROR_HANDLE, "stderr");
+          // 三条流可能是同一个句柄（父进程把它们接到同一个管道）：句柄列表里重复会让创建失败。
+          inherited = distinct(standardInput, standardOutput, standardError);
+        } else {
+          // 捕获模式：stdin 是一条只有 helper 持有写端的空管道。
+          if (!kernel.CreatePipe(stdinRead, stdinWrite, inheritableAttributes(), 0)) {
+            throw new IllegalStateException("cannot create the command stdin pipe: " + lastError());
+          }
+          pipeCreated = true;
+          // 写端只留在 helper 手里（并且不可继承）：创建进程后立刻关闭，命令因此读到确定性的 EOF。
+          if (!kernel.SetHandleInformation(stdinWrite.getValue(), HANDLE_FLAG_INHERIT, 0)) {
+            throw new IllegalStateException(
+                "cannot make the command stdin write end private: " + lastError());
+          }
+          standardInput = stdinRead.getValue();
+          standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
+          // 捕获模式把两路输出指向同一个句柄，命令的 stderr 因此合并进捕获流。
+          standardError = standardOutput;
+          inherited = new HANDLE[] {standardInput, standardOutput};
+        }
       }
-      HANDLE standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
-      // 捕获模式把两路输出指向同一个句柄，命令的 stderr 因此合并进捕获流。
       return createSuspendedProcess(
-          command,
-          workdir,
-          stdinRead.getValue(),
-          standardOutput,
-          standardOutput,
-          new HANDLE[] {stdinRead.getValue(), standardOutput});
+          command, workdir, standardInput, standardOutput, standardError, inherited, console);
     } finally {
-      closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
+      if (pipeCreated) {
+        // 管道两端从创建那一刻起就属于这次调用：无论后面哪一步失败都必须交还给系统。
+        closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
+      }
     }
   }
 
-  /** 两个模式共用的创建步骤：标准句柄 + 句柄列表 + JOB_LIST，创建期间保持挂起。 */
+  /** 三个模式共用的创建步骤：控制台模式附着控制台，其余模式用标准句柄 + 句柄列表；两种都带 JOB_LIST。 */
   private WinBase.PROCESS_INFORMATION createSuspendedProcess(
       List<String> command,
       Path workdir,
       HANDLE standardInput,
       HANDLE standardOutput,
       HANDLE standardError,
-      HANDLE[] inherited) {
+      HANDLE[] inherited,
+      boolean console) {
     CreationAttributes attributes = null;
     try {
       STARTUPINFOEX startupInfoEx = new STARTUPINFOEX();
       startupInfoEx.StartupInfo.cb = new DWORD(startupInfoEx.size());
-      startupInfoEx.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-      startupInfoEx.StartupInfo.hStdInput = standardInput;
-      startupInfoEx.StartupInfo.hStdOutput = standardOutput;
-      startupInfoEx.StartupInfo.hStdError = standardError;
-      attributes = CreationAttributes.create(kernel, job, inherited);
+      if (console) {
+        // 控制台（含 ConPTY）不是普通管道句柄：命令应附着到 helper 的控制台，而不是被显式标准句柄接管。
+        startupInfoEx.StartupInfo.dwFlags = 0;
+      } else {
+        startupInfoEx.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        startupInfoEx.StartupInfo.hStdInput = standardInput;
+        startupInfoEx.StartupInfo.hStdOutput = standardOutput;
+        startupInfoEx.StartupInfo.hStdError = standardError;
+      }
+      attributes = CreationAttributes.create(kernel, job, inherited, console);
       startupInfoEx.lpAttributeList = attributes;
       startupInfoEx.write();
       WinBase.PROCESS_INFORMATION information = new WinBase.PROCESS_INFORMATION();
+      // 控制台附着与句柄继承无关，因此控制台模式关闭句柄继承，避免把 helper 的管道带进命令。
       if (!kernel.CreateProcessW(
           applicationName(command.getFirst()),
           WindowsCommandLine.join(command),
           null,
           null,
-          true,
+          !console,
           new DWORD(EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED),
           null,
           workdir.toString(),
           startupInfoEx.getPointer(),
           information)) {
-        throw new IllegalStateException(
-            "cannot start command " + command.getFirst() + " in " + workdir + ": " + lastError());
+        throw new IllegalStateException("the command could not be started: " + lastError());
       }
       return information;
     } finally {
@@ -463,37 +517,55 @@ public final class WindowsJobScope {
     /** 属性列表的预留容量：两个属性只需数十字节，留足空间后容量本身不再影响行为。 */
     private static final int CAPACITY = 4096;
 
+    /** 原生属性列表引用这些缓冲区，必须持有到 CreateProcess 完成后再释放。 */
+    private final List<Memory> attributeValues = new ArrayList<>();
+
     private CreationAttributes(int capacity) {
       super(capacity);
     }
 
-    static CreationAttributes create(WindowsKernel kernel, HANDLE job, HANDLE[] inherited) {
+    /**
+     * 建立创建属性列表：两种模式都带 {@code PROC_THREAD_ATTRIBUTE_JOB_LIST}（保证「创建即归属」），非控制台模式额外带 {@code
+     * PROC_THREAD_ATTRIBUTE_HANDLE_LIST} 把继承句柄限制在标准流。
+     *
+     * <p>控制台模式（PTY/ConPTY）不限制继承列表：控制台句柄不是普通可继承管道句柄，命令通过附着 helper 的控制台继承终端。
+     */
+    static CreationAttributes create(
+        WindowsKernel kernel, HANDLE job, HANDLE[] inherited, boolean console) {
       CreationAttributes attributes = new CreationAttributes(CAPACITY);
+      int attributeCount = console ? 1 : CREATION_ATTRIBUTE_COUNT;
       // 容量按 SIZE_T（指针宽度）写出：属性列表只需数十字节，这里留足空间，容量不足时 Initialize 会显式失败。
-      Memory size = new Memory(Math.max(Native.POINTER_SIZE, Long.BYTES));
-      size.setLong(0, CAPACITY);
-      if (!kernel.InitializeProcThreadAttributeList(
-          attributes, CREATION_ATTRIBUTE_COUNT, 0, size)) {
-        throw new IllegalStateException(
-            "cannot initialize the process creation attribute list: " + lastError());
+      try (Memory size = new Memory(Math.max(Native.POINTER_SIZE, Long.BYTES))) {
+        size.setLong(0, CAPACITY);
+        if (!kernel.InitializeProcThreadAttributeList(attributes, attributeCount, 0, size)) {
+          String error = lastError();
+          attributes.close();
+          throw new IllegalStateException(
+              "cannot initialize the process creation attribute list: " + error);
+        }
       }
-      Memory handles = new Memory((long) inherited.length * Native.POINTER_SIZE);
-      for (int index = 0; index < inherited.length; index++) {
-        handles.setPointer((long) index * Native.POINTER_SIZE, inherited[index].getPointer());
-      }
-      if (!kernel.UpdateProcThreadAttribute(
-          attributes,
-          0,
-          attribute(PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
-          handles,
-          new SIZE_T(handles.size()),
-          null,
-          null)) {
-        attributes.close(kernel);
-        throw new IllegalStateException(
-            "cannot limit the inherited handles to the standard streams: " + lastError());
+      if (!console) {
+        Memory handles = new Memory((long) inherited.length * Native.POINTER_SIZE);
+        attributes.attributeValues.add(handles);
+        for (int index = 0; index < inherited.length; index++) {
+          handles.setPointer((long) index * Native.POINTER_SIZE, inherited[index].getPointer());
+        }
+        if (!kernel.UpdateProcThreadAttribute(
+            attributes,
+            0,
+            attribute(PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
+            handles,
+            new SIZE_T(handles.size()),
+            null,
+            null)) {
+          String error = lastError();
+          attributes.close(kernel);
+          throw new IllegalStateException(
+              "cannot limit the inherited handles to the standard streams: " + error);
+        }
       }
       Memory jobValue = new Memory(Native.POINTER_SIZE);
+      attributes.attributeValues.add(jobValue);
       jobValue.setPointer(0, job.getPointer());
       if (!kernel.UpdateProcThreadAttribute(
           attributes,
@@ -503,9 +575,10 @@ public final class WindowsJobScope {
           new SIZE_T(Native.POINTER_SIZE),
           null,
           null)) {
+        String error = lastError();
         attributes.close(kernel);
         throw new IllegalStateException(
-            "cannot assign the command process to the scope job object: " + lastError());
+            "cannot assign the command process to the scope job object: " + error);
       }
       return attributes;
     }
@@ -514,9 +587,11 @@ public final class WindowsJobScope {
       return Pointer.createConstant(value);
     }
 
-    /** 释放属性列表；缓冲区自身由 GC 管理，这里只让内核释放它自己分配的记录。 */
+    /** 先删除原生属性列表，再释放其引用的缓冲区。 */
     void close(WindowsKernel kernel) {
       kernel.DeleteProcThreadAttributeList(this);
+      attributeValues.forEach(Memory::close);
+      super.close();
     }
   }
 

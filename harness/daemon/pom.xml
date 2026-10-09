@@ -7,7 +7,7 @@
     <parent>
         <groupId>fun.fengwk.kk-studio</groupId>
         <artifactId>kk-studio-harness</artifactId>
-        <version>1.0.9</version>
+        <version>1.0.10</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -17,8 +17,23 @@
         <!-- 标准 Java LSP 客户端（JSON-RPC 分帧与协议模型）。 -->
         <lsp4j.version>1.0.0</lsp4j.version>
         <!-- 执行范围的原生边界：POSIX setsid/kill 与 Windows Job Object/CreateProcessW。 -->
-        <jna.version>5.17.0</jna.version>
+        <jna.version>5.19.1</jna.version>
+        <!-- 伪终端（PTY / ConPTY）支持：交互式终端 stdio 模式。 -->
+        <pty4j.version>0.14.0</pty4j.version>
+        <!-- SLF4J：pty4j 与 JGit 以 SLF4J 记录诊断，绑定固定为 nop，避免无绑定告警污染用户终端（PTY 模式下 stderr 就是终端）。 -->
+        <slf4j.version>2.0.19</slf4j.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- 对齐 SLF4J：JGit 传递 2.0.18、pty4j 声明 2.0.19，这里统一为 2.0.19，使 nop 绑定与 API 同版本。 -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -67,6 +82,19 @@
             <groupId>net.java.dev.jna</groupId>
             <artifactId>jna-platform</artifactId>
             <version>${jna.version}</version>
+        </dependency>
+        <!-- 伪终端：交互终端 stdio 模式（PTY）在 Linux/macOS 用 pty4j 原生库，在 Windows 用 ConPTY。 -->
+        <dependency>
+            <groupId>org.jetbrains.pty4j</groupId>
+            <artifactId>pty4j</artifactId>
+            <version>${pty4j.version}</version>
+        </dependency>
+        <!-- pty4j 以 SLF4J 记录诊断；绑定固定为 nop，避免「没有 provider」告警混进用户终端（PTY 模式下 stderr 就是终端）。 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-nop</artifactId>
+            <version>${slf4j.version}</version>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
