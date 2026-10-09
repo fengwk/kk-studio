@@ -75,7 +75,7 @@ jobs:
             # macOS 跑执行范围与终端基座相关的全部类：POSIX shell 语义由系统 bash 承担，编码能力的边界用例因此同样有证据；
             # 终端内核、数值投影与 launch 规格也在这里真跑。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest,TerminalKernelTest,TerminalKernelSchedulingTest,TerminalSnapshotProjectorTest,HeadlessTerminalDisplayTest,TerminalLaunchSpecTest,TerminalViewStreamTest,TerminalRuntimeDeterministicTest,TerminalRuntimeRealPtyTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,WindowsCommandLineTest,WindowsJobScopeTest,TerminalKernelTest,TerminalKernelSchedulingTest,TerminalSnapshotProjectorTest,HeadlessTerminalDisplayTest,TerminalLaunchSpecTest,TerminalViewStreamTest,TerminalRuntimeDeterministicTest,TerminalRuntimeRealPtyTest,TerminalWriterTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           else
@@ -86,7 +86,7 @@ jobs:
             # 要求其中两条在 Windows 上必须真跑）。终端内核、数值投影与 launch 规格同属本腿范围，也在此真跑。helper
             # 覆盖率同样打开：helper 的平台分支只有在对应平台上才会被执行。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest,TerminalKernelTest,TerminalKernelSchedulingTest,TerminalSnapshotProjectorTest,HeadlessTerminalDisplayTest,TerminalLaunchSpecTest,TerminalViewStreamTest,TerminalRuntimeDeterministicTest,TerminalRuntimeRealPtyTest' \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,ProcessScopePtyIntegrationTest,ProcessScopeInteractivePtyTest,ProcessScopeConPtyIntegrationTest,PosixProcessSessionTest,PosixProcessSignalOrderTest,BashCapabilityTest,WindowsCommandLineTest,WindowsJobScopeTest,TerminalKernelTest,TerminalKernelSchedulingTest,TerminalSnapshotProjectorTest,HeadlessTerminalDisplayTest,TerminalLaunchSpecTest,TerminalViewStreamTest,TerminalRuntimeDeterministicTest,TerminalRuntimeRealPtyTest,TerminalWriterTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           fi

@@ -40,6 +40,7 @@ TERMINAL_CLASSES = frozenset(
         "TerminalViewStreamTest",
         "TerminalRuntimeDeterministicTest",
         "TerminalRuntimeRealPtyTest",
+        "TerminalWriterTest",
     }
 )
 
@@ -83,6 +84,7 @@ SELECTED_CLASSES = (
     "TerminalViewStreamTest",
     "TerminalRuntimeDeterministicTest",
     "TerminalRuntimeRealPtyTest",
+    "TerminalWriterTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -184,6 +186,18 @@ TERMINAL_RUNTIME_PTY_CASES = (
     "startDeclaresTermAndTrueColorToTheCommand",
     "repeatedCloseIsIdempotentAfterNaturalExit",
 )
+TERMINAL_WRITER_CASES = (
+    "acceptedOnceThenPendingThenConfirmed",
+    "pendingOperationMakesRotationsBusy",
+    "takeoverUsesEpochCasAndLateTakeoverCannotReclaim",
+    "takeoverResetsEpochDedupWatermarks",
+    "recoverResetsEpochWatermarksAndOldCompletionDoesNotAffectNewEpoch",
+    "expiredGrantWithPendingIsBusyThenRecoversRealOutcome",
+    "grantedReplayIsRevalidatedAfterExpiry",
+    "renewedReplayIsRevalidatedAndDoesNotExtendLease",
+    "requestConflictDoesNotPolluteFirstRequestReplay",
+    "grantedReplayAfterFreezeIsFrozenAndStateHidesAuthority",
+)
 CORE_CLASSES = (
     "ProcessScope",
     "ProcessScopeHelper",
@@ -277,6 +291,8 @@ def write_complete_reports(
             cases = TERMINAL_RUNTIME_CASES
         elif class_name == "TerminalRuntimeRealPtyTest":
             cases = TERMINAL_RUNTIME_PTY_CASES
+        elif class_name == "TerminalWriterTest":
+            cases = TERMINAL_WRITER_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -564,13 +580,14 @@ class AssertSurefireReportsTest(unittest.TestCase):
                         )
 
     def test_every_platform_requires_line_identity_and_stream_cases(self):
-        """行身份与 applied-only credit 的关键用例缺失、跳过或重复时都必须失败。"""
+        """行身份、credit、native 与 writer 围栏用例缺失、跳过或重复时都必须失败。"""
         selected = (
             ("TerminalKernelTest", TERMINAL_KERNEL_CASES, TERMINAL_KERNEL_CASES[-2:]),
             ("TerminalSnapshotProjectorTest", TERMINAL_PROJECTOR_CASES, TERMINAL_PROJECTOR_CASES[-2:]),
             ("TerminalViewStreamTest", TERMINAL_VIEW_STREAM_CASES, TERMINAL_VIEW_STREAM_CASES),
             ("TerminalRuntimeDeterministicTest", TERMINAL_RUNTIME_CASES, TERMINAL_RUNTIME_CASES),
             ("TerminalRuntimeRealPtyTest", TERMINAL_RUNTIME_PTY_CASES, TERMINAL_RUNTIME_PTY_CASES),
+            ("TerminalWriterTest", TERMINAL_WRITER_CASES, TERMINAL_WRITER_CASES),
         )
         for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
             for class_name, all_cases, required_cases in selected:

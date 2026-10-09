@@ -40,6 +40,7 @@ TERMINAL_PACKAGE_CLASSES = frozenset(
         "TerminalViewStreamTest",
         "TerminalRuntimeDeterministicTest",
         "TerminalRuntimeRealPtyTest",
+        "TerminalWriterTest",
     }
 )
 
@@ -125,6 +126,19 @@ TERMINAL_RUNTIME_PTY_REQUIRED_CASES = {
     "repeatedCloseIsIdempotentAfterNaturalExit",
 }
 
+TERMINAL_WRITER_REQUIRED_CASES = {
+    "acceptedOnceThenPendingThenConfirmed",
+    "pendingOperationMakesRotationsBusy",
+    "takeoverUsesEpochCasAndLateTakeoverCannotReclaim",
+    "takeoverResetsEpochDedupWatermarks",
+    "recoverResetsEpochWatermarksAndOldCompletionDoesNotAffectNewEpoch",
+    "expiredGrantWithPendingIsBusyThenRecoversRealOutcome",
+    "grantedReplayIsRevalidatedAfterExpiry",
+    "renewedReplayIsRevalidatedAndDoesNotExtendLease",
+    "requestConflictDoesNotPolluteFirstRequestReplay",
+    "grantedReplayAfterFreezeIsFrozenAndStateHidesAuthority",
+}
+
 # 核心验收：只用 JDK 夹具造真实进程层级，任何平台都没有跳过它们的理由。
 REQUIRED_CASES = {
     "fun.fengwk.kkstudio.harness.daemon.process.ProcessScopeCrossPlatformTest": {
@@ -144,6 +158,7 @@ REQUIRED_CASES = {
     TERMINAL_PACKAGE + "TerminalViewStreamTest": TERMINAL_VIEW_STREAM_REQUIRED_CASES,
     TERMINAL_PACKAGE + "TerminalRuntimeDeterministicTest": TERMINAL_RUNTIME_REQUIRED_CASES,
     TERMINAL_PACKAGE + "TerminalRuntimeRealPtyTest": TERMINAL_RUNTIME_PTY_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "TerminalWriterTest": TERMINAL_WRITER_REQUIRED_CASES,
 }
 
 # Windows 腿仍然要有「用真正的 Git Bash 跑通命令执行」的实证：BashCapabilityTest 自己显式定位 Git Bash（runner 上就是
@@ -231,6 +246,7 @@ SELECTED_CLASSES = (
     "TerminalViewStreamTest",
     "TerminalRuntimeDeterministicTest",
     "TerminalRuntimeRealPtyTest",
+    "TerminalWriterTest",
 )
 
 
