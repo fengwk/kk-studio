@@ -37,6 +37,7 @@ TERMINAL_CLASSES = frozenset(
         "TerminalSnapshotProjectorTest",
         "HeadlessTerminalDisplayTest",
         "TerminalLaunchSpecTest",
+        "TerminalViewStreamTest",
     }
 )
 
@@ -77,6 +78,7 @@ SELECTED_CLASSES = (
     "TerminalSnapshotProjectorTest",
     "HeadlessTerminalDisplayTest",
     "TerminalLaunchSpecTest",
+    "TerminalViewStreamTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -127,6 +129,8 @@ TERMINAL_KERNEL_CASES = (
     "asciiProjectsNumericSlotsAndPaddedEmptyTail",
     "inputModesAndRevisionTrackOnlyModeOrSizeChanges",
     "resizingHashCollisionDimensionsStillAdvancesRevision",
+    "identicalBlankScrollMovesObservedScreenIdIntoHistoryAndAllocatesNewRowId",
+    "heightChangeAndBufferRoundTripBetweenCapturesStillResetIdentity",
 )
 TERMINAL_SCHEDULING_CASES = (
     "snapshotBeforePartialCsiSuffixThenSuffixStillApplies",
@@ -142,6 +146,8 @@ TERMINAL_PROJECTOR_CASES = (
     "dwcContinuationAndOverflowTruncationAreExplicit",
     "styleProjectionMapsColorsOptionsAndNull",
     "everyPublicDisplayModeProjectsWithoutRenamingOrDroppingValues",
+    "hundredsOfBlankScrollsTrimReferencesAndNeverGuessTextOverlap",
+    "alternateCaptureRetainsOnlyActiveRowsAndRestoredMainGetsNewIds",
 )
 HEADLESS_DISPLAY_CASES = ("recordsDisplayStateAndIgnoresHeadlessOperations",)
 TERMINAL_LAUNCH_CASES = (
@@ -149,6 +155,14 @@ TERMINAL_LAUNCH_CASES = (
     "unixDefaultsToResolvableShellThenSh",
     "unresolvedExecutableFailsClosedWithoutEchoingCommand",
     "windowsSelectsFirstResolvableShellWithoutRuntimeFallback",
+)
+TERMINAL_VIEW_STREAM_CASES = (
+    "newStreamEmitsVersionOneResetAndHasNoBaselineUntilAck",
+    "ackRequiresExactStreamIdAndInflightVersion",
+    "inflightBlocksFurtherOffersAndIgnoresLatestView",
+    "realKernelScrollProducesBoundedPatchesWithTrim",
+    "decreasingInputModeRevisionIsRejected",
+    "closeAfterAckReleasesBaselineAndKeepsVersionHistory",
 )
 CORE_CLASSES = (
     "ProcessScope",
@@ -237,6 +251,8 @@ def write_complete_reports(
             cases = HEADLESS_DISPLAY_CASES
         elif class_name == "TerminalLaunchSpecTest":
             cases = TERMINAL_LAUNCH_CASES + ("someOtherLaunchCase",)
+        elif class_name == "TerminalViewStreamTest":
+            cases = TERMINAL_VIEW_STREAM_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -508,7 +524,7 @@ class AssertSurefireReportsTest(unittest.TestCase):
             self.assertIn("missing surefire report", result.stdout)
 
     def test_every_platform_requires_the_terminal_reports(self):
-        """终端内核、投影、headless Display 与 launch 的报告在每条矩阵腿都必须存在：缺失即失败。"""
+        """每条矩阵腿都必须包含终端基座报告，视图流也不能漏跑。"""
         for class_name in sorted(TERMINAL_CLASSES):
             for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
                 with self.subTest(class_name=class_name, os_label=os_label):
@@ -522,6 +538,38 @@ class AssertSurefireReportsTest(unittest.TestCase):
                             f"{class_name}: missing surefire report on {os_label}",
                             result.stdout,
                         )
+
+    def test_every_platform_requires_line_identity_and_stream_cases(self):
+        """行身份与 applied-only credit 的关键用例缺失、跳过或重复时都必须失败。"""
+        selected = (
+            ("TerminalKernelTest", TERMINAL_KERNEL_CASES, TERMINAL_KERNEL_CASES[-2:]),
+            ("TerminalSnapshotProjectorTest", TERMINAL_PROJECTOR_CASES, TERMINAL_PROJECTOR_CASES[-2:]),
+            ("TerminalViewStreamTest", TERMINAL_VIEW_STREAM_CASES, TERMINAL_VIEW_STREAM_CASES),
+        )
+        for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            for class_name, all_cases, required_cases in selected:
+                for required in required_cases:
+                    for cases, skipped_cases in (
+                        (tuple(case for case in all_cases if case != required), ()),
+                        (all_cases, (required,)),
+                        (all_cases + (required,), ()),
+                    ):
+                        with self.subTest(
+                            os_label=os_label, class_name=class_name,
+                            required=required, cases=cases, skipped_cases=skipped_cases,
+                        ):
+                            with tempfile.TemporaryDirectory() as tmp:
+                                reports = Path(tmp)
+                                write_complete_reports(reports)
+                                write_surefire_report(
+                                    reports, class_name, cases,
+                                    skipped=len(skipped_cases), skipped_cases=skipped_cases,
+                                )
+                                result = run_script("assert-surefire-reports.py", reports, os_label)
+                                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                                self.assertIn(class_name, result.stdout)
+                                if not skipped_cases:
+                                    self.assertIn(required, result.stdout)
 
     def test_fails_when_a_terminal_kernel_case_is_skipped(self):
         """终端基座核心用例没有平台前置条件，被跳过即失败。"""

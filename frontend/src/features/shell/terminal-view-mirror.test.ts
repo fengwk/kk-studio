@@ -542,7 +542,6 @@ describe('terminal-view-mirror', () => {
       const badReset = {
         ...r,
         version: 6,
-        lines: r.lines,
         screenRows: [
           { row: 0, line: { ...r.screenRows[0].line, id: 999 } },
           { row: 1, line: { ...r.screenRows[1].line, id: 999 } },

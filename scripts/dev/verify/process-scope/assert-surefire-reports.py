@@ -37,6 +37,7 @@ TERMINAL_PACKAGE_CLASSES = frozenset(
         "TerminalSnapshotProjectorTest",
         "HeadlessTerminalDisplayTest",
         "TerminalLaunchSpecTest",
+        "TerminalViewStreamTest",
     }
 )
 
@@ -56,6 +57,8 @@ TERMINAL_KERNEL_REQUIRED_CASES = {
     "asciiProjectsNumericSlotsAndPaddedEmptyTail",
     "inputModesAndRevisionTrackOnlyModeOrSizeChanges",
     "resizingHashCollisionDimensionsStillAdvancesRevision",
+    "identicalBlankScrollMovesObservedScreenIdIntoHistoryAndAllocatesNewRowId",
+    "heightChangeAndBufferRoundTripBetweenCapturesStillResetIdentity",
 }
 
 TERMINAL_KERNEL_SCHEDULING_REQUIRED_CASES = {
@@ -76,6 +79,8 @@ TERMINAL_PROJECTOR_REQUIRED_CASES = {
     "dwcContinuationAndOverflowTruncationAreExplicit",
     "styleProjectionMapsColorsOptionsAndNull",
     "everyPublicDisplayModeProjectsWithoutRenamingOrDroppingValues",
+    "hundredsOfBlankScrollsTrimReferencesAndNeverGuessTextOverlap",
+    "alternateCaptureRetainsOnlyActiveRowsAndRestoredMainGetsNewIds",
 }
 
 HEADLESS_DISPLAY_REQUIRED_CASES = {
@@ -89,6 +94,15 @@ TERMINAL_LAUNCH_REQUIRED_CASES = {
     "unixDefaultsToResolvableShellThenSh",
     "unresolvedExecutableFailsClosedWithoutEchoingCommand",
     "windowsSelectsFirstResolvableShellWithoutRuntimeFallback",
+}
+
+TERMINAL_VIEW_STREAM_REQUIRED_CASES = {
+    "newStreamEmitsVersionOneResetAndHasNoBaselineUntilAck",
+    "ackRequiresExactStreamIdAndInflightVersion",
+    "inflightBlocksFurtherOffersAndIgnoresLatestView",
+    "realKernelScrollProducesBoundedPatchesWithTrim",
+    "decreasingInputModeRevisionIsRejected",
+    "closeAfterAckReleasesBaselineAndKeepsVersionHistory",
 }
 
 # 核心验收：只用 JDK 夹具造真实进程层级，任何平台都没有跳过它们的理由。
@@ -107,6 +121,7 @@ REQUIRED_CASES = {
     TERMINAL_PACKAGE + "TerminalSnapshotProjectorTest": TERMINAL_PROJECTOR_REQUIRED_CASES,
     TERMINAL_PACKAGE + "HeadlessTerminalDisplayTest": HEADLESS_DISPLAY_REQUIRED_CASES,
     TERMINAL_PACKAGE + "TerminalLaunchSpecTest": TERMINAL_LAUNCH_REQUIRED_CASES,
+    TERMINAL_PACKAGE + "TerminalViewStreamTest": TERMINAL_VIEW_STREAM_REQUIRED_CASES,
 }
 
 # Windows 腿仍然要有「用真正的 Git Bash 跑通命令执行」的实证：BashCapabilityTest 自己显式定位 Git Bash（runner 上就是
@@ -191,6 +206,7 @@ SELECTED_CLASSES = (
     "TerminalSnapshotProjectorTest",
     "HeadlessTerminalDisplayTest",
     "TerminalLaunchSpecTest",
+    "TerminalViewStreamTest",
 )
 
 
