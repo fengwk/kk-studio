@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
 /** 装配 Platform 统一 {@code read} 工具执行器与相关内容读取器的 Spring 配置。 */
 @Configuration(proxyBeanMethods = false)
@@ -29,9 +30,13 @@ public class PlatformReadConfiguration {
   public PlatformResourceContentReader platformResourceContentReader(
       ObjectProvider<HarnessStore> harnessStoreProvider,
       SessionBlobRefManager sessionBlobRefManager,
+      StorageBlobManager storageBlobManager,
       StorageBlobContentService storageBlobContentService) {
     return new PlatformResourceContentReader(
-        harnessStoreProvider::getIfAvailable, sessionBlobRefManager, storageBlobContentService);
+        harnessStoreProvider::getIfAvailable,
+        sessionBlobRefManager,
+        storageBlobManager,
+        storageBlobContentService);
   }
 
   @Bean

@@ -22,6 +22,10 @@ final class ResourceUriValidator {
   private static final Pattern CANONICAL_BASE64 =
       Pattern.compile("(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?");
 
+  /** 规范 Session 资源形态：{@code /resources/<canonical-lowercase-uuid>}。 */
+  private static final Pattern SESSION_RESOURCE_SSP =
+      Pattern.compile("/resources/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+
   private static final String UPPER_HEX = "0123456789ABCDEF";
 
   private ResourceUriValidator() {}
@@ -71,6 +75,10 @@ final class ResourceUriValidator {
       }
       case "blob-upload" -> {
         validateBlobUpload(parsed, size, sha256);
+        yield null;
+      }
+      case "kkstudio" -> {
+        validateSessionResource(parsed, size, sha256);
         yield null;
       }
       case "http", "https" -> {
@@ -251,6 +259,27 @@ final class ResourceUriValidator {
     }
     if (!parsedUploadId.toString().equals(uploadId)) {
       throw new IllegalArgumentException("blob-upload uri must carry a canonical UUID");
+    }
+  }
+
+  /**
+   * Session 资源 URI：精确 {@code kkstudio:/resources/<canonical-uuid>}，无
+   * authority/query/fragment，必须携带非空 size/sha。
+   *
+   * <p>它只表示「字节已在全局对象存储且已由当前 Session 引用」这一 durable 引用；它不是可解引用的取数地址，消费方只能通过 Session 引用权限与 Blob
+   * 状态核验后复用同一 blob。
+   */
+  private static void validateSessionResource(URI parsed, Long size, String sha256) {
+    requireSizeAndSha(size, sha256, "kkstudio");
+    if (parsed.getRawAuthority() != null
+        || parsed.getRawQuery() != null
+        || parsed.getRawFragment() != null) {
+      throw new IllegalArgumentException("kkstudio uri must not carry authority/query/fragment");
+    }
+    String ssp = parsed.getRawSchemeSpecificPart();
+    if (ssp == null || !SESSION_RESOURCE_SSP.matcher(ssp).matches()) {
+      throw new IllegalArgumentException(
+          "kkstudio uri must be exactly kkstudio:/resources/<canonical-uuid>");
     }
   }
 

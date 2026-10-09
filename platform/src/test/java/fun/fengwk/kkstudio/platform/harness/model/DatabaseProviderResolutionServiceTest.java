@@ -672,6 +672,53 @@ class DatabaseProviderResolutionServiceTest {
     verify(blobManager, never()).presignOriginalUrl(any());
   }
 
+  /**
+   * 意图：media 投影只由冻结请求的模型模态决定；冻结模型未声明 IMAGE 时，即使当前 adapter 声明了 USER IMAGE 能力也不得内联，
+   * 必须在读取任何存储内容之前显式失败（不使用任何实时模型能力）。
+   */
+  @Test
+  void resolveGatesMediaOnFrozenModelModalitiesNotAdapterCapabilityAlone() {
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    UUID blobId = new UUID(0L, 1L);
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setMediaType("image/png");
+    blob.setSizeBytes(3L);
+    blob.setState(StorageBlobState.ACTIVE);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    ProviderMediaCapabilities capabilities =
+        new ProviderMediaCapabilities(
+            Set.of(ModelInputModality.IMAGE), Set.of(ModelInputModality.IMAGE));
+    ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class), capabilities);
+    DatabaseProviderResolutionService resolution =
+        resolution(
+            blobManager,
+            contentService,
+            new ProviderFactories(
+                List.of(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter))));
+    ProviderRequest persisted =
+        request(
+            ProviderCacheControl.none(),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER,
+                    List.of(
+                        ProviderResourceBlock.media(
+                            blobId, "scan.png", "tiny", ImageInputTier.ORIGINAL)))),
+            List.of(),
+            Set.of(ModelInputModality.TEXT));
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted));
+
+    assertTrue(error.getMessage().contains("model does not declare IMAGE"), error.getMessage());
+    verify(contentService, never()).readBlobContent(any(), anyLong());
+  }
+
   // ---------- 测试基座 ----------
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {
