@@ -954,8 +954,10 @@ export const settingsCatalog = {
     'zh-CN': '上传与 S3 预签名',
   },
   'settings.section.storageMedia.upload.description': {
-    'en-US': 'Upload expiry and S3 presigned URL budgets.',
-    'zh-CN': '上传有效期与 S3 预签名 URL 预算。',
+    'en-US':
+      'Upload lifetime and S3 presigned URL budgets. Upload lifetime applies on the next decision to existing unclaimed uploads, not only to new uploads.',
+    'zh-CN':
+      '上传有效期与 S3 预签名 URL 预算。上传有效期在下次判断时作用于存量未 claim 上传，而不只是新上传。',
   },
   'settings.section.storageMedia.canvasMedia.title': {
     'en-US': 'Canvas media processing',
@@ -970,8 +972,10 @@ export const settingsCatalog = {
     'zh-CN': '上传有效期（秒）',
   },
   'settings.field.storageMedia.uploadExpiresSeconds.hint': {
-    'en-US': 'Expiration period in seconds for temporary upload credentials and upload URLs.',
-    'zh-CN': '临时上传凭证与上传链接的有效秒数。',
+    'en-US':
+      'Lifetime in seconds of an upload from its creation. Shortening it immediately expires older unclaimed uploads on their next check; extending it keeps unclaimed uploads alive. Once cleanup has started it never revives.',
+    'zh-CN':
+      '上传自创建起的有效秒数。缩短后存量未 claim 上传会在下次判断时立即过期；延长则让未 claim 上传继续有效；清理一旦开始便不再复活。',
   },
   'settings.field.storageMedia.s3PresignDefaultExpiresSeconds': {
     'en-US': 'S3 presign default expiry (s)',

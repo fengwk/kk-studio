@@ -1454,8 +1454,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   private void backdateUpload(String uploadId) {
     jdbc.update(
-        "update storage_upload set created_at = expires_at - interval '2 hours',"
-            + " expires_at = current_timestamp - interval '1 minute' where id = ?",
+        "update storage_upload set created_at = current_timestamp - interval '2 days' where id = ?",
         UUID.fromString(uploadId));
   }
 
