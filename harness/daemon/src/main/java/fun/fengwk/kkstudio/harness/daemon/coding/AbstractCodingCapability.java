@@ -21,11 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** 文件系统 coding capability 的通用异步执行与严格 JSON 访问。 */
 abstract class AbstractCodingCapability implements EnvironmentCapability {
 
-  /** 受控诊断的失败产生点所在包：本模块自身，以及 read 窗口核心（binary/编码/越界诊断的固定文案）。 */
-  private static final String[] CONTROLLED_DIAGNOSTIC_PACKAGES = {
-    "fun.fengwk.kkstudio.harness.daemon.coding.", "fun.fengwk.kkstudio.harness.common.text."
-  };
-
   private static final String VERIFY_EFFECT_NEXT_ACTION =
       "Verify whether the intended effect already took place before deciding what to do next";
 
@@ -87,7 +82,8 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
    *
    * <ul>
    *   <li>{@link ToolInputRejectedException} 是本模块已确认的派发前输入拒绝，可以声明未执行；
-   *   <li>由本模块失败产生点显式生成的受控诊断（binary/编码、搜索限界、LSP 未配置或超时等）保留其固定安全文案，但因为可能发生在副作用之后，只声明结果不可确认；
+   *   <li>{@link ToolRunFailureException} / {@link ToolServiceFailureException}
+   *       是本模块在失败产生点给出的受控诊断，保留其固定安全文案，但因为可能发生在副作用之后，只声明结果不可确认；
    *   <li>其余异常（Jackson、IO、JDK 子类等）的 message 可能内联参数片段或凭据，一律用固定安全文案，绝不回显。
    * </ul>
    */
@@ -98,7 +94,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
           ExecutionFact.NOT_EXECUTED,
           "Correct the arguments to match the tool schema, then call the tool again");
     }
-    if (isControlledDiagnostic(error)) {
+    if (error instanceof ToolRunFailureException || error instanceof ToolServiceFailureException) {
       return ToolErrorGuidance.message(
           nonBlank(error), ExecutionFact.UNCERTAIN, VERIFY_EFFECT_NEXT_ACTION);
     }
@@ -107,24 +103,6 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
             + " leaking details",
         ExecutionFact.UNCERTAIN,
         VERIFY_EFFECT_NEXT_ACTION);
-  }
-
-  /**
-   * 失败是否由本模块的失败产生点显式生成：这类异常的顶层栈帧落在本包，文案是本模块自己的固定说明（可含调用方给出的绝对路径或 binary 名），不携带凭据、原始 arguments 或异常栈。
-   * 其他异常（Jackson、IO、JDK）的顶层栈帧不在本包，message 可能内联参数凭据，因此不回显。
-   */
-  private static boolean isControlledDiagnostic(Throwable error) {
-    StackTraceElement[] frames = error.getStackTrace();
-    if (frames.length == 0) {
-      return false;
-    }
-    String origin = frames[0].getClassName();
-    for (String prefix : CONTROLLED_DIAGNOSTIC_PACKAGES) {
-      if (origin.startsWith(prefix)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private static String nonBlank(Throwable error) {

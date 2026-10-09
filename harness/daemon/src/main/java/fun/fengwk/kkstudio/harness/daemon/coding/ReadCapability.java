@@ -72,7 +72,7 @@ public final class ReadCapability extends AbstractCodingCapability {
 
     if (!Files.isRegularFile(path)) {
       // 字符设备、FIFO、socket、块设备等非普通节点必须在任何 I/O 之前拒绝：否则 probe/阅读可能阻塞或给出伪造空文本。
-      throw new IllegalArgumentException("not a regular file: " + displayPath);
+      throw new ToolRunFailureException("not a regular file: " + displayPath);
     }
 
     byte[] probe = TextStreams.probe(path);
@@ -86,7 +86,7 @@ public final class ReadCapability extends AbstractCodingCapability {
 
     TextStreams.Encoding encoding = TextStreams.detectEncoding(probe);
     if (encoding.looksBinary(probe)) {
-      throw new IllegalArgumentException("file appears to be binary");
+      throw new ToolRunFailureException("file appears to be binary");
     }
 
     String text =
@@ -227,7 +227,7 @@ public final class ReadCapability extends AbstractCodingCapability {
       return null;
     }
     if (!value.isInt() || value.intValue() < 1) {
-      throw new IllegalArgumentException(name + " must be a positive integer");
+      throw new ToolInputRejectedException(name + " must be a positive integer");
     }
     return value.intValue();
   }

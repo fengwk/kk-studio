@@ -634,6 +634,80 @@ class CodingCapabilitiesEdgeTest {
     }
   }
 
+  /** 伪造受控来源的栈帧不能改变分类：只有显式受控类型保留文案，任意异常一律固定安全文案且不回显。 */
+  @Test
+  void forgedTopStackDoesNotMakeArbitraryMessageTrusted() throws Exception {
+    RuntimeException forged = new RuntimeException("secret-token-forged-4f2a");
+    forged.setStackTrace(
+        new StackTraceElement[] {
+          new StackTraceElement(
+              ProbeCapability.class.getPackageName() + ".NotATrustedOrigin", "run", "X.java", 1)
+        });
+    EnvironmentCapabilityResult result =
+        invoke(
+            new ProbeCapability(config(2000, 60000), executor, forged, null, null),
+            probeArguments());
+
+    assertTrue(result.error(), text(result));
+    assertTrue(text(result).contains("cannot be confirmed"), text(result));
+    assertFalse(text(result).contains("NotATrustedOrigin"), text(result));
+    assertFalse(text(result).contains("secret-token-forged-4f2a"), text(result));
+    assertFalse(text(result).contains("The tool was not executed."), text(result));
+  }
+
+  /** 显式受控类型（ToolRunFailureException）保留产生点给出的固定安全文案，并声明结果不可确认。 */
+  @Test
+  void controlledRunFailureKeepsItsSafeDiagnostic() throws Exception {
+    EnvironmentCapabilityResult result =
+        invoke(
+            new ProbeCapability(
+                config(2000, 60000),
+                executor,
+                new ToolRunFailureException("binary payload rejected"),
+                null,
+                null),
+            probeArguments());
+
+    assertTrue(result.error(), text(result));
+    assertTrue(text(result).contains("binary payload rejected"), text(result));
+    assertTrue(text(result).contains("cannot be confirmed"), text(result));
+    assertFalse(text(result).contains("The tool was not executed."), text(result));
+  }
+
+  /** 取消可能发生在副作用之后：终态恰好一次，且声明结果不可确认而不是未执行。 */
+  @Test
+  void cancellationReportsUncertainExactlyOnce() throws Exception {
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    RecordingListener listener = new RecordingListener();
+    listener.handle =
+        new ProbeCapability(config(2000, 60000), executor, null, entered, release)
+            .execute(
+                new EnvironmentCapabilityExecutionRequest(
+                    EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ),
+                    new EnvironmentCapabilityCall("cancel", probeArguments()),
+                    Duration.ZERO),
+                listener);
+
+    assertTrue(entered.await(5, TimeUnit.SECONDS));
+    listener.handle.cancel();
+    assertTrue(listener.await());
+    listener.handle.cancel();
+
+    assertTrue(text(listener.result).contains("Operation cancelled"), text(listener.result));
+    assertTrue(
+        text(listener.result).contains("Whether the tool took effect cannot be confirmed"),
+        text(listener.result));
+    assertFalse(
+        text(listener.result).contains("The tool was not executed."), text(listener.result));
+    assertEquals(1, listener.completions, "终态回调必须恰好一次");
+  }
+
+  /** 测试双使用的最小合法 fs.read 参数：只用于通过请求期 schema 校验，测试双不会访问文件系统。 */
+  private String probeArguments() {
+    return "{\"path\":\"" + workspaceRoot.resolve("probe.txt") + "\"}";
+  }
+
   private EditCapability edit(CodingToolsConfig config) {
     return new EditCapability(config, executor);
   }
@@ -686,6 +760,37 @@ class CodingCapabilitiesEdgeTest {
 
   private static String text(ResultContent content) {
     return content instanceof TextResultContent value ? value.text() : "";
+  }
+
+  /** 失败分类测试双：可抛出指定异常，或阻塞直到被中断（用于取消路径）。 */
+  private static final class ProbeCapability extends AbstractCodingCapability {
+    private final Exception failure;
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
+
+    private ProbeCapability(
+        CodingToolsConfig config,
+        ExecutorService executor,
+        Exception failure,
+        CountDownLatch entered,
+        CountDownLatch release) {
+      super(
+          config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ));
+      this.failure = failure;
+      this.entered = entered;
+      this.release = release;
+    }
+
+    @Override
+    EnvironmentCapabilityResult run(
+        EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
+      if (failure != null) {
+        throw failure;
+      }
+      entered.countDown();
+      release.await();
+      return success(request.call().id(), "done");
+    }
   }
 
   private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {

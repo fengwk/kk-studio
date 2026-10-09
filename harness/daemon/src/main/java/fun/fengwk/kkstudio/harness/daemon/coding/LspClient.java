@@ -156,7 +156,8 @@ final class LspClient {
       // stderr 排空与后续初始化同属本进程所有权：提交被拒也必须终止整棵范围，不能把泄漏留给调用方。
       dispatch.submit(() -> drain(process.getErrorStream(), stderrTail));
       if (scope.awaitNaturalExit(PROCESS_PROBE_MILLIS)) {
-        throw new IllegalStateException(earlyExitMessage(server, root, command, scope, stderrTail));
+        throw new ToolServiceFailureException(
+            earlyExitMessage(server, root, command, scope, stderrTail));
       }
       LspClient client =
           new LspClient(
@@ -189,7 +190,7 @@ final class LspClient {
     try {
       return ProcessScope.startDuplex(root, command);
     } catch (IOException | RuntimeException error) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP server '"
               + server.id()
               + "' cannot be started: "
@@ -329,7 +330,7 @@ final class LspClient {
       modified = Files.getLastModifiedTime(target).toMillis();
       size = Files.size(target);
     } catch (IOException error) {
-      throw new IllegalArgumentException(
+      throw new ToolInputRejectedException(
           "cannot read " + target + ": " + error.getMessage(), error);
     }
     if (document != null && document.modified() == modified && document.size() == size) {
@@ -378,7 +379,7 @@ final class LspClient {
   List<String> definition(Path file, int line, int character, Duration timeout) throws Exception {
     requireRunning();
     if (!supports("textDocument/definition")) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP server '" + server.id() + "' does not advertise go-to-definition support.");
     }
     sync(file);
@@ -398,7 +399,7 @@ final class LspClient {
   List<String> workspaceSymbols(String query, int limit, Duration timeout) throws Exception {
     requireRunning();
     if (!supports("workspace/symbol")) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP server '" + server.id() + "' does not advertise workspace symbol support.");
     }
     Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> result =
@@ -420,7 +421,7 @@ final class LspClient {
     Matcher matcher = JDT_URI.matcher(target);
     if (matcher.find()) {
       if (!supports(JAVA_CLASS_FILE_CONTENTS)) {
-        throw new IllegalStateException("lsp_java_decompile is only supported by jdtls.");
+        throw new ToolServiceFailureException("lsp_java_decompile is only supported by jdtls.");
       }
       String result =
           await(
@@ -431,7 +432,7 @@ final class LspClient {
     }
     Path path = resolveLocalTarget(target);
     if (!Files.isRegularFile(path)) {
-      throw new IllegalArgumentException("target is not a readable class file: " + path);
+      throw new ToolInputRejectedException("target is not a readable class file: " + path);
     }
     Object result =
         await(
@@ -450,7 +451,8 @@ final class LspClient {
     if (result instanceof String source && !source.isBlank()) {
       return source;
     }
-    throw new IllegalStateException("Could not load or decompile class for target: " + target);
+    throw new ToolServiceFailureException(
+        "Could not load or decompile class for target: " + target);
   }
 
   /**
@@ -463,17 +465,17 @@ final class LspClient {
       try {
         return Path.of(URI.create(trimmed)).normalize();
       } catch (IllegalArgumentException error) {
-        throw new IllegalArgumentException("invalid class target URI: " + target, error);
+        throw new ToolInputRejectedException("invalid class target URI: " + target, error);
       }
     }
     Path path;
     try {
       path = Path.of(trimmed);
     } catch (RuntimeException error) {
-      throw new IllegalArgumentException("invalid class target: " + target, error);
+      throw new ToolInputRejectedException("invalid class target: " + target, error);
     }
     if (!path.isAbsolute()) {
-      throw new IllegalArgumentException(
+      throw new ToolInputRejectedException(
           "target must be an absolute class path, a file: URI, or a jdt:// URI: " + target);
     }
     return path.normalize();
@@ -522,10 +524,10 @@ final class LspClient {
 
   private void requireRunning() {
     if (stopped.get()) {
-      throw new IllegalStateException("LSP client stopped");
+      throw new ToolServiceFailureException("LSP client stopped");
     }
     if (!running()) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP server '" + server.id() + "' exited" + exitDetail(scope, stderrTail));
     }
   }
@@ -551,7 +553,7 @@ final class LspClient {
       return result;
     } catch (TimeoutException error) {
       future.cancel(true);
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP request timed out after " + millis + "ms (" + description + ").", error);
     } catch (InterruptedException error) {
       future.cancel(true);
@@ -559,10 +561,10 @@ final class LspClient {
       throw error;
     } catch (ExecutionException error) {
       Throwable cause = error.getCause() == null ? error : error.getCause();
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP request failed (" + description + "): " + cause.getMessage(), cause);
     } catch (CancellationException error) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP client stopped before the request finished (" + description + ").", error);
     }
   }
@@ -574,7 +576,7 @@ final class LspClient {
     for (int current = 1; current < line; current++) {
       int newline = text.indexOf('\n', start);
       if (newline < 0) {
-        throw new IllegalArgumentException(
+        throw new ToolInputRejectedException(
             "line " + line + " is beyond the end of " + document.uri());
       }
       start = newline + 1;
@@ -587,7 +589,7 @@ final class LspClient {
     String lineText = text.substring(start, lineEnd);
     int codePoints = lineText.codePointCount(0, lineText.length());
     if (character > codePoints) {
-      throw new IllegalArgumentException(
+      throw new ToolInputRejectedException(
           "character "
               + character
               + " is beyond line "
@@ -718,12 +720,12 @@ final class LspClient {
     try {
       bytes = Files.readAllBytes(file);
     } catch (IOException error) {
-      throw new IllegalArgumentException("cannot read " + file + ": " + error.getMessage(), error);
+      throw new ToolServiceFailureException("the source file could not be read", error);
     }
     try {
       return TextFileCodec.decode(bytes).text();
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("LSP cannot open binary file: " + file, error);
+      throw new ToolInputRejectedException("LSP cannot open binary file: " + file, error);
     }
   }
 

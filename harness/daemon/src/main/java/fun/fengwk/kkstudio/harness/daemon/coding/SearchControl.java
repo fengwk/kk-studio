@@ -47,7 +47,7 @@ final class SearchControl {
       return;
     }
     if (nanoTime.getAsLong() - startedNanos >= timeoutNanos) {
-      throw new IllegalArgumentException(
+      throw new ToolRunFailureException(
           capabilityName + " timed out after " + timeoutMillis + " milliseconds");
     }
   }

@@ -36,7 +36,7 @@ public final class LspJavaDecompileCapability extends AbstractCodingCapability {
     Path path = EnvironmentPaths.existing(string(args, "path"));
     String target = string(args, "target");
     if (target.isBlank()) {
-      throw new IllegalArgumentException("target must not be blank");
+      throw new ToolInputRejectedException("target must not be blank");
     }
     if (execution.isCancelled()) {
       throw new InterruptedException();

@@ -42,7 +42,7 @@ public final class LspDiscovery {
     Map<String, LspServerConfig> unique = new LinkedHashMap<>();
     for (LspServerConfig server : servers) {
       if (unique.putIfAbsent(server.id(), server) != null) {
-        throw new IllegalArgumentException("duplicate lsp server id: " + server.id());
+        throw new ToolInputRejectedException("duplicate lsp server id: " + server.id());
       }
     }
     return new LspDiscovery(new ArrayList<>(unique.values()));
@@ -91,7 +91,7 @@ public final class LspDiscovery {
     return server(file)
         .orElseThrow(
             () ->
-                new IllegalStateException(
+                new ToolServiceFailureException(
                     "No LSP server configured for "
                         + file
                         + ". Add the server to lsp.servers in the daemon configuration."));
@@ -128,7 +128,7 @@ public final class LspDiscovery {
     return executable(server)
         .orElseThrow(
             () ->
-                new IllegalStateException(
+                new ToolServiceFailureException(
                     "LSP server '"
                         + server.id()
                         + "' is not installed. Command '"
