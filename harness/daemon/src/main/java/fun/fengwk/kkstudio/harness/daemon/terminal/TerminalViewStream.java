@@ -17,8 +17,8 @@ import java.util.UUID;
 /**
  * 单个观察流的画面更新生成器：把连续捕获的 {@link TerminalView} 归约为有界 RESET/PATCH 与恰好一个在途消息。
  *
- * <p>状态只由调用方（VT owner）串行访问，不加锁也不自带 executor、时钟、配置或发送出口。它只保存一份已确认基线 view、一个在途 view 与其版本，不保留
- * deque、未确认 delta 链或「最新待发」字段：有在途时 {@link #offer(TerminalView)} 直接返回空，最新画面由调用方在归还额度后再次提供。
+ * <p>状态只由调用方串行访问（单个状态 owner，不限定为 VT owner），不加锁也不自带 executor、时钟、配置或发送出口。它只保存一份已确认基线 view、一个在途 view
+ * 与其版本，不保留 deque、未确认 delta 链或「最新待发」字段：有在途时 {@link #offer(TerminalView)} 直接返回空，最新画面由调用方在归还额度后再次提供。
  *
  * <p>新流的首条消息是 {version=1} 的 RESET；在精确匹配 {@code streamId + inflightVersion} 的 ACK 到来前不存在观察基线。匹配 ACK
  * 原子提升在途 view 为基线并归还额度；不匹配或重复 ACK 返回 {@code false} 且不推进、不清理任何状态。RESET 与 PATCH 都由同一个 {@link
@@ -120,10 +120,15 @@ public final class TerminalViewStream {
   }
 
   /**
-   * 关闭本流；幂等。关闭后 {@link #offer(TerminalView)} 恒返回空，{@link #applied(UUID, long)} 恒为 {@code false}。
+   * 关闭本流；幂等。释放基线/在途画面引用并归还额度，但保留已确认版本号作为历史事实。关闭后 {@link #offer(TerminalView)} 恒返回空，{@link
+   * #applied(UUID, long)} 恒为 {@code false}，{@link #isApplied()} 与 {@link #hasInFlight()} 恒为 {@code
+   * false}。
    */
   public void close() {
     closed = true;
+    appliedBaseline = null;
+    inflightView = null;
+    inflightVersion = 0L;
   }
 
   /** 已有基线时按增量规则生成 PATCH 或退回 RESET；完全相同返回 {@code null}。 */
@@ -131,17 +136,18 @@ public final class TerminalViewStream {
     if (view.equals(base)) {
       return null;
     }
-    if (view.columns() != base.columns()
-        || view.rows() != base.rows()
-        || view.alternate() != base.alternate()) {
-      return reset(view, version);
-    }
+    // 输入模式版本单调：任何下降都是非法输入，优先于尺寸/主备屏回退为 RESET 的分支。
     if (view.inputModeRevision() < base.inputModeRevision()) {
       throw new IllegalArgumentException(
           "input mode revision decreased: "
               + view.inputModeRevision()
               + " < "
               + base.inputModeRevision());
+    }
+    if (view.columns() != base.columns()
+        || view.rows() != base.rows()
+        || view.alternate() != base.alternate()) {
+      return reset(view, version);
     }
     if (!sharesLineId(base, view)) {
       // 无任何共享行 id：reflow 或主/备用屏切换往返，即使尺寸相同也不能当增量。

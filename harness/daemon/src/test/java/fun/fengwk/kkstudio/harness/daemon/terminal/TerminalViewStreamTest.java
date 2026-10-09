@@ -344,8 +344,33 @@ class TerminalViewStreamTest {
     List<Line> lines = List.of(line(11L, 6, 'A'), line(12L, 6, 'B'));
     acknowledge(stream, view(6, 2, 0, 0, 0, 5L, false, lines));
 
+    // 版本下降在任何尺寸/主备屏组合下都先于 RESET 判定被拒绝，且不产生在途、不丢已确认版本号。
     assertThrows(
         IllegalArgumentException.class, () -> stream.offer(view(6, 2, 0, 0, 0, 4L, false, lines)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            stream.offer(
+                view(8, 2, 0, 0, 0, 4L, false, List.of(line(11L, 8, 'A'), line(12L, 8, 'B')))));
+    assertThrows(
+        IllegalArgumentException.class, () -> stream.offer(view(6, 2, 0, 0, 0, 4L, true, lines)));
+    assertFalse(stream.hasInFlight());
+    assertEquals(1L, stream.lastAppliedVersion());
+  }
+
+  @Test
+  void higherInputModeRevisionStillAllowsReset() {
+    TerminalViewStream stream = new TerminalViewStream(TERMINAL_ID, STREAM_ID);
+    acknowledge(
+        stream, view(6, 2, 0, 0, 0, 5L, false, List.of(line(11L, 6, 'A'), line(12L, 6, 'B'))));
+
+    TerminalViewUpdate update =
+        stream
+            .offer(view(8, 2, 0, 0, 0, 6L, false, List.of(line(11L, 8, 'A'), line(12L, 8, 'B'))))
+            .orElseThrow();
+    assertEquals(Kind.RESET, update.type());
+    assertEquals(2L, update.version());
+    assertEquals(6L, update.inputModeRevision());
   }
 
   @Test
@@ -360,6 +385,26 @@ class TerminalViewStreamTest {
     assertTrue(stream.offer(view).isEmpty());
     assertFalse(stream.applied(STREAM_ID, 1L));
     assertFalse(stream.isApplied());
+    // 关闭归还在途额度并释放引用，但版本历史保留。
+    assertFalse(stream.hasInFlight());
+    assertEquals(0L, stream.lastAppliedVersion());
+  }
+
+  @Test
+  void closeAfterAckReleasesBaselineAndKeepsVersionHistory() {
+    TerminalViewStream stream = new TerminalViewStream(TERMINAL_ID, STREAM_ID);
+    TerminalView view =
+        view(6, 2, 0, 0, 0, 1L, false, List.of(line(11L, 6, 'A'), line(12L, 6, 'B')));
+    acknowledge(stream, view);
+    assertTrue(stream.isApplied());
+
+    stream.close();
+    assertFalse(stream.isApplied());
+    assertFalse(stream.hasInFlight());
+    assertEquals(1L, stream.lastAppliedVersion());
+    assertTrue(stream.offer(view).isEmpty());
+    assertFalse(stream.applied(STREAM_ID, 1L));
+    assertFalse(stream.applied(STREAM_ID, 2L));
   }
 
   @Test
