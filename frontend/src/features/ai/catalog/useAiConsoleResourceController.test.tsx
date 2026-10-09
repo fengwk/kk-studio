@@ -559,6 +559,7 @@ function agent() {
     name: 'default-assistant',
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
+    type: 'USER' as const,
     model: 'stub/acceptance-stub',
     variant: 'default',
     config: {

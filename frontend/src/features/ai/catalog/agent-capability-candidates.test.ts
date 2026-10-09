@@ -18,6 +18,7 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
     name,
     description,
     systemPrompt: null,
+    type: 'USER',
     model: 'minimax/MiniMax',
     variant: null,
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },

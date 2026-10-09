@@ -112,8 +112,8 @@ describe('ai-resource-form-validation additional branches', () => {
     { kind: 'provider', mode: 'edit', name: 'provider' },
     { kind: 'model', mode: 'create' },
     { kind: 'model', mode: 'edit', providerName: 'minimax', name: 'model' },
-    { kind: 'agent', mode: 'create' },
-    { kind: 'agent', mode: 'edit', name: 'agent' },
+    { kind: 'agent', mode: 'create', type: 'USER' },
+    { kind: 'agent', mode: 'edit', name: 'agent', type: 'USER' },
   ] as ResourceModal[])('accepts a complete $kind $mode body', (modal) => {
     expect(validate(modal)).toEqual({ ok: true, message: '', fields: {} })
   })
@@ -214,5 +214,21 @@ describe('ai-resource-form-validation additional branches', () => {
     expect(
       validate({ kind: 'agent', mode: 'create' }, { agentDraft: agent({ model: '' }) }).fields,
     ).toHaveProperty('model')
+  })
+
+  it('requires a model for USER but allows an unconfigured BUILTIN save', () => {
+    // USER 无论创建还是编辑都必须有模型。
+    expect(
+      validate(
+        { kind: 'agent', mode: 'edit', name: 'assistant', type: 'USER' },
+        { agentDraft: agent({ model: '' }) },
+      ).fields,
+    ).toHaveProperty('model')
+    // BUILTIN 允许未配置模型直接保存（其余字段完整）。
+    const builtin = validate(
+      { kind: 'agent', mode: 'edit', name: 'summarizer', type: 'BUILTIN' },
+      { agentDraft: agent({ model: '' }) },
+    )
+    expect(builtin).toEqual({ ok: true, message: '', fields: {} })
   })
 })

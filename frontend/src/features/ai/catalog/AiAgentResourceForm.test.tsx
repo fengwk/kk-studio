@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest'
 import { AgentForm } from '@/features/ai/catalog/AiAgentResourceForm'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
-import { emptyAgentDraft, toEditableAgent } from '@/features/ai/catalog/ai-agent-draft-codec'
+import {
+  emptyAgentDraft,
+  toEditableAgent,
+  toEditableAgentUpdate,
+} from '@/features/ai/catalog/ai-agent-draft-codec'
 import type {
   AgentDefinitionDTO,
   AgentModelConfigDTO,
@@ -72,6 +76,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     name,
     description,
     systemPrompt: null,
+    type: 'USER',
     model: 'minimax/MiniMax',
     variant: null,
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
@@ -337,5 +342,93 @@ describe('AgentForm current contracts', () => {
       },
     })
     expect(payload).not.toHaveProperty('environmentId')
+  })
+
+  it('renders an explicit unconfigured model state and suppresses fillFirstModel for BUILTIN', async () => {
+    const user = userEvent.setup()
+    let currentDraft: AgentDraft = {
+      ...emptyAgentDraft(),
+      name: 'compaction',
+      model: '',
+    }
+    function Harness() {
+      const [draft, setDraft] = useState(currentDraft)
+      return (
+        <AgentForm
+          mode="edit"
+          agentType="BUILTIN"
+          draft={draft}
+          models={[modelWithVariants()]}
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+
+    // 1. 显式呈现未配置状态提示，aria-describedby 正确关联
+    expect(
+      screen.getByText('该内置 Agent 尚未配置 Model。选择 Model 后保存即可生效。'),
+    ).toBeInTheDocument()
+    const modelTrigger = screen.getByLabelText('Default Model')
+    expect(modelTrigger).toHaveAttribute(
+      'aria-describedby',
+      'agent-model-unconfigured-status',
+    )
+    expect(modelTrigger).not.toHaveAttribute('aria-required')
+    expect(modelTrigger).toHaveTextContent('未配置')
+
+    // 2. BUILTIN 绝不呈现「使用第一个 Model 填充默认配置」快捷按钮（不自动用父/第一个 model）
+    expect(
+      screen.queryByRole('button', { name: '使用第一个 Model 填充默认配置' }),
+    ).not.toBeInTheDocument()
+
+    // 3. 用户可选定具体 Model 并更新草稿
+    await chooseSelectOption(user, 'Default Model', 'minimax/MiniMax')
+    expect(currentDraft.model).toBe('minimax/MiniMax')
+    expect(modelTrigger).toHaveTextContent('minimax/MiniMax')
+
+    // 4. 保存为 BUILTIN 更新 payload：model 包含所选值，且 payload 不含只读 type
+    const payload = toEditableAgentUpdate(currentDraft, true)
+    expect(payload.model).toBe('minimax/MiniMax')
+    expect(payload).not.toHaveProperty('type')
+  })
+
+  it('shows fillFirstModel and marks model as required for USER agent drafts', async () => {
+    const user = userEvent.setup()
+    let currentDraft: AgentDraft = {
+      ...emptyAgentDraft(),
+      name: 'custom-assistant',
+      model: '',
+    }
+    function Harness() {
+      const [draft, setDraft] = useState(currentDraft)
+      return (
+        <AgentForm
+          mode="create"
+          agentType="USER"
+          draft={draft}
+          models={[modelWithVariants()]}
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+
+    // USER agent 未配置模型时标记为必填，并允许用户一键填充第一个 model
+    const modelTrigger = screen.getByLabelText('Default Model')
+    expect(modelTrigger).toHaveAttribute('aria-required', 'true')
+    const fillButton = screen.getByRole('button', {
+      name: '使用第一个 Model 填充默认配置',
+    })
+    expect(fillButton).toBeInTheDocument()
+
+    await user.click(fillButton)
+    expect(currentDraft.model).toBe('minimax/MiniMax')
   })
 })

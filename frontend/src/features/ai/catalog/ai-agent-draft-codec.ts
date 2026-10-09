@@ -104,7 +104,8 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     name: agent.name,
     description: agent.description || '',
     systemPrompt: agent.systemPrompt || '',
-    model: agent.model,
+    // BUILTIN 的未配置模型（null）投影为空字符串，由表单显式呈现未配置状态。
+    model: agent.model ?? '',
     variant: agent.variant?.trim() || '',
     inheritParentEnvironment: config.inheritParentEnvironment,
     tools: normalizeNames(config.tools),
@@ -137,15 +138,22 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
   }
 }
 
-export function toEditableAgentUpdate(draft: AgentDraft): AgentDefinitionEditablePropertiesDTO {
+/**
+ * 构建 Agent PUT 请求体。`BUILTIN` 允许未配置模型（写入 null）；`USER` 仍要求非空模型引用。
+ * 请求体只包含可编辑字段，绝不携带系统持有的 `type`。
+ */
+export function toEditableAgentUpdate(
+  draft: AgentDraft,
+  allowUnconfiguredModel = false,
+): AgentDefinitionEditablePropertiesDTO {
   const model = draft.model.trim()
-  if (!model) {
+  if (!model && !allowUnconfiguredModel) {
     throw new Error('model must not be blank')
   }
   return {
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),
-    model,
+    model: model || null,
     variant: trimToNull(draft.variant),
     config: toConfig(draft),
   }
