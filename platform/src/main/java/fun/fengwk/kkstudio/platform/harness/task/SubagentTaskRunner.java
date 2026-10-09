@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -178,8 +177,11 @@ public class SubagentTaskRunner implements SubagentRunner {
   /**
    * 继续既有子 Thread：只校验永久父关系后追加命令，忙碌子线程照常入队。
    *
-   * <p>SET_* 前缀无条件按固定顺序完整发出，batch 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 无关；因此同一次调用在任何重试 /
-   * 并发顺序下都产生同一份命令指纹，Runtime 能精确识别为重放而不是「另一份委派」。
+   * <p>续接只追加 SET_AGENT + SET_MODEL + CUSTOM_MESSAGE，绝不重发 SET_ENVIRONMENT：既有子 Thread 保留其既有运行环境，agent
+   * 变更按 {@code /agent} 设置语义在本批生效；新子 Thread 仍通过 NewChildSession 的 root settings 继承父环境。
+   *
+   * <p>SET_* 前缀按固定顺序发出，batch 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或其可变运行时环境无关；因此同一次调用在任何重试
+   * / 并发顺序下都产生同一份命令指纹，Runtime 能精确识别为重放而不是「另一份委派」。
    */
   private static AcceptCommandsCommand appendCommand(
       HarnessRuntime runtime,
@@ -192,7 +194,6 @@ public class SubagentTaskRunner implements SubagentRunner {
         List.of(
             new SetAgentCommandPayload(settings.agentName()),
             new SetModelCommandPayload(settings.model()),
-            new SetEnvironmentCommandPayload(settings.environmentName()),
             new CustomMessageCommandPayload(AgentMessage.user(request.prompt())));
     List<NewThreadCommand> commands = new ArrayList<>(payloads.size());
     for (int i = 0; i < payloads.size(); i++) {
