@@ -428,7 +428,7 @@ export function parseAssistantUsage(
 
 /**
  * 估算缓存命中率：cacheRead / (input + cacheRead + cacheWrite)。
- * 分母为 0 时返回 null，展示为 "—"。
+ * 分母为 0 时返回 null，摘要默认显示 0%。
  */
 export function calculateCacheHitRate(usage: {
   input: number
@@ -462,7 +462,7 @@ export function isValidDecodeSample(sample: {
 
 /**
  * 估算解码速率：decodeTokens * 1000 / decodeDurationMillis。
- * 仅在有效样本上计算，无样本返回 null，展示为 "—"；速率 >= 10 取整、< 10 保留 1 位小数。
+ * 仅在有效样本上计算，无样本返回 null，摘要默认显示 0；速率 >= 10 取整、< 10 保留 1 位小数。
  */
 export function calculateDecodeTokensPerSecond(usage: {
   decodeTokens?: number | null
@@ -521,8 +521,8 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
 /**
  * Turn usage 摘要文本（Conversation TurnSummary、Event TURN_END 与 Footer 共用）：
  * `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N% · X tok/s`。
- * 缺失/为零的 cacheRead/cacheWrite 缩写省略，分母为 0 显示 cache —，无测速样本显示 — tok/s，
- * 无可用定价显示 —（绝不伪造成 $0）。
+ * 所有统计项固定保留；无缓存比例、测速样本或定价时默认显示 0，
+ * 不为缺失定价假定币种。默认值仅用于展示，不写入 usage facts。
  * 统计项分隔符统一为 U+00B7，Footer 只在其外层使用 U+2223 分组，不覆盖本函数。
  */
 export function formatTurnUsageText(usage: {
@@ -537,17 +537,13 @@ export function formatTurnUsageText(usage: {
   const parts = [
     `↑${formatCompactTokens(usage.input)}`,
     `↓${formatCompactTokens(usage.output)}`,
+    `R${formatCompactTokens(usage.cacheRead)}`,
+    `W${formatCompactTokens(usage.cacheWrite)}`,
   ]
-  if (usage.cacheRead > 0) {
-    parts.push(`R${formatCompactTokens(usage.cacheRead)}`)
-  }
-  if (usage.cacheWrite > 0) {
-    parts.push(`W${formatCompactTokens(usage.cacheWrite)}`)
-  }
-  parts.push(formatUsageCost(usage.cost) ?? '—')
+  parts.push(formatUsageCost(usage.cost) ?? '0')
   const cacheHitRate = calculateCacheHitRate(usage)
-  parts.push(cacheHitRate != null ? `cache ${cacheHitRate}%` : 'cache —')
+  parts.push(`cache ${cacheHitRate ?? 0}%`)
   const speed = calculateDecodeTokensPerSecond(usage)
-  parts.push(speed != null ? `${speed} tok/s` : '— tok/s')
+  parts.push(`${speed ?? 0} tok/s`)
   return parts.join(' · ')
 }
