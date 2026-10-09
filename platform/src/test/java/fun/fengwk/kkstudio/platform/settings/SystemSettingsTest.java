@@ -46,7 +46,6 @@ class SystemSettingsTest {
     assertEquals(2_000L, defaults.aiRuntime().retryBaseDelayMillis());
     assertEquals(60_000L, defaults.aiRuntime().retryMaxDelayMillis());
     assertEquals(20_000, defaults.aiRuntime().compactionKeepRecentTokens());
-    assertEquals(null, defaults.aiRuntime().compactionFallbackModel());
     assertEquals(2, defaults.aiRuntime().subagentMaxDepth());
     assertEquals(10, defaults.aiRuntime().subagentMaxConcurrency());
     assertEquals(0, defaults.aiRuntime().subagentMaxTotalConcurrency());
@@ -168,7 +167,6 @@ class SystemSettingsTest {
                 60_000L,
                 2_000L,
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -187,7 +185,6 @@ class SystemSettingsTest {
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 0,
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -201,7 +198,6 @@ class SystemSettingsTest {
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 -1,
@@ -215,7 +211,6 @@ class SystemSettingsTest {
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),

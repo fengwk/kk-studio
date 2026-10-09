@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEnt
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -530,24 +529,6 @@ class ConfigSyncPlannerTest {
     assertNotNull(plan.settings());
     assertEquals("5", plan.settings().expectedVersion());
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SETTINGS, "settings")));
-  }
-
-  @Test
-  void settingsFallbackModelMissingIsSkipped() {
-    when(snapshotReader.read()).thenReturn(emptySnapshot());
-    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-
-    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
-    HarnessModelSelectionDTO fallback = new HarnessModelSelectionDTO();
-    fallback.setProviderName("p");
-    fallback.setModelName("m");
-    fallback.setVariant("v");
-    sections.getAiRuntime().setCompactionFallbackModel(fallback);
-
-    ConfigSyncPlan plan = plan(ConfigSyncFixtures.settingsYaml(sections));
-
-    assertNull(plan.settings());
-    assertEquals("missing fallback model: p/m", reason(plan.skipped(), "settings", "settings"));
   }
 
   @Test

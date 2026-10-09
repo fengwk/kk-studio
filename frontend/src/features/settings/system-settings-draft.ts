@@ -3,7 +3,6 @@ import type {
   SystemSettingsSectionsDTO,
   SystemSettingsUpdateDTO,
 } from '@/shared/api/contracts/system-settings'
-import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
 
 /** 前端 draft 的共享数字/文本基元。 */
 export type DraftNumericField = string
@@ -33,18 +32,11 @@ export interface SystemSettingsAiRuntimeDraft {
   retryBaseDelayMillis: DraftNumericField
   retryMaxDelayMillis: DraftNumericField
   compactionKeepRecentTokens: DraftNumericField
-  compactionFallbackModel: ModelSelectionDraft | null
   subagentMaxDepth: DraftNumericField
   subagentMaxConcurrency: DraftNumericField
   /** '' 表示不额外限制（无 cap）。 */
   subagentMaxTotalConcurrency: DraftNumericField
   subagentMaxTurns: DraftNumericField
-}
-
-export interface ModelSelectionDraft {
-  providerName: string
-  modelName: string
-  variant: string
 }
 
 export interface SystemSettingsEnvironmentDraft {
@@ -154,7 +146,6 @@ export type DraftValidationReason =
   | 'duplicateToolName'
   | 'blankPattern'
   | 'emptyNumericField'
-  | 'partialModelSelection'
 
 export class DraftValidationError extends Error {
   readonly reason: DraftValidationReason
@@ -227,14 +218,6 @@ function aiRuntimeToDraft(
     retryBaseDelayMillis: dto.retryBaseDelayMillis,
     retryMaxDelayMillis: dto.retryMaxDelayMillis,
     compactionKeepRecentTokens: String(dto.compactionKeepRecentTokens),
-    compactionFallbackModel:
-      dto.compactionFallbackModel == null
-        ? null
-        : {
-            providerName: dto.compactionFallbackModel.providerName,
-            modelName: dto.compactionFallbackModel.modelName,
-            variant: dto.compactionFallbackModel.variant,
-          },
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
@@ -343,9 +326,6 @@ export function assembleSettingsUpdate(
       retryBaseDelayMillis: requiredLong(draft.aiRuntime.retryBaseDelayMillis),
       retryMaxDelayMillis: requiredLong(draft.aiRuntime.retryMaxDelayMillis),
       compactionKeepRecentTokens: requiredInt(draft.aiRuntime.compactionKeepRecentTokens),
-      compactionFallbackModel: assembleModelSelection(
-        draft.aiRuntime.compactionFallbackModel,
-      ),
       subagentMaxDepth: requiredInt(draft.aiRuntime.subagentMaxDepth),
       subagentMaxConcurrency: requiredInt(draft.aiRuntime.subagentMaxConcurrency),
       subagentMaxTotalConcurrency: requiredInt(
@@ -506,28 +486,7 @@ function nullableText(value: string): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-function assembleModelSelection(
-  value: ModelSelectionDraft | null,
-): HarnessModelSelectionDTO | null {
-  if (value == null) {
-    return null
-  }
-  const providerName = value.providerName.trim()
-  const modelName = value.modelName.trim()
-  const variant = value.variant.trim()
-  if (providerName === '' && modelName === '' && variant === '') {
-    return null
-  }
-  if (providerName === '' || modelName === '' || variant === '') {
-    throw new DraftValidationError('partialModelSelection')
-  }
-  return { providerName, modelName, variant }
-}
-
-const CUSTOM_ATOMIC_FIELD_PATHS = new Set([
-  'tool.permission',
-  'aiRuntime.compactionFallbackModel',
-])
+const CUSTOM_ATOMIC_FIELD_PATHS = new Set(['tool.permission'])
 
 /** 严格读取 draft 路径；schema renderer 不维护第二份 server field registry。 */
 export function getDraftValue(draft: SystemSettingsSectionsDraft, path: string): unknown {

@@ -188,7 +188,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
         new ThreadProcessorConfig(
             new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
             Duration.ofSeconds(5),
-            () -> new CompactionConfig(20_000, null)),
+            () -> new CompactionConfig(20_000)),
         Clock.systemUTC(),
         scheduler,
         Runnable::run);

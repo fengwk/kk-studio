@@ -29,14 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionNoGain;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -944,124 +942,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     EntryPath retried = path(fixture.store, baseline.threadId());
     assertEquals(
         TurnStartReason.COMPACTION, ((TurnStartPayload) retried.head().payload()).reason());
-  }
-
-  @Test
-  void primaryFailureStartsExactlyOneFallbackWithoutChangingBranchModel() {
-    ModelSelection fallback = new ModelSelection("fallback", "summary-model", "v2");
-    Fixture fixture = fixture(new CompactionConfig(20_000, fallback));
-    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
-    seedCommand(
-        fixture.store,
-        baseline.threadId(),
-        new UserMessageCommandPayload(userMessage("queued input")));
-    requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.autoConsistent = true;
-
-    // primary plan
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    Entry primaryEntry = path(fixture.store, baseline.threadId()).head();
-    TurnStartPayload primaryStart = (TurnStartPayload) primaryEntry.payload();
-    ModelInvocation primary =
-        fixture
-            .store
-            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), primaryEntry.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, primary.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, primary.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store,
-        primary.id(),
-        m -> m.fail(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "bad"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-
-    // one fallback plan reuses trigger/phase/anchors but changes only executionModel。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    Entry fallbackEntry = path(fixture.store, baseline.threadId()).head();
-    TurnStartPayload fallbackStart = (TurnStartPayload) fallbackEntry.payload();
-    assertEquals(primaryStart.compaction().phase(), fallbackStart.compaction().phase());
-    assertEquals(primaryStart.compaction().trigger(), fallbackStart.compaction().trigger());
-    assertEquals(primaryStart.compaction().cutEntryId(), fallbackStart.compaction().cutEntryId());
-    assertEquals(fallback, fallbackStart.compaction().executionModel());
-    assertEquals(branchSettings().model(), fallbackStart.settings().model());
-    assertEquals(
-        branchSettings().model(), path(fixture.store, baseline.threadId()).baseSettings().model());
-
-    ModelInvocation fallbackInvocation =
-        fixture
-            .store
-            .transaction(
-                tx -> tx.findModelInvocationByTurn(baseline.threadId(), fallbackEntry.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, fallbackInvocation.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, fallbackInvocation.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store,
-        fallbackInvocation.id(),
-        m -> m.fail(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "bad again"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-
-    // fallback 已使用：下一 claim 消费 queued input，绝不链式启动第三个 compaction。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    EntryPath inputPath = path(fixture.store, baseline.threadId());
-    assertEquals(
-        TurnStartReason.INPUT,
-        ((TurnStartPayload) inputPath.openTurnStart().orElseThrow().payload()).reason());
-  }
-
-  @Test
-  void successfulFallbackResumesPendingContinuation() {
-    ModelSelection fallback = new ModelSelection("fallback", "summary-model", "v2");
-    Fixture fixture = fixture(new CompactionConfig(20_000, fallback));
-    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
-    requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.autoConsistent = true;
-
-    // claim1/2：primary 压缩启动后失败，durable fallback obligation 保留。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    Entry primaryEntry = path(fixture.store, baseline.threadId()).head();
-    ModelInvocation primary =
-        fixture
-            .store
-            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), primaryEntry.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, primary.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, primary.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store,
-        primary.id(),
-        m -> m.fail(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "bad"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-
-    // claim3/4：fallback 复用冻结 anchors；成功后仍能越过失败 primary 找回原 continuation。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    Entry fallbackEntry = path(fixture.store, baseline.threadId()).head();
-    ModelInvocation fallbackInvocation =
-        fixture
-            .store
-            .transaction(
-                tx -> tx.findModelInvocationByTurn(baseline.threadId(), fallbackEntry.id()))
-            .orElseThrow();
-    transitionModel(fixture.store, fallbackInvocation.id(), m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, fallbackInvocation.id(), m -> m.markRunning(NOW));
-    transitionModel(
-        fixture.store,
-        fallbackInvocation.id(),
-        m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    assertTrue(
-        ((TurnEndPayload) path(fixture.store, baseline.threadId()).head().payload())
-            .continueModel());
-
-    // claim5：无 queued input，恢复原模型 continuation。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    assertEquals(
-        TurnStartReason.CONTINUATION,
-        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).reason());
   }
 
   @Test

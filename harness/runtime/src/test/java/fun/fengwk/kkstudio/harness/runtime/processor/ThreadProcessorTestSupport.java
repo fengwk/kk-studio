@@ -125,7 +125,7 @@ final class ThreadProcessorTestSupport {
   static final int MAX_OUTPUT_TOKENS = 16_384;
 
   /** 测试用默认压缩配置（20_000 保留，无 fallback）。 */
-  static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(20_000, null);
+  static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(20_000);
 
   /** 测试种子线程的合法 64 位小写 SHA-256 creation request hash（非 accept 路径的固定身份键）。 */
   static final String CREATION_REQUEST_HASH =

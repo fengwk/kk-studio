@@ -9,9 +9,8 @@ import java.util.UUID;
  * COMPACTION turn 开始处冻结的最小 durable 元数据（挂在 {@link
  * fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload#compaction()} 上）。
  *
- * <p>{@code executionModel} 是本次压缩调用实际使用的 model selection：默认等于当前 branch 的 {@code
- * settings.model}，fallback 时等于 {@link CompactionConfig#fallbackModel()}；与 {@code settings.model}
- * 比较即可判断是否 fallback，不持久化 fallback boolean。
+ * <p>{@code executionModel} 是压缩执行实际使用的 model selection（解析自普通 Agent 目录中的 {@code compaction}
+ * 定义），冻结后不再随 branch settings 变化。
  *
  * <p>{@code cutEntryId} 是本次压缩实际第一个保留的上下文消息；切分 phases（HISTORY / TURN_PREFIX）额外携带 {@code
  * turnPrefixStartEntryId}（切分 turn 内第一个 USER/CUSTOM）。{@code historyCompactionEntryId} 仅机械

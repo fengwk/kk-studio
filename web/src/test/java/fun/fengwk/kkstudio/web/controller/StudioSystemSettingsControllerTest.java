@@ -83,11 +83,11 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
                         "integrations",
                         "storageMedia",
                         "advanced")))
-        // 两个 custom atomic leaf 各为单个 field。
+        // custom atomic leaf 与自动压缩组字段的顺序与路径。
         .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].path").value("tool.permission"))
         .andExpect(
-            jsonPath("$.data.sections[0].groups[1].fields[1].path")
-                .value("aiRuntime.compactionFallbackModel"))
+            jsonPath("$.data.sections[0].groups[1].fields[0].path")
+                .value("aiRuntime.compactionKeepRecentTokens"))
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].type").value("INTEGER"))
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(1))
@@ -107,8 +107,6 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].options[1].value").value("ask"))
         .andExpect(
             jsonPath("$.data.sections[1].groups[0].fields[0].options[2].value").value("deny"))
-        // nullable fallback model 输出为 true。
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[1].nullable").value(true))
         // group 最小结构：key/labelKey/restartRequired/applyTiming。
         .andExpect(jsonPath("$.data.sections[1].groups[0].key").value("tool.permission"))
         .andExpect(jsonPath("$.data.sections[1].groups[0].restartRequired").value(false))

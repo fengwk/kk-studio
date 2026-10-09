@@ -15,8 +15,7 @@ import java.util.Set;
 /** Schema 与 SystemSettings record 的可编辑 leaf 契约测试。 */
 class SystemSettingsSchemaProviderTest {
 
-  private static final Set<String> CUSTOM_ATOMIC_LEAVES =
-      Set.of("tool.permission", "aiRuntime.compactionFallbackModel");
+  private static final Set<String> CUSTOM_ATOMIC_LEAVES = Set.of("tool.permission");
 
   @Test
   void schemaPathsExactlyCoverEditableRecordLeavesAndMetadataKeysAreUnique() {

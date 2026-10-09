@@ -290,7 +290,7 @@ Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完�
 integrations、storageMedia、advanced 七个 section。strict codec 与 record 校验完整聚合，
 `expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
 `SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
-aiRuntime 包含重试策略、压缩保留量、可空 `compactionFallbackModel` 和 subagent 限额。
+aiRuntime 包含重试策略、压缩保留量与 subagent 限额；压缩执行使用普通 Agent 目录中的 `compaction` 定义，不在 settings 里选择。
 
 network 提供唯一的 Backend 全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
 null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`，

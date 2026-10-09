@@ -447,14 +447,6 @@ public final class ConfigSyncPlanner {
 
   private String settingsUnsatisfiedReason(
       SystemSettingsSectionsDTO settings, Set<String> availableModelKeys, Set<String> agentPool) {
-    if (settings.getAiRuntime() != null
-        && settings.getAiRuntime().getCompactionFallbackModel() != null) {
-      var fallback = settings.getAiRuntime().getCompactionFallbackModel();
-      String key = ConfigSyncRefs.modelName(fallback.getProviderName(), fallback.getModelName());
-      if (!availableModelKeys.contains(key)) {
-        return "missing fallback model: " + key;
-      }
-    }
     if (settings.getIntegrations() != null
         && settings.getIntegrations().getMinimaxH3() != null
         && settings.getIntegrations().getMinimaxH3().getPromptAgentName() != null) {

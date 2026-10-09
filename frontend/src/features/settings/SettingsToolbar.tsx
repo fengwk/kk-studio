@@ -8,7 +8,6 @@ const DRAFT_ERROR_KEYS: Record<DraftValidationReason, string> = {
   duplicateToolName: 'settings.error.permissionDuplicateToolName',
   blankPattern: 'settings.error.permissionPatternRequired',
   emptyNumericField: 'settings.error.numericFieldRequired',
-  partialModelSelection: 'settings.error.partialModelSelection',
 }
 
 /**

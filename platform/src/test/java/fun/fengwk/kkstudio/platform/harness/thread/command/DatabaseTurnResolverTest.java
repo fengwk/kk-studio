@@ -3127,7 +3127,7 @@ class DatabaseTurnResolverTest {
               environmentRepository,
               skillCatalogQueryService,
               skillPromptPathResolver,
-              () -> new CompactionConfig(20_000, null),
+              () -> new CompactionConfig(20_000),
               new AgentPromptComposer(() -> subagentConfig),
               clock);
     }
