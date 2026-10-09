@@ -27,6 +27,9 @@ export const TERMINAL_CONTROL_VERSION = 1
 
 export const MIN_INPUT_BYTES = 1
 export const MAX_INPUT_BYTES = 4096
+const MIN_INPUT_BASE64_LENGTH = 4
+const MAX_INPUT_BASE64_LENGTH = Math.floor((MAX_INPUT_BYTES + 2) / 3) * 4 // 5464
+
 export const MAX_EXECUTABLE_UTF8_BYTES = 4096
 export const MAX_CONTROL_MESSAGE_BYTES = 8 * 1024 * 1024
 
@@ -34,8 +37,8 @@ export const TERMINAL_CONTROL_INVALID_MESSAGE =
   'terminal control message is invalid'
 
 export class TerminalControlError extends Error {
-  constructor(message: string = TERMINAL_CONTROL_INVALID_MESSAGE) {
-    super(message)
+  constructor() {
+    super(TERMINAL_CONTROL_INVALID_MESSAGE)
     this.name = 'TerminalControlError'
   }
 }
@@ -156,40 +159,13 @@ export interface TerminalOpenPayload {
   readonly expectedExited: TerminalIdentity | null
 }
 
-export interface TerminalOpenCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'OPEN'
-  readonly payload: TerminalOpenPayload
-}
-
 export interface TerminalAttachPayload {
   readonly identity: TerminalIdentity
-}
-
-export interface TerminalAttachCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'ATTACH'
-  readonly payload: TerminalAttachPayload
 }
 
 export interface TerminalDetachPayload {
   readonly identity: TerminalIdentity
   readonly streamId: string
-}
-
-export interface TerminalDetachCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'DETACH'
-  readonly payload: TerminalDetachPayload
 }
 
 export interface TerminalClaimPayload {
@@ -198,43 +174,16 @@ export interface TerminalClaimPayload {
   readonly recovery: Recovery | null
 }
 
-export interface TerminalClaimCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'CLAIM'
-  readonly payload: TerminalClaimPayload
-}
-
 export interface TerminalTakeoverPayload {
   readonly identity: TerminalIdentity
   readonly streamId: string
   readonly expectedWriterEpoch: string | null
 }
 
-export interface TerminalTakeoverCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'TAKEOVER'
-  readonly payload: TerminalTakeoverPayload
-}
-
 export interface TerminalReleasePayload {
   readonly identity: TerminalIdentity
   readonly streamId: string
   readonly grant: WriterGrant
-}
-
-export interface TerminalReleaseCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'RELEASE'
-  readonly payload: TerminalReleasePayload
 }
 
 export interface TerminalInputPayload {
@@ -246,15 +195,6 @@ export interface TerminalInputPayload {
   readonly bytes: Uint8Array
 }
 
-export interface TerminalInputCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'INPUT'
-  readonly payload: TerminalInputPayload
-}
-
 export interface TerminalResizePayload {
   readonly identity: TerminalIdentity
   readonly streamId: string
@@ -264,28 +204,10 @@ export interface TerminalResizePayload {
   readonly rows: number
 }
 
-export interface TerminalResizeCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'RESIZE'
-  readonly payload: TerminalResizePayload
-}
-
 export interface TerminalViewAppliedPayload {
   readonly identity: TerminalIdentity
   readonly streamId: string
   readonly version: number
-}
-
-export interface TerminalViewAppliedCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'VIEW_APPLIED'
-  readonly payload: TerminalViewAppliedPayload
 }
 
 export interface TerminalKeepalivePayload {
@@ -294,54 +216,58 @@ export interface TerminalKeepalivePayload {
   readonly grant: WriterGrant | null
 }
 
-export interface TerminalKeepaliveCommand {
-  readonly version: 1
-  readonly requestId: string
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly type: 'KEEPALIVE'
-  readonly payload: TerminalKeepalivePayload
-}
-
 export interface TerminalClosePayload {
   readonly identity: TerminalIdentity
   readonly expectedWriterEpoch: string | null
 }
 
-export interface TerminalCloseCommand {
+export interface TerminalCommandPayloadMap {
+  OPEN: TerminalOpenPayload
+  ATTACH: TerminalAttachPayload
+  DETACH: TerminalDetachPayload
+  CLAIM: TerminalClaimPayload
+  TAKEOVER: TerminalTakeoverPayload
+  RELEASE: TerminalReleasePayload
+  INPUT: TerminalInputPayload
+  RESIZE: TerminalResizePayload
+  VIEW_APPLIED: TerminalViewAppliedPayload
+  KEEPALIVE: TerminalKeepalivePayload
+  CLOSE: TerminalClosePayload
+}
+
+export interface TerminalCommandBase<
+  T extends TerminalCommandType,
+  P extends TerminalCommandPayloadMap[T],
+> {
   readonly version: 1
   readonly requestId: string
   readonly environmentId: string
   readonly viewerId: string
-  readonly type: 'CLOSE'
-  readonly payload: TerminalClosePayload
+  readonly type: T
+  readonly payload: P
 }
 
-export type TerminalCommandPayload =
-  | TerminalOpenPayload
-  | TerminalAttachPayload
-  | TerminalDetachPayload
-  | TerminalClaimPayload
-  | TerminalTakeoverPayload
-  | TerminalReleasePayload
-  | TerminalInputPayload
-  | TerminalResizePayload
-  | TerminalViewAppliedPayload
-  | TerminalKeepalivePayload
-  | TerminalClosePayload
+export type TerminalCommandOf<T extends TerminalCommandType> =
+  TerminalCommandBase<T, TerminalCommandPayloadMap[T]>
 
-export type TerminalCommand =
-  | TerminalOpenCommand
-  | TerminalAttachCommand
-  | TerminalDetachCommand
-  | TerminalClaimCommand
-  | TerminalTakeoverCommand
-  | TerminalReleaseCommand
-  | TerminalInputCommand
-  | TerminalResizeCommand
-  | TerminalViewAppliedCommand
-  | TerminalKeepaliveCommand
-  | TerminalCloseCommand
+export type TerminalOpenCommand = TerminalCommandOf<'OPEN'>
+export type TerminalAttachCommand = TerminalCommandOf<'ATTACH'>
+export type TerminalDetachCommand = TerminalCommandOf<'DETACH'>
+export type TerminalClaimCommand = TerminalCommandOf<'CLAIM'>
+export type TerminalTakeoverCommand = TerminalCommandOf<'TAKEOVER'>
+export type TerminalReleaseCommand = TerminalCommandOf<'RELEASE'>
+export type TerminalInputCommand = TerminalCommandOf<'INPUT'>
+export type TerminalResizeCommand = TerminalCommandOf<'RESIZE'>
+export type TerminalViewAppliedCommand = TerminalCommandOf<'VIEW_APPLIED'>
+export type TerminalKeepaliveCommand = TerminalCommandOf<'KEEPALIVE'>
+export type TerminalCloseCommand = TerminalCommandOf<'CLOSE'>
+
+export type TerminalCommandPayload =
+  TerminalCommandPayloadMap[TerminalCommandType]
+
+export type TerminalCommand = {
+  [K in TerminalCommandType]: TerminalCommandOf<K>
+}[TerminalCommandType]
 
 export interface TerminalAttachedPayload {
   readonly streamId: string
@@ -352,29 +278,9 @@ export interface TerminalAttachedPayload {
   readonly writer: WriterState
 }
 
-export interface TerminalAttachedEvent {
-  readonly version: 1
-  readonly requestId: string | null
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly identity: TerminalIdentity
-  readonly type: 'ATTACHED'
-  readonly payload: TerminalAttachedPayload
-}
-
 export interface TerminalWriterChangedPayload {
   readonly writer: WriterState
   readonly result: ControlResult | null
-}
-
-export interface TerminalWriterChangedEvent {
-  readonly version: 1
-  readonly requestId: string | null
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly identity: TerminalIdentity
-  readonly type: 'WRITER_CHANGED'
-  readonly payload: TerminalWriterChangedPayload
 }
 
 export interface TerminalOpAckPayload {
@@ -383,28 +289,8 @@ export interface TerminalOpAckPayload {
   readonly code: ErrorCode | null
 }
 
-export interface TerminalOpAckEvent {
-  readonly version: 1
-  readonly requestId: string | null
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly identity: TerminalIdentity
-  readonly type: 'OP_ACK'
-  readonly payload: TerminalOpAckPayload
-}
-
 export interface TerminalViewUpdatePayload {
   readonly update: TerminalViewUpdate
-}
-
-export interface TerminalViewUpdateEvent {
-  readonly version: 1
-  readonly requestId: string | null
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly identity: TerminalIdentity
-  readonly type: 'VIEW_UPDATE'
-  readonly payload: TerminalViewUpdatePayload
 }
 
 export interface TerminalExitedPayload {
@@ -412,38 +298,67 @@ export interface TerminalExitedPayload {
   readonly exitCode: number | null
 }
 
-export interface TerminalExitedEvent {
-  readonly version: 1
-  readonly requestId: string | null
-  readonly environmentId: string
-  readonly viewerId: string
-  readonly identity: TerminalIdentity
-  readonly type: 'EXITED'
-  readonly payload: TerminalExitedPayload
-}
-
 export interface TerminalErrorPayload {
   readonly code: ErrorCode
   readonly disposition: ErrorDisposition
 }
 
-export interface TerminalErrorEvent {
+export interface TerminalEventPayloadMap {
+  ATTACHED: TerminalAttachedPayload
+  WRITER_CHANGED: TerminalWriterChangedPayload
+  OP_ACK: TerminalOpAckPayload
+  VIEW_UPDATE: TerminalViewUpdatePayload
+  EXITED: TerminalExitedPayload
+  ERROR: TerminalErrorPayload
+}
+
+export interface TerminalEventBase<
+  T extends TerminalEventType,
+  P extends TerminalEventPayloadMap[T],
+  I extends TerminalIdentity | null = TerminalIdentity,
+> {
   readonly version: 1
   readonly requestId: string | null
   readonly environmentId: string
   readonly viewerId: string
-  readonly identity: TerminalIdentity | null
-  readonly type: 'ERROR'
-  readonly payload: TerminalErrorPayload
+  readonly identity: I
+  readonly type: T
+  readonly payload: P
 }
 
+export type TerminalAttachedEvent = TerminalEventBase<
+  'ATTACHED',
+  TerminalAttachedPayload,
+  TerminalIdentity
+>
+export type TerminalWriterChangedEvent = TerminalEventBase<
+  'WRITER_CHANGED',
+  TerminalWriterChangedPayload,
+  TerminalIdentity
+>
+export type TerminalOpAckEvent = TerminalEventBase<
+  'OP_ACK',
+  TerminalOpAckPayload,
+  TerminalIdentity
+>
+export type TerminalViewUpdateEvent = TerminalEventBase<
+  'VIEW_UPDATE',
+  TerminalViewUpdatePayload,
+  TerminalIdentity
+>
+export type TerminalExitedEvent = TerminalEventBase<
+  'EXITED',
+  TerminalExitedPayload,
+  TerminalIdentity
+>
+export type TerminalErrorEvent = TerminalEventBase<
+  'ERROR',
+  TerminalErrorPayload,
+  TerminalIdentity | null
+>
+
 export type TerminalEventPayload =
-  | TerminalAttachedPayload
-  | TerminalWriterChangedPayload
-  | TerminalOpAckPayload
-  | TerminalViewUpdatePayload
-  | TerminalExitedPayload
-  | TerminalErrorPayload
+  TerminalEventPayloadMap[TerminalEventType]
 
 export type TerminalEvent =
   | TerminalAttachedEvent
@@ -751,7 +666,7 @@ function measureUtf8BytesAndValidate(str: string): number {
   return bytes
 }
 
-export function uint8ArrayToBase64(bytes: Uint8Array): string {
+function uint8ArrayToBase64(bytes: Uint8Array): string {
   let result = ''
   const len = bytes.length
   let i = 0
@@ -780,10 +695,11 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
   return result
 }
 
-export function base64ToUint8Array(text: string): Uint8Array {
+function base64ToUint8Array(text: string): Uint8Array {
   if (
     typeof text !== 'string' ||
-    text.length < 4 ||
+    text.length < MIN_INPUT_BASE64_LENGTH ||
+    text.length > MAX_INPUT_BASE64_LENGTH ||
     text.length % 4 !== 0 ||
     !BASE64_PATTERN.test(text)
   ) {
@@ -799,7 +715,11 @@ export function base64ToUint8Array(text: string): Uint8Array {
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i)
   }
-  if (uint8ArrayToBase64(bytes) !== text) {
+  if (
+    bytes.length < MIN_INPUT_BYTES ||
+    bytes.length > MAX_INPUT_BYTES ||
+    uint8ArrayToBase64(bytes) !== text
+  ) {
     throw new TerminalControlError()
   }
   return bytes
@@ -1024,11 +944,7 @@ function parseCommandBytes(value: unknown): Uint8Array {
     return new Uint8Array(value)
   }
   if (typeof value === 'string') {
-    const bytes = base64ToUint8Array(value)
-    if (bytes.length < MIN_INPUT_BYTES || bytes.length > MAX_INPUT_BYTES) {
-      throw new TerminalControlError()
-    }
-    return bytes
+    return base64ToUint8Array(value)
   }
   throw new TerminalControlError()
 }
@@ -1171,30 +1087,6 @@ export function validateTerminalCommand(value: unknown): TerminalCommand {
   }) as TerminalCommand
 }
 
-function canonicalIdentityNode(
-  identity: TerminalIdentity,
-): Record<string, unknown> {
-  return {
-    daemonInstanceId: identity.daemonInstanceId,
-    terminalId: identity.terminalId,
-  }
-}
-
-function canonicalGrantNode(grant: WriterGrant): Record<string, unknown> {
-  return {
-    epoch: grant.epoch,
-    token: grant.token,
-  }
-}
-
-function canonicalRecoveryNode(recovery: Recovery): Record<string, unknown> {
-  return {
-    previous: canonicalGrantNode(recovery.previous),
-    seq: recovery.seq,
-    digest: recovery.digest,
-  }
-}
-
 /**
  * 校验并编码命令为 canonical JSON 文本。
  *
@@ -1205,90 +1097,17 @@ export function encodeTerminalCommand(command: unknown): string {
   const validated = validateTerminalCommand(command)
 
   let payloadNode: Record<string, unknown>
-  switch (validated.type) {
-    case 'OPEN':
-      payloadNode = {
-        expectedExited: validated.payload.expectedExited
-          ? canonicalIdentityNode(validated.payload.expectedExited)
-          : null,
-      }
-      break
-    case 'ATTACH':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-      }
-      break
-    case 'DETACH':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-      }
-      break
-    case 'CLAIM':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-        recovery: validated.payload.recovery
-          ? canonicalRecoveryNode(validated.payload.recovery)
-          : null,
-      }
-      break
-    case 'TAKEOVER':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-        expectedWriterEpoch: validated.payload.expectedWriterEpoch,
-      }
-      break
-    case 'RELEASE':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-        grant: canonicalGrantNode(validated.payload.grant),
-      }
-      break
-    case 'INPUT':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-        grant: canonicalGrantNode(validated.payload.grant),
-        seq: validated.payload.seq,
-        inputModeRevision: validated.payload.inputModeRevision,
-        bytes: uint8ArrayToBase64(validated.payload.bytes),
-      }
-      break
-    case 'RESIZE':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-        grant: canonicalGrantNode(validated.payload.grant),
-        seq: validated.payload.seq,
-        cols: validated.payload.cols,
-        rows: validated.payload.rows,
-      }
-      break
-    case 'VIEW_APPLIED':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-        version: validated.payload.version,
-      }
-      break
-    case 'KEEPALIVE':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        streamId: validated.payload.streamId,
-        grant: validated.payload.grant
-          ? canonicalGrantNode(validated.payload.grant)
-          : null,
-      }
-      break
-    case 'CLOSE':
-      payloadNode = {
-        identity: canonicalIdentityNode(validated.payload.identity),
-        expectedWriterEpoch: validated.payload.expectedWriterEpoch,
-      }
-      break
+  if (validated.type === 'INPUT') {
+    payloadNode = {
+      identity: validated.payload.identity,
+      streamId: validated.payload.streamId,
+      grant: validated.payload.grant,
+      seq: validated.payload.seq,
+      inputModeRevision: validated.payload.inputModeRevision,
+      bytes: uint8ArrayToBase64(validated.payload.bytes),
+    }
+  } else {
+    payloadNode = validated.payload as unknown as Record<string, unknown>
   }
 
   const root = {
@@ -1348,6 +1167,7 @@ export function decodeTerminalEvent(value: unknown): TerminalEvent {
       const executable = payloadObj.executable
       if (
         executable.length === 0 ||
+        executable.length > MAX_EXECUTABLE_UTF8_BYTES ||
         measureUtf8BytesAndValidate(executable) > MAX_EXECUTABLE_UTF8_BYTES
       ) {
         throw new TerminalControlError()
