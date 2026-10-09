@@ -17,7 +17,7 @@ public record Recovery(WriterGrant previous, long seq, OperationDigest digest) {
   public Recovery {
     Objects.requireNonNull(previous, "previous");
     if (seq < 0 || seq > TerminalLimits.MAX_SAFE_INTEGER) {
-      throw new IllegalArgumentException("seq out of range: " + seq);
+      throw new IllegalArgumentException("seq out of range");
     }
     if ((seq == 0) != (digest == null)) {
       throw new IllegalArgumentException("digest must be present exactly when seq is positive");

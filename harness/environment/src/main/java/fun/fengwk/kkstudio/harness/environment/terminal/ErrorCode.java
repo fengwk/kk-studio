@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.environment.terminal;
 
 /**
- * 终止控制协议的固定错误码。
+ * 终端控制协议的固定错误码。
  *
  * <p>它是错误回执里唯一的、可判定的分类信息：不携带自由文本，也不包装原始异常或载荷，避免把服务端内部细节泄漏到 wire。
  */

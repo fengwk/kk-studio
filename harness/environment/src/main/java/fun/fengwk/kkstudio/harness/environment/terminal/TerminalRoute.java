@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.environment.terminal;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+
 import java.util.Objects;
 import java.util.UUID;
 
@@ -30,5 +32,7 @@ public record TerminalRoute(UUID appNodeId, String connectionId) {
     if (connectionId.codePoints().anyMatch(Character::isISOControl)) {
       throw new IllegalArgumentException("connectionId must not contain control characters");
     }
+    // 严格 UTF-8 量度顺带拒绝孤立代理项等非法 UTF-16，避免非法文本进入 wire。
+    ResourceRef.utf8Length(connectionId, "connectionId");
   }
 }

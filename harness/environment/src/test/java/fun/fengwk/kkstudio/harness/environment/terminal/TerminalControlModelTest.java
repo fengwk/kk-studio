@@ -141,6 +141,10 @@ class TerminalControlModelTest {
     assertEquals(
         AdmissionResult.Kind.REJECTED,
         AdmissionResult.rejected(AdmissionResult.RejectReason.INVALID, 1L, null).kind());
+    // AdmissionResult 是纯 reducer 决议，仍可保留越界 seq；只有 wire OP_ACK 才强制 positive safe。
+    assertEquals(
+        TerminalLimits.MAX_SAFE_INTEGER + 1,
+        AdmissionResult.pending(TerminalLimits.MAX_SAFE_INTEGER + 1, digest).seq());
     assertEquals(
         AdmissionResult.RejectReason.FROZEN,
         AdmissionResult.rejected(AdmissionResult.RejectReason.FROZEN, 1L, digest).reason());
@@ -261,6 +265,12 @@ class TerminalControlModelTest {
             new TerminalRoute(
                 TerminalControlSamples.APP_NODE,
                 "c".repeat(TerminalRoute.MAX_CONNECTION_ID_LENGTH + 1)));
+    // 非法 UTF-16（孤立代理项）必须拒绝，且错误不回显原 input。
+    IllegalArgumentException surrogateError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new TerminalRoute(TerminalControlSamples.APP_NODE, "\ud800"));
+    assertFalse(surrogateError.getMessage().contains("\ud800"));
   }
 
   @Test
@@ -383,6 +393,15 @@ class TerminalControlModelTest {
             new OpAck(
                 TerminalControlSamples.EPOCH,
                 AdmissionResult.pending(0L, TerminalControlSamples.digest()),
+                null));
+    // wire Ack 只接受 positive safe seq；越界 seq 不能进入 encode。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new OpAck(
+                TerminalControlSamples.EPOCH,
+                AdmissionResult.pending(
+                    TerminalLimits.MAX_SAFE_INTEGER + 1, TerminalControlSamples.digest()),
                 null));
     assertThrows(
         IllegalArgumentException.class,

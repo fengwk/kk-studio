@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  * {version,requestId,environmentId,viewerId,type,payload}}，event 根 {@code
  * {version,requestId,environmentId,viewerId,identity,type,payload}}，request/response 只有一层 {@code
  * {route,command}}/{@code {route,event}} 包装，内层复用同一 command/event 模型，不定义第二套 RPC 格式。{@link
- * Type#VIEW_UPDATE} 直接嵌入既有 {@link TerminalViewUpdateCodec} 的 JSON object，不复制格子算法。
+ * TerminalEvent.Type#VIEW_UPDATE} 直接嵌入既有 {@link TerminalViewUpdateCodec} 的 JSON object，不复制格子算法。
  *
  * <p>解码前先施加总 UTF-8 字节上限并拒绝重复 key、尾随文本、缺失/未知字段、未知 type、错误版本、错误 null、非整数/溢出整数、非 canonical UUID 与
  * Base64；出错一律转为固定描述的 {@link TerminalControlException}，不回显输入、token、executable 或画面，也不保留原始 Jackson
@@ -67,6 +67,13 @@ public final class TerminalControlCodec {
   private static final String INVALID_ERROR = "terminal control message is invalid";
   private static final String SIZE_ERROR =
       "terminal control message exceeds the terminal message budget";
+
+  /** 1..4096 字节 canonical padded Base64 的文本长度下界（1 字节解码为 4 字符）。 */
+  private static final int MIN_INPUT_BASE64_LENGTH = 4;
+
+  /** 4096 字节解码后 canonical padded Base64 的文本长度上界：{@code ((4096 + 2) / 3) * 4 = 5464}。 */
+  private static final int MAX_INPUT_BASE64_LENGTH =
+      ((TerminalCommand.MAX_INPUT_BYTES + 2) / 3) * 4;
 
   private static final ObjectMapper OBJECT_MAPPER =
       new ObjectMapper(
@@ -725,13 +732,19 @@ public final class TerminalControlCodec {
 
   private static byte[] requiredBytes(JsonNode node, String field) {
     String text = requiredText(node, field);
+    // 先按 Base64 文本长度上界拒绝，避免在验证 1..4096 字节前解码一个超大字符串。
+    if (text.length() < MIN_INPUT_BASE64_LENGTH || text.length() > MAX_INPUT_BASE64_LENGTH) {
+      throw new TerminalControlException(INVALID_ERROR);
+    }
     byte[] decoded;
     try {
       decoded = Base64.getDecoder().decode(text);
     } catch (IllegalArgumentException error) {
       throw new TerminalControlException(INVALID_ERROR);
     }
-    if (!Base64.getEncoder().encodeToString(decoded).equals(text)) {
+    if (decoded.length < TerminalCommand.MIN_INPUT_BYTES
+        || decoded.length > TerminalCommand.MAX_INPUT_BYTES
+        || !Base64.getEncoder().encodeToString(decoded).equals(text)) {
       throw new TerminalControlException(INVALID_ERROR);
     }
     return decoded;
@@ -925,7 +938,7 @@ public final class TerminalControlCodec {
       return supplier.get();
     } catch (TerminalControlException error) {
       throw error;
-    } catch (RuntimeException error) {
+    } catch (IllegalArgumentException error) {
       throw new TerminalControlException(INVALID_ERROR);
     }
   }

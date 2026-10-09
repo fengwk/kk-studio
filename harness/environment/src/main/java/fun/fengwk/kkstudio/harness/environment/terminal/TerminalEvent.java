@@ -114,8 +114,8 @@ public record TerminalEvent(
       if (result.kind() == AdmissionResult.Kind.ACCEPTED) {
         throw new IllegalArgumentException("ACCEPTED is not a wire acknowledgement");
       }
-      if (result.seq() < 1L) {
-        throw new IllegalArgumentException("result seq must be positive");
+      if (result.seq() < 1L || result.seq() > TerminalLimits.MAX_SAFE_INTEGER) {
+        throw new IllegalArgumentException("result seq must be a positive JS safe integer");
       }
     }
 

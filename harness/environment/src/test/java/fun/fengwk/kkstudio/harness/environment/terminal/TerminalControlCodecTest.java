@@ -178,11 +178,21 @@ class TerminalControlCodecTest {
     assertThrows(
         INVALID, () -> CODEC.decodeCommand(mutatePayload(input, p -> p.put("bytes", "@@@@"))));
     assertThrows(INVALID, () -> CODEC.decodeCommand(mutatePayload(input, p -> p.put("bytes", ""))));
+    // 文本长度下界：不足 4 字符即拒绝，不解码。
+    assertThrows(
+        INVALID, () -> CODEC.decodeCommand(mutatePayload(input, p -> p.put("bytes", "AAA"))));
     byte[] tooLarge = new byte[TerminalCommand.MAX_INPUT_BYTES + 1];
     String encodedTooLarge = Base64.getEncoder().encodeToString(tooLarge);
     assertThrows(
         INVALID,
         () -> CODEC.decodeCommand(mutatePayload(input, p -> p.put("bytes", encodedTooLarge))));
+    // 文本长度上界：超过 4096 字节所能编码的 5464 字符即拒绝，避免先解码超大字符串。
+    byte[] overBoundary = new byte[TerminalCommand.MAX_INPUT_BYTES + 3];
+    String encodedOverBoundary = Base64.getEncoder().encodeToString(overBoundary);
+    assertTrue(encodedOverBoundary.length() > 5464);
+    assertThrows(
+        INVALID,
+        () -> CODEC.decodeCommand(mutatePayload(input, p -> p.put("bytes", encodedOverBoundary))));
   }
 
   @Test
@@ -351,6 +361,12 @@ class TerminalControlCodecTest {
         () -> CODEC.decodeEvent(mutatePayload(pending, p -> result(p).put("kind", "ACCEPTED"))));
     assertThrows(
         INVALID, () -> CODEC.decodeEvent(mutatePayload(pending, p -> result(p).put("seq", 0))));
+    assertThrows(
+        INVALID,
+        () ->
+            CODEC.decodeEvent(
+                mutatePayload(
+                    pending, p -> result(p).put("seq", TerminalLimits.MAX_SAFE_INTEGER + 1))));
     assertThrows(
         INVALID, () -> CODEC.decodeEvent(mutatePayload(pending, p -> result(p).putNull("digest"))));
     assertThrows(
