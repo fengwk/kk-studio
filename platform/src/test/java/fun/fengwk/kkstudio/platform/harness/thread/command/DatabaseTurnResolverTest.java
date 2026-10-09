@@ -1895,25 +1895,22 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * ROOT + 关闭 INPUT turn + COMPACTION TURN_START(head)，head 携带冻结的 executionModel 与 maxOutputTokens。
+   * ROOT + 关闭 INPUT turn + 父 COMPACTION TURN_START(head)：head 携带冻结的 executionModel 与输出预算，且该回合没有
+   * ModelInvocation。
    */
-  private static EntryPath compactionRequestPath(
-      ModelSelection executionModel, Integer maxOutputTokens) {
+  private static EntryPath compactionRequestPath(ModelSelection executionModel) {
     BranchSettings settings = settings("default");
     CompactionStart start =
-        maxOutputTokens == null
-            ? CompactionStart.pending(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(3), null, null)
-            : new CompactionStart(
-                CompactionPhase.FULL,
-                CompactionTrigger.THRESHOLD,
-                executionModel,
-                (long) maxOutputTokens,
-                id(3),
-                null,
-                null,
-                id(50),
-                id(51));
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            executionModel,
+            1234L,
+            id(3),
+            null,
+            null,
+            id(50),
+            id(51));
     return new EntryPath(
         List.of(
             new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
@@ -1926,13 +1923,7 @@ class DatabaseTurnResolverTest {
                 SESSION_ID,
                 id(5),
                 new TurnStartPayload(
-                    TurnStartReason.COMPACTION,
-                    settings,
-                    THREAD_ID,
-                    // contextWindow 与 maxOutputTokens 必须同时冻结或同时缺失。
-                    maxOutputTokens == null ? null : 4096,
-                    maxOutputTokens,
-                    start),
+                    TurnStartReason.COMPACTION, settings, THREAD_ID, 4096, 1234, start),
                 NOW)));
   }
 
@@ -2298,68 +2289,30 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * 逆证：历史压缩预览只按 durable {@code CompactionStart.executionModel} 解析 catalog，并直接冻结该 TURN_START 的实际
-   * maxOutputTokens，绝不回退到 branch settings.model，也绝不按当前 config 重算预算。
+   * 父 COMPACTION turn 自身不创建 ModelInvocation：历史预览绝不按冻结 executionModel 伪造一份零工具请求，也绝不解析 catalog，只返回稳定
+   * typed 拒绝并指向压缩子的真实请求。
    */
   @Test
-  void historicalCompactionPlanFreezesDurableExecutionModelAndBudget() {
+  void historicalCompactionParentTurnIsRejectedWithoutResolvingCatalog() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.modelGlobalOutputLimit(600);
-    ModelSelection fallback = new ModelSelection("fallback-provider", "fallback-model", "fallback");
-    fixture.addModel(
-        fallback,
-        new ParsedAgentModelConfig(
-            8192,
-            4096,
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true,
-            List.of(new ModelVariant("fallback")),
-            "fallback",
-            pricing()));
-    fixture.compactionAgent(fallback);
     when(fixture.providers.getByName("provider"))
         .thenThrow(
-            new AssertionError("historical compaction must not resolve branch settings.model"));
+            new AssertionError("a COMPACTION parent turn must not resolve the provider catalog"));
     when(fixture.models.getByProviderNameAndName("provider", "model"))
         .thenThrow(
-            new AssertionError("historical compaction must not resolve branch settings.model"));
+            new AssertionError("a COMPACTION parent turn must not resolve the model catalog"));
 
-    EntryPath path = compactionRequestPath(fallback, 1234);
-
-    LiveTurnPlan.Planned planned =
+    LiveTurnPlan.Rejected rejected =
         assertInstanceOf(
-            LiveTurnPlan.Planned.class, fixture.resolver.planHistorical(THREAD_ID, path, NOW));
+            LiveTurnPlan.Rejected.class,
+            fixture.resolver.planHistorical(
+                THREAD_ID, compactionRequestPath(settings("default").model()), NOW));
 
-    assertEquals("fallback-provider", planned.spec().model().providerName());
-    assertEquals("fallback-model", planned.spec().model().modelName());
-    assertEquals(8192, planned.contextWindow());
-    // 冻结的 durable 预算 1234，而不是当前 config 对 fallback（reserve 4096）会算出的 3276。
-    assertEquals(1234, planned.spec().outputTokens());
-    assertEquals(List.of(), planned.spec().toolBindings());
-    assertEquals(COMPACTION_SYSTEM_PROMPT, planned.spec().systemInstruction());
-    assertEquals(ProviderCacheControl.none(), planned.spec().cacheControl());
-
-    // 反向对照：同一 executionModel 走正式执行路径时预算仍按当前 config 现算，与冻结值不同。
-    List<AgentMessage> messages =
-        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
-    CompactionPreparation preparation =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(3),
-            null,
-            null,
-            null,
-            messages,
-            50_000L);
-    long recomputed =
-        fixture.resolvedCompaction(fixture.path(settings("default")), preparation).outputBudget();
-    assertEquals(3276L, recomputed);
-    assertNotEquals(recomputed, planned.spec().outputTokens());
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.errorCode());
+    assertTrue(rejected.detail().contains("compaction child thread"), rejected.detail());
   }
 
-  /** 非压缩历史输出与 live planner 完全同源（同一 spec / contextWindow），只有压缩输出走专用重建。 */
+  /** 普通历史输出与 live planner 完全同源（同一 spec / contextWindow）：历史重建没有第二套 planner。 */
   @Test
   void historicalLivePlanIsIdenticalToLivePlanner() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
@@ -2372,20 +2325,6 @@ class DatabaseTurnResolverTest {
 
     assertEquals(live.spec(), historical.spec());
     assertEquals(live.contextWindow(), historical.contextWindow());
-  }
-
-  /** 缺少 durable 冻结预算时不猜值：历史压缩预览返回稳定 typed 拒绝，绝不拿默认或当前 config 冒充历史事实。 */
-  @Test
-  void historicalCompactionPlanRejectsMissingFrozenBudget() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    EntryPath path = compactionRequestPath(settings("default").model(), null);
-
-    LiveTurnPlan.Rejected rejected =
-        assertInstanceOf(
-            LiveTurnPlan.Rejected.class, fixture.resolver.planHistorical(THREAD_ID, path, NOW));
-
-    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.errorCode());
-    assertTrue(rejected.detail().contains("maxOutputTokens"), rejected.detail());
   }
 
   /** CompactionPreparation 保持最小，派生 token/window 与 compaction metadata 不进入 ModelRequestSpec。 */

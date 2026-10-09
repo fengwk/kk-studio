@@ -997,7 +997,7 @@ final class ModelExecution implements ModelGateway.Listener {
 
   /**
    * 压缩子 final 完整性：LENGTH 一律是被输出上限截断的结果（即使 provider 同时给出 tool call，截断的 tool intent 也不是可执行意图），
-   * COMPLETE 只有在无 tool calls 且空文本时才是空摘要。两者都不是可用摘要。
+   * COMPLETE 只有在无 tool calls 且文本为空白时才是空摘要（纯空白与空串同样是不可用摘要，绝不能冻结成父 receipt 后被空摘要校验拒绝）。 两者都不是可用摘要。
    *
    * <p>COMPLETE / CONTINUE 的合法 tool 回合不在此列：它们按普通 Runtime 语义继续推进（模型得到真实 tool result 后再产出 final）。
    */
@@ -1007,7 +1007,7 @@ final class ModelExecution implements ModelGateway.Listener {
     }
     return response.stopReason() == GenerationStopReason.COMPLETE
         && response.toolCalls().isEmpty()
-        && text.isEmpty();
+        && text.isBlank();
   }
 
   /** TRANSIENT 与 INVALID_RESPONSE 共享 {@link InvocationRetryPolicy}：两者耗尽后都转为 FAILED terminal。 */

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -32,10 +31,9 @@ import java.util.UUID;
 /**
  * 唯一请求重建边界：从不可变 {@link EntryPath} 与冻结 {@link ModelRequestSpec} 纯投影内存 {@link ProviderRequest}。
  *
- * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩执行已移出本
- * materializer：压缩子 Thread 的首条输入由 {@code CompactionChildStarter} 以普通 CUSTOM_MESSAGE 构造。只读历史规划通过
- * basis EntryPath 末尾 owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）恢复压缩 turn
- * 的冻结事实，而不是在请求内复制 compaction facts。
+ * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩执行已完全移出本
+ * materializer：压缩子 Thread 的首条输入由 {@code CompactionChildStarter} 以普通 CUSTOM_MESSAGE 构造，父 COMPACTION
+ * turn 不创建 ModelInvocation，也不在请求内复制 compaction facts。
  *
  * <p>压缩感知历史投影还把执行本次压缩的 COMPACTION TURN_START 冻结 settings 中的 Goal 作为有界 USER 级历史背景放在摘要之后、真实近期消息之前：
  * 背景逐字来自该冻结快照（同一压缩每次重建结果相同），已被切掉或仍在近期消息中都不改变它，后续 Goal 设置 / 清除由真实输入消息自身携带。 Goal 只作为用户级背景，绝不提升为
@@ -64,20 +62,6 @@ public final class ModelRequestMaterializer {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(spec, "spec");
     return materializeLive(path, spec);
-  }
-
-  /**
-   * basis path 末尾条目是 owned COMPACTION TURN_START 时返回其冻结元数据，否则 null。只供只读历史规划（压缩输出重建）恢复 phase /
-   * trigger / executionModel / cut 事实：压缩执行本身已不再经过本 materializer。
-   */
-  public static CompactionStart compactionStartAtHead(EntryPath path) {
-    Objects.requireNonNull(path, "path");
-    Entry head = path.head();
-    if (head.payload() instanceof TurnStartPayload start
-        && start.reason() == TurnStartReason.COMPACTION) {
-      return start.compaction();
-    }
-    return null;
   }
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {

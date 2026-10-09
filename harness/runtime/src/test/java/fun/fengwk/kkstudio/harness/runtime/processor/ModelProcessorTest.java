@@ -994,6 +994,104 @@ class ModelProcessorTest {
     assertNull(failed.resultEntryId());
   }
 
+  /**
+   * 压缩子纯空白 final（COMPLETE 且无 tool calls 且文本为 " \n"）同样是空摘要：绝不落 receipt 让父回合以空摘要失败，而是走既有调用重试；
+   * 第二次合法摘要才 SUCCEEDED。
+   */
+  @Test
+  void compactionChildWhitespaceOnlyCompleteFinalRetriesThenCommitsValidSummary() {
+    Fixture fixture =
+        compactionFixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            StreamFlushConfig.IMMEDIATE);
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onSucceeded(
+        new ProviderCompletion(
+            response(" \n\t", GenerationStopReason.COMPLETE), sampleReplayState()));
+
+    ModelInvocation afterFirst = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, afterFirst.status());
+    assertEquals(1, afterFirst.attempt());
+    assertNull(afterFirst.resultEntryId(), "a blank final must not commit any summary");
+    assertEquals(1, afterFirst.failedAttempts().size());
+    assertEquals(" \n\t", afterFirst.failedAttempts().getFirst().text());
+    assertEquals(
+        ProviderErrorKind.INVALID_RESPONSE, afterFirst.failedAttempts().getFirst().error().kind());
+    assertEquals(
+        "compaction model returned an empty summary",
+        afterFirst.failedAttempts().getFirst().error().message());
+
+    fixture.clock.advance(Duration.ofSeconds(5));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            claim(fixture.store, fixture.invocationId, fixture.clock.instant())));
+    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+    secondListener.onSucceeded(
+        new ProviderCompletion(
+            response("valid summary", GenerationStopReason.COMPLETE), sampleReplayState()));
+
+    ModelInvocation terminal = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
+    assertEquals(2, terminal.attempt());
+    assertEquals("valid summary", terminal.result().text());
+  }
+
+  /** 压缩子纯空白 final 耗尽重试预算：FAILED 且无任何摘要提交，绝不把空白当摘要。 */
+  @Test
+  void compactionChildWhitespaceOnlyCompleteFinalExhaustionFailsClosed() {
+    Fixture fixture =
+        compactionFixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            StreamFlushConfig.IMMEDIATE);
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onSucceeded(
+            new ProviderCompletion(
+                response(" \n", GenerationStopReason.COMPLETE), sampleReplayState()));
+    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
+
+    fixture.clock.advance(Duration.ofSeconds(5));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            claim(fixture.store, fixture.invocationId, fixture.clock.instant())));
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onSucceeded(
+            new ProviderCompletion(
+                response("\t \n", GenerationStopReason.COMPLETE), sampleReplayState()));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(2, failed.attempt());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, failed.error().kind());
+    assertEquals(1, failed.failedAttempts().size());
+    assertEquals(" \n", failed.failedAttempts().getFirst().text());
+    assertNull(failed.resultEntryId());
+  }
+
   /** 压缩子 FILTERED 明确不可恢复：INVALID_REQUEST 直接 FAILED，保留同一 attempt（不重试、不落摘要），即使策略允许重试。 */
   @Test
   void compactionChildFilteredFinalFailsWithoutRetry() {

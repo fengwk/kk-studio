@@ -175,8 +175,8 @@ public final class ProviderRequestPreviewService {
    * 现算一次历史模型输出的 Provider 协议请求体预览：请求前缀严格是 ROOT 到该输出的 parent，规划时间显式取该输出的记录时间。
    *
    * <p>catalog 与 Provider 配置都已不是当时的那一份，因此这里按当前定义重建；响应以 {@link
-   * HarnessProviderRequestPreviewDTO#HISTORICAL_NOTICE} 明确声明它不等于原始发送字节。压缩输出按其 durable COMPACTION
-   * TURN_START 冻结的 executionModel 与预算重建，与普通输出一样是只读 GET。
+   * HarnessProviderRequestPreviewDTO#HISTORICAL_NOTICE} 明确声明它不等于原始发送字节。父 COMPACTION turn 自身不创建
+   * ModelInvocation，其 provider 请求由独立的压缩子 Thread 发出，因此父侧无法重建该请求：这里明确 typed 拒绝并指向子的真实调用，绝不伪造一份零工具请求。
    *
    * @param sessionId path 中的目标 Session；不存在时由 {@link HarnessRuntime} 以 typed 异常拒绝
    * @param entryId 被查看的模型输出 Entry，必须属于该 Session 且携带 assistantMetadata
@@ -187,6 +187,13 @@ public final class ProviderRequestPreviewService {
 
     Map<UUID, Entry> entries = sessionEntries(sessionId);
     Entry output = requireSessionEntry(entries, entryId, "entry");
+    if (output.payload() instanceof CompactionPayload) {
+      // 压缩结果由父 COMPACTION turn 提交，但请求属于压缩子 Thread（其 ROOT/输入回合在另一个 Session 里）；父侧没有可重建的请求。
+      throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_UNSUPPORTED,
+          "a COMPACTION parent turn has no model invocation; its provider request belongs to the"
+              + " compaction child thread");
+    }
     UUID requestHeadEntryId = requireRequestHead(output);
     EntryPath requestPath = entryPath(entries, requestHeadEntryId);
     Instant recordedAt = output.createdAt();
@@ -264,8 +271,8 @@ public final class ProviderRequestPreviewService {
   }
 
   /**
-   * 历史预览只接受模型输出本身：携带 assistantMetadata 的 ASSISTANT MESSAGE，或携带真实模型输出 metadata 的 COMPACTION
-   * 结果。请求前缀就是它的 parent，因此本次输出与未来历史绝不进入请求体。
+   * 历史预览只接受模型输出本身：携带 assistantMetadata 的 ASSISTANT MESSAGE。请求前缀就是它的 parent，因此本次输出与未来历史绝不进入 请求体；父
+   * COMPACTION 结果已在 {@link #previewHistorical} 前置拒绝，不会走到这里。
    */
   private static UUID requireRequestHead(Entry output) {
     if (!carriesModelOutputMetadata(output)) {
@@ -279,15 +286,10 @@ public final class ProviderRequestPreviewService {
     return output.parentEntryId();
   }
 
-  /** 只有真正发生过 provider 调用的输出才带 assistantMetadata，才存在可重建的请求前缀。 */
+  /** 只有真正发生过 provider 调用的助手输出才带 assistantMetadata，才存在可重建的请求前缀。 */
   private static boolean carriesModelOutputMetadata(Entry output) {
-    if (output.payload() instanceof MessagePayload message) {
-      return message.assistantMetadata() != null;
-    }
-    if (output.payload() instanceof CompactionPayload compaction) {
-      return compaction.assistantMetadata() != null;
-    }
-    return false;
+    return output.payload() instanceof MessagePayload message
+        && message.assistantMetadata() != null;
   }
 
   /**
