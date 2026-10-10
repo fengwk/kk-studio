@@ -1,27 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { assert, assertDecimalVersion, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
-import { assertDistributedContext } from '../lib/distributed.mjs'
+import { assert, assertDecimalVersion, envelopeData, expectHttpError } from '../lib/http.mjs'
+import { assertDistributedContext, waitForEnvironmentReady, waitForNodeHealth } from '../lib/distributed.mjs'
 import { registerCase } from '../lib/registry.mjs'
 import { createDurationTimer } from '../lib/time.mjs'
 
 const ENV_A_ID = '33333333-3333-3333-3333-333333333333'
 const ENV_B_ID = '44444444-4444-4444-4444-444444444444'
-
-async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 30) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const res = await callNode(node, 'GET', `/api/harness/environments/${encodeURIComponent(envId)}`)
-      const card = envelopeData(res.json)
-      if (card?.ready === true && card?.status === 'READY') {
-        return card
-      }
-    } catch {
-      // transient startup / reconnecting
-    }
-    await sleep(500)
-  }
-  throw new Error(`environment '${envId}' on node '${node}' did not reach READY within timeout`)
-}
 
 registerCase({
   id: 'distributed.shared_state',
@@ -199,10 +183,10 @@ registerCase({
     assertDistributedContext(ctx)
 
     // 1. 两个 App 都必须投影两者 READY
-    const cardAOnA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID)
-    const cardBOnA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_B_ID)
-    const cardAOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID)
-    const cardBOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_B_ID)
+    const cardAOnA = await waitForEnvironmentReady(ctx, 'a', ENV_A_ID)
+    const cardBOnA = await waitForEnvironmentReady(ctx, 'a', ENV_B_ID)
+    const cardAOnB = await waitForEnvironmentReady(ctx, 'b', ENV_A_ID)
+    const cardBOnB = await waitForEnvironmentReady(ctx, 'b', ENV_B_ID)
 
     assert(
       cardAOnA.ready && cardBOnA.ready && cardAOnB.ready && cardBOnB.ready,
@@ -267,7 +251,7 @@ registerCase({
   level: 'L5',
   title: 'DB loss fail-closed 与有界 recovery',
   requires: ['distributed'],
-  docs: '先验证 node A 投影 env A READY；通过受限白名单调 disconnect-db-a 断开 node A DB 网络；断网后 node A 的 DB 权威读路径必须失败（HTTP 4xx/5xx，而不是回退本机 websocket 返回 200）；finally 无条件 reconnect-db-a，随后有界轮询 node A 与 node B 都恢复 READY 且宿主事实（userName/homeDirectory）与断网前一致（证明 DB-authoritative route 恢复）',
+  docs: '先验证 node A 投影 env A READY；通过受限白名单调 disconnect-db-a 断开 node A DB 网络；断网后 node A 的 DB 权威读路径必须失败（HTTP 4xx/5xx，而不是回退本机 websocket 返回 200）；finally 无条件 reconnect-db-a，随后等 node A 通知健康恢复，并在两节点上等到严格晚于断网前 lastSeen 的新鲜 READY，且宿主事实（userName/homeDirectory）与断网前一致（证明 DB-authoritative route 真正恢复、不残留旧租约）',
   async run(ctx) {
     assertDistributedContext(ctx)
     assert(
@@ -276,8 +260,8 @@ registerCase({
     )
 
     // 1. 先证明 node A 与 node B 都能读取 env A 的 DB 权威投影
-    const preCardA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID)
-    const preCardAOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID)
+    const preCardA = await waitForEnvironmentReady(ctx, 'a', ENV_A_ID)
+    const preCardAOnB = await waitForEnvironmentReady(ctx, 'b', ENV_A_ID)
     assert(
       preCardA.homeDirectory === preCardAOnB.homeDirectory,
       `pre-check: cross-node host fact mismatch: ${JSON.stringify({
@@ -313,9 +297,11 @@ registerCase({
       ctx.runDistributedCommand('reconnect-db-a')
     }
 
-    // 4. 有界轮询 node A 与 node B 都恢复 DB 权威 READY 投影
-    const recoveredOnA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID, 60)
-    const recoveredOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID, 60)
+    // 4. 恢复通知总线健康，并在两节点上等到严格晚于断网前 lastSeen 的新鲜 READY：
+    // 旧 READY 行可在租约到期前仍可读，只有新心跳才证明路由真正恢复，避免把陈旧路由留给下一个 case。
+    await waitForNodeHealth(ctx, 'a')
+    const recoveredOnA = await waitForEnvironmentReady(ctx, 'a', ENV_A_ID, preCardA.lastSeen)
+    const recoveredOnB = await waitForEnvironmentReady(ctx, 'b', ENV_A_ID, preCardA.lastSeen)
     assert(recoveredOnA?.status === 'READY', 'node A failed to recover READY status')
     assert(
       recoveredOnA.homeDirectory === preCardA.homeDirectory,

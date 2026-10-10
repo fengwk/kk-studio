@@ -7,7 +7,7 @@ import path from 'node:path'
 
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import { redactSecrets } from './redact.mjs'
-import { sleep } from './http.mjs'
+import { envelopeData, instantEpochMillis, sleep } from './http.mjs'
 
 export const NODE_IDS = ['a', 'b']
 
@@ -67,6 +67,37 @@ export async function waitForNodeHealth(ctx, node, timeoutMs = 30_000) {
     await sleep(Math.min(100, Math.max(0, deadline - Date.now())))
   }
   throw new Error(`node '${node}' health did not recover within ${timeoutMs}ms`)
+}
+
+/**
+ * 等待指定节点投影出指定 Environment 的新鲜 READY，只轮询无副作用 GET。
+ *
+ * DB 断网期间旧的 READY 行在租约到期前仍可读，恢复后即使 status 已是 READY 也可能只是
+ * 尚未过期的旧投影，路由层凭它会把命令派给没有活跃连接的 daemon。提供 afterLastSeen 时
+ * 必须观察到严格更新的 lastSeen（重连后的新心跳），才认定该路由真正恢复。每个请求与整体
+ * 都有界，超时显式失败；不重发任何业务命令。
+ */
+export async function waitForEnvironmentReady(ctx, node, envId, afterLastSeen = null, timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const response = await ctx.callNode(
+        node,
+        'GET',
+        `/api/harness/environments/${encodeURIComponent(envId)}`,
+        undefined,
+        Math.min(2_000, Math.max(1, deadline - Date.now())),
+      )
+      const card = envelopeData(response.json)
+      const fresh = afterLastSeen === null
+        || instantEpochMillis(card?.lastSeen) > instantEpochMillis(afterLastSeen)
+      if (card?.ready === true && card?.status === 'READY' && fresh) return card
+    } catch {
+      // 只轮询无副作用的恢复事实；不重发终端命令或业务提交。
+    }
+    await sleep(Math.min(200, Math.max(0, deadline - Date.now())))
+  }
+  throw new Error(`environment '${envId}' on node '${node}' did not reach a fresh READY within ${timeoutMs}ms`)
 }
 
 /**
