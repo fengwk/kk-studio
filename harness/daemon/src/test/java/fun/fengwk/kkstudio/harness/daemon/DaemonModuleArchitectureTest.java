@@ -209,6 +209,7 @@ class DaemonModuleArchitectureTest {
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.")
         || imported.startsWith("fun.fengwk.kkstudio.share.ai.environment.")
+        || imported.startsWith("fun.fengwk.kkstudio.share.notification.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.mcp.")
         || imported.startsWith("org.eclipse.jgit.")

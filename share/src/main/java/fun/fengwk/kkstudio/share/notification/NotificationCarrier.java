@@ -23,7 +23,12 @@ public final class NotificationCarrier {
    */
   public static final int CHUNK_BYTES = 5400;
 
-  private static final int PAYLOAD_LIMIT = 7900;
+  /**
+   * Maximum encoded ASCII carrier length. Every transport caps its native text/binary frame buffer
+   * to this fixed physical limit; it is independent of the logical message budget.
+   */
+  public static final int PAYLOAD_LIMIT = 7900;
+
   private static final String TOPIC_PATTERN = "[a-z][a-z0-9_.-]{0,95}";
 
   private final UUID publisher;

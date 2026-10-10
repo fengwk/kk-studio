@@ -37,7 +37,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
-import java.util.concurrent.CompletableFuture;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -52,7 +52,6 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String REGISTRATION_TOKEN = "test-registration-token";
   private static final String DAEMON_INSTANCE_ID = "22222222-2222-2222-2222-222222222222";
-  private static final int TOMCAT_DEFAULT_TEXT_BUFFER_BYTES = 8 * 1024;
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
@@ -80,21 +79,26 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     String readyPayloadJson = readyPayload();
     String readyEnvelope = ENVELOPE_CODEC.encode(readyEnvelope(readyPayloadJson));
 
-    FrameListener listener = new FrameListener();
-    OkHttpClient client = new OkHttpClient();
+    TestPeer client = new TestPeer(UUID.randomUUID());
+    CapabilityListener listener = new CapabilityListener(client);
+    OkHttpClient client0 = new OkHttpClient();
     try {
       WebSocket socket =
-          client.newWebSocket(
+          client0.newWebSocket(
               new Request.Builder().url(endpointUri().toASCIIString()).build(), listener);
 
       boolean readyReached = false;
       try {
-        assertTrue(socket.send(ENVELOPE_CODEC.encode(helloEnvelope())));
-        String welcomeJson = listener.awaitText(5_000);
+        for (String frame : client.fragments(ENVELOPE_CODEC.encode(helloEnvelope()))) {
+          assertTrue(socket.send(frame));
+        }
+        String welcomeJson = listener.awaitMessageType("WELCOME");
         assertEquals("WELCOME", readMessageType(welcomeJson));
 
-        // 危险帧：因为缓冲区已被调高，绝不能触发 close code 1009。
-        assertTrue(socket.send(readyEnvelope));
+        // 大 READY 能力消息同样经 carrier 分片，绝不触发 close code 1009。
+        for (String frame : client.fragments(readyEnvelope)) {
+          assertTrue(socket.send(frame));
+        }
         // 轮询最多 10 秒，等待注册表标记为 READY
         readyReached = awaitReady();
       } finally {
@@ -111,9 +115,6 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
           1009,
           listener.observedCloseCode,
           "server closed connection with code 1009 (frame too large) during the handshake");
-      assertTrue(
-          16L * 1024 * 1024 > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
-          "premise: gateway buffer limit must be raised above the 8 KiB default");
 
       EnvironmentConnection connection = registry.find(ENVIRONMENT_ID).orElseThrow();
       assertEquals(DaemonCapabilities.VERSION, connection.daemonCapabilities().version());
@@ -139,8 +140,8 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
               .allMatch(c -> EnvironmentCapabilityIds.SKILL_SYNC.value().equals(c.id().value())),
           "only the internal skill.sync capability may use the skill.* namespace");
     } finally {
-      client.dispatcher().executorService().shutdown();
-      client.connectionPool().evictAll();
+      client0.dispatcher().executorService().shutdown();
+      client0.connectionPool().evictAll();
     }
   }
 
@@ -206,13 +207,16 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
         DaemonProtocol.VERSION, DaemonMessageType.READY, ENVIRONMENT_ID, null, payloadJson);
   }
 
-  private static final class FrameListener extends WebSocketListener {
+  private static final class CapabilityListener extends WebSocketListener {
 
-    private final StringBuilder currentMessage = new StringBuilder();
-    private final CompletableFuture<String> nextMessage = new CompletableFuture<>();
+    private final TestPeer peer;
     private final AtomicInteger closeCount = new AtomicInteger();
     volatile int observedCloseCode = -1;
     volatile String observedCloseReason;
+
+    private CapabilityListener(TestPeer peer) {
+      this.peer = peer;
+    }
 
     @Override
     public void onOpen(WebSocket webSocket, Response response) {
@@ -221,10 +225,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
     @Override
     public void onMessage(WebSocket webSocket, String text) {
-      currentMessage.append(text);
-      String complete = currentMessage.toString();
-      currentMessage.setLength(0);
-      nextMessage.complete(complete);
+      peer.accept(text);
     }
 
     @Override
@@ -255,13 +256,18 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
       }
     }
 
-    String awaitText(long timeoutMillis) throws Exception {
-      try {
-        return nextMessage.get(timeoutMillis, TimeUnit.MILLISECONDS);
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-        throw error;
+    /** 等待一条重组后 messageType 匹配的逻辑 envelope。 */
+    String awaitMessageType(String messageType) throws Exception {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (System.nanoTime() < deadline) {
+        for (String body : peer.inbox()) {
+          if (messageType.equals(readMessageType(body))) {
+            return body;
+          }
+        }
+        Thread.sleep(10);
       }
+      throw new AssertionError("no " + messageType + " message within timeout");
     }
   }
 }

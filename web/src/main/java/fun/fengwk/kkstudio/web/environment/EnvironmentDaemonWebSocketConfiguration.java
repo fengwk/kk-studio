@@ -8,17 +8,16 @@ import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
-import java.util.Objects;
+import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
+
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /**
  * Daemon 端点（WebSocket 路径 `/api/harness/environment-daemon/v1`）的传输注册。
  *
- * <p>当 Daemon 宣告 skills 时，{@code READY} 帧可能超过 Tomcat 默认的 8 KiB 文本缓冲区。存在真实 servlet container 时，宽容的
- * {@link ServletServerContainerFactoryBean} 把 JSR-356 {@code ServerContainer} 的默认上限抬到部署配置 {@code
- * kk-studio.harness.environment-gateway.max-message-bytes}；每条新连接再由 {@link
- * EnvironmentDaemonWebSocketHandler} 套用同一上限。非容器 Spring 上下文中 factory 保持 no-op，以便 MockMvc 与 {@code
- * WebEnvironment.MOCK} 测试可以启动。
+ * <p>所有物理帧都是共享 carrier 的片，物理上限固定为 {@link NotificationCarrier#PAYLOAD_LIMIT}；即使是大 {@code READY}
+ * 能力目录也会被分片，因此 JSR-356 文本/二进制缓冲区只需按该物理上限设置，不再需要抬到 16 MiB。非容器 Spring 上下文中 factory 保持 no-op，以便
+ * MockMvc 与 {@code WebEnvironment.MOCK} 测试可以启动。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocket
@@ -53,18 +52,15 @@ public class EnvironmentDaemonWebSocketConfiguration implements WebSocketConfigu
   }
 
   /**
-   * 通过 Spring 标准 factory bean 提高 JSR-356 文本/二进制帧缓冲区上限。宽容子类会检测缺失的 {@code ServerContainer}
-   * 属性（非容器上下文）并跳过配置而不是抛异常。
+   * 通过 Spring 标准 factory bean 把 JSR-356 文本/二进制帧缓冲区设为 carrier 的固定物理上限。宽容子类会检测缺失的 {@code
+   * ServerContainer} 属性（非容器上下文）并跳过配置而不是抛异常。
    */
   @Bean
-  public ServletServerContainerFactoryBean environmentDaemonWebSocketContainer(
-      EnvironmentDaemonTransportProperties transportProperties) {
-    int maxMessageBytes =
-        Objects.requireNonNull(transportProperties, "transportProperties").requireMaxMessageBytes();
+  public ServletServerContainerFactoryBean environmentDaemonWebSocketContainer() {
     ServletServerContainerFactoryBean container =
         new EnvironmentDaemonWebSocketContainerFactoryBean();
-    container.setMaxTextMessageBufferSize(maxMessageBytes);
-    container.setMaxBinaryMessageBufferSize(maxMessageBytes);
+    container.setMaxTextMessageBufferSize(NotificationCarrier.PAYLOAD_LIMIT);
+    container.setMaxBinaryMessageBufferSize(NotificationCarrier.PAYLOAD_LIMIT);
     return container;
   }
 }
