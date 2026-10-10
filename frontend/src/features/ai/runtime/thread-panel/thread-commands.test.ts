@@ -24,6 +24,7 @@ describe('AgentPane command registry', () => {
       'rename-session',
       'rename-thread',
       'goal',
+      'shell',
     ])
   })
 
@@ -74,6 +75,7 @@ describe('AgentPane command registry', () => {
       'rename-session',
       'rename-thread',
       'goal',
+      'shell',
     ])
     expect(THREAD_COMMANDS.every((command) => command.disabled === undefined)).toBe(true)
   })
@@ -135,6 +137,7 @@ describe('AgentPane command registry', () => {
     expect(newCommand?.disabledReason).toBe('只读模式')
     expect(historyCommand?.disabled).toBe(false)
     expect(shortcutsCommand?.disabled).toBe(false)
+    expect(commands.find((c) => c.id === 'shell')?.disabled).toBe(false)
   })
 
   it('disables new command when allowNewSession is false and cannot branch from root', () => {

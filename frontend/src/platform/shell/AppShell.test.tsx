@@ -70,6 +70,7 @@ function renderShell(
     navItems?: readonly PrimaryNavItem[]
     queryClient?: QueryClient
     pages?: []
+    bottomPanel?: ReactNode
   },
 ) {
   const host = createApplicationExtensionHost()
@@ -83,7 +84,7 @@ function renderShell(
       <ExtensionHostProvider host={host}>
         <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
           <MemoryRouter initialEntries={[initialEntry]}>
-            <AppShell navItems={navItems} pages={options?.pages}>
+            <AppShell navItems={navItems} pages={options?.pages} bottomPanel={options?.bottomPanel}>
               {children}
             </AppShell>
           </MemoryRouter>
@@ -480,5 +481,27 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
     // Empty pages fallback route matching
     renderShell('/unknown-nonexistent-path', <div>404</div>, { pages: [] })
     expect(screen.getByText('404')).toBeInTheDocument()
+  })
+})
+
+describe('AppShell bottom panel slot', () => {
+  it('renders the provided bottom panel after the stage in document order', () => {
+    renderShell('/chats', <div data-testid="stage-content">Stage</div>, {
+      bottomPanel: <div data-testid="bottom-panel">Panel</div>,
+    })
+
+    const stage = document.querySelector('main.stage')!
+    const panel = screen.getByTestId('bottom-panel')
+    expect(stage).toBeInTheDocument()
+    expect(panel).toBeInTheDocument()
+    expect(stage.contains(panel)).toBe(false)
+    // DOM 顺序：stage 之后紧跟 bottom panel，二者是同一 flex 列的兄弟。
+    expect(stage.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(panel.parentElement).toBe(stage.parentElement)
+  })
+
+  it('renders no bottom panel when the slot is absent', () => {
+    renderShell('/chats', <div data-testid="stage-content">Stage</div>)
+    expect(screen.queryByTestId('bottom-panel')).toBeNull()
   })
 })

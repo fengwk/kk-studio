@@ -8,7 +8,12 @@ import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
-  const manager = { subscribe: () => () => undefined }
+  const manager = {
+    subscribe: () => () => undefined,
+    // TerminalProvider 需要同一 app-events 连接的状态与终端订阅入口。
+    getStatus: () => 'open' as const,
+    subscribeTerminal: () => () => undefined,
+  }
   return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
 })
 // jsdom 没有 WebSocket：应用事件 Provider 在 App 级测试中退化为透传。

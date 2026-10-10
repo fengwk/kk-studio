@@ -7,3 +7,8 @@ export * from './terminal-view-codec'
 export * from './terminal-view-mirror'
 export * from './terminal-input-encoder'
 export * from './terminal-control-codec'
+/** 公共终端控制器与跨路由 Provider（context）以及全局面板/视口组件。 */
+export * from './terminal-controller'
+export * from './terminal-context'
+export * from './TerminalViewport'
+export * from './TerminalPanel'

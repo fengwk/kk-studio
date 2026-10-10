@@ -49,6 +49,7 @@ import type {
   RuntimeThreadSummaryDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import { useOptionalTerminal } from '@/features/shell/terminal-context'
 import {
   buildAcceptanceRequest,
   buildGoalAcceptanceRequest,
@@ -197,6 +198,7 @@ export function useRootThreadControl({
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
+  const terminal = useOptionalTerminal()
   const ownerKey = owner ? ownerIdentity(owner) : null
   const composerScope = ownerKey
     ? `agent-pane:${ownerKey}:${paneId}`
@@ -1364,6 +1366,18 @@ export function useRootThreadControl({
       case 'stop':
         controller.runCommand(command)
         return
+      case 'shell': {
+        const activeDraftEnvironmentName = activeDraft?.environmentName ?? null
+        const confirmedEnvCard = activeDraftEnvironmentName
+          ? environments.find((env) => env.name === activeDraftEnvironmentName) ?? null
+          : null
+        if (confirmedEnvCard?.id) {
+          terminal?.show(confirmedEnvCard.id)
+        } else {
+          terminal?.show()
+        }
+        return
+      }
       case 'models':
       case 'upload':
         return

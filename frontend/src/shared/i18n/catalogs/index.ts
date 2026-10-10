@@ -4,6 +4,7 @@ import { platformCatalog } from '@/shared/i18n/catalogs/platform'
 import { projectsCatalog } from '@/shared/i18n/catalogs/projects'
 import { settingsCatalog } from '@/shared/i18n/catalogs/settings'
 import { sharedCatalog } from '@/shared/i18n/catalogs/shared'
+import { shellCatalog } from '@/shared/i18n/catalogs/shell'
 import { shortcutsCatalog } from '@/shared/i18n/catalogs/shortcuts'
 import { syncCatalog } from '@/shared/i18n/catalogs/sync'
 
@@ -16,6 +17,7 @@ export const messageCatalog = {
   ...shortcutsCatalog,
   ...projectsCatalog,
   ...syncCatalog,
+  ...shellCatalog,
 } as const
 
 export type TranslationKey = keyof typeof messageCatalog

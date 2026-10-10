@@ -1359,6 +1359,14 @@ export const aiCatalog = {
     'en-US': 'goal',
     'zh-CN': 'goal',
   },
+  'ai.runtime.command.shell': {
+    'en-US': 'Open the bottom environment terminal panel',
+    'zh-CN': '打开底部环境终端面板',
+  },
+  'ai.runtime.command.shellLabel': {
+    'en-US': 'shell',
+    'zh-CN': 'shell',
+  },
   'ai.runtime.goal.title': {
     'en-US': 'Thread goal',
     'zh-CN': 'thread 目标',

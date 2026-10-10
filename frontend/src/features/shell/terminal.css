@@ -1,0 +1,127 @@
+/* 全局终端面板与只读视口的几何/皮肤。
+   面板是 AppShell.stage 之后的 flex 兄弟，与 stage 共享高度，不使用 fixed 覆盖。 */
+
+.terminal-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  /* 折叠时不占空间；展开时给终端一个稳定的可观测高度。 */
+  height: min(48vh, 520px);
+  min-height: 0;
+}
+
+.terminal-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.terminal-panel__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.terminal-panel__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-panel__tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.terminal-panel__tabs .ui-tabs {
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.terminal-panel__tabpanel {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminal-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.terminal-panel__notice {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--danger, #e5484d);
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-panel__empty {
+  margin: auto;
+  padding: 24px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+.terminal-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #101412;
+}
+
+.terminal-viewport__scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+/* 输入层覆盖在网格之上：透明但保留焦点与键盘/鼠标事件。
+   使用 readOnly 而非 disabled，避免普通输出重绘时丢失焦点。 */
+.terminal-viewport__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  opacity: 0;
+  white-space: pre;
+}
+
+.terminal-grid__selection {
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  background: rgba(120, 170, 255, 0.32);
+}
