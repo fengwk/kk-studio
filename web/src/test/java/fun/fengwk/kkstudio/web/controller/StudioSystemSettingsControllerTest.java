@@ -148,12 +148,12 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[2].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[2].groups[0].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.data.sections[2].groups.length()").value(1))
-        // network 唯一全局分组，重启生效，不暴露模块覆盖。
-        .andExpect(jsonPath("$.data.sections[3].restartRequired").value(true))
+        // network 唯一全局分组，保存后新请求生效，不暴露模块覆盖。
+        .andExpect(jsonPath("$.data.sections[3].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[3].groups.length()").value(1))
         .andExpect(jsonPath("$.data.sections[3].groups[0].key").value("network.proxy"))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].restartRequired").value(true))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].applyTiming").value("RESTART"))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].applyTiming").value("NEXT_HTTP_REQUEST"))
         .andExpect(jsonPath("$.data.sections[3].groups[0].fields.length()").value(2))
         .andExpect(jsonPath("$.data.sections[3].groups[0].fields[0].max").value(2048))
         .andExpect(jsonPath("$.data.sections[3].groups[0].fields[1].max").value(4096))
