@@ -119,25 +119,70 @@ class IdeStreamRelayTest {
   }
 
   @Test
-  void fragmentsWsMessagePreservingOrderAndFin() {
+  void sendsWsSegmentsAndFailsClosedWhenSendCreditExhausted() {
     RecordingSink sink = new RecordingSink();
     IdeStreamRelay relay = new IdeStreamRelay(sink);
-    relay.sendWsMessage(true, new byte[150_000]);
+    byte[] chunk = new byte[65536];
+    for (int i = 0; i < 4; i++) {
+      relay.sendWsSegment(true, false, chunk);
+    }
+    // 第 5 段超窗：必须 fail-closed 且不产生「部分已发」的额外帧。
+    int framesBefore = sink.binaries.size();
+    assertThrows(DaemonProtocolException.class, () -> relay.sendWsSegment(true, true, chunk));
+    assertEquals(framesBefore, sink.binaries.size());
 
-    assertEquals(3, sink.binaries.size());
-    IdeStreamBinaryFrame.WsSegment first =
-        (IdeStreamBinaryFrame.WsSegment) CODEC.decodeBinary(sink.binaries.get(0));
-    IdeStreamBinaryFrame.WsSegment second =
-        (IdeStreamBinaryFrame.WsSegment) CODEC.decodeBinary(sink.binaries.get(1));
-    IdeStreamBinaryFrame.WsSegment third =
-        (IdeStreamBinaryFrame.WsSegment) CODEC.decodeBinary(sink.binaries.get(2));
-    assertEquals(65536, first.bytes().length);
-    assertFalse(first.last());
-    assertEquals(65536, second.bytes().length);
-    assertFalse(second.last());
-    assertEquals(150_000 - 2 * 65536, third.bytes().length);
-    assertTrue(third.last());
-    assertTrue(third.text());
+    relay.receiveBinary(CODEC.encodeAck(4 * 65536));
+    relay.sendWsSegment(false, true, chunk);
+    IdeStreamBinaryFrame.WsSegment last =
+        (IdeStreamBinaryFrame.WsSegment)
+            CODEC.decodeBinary(sink.binaries.get(sink.binaries.size() - 1));
+    assertFalse(last.text());
+    assertTrue(last.last());
+    assertEquals(65536, last.bytes().length);
+  }
+
+  @Test
+  void streamsLargeWsMessageSegmentBySegmentUnderBackpressure() {
+    RecordingSink sink = new RecordingSink();
+    IdeStreamRelay relay = new IdeStreamRelay(sink);
+    int total = 20 * 1024 * 1024;
+    int segment = 65536;
+    byte[] expected = new byte[total];
+    int sent = 0;
+    while (sent < total) {
+      int length = Math.min(segment, total - sent);
+      byte[] chunk = new byte[length];
+      for (int i = 0; i < length; i++) {
+        chunk[i] = (byte) (sent + i);
+      }
+      System.arraycopy(chunk, 0, expected, sent, length);
+      // 适配层先等待 credit，再逐段发送；这里用即时 ACK 模拟 Daemon 的消费回执。
+      relay.sendWsSegment(true, sent + length == total, chunk);
+      relay.receiveBinary(CODEC.encodeAck(length));
+      sent += length;
+    }
+
+    int index = 0;
+    int segments = 0;
+    for (byte[] frame : sink.binaries) {
+      IdeStreamBinaryFrame.WsSegment decoded =
+          (IdeStreamBinaryFrame.WsSegment) CODEC.decodeBinary(frame);
+      segments++;
+      for (byte value : decoded.bytes()) {
+        assertEquals(expected[index++], value);
+      }
+    }
+    assertEquals(total, index);
+    assertEquals(total / segment, segments);
+  }
+
+  @Test
+  void rejectsOversizedWsSegment() {
+    IdeStreamRelay relay = new IdeStreamRelay(new RecordingSink());
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            relay.sendWsSegment(true, true, new byte[DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES + 1]));
   }
 
   @Test
