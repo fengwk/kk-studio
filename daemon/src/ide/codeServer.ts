@@ -1,9 +1,9 @@
 import { existsSync } from 'node:fs'
-import { cp } from 'node:fs/promises'
-import { join } from 'node:path'
+import { cp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { join, relative } from 'node:path'
 import { createServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
-import { randomBytes } from 'node:crypto'
 import type { Readable } from 'node:stream'
 import type { DaemonConfig, ManagedProcess, ProcessSupervisor } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
@@ -84,18 +84,47 @@ export function resolveCodeServerLaunch(distributionDir: string): Launch {
   return { executable, args: [entry] }
 }
 
-async function installBridgeExtension(distributionDir: string, extensionsDir: string): Promise<void> {
-  const target = join(extensionsDir, 'kk-studio-ide-bridge')
-  if (existsSync(target)) {
-    return
+const BRIDGE_EXTENSION_DIR = 'kk-studio-ide-bridge'
+const BRIDGE_DIGEST_FILE = '.kk-studio-digest'
+
+/** Stable digest of the extension source so a new daemon always refreshes a stale bridge. */
+async function extensionDigest(source: string): Promise<string> {
+  const hash = createHash('sha256')
+  const entries = await readdir(source, { recursive: true, withFileTypes: true })
+  const files = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath ?? source, entry.name))
+    .sort()
+  for (const file of files) {
+    hash.update(relative(source, file))
+    hash.update(await readFile(file))
   }
-  const source = [join(distributionDir, 'ide-extension'), join(distributionDir, 'runtime', 'ide-extension')].find(
-    (candidate) => existsSync(candidate),
-  )
-  if (source === undefined) {
+  return hash.digest('hex')
+}
+
+/**
+ * Installs the bundled bridge extension into the private extensions directory.
+ *
+ * The single real contract path is `<distributionDir>/ide-extension`; there is no runtime
+ * fallback. The install is staged and only swapped in once complete, and it is refreshed
+ * whenever the source digest changes so an upgraded daemon never keeps an old bridge.
+ */
+async function installBridgeExtension(distributionDir: string, extensionsDir: string): Promise<void> {
+  const source = join(distributionDir, 'ide-extension')
+  if (!existsSync(source)) {
     throw new IdeError('bundled ide bridge extension is missing')
   }
-  await cp(source, target, { recursive: true })
+  const target = join(extensionsDir, BRIDGE_EXTENSION_DIR)
+  const digest = await extensionDigest(source)
+  const marker = join(target, BRIDGE_DIGEST_FILE)
+  if (existsSync(marker) && (await readFile(marker, 'utf8')) === digest) {
+    return
+  }
+  const staging = join(extensionsDir, `${BRIDGE_EXTENSION_DIR}.staging-${randomUUID()}`)
+  await cp(source, staging, { recursive: true })
+  await writeFile(join(staging, BRIDGE_DIGEST_FILE), digest)
+  await rm(target, { recursive: true, force: true })
+  await rename(staging, target)
 }
 
 /** Keeps only the last N characters of process output for diagnostics; never logged verbatim. */
@@ -223,9 +252,12 @@ export function createCodeServerManager(
 ): CodeServerManager {
   const paths = idePaths(config)
   const diagnostics = new DiagnosticTail()
+  /** Owns startup lifetime so one caller aborting never cancels other waiting views. */
+  const startup = new AbortController()
   let session: CodeServerSession | undefined
   let managed: ManagedProcess | undefined
   let starting: Promise<CodeServerSession> | undefined
+  let closed = false
 
   const start = async (signal: AbortSignal): Promise<CodeServerSession> => {
     const launch = resolveCodeServerLaunch(config.distributionDir)
@@ -303,22 +335,58 @@ export function createCodeServerManager(
     }
   }
 
+  const waitForStart = (signal: AbortSignal): Promise<CodeServerSession> => {
+    if (signal.aborted) {
+      return Promise.reject(abortError())
+    }
+    return new Promise<CodeServerSession>((resolve, reject) => {
+      const onAbort = (): void => reject(abortError())
+      signal.addEventListener('abort', onAbort, { once: true })
+      starting?.then(
+        (value) => {
+          signal.removeEventListener('abort', onAbort)
+          resolve(value)
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', onAbort)
+          reject(error)
+        },
+      )
+    })
+  }
+
   return {
-    async ensureStarted(signal) {
+    ensureStarted(signal) {
+      if (closed) {
+        return Promise.reject(new IdeError('ide service is closed'))
+      }
       if (session) {
-        return session
+        return Promise.resolve(session)
+      }
+      if (signal.aborted) {
+        // Nothing to wait for and no reason to spawn a process for a caller that gave up.
+        return Promise.reject(abortError())
       }
       if (!starting) {
-        starting = start(signal).finally(() => {
+        // Startup is shared; only the manager's own signal can abort it.
+        starting = start(startup.signal).finally(() => {
           starting = undefined
         })
       }
-      return starting
+      // A caller that aborts stops waiting for itself but does not cancel the shared startup.
+      return waitForStart(signal)
     },
     session() {
       return session
     },
     async close() {
+      closed = true
+      startup.abort()
+      const pending = starting
+      if (pending) {
+        // The aborted startup terminates its own process; ignore only its abort/failure here.
+        await pending.catch(() => undefined)
+      }
       session = undefined
       const current = managed
       managed = undefined

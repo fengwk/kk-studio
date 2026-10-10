@@ -63,6 +63,15 @@ const RESET_LOGIN_SERVER = READY_SERVER.replace(
   "if (req.url === '/login' && req.method === 'POST') {",
   "if (req.url === '/login') { req.socket.destroy(); return }\nif (false) {",
 )
+/** Delays listening so tests can observe a startup that is genuinely in flight. */
+const SLOW_READY_SERVER = READY_SERVER.replace(
+  'server.listen(Number(portText), host)',
+  'setTimeout(function () { server.listen(Number(portText), host) }, 300)',
+)
+
+function delay(millis: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, millis))
+}
 
 class TestSupervisor implements ProcessSupervisor {
   readonly children: ChildProcess[] = []
@@ -198,6 +207,44 @@ describe('code-server process manager', () => {
     const controller = new AbortController()
     controller.abort()
     await expect(manager.ensureStarted(controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    // A caller that gave up must not have started a process at all.
+    expect(supervisor.children).toHaveLength(0)
+  })
+
+  it('keeps a shared startup running when one waiting caller cancels', async () => {
+    const root = await distribution(SLOW_READY_SERVER)
+    const supervisor = new TestSupervisor()
+    cleanups.push(() => supervisor.close())
+    const manager = createCodeServerManager(config(root), supervisor, credentials)
+
+    const controller = new AbortController()
+    const cancelled = manager.ensureStarted(controller.signal)
+    controller.abort()
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
+
+    // The startup is owned by the manager, so a later caller joins the same in-flight attempt.
+    const session = await manager.ensureStarted(signal())
+    expect(session.pid).toBeGreaterThan(0)
+    expect(manager.session()).toBe(session)
+    expect(supervisor.children).toHaveLength(1)
+    await manager.close()
+  })
+
+  it('closes cleanly while a startup is still in flight', async () => {
+    const root = await distribution(SLOW_READY_SERVER)
+    const supervisor = new TestSupervisor()
+    cleanups.push(() => supervisor.close())
+    const manager = createCodeServerManager(config(root), supervisor, credentials)
+
+    const pending = manager.ensureStarted(signal())
+    await delay(50)
+    await manager.close()
+    expect(manager.session()).toBeUndefined()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    for (const child of supervisor.children) {
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+    }
+    await expect(manager.ensureStarted(signal())).rejects.toThrow('ide service is closed')
   })
 
   it('surfaces a termination failure on close', async () => {

@@ -126,8 +126,12 @@ describe('VS Code bridge extension host', () => {
   it('switches directory through the public updateWorkspaceFolders API', async () => {
     const { bridge, viewId, fake } = await setup('/managed/one.code-workspace')
 
-    const result = await bridge.request(viewId, { op: 'changeDirectory', directory: '/home/kkdaemon' }, signal())
+    // The daemon only accepts a change the window confirms with the expected directory.
+    const result = await bridge.request(viewId, { op: 'changeDirectory', directory: '/home/kkdaemon' }, signal(), {
+      expectedDirectory: '/home/kkdaemon',
+    })
     expect(result.ok).toBe(true)
+    expect(result.directory).toBe('/home/kkdaemon')
     expect(fake.calls.updateWorkspaceFolders).toEqual([[0, 1, [{ uri: { fsPath: '/home/kkdaemon', scheme: 'file' } }]]])
   })
 
@@ -148,6 +152,19 @@ describe('VS Code bridge extension host', () => {
     const result = await bridge.request(viewId, { op: 'closeView' }, signal())
     expect(result.ok).toBe(true)
     expect(fake.terminals).toHaveLength(0)
+  })
+
+  it('refuses to close the view while documents are dirty and keeps its terminals', async () => {
+    const { bridge, viewId, fake } = await setup('/managed/one.code-workspace')
+    await bridge.request(viewId, { op: 'focusTerminal' }, signal())
+    fake.vscode.workspace.textDocuments.push({ isDirty: true })
+
+    const result = await bridge.request(viewId, { op: 'closeView' }, signal())
+    expect(result.ok).toBe(false)
+    expect(result.code).toBe('DIRTY')
+    // A dirty window must not be torn down or lose its shells.
+    expect(fake.terminals).toHaveLength(1)
+    expect(fake.terminals[0]?.disposed).toBe(false)
   })
 
   it('falls back to the workspace folder when no workspace file is open', async () => {

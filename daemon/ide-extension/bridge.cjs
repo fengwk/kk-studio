@@ -3,17 +3,21 @@
 /**
  * Loopback bridge host for one code-server window.
  *
- * The daemon exposes a private loopback HTTP endpoint guarded by a random per-service
- * secret delivered through the code-server process environment. This host registers the
- * exact assigned workspace file, receives commands over a long-lived NDJSON stream and
- * uses only public VS Code APIs: `workspace.updateWorkspaceFolders`,
- * `window.createTerminal`, `Terminal.show` and `Terminal.processId`. The managed
- * `.code-workspace` file is persisted by the daemon, which owns the durable workspace.
+ * The daemon exposes a private loopback HTTP endpoint. This host authenticates with a random
+ * per-service secret delivered through the code-server process environment (never the browser)
+ * using an `Authorization: Bearer` header, registers the exact assigned workspace file plus its
+ * live folders, receives commands over a long-lived NDJSON stream and uses only public VS Code
+ * APIs: `workspace.updateWorkspaceFolders`, `window.createTerminal`, `Terminal.show` and
+ * `Terminal.processId`. The managed `.code-workspace` file is persisted by the daemon.
  *
  * No `executeCommand`, private SDK or DOM workbench hacks are used.
  */
 
 const DEFAULT_RECONNECT_MILLIS = 500
+/** A command line is a small JSON object; anything larger is a protocol violation. */
+const MAX_LINE_BYTES = 16 * 1024
+/** Bounds how long a bridge POST may occupy the extension host. */
+const POST_TIMEOUT_MILLIS = 5_000
 
 function createBridgeHost(vscode, options) {
   const config = options || {}
@@ -27,20 +31,23 @@ function createBridgeHost(vscode, options) {
   let reconnectTimer = null
   let buffer = ''
   let terminal = null
+  const terminals = []
+  const pendingPosts = new Set()
+
+  const folderPaths = () => {
+    const folders = vscode.workspace.workspaceFolders || []
+    return folders.map((folder) => folder.uri.fsPath).filter((path) => typeof path === 'string' && path.length > 0)
+  }
 
   const workspacePath = () => {
     const file = vscode.workspace.workspaceFile
     if (file) {
       return file.fsPath || file.path
     }
-    const folders = vscode.workspace.workspaceFolders
-    if (folders && folders.length > 0) {
-      return folders[0].uri.fsPath
-    }
-    return undefined
+    return folderPaths()[0]
   }
 
-  // Resolves with the HTTP status code, or 0 when the bridge is unreachable.
+  // Resolves with the HTTP status code, or 0 when the bridge is unreachable or times out.
   const post = (path, payload) => {
     return new Promise((resolve) => {
       if (!url || !token) {
@@ -48,33 +55,63 @@ function createBridgeHost(vscode, options) {
         return
       }
       const body = Buffer.from(JSON.stringify(payload))
+      let settled = false
+      let timer = null
+      const finish = (status) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        if (timer) {
+          clearTimeout(timer)
+        }
+        pendingPosts.delete(request)
+        resolve(status)
+      }
       const request = http.request(
-        `${url}${path}?token=${encodeURIComponent(token)}`,
+        `${url}${path}`,
         {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'content-length': body.length },
+          headers: {
+            'content-type': 'application/json',
+            'content-length': body.length,
+            authorization: `Bearer ${token}`,
+          },
         },
         (response) => {
           response.resume()
-          response.on('end', () => resolve(response.statusCode || 0))
-          response.on('error', () => resolve(0))
+          response.on('end', () => finish(response.statusCode || 0))
+          response.on('error', () => finish(0))
         },
       )
-      request.on('error', () => resolve(0))
+      request.on('error', () => finish(0))
+      pendingPosts.add(request)
+      timer = setTimeout(() => {
+        try {
+          request.destroy()
+        } catch {
+          // already destroyed
+        }
+        finish(0)
+      }, POST_TIMEOUT_MILLIS)
+      if (timer.unref) {
+        timer.unref()
+      }
       request.end(body)
     })
   }
 
   const reply = (id, result) => post('/bridge/result', Object.assign({ id }, result))
 
-  const disposeTerminal = () => {
-    if (terminal) {
+  const disposeTerminals = () => {
+    terminal = null
+    while (terminals.length > 0) {
+      const item = terminals.pop()
       try {
-        terminal.dispose()
+        item.dispose()
       } catch {
         // terminal already gone
       }
-      terminal = null
     }
   }
 
@@ -94,23 +131,24 @@ function createBridgeHost(vscode, options) {
     }
     const folders = vscode.workspace.workspaceFolders || []
     const uri = vscode.Uri.file(message.directory)
-    // The daemon owns the durable `.code-workspace` file; switching the live window through
-    // the public API may restart the extension host, which is why the daemon treats a
-    // delivered change as success rather than waiting for a reply that may never arrive.
+    // The daemon owns the durable `.code-workspace` file. `updateWorkspaceFolders` returning
+    // true is the public API's acceptance of the change; a folder change that reloads the
+    // extension host never replies here, and the reconnected window confirms instead.
     const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
     if (updated === false) {
       await reply(message.id, { ok: false, message: 'directory change was rejected' })
       return
     }
-    await reply(message.id, { ok: true })
+    await reply(message.id, { ok: true, directory: message.directory })
   }
 
   const focusTerminal = async (message) => {
-    const terminals = vscode.window.terminals || []
-    if (!terminal || terminals.indexOf(terminal) === -1) {
+    const live = vscode.window.terminals || []
+    if (!terminal || live.indexOf(terminal) === -1) {
       const folders = vscode.workspace.workspaceFolders || []
       const cwd = folders.length > 0 ? folders[0].uri.fsPath : undefined
       terminal = vscode.window.createTerminal({ name: 'kk-studio', cwd })
+      terminals.push(terminal)
     }
     terminal.show()
     let pid
@@ -122,13 +160,13 @@ function createBridgeHost(vscode, options) {
     const path = workspacePath()
     // A shell that cannot be handed to the daemon for supervision must not be left running.
     if (!(typeof pid === 'number' && pid > 0) || !path) {
-      disposeTerminal()
+      disposeTerminals()
       await reply(message.id, { ok: false, message: 'terminal supervision is unavailable' })
       return
     }
     const status = await post('/bridge/pty', { workspacePath: path, pid })
     if (status >= 400 || status === 0) {
-      disposeTerminal()
+      disposeTerminals()
       await reply(message.id, { ok: false, message: 'terminal supervision failed' })
       return
     }
@@ -136,7 +174,16 @@ function createBridgeHost(vscode, options) {
   }
 
   const closeView = async (message) => {
-    disposeTerminal()
+    // Never tear a window down with unsaved work; the daemon keeps the workspace on refusal.
+    if (hasDirtyDocuments()) {
+      await reply(message.id, {
+        ok: false,
+        code: 'DIRTY',
+        message: 'save or discard unsaved changes before closing the view',
+      })
+      return
+    }
+    disposeTerminals()
     await reply(message.id, { ok: true })
   }
 
@@ -156,8 +203,26 @@ function createBridgeHost(vscode, options) {
     }
   }
 
+  const failStream = () => {
+    buffer = ''
+    if (streamRequest) {
+      try {
+        streamRequest.destroy()
+      } catch {
+        // already destroyed
+      }
+      streamRequest = null
+    }
+    scheduleReconnect()
+  }
+
   const onData = (chunk) => {
     buffer += chunk
+    // An unterminated line beyond the bound is a protocol violation; never carry it forward.
+    if (buffer.indexOf('\n') === -1 && buffer.length > MAX_LINE_BYTES) {
+      failStream()
+      return
+    }
     let index = buffer.indexOf('\n')
     while (index >= 0) {
       const line = buffer.slice(0, index)
@@ -166,11 +231,16 @@ function createBridgeHost(vscode, options) {
       if (line.trim().length === 0) {
         continue
       }
+      if (line.length > MAX_LINE_BYTES) {
+        failStream()
+        return
+      }
       let message
       try {
         message = JSON.parse(line)
       } catch {
-        continue
+        failStream()
+        return
       }
       if (message && message.type === 'command' && typeof message.id === 'string') {
         void handleCommand(message)
@@ -199,8 +269,15 @@ function createBridgeHost(vscode, options) {
     if (!path) {
       return
     }
-    const target = `${url}/bridge/stream?token=${encodeURIComponent(token)}&workspacePath=${encodeURIComponent(path)}`
-    streamRequest = http.get(target, (response) => {
+    // Drop any partial line from a previous connection.
+    buffer = ''
+    const params = new URLSearchParams()
+    params.set('workspacePath', path)
+    for (const folder of folderPaths()) {
+      params.append('folder', folder)
+    }
+    const target = `${url}/bridge/stream?${params.toString()}`
+    streamRequest = http.get(target, { headers: { authorization: `Bearer ${token}` } }, (response) => {
       if (response.statusCode !== 200) {
         response.resume()
         scheduleReconnect()
@@ -232,14 +309,15 @@ function createBridgeHost(vscode, options) {
         }
         streamRequest = null
       }
-      if (terminal) {
+      for (const request of pendingPosts) {
         try {
-          terminal.dispose()
+          request.destroy()
         } catch {
           // already closed
         }
-        terminal = null
       }
+      pendingPosts.clear()
+      disposeTerminals()
     },
   }
 }

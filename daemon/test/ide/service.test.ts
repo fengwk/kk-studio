@@ -188,12 +188,21 @@ class FakeExtension {
     private readonly base: string,
     private readonly token: string,
     readonly workspacePath: string,
+    private folders: string[] = [],
   ) {}
+
+  setFolders(folders: string[]): void {
+    this.folders = folders
+  }
 
   connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const url = `${this.base}/bridge/stream?token=${encodeURIComponent(this.token)}&workspacePath=${encodeURIComponent(this.workspacePath)}`
-      this.request = http.get(url, (response) => {
+      const params = new URLSearchParams({ workspacePath: this.workspacePath })
+      for (const folder of this.folders) {
+        params.append('folder', folder)
+      }
+      const url = `${this.base}/bridge/stream?${params.toString()}`
+      this.request = http.get(url, { headers: { authorization: `Bearer ${this.token}` } }, (response) => {
         this.response = response
         if (response.statusCode !== 200) {
           response.resume()
@@ -256,8 +265,15 @@ class FakeExtension {
     return new Promise<void>((resolve) => {
       const body = Buffer.from(JSON.stringify(payload))
       const request = http.request(
-        `${this.base}${path}?token=${encodeURIComponent(this.token)}`,
-        { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': body.length } },
+        `${this.base}${path}`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': body.length,
+            authorization: `Bearer ${this.token}`,
+          },
+        },
         (response) => {
           response.resume()
           response.on('end', resolve)
@@ -279,12 +295,14 @@ function bridgeCredentials(supervisor: FakeSupervisor): { url: string; token: st
   return { url: String(env.KK_STUDIO_IDE_BRIDGE_URL), token: String(env.KK_STUDIO_IDE_BRIDGE_TOKEN) }
 }
 
-function httpStatus(url: string): Promise<number> {
+function httpStatus(url: string, token?: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    http.get(url, (response) => {
-      response.resume()
-      resolve(response.statusCode ?? 0)
-    }).on('error', reject)
+    http
+      .get(url, { headers: token === undefined ? {} : { authorization: `Bearer ${token}` } }, (response) => {
+        response.resume()
+        resolve(response.statusCode ?? 0)
+      })
+      .on('error', reject)
   })
 }
 
@@ -352,7 +370,7 @@ describe('managed code-server IDE service', () => {
     const opened = await service.handle({ action: 'OPEN_VIEW', viewId, directory }, signal())
 
     const credentials = bridgeCredentials(supervisor)
-    const extension = new FakeExtension(credentials.url, credentials.token, opened.workspacePath as string)
+    const extension = new FakeExtension(credentials.url, credentials.token, opened.workspacePath as string, [directory])
     cleanups.push(() => extension.close())
     await extension.connect()
 
@@ -365,10 +383,10 @@ describe('managed code-server IDE service', () => {
     expect(dirtyReply.ok).toBe(false)
     expect(dirtyReply.message).toBe('save first')
 
-    // CHANGE_DIRECTORY accepted.
+    // CHANGE_DIRECTORY accepted; the window reports the applied directory.
     const changePending = service.handle({ action: 'CHANGE_DIRECTORY', viewId, directory: other }, signal())
     const changeCommand = await extension.nextCommand()
-    await extension.reply({ id: changeCommand.id, ok: true })
+    await extension.reply({ id: changeCommand.id, ok: true, directory: other })
     const changeReply = await changePending
     expect(changeReply.ok).toBe(true)
     expect(changeReply.directory).toBe(other)
@@ -385,12 +403,121 @@ describe('managed code-server IDE service', () => {
     await waitFor(() => supervisor.descendants.length === 1)
     expect(supervisor.descendants[0]).toEqual([supervisor.started[0]?.child.pid, 7777])
 
-    // CLOSE_VIEW is idempotent and removes the workspace file.
-    const closed = await service.handle({ action: 'CLOSE_VIEW', viewId }, signal())
+    // CLOSE_VIEW asks the connected window to release terminals, then removes the workspace file.
+    const closePending = service.handle({ action: 'CLOSE_VIEW', viewId }, signal())
+    const closeCommand = await extension.nextCommand()
+    expect(closeCommand.op).toBe('closeView')
+    await extension.reply({ id: closeCommand.id, ok: true })
+    const closed = await closePending
     expect(closed.ok).toBe(true)
     await expect(stat(opened.workspacePath as string)).rejects.toThrow()
     const closedAgain = await service.handle({ action: 'CLOSE_VIEW', viewId }, signal())
     expect(closedAgain.ok).toBe(true)
+  })
+
+  it('keeps an open view idempotent and refuses a conflicting directory', async () => {
+    const distribution = await createDistribution()
+    const supervisor = new FakeSupervisor()
+    cleanups.push(() => supervisor.close())
+    const service = await createIdeService(makeConfig(distribution, '127.0.0.1:1'), supervisor)
+    cleanups.push(() => service.close())
+
+    const directory = join(distribution, 'project')
+    const other = join(distribution, 'other')
+    await mkdir(directory, { recursive: true })
+    await mkdir(other, { recursive: true })
+    const viewId = '99999999-9999-4999-8999-999999999999'
+
+    const first = await service.handle({ action: 'OPEN_VIEW', viewId, directory }, signal())
+    expect(first.ok).toBe(true)
+
+    // Omitting the directory must never reset an open view back to the default HOME.
+    const reopened = await service.handle({ action: 'OPEN_VIEW', viewId }, signal())
+    expect(reopened.ok).toBe(true)
+    expect(reopened.directory).toBe(directory)
+
+    // A different explicit directory conflicts and the existing view is preserved.
+    const conflict = await service.handle({ action: 'OPEN_VIEW', viewId, directory: other }, signal())
+    expect(conflict.ok).toBe(false)
+    expect(conflict.directory).toBe(directory)
+    expect(supervisor.started).toHaveLength(1)
+
+    // The same explicit directory is idempotent.
+    const same = await service.handle({ action: 'OPEN_VIEW', viewId, directory }, signal())
+    expect(same.ok).toBe(true)
+    expect(same.directory).toBe(directory)
+    expect(supervisor.started).toHaveLength(1)
+  })
+
+  it('keeps the workspace when the window refuses to close while dirty', async () => {
+    const distribution = await createDistribution()
+    const supervisor = new FakeSupervisor()
+    cleanups.push(() => supervisor.close())
+    const service = await createIdeService(makeConfig(distribution, '127.0.0.1:1'), supervisor)
+    cleanups.push(() => service.close())
+
+    const directory = join(distribution, 'project')
+    await mkdir(directory, { recursive: true })
+    const viewId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const opened = await service.handle({ action: 'OPEN_VIEW', viewId, directory }, signal())
+    const credentials = bridgeCredentials(supervisor)
+    const extension = new FakeExtension(credentials.url, credentials.token, opened.workspacePath as string, [directory])
+    cleanups.push(() => extension.close())
+    await extension.connect()
+
+    const dirtyPending = service.handle({ action: 'CLOSE_VIEW', viewId }, signal())
+    const dirtyCommand = await extension.nextCommand()
+    expect(dirtyCommand.op).toBe('closeView')
+    await extension.reply({ id: dirtyCommand.id, ok: false, code: 'DIRTY', message: 'save first' })
+    const dirty = await dirtyPending
+    expect(dirty.ok).toBe(false)
+    expect(dirty.message).toBe('save first')
+    // The durable workspace survives a refused close.
+    expect(JSON.parse(await readFile(opened.workspacePath as string, 'utf8'))).toEqual({ folders: [{ path: directory }] })
+
+    // A later accepted close removes it.
+    const retryPending = service.handle({ action: 'CLOSE_VIEW', viewId }, signal())
+    const retryCommand = await extension.nextCommand()
+    await extension.reply({ id: retryCommand.id, ok: true })
+    expect((await retryPending).ok).toBe(true)
+    await expect(stat(opened.workspacePath as string)).rejects.toThrow()
+  })
+
+  it('waits for the bridge to connect before focusing a terminal', async () => {
+    const distribution = await createDistribution()
+    const supervisor = new FakeSupervisor()
+    cleanups.push(() => supervisor.close())
+    const service = await createIdeService(makeConfig(distribution, '127.0.0.1:1'), supervisor)
+    cleanups.push(() => service.close())
+
+    const directory = join(distribution, 'project')
+    await mkdir(directory, { recursive: true })
+    const viewId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const opened = await service.handle({ action: 'OPEN_VIEW', viewId, directory }, signal())
+
+    // The iframe asks for a terminal before its extension host has connected the bridge.
+    const focusPending = service.handle({ action: 'FOCUS_TERMINAL', viewId }, signal())
+    await delay(30)
+
+    const credentials = bridgeCredentials(supervisor)
+    const extension = new FakeExtension(credentials.url, credentials.token, opened.workspacePath as string, [directory])
+    cleanups.push(() => extension.close())
+    await extension.connect()
+
+    const focusCommand = await extension.nextCommand()
+    expect(focusCommand.op).toBe('focusTerminal')
+    await extension.reply({ id: focusCommand.id, ok: true })
+    await extension.pty(555)
+    const focusReply = await focusPending
+    expect(focusReply.ok).toBe(true)
+    await waitFor(() => supervisor.descendants.length === 1)
+    expect(supervisor.descendants[0]).toEqual([supervisor.started[0]?.child.pid, 555])
+
+    // Cancelling the wait surfaces a failure instead of hanging until the command budget.
+    const aborted = new AbortController()
+    aborted.abort()
+    const cancelled = await service.handle({ action: 'FOCUS_TERMINAL', viewId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }, aborted.signal)
+    expect(cancelled.ok).toBe(false)
   })
 
   it('refuses a bridge stream for an unassigned workspace', async () => {
@@ -405,15 +532,23 @@ describe('managed code-server IDE service', () => {
     await service.handle({ action: 'OPEN_VIEW', directory }, signal())
     const credentials = bridgeCredentials(supervisor)
 
+    // A valid secret cannot bind a stream to a workspace it was never assigned.
     const status = await httpStatus(
-      `${credentials.url}/bridge/stream?token=${encodeURIComponent(credentials.token)}&workspacePath=${encodeURIComponent('/not/assigned.code-workspace')}`,
+      `${credentials.url}/bridge/stream?workspacePath=${encodeURIComponent('/not/assigned.code-workspace')}`,
+      credentials.token,
     )
     expect(status).toBe(403)
 
+    // Without a valid secret the request never reaches routing.
     const badToken = await httpStatus(
-      `${credentials.url}/bridge/stream?token=wrong&workspacePath=${encodeURIComponent('/not/assigned.code-workspace')}`,
+      `${credentials.url}/bridge/stream?workspacePath=${encodeURIComponent('/not/assigned.code-workspace')}`,
+      'wrong',
     )
     expect(badToken).toBe(401)
+    const noToken = await httpStatus(
+      `${credentials.url}/bridge/stream?workspacePath=${encodeURIComponent('/not/assigned.code-workspace')}`,
+    )
+    expect(noToken).toBe(401)
   })
 
   it('proxies an HTTP exchange to code-server and rejects a foreign stream url', async () => {

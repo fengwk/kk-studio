@@ -18,10 +18,17 @@ export interface BridgeCommand {
   directory?: string
 }
 
+export interface BridgeRequestOptions {
+  /** The directory the window must actually report for a changeDirectory to count as applied. */
+  expectedDirectory?: string
+}
+
 export interface BridgeResult {
   ok: boolean
   code?: string
   message?: string
+  /** For a confirmed directory change, the directory the window actually reports. */
+  directory?: string
 }
 
 export interface IdeBridge {
@@ -30,8 +37,15 @@ export interface IdeBridge {
   assign(viewId: string, workspacePath: string): void
   revoke(viewId: string): void
   isConnected(viewId: string): boolean
+  /** Resolves once a window stream for the view is registered; rejects when aborted or closed. */
+  waitForConnection(viewId: string, signal: AbortSignal): Promise<void>
   onPty(listener: (viewId: string, pid: number) => void | Promise<void>): void
-  request(viewId: string, command: BridgeCommand, signal: AbortSignal): Promise<BridgeResult>
+  request(
+    viewId: string,
+    command: BridgeCommand,
+    signal: AbortSignal,
+    options?: BridgeRequestOptions,
+  ): Promise<BridgeResult>
   close(): Promise<void>
 }
 
@@ -79,8 +93,21 @@ interface ViewState {
 interface Pending {
   viewId: string
   op: BridgeCommand['op']
+  expectedDirectory?: string
   resolve: (result: BridgeResult) => void
   timer: NodeJS.Timeout
+}
+
+interface ConnectionWaiter {
+  resolve: () => void
+  reject: (error: unknown) => void
+}
+
+/** Aborts with the standard AbortError name so callers can distinguish cancellation. */
+function abortError(): Error {
+  const error = new Error('ide request was cancelled')
+  error.name = 'AbortError'
+  return error
 }
 
 export async function createIdeBridge(): Promise<IdeBridge> {
@@ -89,6 +116,7 @@ export async function createIdeBridge(): Promise<IdeBridge> {
   const byKey = new Map<string, string>()
   const pending = new Map<string, Pending>()
   const ptyListeners = new Set<(viewId: string, pid: number) => void | Promise<void>>()
+  const connectionWaiters = new Map<string, Set<ConnectionWaiter>>()
 
   const server = createServer((request, response) => {
     void handleRequest(request, response)
@@ -116,6 +144,32 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     }
   }
 
+  /** Confirms a pending directory change once a (re)connected window reports the new folder. */
+  const settleReconnect = (viewId: string, folders: string[]): void => {
+    for (const [id, entry] of pending) {
+      if (entry.viewId === viewId && entry.op === 'changeDirectory' && entry.expectedDirectory !== undefined) {
+        resolvePending(
+          id,
+          folders.includes(entry.expectedDirectory)
+            ? { ok: true, directory: entry.expectedDirectory }
+            : { ok: false, message: 'directory change was not applied' },
+        )
+      }
+    }
+  }
+
+  /** Wakes every caller waiting for the view's window stream to register. */
+  const notifyConnected = (viewId: string): void => {
+    const waiters = connectionWaiters.get(viewId)
+    if (!waiters) {
+      return
+    }
+    connectionWaiters.delete(viewId)
+    for (const waiter of waiters) {
+      waiter.resolve()
+    }
+  }
+
   const handleRequest = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       if (!isLoopback(request.socket.remoteAddress)) {
@@ -123,8 +177,11 @@ export async function createIdeBridge(): Promise<IdeBridge> {
         return
       }
       const url = new URL(request.url ?? '/', 'http://127.0.0.1')
-      const token = url.searchParams.get('token')
-      if (token === null || !tokenMatches(token, secret)) {
+      // The private bridge secret travels in the Authorization header, never the URL, so it
+      // cannot leak into request logs or history.
+      const header = request.headers.authorization
+      const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : undefined
+      if (token === undefined || !tokenMatches(token, secret)) {
         respond(response, 401, 'unauthorized')
         return
       }
@@ -176,19 +233,19 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     })
     view.stream = response
     response.write(`${JSON.stringify({ type: 'registered', viewId })}\n`)
+    // Waking readiness waiters must happen before reconnect settlement so a caller that was
+    // waiting to send a command proceeds with the freshly bound stream.
+    notifyConnected(viewId)
+    // The reconnecting window reports its live folders; only an actual match confirms a
+    // pending directory change. A disconnect is never treated as success.
+    settleReconnect(viewId, url.searchParams.getAll('folder'))
     response.on('close', () => {
       if (view.stream === response) {
         view.stream = undefined
       }
-      // A delivered folder change may restart the extension host, which drops this stream.
-      // Treat that as success instead of a timeout or a false rollback; other pending
-      // commands can no longer be answered and must fail.
       for (const [id, entry] of pending) {
-        if (entry.viewId === viewId) {
-          resolvePending(
-            id,
-            entry.op === 'changeDirectory' ? { ok: true } : { ok: false, message: 'ide window closed' },
-          )
+        if (entry.viewId === viewId && entry.op !== 'changeDirectory') {
+          resolvePending(id, { ok: false, message: 'ide window closed' })
         }
       }
     })
@@ -213,10 +270,25 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       respond(response, 400, 'invalid result')
       return
     }
+    const entry = pending.get(id)
+    const actualDirectory = typeof result.directory === 'string' ? result.directory : undefined
+    // A directory change only succeeds when the window reports the exact expected directory.
+    if (
+      entry?.op === 'changeDirectory' &&
+      entry.expectedDirectory !== undefined &&
+      result.ok === true &&
+      actualDirectory !== entry.expectedDirectory
+    ) {
+      resolvePending(id, { ok: false, message: 'directory change was not applied' })
+      respond(response, 204)
+      return
+    }
     resolvePending(id, {
       ok: result.ok === true,
       code: typeof result.code === 'string' ? result.code : undefined,
       message: typeof result.message === 'string' ? result.message : undefined,
+      // Carry the confirmed directory through so callers see what the window reported.
+      directory: result.ok === true ? actualDirectory : undefined,
     })
     respond(response, 204)
   }
@@ -290,7 +362,39 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     isConnected(viewId) {
       return views.get(viewId)?.stream !== undefined
     },
-    request(viewId, command, signal) {
+    waitForConnection(viewId, signal) {
+      if (views.get(viewId)?.stream) {
+        return Promise.resolve()
+      }
+      if (signal.aborted) {
+        return Promise.reject(abortError())
+      }
+      return new Promise<void>((resolve, reject) => {
+        const waiter: ConnectionWaiter = {
+          resolve: () => {
+            signal.removeEventListener('abort', onAbort)
+            resolve()
+          },
+          reject: (error) => {
+            signal.removeEventListener('abort', onAbort)
+            reject(error)
+          },
+        }
+        const onAbort = (): void => {
+          const waiters = connectionWaiters.get(viewId)
+          waiters?.delete(waiter)
+          if (waiters && waiters.size === 0) {
+            connectionWaiters.delete(viewId)
+          }
+          reject(abortError())
+        }
+        const waiters = connectionWaiters.get(viewId) ?? new Set<ConnectionWaiter>()
+        waiters.add(waiter)
+        connectionWaiters.set(viewId, waiters)
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+    },
+    request(viewId, command, signal, options) {
       const view = views.get(viewId)
       const stream = view?.stream
       if (!stream) {
@@ -312,6 +416,7 @@ export async function createIdeBridge(): Promise<IdeBridge> {
         pending.set(id, {
           viewId,
           op: command.op,
+          expectedDirectory: options?.expectedDirectory,
           timer,
           resolve: (result) => {
             signal.removeEventListener('abort', onAbort)
@@ -333,6 +438,12 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       views.clear()
       byKey.clear()
       ptyListeners.clear()
+      for (const waiters of connectionWaiters.values()) {
+        for (const waiter of waiters) {
+          waiter.reject(new IdeError('ide bridge closed'))
+        }
+      }
+      connectionWaiters.clear()
       return closeServer(server)
     },
   }
