@@ -120,6 +120,10 @@ class NotificationPostgresqlIntegrationTest {
       busB.start();
       await(readyA);
       await(readyB);
+      // readyA/readyB only prove the subscribe recovery ran, not that LISTEN is established; the
+      // broadcast/remote frames below require each bus reader to have executed LISTEN.
+      awaitHealthy(busA);
+      awaitHealthy(busB);
       String unicode = "通知😀".repeat(1500);
       transactions(source)
           .executeWithoutResult(
@@ -161,6 +165,10 @@ class NotificationPostgresqlIntegrationTest {
       busB.start();
       await(readyA);
       await(readyB);
+      // readyA/readyB only prove the subscribe recovery ran, not that LISTEN is established; the
+      // remote control marker below can only be observed once each bus reader has executed LISTEN.
+      awaitHealthy(busA);
+      awaitHealthy(busB);
       Thread publisher =
           Thread.ofPlatform()
               .start(
@@ -204,6 +212,32 @@ class NotificationPostgresqlIntegrationTest {
   }
 
   @Test
+  void subscribeRecoveryRunsBeforeListenEstablished() throws Exception {
+    CountingDataSource source = dataSource();
+    AtomicBoolean healthyDuringRecovery = new AtomicBoolean(false);
+    CountDownLatch recovered = new CountDownLatch(1);
+    try (DefaultNotificationBus bus = bus(source)) {
+      // 订阅恢复回调必须在 LISTEN 建连前执行；此时 transport 尚未 start，healthy() 必为 false。
+      bus.subscribe(
+          EVENTS,
+          ignored -> {},
+          () -> {
+            if (bus.healthy()) {
+              healthyDuringRecovery.set(true);
+            }
+            recovered.countDown();
+          });
+      await(recovered);
+      assertFalse(
+          healthyDuringRecovery.get(), "subscribe recovery must run before LISTEN is established");
+      assertFalse(bus.healthy(), "transport must be unhealthy before start");
+      bus.start();
+      awaitHealthy(bus);
+      assertTrue(bus.healthy());
+    }
+  }
+
+  @Test
   void identicalTransactionHintsMergeLocallyAndRemotelyWithoutMessageIdDefeatingPgSemantics()
       throws Exception {
     CountingDataSource source = dataSource();
@@ -220,6 +254,10 @@ class NotificationPostgresqlIntegrationTest {
       busB.start();
       await(readyA);
       await(readyB);
+      // readyA/readyB only prove the subscribe recovery ran, not that LISTEN is established; the
+      // broadcast frames below require each bus reader to have executed LISTEN.
+      awaitHealthy(busA);
+      awaitHealthy(busB);
       transactions(source)
           .executeWithoutResult(
               status ->
