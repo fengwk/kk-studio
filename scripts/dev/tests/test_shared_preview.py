@@ -802,11 +802,7 @@ class TestRemovedDevTopology(unittest.TestCase):
         "scripts/dev/tests/test_shared_preview.py",
     }
     REMOVED_DAEMON_FLAG_ALLOWED = {
-        "harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java",
-        "harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonMainTest.java",
         "scripts/dev/tests/test_shared_preview.py",
-        "scripts/dev/verify/e2e/tests/test_daemon_bootstrap_contracts.py",
-        "scripts/dev/verify/reliability/tests/test_daemon_entrypoint_contracts.py",
     }
 
     def test_no_live_reference_to_the_dev_node_image_or_workspace(self):

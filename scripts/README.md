@@ -57,13 +57,13 @@ systemd/launchd 服务，测试入口见
 | 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.py](dev/verify/repository/check-sensitive-data.py) | python3、git，只读；命中只报告规则与位置，不回显敏感值 |
 | Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.py](dev/verify/repository/check-sensitive-history.py) | python3、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；与当前树门禁分开使用 |
 
-E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行路径见[开发与测试](../docs/operations/development-and-testing.md)。覆盖率/进程矩阵的 CI 辅助脚本位于 [process-scope](dev/verify/process-scope/)，不用于启动应用。
+E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行路径见[开发与测试](../docs/operations/development-and-testing.md)。
 
 ## 发布与数据库维护
 
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
-| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag>` | checkout、JDK 21、git、sha256sum、已构建 shaded JAR；校验后替换 `harness/daemon/target/release`，生成 JAR、SHA、JSON、LICENSE、THIRD_PARTY_NOTICES，**不上传发布** |
+| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag>` | checkout、git、sha256sum、已构建发布包；校验后替换发布暂存目录，生成发布归档、SHA、JSON、LICENSE、THIRD_PARTY_NOTICES，**不上传发布** |
 | 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、python3，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
 
 配置导出与导入在产品的“设置 → 同步”完成，YAML 始终包含所需凭据，不属于数据库脚本。

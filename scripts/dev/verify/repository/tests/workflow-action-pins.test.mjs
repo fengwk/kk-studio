@@ -28,7 +28,6 @@ const REPOSITORY_ROOT = repositoryRoot()
 const WORKFLOWS = [
   '.github/workflows/daemon-release.yml',
   '.github/workflows/docker-publish.yml',
-  '.github/workflows/process-scope.yml',
 ]
 
 /**

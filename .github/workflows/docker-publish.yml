@@ -70,9 +70,6 @@ jobs:
       # PowerShell 5.1 is the minimum supported host; PowerShell 7 catches modern-host drift.
       # The test constructs a real ScheduledTasks definition and probes Java argv without
       # registering a task or changing the runner's service state.
-      - name: Build real daemon fat JAR for Windows config compatibility
-        shell: bash
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am package -DskipTests "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
       - name: Test generated Windows scripts with native ACLs
         shell: bash
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
