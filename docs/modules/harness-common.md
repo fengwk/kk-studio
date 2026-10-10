@@ -33,7 +33,7 @@
 
 [`ToolArguments`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」，`render` 把调用方给出的字段渲染函数应用到指定字段。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
 
-[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本；累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。它刻意继承 `IOException`：Jackson 生成器会把写入期异常原样上抛而不做二次包装，调用方据此区分「超限中止」与「编码失败」。[`harness-tool`](harness-tool.md) 里 Tool 结果的字节预算判定与它复用同一实现。
+[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文 8 MiB 的整包预算。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本；累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。它刻意继承 `IOException`：Jackson 生成器会把写入期异常原样上抛而不做二次包装，调用方据此区分「超限中止」与「编码失败」。[`harness-tool`](harness-tool.md) 里 Tool 结果的字节预算判定与它复用同一实现。
 
 ## Resource 引用与 URI 校验
 

@@ -115,7 +115,7 @@ protocolVersion / messageType / environmentId / invocationId? / payload
 
 `environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT`、调用消息与 shell 消息必须非空；`ERROR` 在握手失败时可能没有绑定 scope。调用与资源上传控制消息必须携带非空的 `invocationId`，`transferId` 只存在于 payload。`SHELL_COMMAND` 与 `SHELL_EVENT` 禁止携带 `invocationId`，其 scope 必须与内层命令或事件的 `environmentId` 一致。`payload` 必须是 JSON 对象。
 
-重连去重以 invocationId 与 Daemon journal 关联消息，各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion。同实例恢复的进程生命周期限制见下文。
+重连去重以 invocationId 与 Daemon journal 关联消息，各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion；整包 encode/decode 共用共享 carrier 的单条逻辑消息预算（`MAX_ENVELOPE_UTF8_BYTES` = 8 MiB）。解码在解析前检查 UTF-8 字节数，编码在有界写入时中止，不物化超限输出；结果 payload 可用预算由 `payloadBudget` 按真实 invocationId 精确扣除动态外壳开销。同实例恢复的进程生命周期限制见下文。
 
 握手与调用时序：
 
@@ -178,7 +178,7 @@ Skill 安装状态通过内部 `skill.sync` 调用结果报告，MCP 目录完�
 [`DaemonCapabilityResultCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java) 编解码流式与终态结果：
 
 - `PROGRESS` 只接受 text/json 内容，resource 与 binary 在任何上传副作用前拒绝。
-- `COMPLETED` 先执行预算预检——单资源与聚合资源字节都不超过 `WELCOME` 通告的 `maxResourceBytes`、内容条目不超过固定的 64 项、最终 JSON 不超过 16 MiB UTF-8——全部通过后才通过 [`DaemonResourceUploader`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceUploader.java) 外部化 `BinaryResultContent`。
+- `COMPLETED` 先执行预算预检——单资源与聚合资源字节都不超过 `WELCOME` 通告的 `maxResourceBytes`、内容条目不超过固定的 64 项、最终 payload 不超过调用方按整包 envelope 动态扣除外壳开销后给出的 `maximumPayloadBytes`（硬上限 `MAX_PAYLOAD_UTF8_BYTES` = 8 MiB）——全部通过后才通过 [`DaemonResourceUploader`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceUploader.java) 外部化 `BinaryResultContent`。
 - resource wire 以 `type=resource` 判别，只包含 `uploadId`、`mediaType`、`name`、`size`、`sha256` 与可选 `preview`，不含 URI、字节、Base64 或未经内容复核的文本工件元数据；解码方在 Backend 进程内构造瞬时 `blob-upload:<uploadId>` 引用。
 - 终态 `FAILED` 携带 `message`，`CANCELLED` 携带 `reason`。
 

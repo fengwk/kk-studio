@@ -59,7 +59,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 恢复范围是同一 Daemon 进程与仍持有在途目录的 Gateway。Daemon 重启生成新 instanceId，Gateway 将此前在途调用收敛为结果不确定，等待调用层处理；journal 的去重事实随进程生命周期保留。
 
-[`OkHttpWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransport.java) 强制握手协商 `permessage-deflate`，缺失以 1010 关闭；只接收文本帧，二进制帧或单条文本超过 16 MiB 字符以 1008 关闭，不退化为另一种传输。
+[`OkHttpWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransport.java) 强制握手协商 `permessage-deflate`，缺失以 1010 关闭；所有逻辑消息（含 `count=1` 的 HELLO/READY/INVOKE 与短控制帧）都经共享 `NotificationCarrier` 分片，不存在 raw JSON 旁路：只接收严格 carrier 解码的文本帧（单帧物理上限 `NotificationCarrier.PAYLOAD_LIMIT` = 7900 字节），binary 帧、raw JSON 或超限文本以 1008 关闭；整条逻辑消息预算为 `NotificationLimits.DEFAULT_MAX_MESSAGE_BYTES`（8 MiB）。
 
 ## 本地存储与文本输出
 

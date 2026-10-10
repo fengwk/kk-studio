@@ -113,7 +113,7 @@ keeper 被外部强杀后仍以内核会话枚举收敛（Linux/WSL `/proc`、ma
 [`DaemonRuntimeTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)
 验证超时裁决仍为 `FAILED`、取消裁决仍为 `CANCELLED`，两者在收尾窗口携带捕获输出；
 能力未回调、调度器拒绝、收尾中停机和迟到回调都只能产生一个终态。
-`handoffDropsCapabilityTextBeyondWireLimit` 还固定超过 16 MiB wire 预算时整体丢弃能力文本，而非发送超大终态。
+`handoffDropsCapabilityTextBeyondWireLimit` 固定超过 8 MiB 逻辑消息预算时整体丢弃能力文本，而非发送超大终态；`handoffDropsCapabilityTextWithinEnvelopeBudgetBand` 覆盖文本本身未到 8 MiB、但加上 JSON 转义和外壳后整包超限的情况。
 
 ## 权限面分析
 

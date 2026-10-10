@@ -81,12 +81,21 @@ final class EnvironmentDaemonServerTestSupport {
 
   static String completedPayload(UUID invocationId, String text) {
     return RESULT_CODEC.encodeCompleted(
-        EnvironmentCapabilityResult.text(invocationId.toString(), text), MAX_RESOURCE_BYTES, null);
+        EnvironmentCapabilityResult.text(invocationId.toString(), text),
+        MAX_RESOURCE_BYTES,
+        null,
+        resultPayloadBudget(DaemonMessageType.COMPLETED, invocationId));
   }
 
   static String partialPayload(UUID invocationId, String text) {
     return RESULT_CODEC.encodeProgress(
-        EnvironmentCapabilityResult.text(invocationId.toString(), text));
+        EnvironmentCapabilityResult.text(invocationId.toString(), text),
+        resultPayloadBudget(DaemonMessageType.PROGRESS, invocationId));
+  }
+
+  /** 与生产 `DaemonRuntime` 相同：用整包外壳预算给结果 payload 留出 carrier 内的空间。 */
+  private static int resultPayloadBudget(DaemonMessageType messageType, UUID invocationId) {
+    return ENVELOPE_CODEC.payloadBudget(messageType, invocationId.toString());
   }
 
   /** 终态 COMPLETED payload：携带一个已就绪的 resource 上传引用（由 FakeTicketService 预先发放）。 */
@@ -103,7 +112,8 @@ final class EnvironmentDaemonServerTestSupport {
     return RESULT_CODEC.encodeCompleted(
         new EnvironmentCapabilityResult(invocationId.toString(), contents, false, "{}"),
         MAX_RESOURCE_BYTES,
-        null);
+        null,
+        resultPayloadBudget(DaemonMessageType.COMPLETED, invocationId));
   }
 
   static String helloPayload(String token) {

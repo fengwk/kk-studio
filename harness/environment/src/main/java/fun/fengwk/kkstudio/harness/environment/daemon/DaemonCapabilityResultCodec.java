@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -48,18 +49,22 @@ import java.util.UUID;
  * ResourceRef#blobUploadUri(java.util.UUID)} 引用（{@code blob-upload:<uploadId>}），该 scheme 只在本进程内存在。
  *
  * <p>编码分相：{@link #encodeProgress} 只允许 text/json，任何 resource/binary 内容在任何上传之前拒绝；{@link
- * #encodeCompleted} 先完成全部计数与尺寸预算预检，预检全部通过后才开始上传，杜绝后置条目超限造成半途副作用。最终 payload 的 UTF-8 字节数必须 ≤ {@link
- * #MAX_PAYLOAD_UTF8_BYTES}（16 MiB），由 bounded 输出辅助在物化前中止；由于 resource 不再内联字节，该上限实际上 只约束 text/json
- * 与元数据。
+ * #encodeCompleted} 先完成全部计数与尺寸预算预检，预检全部通过后才开始上传，杜绝后置条目超限造成半途副作用。最终 payload 的 UTF-8 字节数必须 ≤ 调用方给出的
+ * per-call {@code maximumPayloadBytes}（{@link #MAX_PAYLOAD_UTF8_BYTES} 为其硬上限，由 bounded 输出辅助在物化前中止）；
+ * 该预算把整包 envelope 的动态外壳开销也扣除，因此放得下的 payload 一定能装进共享 carrier 的单条逻辑消息。由于 resource 不再内联字节，该上限实际上只约束
+ * text/json 与元数据。
  *
  * <p>解码侧：resource 还原为携带瞬态 {@code blob-upload:<uploadId>} 引用的 {@link ResourceResultContent}，并复核声明尺寸
- * 落在 {@code maximumResourceBytes} 聚合预算内。解码先施加原始 payload 的 UTF-8 上限，并配置 Jackson {@link
- * StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
+ * 落在 {@code maximumResourceBytes} 聚合预算内。解码先施加原始 payload 的 UTF-8 上限（{@link
+ * #MAX_PAYLOAD_UTF8_BYTES}），并配置 Jackson {@link StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
  */
 public final class DaemonCapabilityResultCodec {
 
-  /** 结果 payload 的原始 UTF-8 上限（解码前）与最终编码输出上限：16 MiB。 */
-  public static final int MAX_PAYLOAD_UTF8_BYTES = 16 * 1024 * 1024;
+  /**
+   * 结果 payload 的 UTF-8 硬上限（解码前与最终编码输出）：与共享 carrier 的单条逻辑消息预算同源（8 MiB）。单次编码实际使用调用方传入的 {@code
+   * maximumPayloadBytes}，它由整包 envelope 预算进一步扣除动态外壳开销，且不得超过本硬上限。
+   */
+  public static final int MAX_PAYLOAD_UTF8_BYTES = NotificationLimits.DEFAULT_MAX_MESSAGE_BYTES;
 
   private static final ObjectMapper OBJECT_MAPPER =
       new ObjectMapper(
@@ -94,35 +99,43 @@ public final class DaemonCapabilityResultCodec {
   /**
    * 编码 PROGRESS 结果：只允许 text/json 内容；任何 {@link ResourceResultContent}/{@link BinaryResultContent}
    * 都在任何上传之前被拒绝。
+   *
+   * @param maximumPayloadBytes 本次编码允许的 payload UTF-8 字节预算；必须是 {@code 0 < budget <=
+   *     MAX_PAYLOAD_UTF8_BYTES}，由 {@link DaemonEnvelopeCodec#payloadBudget} 扣除整包外壳开销后给出
    */
-  public String encodeProgress(EnvironmentCapabilityResult partial) {
+  public String encodeProgress(EnvironmentCapabilityResult partial, int maximumPayloadBytes) {
     Objects.requireNonNull(partial, "partial");
+    requirePayloadBudget(maximumPayloadBytes);
     for (ResultContent content : partial.contents()) {
       if (!(content instanceof TextResultContent) && !(content instanceof JsonResultContent)) {
         throw new DaemonProtocolException(
             "PROGRESS result must not contain " + content.getClass().getSimpleName() + " content");
       }
     }
-    return writeBoundedPayload(buildResultTree(partial, null, null));
+    return writeBoundedPayload(buildResultTree(partial, null, null), maximumPayloadBytes);
   }
 
   /**
    * 编码 COMPLETED 结果。
    *
    * <p>在第一个上传或字节读取之前完成全部预检：resource ref 必须携带非空 size/sha、binary 大小取自内容、单条与聚合资源字节都必须 ≤ {@code
-   * maximumResourceBytes}。任何后置条目超限都不会产生任何上传副作用。
+   * maximumResourceBytes}，且整段 payload 必须放得进 {@code maximumPayloadBytes}。任何后置条目超限都不会产生任何上传副作用。
    *
    * @param maximumResourceBytes 本连接 WELCOME 通告的单条/聚合资源字节预算
    * @param uploader 把 binary 字节直传对象存储的端口；为 {@code null} 时 binary 内容确定性失败
+   * @param maximumPayloadBytes 本次编码允许的 payload UTF-8 字节预算；必须是 {@code 0 < budget <=
+   *     MAX_PAYLOAD_UTF8_BYTES}，由 {@link DaemonEnvelopeCodec#payloadBudget} 扣除整包外壳开销后给出
    */
   public String encodeCompleted(
       EnvironmentCapabilityResult result,
       long maximumResourceBytes,
-      DaemonResourceUploader uploader) {
+      DaemonResourceUploader uploader,
+      int maximumPayloadBytes) {
     Objects.requireNonNull(result, "result");
     if (maximumResourceBytes <= 0) {
       throw new IllegalArgumentException("maximumResourceBytes must be positive");
     }
+    requirePayloadBudget(maximumPayloadBytes);
     long aggregate = 0;
     for (ResultContent content : result.contents()) {
       long size;
@@ -160,10 +173,11 @@ public final class DaemonCapabilityResultCodec {
     // 用固定长度 uploadId/sha 元数据构建等尺寸 wire 树，只计数不保留输出；完整 payload
     // 通过上限后才允许真实上传，避免后置 text/json 超限留下无消费者对象。
     ObjectNode preflight = buildResultTree(result, maximumResourceBytes, PREFLIGHT_UPLOADER);
-    if (!BoundedJsonWriter.fits(preflight, MAX_PAYLOAD_UTF8_BYTES)) {
-      throw payloadTooLarge();
+    if (!BoundedJsonWriter.fits(preflight, maximumPayloadBytes)) {
+      throw payloadTooLarge(maximumPayloadBytes);
     }
-    return writeBoundedPayload(buildResultTree(result, maximumResourceBytes, uploader));
+    return writeBoundedPayload(
+        buildResultTree(result, maximumResourceBytes, uploader), maximumPayloadBytes);
   }
 
   /**
@@ -294,18 +308,26 @@ public final class DaemonCapabilityResultCodec {
     return root;
   }
 
-  /** 最终 payload 必须 ≤ {@link #MAX_PAYLOAD_UTF8_BYTES} UTF-8 字节：经 bounded 输出在物化前中止。 */
-  private String writeBoundedPayload(ObjectNode root) {
-    String payload = BoundedJsonWriter.write(root, MAX_PAYLOAD_UTF8_BYTES);
+  /** 最终 payload 必须 ≤ 本次预算 UTF-8 字节：经 bounded 输出在物化前中止。 */
+  private String writeBoundedPayload(ObjectNode root, int maximumPayloadBytes) {
+    String payload = BoundedJsonWriter.write(root, maximumPayloadBytes);
     if (payload == null) {
-      throw payloadTooLarge();
+      throw payloadTooLarge(maximumPayloadBytes);
     }
     return payload;
   }
 
-  private DaemonProtocolException payloadTooLarge() {
+  /** per-call payload 预算：必须为正且不超过 {@link #MAX_PAYLOAD_UTF8_BYTES} 硬上限。 */
+  private static void requirePayloadBudget(int maximumPayloadBytes) {
+    if (maximumPayloadBytes <= 0 || maximumPayloadBytes > MAX_PAYLOAD_UTF8_BYTES) {
+      throw new IllegalArgumentException(
+          "maximumPayloadBytes must be within (0, " + MAX_PAYLOAD_UTF8_BYTES + "]");
+    }
+  }
+
+  private DaemonProtocolException payloadTooLarge(int maximumPayloadBytes) {
     return new DaemonProtocolException(
-        "daemon payload exceeds " + MAX_PAYLOAD_UTF8_BYTES + " UTF-8 bytes");
+        "daemon payload exceeds " + maximumPayloadBytes + " UTF-8 bytes");
   }
 
   private void writeContent(

@@ -18,7 +18,7 @@ import java.util.stream.Stream;
 /**
  * Environment 模块的轻量级架构守卫。
  *
- * <p>Environment 主源码只能依赖 JDK、Jackson、harness.common 以及自身包； 禁止依赖
+ * <p>Environment 主源码只能依赖 JDK、Jackson、harness.common、共享 wire 预算（share.notification）以及自身包； 禁止依赖
  * harness.tool、Runtime、Daemon、Platform、Web、Spring 等。
  */
 class EnvironmentModuleArchitectureTest {
@@ -58,7 +58,7 @@ class EnvironmentModuleArchitectureTest {
   }
 
   @Test
-  void environmentPomDeclaresOnlyCommonAndJacksonAsProductionDependencies() throws IOException {
+  void environmentPomDeclaresOnlyAllowlistedProductionDependencies() throws IOException {
     Path moduleRoot = locateEnvironmentMainJava().getParent().getParent().getParent();
     Path pom = moduleRoot.resolve("pom.xml");
     String text = Files.readString(pom, StandardCharsets.UTF_8);
@@ -68,6 +68,7 @@ class EnvironmentModuleArchitectureTest {
     Set<String> allowed =
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-common",
+            "fun.fengwk.kk-studio:kk-studio-share",
             "com.fasterxml.jackson.core:jackson-databind");
     while (matcher.find()) {
       String dependency = matcher.group(1);
@@ -124,6 +125,7 @@ class EnvironmentModuleArchitectureTest {
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
+        || imported.startsWith("fun.fengwk.kkstudio.share.notification.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.");
   }
 
