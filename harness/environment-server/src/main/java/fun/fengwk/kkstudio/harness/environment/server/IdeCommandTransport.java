@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.environment.server;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -17,4 +18,11 @@ public interface IdeCommandTransport {
 
   /** 放弃一条在途命令（超时/取消）；此后迟到的回执被安静忽略。 */
   void abandonIde(UUID invocationId);
+
+  /**
+   * 该 Environment 当前 READY 连接的代际快照；无本地连接/未 READY 时返回 empty。
+   *
+   * <p>IDE 入口与反向流据此把 cookie/流绑定到具体 Daemon 实例与租约；跨进程接管后旧绑定自动作废。
+   */
+  Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId);
 }

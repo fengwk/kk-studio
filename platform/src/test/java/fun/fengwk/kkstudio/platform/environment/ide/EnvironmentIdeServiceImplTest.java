@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -243,6 +244,11 @@ class EnvironmentIdeServiceImplTest {
     @Override
     public void abandonIde(UUID id) {
       abandoned.add(id);
+    }
+
+    @Override
+    public Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId) {
+      return Optional.of(new IdeSessionIdentity(environmentId, INSTANCE, LEASE));
     }
   }
 }
