@@ -246,4 +246,89 @@ describe('TagInput', () => {
     await user.type(input, '{backspace}')
     expect(onChange).toHaveBeenCalledWith([408])
   })
+
+  it('uses class name ui-tag-input-field for the inner input element', () => {
+    render(
+      <TagInput
+        value={[408]}
+        onChange={() => undefined}
+        min={400}
+        max={599}
+        ariaLabel="HTTP status codes"
+      />,
+    )
+    const input = screen.getByRole('textbox')
+    expect(input).toHaveClass('ui-tag-input-field')
+    expect(input).not.toHaveClass('ui-tag-inline-input')
+  })
+
+  it('ignores Enter key during IME composition and commits only after composition completes', async () => {
+    const user = userEvent.setup()
+    function ControlledTagInput() {
+      const [value, setValue] = useState<(number | string)[]>([408])
+      return (
+        <TagInput
+          value={value}
+          onChange={setValue}
+          min={400}
+          max={599}
+          ariaLabel="HTTP status codes"
+        />
+      )
+    }
+
+    render(<ControlledTagInput />)
+    const input = screen.getByRole('textbox')
+
+    // Simulate typing 502
+    await user.type(input, '502')
+
+    // Fire Enter with isComposing = true (e.g. confirming IME candidate)
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+    // Chip 502 should NOT be committed yet
+    expect(screen.queryByText('502')).toBeNull()
+    expect(input).toHaveValue('502')
+
+    // Fire Enter with Process key (some IMEs)
+    fireEvent.keyDown(input, { key: 'Process', isComposing: true })
+    expect(screen.queryByText('502')).toBeNull()
+
+    // Now press normal Enter (isComposing = false)
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false })
+    expect(screen.getByText('502')).toBeInTheDocument()
+    expect(input).toHaveValue('')
+  })
+
+  it('prevents accidental submission of outer form when pressing Enter', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn((e) => e.preventDefault())
+
+    function FormWithTagInput() {
+      const [value, setValue] = useState<(number | string)[]>([408])
+      return (
+        <form onSubmit={onSubmit}>
+          <TagInput
+            value={value}
+            onChange={setValue}
+            min={400}
+            max={599}
+            ariaLabel="HTTP status codes"
+          />
+          <button type="submit">Submit</button>
+        </form>
+      )
+    }
+
+    render(<FormWithTagInput />)
+    const input = screen.getByRole('textbox')
+
+    // Press Enter with a code
+    await user.type(input, '503{enter}')
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByText('503')).toBeInTheDocument()
+
+    // Press Enter on empty input
+    await user.type(input, '{enter}')
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })

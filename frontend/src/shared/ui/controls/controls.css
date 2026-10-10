@@ -571,11 +571,11 @@
 
 .ui-tag-input:focus-within {
   border-color: var(--green-primary, #71e79a);
-  box-shadow: 0 0 0 3px var(--focus-ring, rgba(113, 231, 154, 0.2));
+  box-shadow: 0 0 0 2px var(--focus-ring, rgba(113, 231, 154, 0.2));
 }
 
 .ui-tag-input[data-invalid='true'] {
-  border-color: var(--danger, #ff7b7b);
+  border-color: var(--danger, #f08585);
 }
 
 .ui-tag-input.is-disabled {
@@ -588,18 +588,18 @@
   align-items: center;
   gap: 4px;
   padding: 2px 6px;
-  background: var(--surface-raised, #24292e);
-  border: 1px solid var(--border, #30363d);
-  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-raised, #202723);
+  border: 1px solid var(--border, #2b342f);
+  border-radius: var(--radius-sm, 6px);
   font-size: 12px;
-  font-family: var(--font-mono, monospace);
-  color: var(--fg);
+  font-family: var(--mono, monospace);
+  color: var(--fg, #edf2ed);
   line-height: 1.4;
 }
 
 .ui-tag-item.is-invalid {
-  border-color: var(--danger, #ff7b7b);
-  color: var(--danger, #ff7b7b);
+  border-color: var(--danger, #f08585);
+  color: var(--danger, #f08585);
 }
 
 .ui-tag-remove {
@@ -611,16 +611,17 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--fg-muted, #8b949e);
+  color: var(--fg-muted, #919c94);
   cursor: pointer;
   border-radius: 50%;
   font-size: 12px;
   line-height: 1;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
 
 .ui-tag-remove:hover:not(:disabled) {
-  color: var(--fg);
-  background: rgba(255, 255, 255, 0.15);
+  color: var(--fg, #edf2ed);
+  background-color: var(--surface-hover, rgba(255, 255, 255, 0.15));
 }
 
 .ui-tag-input-field {
@@ -631,12 +632,19 @@
   background: transparent;
   border: 0;
   outline: 0;
+  box-shadow: none;
   color: var(--fg);
   font-size: 13px;
   font-family: inherit;
 }
 
+.ui-tag-input-field:focus {
+  outline: 0;
+  border: 0;
+  box-shadow: none;
+}
+
 .ui-tag-input-field::placeholder {
-  color: var(--fg-dim, #6e7681);
+  color: var(--fg-dim, #9da89f);
 }
 

@@ -621,7 +621,7 @@ textarea::placeholder {
   color: var(--danger, #ff7b7b);
 }
 
-.form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input),
+.form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field),
 .form-group.is-error select,
 .form-group.is-error textarea:not(.ui-textarea),
 .form-group.is-error .form-select .form-select-control {
@@ -629,7 +629,7 @@ textarea::placeholder {
   box-shadow: 0 0 0 1px rgba(255, 96, 96, 0.35);
 }
 
-.form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):focus,
+.form-group.is-error input:not([type='checkbox']):not([type='radio']):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field):focus,
 .form-group.is-error select:focus,
 .form-group.is-error textarea:not(.ui-textarea):focus {
   border-color: var(--danger, #ff7b7b) !important;
@@ -706,8 +706,8 @@ div.is-error {
 
 /* 表单控件基座（.form-group 后代控件）：普通控件统一 32px 高度、表面与聚焦。
    共享控件自带高度/表面/焦点语义，故显式排除 .ui-text-input/.ui-textarea/
-   .number-input-field/.ui-search-input。 */
-.form-group input:not([type="checkbox"]):not([type="radio"]):not(.ui-text-input):not(.number-input-field):not(.ui-search-input),
+   .number-input-field/.ui-search-input/.ui-tag-input-field。 */
+.form-group input:not([type="checkbox"]):not([type="radio"]):not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field),
 .form-group select,
 .form-group textarea:not(.ui-textarea) {
   height: 32px;
@@ -785,7 +785,7 @@ div.is-error {
   font: inherit;
 }
 
-.form-group input:not(.ui-text-input):not(.number-input-field):not(.ui-search-input):focus,
+.form-group input:not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field):focus,
 .form-group select:focus,
 .form-group textarea:not(.ui-textarea):focus {
   border-color: var(--green-primary);
