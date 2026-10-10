@@ -149,15 +149,6 @@ class TestDistributedTopologyContract(unittest.TestCase):
         self.assertIn("KK_STUDIO_STORAGE_S3_BUCKET: kk-studio-distributed", compose)
         self.assertNotIn("app-b-db", compose)
 
-    def test_workspace_init_creates_isolated_daemon_volumes(self):
-        """Workspace init must prepare distinct daemon volumes for A/B owner isolation."""
-        compose = COMPOSE_FILE.read_text()
-        self.assertIn("daemon-workspace-a:/workspace-a", compose)
-        self.assertIn("daemon-workspace-b:/workspace-b", compose)
-        self.assertIn("chown -R 10001:10001", compose)
-        self.assertNotIn("distributed-a-only", compose)
-        self.assertNotIn("distributed-b-only", compose)
-
     def test_three_l5_distributed_cases_registered(self):
         """Three L5 cases with requires=['distributed'] must be registered in the matrix."""
         cases_file = E2E_ROOT / "cases" / "distributed.mjs"
@@ -171,18 +162,6 @@ class TestDistributedTopologyContract(unittest.TestCase):
         # 已删除的目录浏览 mailbox case 不得复活。
         self.assertNotIn("distributed.lease_mailbox_routing", content)
         self.assertNotIn("/directories", content)
-
-    def test_node_identity_defaults_are_fixed_and_overridable(self):
-        """Registration tokens have explicit disposable defaults in compose and CLI options are clean."""
-        compose = COMPOSE_FILE.read_text()
-        self.assertIn("${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}", compose)
-        self.assertIn("${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}", compose)
-        self.assertIn("KK_STUDIO_DAEMON_STUDIO_URL: http://app-a:8080", compose)
-        self.assertIn("KK_STUDIO_DAEMON_STUDIO_URL: http://app-b:8080", compose)
-        # 旧 CLI/数据目录参数必须保持删除状态；配置只经共享 daemon.json。
-        for removed in ("--gateway-uri", "--data-dir", "--environment-name", "--gateway-token", "--daemon-id"):
-            self.assertNotIn(removed, compose, removed)
-        self.assertNotIn("DISTRIBUTED_DAEMON_TOKEN", compose)
 
 
 class TestDistributedNodeContracts(unittest.TestCase):

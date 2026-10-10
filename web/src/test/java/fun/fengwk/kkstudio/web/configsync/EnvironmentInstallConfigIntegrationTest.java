@@ -225,8 +225,6 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     return Map.of(
         "operatingSystem",
         "linux",
-        "javaHome",
-        "/opt/jdk21",
         "daemon",
         Map.of(
             "studioUrl",

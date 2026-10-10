@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
@@ -168,7 +169,8 @@ public class CurrentEnvironmentContextTest {
             "dev",
             "/home/dev",
             "Linux environment.",
-            "/tmp/kk-studio");
+            "/tmp/kk-studio",
+            DaemonArchitecture.AMD64);
     CurrentEnvironmentContext reported =
         CurrentEnvironmentContext.selected(envId, "nas-dev", hostFacts, NOW, ZoneOffset.UTC);
     assertEquals(LocalDate.of(2026, 9, 12), reported.currentDate());

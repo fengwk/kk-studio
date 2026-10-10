@@ -5,7 +5,6 @@ import { registerCase } from '../lib/registry.mjs'
 export function linuxInstallConfig() {
   return {
     operatingSystem: 'linux',
-    javaHome: null,
     daemon: {
       studioUrl: 'http://127.0.0.1:18081',
       note: 'e2e install config',
@@ -26,7 +25,10 @@ export function linuxInstallConfig() {
 export function assertInstallConfig(config) {
   assert(config && typeof config === 'object', `installConfig must be an object: ${JSON.stringify(config)}`)
   assert(config.operatingSystem === 'linux', `operatingSystem must be linux: ${config.operatingSystem}`)
-  assert(config.javaHome == null, `javaHome must stay unset: ${config.javaHome}`)
+  assert(
+    !Object.prototype.hasOwnProperty.call(config, 'javaHome'),
+    `installConfig must not carry a javaHome field: ${JSON.stringify(config)}`,
+  )
   assert(
     config.daemon?.studioUrl === 'http://127.0.0.1:18081',
     `studioUrl must round-trip: ${config.daemon?.studioUrl}`,
