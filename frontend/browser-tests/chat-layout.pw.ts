@@ -329,7 +329,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     const pane1Lines = pane1Footer.locator('.thread-status-line')
     await expect(pane1Lines).toHaveCount(1)
     await expect(pane1Lines.nth(0)).toHaveText(
-      'production ∣ ctx 16k/128k ∣ ↑12k · ↓800 · R4.0k · $0.042 · cache 25% · 475 tok/s',
+      'production ∣ ctx 16k/128k ∣ ↑12k · ↓800 · R4.0k · W0 · $0.042 · cache 25% · 475 tok/s',
     )
 
     // 超宽被省略的信息必须仍能通过 hover 完整读取，且不含内部口径说明
@@ -372,10 +372,10 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(pane2Title).toContain('环境：production-us-east-long-cluster-primary-node')
     expect(pane2Title).toContain('未缓存输入：123456 tokens；输出：654321 tokens')
 
-    // 无环境且无闭合回合用量时，零事实与占位符仍稳定落在唯一一行
+    // 无环境且无闭合回合用量时，所有统计字段仍以零值稳定落在唯一一行
     const pane3Line = page.locator('[data-testid="pane-3-footer"] .thread-status-line')
     await expect(pane3Line).toHaveCount(1)
-    await expect(pane3Line).toHaveText('未选择环境 ∣ ↑0 · ↓0 · — · cache — · — tok/s')
+    await expect(pane3Line).toHaveText('未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s')
     expect((await pane3Line.getAttribute('title')) ?? '').toContain('生成速度：暂无数据')
 
     // 桌面分屏截图
