@@ -335,9 +335,7 @@ public final class BashCapability implements EnvironmentCapability {
         captured.callId(), captured.contents(), true, details.toString());
   }
 
-  /**
-   * 终态说明只取受控来源：派发前参数/路径拒绝的字段说明，或配置里显式的 shell 可执行文件。已启动后的异常不回显其 message（进程启动与读取的 IO 异常可能内联可执行文件与参数）。
-   */
+  /** 终态说明只取受控来源：参数拒绝保留字段说明；进程失败使用固定分类，不回显 shell 路径或原始 IO 异常。 */
   private String failureReason(BashHandle handle, Exception error) {
     if (error instanceof ToolInputRejectedException) {
       return error.getMessage();
@@ -350,10 +348,9 @@ public final class BashCapability implements EnvironmentCapability {
       }
     }
     if (handle.scope == null) {
-      return "the shell could not be started: " + config.bashExecutable();
+      return "the shell could not be started";
     }
-    // 已启动后的异常不回显其 message（进程启动与读取的 IO 异常可能内联可执行文件与参数）：诊断改用显式的 shell 名。
-    return "the command failed after it started (shell: " + config.bashExecutable() + ")";
+    return "the command failed after it started";
   }
 
   /** 关闭子进程 stdin：命令以参数传入、不读 stdin，写端未关闭会让等待 EOF 的命令一直阻塞到超时。 */
