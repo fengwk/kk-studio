@@ -99,7 +99,7 @@ async function serverTab(name: string) {
 }
 
 describe('system settings server editor', () => {
-  // 通过真实编辑器与完整 CAS mock 验证单一全局代理：两个字段、重启提示、保存与清空不丢其他段。
+  // 通过真实编辑器与完整 CAS mock 验证单一全局代理：两个字段、新请求生效提示、保存与清空不丢其他段。
   it('edits and clears the global proxy while preserving every other section', async () => {
     const initial = makeSettingsDto()
     initial.tool.defaultYolo = true
@@ -113,9 +113,9 @@ describe('system settings server editor', () => {
     const panel = screen.getByRole('tabpanel')
     expect(within(panel).getAllByRole('textbox')).toHaveLength(2)
     expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
-    expect(within(panel).getByText('重启后生效')).toBeInTheDocument()
+    expect(within(panel).getByText('新发起请求生效')).toBeInTheDocument()
     expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
-      '保存后重启 Backend 生效，不控制 daemon、浏览器或 Hub 等服务内部请求。',
+      '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；不控制 daemon、浏览器或 Hub 等服务内部请求。',
     )
     const proxy = within(panel).getByLabelText('代理地址')
     const bypass = within(panel).getByLabelText('代理绕过规则')
@@ -154,7 +154,7 @@ describe('system settings server editor', () => {
       network: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1,minio,*.internal' },
       expectedVersion: '1',
     })
-    expect(screen.getByText('重启后生效')).toBeInTheDocument()
+    expect(screen.getByText('新发起请求生效')).toBeInTheDocument()
     expect(screen.getByLabelText('代理地址')).toHaveValue('')
   })
 

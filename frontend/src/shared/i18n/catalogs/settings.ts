@@ -190,16 +190,16 @@ export const settingsCatalog = {
     'zh-CN': '全局 HTTP 代理',
   },
   'settings.section.network.proxy.description': {
-    'en-US': 'Restart Backend after saving. This does not control daemon, browser, or internal requests of services such as Hub.',
-    'zh-CN': '保存后重启 Backend 生效，不控制 daemon、浏览器或 Hub 等服务内部请求。',
+    'en-US': 'New HTTP requests use the saved proxy; in-flight requests are unaffected. This does not control daemon, browser, or internal requests of services such as Hub.',
+    'zh-CN': '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；不控制 daemon、浏览器或 Hub 等服务内部请求。',
   },
   'settings.field.network.proxyUrl': {
     'en-US': 'Proxy URL',
     'zh-CN': '代理地址',
   },
   'settings.field.network.proxyUrl.hint': {
-    'en-US': 'Backend global default HTTP proxy. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. Restart Backend after saving; this does not control daemon, browser, or internal requests of services such as Hub.',
-    'zh-CN': 'Backend 全局默认 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后重启 Backend 生效，不控制 daemon、浏览器或 Hub 等服务内部请求。',
+    'en-US': 'Backend global default HTTP proxy. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected; this does not control daemon, browser, or internal requests of services such as Hub.',
+    'zh-CN': 'Backend 全局默认 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；不控制 daemon、浏览器或 Hub 等服务内部请求。',
   },
   'settings.field.network.noProxyHosts': {
     'en-US': 'Proxy bypass rules',
@@ -224,6 +224,10 @@ export const settingsCatalog = {
   'settings.applyTiming.nextInvocation': {
     'en-US': 'Takes effect on next invocation',
     'zh-CN': '下次调用生效',
+  },
+  'settings.applyTiming.nextHttpRequest': {
+    'en-US': 'Takes effect on new HTTP requests',
+    'zh-CN': '新发起请求生效',
   },
   'settings.applyTiming.nextChat': {
     'en-US': 'Applies to newly created chats',

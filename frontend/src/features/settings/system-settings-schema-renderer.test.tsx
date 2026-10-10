@@ -173,6 +173,19 @@ describe('system settings schema renderer', () => {
     expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
   })
 
+  it('renders the next-HTTP-request badge for the network proxy group', () => {
+    const schema = makeSettingsSchema()
+    const draft = settingsSectionsToDraft(makeSettingsDto())
+    const section = renderSection(schema, 'network')
+    const { container } = renderRenderer(
+      <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
+    )
+    const cards = container.querySelectorAll('.settings-card')
+    expect(cards).toHaveLength(1)
+    expect(within(cards[0] as HTMLElement).getByText('新发起请求生效')).toBeInTheDocument()
+    expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
+  })
+
   it('puts a restart badge on every restart-required card and never on the section header', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())

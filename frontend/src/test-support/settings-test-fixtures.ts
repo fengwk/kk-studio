@@ -413,14 +413,14 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'network',
         labelKey: 'settings.tabs.network',
         descriptionKey: 'settings.section.network.description',
-        restartRequired: true,
+        restartRequired: false,
         groups: [
           {
             key: 'network.proxy',
             labelKey: 'settings.section.network.proxy.title',
             descriptionKey: 'settings.section.network.proxy.description',
-            restartRequired: true,
-            applyTiming: 'RESTART',
+            restartRequired: false,
+            applyTiming: 'NEXT_HTTP_REQUEST',
             fields: [
               {
                 path: 'network.proxyUrl',
