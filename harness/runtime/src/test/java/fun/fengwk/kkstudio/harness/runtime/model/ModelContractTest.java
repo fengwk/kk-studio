@@ -70,8 +70,8 @@ class ModelContractTest {
   }
 
   /**
-   * Variant 只承载 id 与可空 reasoningEffort：id 必须无前后空白且非空；effort 为厂商自定义字符串，大小写与空白被归一化； 允许 max、xhigh
-   * 等任意非空且不超过 64 字符的值；空白与超长（>64）被拒绝；{@code off} 是显式关闭、{@code null} 是不声明，二者绝不互相静默映射。
+   * Variant 只承载 id 与可空 reasoningEffort：id 必须无前后空白且非空；effort 为厂商自定义自由字符串，只去除首尾空白并原样保留大小写； 允许
+   * max、xhigh 等任意非空且不超过 64 字符的值；空白与超长（>64）被拒绝；{@code off} 是显式关闭、{@code null} 是不声明，二者绝不互相静默映射。
    */
   @Test
   void enforcesVariantIdentityAndReasoningEffort() {
@@ -79,10 +79,13 @@ class ModelContractTest {
     assertNull(new ModelVariant("default").reasoningEffort());
     assertEquals("high", new ModelVariant("default", "high").reasoningEffort());
     assertEquals("off", new ModelVariant("default", "off").reasoningEffort());
-    assertEquals("off", new ModelVariant("default", "  OFF ").reasoningEffort());
-    assertEquals("max", new ModelVariant("default", "MAX").reasoningEffort());
-    assertEquals("xhigh", new ModelVariant("default", "  xHigh ").reasoningEffort());
+    // 大小写是厂商原生值，绝不被归一化；仅首尾空白被去除
+    assertEquals("OFF", new ModelVariant("default", "  OFF ").reasoningEffort());
+    assertEquals("MAX", new ModelVariant("default", "MAX").reasoningEffort());
+    assertEquals("xHigh", new ModelVariant("default", "  xHigh ").reasoningEffort());
     assertTrue(new ModelVariant("default", "off").reasoningOff());
+    // 只有精确小写 off 是显式关闭；OFF 等原生值不构成 case-insensitive 别名
+    assertFalse(new ModelVariant("default", "OFF").reasoningOff());
     assertFalse(new ModelVariant("default").reasoningOff());
     assertFalse(new ModelVariant("default", "high").reasoningOff());
     assertFalse(new ModelVariant("default", "max").reasoningOff());

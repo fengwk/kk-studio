@@ -80,21 +80,36 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.variants().get(0).reasoningOff());
   }
 
-  /** 厂商自定义 reasoningEffort（如 max, xhigh）被正常解析、归一化并在 round-trip 中保留。 */
+  /** 厂商自定义 reasoningEffort（如 MAX, xHigh）被正常解析、只去除首尾空白并原样保留大小写，在 round-trip 中保持不变。 */
   @Test
   void acceptsAndRoundTripsCustomReasoningEffort() {
     String maxConfig =
         validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"  MAX \"");
     var parsedMax = parser.parse(maxConfig);
-    assertEquals("max", parsedMax.variants().get(0).reasoningEffort());
+    assertEquals("MAX", parsedMax.variants().get(0).reasoningEffort());
 
     String xhighConfig =
         validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"xHigh\"");
     AgentModelConfigDTO decoded = parser.decode(xhighConfig);
-    assertEquals("xhigh", decoded.getVariants().get(0).getReasoningEffort());
+    assertEquals("xHigh", decoded.getVariants().get(0).getReasoningEffort());
     String reencoded = parser.encode(decoded);
     var parsedXhigh = parser.parse(reencoded);
-    assertEquals("xhigh", parsedXhigh.variants().get(0).reasoningEffort());
+    assertEquals("xHigh", parsedXhigh.variants().get(0).reasoningEffort());
+  }
+
+  /** 手工配置的 reasoningEffort 大小写是厂商原生值：HIGH/high 混合大小写在 decode→encode→parse 后原样保留。 */
+  @Test
+  void preservesReasoningEffortCaseAcrossConfigRoundTrip() {
+    for (String effort : List.of("HIGH", "high", "HiGh")) {
+      String config =
+          validConfig()
+              .replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"" + effort + "\"");
+      AgentModelConfigDTO decoded = parser.decode(config);
+      assertEquals(effort, decoded.getVariants().get(0).getReasoningEffort());
+      String encoded = parser.encode(decoded);
+      assertEquals(effort, parser.decode(encoded).getVariants().get(0).getReasoningEffort());
+      assertEquals(effort, parser.parse(encoded).variants().get(0).reasoningEffort());
+    }
   }
 
   /** 未声明 reasoningEffort 的 variant 保持 null，与显式 off 是不同语义；未声明原生选项等价于空 object。 */

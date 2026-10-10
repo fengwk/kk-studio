@@ -75,20 +75,23 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(variant, decoded);
   }
 
-  /** 厂商自定义 reasoningEffort（如 max、xhigh）走完 codec 必须等价往返并保持小写归一化。 */
+  /** 厂商自定义 reasoningEffort（如 MAX、xHigh、hiGh）走完 codec 必须等价往返并原样保留大小写，仅去除首尾空白。 */
   @Test
   void roundTripsVariantWithCustomReasoningEfforts() {
-    ModelVariant max = new ModelVariant("id", "max");
+    ModelVariant max = new ModelVariant("id", "MAX");
     assertEquals(max, codec.decodeVariant(codec.encodeVariant(max)));
 
-    ModelVariant xhigh = new ModelVariant("id", "xhigh");
+    ModelVariant xhigh = new ModelVariant("id", "xHigh");
     assertEquals(xhigh, codec.decodeVariant(codec.encodeVariant(xhigh)));
 
-    // 大写与外层空白在解码时被归一化
-    ModelVariant decodedFromNormalized =
+    ModelVariant mixed = new ModelVariant("id", "HiGh");
+    assertEquals(mixed, codec.decodeVariant(codec.encodeVariant(mixed)));
+
+    // 外层空白在解码时被去除，大小写保持原值
+    ModelVariant decodedFromTrimmed =
         codec.decodeVariant(
             "{\"id\":\"id\",\"reasoningEffort\":\"  MAX \",\"protocolOptions\":{}}");
-    assertEquals("max", decodedFromNormalized.reasoningEffort());
+    assertEquals("MAX", decodedFromTrimmed.reasoningEffort());
 
     // 空白与超长 reasoningEffort 必须在解码时被拒绝
     assertThrows(
