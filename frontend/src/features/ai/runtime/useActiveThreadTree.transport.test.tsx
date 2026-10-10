@@ -66,7 +66,7 @@ describe('execution tree HTTP Instant contract', () => {
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual([node(ROOT, null), node(CHILD, ROOT)])
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
     ]))
   })
 
@@ -101,7 +101,7 @@ describe('execution tree HTTP Instant contract', () => {
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(valid)
     expect(screen.getByRole('link')).toBeInTheDocument()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
     ])
   })
 })

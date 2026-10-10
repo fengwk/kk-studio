@@ -443,6 +443,11 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `events.heartbeat_keepalive` / `events.project_invalidation`：应用事件 WebSocket 的周期
   heartbeat 保活，以及 Project 全局 changed 失效；Thread/Canvas 的 snapshot-first 对账、
   tree/interactions/environments 资源回读与 `statusExpiresAt` 一次性回读由前端 jsdom/组件测试覆盖。
+  逻辑帧版本为 2，每个逻辑帧都作为 `app.events.v2` topic 的 NotificationCarrier 分片经唯一
+  `/api/events/v1` 物理连接承载（共享 packet/reassembler/outbox，无 raw JSON 旁路）；
+  Node 探针与浏览器复用同一
+  [framed-link.mjs](../../frontend/src/shared/app-events/framed-link.mjs) 与
+  [notification.mjs](../../frontend/src/shared/notification/notification.mjs)，旧 version=1 逻辑帧一律拒绝。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `thread.provider_request_preview_readonly`、`model.attempt_failure_visibility` 依赖 case 内自建的宿主
@@ -553,7 +558,8 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 分布式故障演练与 UI 矩阵应作为两条独立命令串行执行；`--distributed` 不能与 `--ui` 同次启用。
 容器断网与重连可能触发浏览器网络变更，干扰 Vite 动态导入，不应以盲目重试掩盖相互干扰。
 
-L5 通知 case 使用两节点真实 `/api/events/v1` WebSocket：Projects 双向 CRUD/CAS 的提交可见性与
+L5 通知 case 使用两节点真实 `/api/events/v1` WebSocket（逻辑 version=2，全部逻辑帧经共享
+`app.events.v2` carrier 分片承载）：Projects 双向 CRUD/CAS 的提交可见性与
 逐提交去重、Canvas revision 与 Environment 跨 topic 隔离及失败事务静默、订阅释放与重连新基线、
 DB 网络断开后的 fail-closed 和权威 resync。先等待 `subscribed`，保存全部帧，并在收到通知时
 立即读取权威 API；去重与静默断言使用 400ms 有界稳定窗。Environment v1 全局事件不携带实体 ID，

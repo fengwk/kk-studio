@@ -105,7 +105,7 @@ describe('useHarnessThreadRealtime', () => {
     })
     // version 前进不重建订阅：wire 上始终只有一条 subscribe。
     rerender({ version: '43' })
-    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: threadResource }])
+    expect(socket.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: threadResource }])
     expect(invalidate).toHaveBeenCalledTimes(4)
   })
 
@@ -689,10 +689,10 @@ describe('useHarnessThreadRealtime', () => {
       sockets.latest?.fail()
       await waitFor(() => expect(sockets.sockets.length).toBe(attempt + 2), { timeout: 2000 })
       const next = sockets.openLatest()
-      expect(next.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: threadResource }])
+      expect(next.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: threadResource }])
       act(() => next.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
     }
-    expect(first.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: threadResource }])
+    expect(first.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: threadResource }])
     // 每次重连的 subscribed ack 各触发一次对账。
     expect(invalidate).toHaveBeenCalledTimes(2)
   })
@@ -914,7 +914,7 @@ describe('useHarnessThreadRealtime', () => {
     // 订阅初始化完成（wire 上出现 subscribe）后，snapshot-seeded overlay 仍在。
     await waitFor(() =>
       expect(sockets.latest?.sentMessages()).toEqual([
-        { version: 1, type: 'subscribe', resource: threadResource },
+        { version: 2, type: 'subscribe', resource: threadResource },
       ]),
     )
     await waitFor(() =>

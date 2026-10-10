@@ -58,7 +58,7 @@ describe('useCanvasVersionEvents', () => {
     const { sockets, onSnapshot } = renderEvents({ revision: '7' })
     const socket = sockets.openLatest()
 
-    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
+    expect(socket.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: canvasResource }])
     // 快照 GET 与 wire 建立之间的缺口由 subscribed ack 关闭。
     expect(onSnapshot).not.toHaveBeenCalled()
     act(() => socket.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
@@ -124,7 +124,7 @@ describe('useCanvasVersionEvents', () => {
     first.fail()
     await waitFor(() => expect(sockets.sockets.length).toBe(2), { timeout: 2000 })
     const second = sockets.openLatest()
-    expect(second.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
+    expect(second.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: canvasResource }])
     act(() => second.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
     expect(onSnapshot).toHaveBeenCalledTimes(2)
   })
@@ -135,10 +135,10 @@ describe('useCanvasVersionEvents', () => {
 
     rerender({ enabled: true })
     const socket = sockets.openLatest()
-    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
+    expect(socket.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: canvasResource }])
 
     // 连接仍存活时禁用订阅：wire 上出现 unsubscribe（refcount 释放路径）。
     rerender({ enabled: false })
-    expect(socket.sentMessages().at(-1)).toEqual({ version: 1, type: 'unsubscribe', resource: canvasResource })
+    expect(socket.sentMessages().at(-1)).toEqual({ version: 2, type: 'unsubscribe', resource: canvasResource })
   })
 })

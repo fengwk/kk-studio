@@ -50,6 +50,9 @@ Java long 游标保持字符串，版本比较使用长度与字典序，保留�
 Thread/Canvas 先读取 Snapshot，再订阅 `/api/events/v1`。
 浏览器只有一个应用事件 WebSocket，连接与订阅由应用级 manager 按资源引用计数管理：
 同一资源无论多少消费者只有一条 wire 订阅，重连后自动重发全部订阅，恢复在线或回到前台立即重试。
+物理帧统一是 `app.events.v2` topic 的 NotificationCarrier 分片（逻辑 `version=2`，`count=1` 同格式），
+浏览器与 Node 探针复用同一 [framed-link.mjs](../../frontend/src/shared/app-events/framed-link.mjs) 与
+[notification.mjs](../../frontend/src/shared/notification/notification.mjs)，不存在 raw JSON 旁路。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
 projects/tree/interactions/environments 只发 changed 提示、不携带 cursor。
 subscribed（含重连）、resync、资源 error 和版本提示触发回读；

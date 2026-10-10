@@ -98,11 +98,11 @@ it('没有 READY 环境调用就不订阅，换绑释放旧根', async () => {
   rerender({ id: CHILD })
   await waitFor(() => expect(result.current.thread?.threadId).toBe(CHILD))
   const socket = sockets.openLatest()
-  expect(socket.sentMessages()).toContainEqual({ version: 1, type: 'subscribe', resource: { kind: 'interactions' } })
+  expect(socket.sentMessages()).toContainEqual({ version: 2, type: 'subscribe', resource: { kind: 'interactions' } })
   get.mockResolvedValue(snapshot(OTHER, { status: 'RUNNING' }))
   rerender({ id: OTHER })
   await waitFor(() => expect(result.current.thread?.threadId).toBe(OTHER))
-  expect(socket.sentMessages()).toContainEqual({ version: 1, type: 'unsubscribe', resource: { kind: 'interactions' } })
+  expect(socket.sentMessages()).toContainEqual({ version: 2, type: 'unsubscribe', resource: { kind: 'interactions' } })
 })
 
 it('snapshot 最早自然截止单次回读，续租注销旧 timer，旧过期投影不热循环', async () => {

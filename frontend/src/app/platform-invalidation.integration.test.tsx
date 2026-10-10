@@ -29,7 +29,7 @@ describe('platform invalidation bridges', () => {
 
     const socket = sockets.openLatest()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'projects' } },
+      { version: 2, type: 'subscribe', resource: { kind: 'projects' } },
     ])
 
     // 1. subscribed 事件 -> 全量失效 projects.all
