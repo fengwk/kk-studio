@@ -87,12 +87,15 @@ registerCase({
       // later Ctrl-C cannot race an unstarted command.
       const ctrlStart = sentinel('CS')
       const ctrlEnd = sentinel('CE')
-      const fgOp = probe.sendInput(`(printf '%s\\n' ${ctrlStart}; sleep 60; printf '%s\\n' ${ctrlEnd})\r`, 3)
+      const resumedPrompt = sentinel('PROMPT')
+      const fgOp = probe.sendInput(`PS1='${resumedPrompt}'; (printf '%s\\n' ${ctrlStart}; sleep 60; printf '%s\\n' ${ctrlEnd})\r`, 3)
       await probe.waitOperation(fgOp, 25_000)
       await probe.waitScreenRow(ctrlStart, 25_000)
       const ctrlCOp = probe.sendInput(Buffer.from([0x03]), 4)
       await probe.waitOperation(ctrlCOp, 25_000)
       const ctrlCAt = Date.now()
+      // WRITTEN is not a shell-readiness ACK; the fresh exact prompt proves the foreground job ended.
+      await probe.waitScreenRow(resumedPrompt, 5_000)
       const lifecycleSentinel = sentinel('LIFE')
       const lifecycleOp = probe.sendInput(`printf '%s\\n' ${lifecycleSentinel}\r`, 5)
       await probe.waitOperation(lifecycleOp, 25_000)
