@@ -7,10 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import git from 'isomorphic-git'
 import {
   SkillPackageInstaller,
-  assertRealDirectorySync,
-  createParentDirectoriesOwnerOnly,
-  writeFileOwnerOnly,
-  createOwnerOnlyDirectory,
+  assertRealDirectory,
   validatePackageEntryPath,
   validateTargetCommit,
   validatePackageName,
@@ -18,6 +15,7 @@ import {
   validateRepositoryUrl,
 } from '../../src/skill/installer.js'
 import { SkillSyncException } from '../../src/skill/types.js'
+import { createTestPrivateFs } from './test-private-fs.js'
 
 describe('SkillPackageInstaller', () => {
   let tempDir: string
@@ -27,17 +25,19 @@ describe('SkillPackageInstaller', () => {
   let backupRoot: string
   let installer: SkillPackageInstaller
 
-  beforeEach(async () => {
+  beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-inst-test-'))
     remoteRepoDir = path.join(tempDir, 'remote-repo')
     skillsRoot = path.join(tempDir, 'skills')
     stagingRoot = path.join(tempDir, 'staging')
     backupRoot = path.join(tempDir, 'backup')
 
-    installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot)
+    installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+    })
   })
 
-  afterEach(async () => {
+  afterEach(() => {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true })
     } catch {}
@@ -125,7 +125,7 @@ describe('SkillPackageInstaller', () => {
     assertDirectoryEmpty(backupRoot)
   })
 
-  it('commit with symlink is rejected with UNSAFE_PACKAGE_ENTRY and preserves previous install', async () => {
+  it('commit with symlink is rejected without checking out or writing symlink to staging', async () => {
     const { commit1 } = await createFixtureRepo()
     const remoteUrl = pathToFileURL(remoteRepoDir).toString()
 
@@ -170,19 +170,23 @@ describe('SkillPackageInstaller', () => {
       message: 'Symbolic links are not allowed in skill package',
     })
 
-    // Assert previous install is byte-for-byte preserved
+    // Previous install is byte-for-byte preserved
     expect(fs.readFileSync(path.join(pkgDir, 'weather-skill', 'SKILL.md'), 'utf8')).toBe(
       '# Weather Skill\nVersion 1.0\n',
     )
     expect(fs.readFileSync(path.join(pkgDir, '.kkstudio-commit'), 'utf8')).toBe(`${commit1}\n`)
 
+    // Staging and backup are cleaned up, no symlinks ever created
     assertDirectoryEmpty(stagingRoot)
     assertDirectoryEmpty(backupRoot)
   })
 
-  it('commit with submodule is rejected with UNSAFE_PACKAGE_ENTRY', async () => {
-    await fs.promises.mkdir(remoteRepoDir, { recursive: true })
-    await git.init({ fs, dir: remoteRepoDir, defaultBranch: 'main' })
+  it('commit with submodule is rejected with UNSAFE_PACKAGE_ENTRY and preserves prior install', async () => {
+    const { commit1 } = await createFixtureRepo()
+    const remoteUrl = pathToFileURL(remoteRepoDir).toString()
+
+    await installer.install('submodule-pkg', remoteUrl, 'main', commit1)
+    const pkgDir = path.join(skillsRoot, 'submodule-pkg')
 
     const treeOid = await git.writeTree({
       fs,
@@ -202,14 +206,12 @@ describe('SkillPackageInstaller', () => {
       commit: {
         message: 'submodule commit',
         tree: treeOid,
-        parent: [],
+        parent: [commit1],
         author: { name: 'test', email: 'test@example.com', timestamp: 0, timezoneOffset: 0 },
         committer: { name: 'test', email: 'test@example.com', timestamp: 0, timezoneOffset: 0 },
       },
     })
-    await git.writeRef({ fs, dir: remoteRepoDir, ref: 'refs/heads/main', value: subCommit })
 
-    const remoteUrl = pathToFileURL(remoteRepoDir).toString()
     await expect(
       installer.install('submodule-pkg', remoteUrl, 'main', subCommit),
     ).rejects.toMatchObject({
@@ -217,8 +219,54 @@ describe('SkillPackageInstaller', () => {
       message: 'Submodules are not allowed in skill package',
     })
 
+    expect(fs.readFileSync(path.join(pkgDir, 'weather-skill', 'SKILL.md'), 'utf8')).toBe(
+      '# Weather Skill\nVersion 1.0\n',
+    )
     assertDirectoryEmpty(stagingRoot)
     assertDirectoryEmpty(backupRoot)
+  })
+
+  it('supports file:// repositories where .git is a gitfile pointing to another gitdir', async () => {
+    const { commit1 } = await createFixtureRepo()
+
+    // Create a secondary working tree with a .git file
+    const gitfileRepoDir = path.join(tempDir, 'gitfile-repo')
+    await fs.promises.mkdir(gitfileRepoDir, { recursive: true })
+    const dotGitFile = path.join(gitfileRepoDir, '.git')
+    await fs.promises.writeFile(dotGitFile, `gitdir: ${path.join(remoteRepoDir, '.git')}\n`)
+
+    const fileUrl = pathToFileURL(gitfileRepoDir).toString()
+    const installed = await installer.install('gitfile-pkg', fileUrl, 'main', commit1)
+
+    expect(installed.packageName).toBe('gitfile-pkg')
+    expect(installed.installedCommit).toBe(commit1)
+    const skillFile = path.join(skillsRoot, 'gitfile-pkg', 'weather-skill', 'SKILL.md')
+    expect(fs.readFileSync(skillFile, 'utf8')).toBe('# Weather Skill\nVersion 1.0\n')
+  })
+
+  it('supports file:// repositories with worktree layout (.git file + commondir)', async () => {
+    const { commit1 } = await createFixtureRepo()
+
+    // Simulate git worktree layout:
+    // remoteRepoDir/.git/worktrees/wt1/
+    //   commondir -> ../..
+    //   HEAD -> ref: refs/heads/main
+    const wtDir = path.join(tempDir, 'worktree-repo')
+    await fs.promises.mkdir(wtDir, { recursive: true })
+    const wtGitdir = path.join(remoteRepoDir, '.git', 'worktrees', 'wt1')
+    await fs.promises.mkdir(wtGitdir, { recursive: true })
+    await fs.promises.writeFile(path.join(wtGitdir, 'commondir'), '../..\n')
+    await fs.promises.writeFile(path.join(wtGitdir, 'HEAD'), 'ref: refs/heads/main\n')
+
+    await fs.promises.writeFile(path.join(wtDir, '.git'), `gitdir: ${wtGitdir}\n`)
+
+    const fileUrl = pathToFileURL(wtDir).toString()
+    const installed = await installer.install('worktree-pkg', fileUrl, 'main', commit1)
+
+    expect(installed.packageName).toBe('worktree-pkg')
+    expect(installed.installedCommit).toBe(commit1)
+    const skillFile = path.join(skillsRoot, 'worktree-pkg', 'weather-skill', 'SKILL.md')
+    expect(fs.readFileSync(skillFile, 'utf8')).toBe('# Weather Skill\nVersion 1.0\n')
   })
 
   it('fetch failure preserves previous install and leaves no artifacts', async () => {
@@ -298,11 +346,21 @@ describe('SkillPackageInstaller', () => {
     assertDirectoryEmpty(backupRoot)
   })
 
-  it('recoverArtifacts cleans staging and restores missing target from backup', async () => {
-    // 1. Leftover staging
-    const leftoverStaging = path.join(stagingRoot, `leftover.${randomUUID()}`)
-    fs.mkdirSync(leftoverStaging, { recursive: true })
-    fs.writeFileSync(path.join(leftoverStaging, 'temp.txt'), 'leftover')
+  it('recoverArtifacts only touches product-named artifacts, restores missing package and preserves foreign files', async () => {
+    // 1. Leftover staging matching product name
+    const leftoverStaging1 = path.join(stagingRoot, `leftover-pkg.${randomUUID()}`)
+    fs.mkdirSync(leftoverStaging1, { recursive: true })
+    fs.writeFileSync(path.join(leftoverStaging1, 'temp.txt'), 'leftover')
+
+    const leftoverStaging2 = path.join(stagingRoot, `leftover-pkg.${randomUUID()}.clone`)
+    fs.mkdirSync(leftoverStaging2, { recursive: true })
+    fs.writeFileSync(path.join(leftoverStaging2, 'temp.txt'), 'leftover-clone')
+
+    // Staging non-product file/dir (MUST BE LEFT UNTOUCHED)
+    const stagingForeignFile = path.join(stagingRoot, 'manual-unrelated.txt')
+    fs.writeFileSync(stagingForeignFile, 'keep-me')
+    const stagingForeignDir = path.join(stagingRoot, 'unrelated-dir')
+    fs.mkdirSync(stagingForeignDir, { recursive: true })
 
     // 2. Restorable backup (missing in skills)
     const restorableUuid = randomUUID()
@@ -319,21 +377,72 @@ describe('SkillPackageInstaller', () => {
     fs.mkdirSync(existingBackup, { recursive: true })
     fs.writeFileSync(path.join(existingBackup, 'old.txt'), 'old')
 
-    // 4. Corrupted file
+    // 4. Non-conforming backup file/dir (MUST BE LEFT UNTOUCHED)
     const corruptBackup = path.join(backupRoot, 'corrupted-file.bin')
     fs.writeFileSync(corruptBackup, 'garbage')
+    const badNameBackup = path.join(backupRoot, `bad:name.${randomUUID()}`)
+    fs.mkdirSync(badNameBackup, { recursive: true })
 
-    installer.recoverArtifacts()
+    await installer.recoverArtifacts()
 
-    assertDirectoryEmpty(stagingRoot)
-    assertDirectoryEmpty(backupRoot)
+    // Verify product-named staging cleaned, but foreign entries untouched
+    expect(fs.existsSync(leftoverStaging1)).toBe(false)
+    expect(fs.existsSync(leftoverStaging2)).toBe(false)
+    expect(fs.existsSync(stagingForeignFile)).toBe(true)
+    expect(fs.existsSync(stagingForeignDir)).toBe(true)
 
+    // Verify restored backup
     const restoredDir = path.join(skillsRoot, 'restored-pkg')
     expect(fs.existsSync(restoredDir)).toBe(true)
     expect(fs.readFileSync(path.join(restoredDir, 'recovered.txt'), 'utf8')).toBe('good')
 
+    // Verify existing package untouched and its redundant backup cleaned
     expect(fs.existsSync(existingPackage)).toBe(true)
     expect(fs.readFileSync(path.join(existingPackage, 'current.txt'), 'utf8')).toBe('current')
+    expect(fs.existsSync(existingBackup)).toBe(false)
+
+    // Verify foreign/non-conforming backups left untouched
+    expect(fs.existsSync(corruptBackup)).toBe(true)
+    expect(fs.existsSync(badNameBackup)).toBe(true)
+  })
+
+  it('recoverArtifacts throws clear safe error if restore fails and leaves backup intact', async () => {
+    const restorableUuid = randomUUID()
+    const restorableBackup = path.join(backupRoot, `fail-restore-pkg.${restorableUuid}`)
+    fs.mkdirSync(restorableBackup, { recursive: true })
+    fs.writeFileSync(path.join(restorableBackup, 'important.txt'), 'safe')
+
+    const failingRecoveryInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+      directoryMover: async () => {
+        throw new Error('disk permission denied during move')
+      },
+    })
+
+    await expect(failingRecoveryInstaller.recoverArtifacts()).rejects.toThrow(
+      /failed to restore backup/,
+    )
+
+    // The backup must NOT be deleted
+    expect(fs.existsSync(restorableBackup)).toBe(true)
+    expect(fs.readFileSync(path.join(restorableBackup, 'important.txt'), 'utf8')).toBe('safe')
+  })
+
+  it('rejects 64-hex SHA-256 target commit clearly before network or materialization', async () => {
+    const commit64 = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    const remoteUrl = pathToFileURL(remoteRepoDir).toString()
+
+    await expect(
+      installer.install('sha256-pkg', remoteUrl, 'main', commit64),
+    ).rejects.toMatchObject({
+      code: 'INVALID_TARGET_COMMIT',
+      message:
+        'Target commit must be a 40-character SHA-1 commit; SHA-256 commits are not supported by the local Git backend',
+    })
+
+    // No staging or backup directories touched
+    assertDirectoryEmpty(stagingRoot)
+    assertDirectoryEmpty(backupRoot)
   })
 
   it('invalid arguments rejected without filesystem side effects', async () => {
@@ -441,6 +550,7 @@ describe('SkillPackageInstaller', () => {
 
     let failSwap = true
     const faultyInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
       directoryMover: async (source, target) => {
         if (failSwap && source.startsWith(stagingRoot) && target === pkgDir) {
           throw new Error('simulated atomic swap failure')
@@ -464,6 +574,44 @@ describe('SkillPackageInstaller', () => {
 
     assertDirectoryEmpty(stagingRoot)
     assertDirectoryEmpty(backupRoot)
+  })
+
+  it('publish swap failure surfaces distinct error if rollback of previous package also fails', async () => {
+    const { commit1, commit2 } = await createFixtureRepo()
+    const remoteUrl = pathToFileURL(remoteRepoDir).toString()
+
+    await installer.install('rollback-fail-pkg', remoteUrl, 'main', commit1)
+    const pkgDir = path.join(skillsRoot, 'rollback-fail-pkg')
+
+    const doubleFaultInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+      directoryMover: async (source, target) => {
+        // Step 1: Moving existing package to backupDir succeeds
+        if (source === pkgDir && target.startsWith(backupRoot)) {
+          await fs.promises.rename(source, target)
+          return
+        }
+        // Step 2: Swap stagingDir to packageDir fails
+        if (source.startsWith(stagingRoot) && target === pkgDir) {
+          throw new Error('initial swap failure')
+        }
+        // Step 3: Rollback backupDir to packageDir also fails
+        if (source.startsWith(backupRoot) && target === pkgDir) {
+          throw new Error('rollback move failure')
+        }
+        await fs.promises.rename(source, target)
+      },
+    })
+
+    await expect(
+      doubleFaultInstaller.install('rollback-fail-pkg', remoteUrl, 'main', commit2),
+    ).rejects.toMatchObject({
+      code: 'INSTALL_FAILED',
+      message: 'Failed to swap installed package directory and rollback of the previous package failed',
+    })
+
+    // Neither false success nor swallow occurred
+    expect(fs.existsSync(pkgDir)).toBe(false)
   })
 
   it('sets owner-only permissions (0600/0700) on POSIX', async () => {
@@ -536,6 +684,7 @@ describe('SkillPackageInstaller', () => {
 
     let slowMoverPkg1 = 0
     const delayInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
       directoryMover: async (source, target) => {
         if (target.includes('pkg-same')) {
           slowMoverPkg1++
@@ -563,7 +712,6 @@ describe('SkillPackageInstaller', () => {
     expect(firstSameEnd).toBeLessThan(secondSameStart)
 
     const diffStart = executionLog.indexOf('pkg-diff start')
-    // diff started before same-1 finished
     expect(diffStart).toBeLessThan(firstSameEnd)
   })
 
@@ -586,42 +734,19 @@ describe('SkillPackageInstaller', () => {
     expect(inst.backupRoot()).toBe(path.join(tempDir, 'skill-work', 'backup'))
   })
 
-  it('assertRealDirectorySync throws if path does not exist or is a symlink', () => {
-    expect(() => {
-      assertRealDirectorySync(path.join(tempDir, 'non-existent'), 'testDir')
-    }).toThrow(/testDir does not exist/)
+  it('assertRealDirectory throws if path does not exist or is a symlink', async () => {
+    await expect(assertRealDirectory(path.join(tempDir, 'non-existent'), 'testDir')).rejects.toThrow(
+      /testDir does not exist/,
+    )
 
     const realDir = path.join(tempDir, 'real-target')
     fs.mkdirSync(realDir)
     const symlinkDir = path.join(tempDir, 'symlink-dir')
     fs.symlinkSync(realDir, symlinkDir)
 
-    expect(() => {
-      assertRealDirectorySync(symlinkDir, 'symDir')
-    }).toThrow(/symDir must be a real non-symlink directory/)
-  })
-
-  it('recoverArtifacts cleans backups with non-conforming package names and uuids', () => {
-    const badNames = [
-      `bad:name.${randomUUID()}`,
-      `bad@name.${randomUUID()}`,
-      `bad\\name.${randomUUID()}`,
-      `bad\u0001name.${randomUUID()}`,
-      `.${randomUUID()}`,
-      `..${randomUUID()}`,
-      ` trailing .${randomUUID()}`,
-      `valid-pkg.not-a-valid-uuid`,
-      `no-dot-separator`,
-    ]
-
-    for (const badName of badNames) {
-      const p = path.join(backupRoot, badName)
-      fs.mkdirSync(p, { recursive: true })
-      fs.writeFileSync(path.join(p, 'junk.txt'), 'junk')
-    }
-
-    installer.recoverArtifacts()
-    assertDirectoryEmpty(backupRoot)
+    await expect(assertRealDirectory(symlinkDir, 'symDir')).rejects.toThrow(
+      /symDir must be a real non-symlink directory/,
+    )
   })
 
   it('validates package entry path against unsafe patterns', () => {
@@ -653,12 +778,14 @@ describe('SkillPackageInstaller', () => {
     expect(() => validatePackageEntryPath('valid/nested/path.txt')).not.toThrow()
   })
 
-  it('validateTargetCommit accepts 40-char and 64-char lowercase hex commits', () => {
+  it('validateTargetCommit accepts 40-char SHA-1 and rejects 64-char SHA-256 with specific message', () => {
     const commit40 = '0123456789abcdef0123456789abcdef01234567'
     const commit64 = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
     expect(() => validateTargetCommit(commit40)).not.toThrow()
-    expect(() => validateTargetCommit(commit64)).not.toThrow()
+    expect(() => validateTargetCommit(commit64)).toThrowError(
+      'Target commit must be a 40-character SHA-1 commit; SHA-256 commits are not supported by the local Git backend',
+    )
 
     expect(() => validateTargetCommit(null)).toThrow()
     expect(() => validateTargetCommit('bad')).toThrow()
@@ -679,54 +806,288 @@ describe('SkillPackageInstaller', () => {
     expect(() => validateRepositoryUrl('ftp://example.com/repo.git')).toThrow()
   })
 
-  it('createParentDirectoriesOwnerOnly detects symlinks and non-directory conflicts', async () => {
-    const root = path.join(tempDir, 'parent-test-root')
-    fs.mkdirSync(root, { recursive: true })
+  it('file:// protocol handles missing repo, invalid gitfile, bare repo, and worktree refs', async () => {
+    const { commit1 } = await createFixtureRepo()
 
-    // Create a file at root/conflict
-    const conflictFile = path.join(root, 'conflict')
-    fs.writeFileSync(conflictFile, 'a file')
-
+    // 1. Nonexistent directory
     await expect(
-      createParentDirectoriesOwnerOnly(root, path.join(conflictFile, 'sub')),
+      installer.install('nonexist-pkg', 'file:///path/does/not/exist/anywhere', 'main', commit1),
+    ).rejects.toMatchObject({
+      code: 'GIT_FETCH_FAILED',
+      message: 'Git branch fetch failed',
+    })
+
+    // 2. Directory with no .git and no HEAD
+    const emptyDir = path.join(tempDir, 'empty-dir')
+    fs.mkdirSync(emptyDir, { recursive: true })
+    await expect(
+      installer.install('empty-pkg', pathToFileURL(emptyDir).toString(), 'main', commit1),
+    ).rejects.toMatchObject({
+      code: 'GIT_FETCH_FAILED',
+      message: 'Git branch fetch failed',
+    })
+
+    // 3. Directory with .git file that lacks "gitdir:" prefix
+    const badGitfileDir = path.join(tempDir, 'bad-gitfile-dir')
+    fs.mkdirSync(badGitfileDir, { recursive: true })
+    fs.writeFileSync(path.join(badGitfileDir, '.git'), 'invalid-content-without-prefix\n')
+    await expect(
+      installer.install('badgit-pkg', pathToFileURL(badGitfileDir).toString(), 'main', commit1),
+    ).rejects.toMatchObject({
+      code: 'GIT_FETCH_FAILED',
+      message: 'Git branch fetch failed',
+    })
+
+    // 4. Bare repository support (HEAD file exists directly in sourcePath)
+    const bareDir = path.join(tempDir, 'bare-repo')
+    await fs.promises.mkdir(bareDir, { recursive: true })
+    await git.init({ fs, dir: bareDir, bare: true })
+    // Write a dummy skill commit in bare repo
+    const blob = await git.writeBlob({ fs, dir: bareDir, blob: Buffer.from('# Bare Skill\n') })
+    const tree = await git.writeTree({
+      fs,
+      dir: bareDir,
+      tree: [{ mode: '100644', path: 'SKILL.md', oid: blob, type: 'blob' }],
+    })
+    const bareCommit = await git.writeCommit({
+      fs,
+      dir: bareDir,
+      commit: {
+        message: 'bare init',
+        tree,
+        parent: [],
+        author: { name: 't', email: 't@t', timestamp: 0, timezoneOffset: 0 },
+        committer: { name: 't', email: 't@t', timestamp: 0, timezoneOffset: 0 },
+      },
+    })
+    await git.writeRef({ fs, dir: bareDir, ref: 'refs/heads/main', value: bareCommit })
+    const bareInstalled = await installer.install(
+      'bare-pkg',
+      pathToFileURL(bareDir).toString(),
+      'main',
+      bareCommit,
+    )
+    expect(bareInstalled.packageName).toBe('bare-pkg')
+    expect(bareInstalled.installedCommit).toBe(bareCommit)
+
+    // 5. Worktree where branch ref exists in gitdir but not in common dir
+    const wtDir = path.join(tempDir, 'wt-custom-ref')
+    await fs.promises.mkdir(wtDir, { recursive: true })
+    const wtGitdir = path.join(remoteRepoDir, '.git', 'worktrees', 'wt-custom')
+    await fs.promises.mkdir(path.join(wtGitdir, 'refs', 'heads'), { recursive: true })
+    await fs.promises.writeFile(path.join(wtGitdir, 'commondir'), '../..\n')
+    await fs.promises.writeFile(path.join(wtGitdir, 'refs', 'heads', 'custom-branch'), commit1 + '\n')
+    await fs.promises.writeFile(path.join(wtDir, '.git'), `gitdir: ${wtGitdir}\n`)
+
+    const wtInstalled = await installer.install(
+      'wt-custom-pkg',
+      pathToFileURL(wtDir).toString(),
+      'custom-branch',
+      commit1,
+    )
+    expect(wtInstalled.packageName).toBe('wt-custom-pkg')
+
+    // 6. Non-empty file URL host on POSIX throws inside fileURLToPath
+    if (process.platform !== 'win32') {
+      await expect(
+        installer.install('badhost-pkg', 'file://unsupported-host/path', 'main', commit1),
+      ).rejects.toMatchObject({
+        code: 'GIT_FETCH_FAILED',
+        message: 'Git branch fetch failed',
+      })
+    }
+
+    // 7. Missing branch ref in valid repo
+    await expect(
+      installer.install('missing-branch-pkg', pathToFileURL(remoteRepoDir).toString(), 'nonexistent-branch', commit1),
+    ).rejects.toMatchObject({
+      code: 'GIT_FETCH_FAILED',
+      message: 'Git branch fetch failed',
+    })
+
+    // 8. Missing commit in valid repo
+    const unknownCommit = '0123456789012345678901234567890123456789'
+    await expect(
+      installer.install('missing-commit-pkg', pathToFileURL(remoteRepoDir).toString(), 'main', unknownCommit),
+    ).rejects.toMatchObject({
+      code: 'COMMIT_NOT_FOUND',
+      message: 'Target commit could not be resolved from remote repository',
+    })
+  })
+
+  it('detects existing target collisions and parent path conflicts in staging', async () => {
+    const { commit1 } = await createFixtureRepo()
+    const remoteUrl = pathToFileURL(remoteRepoDir).toString()
+
+    // 1. Existing file collision in staging before write
+    const collisionFs = createTestPrivateFs()
+    const origEnsure = collisionFs.ensurePrivateDirectory
+    collisionFs.ensurePrivateDirectory = async (p: string) => {
+      const res = await origEnsure(p)
+      if (p.includes('collision-pkg')) {
+        // Pre-create the target file so lstat sees it
+        const targetPath = path.join(p, 'weather-skill', 'SKILL.md')
+        await fs.promises.mkdir(path.dirname(targetPath), { recursive: true })
+        await fs.promises.writeFile(targetPath, 'already-there')
+      }
+      return res
+    }
+    const collisionInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: collisionFs,
+    })
+    await expect(
+      collisionInstaller.install('collision-pkg', remoteUrl, 'main', commit1),
+    ).rejects.toMatchObject({
+      code: 'UNSAFE_PACKAGE_ENTRY',
+      message: 'Target file already exists or is a symbolic link',
+    })
+
+    // 2. Symlink in parent path
+    const symlinkParentFs = createTestPrivateFs()
+    symlinkParentFs.ensurePrivateDirectory = async (p: string) => {
+      const res = await origEnsure(p)
+      if (p.includes('symparent-pkg')) {
+        const dummyTarget = path.join(tempDir, 'dummy-dir')
+        await fs.promises.mkdir(dummyTarget, { recursive: true })
+        const symlinkPath = path.join(p, 'weather-skill')
+        try {
+          await fs.promises.symlink(dummyTarget, symlinkPath)
+        } catch {}
+      }
+      return res
+    }
+    const symparentInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: symlinkParentFs,
+    })
+    await expect(
+      symparentInstaller.install('symparent-pkg', remoteUrl, 'main', commit1),
+    ).rejects.toMatchObject({
+      code: 'UNSAFE_PACKAGE_ENTRY',
+      message: 'Symbolic link encountered in path',
+    })
+
+    // 3. Non-directory file in parent path
+    const fileParentFs = createTestPrivateFs()
+    fileParentFs.ensurePrivateDirectory = async (p: string) => {
+      const res = await origEnsure(p)
+      if (p.includes('fileparent-pkg')) {
+        const filePath = path.join(p, 'weather-skill')
+        await fs.promises.writeFile(filePath, 'not-a-directory')
+      }
+      return res
+    }
+    const fileparentInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: fileParentFs,
+    })
+    await expect(
+      fileparentInstaller.install('fileparent-pkg', remoteUrl, 'main', commit1),
     ).rejects.toMatchObject({
       code: 'UNSAFE_PACKAGE_ENTRY',
       message: 'Path element is not a directory',
     })
 
-    // Create a symlink directory at root/symdir
-    const realDir = path.join(tempDir, 'real-sub')
-    fs.mkdirSync(realDir, { recursive: true })
-    const symDir = path.join(root, 'symdir')
-    fs.symlinkSync(realDir, symDir)
-
+    // 4. Unexpected error in materialization is mapped to INSTALL_FAILED
+    const failingFs = createTestPrivateFs()
+    failingFs.writePrivateFile = async () => {
+      throw new Error('disk read/write failure')
+    }
+    const failingInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: failingFs,
+    })
     await expect(
-      createParentDirectoriesOwnerOnly(root, path.join(symDir, 'sub')),
+      failingInstaller.install('fail-io-pkg', remoteUrl, 'main', commit1),
     ).rejects.toMatchObject({
-      code: 'UNSAFE_PACKAGE_ENTRY',
-      message: 'Symbolic link encountered in path',
+      code: 'INSTALL_FAILED',
+      message: 'Skill package installation failed',
+    })
+
+    // 5. In-flight abort during materialization throws Operation cancelled
+    const abortFs = createTestPrivateFs()
+    abortFs.writePrivateFile = async () => {
+      const err = new Error('Operation cancelled')
+      err.name = 'AbortError'
+      throw err
+    }
+    const abortInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: abortFs,
+    })
+    await expect(
+      abortInstaller.install('abort-mat-pkg', remoteUrl, 'main', commit1),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'Operation cancelled',
     })
   })
 
-  it('writeFileOwnerOnly rejects if file already exists', async () => {
-    const targetFile = path.join(tempDir, 'already-exists.txt')
-    fs.writeFileSync(targetFile, 'existing')
-
-    await expect(
-      writeFileOwnerOnly(targetFile, Buffer.from('new content'), false),
-    ).rejects.toMatchObject({
-      code: 'UNSAFE_PACKAGE_ENTRY',
-      message: 'Target file already exists or is a symbolic link',
+  it('recoverArtifacts is resilient to non-existent directories and preserves edge-case non-conforming names', async () => {
+    const nonExistentStaging = path.join(tempDir, 'staging-no-dir')
+    const nonExistentBackup = path.join(tempDir, 'backup-no-dir')
+    const noDirInstaller = new SkillPackageInstaller(skillsRoot, nonExistentStaging, nonExistentBackup, {
+      privateFs: createTestPrivateFs(),
     })
+
+    // Does not throw when directories are absent
+    await expect(noDirInstaller.recoverArtifacts()).resolves.toBeUndefined()
+
+    // Test non-conforming backup entries preserved
+    fs.mkdirSync(backupRoot, { recursive: true })
+    const validUuid = randomUUID()
+    const nonConforming = [
+      `a`.repeat(129) + `.${validUuid}`,
+      `.${validUuid}`,
+      `..${validUuid}`,
+      `bad\u001fname.${validUuid}`,
+      `bad\u0080name.${validUuid}`,
+      `pkg.short-uuid`,
+      `pkg.${validUuid}.clone`,
+    ]
+    for (const name of nonConforming) {
+      const p = path.join(backupRoot, name)
+      fs.mkdirSync(p, { recursive: true })
+      fs.writeFileSync(path.join(p, 'data.txt'), 'keep')
+    }
+
+    await installer.recoverArtifacts()
+
+    for (const name of nonConforming) {
+      expect(fs.existsSync(path.join(backupRoot, name))).toBe(true)
+    }
   })
 
-  it('createOwnerOnlyDirectory rejects if path is not a directory', async () => {
-    const fileTarget = path.join(tempDir, 'file-target.txt')
-    fs.writeFileSync(fileTarget, 'existing')
+  it('validates URLs, branches and package names across all edge cases', () => {
+    // Malformed URLs
+    expect(() => validateRepositoryUrl('http://[')).toThrowError(/malformed/)
+    expect(() => validateRepositoryUrl('not-a-url')).toThrowError(/malformed/)
+    expect(() => validateRepositoryUrl('http://user@host.com/repo.git')).toThrowError(/user info/)
+    expect(() => validateRepositoryUrl('http://user:pass@host.com/repo.git')).toThrowError(/user info/)
+    expect(() => validateRepositoryUrl('http://@host.com/repo.git')).toThrowError(/user info/)
+    expect(() => validateRepositoryUrl('http://' + 'a'.repeat(2048) + '.com')).toThrowError(/exceed 2048/)
+    expect(() => validateRepositoryUrl('')).toThrowError(/must not be blank/)
+    expect(() => validateRepositoryUrl('ftp://host.com/repo.git')).toThrowError(/supported/)
 
-    await expect(createOwnerOnlyDirectory(fileTarget)).rejects.toThrow(
-      /directory path must be a real directory/,
-    )
+    // Branches
+    expect(() => validateBranch('')).toThrowError(/must not be blank/)
+    expect(() => validateBranch('a'.repeat(256))).toThrowError(/exceed 255/)
+    expect(() => validateBranch(' branch')).toThrowError(/whitespace/)
+    expect(() => validateBranch('branch ')).toThrowError(/whitespace/)
+    expect(() => validateBranch('bad\u001fbranch')).toThrowError(/control characters/)
+    expect(() => validateBranch('bad\u007fbranch')).toThrowError(/control characters/)
+    expect(() => validateBranch('bad\u0080branch')).toThrowError(/control characters/)
+
+    // Package names
+    expect(() => validatePackageName('')).toThrowError(/must not be blank/)
+    expect(() => validatePackageName('a'.repeat(129))).toThrowError(/exceed 128/)
+    expect(() => validatePackageName(' pkg')).toThrowError(/whitespace/)
+    expect(() => validatePackageName('pkg ')).toThrowError(/whitespace/)
+    expect(() => validatePackageName('.')).toThrowError(/must not be \. or \.\./)
+    expect(() => validatePackageName('..')).toThrowError(/must not be \. or \.\./)
+    expect(() => validatePackageName('bad\u001fpkg')).toThrowError(/control characters/)
+    expect(() => validatePackageName('bad\u007fpkg')).toThrowError(/control characters/)
+    expect(() => validatePackageName('bad\u0080pkg')).toThrowError(/control characters/)
+    expect(() => validatePackageName('bad:pkg')).toThrowError(/invalid characters/)
+    expect(() => validatePackageName('bad/pkg')).toThrowError(/invalid characters/)
+    expect(() => validatePackageName('bad@pkg')).toThrowError(/invalid characters/)
+    expect(() => validatePackageName('bad\\pkg')).toThrowError(/invalid characters/)
   })
 
   it('install rejects immediately if signal is pre-aborted', async () => {
@@ -744,6 +1105,9 @@ describe('SkillPackageInstaller', () => {
   })
 
   function assertDirectoryEmpty(dir: string): void {
+    if (!fs.existsSync(dir)) {
+      return
+    }
     const entries = fs.readdirSync(dir)
     expect(entries).toEqual([])
   }

@@ -13,6 +13,7 @@ import type {
   ProcessSupervisor,
   ResourceUploader,
 } from '../../src/contracts.js'
+import { createTestPrivateFs } from './test-private-fs.js'
 
 describe('createSkillCapability', () => {
   let tempDir: string
@@ -42,6 +43,12 @@ describe('createSkillCapability', () => {
       resources: dummyResources,
       progress: async () => {},
     }
+  }
+
+  function createTestInstaller(): SkillPackageInstaller {
+    return SkillPackageInstaller.open(config, {
+      privateFs: createTestPrivateFs(),
+    })
   }
 
   beforeEach(async () => {
@@ -84,7 +91,7 @@ describe('createSkillCapability', () => {
   })
 
   it('successful install returns json content with packageName, installedCommit, localPath', async () => {
-    const capability = createSkillCapability(config)
+    const capability = createSkillCapability(config, createTestInstaller())
     const remoteUrl = pathToFileURL(remoteRepoDir).toString()
 
     const call: CapabilityCall = {
@@ -120,7 +127,7 @@ describe('createSkillCapability', () => {
   })
 
   it('handles optional credential string and trims whitespace', async () => {
-    const capability = createSkillCapability(config)
+    const capability = createSkillCapability(config, createTestInstaller())
     const remoteUrl = pathToFileURL(remoteRepoDir).toString()
 
     // Non-empty credential
@@ -162,7 +169,9 @@ describe('createSkillCapability', () => {
     const backupRoot = path.join(dataDir, 'skill-work', 'backup')
 
     const ac = new AbortController()
-    const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot)
+    const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+    })
     installer.install = async () => {
       ac.abort()
       const abortErr = new Error('Operation cancelled')
@@ -190,7 +199,7 @@ describe('createSkillCapability', () => {
   })
 
   it('missing or invalid argument types return coded INVALID_ARGUMENT error', async () => {
-    const capability = createSkillCapability(config)
+    const capability = createSkillCapability(config, createTestInstaller())
     const context = createContext()
 
     // Missing required field
@@ -239,16 +248,42 @@ describe('createSkillCapability', () => {
     const res3 = await capability(call3, context)
     expect(res3.error).toBe(true)
     expect(res3.details).toEqual({ code: 'INVALID_ARGUMENT' })
+    expect(res3.contents).toEqual([{ type: 'text', text: 'Error: Invalid skill sync argument' }])
+
+    // Arguments is array
+    const call4: CapabilityCall = {
+      invocationId: 'call-bad-4',
+      capabilityId: 'skill.sync',
+      arguments: ['invalid', 'array'],
+      timeoutMillis: 5000,
+    }
+    const res4 = await capability(call4, context)
+    expect(res4.error).toBe(true)
+    expect(res4.details).toEqual({ code: 'INVALID_ARGUMENT' })
+    expect(res4.contents).toEqual([{ type: 'text', text: 'Error: Invalid skill sync argument' }])
   })
 
-  it('pre-aborted context signal returns Operation cancelled error with details {}', async () => {
+  it('default installer branch without injection handles validation without running install', async () => {
     const capability = createSkillCapability(config)
+    const call: CapabilityCall = {
+      invocationId: 'call-default-inst',
+      capabilityId: 'skill.sync',
+      // @ts-expect-error null args
+      arguments: null,
+      timeoutMillis: 5000,
+    }
+    const result = await capability(call, createContext())
+    expect(result.error).toBe(true)
+    expect(result.details).toEqual({ code: 'INVALID_ARGUMENT' })
+  })
+
+  it('pre-aborted context returns Operation cancelled error with details {}', async () => {
+    const capability = createSkillCapability(config, createTestInstaller())
     const ac = new AbortController()
     ac.abort()
-    const context = createContext(ac.signal)
 
     const call: CapabilityCall = {
-      invocationId: 'call-abort',
+      invocationId: 'call-abort-early',
       capabilityId: 'skill.sync',
       arguments: {
         packageName: 'demo-package',
@@ -259,55 +294,49 @@ describe('createSkillCapability', () => {
       timeoutMillis: 5000,
     }
 
-    const result = await capability(call, context)
+    const result = await capability(call, createContext(ac.signal))
     expect(result.error).toBe(true)
     expect(result.details).toEqual({})
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Operation cancelled' }])
   })
 
-  it('SkillSyncException maps to coded error result', async () => {
-    const capability = createSkillCapability(config)
-    const context = createContext()
+  it('SkillSyncException is mapped to coded error result', async () => {
+    const capability = createSkillCapability(config, createTestInstaller())
 
     const call: CapabilityCall = {
-      invocationId: 'call-sync-err',
+      invocationId: 'call-bad-url',
       capabilityId: 'skill.sync',
       arguments: {
         packageName: 'demo-package',
-        repositoryUrl: pathToFileURL(remoteRepoDir).toString(),
+        repositoryUrl: 'not-a-valid-url',
         branch: 'main',
-        targetCommit: '0123456789012345678901234567890123456789', // Missing commit
+        targetCommit: commitId,
       },
       timeoutMillis: 5000,
     }
 
-    const result = await capability(call, context)
+    const result = await capability(call, createContext())
     expect(result.error).toBe(true)
-    expect(result.details).toEqual({ code: 'COMMIT_NOT_FOUND' })
-    expect(result.contents).toEqual([
-      {
-        type: 'text',
-        text: 'Error: Target commit could not be resolved from remote repository',
-      },
-    ])
+    expect(result.details).toEqual({ code: 'INVALID_REPOSITORY_URL' })
+    expect(result.contents).toEqual([{ type: 'text', text: 'Error: Repository URL is malformed' }])
   })
 
-  it('unexpected failure maps to SKILL_SYNC_FAILED', async () => {
+  it('unexpected error is mapped to SKILL_SYNC_FAILED', async () => {
     const skillsRoot = path.join(dataDir, 'skills')
     const stagingRoot = path.join(dataDir, 'skill-work', 'staging')
     const backupRoot = path.join(dataDir, 'skill-work', 'backup')
 
-    const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot)
-    // Inject failure
-    installer.install = async () => {
-      throw new Error('Unexpected catastrophic failure')
+    const faultyInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+    })
+    faultyInstaller.install = async () => {
+      throw new Error('Unexpected disk read error')
     }
 
-    const capability = createSkillCapability(config, installer)
-    const context = createContext()
+    const capability = createSkillCapability(config, faultyInstaller)
 
     const call: CapabilityCall = {
-      invocationId: 'call-catastrophic',
+      invocationId: 'call-err',
       capabilityId: 'skill.sync',
       arguments: {
         packageName: 'demo-package',
@@ -318,7 +347,7 @@ describe('createSkillCapability', () => {
       timeoutMillis: 5000,
     }
 
-    const result = await capability(call, context)
+    const result = await capability(call, createContext())
     expect(result.error).toBe(true)
     expect(result.details).toEqual({ code: 'SKILL_SYNC_FAILED' })
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Skill sync failed' }])

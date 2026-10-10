@@ -38,12 +38,31 @@ if (mode === 'garbage') {
   process.stdout.write('stray server banner\r\n\r\n')
 }
 
+if (mode === 'huge-banner') {
+  // Exceeds the pre-header budget before any real frame; the client must fail closed.
+  process.stdout.write('x'.repeat(64 * 1024))
+}
+
 let outboundId = 900
+let fragmentedHeaderUsed = false
 
 function writeMessage(message) {
   const payload = Buffer.from(JSON.stringify(message), 'utf8')
   record({ event: 'send', message })
-  process.stdout.write(`Content-Length: ${payload.length}\r\n\r\n`)
+  const header = `Content-Length: ${payload.length}\r\n\r\n`
+  if (mode === 'fragment-header' && !fragmentedHeaderUsed) {
+    // Split the first header across writes so the pre-header filter must accumulate a fragment.
+    fragmentedHeaderUsed = true
+    const mid = Math.floor(header.length / 2)
+    process.stdout.write(header.slice(0, 2))
+    setTimeout(() => process.stdout.write(header.slice(2, mid)), 5)
+    setTimeout(() => {
+      process.stdout.write(header.slice(mid))
+      process.stdout.write(payload)
+    }, 10)
+    return
+  }
+  process.stdout.write(header)
   process.stdout.write(payload)
 }
 
@@ -239,6 +258,14 @@ function handleMessage(message) {
         sendResult(id, [{ uri: 'jdt://contents/pkg/Thing.class' }, { uri: null }])
         return
       }
+      if (mode === 'bare-definition') {
+        sendResult(id, [
+          { uri: 'custom://some/uri' },
+          null,
+          { uri: 'file://invalid host/path' },
+        ])
+        return
+      }
       if (mode === 'link-definition') {
         const docUri = message.params?.textDocument?.uri || ''
         sendResult(id, [
@@ -269,6 +296,14 @@ function handleMessage(message) {
       }
       if (mode === 'odd-symbols') {
         sendResult(id, [{ name: null, kind: null, location: null }])
+        return
+      }
+      if (mode === 'custom-symbols') {
+        sendResult(id, [
+          null,
+          'invalid-item',
+          { name: 'CustomSym', kind: 'customInterface', location: {} },
+        ])
         return
       }
       sendResult(id, [

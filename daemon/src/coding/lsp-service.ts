@@ -26,7 +26,7 @@ export class LspService {
     timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string> {
-    const entry = await this.pool.lease(file)
+    const entry = await this.pool.lease(file, signal)
     try {
       const locations = await entry.client.definition(file, line, character, timeoutMillis, signal)
       return locations.join('\n')
@@ -42,7 +42,7 @@ export class LspService {
     timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string> {
-    const entry = await this.pool.lease(file)
+    const entry = await this.pool.lease(file, signal)
     try {
       const symbols = await entry.client.workspaceSymbols(query, limit, timeoutMillis, signal)
       return symbols.join('\n')
@@ -57,7 +57,7 @@ export class LspService {
     timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string> {
-    const entry = await this.pool.lease(file)
+    const entry = await this.pool.lease(file, signal)
     try {
       return await entry.client.javaDecompile(target, timeoutMillis, signal)
     } finally {

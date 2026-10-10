@@ -5,6 +5,7 @@ import http from 'node:http'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { SkillPackageInstaller } from '../../src/skill/installer.js'
 import { SkillSyncException } from '../../src/skill/types.js'
+import { createTestPrivateFs } from './test-private-fs.js'
 
 describe('SkillPackageInstaller Network', () => {
   let tempDir: string
@@ -49,7 +50,9 @@ describe('SkillPackageInstaller Network', () => {
     fs.mkdirSync(existingDir, { recursive: true })
     fs.writeFileSync(path.join(existingDir, 'existing.txt'), 'persisted')
 
-    const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot)
+    const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+    })
 
     let caughtError: SkillSyncException | null = null
     try {
@@ -81,6 +84,7 @@ describe('SkillPackageInstaller Network', () => {
     const targetCommit = '0123456789012345678901234567890123456789'
 
     const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
       connectMillis: 1000,
       readMillis: 100,
     })
@@ -110,6 +114,7 @@ describe('SkillPackageInstaller Network', () => {
     const targetCommit = '0123456789012345678901234567890123456789'
 
     const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
       connectMillis: 30_000,
       readMillis: 30_000,
     })
@@ -151,6 +156,7 @@ describe('SkillPackageInstaller Network', () => {
 
     // readMillis is 60ms, total stream time is 120ms
     const installer = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
       connectMillis: 1000,
       readMillis: 60,
     })

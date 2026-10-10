@@ -14,11 +14,18 @@ import { TextFileCodec } from './lsp-codec.js'
 import type { ResolvedServerConfig } from './lsp-discovery.js'
 import { LspError } from './lsp-error.js'
 
+/**
+ * Pre-header budget: non-LSP banner bytes are tolerated only up to this bound. Past it the stream
+ * fails closed instead of buffering unbounded garbage in memory. A fragmented `Content-Length`
+ * header arriving across chunks still fits comfortably inside this budget.
+ */
+export const MAX_BANNER_BYTES = 8 * 1024
+
 export class GarbageBannerFilter extends Transform {
   private foundFirstHeader = false
   private buffer = Buffer.alloc(0)
 
-  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: () => void): void {
+  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error) => void): void {
     if (this.foundFirstHeader) {
       this.push(chunk)
       return callback()
@@ -31,6 +38,16 @@ export class GarbageBannerFilter extends Transform {
       const valid = this.buffer.subarray(match)
       this.buffer = Buffer.alloc(0)
       this.push(valid)
+      return callback()
+    }
+    if (this.buffer.length > MAX_BANNER_BYTES) {
+      this.buffer = Buffer.alloc(0)
+      callback(
+        new Error(
+          `LSP server produced more than ${MAX_BANNER_BYTES} bytes of non-protocol output before the first message`,
+        ),
+      )
+      return
     }
     callback()
   }
@@ -162,6 +179,9 @@ export class LspClient {
   private exitCode: number | null = null
   private capabilities: ServerCapabilities | null = null
   private positionEncoding = 'utf-16'
+  private transportFailure: Error | null = null
+  private rejectTransport!: (error: Error) => void
+  private readonly transportFailurePromise: Promise<never>
 
   private constructor(
     server: ResolvedServerConfig,
@@ -174,12 +194,35 @@ export class LspClient {
     this.managed = managed
     this.connection = connection
     this.isJdtls = isJdtlsCommand(server.command)
+    this.transportFailurePromise = new Promise<never>((_resolve, reject) => {
+      this.rejectTransport = reject
+    })
+    // The rejection is raced by in-flight requests; keep it from becoming an unhandled rejection.
+    void this.transportFailurePromise.catch(() => {})
 
     this.managed.exit.then((exit: ProcessExit) => {
       this.hasExited = true
       this.exitCode = exit.exitCode
       this.connection.dispose()
     })
+  }
+
+  /** Records a fatal stdio framing/transport failure and converges the underlying process. */
+  private reportTransportFailure(error: Error): void {
+    if (this.transportFailure) {
+      return
+    }
+    const recorded = error instanceof LspError ? error : new LspError(error.message, { cause: error })
+    this.transportFailure = recorded
+    void this.managed.terminate(0).catch((cleanupError: unknown) => {
+      // Preserve the cleanup failure instead of swallowing it: attach it to the recorded failure.
+      if (this.transportFailure === recorded) {
+        this.transportFailure = new LspError(recorded.message, {
+          cause: new AggregateError([recorded, cleanupError], 'LSP transport failure and cleanup failure'),
+        })
+      }
+    })
+    this.rejectTransport(recorded)
   }
 
   static async launch(
@@ -232,10 +275,30 @@ export class LspClient {
       const connection = createMessageConnection(reader, writer)
 
       const client = new LspClient(server, root, managed, connection)
+      filter.on('error', (error: Error) => {
+        client.reportTransportFailure(error)
+      })
       client.listen()
       return client
     } catch (error) {
-      await managed.terminate(0).catch(() => {})
+      let cleanupError: unknown
+      try {
+        await managed.terminate(0)
+      } catch (failure) {
+        cleanupError = failure
+      }
+      if (cleanupError !== undefined) {
+        const cause = new AggregateError([error, cleanupError], 'LSP launch failed and cleanup failed')
+        if (error instanceof LspError) {
+          throw new LspError(error.message, { cause })
+        }
+        if (error instanceof Error) {
+          // Preserve the original error identity and message; record the cleanup failure without masking it.
+          error.cause = cause
+          throw error
+        }
+        throw new LspError(`LSP server '${server.id}' failed to start`, { cause })
+      }
       throw error
     }
   }
@@ -268,7 +331,7 @@ export class LspClient {
     this.connection.listen()
   }
 
-  async initialize(timeoutMillis = 60_000): Promise<void> {
+  async initialize(timeoutMillis = 60_000, signal?: AbortSignal): Promise<void> {
     const rootUri = pathToFileURL(this.root).href
     const initParams: Record<string, unknown> = {
       processId: this.managed.pid,
@@ -308,7 +371,7 @@ export class LspClient {
     try {
       const result = await this.sendRequest<{
         capabilities?: ServerCapabilities
-      }>('initialize', initParams, timeoutMillis, 'initialize')
+      }>('initialize', initParams, timeoutMillis, 'initialize', signal)
 
       this.capabilities = result?.capabilities ?? null
       const encoding = result?.capabilities?.positionEncoding
@@ -318,7 +381,18 @@ export class LspClient {
 
       await this.connection.sendNotification('initialized', {})
     } catch (error) {
-      await this.stop(0).catch(() => {})
+      let cleanupError: unknown
+      try {
+        await this.stop(0)
+      } catch (failure) {
+        cleanupError = failure
+      }
+      if (cleanupError !== undefined) {
+        const primary = error instanceof LspError ? error.message : 'LSP initialize failed'
+        throw new LspError(primary, {
+          cause: new AggregateError([error, cleanupError], 'LSP initialize failed and cleanup failed'),
+        })
+      }
       throw error
     }
   }
@@ -531,13 +605,24 @@ export class LspClient {
     } finally {
       this.documents.clear()
       this.connection.dispose()
+      let cleanupError: unknown
       try {
         await this.managed.terminate(graceMillis)
-      } catch {}
+      } catch (error) {
+        cleanupError = error
+      }
+      if (cleanupError !== undefined) {
+        throw new LspError('LSP server process termination failed during shutdown', {
+          cause: cleanupError,
+        })
+      }
     }
   }
 
   private requireRunning(): void {
+    if (this.transportFailure) {
+      throw new LspError(this.transportFailure.message, { cause: this.transportFailure })
+    }
     if (this.stopped) {
       throw new LspError('LSP client stopped')
     }
@@ -595,6 +680,9 @@ export class LspClient {
       const code = exit.exitCode != null ? String(exit.exitCode) : 'unknown'
       throw new LspError(`LSP server '${this.server.id}' exited (exit code ${code})`)
     })
+    // The race below consumes this rejection; keep a handler so a late exit after the race has already
+    // settled does not surface as an unhandled rejection.
+    void exitPromise.catch(() => {})
 
     try {
       const result = await Promise.race([
@@ -602,6 +690,7 @@ export class LspClient {
         timeoutPromise,
         abortPromise,
         exitPromise,
+        this.transportFailurePromise,
       ])
       if (requireAlive) {
         this.requireRunning()
