@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -117,15 +118,18 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldAllowUnconfiguredBuiltinModel() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     AgentDefinitionCreateDTO create =
-        create("compaction", null, config(List.of(), List.of()), null);
-    AgentDefinition builtin = factory.newBuiltinAgent("compaction", create);
+        create(BuiltinAgentDefinitions.COMPACTION_NAME, null, config(List.of(), List.of()), null);
+    AgentDefinition builtin =
+        factory.newBuiltinAgent(BuiltinAgentDefinitions.COMPACTION_NAME, create);
     assertEquals(AgentDefinitionType.BUILTIN, builtin.getType());
     assertNull(builtin.getModelProviderName());
     assertNull(builtin.getModelName());
     assertNull(builtin.getVariant());
 
     create.setVariant("default");
-    assertThrows(AiValidationException.class, () -> factory.newBuiltinAgent("compaction", create));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newBuiltinAgent(BuiltinAgentDefinitions.COMPACTION_NAME, create));
 
     AgentDefinitionCreateDTO user = create("agent", null, config(List.of(), List.of()), null);
     assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", user));

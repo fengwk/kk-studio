@@ -17,6 +17,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDefinitionConverter;
@@ -287,9 +288,9 @@ public class AgentDefinitionServiceImplTest {
         service(repository, converter, factory, resolver, variants);
 
     AgentDefinitionCreateDTO create = create();
-    create.setName("compaction");
+    create.setName(BuiltinAgentDefinitions.COMPACTION_NAME);
     assertThrows(AiDuplicateException.class, () -> service.createAgent(create));
-    verify(factory, never()).newUserAgent(eq("compaction"), eq(create));
+    verify(factory, never()).newUserAgent(eq(BuiltinAgentDefinitions.COMPACTION_NAME), eq(create));
     verify(repository, never()).create(any());
   }
 

@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -43,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
@@ -386,7 +386,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * 按父冻结 outputBudget 收紧并强制 NONE cache。普通分支即便直接选择该 Agent 名称，也只得到同样的 cache hint，不会改变、也不会覆盖该 Join 规则。
    */
   private static boolean usesCompactionAgentCacheHint(BranchSettings settings) {
-    return JoinPurpose.COMPACTION.wireName().equals(settings.agentName());
+    return BuiltinAgentDefinitions.COMPACTION_NAME.equals(settings.agentName());
   }
 
   /**
@@ -411,7 +411,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * config 与 removedPrefixTokens 现算。
    */
   private Result resolveCompaction(EntryPath parentPath, CompactionPreparation preparation) {
-    String compactionAgentName = JoinPurpose.COMPACTION.wireName();
+    String compactionAgentName = BuiltinAgentDefinitions.COMPACTION_NAME;
     AgentDefinition agent =
         require(
             agentDefinitionRepository.getByName(compactionAgentName),

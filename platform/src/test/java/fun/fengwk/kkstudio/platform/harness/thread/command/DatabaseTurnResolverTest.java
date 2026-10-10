@@ -160,7 +160,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 class DatabaseTurnResolverTest {
 
-  /** 内置 compaction Agent 在 catalog 中配置的 system prompt：历史压缩预览必须读同一份事实。 */
+  /** 内置 Compaction Agent 在 catalog 中配置的 system prompt：历史压缩预览必须读同一份事实。 */
   private static final String COMPACTION_SYSTEM_PROMPT = "compaction catalog system prompt";
 
   private static final Instant NOW = Instant.parse("2026-08-02T00:00:00Z");
@@ -1551,7 +1551,7 @@ class DatabaseTurnResolverTest {
             true);
     ModelSelection compactor = new ModelSelection("provider", "model", "default");
     fixture.compactionAgent(compactor);
-    BranchSettings compactorSettings = new BranchSettings("compaction", compactor, ENV_A_NAME);
+    BranchSettings compactorSettings = new BranchSettings("Compaction", compactor, ENV_A_NAME);
 
     // 两次独立规划代表压缩子的连续 turn（第二个 turn 即工具 loop 之后的续作），都必须 NONE。
     assertEquals(
@@ -2164,7 +2164,7 @@ class DatabaseTurnResolverTest {
     assertEquals(compactorModel, resolved.executionModel());
     assertEquals(4096, resolved.contextWindow());
     assertEquals(123, resolved.outputBudget());
-    assertEquals("compaction", resolved.childSettings().agentName());
+    assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(compactorModel, resolved.childSettings().model());
     assertNull(resolved.childSettings().goal());
     assertEquals(settings.environmentName(), resolved.childSettings().environmentName());
@@ -2195,12 +2195,12 @@ class DatabaseTurnResolverTest {
     assertEquals("compaction agent has no configured model", rejected.error().message());
 
     // 场景 2: compaction agent 彻底未注册
-    when(fixture.agents.getByName("compaction")).thenReturn(null);
+    when(fixture.agents.getByName("Compaction")).thenReturn(null);
     TurnResolver.Rejected rejectedMissing =
         assertInstanceOf(
             TurnResolver.Rejected.class,
             fixture.resolver.resolve(THREAD_ID, fixture.path(settings), preparation));
-    assertTrue(rejectedMissing.error().message().contains("compaction"));
+    assertTrue(rejectedMissing.error().message().contains("Compaction"));
   }
 
   /** 输出预算只来自 model 级 limit.output 与剩余上下文：variant 不参与，也不存在任何 variant 级回退。 */
@@ -2329,7 +2329,7 @@ class DatabaseTurnResolverTest {
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
 
     assertEquals(compactorModel, resolved.executionModel());
-    assertEquals("compaction", resolved.childSettings().agentName());
+    assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(compactorModel, resolved.childSettings().model());
     assertEquals(8192, resolved.contextWindow());
     // fallback model 的 limit.output = 4096 经 FULL 预算公式 floor(0.8 * 4096) = 3276 裁剪。
@@ -2717,7 +2717,7 @@ class DatabaseTurnResolverTest {
     TurnResolver.CompactionResolved resolved =
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
 
-    assertEquals("compaction", resolved.childSettings().agentName());
+    assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(compactorModel, resolved.childSettings().model());
     assertNull(resolved.childSettings().goal());
   }
@@ -3335,7 +3335,7 @@ class DatabaseTurnResolverTest {
 
     private void compactionAgent(ModelSelection selection) {
       AgentDefinition compaction = new AgentDefinition();
-      compaction.setName("compaction");
+      compaction.setName("Compaction");
       compaction.setSystemPrompt(COMPACTION_SYSTEM_PROMPT);
       // 与普通 Agent 一样提供可解码的普通执行配置，使内置压缩 Agent 也能走 live 规划路径。
       compaction.setConfigJson("agent-config");
@@ -3344,7 +3344,7 @@ class DatabaseTurnResolverTest {
         compaction.setModelName(selection.modelName());
         compaction.setVariant(selection.variant());
       }
-      when(agents.getByName("compaction")).thenReturn(compaction);
+      when(agents.getByName("Compaction")).thenReturn(compaction);
     }
 
     private ModelRequestSpec resolved(EntryPath path) {

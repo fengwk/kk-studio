@@ -883,16 +883,16 @@ registerCase({
 registerCase({
   id: 'crud.agent.builtin_identity',
   level: 'L1',
-  title: '内置 compaction Agent identity 只读与改名/删除拒绝',
-  docs: 'GET /api/ai/catalog/agents 必含内置 compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为合法 provider/model 引用，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
+  title: '内置 Compaction Agent identity 只读与改名/删除拒绝',
+  docs: 'GET /api/ai/catalog/agents 必含内置 Compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为合法 provider/model 引用，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
   async run(ctx) {
     const agents = pageResults(
       (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
     )
-    const compaction = agents.find((agent) => agent.name === 'compaction')
+    const compaction = agents.find((agent) => agent.name === 'Compaction')
     assert(
       compaction,
-      `builtin compaction Agent must be listed: ${JSON.stringify(agents.map((a) => a.name))}`,
+      `builtin Compaction Agent must be listed: ${JSON.stringify(agents.map((a) => a.name))}`,
     )
     assert(compaction.type === 'BUILTIN', JSON.stringify(compaction))
     // model 字段恒在：未配置时显式 null，已配置时是合法 providerName/modelName 引用。
@@ -907,7 +907,7 @@ registerCase({
     for (const identity of [{ name: 'compaction-renamed' }, { type: 'USER' }]) {
       await expectHttpError(
         () =>
-        ctx.call('PUT', '/api/ai/catalog/agents/compaction', {
+        ctx.call('PUT', '/api/ai/catalog/agents/Compaction', {
           ...identity,
           description: compaction.description,
           systemPrompt: compaction.systemPrompt,
@@ -924,17 +924,17 @@ registerCase({
       () =>
         ctx.call(
           'DELETE',
-          `/api/ai/catalog/agents/compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
+          `/api/ai/catalog/agents/Compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
         ),
       { status: 409 },
     )
     // 拒绝后 identity/version 严格不变。
     const after = pageResults(
       (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
-    ).find((agent) => agent.name === 'compaction')
+    ).find((agent) => agent.name === 'Compaction')
     assert(
       after && after.type === 'BUILTIN' && String(after.version) === String(compaction.version),
-      `builtin compaction identity must be unchanged: ${JSON.stringify({ before: compaction, after })}`,
+      `builtin Compaction identity must be unchanged: ${JSON.stringify({ before: compaction, after })}`,
     )
   },
 })
