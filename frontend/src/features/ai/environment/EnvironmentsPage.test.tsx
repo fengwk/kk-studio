@@ -461,6 +461,27 @@ describe('EnvironmentsPage', () => {
     expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
   })
 
+  it('retains cached environments and create action when background refetch fails with an error', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValueOnce([
+      environment({ name: 'box-cached' }),
+    ])
+    const { queryClient } = renderPage()
+
+    expect(await screen.findByText('box-cached')).toBeInTheDocument()
+    expect(screen.getByText('创建环境')).toBeInTheDocument()
+
+    // 模拟后台 refetch 发生网络错误
+    vi.mocked(environmentService.listEnvironments).mockRejectedValueOnce(new Error('background glitch'))
+    await act(async () => {
+      await queryClient.refetchQueries()
+    })
+
+    // 验证：既展示错误提示，又保留已有缓存数据与创建卡操作
+    expect(await screen.findByText('background glitch')).toBeInTheDocument()
+    expect(screen.getByText('box-cached')).toBeInTheDocument()
+    expect(screen.getByText('创建环境')).toBeInTheDocument()
+  })
+
   it('formats numeric epoch lastSeen as seconds and milliseconds and falls back to raw text', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-id-sec', name: 'seconds-box', lastSeen: 1750000000 }),

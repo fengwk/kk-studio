@@ -266,9 +266,9 @@ export function EnvironmentsPage() {
             tone="danger"
           />
         )}
-        {!environmentsQuery.isLoading && !environmentsQuery.error && (
+        {!environmentsQuery.isLoading && (
           <ResourceGrid>
-          <CreateCard
+            <CreateCard
             title={t('ai.environment.create')}
             subtitle={t('ai.environment.createDescription')}
             onClick={() => {
@@ -398,7 +398,7 @@ export function EnvironmentsPage() {
             )
           })}
         </ResourceGrid>
-        )}
+      )}
       </div>
 
       {createModalOpen && (

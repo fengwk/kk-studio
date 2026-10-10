@@ -2,12 +2,12 @@ import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import './cards.css'
 
 export interface ResourceCardSkeletonProps {
-  /** 占位卡片数量，默认 6 个 */
-  count?: number
   /** 无障碍说明标签，默认“正在加载资源...” */
   label?: string
   className?: string
 }
+
+const FIXED_SKELETON_ITEMS = [0, 1, 2, 3, 4, 5]
 
 /**
  * 资源卡列表骨架屏：
@@ -15,12 +15,9 @@ export interface ResourceCardSkeletonProps {
  * 在数据就绪前替代整行文字提示，在 prefers-reduced-motion 下自动关闭动效。
  */
 export function ResourceCardSkeleton({
-  count = 6,
   label = '正在加载资源...',
   className,
 }: ResourceCardSkeletonProps) {
-  const cards = Array.from({ length: count }, (_, index) => index)
-
   return (
     <div
       role="status"
@@ -29,7 +26,7 @@ export function ResourceCardSkeleton({
       className={['resource-skeleton-container', className].filter(Boolean).join(' ')}
     >
       <ResourceGrid>
-        {cards.map((index) => (
+        {FIXED_SKELETON_ITEMS.map((index) => (
           <div key={index} className="resource-card resource-card-skeleton" aria-hidden="true">
             <div className="resource-card-head">
               <div className="skeleton-box skeleton-icon" />

@@ -124,11 +124,11 @@ export function ProjectsPage({
 
       {!(isLoading && projects.length === 0) && (
         <ResourceGrid>
-        <CreateCard
-          title={t('projects.create')}
-          subtitle={t('projects.createCardSubtitle')}
-          onClick={() => setIsCreateOpen(true)}
-        />
+          <CreateCard
+            title={t('projects.create')}
+            subtitle={t('projects.createCardSubtitle')}
+            onClick={() => setIsCreateOpen(true)}
+          />
 
         {filteredProjects.map((project) => (
           <ResourceCard
@@ -190,7 +190,7 @@ export function ProjectsPage({
           />
         ))}
       </ResourceGrid>
-      )}
+    )}
 
       {/* Modals */}
       <CreateProjectModal
