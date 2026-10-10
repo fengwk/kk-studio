@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -24,7 +23,7 @@ class ToolSettingsProviderTest {
   private static final List<PermissionRule> ASK_ALL =
       List.of(new PermissionRule("*", PermissionAction.ASK));
 
-  /** 数据库默认聚合的 permission 为 write/edit/bash 的 {@code * -> ask}，read 不受限，且 defaultYolo=false。 */
+  /** 数据库默认聚合的 permission 为 write/edit/bash 的 {@code * -> ask}，read 不受限。 */
   @Test
   void convertsDatabaseToolSectionAndSafeDefaults() {
     ToolSettingsProvider provider = providerFor(SystemSettings.Tool.DEFAULT);
@@ -34,10 +33,9 @@ class ToolSettingsProviderTest {
     assertEquals(ASK_ALL, settings.rulesFor("edit"));
     assertEquals(ASK_ALL, settings.rulesFor("bash"));
     assertTrue(settings.rulesFor("read").isEmpty(), "production default must not restrict read");
-    assertFalse(settings.defaultYolo());
   }
 
-  /** 每次 {@code get()} 都读取当前数据库快照：defaultYolo 与 permission 的变更对下一次调用立即生效。 */
+  /** 每次 {@code get()} 都读取当前数据库快照：permission 的变更对下一次调用立即生效。 */
   @Test
   void reflectsCurrentDatabaseSnapshotOnEveryCall() {
     SystemSettingsProvider systemSettingsProvider = mock(SystemSettingsProvider.class);
@@ -48,17 +46,14 @@ class ToolSettingsProviderTest {
             systemSettingsWithTool(
                 new SystemSettings.Tool(
                     Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))),
-                    true,
                     5_000L,
                     1_000L,
                     5_000L)));
-    assertTrue(provider.get().defaultYolo());
     assertEquals(PermissionAction.DENY, provider.get().rulesFor("write").getFirst().action());
 
     // 同一 provider 在数据库快照更新后无需重建即可读到新值。
     when(systemSettingsProvider.get())
         .thenReturn(systemSettingsWithTool(SystemSettings.Tool.DEFAULT));
-    assertFalse(provider.get().defaultYolo());
     assertEquals(PermissionAction.ASK, provider.get().rulesFor("bash").getFirst().action());
     assertTrue(provider.get().rulesFor("read").isEmpty());
   }

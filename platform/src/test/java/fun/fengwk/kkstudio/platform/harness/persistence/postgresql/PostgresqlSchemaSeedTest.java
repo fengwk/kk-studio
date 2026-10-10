@@ -224,8 +224,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
             List.of(new PermissionRule("*", PermissionAction.ASK)),
             settings.tool().permission().get("read"),
             "e2e seed must grant read -> ask in the effective DB settings");
-        assertEquals(
-            false, settings.tool().defaultYolo(), "e2e seed must keep defaultYolo disabled");
       }
     }
   }

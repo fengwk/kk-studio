@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -196,5 +198,58 @@ class StudioChatControllerTest {
                 .content("{\"workspacePath\":null,\"expectedVersion\":\"2\"}"))
         .andExpect(status().isBadRequest());
     verifyNoInteractions(chatService);
+  }
+
+  /** 测试意图：创建请求透传 environmentName，并在响应中回传持久化的默认环境。 */
+  @Test
+  void createChatForwardsEnvironmentName() throws Exception {
+    when(chatService.createChat(any(ChatCreateDTO.class)))
+        .thenAnswer(
+            invocation -> {
+              ChatCreateDTO dto = invocation.getArgument(0);
+              ChatDTO dtoOut = new ChatDTO();
+              dtoOut.setId("1");
+              dtoOut.setTitle(dto.getTitle());
+              dtoOut.setAgentName(dto.getAgentName());
+              dtoOut.setEnvironmentName(dto.getEnvironmentName());
+              return dtoOut;
+            });
+
+    mockMvc
+        .perform(
+            post("/api/ai/chats")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"title\":\"t\",\"agentName\":\"default-assistant\","
+                        + "\"environmentName\":\"env-a\"}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.environmentName").value("env-a"));
+
+    ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
+    verify(chatService).createChat(captor.capture());
+    assertEquals("env-a", captor.getValue().getEnvironmentName());
+  }
+
+  /** 测试意图：更新显式 environmentName=null 被标记为 provided（清空默认环境），与省略保留区分。 */
+  @Test
+  void updateChatDistinguishesExplicitNullEnvironmentNameFromOmission() throws Exception {
+    ChatDTO updated = new ChatDTO();
+    updated.setId("7");
+    updated.setTitle("t");
+    updated.setAgentName("default-assistant");
+    updated.setVersion("2");
+    when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(updated);
+
+    mockMvc
+        .perform(
+            put("/api/ai/chats/7")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"environmentName\":null,\"expectedVersion\":\"2\"}"))
+        .andExpect(status().isOk());
+
+    ArgumentCaptor<ChatUpdateDTO> captor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
+    verify(chatService).updateChat(eq("7"), captor.capture());
+    assertTrue(captor.getValue().isEnvironmentNameProvided());
+    assertNull(captor.getValue().getEnvironmentName());
   }
 }

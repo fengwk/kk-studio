@@ -193,7 +193,6 @@ public class SystemSettingsCodec {
     }
     return new SystemSettings.Tool(
         toPermission(dto.getPermission()),
-        requiredBoolean(dto.getDefaultYolo(), "tool.defaultYolo"),
         requiredMillis(dto.getModelGatewayBusyRetryMillis(), "tool.modelGatewayBusyRetryMillis"),
         requiredMillis(dto.getToolGatewayBusyRetryMillis(), "tool.toolGatewayBusyRetryMillis"),
         requiredMillis(
@@ -442,7 +441,6 @@ public class SystemSettingsCodec {
               permission.put(toolName, ruleDtos);
             });
     dto.setPermission(permission);
-    dto.setDefaultYolo(tool.defaultYolo());
     dto.setModelGatewayBusyRetryMillis(tool.modelGatewayBusyRetryMillis());
     dto.setToolGatewayBusyRetryMillis(tool.toolGatewayBusyRetryMillis());
     dto.setToolGatewayOverloadRetryMillis(tool.toolGatewayOverloadRetryMillis());

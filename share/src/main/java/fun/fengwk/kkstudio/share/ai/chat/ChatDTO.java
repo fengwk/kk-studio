@@ -18,6 +18,9 @@ public class ChatDTO {
   /** 必填可见 Agent 身份；Agent 删除后该值可能过期。 */
   private String agentName;
 
+  /** 默认 Environment name（nullable）；Environment 删除后该值可能过期，发送时按正常 planner fail closed。 */
+  private String environmentName;
+
   /** 可见的发送权限模式。 */
   private boolean yoloEnabled;
 

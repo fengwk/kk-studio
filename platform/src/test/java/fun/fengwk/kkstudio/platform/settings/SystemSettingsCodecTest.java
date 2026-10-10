@@ -224,19 +224,22 @@ class SystemSettingsCodecTest {
         IllegalStateException.class,
         () ->
             codec.decode(
-                withToolField(canonical, "defaultYolo", mapper.getNodeFactory().textNode("true"))),
+                withIntegrationsField(
+                    canonical, "comfyui", "enabled", mapper.getNodeFactory().textNode("true"))),
         "string boolean");
     assertThrows(
         IllegalStateException.class,
         () ->
             codec.decode(
-                withToolField(canonical, "defaultYolo", mapper.getNodeFactory().numberNode(1))),
+                withIntegrationsField(
+                    canonical, "comfyui", "enabled", mapper.getNodeFactory().numberNode(1))),
         "integer boolean");
     assertThrows(
         IllegalStateException.class,
         () ->
             codec.decode(
-                withToolField(canonical, "defaultYolo", mapper.getNodeFactory().numberNode(1.5))),
+                withIntegrationsField(
+                    canonical, "comfyui", "enabled", mapper.getNodeFactory().numberNode(1.5))),
         "float boolean");
   }
 
@@ -387,7 +390,6 @@ class SystemSettingsCodecTest {
     return new SystemSettings(
         new SystemSettings.Tool(
             permission,
-            base.defaultYolo(),
             base.modelGatewayBusyRetryMillis(),
             base.toolGatewayBusyRetryMillis(),
             base.toolGatewayOverloadRetryMillis()),
@@ -427,9 +429,10 @@ class SystemSettingsCodecTest {
     return mapper.writeValueAsString(root);
   }
 
-  private String withToolField(String canonical, String field, JsonNode value) throws Exception {
+  private String withIntegrationsField(String canonical, String group, String field, JsonNode value)
+      throws Exception {
     ObjectNode root = (ObjectNode) mapper.readTree(canonical);
-    ((ObjectNode) root.get("tool")).set(field, value);
+    ((ObjectNode) ((ObjectNode) root.get("integrations")).get(group)).set(field, value);
     return mapper.writeValueAsString(root);
   }
 }

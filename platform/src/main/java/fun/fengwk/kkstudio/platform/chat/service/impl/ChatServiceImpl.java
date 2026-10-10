@@ -67,6 +67,7 @@ public class ChatServiceImpl implements ChatService {
   public ChatDTO createChat(ChatCreateDTO createDTO) {
     Chat chat = mutationFactory.newChat(createDTO);
     guard.ensureAgentExists(chat.getAgentName());
+    guard.ensureEnvironmentExists(chat.getEnvironmentName());
     if (!repository.create(chat)) {
       throw new IllegalStateException("create chat failed");
     }
@@ -84,9 +85,13 @@ public class ChatServiceImpl implements ChatService {
     Chat existing = guard.requireChat(id);
     ensureExpectedVersion(existing, id, rawExpected, expected);
     boolean agentNameProvided = updateDTO.getAgentName() != null;
+    boolean environmentNameProvided = updateDTO.isEnvironmentNameProvided();
     mutationFactory.apply(existing, updateDTO);
     if (agentNameProvided) {
       guard.ensureAgentExists(existing.getAgentName());
+    }
+    if (environmentNameProvided) {
+      guard.ensureEnvironmentExists(existing.getEnvironmentName());
     }
     if (!repository.updateById(existing, expected)) {
       Chat reread = repository.getById(existing.getId());
