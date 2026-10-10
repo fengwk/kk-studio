@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonEndpoint;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -77,7 +78,7 @@ class EnvironmentDaemonSendDeadlineConfigurationTest {
             ArgumentCaptor<DaemonChannel> channels = ArgumentCaptor.forClass(DaemonChannel.class);
             verify(endpoint, times(2)).open(channels.capture());
             channels.getAllValues().forEach(channel -> channel.offerText("frame"));
-            awaitQueueSize(timer, 2);
+            awaitQueueAtLeast(timer, 2);
             assertEquals(0, other.getQueue().size());
             assertSame(timer, context.getBean("environmentDaemonSendDeadlineTimer"));
             channels.getAllValues().forEach(DaemonChannel::close);
@@ -100,11 +101,27 @@ class EnvironmentDaemonSendDeadlineConfigurationTest {
     assertEquals(expected, timer.getQueue().size());
   }
 
+  /** 每连接除发送期限外还有一个周期 expire 任务，因此这里只断言共享 timer 至少承载了这些任务。 */
+  private static void awaitQueueAtLeast(ScheduledThreadPoolExecutor timer, int atLeast) {
+    long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (timer.getQueue().size() < atLeast && System.nanoTime() < until) {
+      LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+    }
+    assertTrue(
+        timer.getQueue().size() >= atLeast,
+        () -> "expected at least " + atLeast + " shared timer tasks");
+  }
+
   @Configuration(proxyBeanMethods = false)
   static class TestBeans {
     @Bean
     DaemonEndpoint endpoint() {
       return mock(DaemonEndpoint.class);
+    }
+
+    @Bean(name = "nodeInstanceId")
+    UUID nodeInstanceId() {
+      return UUID.randomUUID();
     }
 
     @Bean(destroyMethod = "shutdownNow")

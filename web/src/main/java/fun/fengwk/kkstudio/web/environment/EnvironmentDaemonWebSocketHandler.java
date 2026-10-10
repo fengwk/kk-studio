@@ -13,17 +13,24 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonEndpoint;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
+import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
+import fun.fengwk.kkstudio.share.notification.NotificationPeerLink;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /**
  * Spring WebSocket 适配器：把物理连接桥接为 {@link DaemonChannel} 并投递入站帧；本层不保存任何协议状态。
+ *
+ * <p><b>唯一物理载体：</b>每条连接由 {@link NotificationPeerLink} 承载全部逻辑消息（含 HELLO/READY/INVOKE 与短控制 帧），不存在 raw
+ * JSON 旁路。publisher 是本进程 endpoint UUID（与 bus 相同的 {@code nodeInstanceId}）。
  *
  * <p><b>强制压缩：</b>连接建立后立即要求本次握手已协商 {@code permessage-deflate}；未协商成功时以 RFC 6455 close code 1010
  * 关闭连接且不向会话核心暴露通道，避免出现未经压缩的降级会话。
@@ -36,9 +43,8 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   static final String PERMESSAGE_DEFLATE = "permessage-deflate";
 
   private final DaemonEndpoint endpoint;
-  private final int maxMessageBytes;
-  private final int queueCapacity;
-  private final int maxBytes;
+  private final UUID self;
+  private final NotificationLimits limits;
   private final int sendTimeoutMillis;
   private final ScheduledThreadPoolExecutor deadlineTimer;
   private final Map<String, SpringWebSocketConnection> connections = new ConcurrentHashMap<>();
@@ -46,13 +52,14 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   public EnvironmentDaemonWebSocketHandler(
       DaemonEndpoint endpoint,
       EnvironmentDaemonTransportProperties transportProperties,
-      @Qualifier("environmentDaemonSendDeadlineTimer") ScheduledThreadPoolExecutor deadlineTimer) {
+      @Qualifier("environmentDaemonSendDeadlineTimer") ScheduledThreadPoolExecutor deadlineTimer,
+      @Qualifier("nodeInstanceId") UUID self) {
     this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
     this.deadlineTimer = Objects.requireNonNull(deadlineTimer, "deadlineTimer");
-    this.maxMessageBytes =
-        Objects.requireNonNull(transportProperties, "transportProperties").requireMaxMessageBytes();
-    this.queueCapacity = transportProperties.requireQueueCapacity();
-    this.maxBytes = transportProperties.requireMaxBytes();
+    this.self = Objects.requireNonNull(self, "self");
+    this.limits =
+        Objects.requireNonNull(transportProperties, "transportProperties")
+            .requireNotificationLimits();
     this.sendTimeoutMillis = transportProperties.requireSendTimeoutMillis();
   }
 
@@ -78,7 +85,7 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   protected void handleTextMessage(WebSocketSession session, TextMessage message) {
     SpringWebSocketConnection connection = connections.get(session.getId());
     if (connection != null && connection.matches(session)) {
-      endpoint.receive(session.getId(), message.getPayload());
+      connection.acceptInbound(message.getPayload());
     }
   }
 
@@ -116,13 +123,13 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   }
 
   private void applyMessageBuffer(WebSocketSession session) {
-    session.setTextMessageSizeLimit(maxMessageBytes);
-    session.setBinaryMessageSizeLimit(maxMessageBytes);
+    session.setTextMessageSizeLimit(NotificationCarrier.PAYLOAD_LIMIT);
+    session.setBinaryMessageSizeLimit(NotificationCarrier.PAYLOAD_LIMIT);
     if (session instanceof NativeWebSocketSession nativeSession) {
       Session jsrSession = nativeSession.getNativeSession(Session.class);
       if (jsrSession != null) {
-        jsrSession.setMaxTextMessageBufferSize(maxMessageBytes);
-        jsrSession.setMaxBinaryMessageBufferSize(maxMessageBytes);
+        jsrSession.setMaxTextMessageBufferSize(NotificationCarrier.PAYLOAD_LIMIT);
+        jsrSession.setMaxBinaryMessageBufferSize(NotificationCarrier.PAYLOAD_LIMIT);
       }
     }
   }
@@ -139,7 +146,7 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
       return;
     }
     try {
-      // 会话核心必须先解绑 registry/active/pending，再关闭 sender；二者都在 handler 锁外执行。
+      // 会话核心必须先解绑 registry/active/pending，再关闭 sender 与 carrier link；二者都在 handler 锁外执行。
       endpoint.close(connection.connectionId());
     } finally {
       connection.close();
@@ -149,18 +156,28 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   private final class SpringWebSocketConnection implements DaemonChannel {
 
     private final WebSocketSession session;
+    private final NotificationPeerLink link;
     private final DaemonOutboundSender sender;
 
     private SpringWebSocketConnection(WebSocketSession session) {
       this.session = Objects.requireNonNull(session, "session");
+      this.link =
+          new NotificationPeerLink(
+              self,
+              NotificationPeerLink.DAEMON_TOPIC,
+              limits,
+              deadlineTimer,
+              body -> endpoint.receive(session.getId(), body),
+              // link 已先完成 fail-closed；断开必须离开共享 deadline timer：endpoint.close 可能执行 JDBC/lease
+              // 释放而阻塞，绝不能让共用 timer 线程被一个连接占住。
+              () -> Thread.startVirtualThread(() -> disconnect(this)));
       this.sender =
           new DaemonOutboundSender(
-              session,
-              queueCapacity,
-              maxBytes,
-              sendTimeoutMillis,
-              deadlineTimer,
-              error -> disconnect(this));
+              session, link, sendTimeoutMillis, deadlineTimer, error -> disconnect(this));
+    }
+
+    private void acceptInbound(String rawFrame) {
+      link.accept(rawFrame);
     }
 
     @Override
@@ -186,6 +203,7 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
     @Override
     public void close() {
       sender.close();
+      link.close();
     }
 
     private boolean matches(WebSocketSession candidate) {

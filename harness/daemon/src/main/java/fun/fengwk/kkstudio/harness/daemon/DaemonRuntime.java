@@ -169,7 +169,7 @@ public final class DaemonRuntime implements AutoCloseable {
     try {
       taskExecutor = newTaskExecutor();
       lspExecutor = newLspExecutor();
-      transport = new OkHttpWebSocketTransport(config.gatewayUri());
+      transport = new OkHttpWebSocketTransport(config.gatewayUri(), taskExecutor, scheduler);
       DaemonCapabilityRegistry capabilityRegistry = new DaemonCapabilityRegistry();
       capabilityResources =
           registrar.register(capabilityRegistry, taskExecutor, scheduler, lspExecutor);
