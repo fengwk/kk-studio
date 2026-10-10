@@ -55,7 +55,7 @@ class DaemonIdeCodecTest {
             VIEW,
             null,
             TICKET,
-            "https://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
+            "wss://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
             IdeStreamMode.HTTP,
             "GET",
             "/?folder=/home/user/project&t=1",
@@ -71,7 +71,7 @@ class DaemonIdeCodecTest {
             VIEW,
             null,
             TICKET,
-            "https://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
+            "wss://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
             IdeStreamMode.WS,
             null,
             null,
@@ -172,7 +172,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 null,
-                "https://x.example/s",
+                "wss://x.example/s",
                 IdeStreamMode.WS,
                 null,
                 null,
@@ -185,7 +185,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "https://x.example/s",
+                "wss://x.example/s",
                 null,
                 null,
                 null,
@@ -202,7 +202,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "https://x.example/s",
+                "wss://x.example/s",
                 IdeStreamMode.HTTP,
                 null,
                 "/",
@@ -215,7 +215,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "https://x.example/s",
+                "wss://x.example/s",
                 IdeStreamMode.HTTP,
                 "GET",
                 null,
@@ -229,10 +229,7 @@ class DaemonIdeCodecTest {
     }
     for (String url :
         new String[] {
-          "ftp://x.example/s",
-          "https://user:pw@x.example/s",
-          "https://x.example/s#frag",
-          "/relative"
+          "ftp://x.example/s", "wss://user:pw@x.example/s", "wss://x.example/s#frag", "/relative"
         }) {
       assertThrows(IllegalArgumentException.class, () -> IdeCommand.validateStreamUrl(url), url);
     }
@@ -256,7 +253,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "https://x.example/s",
+                "wss://x.example/s",
                 IdeStreamMode.WS,
                 "GET",
                 "/",
