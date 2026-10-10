@@ -155,7 +155,8 @@ accepted 收据都使用“查看 subagent 执行”链接，字体与正文一�
 “从此处分支”，以及对话中已关闭 TURN_END 回合 footer 的分支按钮（即使该回合没有 usage 文本也
 照常展示）。弹窗要求规范化名称并选择目标位置 1..9；确认只把草稿目标路由到目标 pane，
 不预创建 Thread，隐藏位置先扩展布局显露并移动焦点，在途目标被拒绝，覆盖未发送草稿需二次确认；
-首次发送才原子创建命名 Thread。模型与存储见 [Frontend](frontend.md#chat-提交与控制)。
+首次发送才原子创建命名 Thread。面板底部另有“从此处新建会话”，把切点处的有效上下文复制到新 Session
+并创建独立执行根（`FORK_SESSION_DRAFT`），不经过命名弹窗。模型与存储见 [Frontend](frontend.md#chat-提交与控制)。
 
 ## 思考与阅读
 

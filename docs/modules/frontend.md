@@ -121,6 +121,8 @@ view 绑定（PaneTarget）与布局，不复制 Thread、draft 或执行状态�
 并选择目标位置 1..9；确认只把 `NEW_THREAD_DRAFT` 路由到目标 pane（隐藏位置先扩展布局显露、
 焦点随之移动），名称是创建 target 的必需事实，此处不预创建 Thread。目标有在途操作时拒绝路由，
 已有未发送草稿时要求二次确认覆盖，用户输入的本地草稿按 pane 作用域持久化。
+面板底部另提供“从此处新建会话”（`FORK_SESSION_DRAFT`）：把选中 ROOT 或已关闭 TURN_END 处的有效上下文
+复制到新 Session 并创建独立执行根，不走命名弹窗。
 目标列表明确区分 thread 草稿与已持久化 Thread。隐藏位置的在途接受、重命名或队列
 保持控制层挂载且惰性，直到结算才卸载；隐藏布局不解除 busy 门禁。
 打开前按需读取 Session 的 Thread 摘要，只对执行根名称查重，同时检查同 Session 的本地草稿
@@ -145,13 +147,14 @@ queued/live invocation。缺节点、循环、跨 Session 和非 ROOT 终点明�
 pane 与布局的存储键分别以 owner 身份和 pane 隔离，
 ISSUE_AGENT 与独立地址不落 Chat target 存储。
 
-PaneTarget 只有三种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
+PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `NEW_THREAD_DRAFT`（携带 `sessionId`、`startEntryId` 与已规范化 `threadName`）、
+`FORK_SESSION_DRAFT`（携带 `sourceThreadId`、`startEntryId`，会话 fork 为新建的 `sessionId`/`threadId`）、
 `BOUND_THREAD`（既有 Thread 用精确 head/sequence 提交）。
 显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
 配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
-前缀发送，YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
+前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
 根面板与草稿 pane 不再渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
 其真实身份（agent 名称、provider/model，以及变体定义的真实 reasoningEffort；默认 main
 不作为独立身份）与只读动作直接汇入工作区顶栏，并提供返回直属父 Agent 入口。
@@ -177,7 +180,7 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
 
-全局与根交互区共用 InteractionCardBody/ApprovalCard。审批保留一次完整 `argumentsJson`（含 workdir），
+全局与根交互区共用 InteractionCardBody/ApprovalCard。审批保留一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
 来源名称来自 owner 或既有根执行树，不逐卡获取 Snapshot；无名称用“查看来源”，
 后代入口用“查看 subagent 执行”，名称与跳转目标一致，不显示裸 UUID，也不改变审批/问卷的原始来源身份。
@@ -250,6 +253,7 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 ## 功能入口
 
 AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作区。
+Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护，编辑表单允许其模型留空（未配置），用户创建的 Agent 仍要求模型。
 MCP Card 消费安全投影，编辑时读取 no-store 配置并用 generation fence 保护迟到响应。
 Skill Check 只更新候选，用户确认 exact commit 后 Update 发布。
 Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗
@@ -299,7 +303,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 全局 token 在 [`styles.css`](../../frontend/src/styles.css)，Canvas 样式由 feature 拥有。
 [`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
-Select、NumberInput、SearchField、TextInput、TextArea、FieldLabel、Tabs）、cards（ResourceCard、
+Select、NumberInput、SearchField、TextInput、TextArea、TagInput、FieldLabel、Tabs）、cards（ResourceCard、
 ResourceGrid）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、CreateCard），
 以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
 生产代码禁用原生 `<select>`，下拉统一走自研 listbox。
