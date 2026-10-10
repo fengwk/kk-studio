@@ -1,10 +1,11 @@
+import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { createProcessSupervisor } from '../../src/native/index.js'
 import type { ManagedProcess, ProcessSupervisor } from '../../src/contracts.js'
-import { awaitGone, fixtureCommand, isAlive, waitForFile, waitForPid } from './process-test-util.js'
+import { awaitGone, fixtureCommand, fixturePath, isAlive, waitForFile, waitForPid } from './process-test-util.js'
 
 const TEST_TIMEOUT = 30_000
 const STREAM_TIMEOUT = 10_000
@@ -218,6 +219,101 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
     await managed.terminate()
     expect(await awaitGone(root)).toBe(true)
     expect(await awaitGone(child)).toBe(true)
+  }, TEST_TIMEOUT)
+
+  test('the scope helper converges everything when its parent daemon is killed', async () => {
+    // 父进程消失必须由 helper 自己触发收敛：专用 IPC 通道的内核 EOF，不依赖心跳或猜父 pid。
+    if (process.platform === 'win32') {
+      return
+    }
+    const { resolveHelperPath } = await import('../../src/native/helper-path.js')
+    const stateDir = mkdtempSync(join(tmpdir(), 'kk-studio-native-owner-'))
+    const helperPidFile = join(workdir, 'helper.pid')
+    const rootPidFile = join(workdir, 'root.pid')
+    const escapedPidFile = join(workdir, 'escaped.pid')
+    const command = fixtureCommand('escape-fork.mjs', rootPidFile, escapedPidFile)
+    const owner = spawn(
+      process.execPath,
+      [fixturePath('parent-owner.mjs'), stateDir, resolveHelperPath(), helperPidFile, command.executable, ...command.args],
+      { stdio: 'ignore' },
+    )
+    try {
+      const helperPid = await waitForPid(helperPidFile)
+      const root = await waitForPid(rootPidFile)
+      const escaped = await waitForPid(escapedPidFile)
+      expect([helperPid, root, escaped].every(isAlive)).toBe(true)
+
+      // 强杀所有者（daemon）：helper 与后代此刻都还在，没有任何登记窗口。
+      process.kill(owner.pid as number, 'SIGKILL')
+      await new Promise<void>((resolve) => owner.on('exit', () => resolve()))
+
+      expect(await awaitGone(helperPid, 30_000)).toBe(true)
+      expect(await awaitGone(root, 30_000)).toBe(true)
+      if (process.platform === 'linux') {
+        expect(await awaitGone(escaped, 30_000)).toBe(true)
+      } else {
+        process.kill(escaped, 'SIGKILL')
+        await awaitGone(escaped)
+      }
+    } finally {
+      if (owner.exitCode === null && owner.signalCode === null) {
+        owner.kill('SIGKILL')
+      }
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  }, TEST_TIMEOUT)
+
+  test('an unrelated child owned by the daemon is never converged', async () => {
+    // 基线之外才是本次调用可能收养的孤儿：不属于任何 managed 的既有直接子进程绝不能被收敛。
+    if (process.platform !== 'linux') {
+      return
+    }
+    const unrelatedPidFile = join(workdir, 'unrelated.pid')
+    const unrelated = spawn(process.execPath, [fixturePath('hold.mjs'), unrelatedPidFile], { stdio: 'ignore' })
+    const unrelatedPid = await waitForPid(unrelatedPidFile)
+
+    const rootPidFile = join(workdir, 'root.pid')
+    const escapedPidFile = join(workdir, 'escaped.pid')
+    const managed = await start('escape-fork.mjs', rootPidFile, escapedPidFile)
+    const escaped = await waitForPid(escapedPidFile)
+
+    process.kill(managed.pid, 'SIGKILL')
+    await managed.terminate()
+    expect(await awaitGone(escaped)).toBe(true)
+    expect(isAlive(unrelatedPid)).toBe(true)
+
+    process.kill(unrelatedPid, 'SIGKILL')
+    await awaitGone(unrelatedPid)
+    unrelated.unref()
+  }, TEST_TIMEOUT)
+
+  test('terminating one scope does not touch another live scope', async () => {
+    // 多范围归属不可精确证明时，至少保证「其它活动范围 + 未登记进任何范围的直接子进程」不受影响。
+    if (process.platform !== 'linux') {
+      return
+    }
+    const bRootPidFile = join(workdir, 'b-root.pid')
+    const bChildPidFile = join(workdir, 'b-child.pid')
+    const scopeB = await start('fork-hold.mjs', bRootPidFile, bChildPidFile)
+    const rootB = await waitForPid(bRootPidFile)
+    const childB = await waitForPid(bChildPidFile)
+    expect([rootB, childB].every(isAlive)).toBe(true)
+
+    const aRootPidFile = join(workdir, 'a-root.pid')
+    const aEscapedPidFile = join(workdir, 'a-escaped.pid')
+    const scopeA = await start('escape-fork.mjs', aRootPidFile, aEscapedPidFile)
+    const escapedA = await waitForPid(aEscapedPidFile)
+
+    process.kill(scopeA.pid, 'SIGKILL')
+    await scopeA.terminate()
+    expect(await awaitGone(escapedA)).toBe(true)
+    // 另一个活动范围完全不受影响。
+    expect(isAlive(rootB)).toBe(true)
+    expect(isAlive(childB)).toBe(true)
+
+    await scopeB.terminate()
+    expect(await awaitGone(rootB)).toBe(true)
+    expect(await awaitGone(childB)).toBe(true)
   }, TEST_TIMEOUT)
 
   test('an unknown root pid cannot be tracked', async () => {

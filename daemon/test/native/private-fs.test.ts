@@ -88,4 +88,22 @@ describe.skipIf(process.platform === 'win32')('native private filesystem', () =>
     await writePrivateFile(file, 'x')
     await expect(ensurePrivateDirectory(file)).rejects.toThrow()
   })
+
+  test('writePrivateFile replaces an existing file atomically and leaves no temp file', async () => {
+    const file = join(workdir, 'secret')
+    await writePrivateFile(file, 'first')
+    // 目标先被放宽到 0666：替换式写入不能让明文先落进这个宽松文件，最终结果必须重新是 0600。
+    chmodSync(file, 0o666)
+    await writePrivateFile(file, 'second')
+    expect(readFileSync(file, 'utf8')).toBe('second')
+    expect(lstatSync(file).mode & 0o777).toBe(0o600)
+    const leftovers = (await import('node:fs')).readdirSync(workdir).filter((name) => name.includes('.tmp'))
+    expect(leftovers).toEqual([])
+  })
+
+  test('writePrivateFile rejects a directory target', async () => {
+    const dir = join(workdir, 'adir')
+    mkdirSync(dir, { mode: 0o700 })
+    await expect(writePrivateFile(dir, 'x')).rejects.toThrow()
+  })
 })

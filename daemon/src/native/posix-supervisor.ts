@@ -1,7 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import type { ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../contracts.js'
 import { resolveHelperPath } from './helper-path.js'
+import { verifyPrivateFile } from './private-fs.js'
 import * as posix from './posix-session.js'
 import * as state from './state.js'
 
@@ -29,13 +31,13 @@ const MESSAGE_LIMIT = 300
  * <p>顺序是唯一的安全性来源：范围确认 -> 登记父进程自己的收敛手段（会话 id 已经就是 helper 的 pid，因此直接可用）-> 放行命令。
  * 所以「许可之前失败」永远等价于「用户命令没有产生任何副作用」；许可之后则一律走完整收敛。
  *
- * <p>父进程同时把自己变成子进程收养者（Linux `PR_SET_CHILD_SUBREAPER`）：helper 崩溃时，它名下已经 `setsid` 的后代会被内核
- * 重新挂到父进程，于是父进程仍能核实归属并收敛，而不是把它们留给 init。没有收养机制的平台（macOS）无法核实这层集合，限制由
- * `processScopeCapabilities()` 明确暴露。
+ * <p>helper 与父进程之间另有一条**专用 IPC 通道**（不在用户命令的 stdin/stdout/stderr 里）：父进程被强杀时该通道由内核关闭，
+ * helper 收到 `disconnect` 后收敛整个会话再退出，因此父进程崩溃不会留下失控的后代。
  *
- * <p>收敛语义：对**整个会话**先温和后强杀（交互 shell 会建立多个作业进程组，单组收敛会漏组），收敛显式登记的后代会话，再收敛
- * 被内核收养到父进程名下的直接子进程所属会话，并确认没有活着的成员（僵尸不算）。收敛不能被证明时显式失败（`terminate()` 抛
- * 出），绝不声称已经收敛。
+ * <p>父进程同时把自己变成子进程收养者（Linux `PR_SET_CHILD_SUBREAPER`，失败即失败关闭）：helper 崩溃时，它名下已经 `setsid`
+ * 的后代会被内核重新挂到父进程。父进程只收敛**本次调用新增**的直接子进程（对照 `start()` 时的基线）并排除其它活动 helper，
+ * 绝不因为「是父进程的孩子」就整片收敛陌生会话。没有收养机制的平台（macOS）无法核实这层集合，限制由
+ * `processScopeCapabilities()` 如实暴露。
  */
 export class PosixProcessSupervisor implements ProcessSupervisor {
   private readonly processes = new Set<PosixManagedProcess>()
@@ -49,22 +51,28 @@ export class PosixProcessSupervisor implements ProcessSupervisor {
     if (spec.signal?.aborted === true) {
       throw new Error('the process scope was cancelled before the user command was started')
     }
-    const stateDir = state.createStateDir()
+    // 基线必须在 spawn helper 之前采样：之后新增的直接子进程才可能是本次调用的收养孤儿。采样不可判定（null）时，
+    // 父进程侧收养收尾直接放弃（见 runTermination），绝不把「读不到」当成「全是新孤儿」而误杀。
+    const baselineScan = posix.directChildren(process.pid, [])
+    const baseline = baselineScan === null ? null : baselineScan.map((child) => child.pid)
+    const stateDir = await state.createStateDir()
     let helper: ChildProcessWithoutNullStreams
     try {
-      // 启动规格（cwd 与 argv）只经状态文件交接，绝不进入 helper 的命令行。
+      // 启动规格（cwd 与 argv）只经 0700/0600 状态文件交接，绝不进入 helper 的命令行。
       state.writeLaunch(stateDir, { cwd: spec.cwd, args: [spec.executable, ...spec.args] })
+      // 写入后读回：确认启动规格文件确实落在属主独占路径上，而不是继承来的宽松权限。
+      await verifyPrivateFile(join(stateDir, state.LAUNCH_FILE))
+      // 第 4 个条目是专用 IPC 通道：用户命令继承 0/1/2，不会拿到它。
       helper = spawn(process.execPath, ['--no-warnings', resolveHelperPath(), stateDir], {
         env: spec.env ?? process.env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      }) as ChildProcessWithoutNullStreams
     } catch (error) {
       state.removeStateDir(stateDir)
       throw error
     }
-    const managed = new PosixManagedProcess(stateDir, helper, spec.signal, () => this.helperPids(), this.adoptsOrphans)
+    const managed = new PosixManagedProcess(stateDir, helper, spec.signal, baseline, () => this.helperPids(), this.adoptsOrphans)
     this.processes.add(managed)
-    // 已经完成（自然退出后收敛完、或显式收尾成功）的记录立即释放，Set 不会随累计调用无限增长。
     void managed.settled.then(() => this.processes.delete(managed))
     try {
       await managed.establish()
@@ -133,6 +141,7 @@ export class PosixManagedProcess implements ManagedProcess {
 
   private readonly helper: ChildProcessWithoutNullStreams
   private readonly grantedSignal: AbortSignal | undefined
+  private readonly baselinePids: number[] | null
   private readonly excludedHelpers: () => number[]
   private readonly adoptsOrphans: boolean
   private readonly extraSessions = new Map<number, TrackedSession>()
@@ -152,12 +161,14 @@ export class PosixManagedProcess implements ManagedProcess {
     stateDir: string,
     helper: ChildProcessWithoutNullStreams,
     signal: AbortSignal | undefined,
+    baselinePids: number[] | null,
     excludedHelpers: () => number[],
     adoptsOrphans: boolean,
   ) {
     this.stateDir = stateDir
     this.helper = helper
     this.grantedSignal = signal
+    this.baselinePids = baselinePids
     this.excludedHelpers = excludedHelpers
     this.adoptsOrphans = adoptsOrphans
     this.exit = new Promise<ProcessExit>((resolve) => {
@@ -227,7 +238,16 @@ export class PosixManagedProcess implements ManagedProcess {
     this.extraSessions.set(session, { childPid, session, identity })
   }
 
+  /**
+   * 终止并收敛本次调用。
+   *
+   * <p>`terminate`/`close` 必须真正幂等：一旦本次调用已经被证明收敛并释放（`settledFlag`），再次调用**直接返回**，绝不对已经
+   * 消失的会话/复用同一 sid 的陌生进程再发信号。失败保留在 `termination` 上（不 fake-clear），后续调用仍如实抛出。
+   */
   async terminate(graceMillis = DEFAULT_GRACE_MILLIS): Promise<void> {
+    if (this.settledFlag) {
+      return
+    }
     if (this.termination === null) {
       this.termination = this.runTermination(graceMillis)
     }
@@ -247,6 +267,9 @@ export class PosixManagedProcess implements ManagedProcess {
 
   /** 收敛已被证明：释放状态目录并释放记录，避免 supervisor 的 Set 与临时目录无限增长。 */
   private complete(): void {
+    if (this.settledFlag) {
+      return
+    }
     this.clearPoll()
     state.removeStateDir(this.stateDir)
     this.settle()
@@ -282,13 +305,13 @@ export class PosixManagedProcess implements ManagedProcess {
   /**
    * 启动失败时的说明。
    *
-   * <p>只回显 helper 自己发布的失败原因（helper 侧已保证它是单行、不含启动参数与环境），并且同样做单行化与长度截断。绝不把
-   * helper 的原始诊断文件内容拼进来：那里面可能有命令或环境的片段。
+   * <p>只接受 helper 发布的**固定阶段代码**（`helper-<phase>-failure`），并据此给出通用说明；其它任何内容（例如被篡改的文件、
+   * 或 helper 内部拼出的通用 spawn 路径）都不回显，避免把命令路径或环境片段带进对外错误。
    */
   private startupFailure(): string {
     const reported = state.read(this.stateDir, state.ERROR_FILE)
-    if (reported !== null) {
-      return reported.replace(/\s+/g, ' ').slice(0, MESSAGE_LIMIT)
+    if (reported !== null && /^helper-[a-z]+-failure$/.test(reported)) {
+      return `the process scope helper failed during its ${reported.slice('helper-'.length, -'-failure'.length)} phase`
     }
     return `the process scope helper exited with code ${this.helperCloseCode} before establishing the OS scope`
   }
@@ -310,9 +333,11 @@ export class PosixManagedProcess implements ManagedProcess {
     }
     let proven = await this.drainSession(this.sessionId)
     proven = (await this.drainTrackedSessions()) && proven
-    // helper 崩溃时，故意 setsid 的后代被内核收养到父 daemon 名下：收敛它们所在会话才算真正收尾。
-    if (this.adoptsOrphans) {
-      proven = (await posix.convergeAdoptedChildren(process.pid, graceMillis, this.excludedHelpers())) && proven
+    // helper 崩溃时，本次调用新增的、被内核收养到父进程名下的直接子进程才需要父进程收尾；基线子进程与其它活动 helper 一律排除。
+    // 基线采样不可判定时不做这一步：宁可留下一个未收敛的孤儿（如实计入 remaining），也绝不误杀陌生进程。
+    if (this.adoptsOrphans && this.baselinePids !== null) {
+      const excluded = [...this.excludedHelpers(), ...this.baselinePids]
+      proven = (await posix.convergeAdoptedChildren(process.pid, graceMillis, excluded)) && proven
     }
     if (!proven) {
       throw new Error('the process scope could not be proven converged')

@@ -1,7 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import type { ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../contracts.js'
 import { resolveHelperPath } from './helper-path.js'
+import { verifyPrivateFile } from './private-fs.js'
 import * as state from './state.js'
 import { jobNameFor, openJob, type WindowsJobScope } from './win32.js'
 
@@ -37,14 +39,17 @@ export class WindowsProcessSupervisor implements ProcessSupervisor {
     if (spec.signal?.aborted === true) {
       throw new Error('the process scope was cancelled before the user command was started')
     }
-    const stateDir = state.createStateDir()
+    const stateDir = await state.createStateDir()
     let helper: ChildProcessWithoutNullStreams
     try {
       state.writeLaunch(stateDir, { cwd: spec.cwd, args: [spec.executable, ...spec.args] })
+      // 写入后读回：确认启动规格文件确实落在属主独占路径上，而不是继承来的宽松权限。
+      await verifyPrivateFile(join(stateDir, state.LAUNCH_FILE))
+      // 第 4 个条目是专用 IPC 通道：用户命令继承 0/1/2，不会拿到它。
       helper = spawn(process.execPath, ['--no-warnings', resolveHelperPath(), stateDir], {
         env: spec.env ?? process.env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      }) as ChildProcessWithoutNullStreams
     } catch (error) {
       state.removeStateDir(stateDir)
       throw error
@@ -164,7 +169,16 @@ export class WindowsManagedProcess implements ManagedProcess {
     this.job.assignProcess(childPid)
   }
 
+  /**
+   * 终止并收敛本次调用。
+   *
+   * <p>`terminate`/`close` 必须真正幂等：一旦本次调用已经被证明收敛并释放（`settledFlag`），再次调用**直接返回**。失败保留在
+   * `termination` 上（不 fake-clear），后续调用仍如实抛出。
+   */
   async terminate(graceMillis = CONVERGENCE_BUDGET_MILLIS): Promise<void> {
+    if (this.settledFlag) {
+      return
+    }
     if (this.termination === null) {
       this.termination = this.runTermination(graceMillis)
     }
@@ -182,9 +196,21 @@ export class WindowsManagedProcess implements ManagedProcess {
     await this.terminate()
   }
 
-  /** 收敛已被证明：释放状态目录并释放记录，避免 supervisor 的 Set 与临时目录无限增长。 */
+  /**
+   * 收敛已被证明：关闭父进程持有的 Job 句柄、释放状态目录与记录。
+   *
+   * <p>自然退出路径（命令退出且 helper 已证明 Job 收敛）也必须走这里：否则父进程打开的 Job 句柄会一直泄漏。整个流程幂等，
+   * 重复调用不会再关一次句柄或删一次目录。
+   */
   private complete(): void {
+    if (this.settledFlag) {
+      return
+    }
     this.clearPoll()
+    if (this.job !== null) {
+      this.job.close()
+      this.job = null
+    }
     state.removeStateDir(this.stateDir)
     this.settle()
   }

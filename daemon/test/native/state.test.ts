@@ -8,8 +8,8 @@ import * as state from '../../src/native/state.js'
 describe('native scope state protocol', () => {
   let dir: string
 
-  beforeEach(() => {
-    dir = state.createStateDir()
+  beforeEach(async () => {
+    dir = await state.createStateDir()
   })
 
   afterEach(() => {
