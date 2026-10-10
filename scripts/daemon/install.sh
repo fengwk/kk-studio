@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Official-release-only, per-user installer. Bash 3.2 / GNU and BSD utilities.
-# JSON and token semantics belong exclusively to the downloaded JAR preflight.
+# Official-release-only, per-user installer for the Node Environment Daemon.
+# Bash 3.2 / GNU and BSD utilities. JSON and token semantics belong exclusively to the
+# downloaded daemon preflight.
 set -euo pipefail
 umask 077
 
@@ -11,7 +12,6 @@ LAUNCHD_LABEL=fun.fengwk.kkstudio.environment-daemon
 PLIST_MARKER='<!-- Managed by scripts/daemon/install.sh -->'
 CONFIG_FILE=
 TOKEN_FILE=
-OPT_JAVA_HOME=
 SEEN_OPTIONS=
 DOWNLOAD_DIR=
 BACKUP_DIR=
@@ -22,20 +22,20 @@ VERIFY_STABLE_SECONDS=${DAEMON_VERIFY_STABLE_SECONDS:-3}
 
 usage() {
   cat <<'EOF'
-Usage: bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token> [--java-home <absolute JDK home>]
+Usage: bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token>
        bash install.sh status | uninstall | help
 
-Install downloads the latest official GitHub release, validates private sibling
-inputs with that JAR, replaces program/config/token and restarts the user service.
-Requires JDK 21 (java), curl and a SHA256 tool.
-Java discovery order: --java-home, JAVA_HOME_21, JAVA_HOME, then PATH.
+Install downloads the latest official GitHub release for this OS/architecture, validates
+private sibling inputs with that distribution, replaces program/config/token and restarts
+the user service. Requires curl and a SHA256 tool; no JRE or user Node is needed.
 Inputs must be named daemon.json and daemon.token in the same private directory.
-The release --check-config preflight validates the configuration, its sibling
-token and the configured Bash before any installation change.
+The release --check-config preflight validates the configuration, its sibling token and the
+configured Bash before any installation change.
 No interactive prompts. Unknown and duplicate options fail closed.
 
 Fixed layout: ~/.kk-studio (0700), daemon.json and daemon.token (0600),
-lib/kk-studio-daemon.jar, logs/ (macOS), backups/ (private unique backups).
+lib/ (Node Daemon distribution with its frozen code-server runtime), logs/ (macOS),
+backups/ (private unique backups).
 Uninstall removes only the owned service and program; config/token/data remain.
 After install, return to Studio and confirm the environment reports READY.
 No automatic rollback: after publication failures, use the reported backup and
@@ -68,7 +68,6 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 absolute_path() {
   case "$1" in /*) ;; *) fail "$2 must be an absolute path" ;; esac
   case "$1" in *[[:cntrl:]]*) fail "$2 must not contain control characters" ;; esac
-  # Require an absolute path without dot or empty segments.
   case "/${1#/}/" in */../* | */./* | *//*) fail "$2 must not contain dot or empty path segments" ;; esac
 }
 file_owner_uid() { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null; }
@@ -82,8 +81,6 @@ check_metadata() {
   (( (8#$mode & mask) == 0 )) || fail "unsafe permissions: $path"
 }
 
-# Validate only this private directory; shared ancestors are the user's trusted
-# layout, not directories for the installer to inspect or harden.
 check_private_directory() {
   local path=$1
   [ ! -L "$path" ] || fail "symbolic link directory is unsafe: $path"
@@ -115,13 +112,12 @@ check_input() {
 check_managed_paths() {
   local path
   check_private_directory "$INSTALL_ROOT"
-  for path in "$INSTALL_ROOT/lib" "$INSTALL_ROOT/logs" "$INSTALL_ROOT/backups"; do
+  for path in "$INSTALLED_LIB" "$INSTALL_ROOT/logs" "$INSTALL_ROOT/backups"; do
     check_private_directory "$path"
   done
   for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN"; do
     if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; fi
   done
-  if [ -e "$INSTALLED_JAR" ] || [ -L "$INSTALLED_JAR" ]; then check_file "$INSTALLED_JAR" false; fi
   for path in "$STDOUT_LOG" "$STDERR_LOG"; do
     if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; fi
   done
@@ -159,8 +155,8 @@ ownership_conflict() {
   exit 1
 }
 require_ownership() {
+  local fragment=
   if [ "$HOST_OS" = Linux ]; then
-    local fragment
     fragment=$(systemctl --user show --property=FragmentPath --value "$SERVICE_NAME") ||
       fail "cannot inspect systemd service ownership"
     if [ -n "$fragment" ] && [ "$fragment" != "$SERVICE_PATH" ] &&
@@ -212,21 +208,21 @@ stop_launchd() {
     fail ${1:+"$1"} "服务停止后仍处于加载状态，未替换或删除任何文件。"
   fi
 }
-resolve_java_home() {
-  local candidate version java_path
-  candidate=$OPT_JAVA_HOME
-  if [ -z "$candidate" ]; then candidate=${JAVA_HOME_21:-${JAVA_HOME:-}}; fi
-  if [ -z "$candidate" ]; then
-    java_path=$(command -v java) || fail "未找到 JDK 21。请设置 JAVA_HOME_21 或 --java-home，或将 java 加入 PATH。"
-    candidate=$(cd "$(dirname "$java_path")/.." && pwd -P)
-  fi
-  absolute_path "$candidate" "Java home"
-  # Only the runtime is needed: the released JAR is never compiled here.
-  [ -x "$candidate/bin/java" ] || fail "所选 JDK 21 缺少可执行的 bin/java：$candidate/bin/java"
-  version=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS "$candidate/bin/java" -version 2>&1) ||
-    fail "无法执行所选 Java：$candidate/bin/java"
-  case "${version%%$'\n'*}" in *'version "21"'* | *'version "21.'*) ;; *) fail "需要 JDK 21（当前 Java 不是 JDK 21）" ;; esac
-  SELECTED_JAVA_HOME=$candidate
+
+# 本机发行平台：uname 结果映射到官方归档的 os/arch 命名。不支持的平台 fail closed。
+resolve_release_platform() {
+  local machine
+  case "$HOST_OS" in
+    Linux) RELEASE_OS=linux ;;
+    Darwin) RELEASE_OS=macos ;;
+    *) fail "unsupported operating system: $HOST_OS" ;;
+  esac
+  machine=$(uname -m)
+  case "$machine" in
+    x86_64 | amd64) RELEASE_ARCH=amd64 ;;
+    arm64 | aarch64) RELEASE_ARCH=arm64 ;;
+    *) fail "unsupported architecture: $machine" ;;
+  esac
 }
 release_curl() {
   curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$@"
@@ -241,25 +237,25 @@ download_daemon() {
   [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] || fail "invalid official release tag"
   DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon.XXXXXXXX")
   chmod 0700 "$DOWNLOAD_DIR"
-  asset="kk-studio-daemon-$RELEASE_TAG.jar"
-  DOWNLOADED_JAR="$DOWNLOAD_DIR/$asset"
-  checksum="$DOWNLOADED_JAR.sha256"
-  release_curl --output "$DOWNLOADED_JAR" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
-    fail "无法下载：正式版本 JAR 获取失败。请检查网络后重试。"
+  asset="kk-studio-daemon-$RELEASE_TAG-$RELEASE_OS-$RELEASE_ARCH.tar.gz"
+  DOWNLOADED_ARCHIVE="$DOWNLOAD_DIR/$asset"
+  checksum="$DOWNLOADED_ARCHIVE.sha256"
+  release_curl --output "$DOWNLOADED_ARCHIVE" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
+    fail "无法下载：正式版本发行归档获取失败。请检查网络后重试。"
   release_curl --output "$checksum" "$RELEASE_BASE/download/$RELEASE_TAG/$asset.sha256" ||
     fail "无法下载：正式版本 SHA256 获取失败。请检查网络后重试。"
   expected=$(cat "$checksum")
   pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${asset//./\\.}$"
   [[ $expected =~ $pattern ]] || fail "校验失败：SHA256 文件格式无效。"
   expected=${BASH_REMATCH[1]}
-  if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$DOWNLOADED_JAR");
-  else require_cmd shasum; actual=$(shasum -a 256 "$DOWNLOADED_JAR"); fi
+  if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$DOWNLOADED_ARCHIVE");
+  else require_cmd shasum; actual=$(shasum -a 256 "$DOWNLOADED_ARCHIVE"); fi
   expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
   [ "${actual%% *}" = "$expected" ] || fail "校验失败：SHA256 与正式版本不一致。"
 }
-# Do not echo arbitrary JAR diagnostics. The release may print one stable, value-free
+# Do not echo arbitrary daemon diagnostics. The release may print one stable, value-free
 # `Invalid daemon configuration:` line naming the field path and rule; surface only that
-# bounded line so JVM stack traces and raw input values can never be echoed.
+# bounded line so stack traces and raw input values can never be echoed.
 preflight_failure_detail() {
   local line
   while IFS= read -r line; do
@@ -275,10 +271,6 @@ preflight_failure_detail() {
   done <"$DOWNLOAD_DIR/preflight.log"
   return 1
 }
-
-# The staging directory is user-controlled: re-validate regular/private/sibling right
-# before the snapshot so a symlink or permission swap during the network download is
-# never followed into the published configuration.
 recheck_inputs() {
   check_input "$CONFIG_FILE" 1048576
   check_input "$TOKEN_FILE" 16384
@@ -286,12 +278,18 @@ recheck_inputs() {
     fail "staged inputs must remain sibling daemon.json and daemon.token"
 }
 preflight() {
-  local output detail
-  [ -s "$DOWNLOADED_JAR" ] || fail "校验失败：下载的 JAR 为空。"
-  output=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
-    "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --version 2>&1) ||
-    fail "校验失败：下载的 JAR 无法执行。"
-  [ "$output" = "kk-studio-daemon ${RELEASE_TAG#v}" ] || fail "daemon --version does not match resolved release tag"
+  local output detail extract="$DOWNLOAD_DIR/extract" version
+  [ -s "$DOWNLOADED_ARCHIVE" ] || fail "校验失败：下载的发行归档为空。"
+  mkdir -p "$extract"
+  tar -xzf "$DOWNLOADED_ARCHIVE" -C "$extract" || fail "校验失败：发行归档无法解包。"
+  STAGED_NODE="$extract/runtime/code-server/lib/node"
+  STAGED_MAIN="$extract/main.js"
+  [ -x "$STAGED_NODE" ] || fail "校验失败：发行归档缺少运行时。"
+  [ -f "$STAGED_MAIN" ] || fail "校验失败：发行归档缺少程序入口。"
+  version=$("$STAGED_NODE" "$STAGED_MAIN" --version 2>&1) ||
+    fail "校验失败：下载的发行归档无法执行。"
+  [ "$version" = "kk-studio-daemon ${RELEASE_TAG#v}" ] ||
+    fail "daemon --version does not match resolved release tag"
   recheck_inputs
   # Validate exactly the secure snapshot that will be published, not inputs reread later.
   cp "$CONFIG_FILE" "$DOWNLOAD_DIR/daemon.json"
@@ -299,8 +297,7 @@ preflight() {
   chmod 0600 "$DOWNLOAD_DIR/daemon.json" "$DOWNLOAD_DIR/daemon.token"
   CONFIG_FILE="$DOWNLOAD_DIR/daemon.json"
   TOKEN_FILE="$DOWNLOAD_DIR/daemon.token"
-  if ! env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
-    "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --check-config "$CONFIG_FILE" >"$DOWNLOAD_DIR/preflight.log" 2>&1; then
+  if ! "$STAGED_NODE" "$STAGED_MAIN" --check-config "$CONFIG_FILE" >"$DOWNLOAD_DIR/preflight.log" 2>&1; then
     detail=$(preflight_failure_detail) && fail "配置校验失败：$detail 现有安装未改动。"
     fail "配置校验失败：当前版本拒绝 --check-config 或暂存的配置与令牌。请修正输入，或使用支持 --check-config 的版本后重试。现有安装未改动。"
   fi
@@ -337,7 +334,8 @@ xml_escape() {
 xml_string() { printf '<string>%s</string>\n' "$(xml_escape "$1")"; }
 stage_service() {
   STAGED_SERVICE="$DOWNLOAD_DIR/service"
-  local arguments=("$SELECTED_JAVA_HOME/bin/java" -jar "$INSTALLED_JAR" --config "$INSTALLED_CONFIG") argument line=
+  local node_bin="$INSTALLED_LIB/runtime/code-server/lib/node"
+  local arguments=("$node_bin" "$INSTALLED_LIB/main.js" --config "$INSTALLED_CONFIG") argument line=
   if [ "$HOST_OS" = Linux ]; then
     for argument in "${arguments[@]}"; do line="$line $(escape_exec_argument "$argument")"; done
     cat >"$STAGED_SERVICE" <<EOF
@@ -371,7 +369,7 @@ EOF
       xml_string "$LAUNCHD_LABEL"
       printf '<key>ProgramArguments</key><array>\n'
       for argument in "${arguments[@]}"; do xml_string "$argument"; done
-      printf '</array>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n<key>ThrottleInterval</key><integer>10</integer>\n<key>Umask</key><integer>63</integer>\n<key>WorkingDirectory</key>\n'
+      printf '</array>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n<key>ThrottleInterval</key><integer>10</integer>\n<key>Umask</key><integer>63</integer>\n<key>WorkingDirectory</key>\n'
       xml_string "$HOME"
       printf '<key>StandardOutPath</key>\n'; xml_string "$STDOUT_LOG"
       printf '<key>StandardErrorPath</key>\n'; xml_string "$STDERR_LOG"
@@ -383,19 +381,28 @@ EOF
 }
 backup_current() {
   local path present=false
-  for path in "$INSTALLED_JAR" "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
+  for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
     if [ -f "$path" ]; then present=true; fi
   done
+  if [ -d "$INSTALLED_LIB" ]; then present=true; fi
   [ "$present" = true ] || return 0
   mkdir -p "$INSTALL_ROOT/backups"
   BACKUP_DIR=$(mktemp -d "$INSTALL_ROOT/backups/install.XXXXXXXX")
   chmod 0700 "$BACKUP_DIR"
-  for path in "$INSTALLED_JAR" "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
+  for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
     if [ -f "$path" ]; then
       cp "$path" "$BACKUP_DIR/${path##*/}"
       chmod 0600 "$BACKUP_DIR/${path##*/}"
     fi
   done
+}
+# 发布新的发行目录：先停服务，再把旧目录整体改名进备份（同文件系统，快速），最后把已解包的
+# 新目录改名到受管位置。任何一步失败都保留备份，不自动回滚。
+publish_program() {
+  if [ -e "$INSTALLED_LIB" ]; then
+    mv "$INSTALLED_LIB" "$BACKUP_DIR/lib" || fail "无法备份现有发行目录，未替换任何文件。"
+  fi
+  mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB" || fail "无法发布新发行目录。"
 }
 verify_running() {
   local attempt stable pid active
@@ -425,14 +432,14 @@ cmd_install() {
   local option value
   while [ $# -gt 0 ]; do
     option=$1
-    case "$option" in --config-file | --token-file | --java-home) ;; *) fail "unknown option (value not echoed)" ;; esac
+    case "$option" in --config-file | --token-file) ;; *) fail "unknown option (value not echoed)" ;; esac
     case "$SEEN_OPTIONS" in *"|$option|"*) fail "duplicate option: $option" ;; esac
     SEEN_OPTIONS="$SEEN_OPTIONS|$option|"
     [ $# -ge 2 ] || fail "missing value for $option"
     value=$2
     [ -n "$value" ] || fail "missing value for $option"
     absolute_path "$value" "$option"
-    case "$option" in --config-file) CONFIG_FILE=$value ;; --token-file) TOKEN_FILE=$value ;; --java-home) OPT_JAVA_HOME=$value ;; esac
+    case "$option" in --config-file) CONFIG_FILE=$value ;; --token-file) TOKEN_FILE=$value ;; esac
     shift 2
   done
   [ -n "$CONFIG_FILE" ] && [ -n "$TOKEN_FILE" ] || fail "install requires --config-file and --token-file"
@@ -443,19 +450,16 @@ cmd_install() {
   check_managed_paths
   check_input "$CONFIG_FILE" 1048576
   check_input "$TOKEN_FILE" 16384
-  # The released JAR's --check-config probes the configured Bash; the installer must not
-  # look up a Bash on PATH so an explicit off-PATH bashExecutable remains supported.
-  resolve_java_home
+  resolve_release_platform
   download_daemon
   preflight
   stage_service
   # All semantic checks (including macOS plist lint) precede target writes and stop.
   check_managed_paths
   require_ownership
-  mkdir -p "$INSTALL_ROOT/lib" "${SERVICE_PATH%/*}"
+  mkdir -p "$INSTALL_ROOT" "${SERVICE_PATH%/*}"
   if [ "$HOST_OS" = Darwin ]; then mkdir -p "$INSTALL_ROOT/logs"; fi
   backup_current
-  stage_file "$DOWNLOADED_JAR" "$INSTALL_ROOT/lib" kk-studio-daemon.jar 0644; STAGED_JAR=$REGISTERED_TEMP_PATH
   stage_file "$CONFIG_FILE" "$INSTALL_ROOT" daemon.json 0600; STAGED_CONFIG=$REGISTERED_TEMP_PATH
   stage_file "$TOKEN_FILE" "$INSTALL_ROOT" daemon.token 0600; STAGED_TOKEN=$REGISTERED_TEMP_PATH
   stage_file "$STAGED_SERVICE" "${SERVICE_PATH%/*}" service 0644; STAGED_SERVICE=$REGISTERED_TEMP_PATH
@@ -465,7 +469,7 @@ cmd_install() {
   fi
   # From the first rename onward a failure must report manual recovery, even partial publication.
   PUBLISHED=true
-  mv -f "$STAGED_JAR" "$INSTALLED_JAR"
+  publish_program
   mv -f "$STAGED_CONFIG" "$INSTALLED_CONFIG"
   mv -f "$STAGED_TOKEN" "$INSTALLED_TOKEN"
   mv -f "$STAGED_SERVICE" "$SERVICE_PATH"
@@ -511,7 +515,8 @@ cmd_uninstall() {
   if [ "$HOST_OS" = Linux ]; then
     systemctl --user disable --now "$SERVICE_NAME" || fail --uninstall "无法停止或禁用服务，未删除任何文件"
   else stop_launchd --uninstall; fi
-  rm -f "$SERVICE_PATH" "$INSTALLED_JAR"
+  rm -f "$SERVICE_PATH"
+  rm -rf "$INSTALLED_LIB"
   if [ "$HOST_OS" = Linux ]; then systemctl --user daemon-reload; fi
   echo "KK Studio 环境已卸载，受管服务和程序已移除。"
   echo
@@ -531,7 +536,7 @@ main() {
   while [ "$HOME" != / ] && [ "${HOME%/}" != "$HOME" ]; do HOME=${HOME%/}; done
   absolute_path "$HOME" HOME
   INSTALL_ROOT="$HOME/.kk-studio"
-  INSTALLED_JAR="$INSTALL_ROOT/lib/kk-studio-daemon.jar"
+  INSTALLED_LIB="$INSTALL_ROOT/lib"
   INSTALLED_CONFIG="$INSTALL_ROOT/daemon.json"
   INSTALLED_TOKEN="$INSTALL_ROOT/daemon.token"
   STDOUT_LOG="$INSTALL_ROOT/logs/environment-daemon.stdout.log"

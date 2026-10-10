@@ -299,7 +299,7 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 ## 本机代理
 
 Daemon 不接收 Backend 的代理设置。启动时分别读取 `http_proxy`、`https_proxy`，
-兼容大写变量，小写存在时优先；空值明确直连，未设置的协议才委托 JDK 的操作系统代理。
+兼容大写变量，小写存在时优先；空值明确直连，未设置的协议才委托操作系统的代理设置。
 `no_proxy`/`NO_PROXY` 的逗号分隔绕过规则同样作用于操作系统回退结果，支持主机、域名后缀、
 IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`）；CIDR 只按目标 URL
 中的数值 IP 逐位匹配，不会为目标域名解析 DNS，因此按域名访问的内网服务仍应写域名规则。
@@ -309,7 +309,7 @@ IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`�
 macOS 的回退来源是网络设置；Linux 的桌面代理取决于宿主支持，服务器/容器通常应显式
 传入环境变量。Windows 读取当前运行用户的系统代理（含系统自动代理能力），不是
 `netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。未显式指定时
-Daemon 开启 `java.net.useSystemProxies`；显式 JVM 代理属性仍参与 JDK 回退。
+Daemon 的 HTTP 客户端使用操作系统的代理设置；环境变量始终优先于系统代理回退。
 
 环境变量必须进入 Daemon 进程：终端 `export` 不会改变已经运行的服务。安装器不保存
 代理配置文件；Linux systemd user service、macOS LaunchAgent 或 Windows 计划任务

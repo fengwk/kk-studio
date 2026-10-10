@@ -1,0 +1,24 @@
+# Third-Party Notices
+
+The Node Daemon distribution archive bundles the compiled daemon JavaScript, its
+locked production npm dependencies (see `package-lock.json`) and the official
+`code-server` standalone runtime with its bundled Node.js. It contains no JRE and
+no separately installed user Node.
+
+Each bundled npm package keeps its own license file under `node_modules/<package>/`
+inside the archive. Direct runtime dependencies:
+
+| Component | License |
+| --- | --- |
+| `ajv`, `ignore`, `isomorphic-git`, `jsonc-parser`, `koffi`, `picomatch`, `vscode-jsonrpc`, `ws` | MIT License |
+| `re2-wasm` | Apache License 2.0 |
+| `code-server` (coder/code-server, frozen standalone) | MIT License |
+| Node.js (bundled inside the code-server standalone runtime) | MIT License |
+
+Apache License 2.0 components are covered by the accompanying `LICENSE`.
+
+Source repositories:
+
+- npm packages: `https://www.npmjs.com/package/<name>`
+- code-server: `https://github.com/coder/code-server`
+- Node.js: `https://github.com/nodejs/node`

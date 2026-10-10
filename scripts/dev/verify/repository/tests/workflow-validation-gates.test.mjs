@@ -160,7 +160,7 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
   assert.match(fixture, /f"postgres:\{POSTGRES_MAJOR\}-alpine"/u)
   for (const [source, validationName] of [
     [docker, 'Verify Java sources, tests and coverage'],
-    [release, 'Verify the daemon module'],
+    [release, 'Verify and build the Node daemon'],
   ]) {
     assert.ok(source.includes(`POSTGRES_VERSION: '${major}'`))
     const setup = source.indexOf('- name: Set up PostgreSQL client tools')
