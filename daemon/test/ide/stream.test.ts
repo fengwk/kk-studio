@@ -178,6 +178,46 @@ class GatewayPump {
   }
 }
 
+/** Sends one WebSocket message as credit controlled wire fragments, marking the final FIN. */
+class WsFragmentPump {
+  private outstanding = 0
+  private index = 0
+  private completed = false
+
+  constructor(
+    private readonly gateway: Gateway,
+    private readonly chunks: Buffer[],
+    private readonly kind: 'text' | 'binary',
+    private readonly onComplete: () => void,
+  ) {}
+
+  start(): void {
+    this.flush()
+  }
+
+  ack(bytes: number): void {
+    this.outstanding -= bytes
+    this.flush()
+  }
+
+  private flush(): void {
+    while (this.index < this.chunks.length) {
+      const chunk = this.chunks[this.index] as Buffer
+      if (this.outstanding + chunk.length > INITIAL_CREDIT) {
+        return
+      }
+      const last = this.index === this.chunks.length - 1
+      this.index += 1
+      this.gateway.socket.send(encodeWsFrame(this.kind, chunk, last))
+      this.outstanding += chunk.length
+    }
+    if (!this.completed) {
+      this.completed = true
+      this.onComplete()
+    }
+  }
+}
+
 const ACK_THRESHOLD = 64 * 1024
 
 describe('HTTP exchanges over the reverse stream', () => {
@@ -487,6 +527,132 @@ describe('WebSocket exchanges over the reverse stream', () => {
     await exchange
   })
 
+  it('relays a >20MiB fragmented text message across credit rounds without corrupting UTF-8', async () => {
+    // A multi-byte heavy message whose fragments (and multi-byte sequences) straddle 64KiB frames.
+    const unit = Buffer.from('ab世🙂'.repeat(1024), 'utf8')
+    const count = Math.ceil((20 * 1024 * 1024) / unit.length)
+    const message = Buffer.alloc(count * unit.length)
+    for (let index = 0; index < count; index += 1) {
+      unit.copy(message, index * unit.length)
+    }
+
+    let received: Buffer | undefined
+    let receivedIsBinary: boolean | undefined
+    const upstream = await startWsUpstream((socket) => {
+      socket.on('message', (data, isBinary) => {
+        received = Buffer.from(data as Buffer)
+        receivedIsBinary = isBinary
+      })
+    })
+
+    let ready = false
+    let gatewaySocket: WebSocket | undefined
+    const gateway = await startGateway((conn) => {
+      gatewaySocket = conn.socket
+      let pump: WsFragmentPump | undefined
+      conn.socket.on('message', (data, isBinary) => {
+        if (!isBinary) {
+          if (decodeTextFrame(data.toString('utf8')).type === 'WS_READY') {
+            ready = true
+            pump = new WsFragmentPump(conn, chunkBuffer(message), 'text', () => undefined)
+            pump.start()
+          }
+          return
+        }
+        const frame = decodeBinaryFrame(data as Buffer)
+        if (frame.kind === 'ack') {
+          pump?.ack(frame.bytes)
+        }
+      })
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+
+    await waitFor(() => ready)
+    await waitFor(() => received !== undefined && received.length === message.length, 20_000)
+    expect(receivedIsBinary).toBe(false)
+    expect(received?.equals(message)).toBe(true)
+
+    gatewaySocket?.close()
+    await exchange
+  }, 30_000)
+
+  it('throttles an upstream that outruns the browser instead of buffering unboundedly', async () => {
+    const total = 1500
+    const messageSize = 32 * 1024
+    const message = Buffer.alloc(messageSize, 0x41)
+    let produced = 0
+    // Production is driven by flush callbacks: if the daemon stops reading, it stops here.
+    const upstream = await startWsUpstream((socket) => {
+      let sent = 0
+      const next = (): void => {
+        if (sent >= total) {
+          return
+        }
+        sent += 1
+        socket.send(message, () => {
+          produced += 1
+          next()
+        })
+      }
+      next()
+    })
+
+    let received = 0
+    let unacked = 0
+    let ackEnabled = false
+    let gatewaySocket: WebSocket | undefined
+    let flushAck: (() => void) | undefined
+    const gateway = await startGateway((conn) => {
+      gatewaySocket = conn.socket
+      flushAck = (): void => {
+        if (unacked > 0) {
+          conn.sendAck(unacked)
+          unacked = 0
+        }
+      }
+      conn.socket.on('message', (data, isBinary) => {
+        if (!isBinary) {
+          return
+        }
+        const frame = decodeBinaryFrame(data as Buffer)
+        if (frame.kind === 'ws-text' || frame.kind === 'ws-binary') {
+          received += frame.payload.length
+          unacked += frame.payload.length
+          if (ackEnabled && unacked >= ACK_THRESHOLD) {
+            flushAck()
+          }
+        }
+      })
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+
+    // While the browser withholds credit, the daemon must stop the upstream from producing.
+    await waitFor(() => produced > 0)
+    await delay(300)
+    const throttled = produced
+    expect(throttled).toBeLessThan(total / 2)
+
+    ackEnabled = true
+    flushAck?.()
+    await waitFor(() => received >= total * messageSize, 20_000)
+    expect(produced).toBeGreaterThanOrEqual(total)
+
+    gatewaySocket?.terminate()
+    await exchange
+  }, 30_000)
+
   it('forwards the upstream WebSocket close code to the stream', async () => {
     const upstream = await startWsUpstream((socket) => {
       socket.close(4001, 'bye')
@@ -553,14 +719,48 @@ describe('WebSocket exchanges over the reverse stream', () => {
     ).rejects.toThrow(/unexpected text frame WS_READY/)
   })
 
-  it('accounts for body frames on a bodyless request', async () => {
+  it('pumps a GET body upstream instead of silently dropping it', async () => {
+    const body = Buffer.from('query-params-as-body')
+    let receivedBody = Buffer.alloc(0)
+    const upstream = await startHttpUpstream((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', (chunk) => chunks.push(chunk as Buffer))
+      req.on('end', () => {
+        receivedBody = Buffer.concat(chunks)
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        res.end('ok')
+      })
+    })
+    let ended = false
+    const gateway = await startGateway((conn) => {
+      conn.sendBody(body)
+      conn.sendEnd()
+      conn.socket.on('message', (data, isBinary) => {
+        if (isBinary && decodeBinaryFrame(data as Buffer).kind === 'http-end') {
+          ended = true
+        }
+      })
+    })
+
+    await openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'HTTP', method: 'GET', path: '/g', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+    await waitFor(() => ended)
+    expect(ended).toBe(true)
+    expect(receivedBody.equals(body)).toBe(true)
+  })
+
+  it('completes a HEAD exchange that carries a body frame', async () => {
     const upstream = await startHttpUpstream((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/plain' })
       res.end('head')
     })
     let ended = false
     const gateway = await startGateway((conn) => {
-      conn.sendBody(Buffer.from('ignored'))
+      conn.sendBody(Buffer.from('head-body'))
       conn.sendEnd()
       conn.socket.on('message', (data, isBinary) => {
         if (isBinary && decodeBinaryFrame(data as Buffer).kind === 'http-end') {

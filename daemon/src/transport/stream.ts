@@ -35,6 +35,14 @@ import {
 /** Upper bound on a single upstream WebSocket message before it is fragmented for the stream. */
 const UPSTREAM_MAX_MESSAGE = 256 * 1024 * 1024
 
+/**
+ * Bounded residual of upstream WebSocket messages that may be buffered while the browser is
+ * still consuming. The upstream socket is paused as soon as one message is queued, so this only
+ * absorbs whatever the ws receiver already parsed; exceeding it fails the exchange closed.
+ */
+const MAX_UPSTREAM_PENDING_MESSAGES = 32
+const MAX_UPSTREAM_PENDING_BYTES = 8 * 1024 * 1024
+
 export interface StreamRequest {
   mode: 'HTTP' | 'WS'
   method: string
@@ -74,22 +82,32 @@ const DROP_REQUEST_HEADERS = new Set([
   'authorization',
   'origin',
   'referer',
-  'content-length',
   'sec-websocket-key',
   'sec-websocket-version',
   'sec-websocket-extensions',
   'sec-websocket-protocol',
 ])
 
-function buildUpstreamHeaders(request: StreamRequest, upstream: StreamUpstream): [string, string][] {
+function buildUpstreamHeaders(request: StreamRequest, upstream: StreamUpstream, declareBody: boolean): [string, string][] {
   const headers: [string, string][] = []
+  let hasContentLength = false
   for (const [name, value] of request.headers) {
-    if (DROP_REQUEST_HEADERS.has(name.toLowerCase())) {
+    const key = name.toLowerCase()
+    if (DROP_REQUEST_HEADERS.has(key)) {
       continue
+    }
+    if (key === 'content-length') {
+      hasContentLength = true
     }
     headers.push([name, value])
   }
   headers.push(['host', `${upstream.host}:${upstream.port}`])
+  // Without a length Node only streams a body for methods it expects to carry one; declaring the
+  // framing explicitly lets a bodyful GET/HEAD reach the upstream unchanged. WebSocket handshakes
+  // must never carry it.
+  if (declareBody && !hasContentLength) {
+    headers.push(['transfer-encoding', 'chunked'])
+  }
   if (upstream.cookie !== undefined && upstream.cookie.length > 0) {
     headers.push(['cookie', upstream.cookie])
   }
@@ -291,19 +309,6 @@ function waitForOpen(socket: WebSocket, timeoutMillis: number): Promise<void> {
   })
 }
 
-function waitForBuffer(socket: WebSocket): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const check = (): void => {
-      if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount <= MAX_PAYLOAD) {
-        resolve()
-      } else {
-        setTimeout(check, 1).unref()
-      }
-    }
-    check()
-  })
-}
-
 function toBuffer(data: RawData): Buffer {
   if (Buffer.isBuffer(data)) {
     return data
@@ -408,8 +413,6 @@ class HttpExchange extends Exchange {
   private readonly inbound = new AsyncQueue<Buffer>()
   private upstreamRequest?: http.ClientRequest
   private upstreamResponse?: IncomingMessage
-  private readonly expectsBody =
-    this.options.request.method.toUpperCase() !== 'GET' && this.options.request.method.toUpperCase() !== 'HEAD'
 
   listen(): void {
     super.listen()
@@ -423,21 +426,22 @@ class HttpExchange extends Exchange {
       port: upstream.port,
       method: request.method.toUpperCase(),
       path: request.path,
-      headers: headerRecord(buildUpstreamHeaders(request, upstream)),
+      headers: headerRecord(buildUpstreamHeaders(request, upstream, true)),
       agent: false,
       signal: this.options.signal,
     })
     this.upstreamRequest = clientRequest
     clientRequest.on('error', (error: Error) => this.fail(new WireError(`upstream request failed: ${error.message}`)))
+    // Send the request headers immediately so an upstream that answers without reading a body
+    // (health probes, plain GETs) can respond while the body is still streaming in.
+    clientRequest.flushHeaders()
     clientRequest.on('response', (response) => {
       this.upstreamResponse = response
       void this.pumpResponse(response).catch((error: unknown) => this.fail(error))
     })
-    if (this.expectsBody) {
-      void this.pumpRequestBody().catch((error: unknown) => this.fail(error))
-    } else {
-      clientRequest.end()
-    }
+    // Every request body is pumped, including GET/HEAD: a body frame is real client data and
+    // dropping it would silently rewrite the request. The pump ends the request on http-end.
+    void this.pumpRequestBody().catch((error: unknown) => this.fail(error))
   }
 
   private async pumpRequestBody(): Promise<void> {
@@ -445,13 +449,27 @@ class HttpExchange extends Exchange {
     if (!clientRequest) {
       return
     }
-    for await (const chunk of this.inbound) {
-      if (!clientRequest.write(chunk)) {
-        await waitForDrain(clientRequest)
+    try {
+      for await (const chunk of this.inbound) {
+        if (this.settled) {
+          return
+        }
+        if (!clientRequest.write(chunk)) {
+          await waitForDrain(clientRequest)
+        }
+        // Acknowledge only after the bytes have been handed to the upstream request.
+        this.sendAck(chunk.length)
       }
-      this.sendAck(chunk.length)
+    } catch {
+      // The response can finish before the request body; a destroy during cleanup is not fatal.
+      if (!this.settled) {
+        throw new WireError('upstream request body failed')
+      }
+      return
     }
-    clientRequest.end()
+    if (!this.settled && !clientRequest.destroyed) {
+      clientRequest.end()
+    }
   }
 
   private async pumpResponse(response: IncomingMessage): Promise<void> {
@@ -472,11 +490,7 @@ class HttpExchange extends Exchange {
     switch (frame.kind) {
       case 'http-body': {
         this.recvWindow.reserve(frame.payload.length)
-        if (this.expectsBody) {
-          this.inbound.push(frame.payload)
-        } else {
-          this.sendAck(frame.payload.length)
-        }
+        this.inbound.push(frame.payload)
         return
       }
       case 'http-end': {
@@ -503,9 +517,14 @@ class HttpExchange extends Exchange {
 
 class WebSocketExchange extends Exchange {
   private upstreamSocket?: WebSocket
-  private readonly inboundMessages = new AsyncQueue<{ kind: 'text' | 'binary'; payload: Buffer }>()
-  private assemblerKind: 'text' | 'binary' = 'binary'
-  private assemblerChunks: Buffer[] = []
+  /** Browser -> upstream wire fragments awaiting a serialized, credit friendly send. */
+  private readonly outboundFragments: { kind: 'text' | 'binary'; payload: Buffer; last: boolean }[] = []
+  private drainingFragments = false
+  /** Upstream -> browser messages awaiting credit; bounded and backed by socket.pause(). */
+  private readonly inboundMessages: { kind: 'text' | 'binary'; payload: Buffer }[] = []
+  private inboundBytes = 0
+  private drainingInbound = false
+  private upstreamReady = false
 
   listen(): void {
     super.listen()
@@ -532,8 +551,11 @@ class WebSocketExchange extends Exchange {
         perMessageDeflate: false,
         maxPayload: UPSTREAM_MAX_MESSAGE,
         followRedirects: false,
-        headers: headerRecord(buildUpstreamHeaders(request, upstream)),
+        headers: headerRecord(buildUpstreamHeaders(request, upstream, false)),
         handshakeTimeout: this.options.connectTimeoutMillis ?? 10_000,
+        // Deferring events gives us a chance to pause the socket between messages so the local
+        // IDE cannot outrun the browser and grow an unbounded queue.
+        allowSynchronousEvents: false,
       },
     )
     this.upstreamSocket = socket
@@ -542,10 +564,10 @@ class WebSocketExchange extends Exchange {
     // is reported as a safe ERROR frame instead of a premature success.
     socket.on('error', (error: Error) => this.fail(new WireError(`upstream websocket failed: ${error.message}`)))
     socket.on('message', (data, isBinary) => {
-      const payload = toBuffer(data)
-      void this.outbox
-        .sendWsMessage(isBinary ? 'binary' : 'text', payload, this.sendWindow)
-        .catch((error: unknown) => this.fail(error))
+      if (this.settled) {
+        return
+      }
+      this.enqueueInbound(isBinary ? 'binary' : 'text', toBuffer(data))
     })
     socket.on('close', (code: number, reason: Buffer) => {
       if (this.gateway.readyState === WebSocket.OPEN) {
@@ -554,20 +576,40 @@ class WebSocketExchange extends Exchange {
       this.succeed()
     })
     await this.outbox.sendText({ type: 'WS_READY' })
-    void this.relayInbound().catch((error: unknown) => this.fail(error))
+    this.upstreamReady = true
+    this.maybeDrainFragments()
   }
 
-  private async relayInbound(): Promise<void> {
-    for await (const message of this.inboundMessages) {
+  /** Queues one upstream message, pausing the socket and failing closed past the bounded residual. */
+  private enqueueInbound(kind: 'text' | 'binary', payload: Buffer): void {
+    this.inboundMessages.push({ kind, payload })
+    this.inboundBytes += payload.length
+    if (
+      this.inboundMessages.length > MAX_UPSTREAM_PENDING_MESSAGES ||
+      this.inboundBytes > MAX_UPSTREAM_PENDING_BYTES
+    ) {
+      this.fail(new WireError('upstream websocket produced more data than the stream can consume'))
+      return
+    }
+    this.upstreamSocket?.pause()
+    if (!this.drainingInbound) {
+      this.drainingInbound = true
+      void this.drainInbound().catch((error: unknown) => this.fail(error))
+    }
+  }
+
+  private async drainInbound(): Promise<void> {
+    while (!this.settled && this.inboundMessages.length > 0) {
+      const message = this.inboundMessages.shift() as { kind: 'text' | 'binary'; payload: Buffer }
+      this.inboundBytes -= message.payload.length
+      await this.outbox.sendWsMessage(message.kind, message.payload, this.sendWindow)
+    }
+    this.drainingInbound = false
+    if (!this.settled) {
       const socket = this.upstreamSocket
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        throw new WireError('upstream websocket is not open')
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.resume()
       }
-      if (socket.bufferedAmount > 0) {
-        await waitForBuffer(socket)
-      }
-      socket.send(message.kind === 'text' ? message.payload.toString('utf8') : message.payload)
-      this.sendAck(message.payload.length)
     }
   }
 
@@ -577,20 +619,12 @@ class WebSocketExchange extends Exchange {
       case 'ws-text':
       case 'ws-binary': {
         const kind = frame.kind === 'ws-text' ? 'text' : 'binary'
-        if (this.assemblerChunks.length > 0 && this.assemblerKind !== kind) {
-          throw new WireError('WebSocket fragment type changed mid message')
-        }
-        // Bound every fragment, not just the reassembled message, so a stalled
-        // upstream cannot let the peer exceed the credit window.
+        // Reserve per fragment and forward each fragment as it arrives so a message larger
+        // than the credit window never deadlocks; the peer is acknowledged as we flush to the
+        // upstream. Raw bytes are preserved, including a multi-byte sequence split across frames.
         this.recvWindow.reserve(frame.payload.length)
-        this.assemblerKind = kind
-        this.assemblerChunks.push(frame.payload)
-        if (!frame.last) {
-          return
-        }
-        const payload = Buffer.concat(this.assemblerChunks)
-        this.assemblerChunks = []
-        this.inboundMessages.push({ kind, payload })
+        this.outboundFragments.push({ kind, payload: frame.payload, last: frame.last })
+        this.maybeDrainFragments()
         return
       }
       case 'ack': {
@@ -598,7 +632,7 @@ class WebSocketExchange extends Exchange {
         return
       }
       case 'http-end': {
-        this.inboundMessages.close()
+        // The browser stopped sending; a WebSocket stays open until the socket closes.
         return
       }
       default:
@@ -606,8 +640,46 @@ class WebSocketExchange extends Exchange {
     }
   }
 
+  /** Starts the fragment drain once the upstream is open; fragments may arrive earlier. */
+  private maybeDrainFragments(): void {
+    if (!this.upstreamReady || this.drainingFragments || this.outboundFragments.length === 0) {
+      return
+    }
+    this.drainingFragments = true
+    void this.drainFragments().catch((error: unknown) => this.fail(error))
+  }
+
+  private async drainFragments(): Promise<void> {
+    while (!this.settled && this.outboundFragments.length > 0) {
+      const fragment = this.outboundFragments.shift() as { kind: 'text' | 'binary'; payload: Buffer; last: boolean }
+      await this.sendFragment(fragment)
+      this.sendAck(fragment.payload.length)
+    }
+    this.drainingFragments = false
+  }
+
+  /** Writes one upstream frame and resolves once it has been flushed, then credit is released. */
+  private sendFragment(fragment: { kind: 'text' | 'binary'; payload: Buffer; last: boolean }): Promise<void> {
+    const socket = this.upstreamSocket
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new WireError('upstream websocket is not open'))
+    }
+    return new Promise<void>((resolve, reject) => {
+      socket.send(
+        fragment.payload,
+        { binary: fragment.kind === 'binary', fin: fragment.last },
+        (error?: Error) => {
+          if (error) {
+            reject(new WireError(`upstream websocket send failed: ${error.message}`))
+          } else {
+            resolve()
+          }
+        },
+      )
+    })
+  }
+
   private closeUpstream(code: number, reason: string): void {
-    this.inboundMessages.close()
     const socket = this.upstreamSocket
     if (socket && socket.readyState <= WebSocket.OPEN) {
       socket.close(code, reason)
@@ -616,7 +688,9 @@ class WebSocketExchange extends Exchange {
 
   protected cleanup(error?: unknown): void {
     void error
-    this.inboundMessages.close()
+    this.outboundFragments.length = 0
+    this.inboundMessages.length = 0
+    this.inboundBytes = 0
     const socket = this.upstreamSocket
     if (socket && socket.readyState <= WebSocket.OPEN) {
       socket.terminate()
