@@ -28,14 +28,17 @@ public final class IdeOriginRequestFilter extends OncePerRequestFilter {
   private final IdeHostResolver hostResolver;
   private final IdeOriginProperties originProperties;
   private final IdeGatewayDataPlane dataPlane;
+  private final IdeBrowserWebSocketGateway browserGateway;
 
   public IdeOriginRequestFilter(
       IdeHostResolver hostResolver,
       IdeOriginProperties originProperties,
-      IdeGatewayDataPlane dataPlane) {
+      IdeGatewayDataPlane dataPlane,
+      IdeBrowserWebSocketGateway browserGateway) {
     this.hostResolver = Objects.requireNonNull(hostResolver, "hostResolver");
     this.originProperties = Objects.requireNonNull(originProperties, "originProperties");
     this.dataPlane = Objects.requireNonNull(dataPlane, "dataPlane");
+    this.browserGateway = Objects.requireNonNull(browserGateway, "browserGateway");
   }
 
   @Override
@@ -53,7 +56,12 @@ public final class IdeOriginRequestFilter extends OncePerRequestFilter {
       dataPlane.handleBootstrap(environmentId.get(), request, response);
       return;
     }
-    dataPlane.handleHttp(environmentId.get(), rawPathAndQuery(request, path), request, response);
+    String pathAndQuery = rawPathAndQuery(request, path);
+    if (IdeBrowserWebSocketGateway.isWebSocketUpgrade(request)) {
+      browserGateway.handleUpgrade(environmentId.get(), pathAndQuery, request, response);
+      return;
+    }
+    dataPlane.handleHttp(environmentId.get(), pathAndQuery, request, response);
   }
 
   private boolean isBootstrapPath(String path) {

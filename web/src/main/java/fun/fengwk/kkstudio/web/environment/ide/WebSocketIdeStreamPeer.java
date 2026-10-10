@@ -55,15 +55,21 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
 
   @Override
   public Inbound poll(Duration timeout) throws InterruptedException {
-    if (closed && inbound.isEmpty()) {
-      return null;
+    long millis = timeout.toMillis();
+    if (millis <= 0L) {
+      return inbound.poll();
     }
-    return inbound.poll(Math.max(1L, timeout.toMillis()), TimeUnit.MILLISECONDS);
+    return inbound.poll(millis, TimeUnit.MILLISECONDS);
   }
 
   /** WebSocket 容器线程入队一个入站帧。 */
   void offer(Inbound frame) {
     inbound.add(frame);
+  }
+
+  @Override
+  public boolean closed() {
+    return closed;
   }
 
   @Override

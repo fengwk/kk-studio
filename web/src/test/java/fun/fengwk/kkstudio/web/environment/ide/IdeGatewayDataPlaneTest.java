@@ -288,6 +288,11 @@ class IdeGatewayDataPlaneTest {
     }
 
     @Override
+    public boolean closed() {
+      return closed;
+    }
+
+    @Override
     public Inbound poll(Duration timeout) {
       if (closed) {
         return null;
