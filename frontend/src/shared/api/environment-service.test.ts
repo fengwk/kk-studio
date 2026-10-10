@@ -191,4 +191,68 @@ describe('environmentService', () => {
     expect(client.get).not.toHaveBeenCalled()
     expect(result).toEqual(card)
   })
+
+  it('creates an ide view via POST /harness/environments/{id}/ide/views', async () => {
+    const view = {
+      viewId: 'v-1',
+      environmentId: 'env-1',
+      directory: '/home/user/workspace',
+      entryUrl: 'https://env-1.ide.example.com/?workspace=xyz',
+    }
+    const client = {
+      get: vi.fn(async () => ({})),
+      post: vi.fn(async () => view),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    const result = await service.createIdeView('env-1', { viewId: 'v-1' })
+    expect(client.post).toHaveBeenCalledWith('/harness/environments/env-1/ide/views', { viewId: 'v-1' })
+    expect(result).toEqual(view)
+  })
+
+  it('changes ide view directory via PUT /harness/environments/{id}/ide/views/{viewId}/directory', async () => {
+    const updated = {
+      viewId: 'v-1',
+      environmentId: 'env-1',
+      directory: '/new/path',
+      entryUrl: null,
+    }
+    const client = {
+      get: vi.fn(async () => ({})),
+      post: vi.fn(async () => ({})),
+      put: vi.fn(async () => updated),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    const result = await service.changeIdeViewDirectory('env-1', 'v-1', { directory: '/new/path' })
+    expect(client.put).toHaveBeenCalledWith('/harness/environments/env-1/ide/views/v-1/directory', {
+      directory: '/new/path',
+    })
+    expect(result).toEqual(updated)
+  })
+
+  it('opens an ide view terminal via POST /harness/environments/{id}/ide/views/{viewId}/terminal', async () => {
+    const client = {
+      get: vi.fn(async () => ({})),
+      post: vi.fn(async () => ({})),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    await service.openIdeViewTerminal('env-1', 'v-1')
+    expect(client.post).toHaveBeenCalledWith('/harness/environments/env-1/ide/views/v-1/terminal')
+  })
+
+  it('closes an ide view via DELETE /harness/environments/{id}/ide/views/{viewId}', async () => {
+    const client = {
+      get: vi.fn(async () => ({})),
+      post: vi.fn(async () => ({})),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    await service.closeIdeView('env-1', 'v-1')
+    expect(client.delete).toHaveBeenCalledWith('/harness/environments/env-1/ide/views/v-1')
+  })
 })

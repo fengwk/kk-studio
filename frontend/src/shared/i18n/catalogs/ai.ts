@@ -1444,6 +1444,114 @@ export const aiCatalog = {
     'en-US': 'goal',
     'zh-CN': 'goal',
   },
+  'ai.runtime.command.files': {
+    'en-US': 'Open file explorer in workspace',
+    'zh-CN': '在工作区打开文件浏览',
+  },
+  'ai.runtime.command.filesLabel': {
+    'en-US': 'files',
+    'zh-CN': 'files',
+  },
+  'ai.runtime.command.shell': {
+    'en-US': 'Open terminal shell in workspace',
+    'zh-CN': '在工作区打开终端',
+  },
+  'ai.runtime.command.shellLabel': {
+    'en-US': 'shell',
+    'zh-CN': 'shell',
+  },
+  'ai.ide.title': {
+    'en-US': 'Workspace IDE',
+    'zh-CN': '工作区 IDE',
+  },
+  'ai.ide.collapse': {
+    'en-US': 'Collapse',
+    'zh-CN': '收起',
+  },
+  'ai.ide.close': {
+    'en-US': 'Close',
+    'zh-CN': '关闭',
+  },
+  'ai.ide.newTerminal': {
+    'en-US': 'New Terminal',
+    'zh-CN': '新终端',
+  },
+  'ai.ide.openDirectory': {
+    'en-US': 'Open Directory',
+    'zh-CN': '打开目录',
+  },
+  'ai.ide.openDirectoryTitle': {
+    'en-US': 'Open Host Directory',
+    'zh-CN': '打开宿主目录',
+  },
+  'ai.ide.directoryPathLabel': {
+    'en-US': 'Host Directory Path',
+    'zh-CN': '宿主目录路径',
+  },
+  'ai.ide.directoryPathPlaceholder': {
+    'en-US': 'e.g. /home/user/project',
+    'zh-CN': '例如 /home/user/project',
+  },
+  'ai.ide.confirm': {
+    'en-US': 'Confirm',
+    'zh-CN': '确认',
+  },
+  'ai.ide.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'ai.ide.dirtyError': {
+    'en-US': 'Cannot switch directory with unsaved changes. Please save or discard your changes first.',
+    'zh-CN': '当前有未保存的修改，无法切换目录。请先保存或放弃修改后再试。',
+  },
+  'ai.ide.dirtyCloseWarning': {
+    'en-US': 'Cannot close IDE view with unsaved changes. Please save or discard your changes first.',
+    'zh-CN': '当前有未保存的修改，无法关闭视图。请先保存或放弃修改后再试。',
+  },
+  'ai.ide.unavailable': {
+    'en-US': 'IDE service is currently unavailable for this environment.',
+    'zh-CN': '当前环境 IDE 不可用。',
+  },
+  'ai.ide.invalidOrigin': {
+    'en-US': 'IDE entry URL origin is invalid or untrusted.',
+    'zh-CN': 'IDE 入口地址 Origin 不合法或不安全。',
+  },
+  'ai.ide.loading': {
+    'en-US': 'Connecting to workspace IDE...',
+    'zh-CN': '正在连接工作区 IDE...',
+  },
+  'ai.ide.error': {
+    'en-US': 'Failed to open workspace IDE',
+    'zh-CN': '打开工作区 IDE 失败',
+  },
+  'ai.ide.offline': {
+    'en-US': 'Environment is currently offline',
+    'zh-CN': '环境当前处于离线状态',
+  },
+  'ai.ide.selectEnvironment': {
+    'en-US': 'Select Environment',
+    'zh-CN': '选择环境',
+  },
+  'ai.ide.noEnvironments': {
+    'en-US': 'No available environments',
+    'zh-CN': '暂无可用环境',
+  },
+  'ai.ide.environmentNotReady': {
+    'en-US': 'Environment "{{name}}" is not ready',
+    'zh-CN': '环境“{{name}}”尚未就绪',
+  },
+  'ai.ide.missingEnvironment': {
+    'en-US': 'Please select an environment to open IDE',
+    'zh-CN': '请选择一个环境以打开 IDE',
+  },
+  'ai.ide.changeDirectoryFailed': {
+    'en-US': 'Failed to change directory',
+    'zh-CN': '切换目录失败',
+  },
+  'ai.ide.terminalFailed': {
+    'en-US': 'Failed to create terminal',
+    'zh-CN': '创建终端失败',
+  },
   'ai.runtime.goal.title': {
     'en-US': 'Thread goal',
     'zh-CN': 'thread 目标',
