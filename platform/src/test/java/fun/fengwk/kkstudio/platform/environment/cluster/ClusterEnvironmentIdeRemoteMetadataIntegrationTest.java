@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
@@ -132,6 +133,61 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         () -> nodeAService.openView(ENV, openViewRequest()));
     assertEquals(0, received.get());
     assertTrue(localTransportA.commands.isEmpty());
+  }
+
+  @Test
+  void oversizedResponseBodyIsRejectedByTheTotalByteCap() throws IOException {
+    HttpServer oversizeServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    oversizeServer.createContext(
+        "/internal/environment-ide/",
+        exchange -> {
+          String body =
+              "{\"viewId\":\""
+                  + VIEW
+                  + "\",\"environmentId\":\""
+                  + ENV
+                  + "\",\"directory\":\""
+                  + "a".repeat(4096)
+                  + "\"}";
+          respond(exchange, 200, body);
+        });
+    oversizeServer.start();
+    try {
+      ClusterInternalClient smallClient =
+          new ClusterInternalClient(
+              HttpClient.newHttpClient(),
+              objectMapper,
+              new HmacClusterInternalAuthentication(
+                  SECRET, NODE_A, Clock.systemUTC(), Duration.ofSeconds(30), 1024),
+              Duration.ofSeconds(5),
+              1024);
+      StubRegistry registry = new StubRegistry();
+      registry.current =
+          Optional.of(
+              ClusterIdeOwnerRoute.remote(
+                  NODE_B, URI.create("http://127.0.0.1:" + oversizeServer.getAddress().getPort())));
+      EnvironmentIdeServiceImpl local =
+          new EnvironmentIdeServiceImpl(
+              localTransportA, new IdeOriginProperties(), new InMemoryIdeBootstrapTicketService());
+      ClusterEnvironmentIdeService service =
+          new ClusterEnvironmentIdeService(registry, smallClient, local);
+
+      assertThrows(
+          AiEnvironmentIdeUnavailableException.class,
+          () -> service.openView(ENV, openViewRequest()));
+    } finally {
+      oversizeServer.stop(0);
+    }
+  }
+
+  @Test
+  void oversizedMetadataRequestIsRejectedBeforeAnyNetworkCall() {
+    EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
+    request.setViewId(VIEW);
+    request.setDirectory("x".repeat(20 * 1024));
+
+    assertThrows(AiValidationException.class, () -> nodeAService.openView(ENV, request));
+    assertEquals(0, received.get());
   }
 
   private void handle(HttpExchange exchange) throws IOException {

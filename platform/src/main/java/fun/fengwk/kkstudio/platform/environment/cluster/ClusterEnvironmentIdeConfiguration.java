@@ -33,9 +33,8 @@ public class ClusterEnvironmentIdeConfiguration {
   public JdbcClusterNodeRegistry clusterNodeRegistry(
       JdbcTemplate jdbcTemplate,
       @Qualifier("nodeInstanceId") UUID nodeInstanceId,
-      Clock clock,
       ClusterProperties clusterProperties) {
-    return new JdbcClusterNodeRegistry(jdbcTemplate, nodeInstanceId, clock, clusterProperties);
+    return new JdbcClusterNodeRegistry(jdbcTemplate, nodeInstanceId, clusterProperties);
   }
 
   @Bean
