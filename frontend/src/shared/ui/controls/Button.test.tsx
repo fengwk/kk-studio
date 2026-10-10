@@ -76,6 +76,18 @@ describe('Button', () => {
     expect(button).not.toHaveClass('is-loading')
     expect(button.querySelector('.ui-loading-spinner')).toBeNull()
   })
+
+  it('ensures authoritative loading wins even when caller passes aria-busy="false"', () => {
+    // 回归验证：展开 rest 必须在权威 computed aria-busy 之前，caller 的 aria-busy="false" 不得覆盖 loading=true
+    render(
+      <Button loading aria-busy="false">
+        权威加载
+      </Button>,
+    )
+    const button = screen.getByRole('button', { name: '权威加载' })
+    expect(button).toHaveAttribute('aria-busy', 'true')
+    expect(button).toBeDisabled()
+  })
 })
 
 describe('IconButton', () => {
