@@ -117,6 +117,14 @@ kk-studio:
       origin-template: ${KK_STUDIO_IDE_ORIGIN_TEMPLATE:}
       # IDE bootstrap 入口路径（受控 endpoint，不接受浏览器提供的任意 proxy 地址）。
       bootstrap-path: ${KK_STUDIO_IDE_BOOTSTRAP_PATH:/__ide/bootstrap}
+  cluster:
+    # 本实例对其他节点可达的 HTTP(S) origin；留空表示单节点部署，只做本地交付，不注册也不接受跨节点路由。
+    internal-url: ${KK_STUDIO_CLUSTER_INTERNAL_URL:}
+    # 内部认证的共享 HMAC 秘密；留空表示不参与跨节点认证，绝不写入 URL、日志或 DTO。
+    secret: ${KK_STUDIO_CLUSTER_SECRET:}
+    # 本节点注册行租约与心跳间隔；心跳必须明显小于租约。
+    node-lease: ${KK_STUDIO_CLUSTER_NODE_LEASE:45s}
+    heartbeat-interval: ${KK_STUDIO_CLUSTER_HEARTBEAT_INTERVAL:15s}
   canvas:
     function:
       runtime:
