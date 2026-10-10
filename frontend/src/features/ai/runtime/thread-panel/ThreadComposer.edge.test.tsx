@@ -253,8 +253,8 @@ describe('ThreadComposer edge interactions', () => {
   it('navigates the plus palette with ArrowUp wrapping to the last enabled command', async () => {
     const user = userEvent.setup()
     const onCommand = vi.fn()
-    // NEW_SESSION_DRAFT 目标：tree/stop/new/debug/compact 禁用，ArrowUp 从首项环绕到
-    // 最后一个可用项 shortcuts。
+    // NEW_SESSION_DRAFT 目标：history/stop/new/debug/compact 禁用，ArrowUp 从首项环绕到
+    // 最后一个可用项 shell。
     const commands = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
     render(<Harness onCommand={onCommand} commands={commands} />)
     await user.click(screen.getByRole('button', { name: '打开命令表' }))
@@ -262,7 +262,7 @@ describe('ThreadComposer edge interactions', () => {
 
     await user.keyboard('{ArrowUp}')
     await user.keyboard('{Enter}')
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'shortcuts' }))
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'shell' }))
     expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
   })
 

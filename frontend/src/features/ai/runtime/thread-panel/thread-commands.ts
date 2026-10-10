@@ -41,7 +41,7 @@ export interface ThreadCommand {
 
 /**
  * The only user-visible command registry. Chat projects this
- * ordered list from the three durable PaneTarget states.
+ * ordered list from the four PaneTarget states.
  */
 export const THREAD_COMMANDS: ThreadCommand[] = [
   command('thread', ['branch', 'switch', 'session']),
@@ -103,6 +103,7 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'debug',
     'shortcuts',
     'goal',
+    'shell',
   ],
   BOUND_THREAD: THREAD_COMMANDS.map((item) => item.id),
 }

@@ -321,9 +321,9 @@ describe('AgentPane acceptance pipeline', () => {
 
   it('projects one command matrix for Chat and Canvas across all four targets', () => {
     const expected = {
-      NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts'],
-      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'rename-session', 'rename-thread', 'goal'],
-      FORK_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'goal'],
+      NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts', 'shell'],
+      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'rename-session', 'rename-thread', 'goal', 'shell'],
+      FORK_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'goal', 'shell'],
       BOUND_THREAD: THREAD_COMMANDS.map((command) => command.id),
     } as const
     for (const kind of Object.keys(expected) as Array<keyof typeof expected>) {
