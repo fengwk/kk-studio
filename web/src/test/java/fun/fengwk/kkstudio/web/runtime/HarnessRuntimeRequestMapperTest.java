@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
@@ -88,6 +90,55 @@ class HarnessRuntimeRequestMapperTest {
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
                 request(invalid, userCommand("bad"))));
+  }
+
+  /**
+   * 测试意图：Debug 请求的草稿选择复用 canonical model 与 branch Environment name 校验——model 必填、environmentName 可空
+   * canonical，非法值一律 fail closed。
+   */
+  @Test
+  void mapsModelRequestDebugDraftSelectionStrictly() {
+    HarnessModelRequestDebugRequestDTO request = new HarnessModelRequestDebugRequestDTO();
+    request.setModel(modelSelection());
+    request.setEnvironmentName("env-a");
+    HarnessRuntimeRequestMapper.ModelRequestDebugSelection selection =
+        HarnessRuntimeRequestMapper.toModelRequestDebugSelection(request);
+    assertEquals(new ModelSelection("openai", "gpt-5", "default"), selection.model());
+    assertEquals("env-a", selection.environmentName());
+
+    // 缺省与显式 null 都表示未选择 Environment。
+    HarnessModelRequestDebugRequestDTO unbound = new HarnessModelRequestDebugRequestDTO();
+    unbound.setModel(modelSelection());
+    assertNull(HarnessRuntimeRequestMapper.toModelRequestDebugSelection(unbound).environmentName());
+
+    // model 必填。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toModelRequestDebugSelection(
+                new HarnessModelRequestDebugRequestDTO()));
+
+    // canonical model 校验复用 ModelSelection。
+    HarnessModelRequestDebugRequestDTO blankVariant = new HarnessModelRequestDebugRequestDTO();
+    HarnessModelSelectionDTO blankModel = modelSelection();
+    blankModel.setVariant(" ");
+    blankVariant.setModel(blankModel);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toModelRequestDebugSelection(blankVariant));
+
+    // Environment name 复用 branch canonical 规则。
+    HarnessModelRequestDebugRequestDTO badEnvironment = new HarnessModelRequestDebugRequestDTO();
+    badEnvironment.setModel(modelSelection());
+    badEnvironment.setEnvironmentName("a/b");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toModelRequestDebugSelection(badEnvironment));
+
+    // 请求本身为 null 也必须 fail closed。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toModelRequestDebugSelection(null));
   }
 
   @Test

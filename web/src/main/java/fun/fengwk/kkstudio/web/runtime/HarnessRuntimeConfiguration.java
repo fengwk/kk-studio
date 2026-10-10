@@ -41,6 +41,8 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
@@ -361,8 +363,13 @@ public class HarnessRuntimeConfiguration {
   /** 结构化 Model Request Debug 只读服务：依赖完整 Runtime，因此只在 Web 组合根创建。 */
   @Bean
   public ModelRequestDebugService modelRequestDebugService(
-      HarnessRuntime runtime, DatabaseTurnResolver turnResolver, Clock clock) {
-    return new ModelRequestDebugService(runtime, turnResolver, clock);
+      HarnessRuntime runtime,
+      DatabaseTurnResolver turnResolver,
+      AgentDefinitionRepository agentDefinitionRepository,
+      AgentDefinitionConfigCodec agentDefinitionConfigCodec,
+      Clock clock) {
+    return new ModelRequestDebugService(
+        runtime, turnResolver, agentDefinitionRepository, agentDefinitionConfigCodec, clock);
   }
 
   /**

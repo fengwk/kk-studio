@@ -168,7 +168,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         return resolveCompaction(path, compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
-      return resolved(plan(path, clock.instant()));
+      return resolved(plan(path, path.baseSettings(), clock.instant()));
     } catch (Rejection rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
@@ -196,7 +196,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * projector 等基础设施或编程异常照常传播， 绝不伪装成 planning 失败。压缩路径不属于本入口。
    */
   public LiveTurnPlan planLive(UUID threadId, EntryPath path) {
-    return planLive(threadId, path, clock.instant());
+    return planLive(threadId, path, path.baseSettings(), clock.instant());
   }
 
   /**
@@ -204,11 +204,28 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * 宿主事实的「当前时间」替换为显式 {@code now}，供历史请求预览在所选 Entry 的真实时间点上重建。
    */
   public LiveTurnPlan planLive(UUID threadId, EntryPath path, Instant now) {
+    return planLive(threadId, path, path.baseSettings(), now);
+  }
+
+  /**
+   * 显式 settings 的只读 live 规划：与正式入口共用同一个 planner，只把 draft 的 Agent/Model/Environment/Goal 快照换成调用方 给出的
+   * {@link BranchSettings}；EntryPath 本身不承载、也不被写入任何 draft。
+   *
+   * <p>供 Debug 预览以 UI 当前草稿选择现算，绝不改变 Thread 的持久事实：不落 Entry、不动 cursor、不做 CAS、不发布 Package、也不触发 Daemon
+   * sync。
+   */
+  public LiveTurnPlan planLiveWithSettings(UUID threadId, EntryPath path, BranchSettings settings) {
+    return planLive(threadId, path, settings, clock.instant());
+  }
+
+  private LiveTurnPlan planLive(
+      UUID threadId, EntryPath path, BranchSettings settings, Instant now) {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(settings, "settings");
     Objects.requireNonNull(now, "now");
     try {
-      return plan(path, now);
+      return plan(path, settings, now);
     } catch (Rejection rejection) {
       return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
     }
@@ -243,8 +260,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return new TurnResolver.Resolved(plan.spec(), plan.contextWindow(), plan.spec().outputTokens());
   }
 
-  private LiveTurnPlan.Planned plan(EntryPath path, Instant now) {
-    BranchSettings settings = path.baseSettings();
+  private LiveTurnPlan.Planned plan(EntryPath path, BranchSettings settings, Instant now) {
     UUID sessionId = path.root().sessionId();
 
     AgentDefinition agent =
