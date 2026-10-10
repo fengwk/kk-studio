@@ -40,6 +40,8 @@ class DaemonCapabilityResultCodecTest {
   private static final String SHA_HELLO =
       "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
 
+  private static final int MAX_PAYLOAD_BYTES = DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES;
+
   private final DaemonCapabilityResultCodec codec = new DaemonCapabilityResultCodec();
 
   /** text / json 内容必须保持现有 wire shape，并且文本严格校验为 string。 */
@@ -55,7 +57,7 @@ class DaemonCapabilityResultCodecTest {
             false,
             "{}");
 
-    String payload = codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE);
+    String payload = codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES);
 
     assertTrue(payload.contains("\"callId\":\"call-1\""));
     assertTrue(payload.contains("\"error\":false"));
@@ -81,7 +83,7 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "call-2", List.of(new ResourceResultContent(uploaded)), false, "{}");
 
-    String payload = codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE);
+    String payload = codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES);
 
     assertTrue(payload.contains("\"type\":\"resource\""));
     assertTrue(payload.contains("\"uploadId\":\"" + uploadId + "\""));
@@ -120,7 +122,7 @@ class DaemonCapabilityResultCodecTest {
     EnvironmentCapabilityResult result =
         new EnvironmentCapabilityResult("call-rt", List.of(content), false, "{}");
 
-    String payload = codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE);
+    String payload = codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES);
     assertTrue(payload.contains("\"preview\":\"hello world\\n\""));
 
     EnvironmentCapabilityResult decoded =
@@ -137,7 +139,7 @@ class DaemonCapabilityResultCodecTest {
     EnvironmentCapabilityResult partial =
         new EnvironmentCapabilityResult(
             "p", List.of(new TextResultContent("hi"), new JsonResultContent("[1]")), false, "{}");
-    String payload = codec.encodeProgress(partial);
+    String payload = codec.encodeProgress(partial, MAX_PAYLOAD_BYTES);
     assertTrue(payload.contains("\"type\":\"text\""));
     assertTrue(payload.contains("\"type\":\"json\""));
     assertEquals(2, codec.decodeResult(payload).contents().size());
@@ -153,13 +155,15 @@ class DaemonCapabilityResultCodecTest {
                         new ResourceResultContent(
                             uploadedRef(UUID.randomUUID(), "text/plain", null, data))),
                     false,
-                    "{}")));
+                    "{}"),
+                MAX_PAYLOAD_BYTES));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.encodeProgress(
                 new EnvironmentCapabilityResult(
-                    "p", List.of(new BinaryResultContent("text/plain", data)), false, "{}")));
+                    "p", List.of(new BinaryResultContent("text/plain", data)), false, "{}"),
+                MAX_PAYLOAD_BYTES));
   }
 
   /** COMPLETED 编码预检先于一切上传：后置条目超预算时不得产生任何上传副作用。 */
@@ -176,7 +180,9 @@ class DaemonCapabilityResultCodecTest {
     DaemonProtocolException binaryError =
         assertThrows(
             DaemonProtocolException.class,
-            () -> codec.encodeCompleted(laterOverBudgetBinary, 4, NoopUploader.INSTANCE));
+            () ->
+                codec.encodeCompleted(
+                    laterOverBudgetBinary, 4, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
     assertTrue(binaryError.getMessage().contains("aggregate resource bytes exceed"));
 
     EnvironmentCapabilityResult laterOverBudgetResource =
@@ -196,7 +202,9 @@ class DaemonCapabilityResultCodecTest {
     DaemonProtocolException resourceError =
         assertThrows(
             DaemonProtocolException.class,
-            () -> codec.encodeCompleted(laterOverBudgetResource, 4, NoopUploader.INSTANCE));
+            () ->
+                codec.encodeCompleted(
+                    laterOverBudgetResource, 4, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
     assertTrue(resourceError.getMessage().contains("aggregate resource bytes exceed"));
 
     // 聚合超限：两个 3 字节 binary 在 4 字节预算下，第二个条目在预检阶段触发聚合错误。
@@ -210,7 +218,7 @@ class DaemonCapabilityResultCodecTest {
             "{}");
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.encodeCompleted(aggregateOver, 4, NoopUploader.INSTANCE));
+        () -> codec.encodeCompleted(aggregateOver, 4, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
   }
 
   /** binary 内容在终态编码阶段经上传端口直传，编码结果只保留返回引用。 */
@@ -230,7 +238,8 @@ class DaemonCapabilityResultCodecTest {
             (invocationId, mediaType, name, bytes) -> {
               uploadedMediaTypes.add(mediaType);
               return uploadedRef(uploadId, mediaType, name, bytes);
-            });
+            },
+            MAX_PAYLOAD_BYTES);
 
     assertEquals(List.of("text/plain"), uploadedMediaTypes);
     assertEquals(
@@ -254,7 +263,7 @@ class DaemonCapabilityResultCodecTest {
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class,
-            () -> codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE));
+            () -> codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
     assertTrue(error.getMessage().contains("must be uploaded to global storage"));
   }
 
@@ -274,7 +283,8 @@ class DaemonCapabilityResultCodecTest {
                     1024,
                     (invocationId, mediaType, name, bytes) -> {
                       throw new IOException("https://minio.local/bucket?X-Amz-Signature=secret");
-                    }));
+                    },
+                    MAX_PAYLOAD_BYTES));
     assertTrue(error.getMessage().contains("cannot upload resource content"));
     assertNoThrowableMessageContains(error, "X-Amz-Signature");
   }
@@ -294,23 +304,43 @@ class DaemonCapabilityResultCodecTest {
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class,
-            () -> codec.encodeCompleted(huge, 1024, NoopUploader.INSTANCE));
+            () -> codec.encodeCompleted(huge, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
     assertTrue(error.getMessage().contains("payload exceeds"));
   }
 
-  /** COMPLETED 编码的预算参数必须为正。 */
+  /** COMPLETED 编码的预算参数必须为正：资源字节预算与 payload 预算都严格校验。 */
   @Test
   void encodeCompletedValidatesBudget() {
     EnvironmentCapabilityResult text =
         new EnvironmentCapabilityResult("c", List.of(new TextResultContent("x")), false, "{}");
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.encodeCompleted(text, 0, NoopUploader.INSTANCE));
+        () -> codec.encodeCompleted(text, 0, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.encodeCompleted(text, -1, NoopUploader.INSTANCE));
+        () -> codec.encodeCompleted(text, -1, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
+    // payload 预算必须落在 (0, MAX_PAYLOAD_BYTES]：越界在编码前明确拒绝。
     assertThrows(
-        NullPointerException.class, () -> codec.encodeCompleted(null, 1024, NoopUploader.INSTANCE));
+        IllegalArgumentException.class,
+        () -> codec.encodeCompleted(text, 1024, NoopUploader.INSTANCE, 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.encodeCompleted(text, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES + 1));
+    assertThrows(
+        NullPointerException.class,
+        () -> codec.encodeCompleted(null, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
+  }
+
+  /** PROGRESS 编码同样要求 payload 预算落在硬上限内。 */
+  @Test
+  void encodeProgressValidatesPayloadBudget() {
+    EnvironmentCapabilityResult partial =
+        new EnvironmentCapabilityResult("p", List.of(new TextResultContent("x")), false, "{}");
+    assertThrows(IllegalArgumentException.class, () -> codec.encodeProgress(partial, 0));
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.encodeProgress(partial, MAX_PAYLOAD_BYTES + 1));
+    assertEquals(
+        1, codec.decodeResult(codec.encodeProgress(partial, MAX_PAYLOAD_BYTES)).contents().size());
   }
 
   /** detailsJson 为 null 时编码为空对象 details。 */
@@ -319,7 +349,9 @@ class DaemonCapabilityResultCodecTest {
     EnvironmentCapabilityResult result =
         new EnvironmentCapabilityResult("c", List.of(new TextResultContent("hi")), false, null);
     assertTrue(
-        codec.encodeCompleted(result, 1024, NoopUploader.INSTANCE).contains("\"details\":{}"));
+        codec
+            .encodeCompleted(result, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES)
+            .contains("\"details\":{}"));
   }
 
   /** PROGRESS 解码拒绝 resource；COMPLETED 接受。 */
@@ -516,7 +548,7 @@ class DaemonCapabilityResultCodecTest {
             "{}");
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.encodeCompleted(binary, 1024, NoopUploader.INSTANCE));
+        () -> codec.encodeCompleted(binary, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
 
     EnvironmentCapabilityResult resource =
         new EnvironmentCapabilityResult(
@@ -530,7 +562,7 @@ class DaemonCapabilityResultCodecTest {
             "{}");
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.encodeCompleted(resource, 1024, NoopUploader.INSTANCE));
+        () -> codec.encodeCompleted(resource, 1024, NoopUploader.INSTANCE, MAX_PAYLOAD_BYTES));
 
     String prefix =
         "{\"type\":\"resource\",\"uploadId\":\""
@@ -688,6 +720,69 @@ class DaemonCapabilityResultCodecTest {
       String message = current.getMessage();
       assertFalse(message != null && message.contains(sensitive));
       current = current.getCause();
+    }
+  }
+
+  /**
+   * payload 本身可放进 8 MiB，但加真实 envelope 动态外壳开销会超：必须在任何上传之前按整包预算拒绝，uploader 一次都不被调用。 正控证明同一 payload
+   * 在硬上限预算下可正常上传，说明差异来自外壳开销而非 payload 大小。
+   */
+  @Test
+  void encodeCompletedPreflightsEnvelopeBudgetBeforeUpload() {
+    String invocationId = "envelope-budget-" + "x".repeat(400);
+    byte[] data = "payload".getBytes(StandardCharsets.UTF_8);
+    AdderUploader measure = new AdderUploader();
+    String base =
+        codec.encodeCompleted(
+            new EnvironmentCapabilityResult(
+                invocationId,
+                List.of(
+                    new BinaryResultContent("application/octet-stream", data),
+                    new TextResultContent("")),
+                false,
+                "{}"),
+            1024,
+            measure,
+            DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES);
+    int textBytes =
+        DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES
+            - ResourceRef.utf8Length(base, "base")
+            - 1;
+    EnvironmentCapabilityResult result =
+        new EnvironmentCapabilityResult(
+            invocationId,
+            List.of(
+                new BinaryResultContent("application/octet-stream", data),
+                new TextResultContent("a".repeat(textBytes))),
+            false,
+            "{}");
+
+    int envelopeBudget =
+        new DaemonEnvelopeCodec().payloadBudget(DaemonMessageType.COMPLETED, invocationId);
+    assertTrue(envelopeBudget < DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES);
+
+    AdderUploader underBudget = new AdderUploader();
+    DaemonProtocolException error =
+        assertThrows(
+            DaemonProtocolException.class,
+            () -> codec.encodeCompleted(result, 1024, underBudget, envelopeBudget));
+    assertEquals(0, underBudget.calls);
+    assertTrue(error.getMessage().contains("payload exceeds"));
+
+    AdderUploader atHardLimit = new AdderUploader();
+    codec.encodeCompleted(
+        result, 1024, atHardLimit, DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES);
+    assertEquals(1, atHardLimit.calls);
+  }
+
+  /** 计数上传端口：返回固定形状的瞬时引用，用于证明预检是否触达上传。 */
+  private static final class AdderUploader implements DaemonResourceUploader {
+    private int calls;
+
+    @Override
+    public ResourceRef upload(String invocationId, String mediaType, String name, byte[] bytes) {
+      calls++;
+      return uploadedRef(UUID.randomUUID(), mediaType, name, bytes);
     }
   }
 

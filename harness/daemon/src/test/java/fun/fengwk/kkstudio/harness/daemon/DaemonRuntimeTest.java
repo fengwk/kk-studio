@@ -956,6 +956,34 @@ class DaemonRuntimeTest {
   }
 
   /**
+   * 能力文本落在「整包预算 &lt; text &lt; 8 MiB 硬上限」的临界 band 时同样必须整体丢弃：终态既要能整包放进共享 carrier， 也不能出现 final frame
+   * over-8M 逃逸。
+   */
+  @Test
+  void handoffDropsCapabilityTextWithinEnvelopeBudgetBand() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofSeconds(2));
+    tool.capturedTextOfLength(DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES - 64);
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-band", "handoff", "1.0.0", 30));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertTrue(terminal.get(0).payloadJson().contains("timed out"));
+    assertTrue(terminal.get(0).payloadJson().length() < 1024, "band 内正文必须整体丢弃而不是注入超限终态");
+    assertEquals(DaemonInvocationState.FAILED, journal.find("handoff-band").orElseThrow().state());
+  }
+
+  /**
    * 收尾窗口内能力自身失败时，能力失败事实接管终态正文，但仍保留运行时的裁决类型与原因。
    *
    * <p>调用方必须同时看到「为什么被收敛」（超时）与「能力为何没能给出结果」（发布失败），不能只看到其中一半。
@@ -3110,6 +3138,11 @@ class DaemonRuntimeTest {
     /** 让能力提交的已捕获输出超过 wire 载荷上限，用于验证运行时不会把它注入终态。 */
     private void oversizedCapturedText() {
       captured = "x".repeat(DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES + 1);
+    }
+
+    /** 让能力提交指定长度的已捕获输出，用于验证整包预算 band 的注入/丢弃。 */
+    private void capturedTextOfLength(int length) {
+      captured = "x".repeat(length);
     }
 
     private void failOnTerminate() {

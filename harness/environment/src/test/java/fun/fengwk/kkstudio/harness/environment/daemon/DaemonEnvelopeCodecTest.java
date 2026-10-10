@@ -1,13 +1,22 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
+import fun.fengwk.kkstudio.share.notification.NotificationPacket;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.UUID;
 
 /** Daemon envelope codec 的协议边界测试。 */
 class DaemonEnvelopeCodecTest {
@@ -157,6 +166,156 @@ class DaemonEnvelopeCodecTest {
         "{\"protocolVersion\":1.5,\"messageType\":\"READY\",\"environmentId\":\""
             + ID_TEXT
             + "\",\"payload\":{}}");
+  }
+
+  /** 精确 8 MiB 整包可 encode 并被共享 carrier 接受；+1 byte 同时被 encode 与 carrier 拒绝。 */
+  @Test
+  void enforcesExactSharedCarrierLimit() {
+    String invocationId = "limit";
+    int budget = codec.payloadBudget(DaemonMessageType.PROGRESS, invocationId);
+    ObjectNode payload = codec.createPayload();
+    payload.put("x", "a".repeat(budget - 8));
+
+    String json =
+        codec.encode(
+            new DaemonEnvelope(
+                DaemonProtocol.VERSION,
+                DaemonMessageType.PROGRESS,
+                ID,
+                invocationId,
+                payload.toString()));
+    assertEquals(DaemonEnvelopeCodec.MAX_ENVELOPE_UTF8_BYTES, ResourceRef.utf8Length(json, "json"));
+
+    UUID publisher = UUID.randomUUID();
+    byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+    NotificationPacket packet =
+        new NotificationPacket(publisher, null, "daemon.wire", UUID.randomUUID(), bytes);
+    assertEquals(DaemonEnvelopeCodec.MAX_ENVELOPE_UTF8_BYTES, packet.byteLength());
+    assertEquals(
+        NotificationCarrier.count(DaemonEnvelopeCodec.MAX_ENVELOPE_UTF8_BYTES),
+        NotificationCarrier.chunk(packet, 0).count());
+
+    byte[] plusOne = Arrays.copyOf(bytes, bytes.length + 1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new NotificationPacket(publisher, null, "daemon.wire", UUID.randomUUID(), plusOne));
+
+    ObjectNode tooBig = codec.createPayload();
+    tooBig.put("x", "a".repeat(budget - 7));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.encode(
+                new DaemonEnvelope(
+                    DaemonProtocol.VERSION,
+                    DaemonMessageType.PROGRESS,
+                    ID,
+                    invocationId,
+                    tooBig.toString())));
+  }
+
+  /** 多字节/引号/反斜杠/控制字符 invocationId 的预算按实际 encode 精确一致。 */
+  @Test
+  void budgetAccountsDynamicInvocationIdEscaping() {
+    for (String invocationId : new String[] {"中文-\"q\"-\\-😀", "a\"\\\n\tb", "   spaced   "}) {
+      int budget = codec.payloadBudget(DaemonMessageType.COMPLETED, invocationId);
+      ObjectNode atBudget = codec.createPayload();
+      atBudget.put("x", "a".repeat(budget - 8));
+      assertEquals(
+          DaemonEnvelopeCodec.MAX_ENVELOPE_UTF8_BYTES,
+          ResourceRef.utf8Length(
+              codec.encode(
+                  new DaemonEnvelope(
+                      DaemonProtocol.VERSION,
+                      DaemonMessageType.COMPLETED,
+                      ID,
+                      invocationId,
+                      atBudget.toString())),
+              "json"));
+
+      ObjectNode overBudget = codec.createPayload();
+      overBudget.put("x", "a".repeat(budget - 7));
+      assertThrows(
+          DaemonProtocolException.class,
+          () ->
+              codec.encode(
+                  new DaemonEnvelope(
+                      DaemonProtocol.VERSION,
+                      DaemonMessageType.COMPLETED,
+                      ID,
+                      invocationId,
+                      overBudget.toString())));
+    }
+  }
+
+  /** payloadFits 与 payloadBudget 一致，供运行时按真实 invocationId 判断注入。 */
+  @Test
+  void payloadFitsMatchesBudget() {
+    String invocationId = "fits";
+    int budget = codec.payloadBudget(DaemonMessageType.PROGRESS, invocationId);
+    ObjectNode ok = codec.createPayload();
+    ok.put("x", "a".repeat(budget - 8));
+    assertTrue(codec.payloadFits(DaemonMessageType.PROGRESS, invocationId, ok));
+    ObjectNode tooBig = codec.createPayload();
+    tooBig.put("x", "a".repeat(budget - 7));
+    assertFalse(codec.payloadFits(DaemonMessageType.PROGRESS, invocationId, tooBig));
+  }
+
+  /** 固定 UUID 外壳计数只适用于 scoped 结果，不能用于认证前 HELLO 或无调用心跳。 */
+  @Test
+  void rejectsBudgetRequestsForNonResultTypes() {
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.payloadBudget(DaemonMessageType.HELLO, "id"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.payloadFits(DaemonMessageType.HEARTBEAT, "id", codec.createPayload()));
+  }
+
+  /** decode 超限、非法 JSON、未知 messageType/字段都固定去敏：不 echo body sentinel，也不留 cause。 */
+  @Test
+  void decodeRejectsOversizeAndInvalidInputWithoutEchoingBody() {
+    String sentinel = "SENTINEL-SECRET-VALUE";
+    String oversize =
+        "{\"protocolVersion\":1,\"messageType\":\""
+            + sentinel
+            + "\",\"x\":\""
+            + "a".repeat(DaemonEnvelopeCodec.MAX_ENVELOPE_UTF8_BYTES)
+            + "\"}";
+    assertNoThrowableMessageContains(
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(oversize)), sentinel);
+
+    String invalidJson = "{\"protocolVersion\":" + sentinel + "}";
+    assertNoThrowableMessageContains(
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(invalidJson)), sentinel);
+
+    String unknownType =
+        current("\"messageType\":\"" + sentinel + "\",\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"payload\":{}}";
+    assertNoThrowableMessageContains(
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(unknownType)), sentinel);
+
+    String unknownField =
+        current(
+                "\"messageType\":\"READY\",\"environmentId\":\""
+                    + ID_TEXT
+                    + "\",\""
+                    + sentinel
+                    + "\":true,")
+            + "\"payload\":{}}";
+    assertNoThrowableMessageContains(
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(unknownField)), sentinel);
+
+    // 未配对代理项在解析前被拒绝，不进入 Jackson。
+    assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"p\":\"\uD800\"}"));
+  }
+
+  private static void assertNoThrowableMessageContains(Throwable error, String sensitive) {
+    Throwable current = error;
+    while (current != null) {
+      String message = current.getMessage();
+      assertFalse(message != null && message.contains(sensitive));
+      current = current.getCause();
+    }
   }
 
   private static String current(String fields) {

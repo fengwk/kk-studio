@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import okhttp3.OkHttpClient;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
@@ -1261,25 +1260,20 @@ public final class DaemonRuntime implements AutoCloseable {
    * <p>终态类型表达裁决原因（超时仍是 {@code FAILED}、取消仍是 {@code CANCELLED}，平台据此走既有的失败/取消收敛路径），正文表达本地事实。
    * 这样已捕获输出无需协议变更即可到达调用方，也绝不会把一次取消报告成 {@code COMPLETED}。
    *
-   * <p>注入的正文只来自能力结果的文本内容，与同一次调用原本会返回的工具结果正文完全一致：二进制/资源/JSON 内容不进入终态说明，因此不会出现 durable 日志之外的原始字节。超过单条
-   * wire 文本上限的正文被整体丢弃（只保留运行时自己的裁决原因），绝不截断成半个字符，也绝不因此丢终态。
+   * <p>注入的正文只来自能力结果的文本内容，与同一次调用原本会返回的工具结果正文完全一致：二进制/资源/JSON 内容不进入终态说明，因此不会出现 durable
+   * 日志之外的原始字节。注入后整包（含动态外壳开销）超出共享 carrier 预算的正文被整体丢弃（只保留运行时自己的裁决原因），绝不截断成半个字符，也绝不因此丢终态或产生超限帧。
    */
   private DaemonTerminalMessage withCapabilityText(
-      DaemonTerminalMessage base, String capabilityText) {
+      DaemonTerminalMessage base, String invocationId, String capabilityText) {
+    if (capabilityText == null || capabilityText.isBlank()) {
+      return base;
+    }
     String field = base.messageType() == DaemonMessageType.CANCELLED ? "reason" : "message";
-    String baseText = payloadText(base.payloadJson(), field);
-    String text =
-        capabilityText == null
-                || capabilityText.isBlank()
-                || ResourceRef.utf8LengthUpTo(
-                        capabilityText,
-                        "capabilityText",
-                        DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES)
-                    > DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES
-            ? baseText
-            : baseText + "\n" + capabilityText;
     ObjectNode payload = envelopeCodec.createPayload();
-    payload.put(field, text);
+    payload.put(field, payloadText(base.payloadJson(), field) + "\n" + capabilityText);
+    if (!envelopeCodec.payloadFits(base.messageType(), invocationId, payload)) {
+      return base;
+    }
     return new DaemonTerminalMessage(base.messageType(), payload.toString());
   }
 
@@ -1984,6 +1978,14 @@ public final class DaemonRuntime implements AutoCloseable {
         });
   }
 
+  /**
+   * 本次结果 payload 的可用 UTF-8 预算：由整包的动态外壳开销决定，使 PROGRESS/COMPLETED 整包都能落在共享 carrier
+   * 的单条逻辑消息预算内。environmentId 宽度恒定，因此断网或 invocation 已结束时同样可以计算。
+   */
+  private int resultPayloadBudget(DaemonMessageType messageType, String invocationId) {
+    return envelopeCodec.payloadBudget(messageType, invocationId);
+  }
+
   private final class InvocationListener implements EnvironmentCapabilityExecutionListener {
     private final RunningInvocation invocation;
 
@@ -2011,7 +2013,10 @@ public final class DaemonRuntime implements AutoCloseable {
         return;
       }
       try {
-        String payloadJson = resultCodec.encodeProgress(partial);
+        String payloadJson =
+            resultCodec.encodeProgress(
+                partial,
+                resultPayloadBudget(DaemonMessageType.PROGRESS, invocation.invocationId()));
         send(DaemonMessageType.PROGRESS, invocation.invocationId(), payloadJson);
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "partial");
@@ -2032,12 +2037,15 @@ public final class DaemonRuntime implements AutoCloseable {
       try {
         String payloadJson =
             resultCodec.encodeCompleted(
-                result, maxResourceBytes.get(), resourceUploader(invocation));
+                result,
+                maxResourceBytes.get(),
+                resourceUploader(invocation),
+                resultPayloadBudget(DaemonMessageType.COMPLETED, invocation.invocationId()));
         DaemonTerminalMessage completed =
             new DaemonTerminalMessage(DaemonMessageType.COMPLETED, payloadJson);
         // 处于超时/取消的延迟终态窗口时，用已捕获输出在同一裁决类型下收尾；否则按正常终态路径提交。
         if (!invocation.resolveHandoff(
-            runtime -> withCapabilityText(runtime, capturedText(result)),
+            runtime -> withCapabilityText(runtime, invocation.invocationId(), capturedText(result)),
             resolved -> commitTerminal(invocation.invocationId(), invocation, resolved))) {
           terminal(invocation.invocationId(), completed, null);
         }
@@ -2051,7 +2059,8 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonTerminalMessage failed =
           new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error));
       if (!invocation.resolveHandoff(
-          runtime -> withCapabilityText(runtime, safeFailureMessage(error)),
+          runtime ->
+              withCapabilityText(runtime, invocation.invocationId(), safeFailureMessage(error)),
           resolved -> commitTerminal(invocation.invocationId(), invocation, resolved))) {
         terminal(invocation.invocationId(), failed, null);
       }

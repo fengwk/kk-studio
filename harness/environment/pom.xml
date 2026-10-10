@@ -18,6 +18,11 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-common</artifactId>
         </dependency>
+        <!-- daemon wire 直接使用共享 carrier 的单条逻辑消息预算（NotificationLimits）作为唯一事实来源。 -->
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-share</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
