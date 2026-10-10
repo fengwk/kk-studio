@@ -655,7 +655,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(page.locator('.interaction-approval-tool-name')).toHaveText('bash')
   })
 
-  for (const width of [1280, 320]) {
+  for (const width of [1280, 580, 390, 320]) {
     test(`shared loading, empty and error feedback fits ${width}px and retains retry`, async ({ page }) => {
       let release!: () => void
       const gate = new Promise<void>((resolve) => { release = resolve })
@@ -663,7 +663,11 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       await mockPendingApi(page, { listGate: gate, empty: true, failFirstList: true, listFailureMessage: failureMessage })
       await page.setViewportSize({ width, height: 900 })
       await page.goto(HARNESS_URL)
-      await expect(page.locator('.state-block')).toHaveText('正在加载资源')
+      const loadingState = page.locator('.interactions-loading-state')
+      await expect(loadingState).toHaveAttribute('role', 'status')
+      await expect(loadingState).toContainText('正在加载资源')
+      await expect(loadingState.locator('.interactions-loading-spinner.animate-spin')).toBeVisible()
+      await expect(page.locator('.interactions-empty-state')).toHaveCount(0)
       await expect(page.getByRole('button', { name: '刷新', exact: true })).toBeDisabled()
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: test.info().outputPath(`interactions-loading-${width}.png`) })
@@ -671,10 +675,40 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       const error = page.locator('.state-block.danger')
       await expect(error).toHaveText(failureMessage)
       await expect(error).toHaveCSS('color', await resolveToken(page, '--danger'))
+      await expect(page.locator('.interactions-empty-state')).toHaveCount(0)
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: test.info().outputPath(`interactions-error-${width}.png`) })
       await page.getByRole('button', { name: '重试', exact: true }).click()
-      await expect(page.locator('.state-block')).toHaveText('暂无待处理项')
+      const emptyState = page.locator('.interactions-empty-state')
+      await expect(emptyState).toBeVisible()
+      await expect(page.locator('.state-block')).toHaveCount(0)
+      await expect(emptyState.locator('.interactions-empty-title')).toHaveText('暂无待处理事项')
+      await expect(emptyState.locator('.interactions-empty-description')).toHaveText(
+        '需要审批、补充输入或等待环境的请求会显示在这里。',
+      )
+      await expect(emptyState.locator('button')).toHaveCount(0)
+      const emptyStyles = await emptyState.evaluate((el) => {
+        const icon = el.querySelector<HTMLElement>('.interactions-empty-icon')!
+        const title = el.querySelector<HTMLElement>('.interactions-empty-title')!
+        const desc = el.querySelector<HTMLElement>('.interactions-empty-description')!
+        const iconStyle = getComputedStyle(icon)
+        return {
+          borderStyle: getComputedStyle(el).borderTopStyle,
+          iconWidth: iconStyle.width,
+          iconHeight: iconStyle.height,
+          iconBg: iconStyle.backgroundColor,
+          iconColor: iconStyle.color,
+          titleColor: getComputedStyle(title).color,
+          descColor: getComputedStyle(desc).color,
+        }
+      })
+      expect(emptyStyles.borderStyle).toBe('none')
+      expect(emptyStyles.iconWidth).toBe('40px')
+      expect(emptyStyles.iconHeight).toBe('40px')
+      expect(emptyStyles.iconBg).toBe(await resolveToken(page, '--green-soft'))
+      expect(emptyStyles.iconColor).toBe(await resolveToken(page, '--green-primary'))
+      expect(emptyStyles.titleColor).toBe(await resolveToken(page, '--fg'))
+      expect(emptyStyles.descColor).toBe(await resolveToken(page, '--fg-muted'))
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: test.info().outputPath(`interactions-empty-${width}.png`) })
     })
