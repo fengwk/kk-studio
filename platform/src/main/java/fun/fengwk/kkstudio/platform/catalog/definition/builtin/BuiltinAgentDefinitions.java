@@ -11,12 +11,17 @@ import java.util.List;
  * <p>这里持有全部内置 Agent 的保留名称、初始系统提示词与初始执行配置，是保留身份、启动初始化与生命周期保护共用的唯一事实来源；不引入插件
  * registry、配置扩展点或按名称散落的特判。内置 Agent 的名称与存在性由系统持有，用户只能编辑其 prompt/model/tools/skills 等普通执行配置。
  *
- * <p>当前只有压缩 Agent {@code compaction}：初始复用摘要 system prompt，无 tools/skills/subagents，模型显式未配置。
+ * <p>当前只有压缩 Agent {@code Compaction}：初始复用摘要 system prompt，无 tools/skills/subagents，模型显式未配置。
  */
 public final class BuiltinAgentDefinitions {
 
-  /** 压缩内置 Agent 的保留名称；压缩执行路径按此名称通过普通 Agent 目录读取定义。 */
-  public static final String COMPACTION_NAME = "compaction";
+  /**
+   * 压缩内置 Agent 的保留身份名称；压缩执行路径按此名称通过普通 Agent 目录读取定义。
+   *
+   * <p>这是普通 Agent 目录中的显示/身份名称，与 {@code JoinPurpose.COMPACTION} 的 wire token {@code compaction}
+   * 相互独立：后者是持久化与 wire 协议稳定性的一部分，不随此名称变化。
+   */
+  public static final String COMPACTION_NAME = "Compaction";
 
   private static final List<BuiltinAgent> DEFINITIONS =
       List.of(
