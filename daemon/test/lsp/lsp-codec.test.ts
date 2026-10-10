@@ -54,4 +54,19 @@ describe('TextFileCodec', () => {
     const invalidUtf8 = Buffer.from([0x30, 0x80, 0xbf])
     expect(() => TextFileCodec.decode(invalidUtf8)).toThrow(/invalid text encoding/)
   })
+
+  it('detects NUL characters inside BOM-decoded text', () => {
+    // UTF-16LE BOM followed by a NUL character (0x00 0x00)
+    const nulUtf16 = Buffer.from([0xff, 0xfe, 0x00, 0x00])
+    expect(() => TextFileCodec.decode(nulUtf16)).toThrow(/contains NUL character/)
+  })
+
+  it('handles empty or short byte arrays without throwing in starts check', () => {
+    const emptyDecoded = TextFileCodec.decode(Buffer.alloc(0))
+    expect(emptyDecoded.text).toBe('')
+    expect(emptyDecoded.bomLength).toBe(0)
+
+    const oneByte = TextFileCodec.decode(Buffer.from('a', 'utf8'))
+    expect(oneByte.text).toBe('a')
+  })
 })

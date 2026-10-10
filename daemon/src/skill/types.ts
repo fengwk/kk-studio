@@ -1,3 +1,8 @@
+export interface PrivateFs {
+  ensurePrivateDirectory(path: string): Promise<string>
+  writePrivateFile(path: string, data: string | Uint8Array): Promise<void>
+}
+
 export interface InstalledSkillPackage {
   packageName: string
   installedCommit: string
@@ -10,6 +15,7 @@ export interface SkillPackageInstallerOptions {
   connectMillis?: number
   readMillis?: number
   directoryMover?: DirectoryMover
+  privateFs?: PrivateFs
 }
 
 export class SkillSyncException extends Error {

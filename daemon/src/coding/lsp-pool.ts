@@ -12,8 +12,13 @@ export interface PoolEntry {
 interface Boot {
   generation: number
   promise: Promise<LspClient>
+  resolve: (client: LspClient) => void
+  reject: (error: unknown) => void
+  abort: AbortController
   client?: LspClient
-  reject: (err: unknown) => void
+  published: boolean
+  cancelled: boolean
+  waiters: number
 }
 
 interface Retiring {
@@ -29,6 +34,61 @@ export interface LspPoolOptions {
   initializeTimeout?: number
 }
 
+/**
+ * Structured reuse fingerprint: a JSON tuple so that array values containing separators can never
+ * collide (the previous `,`-join merged distinct configurations).
+ */
+export function poolKey(root: string, server: ResolvedServerConfig): string {
+  return JSON.stringify([
+    root,
+    server.id,
+    server.command,
+    server.extensions,
+    server.rootMarkers,
+    server.firstMatchMarkers,
+  ])
+}
+
+function abortError(): Error {
+  const error = new Error('Operation cancelled')
+  error.name = 'AbortError'
+  return error
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+/** Race a promise against an AbortSignal, resolving/rejecting with whichever settles first. */
+function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return promise
+  }
+  if (signal.aborted) {
+    return Promise.reject(abortError())
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(abortError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
 export class LspClientPool {
   private readonly discovery: LspDiscovery
   private readonly processes: ProcessSupervisor
@@ -39,6 +99,7 @@ export class LspClientPool {
   private readonly clients = new Map<string, PoolEntry>()
   private readonly boots = new Map<string, Boot>()
   private readonly retiring = new Map<string, Retiring>()
+  private readonly cleanupFailures: Error[] = []
 
   private generation = 0
   private closed = false
@@ -56,7 +117,7 @@ export class LspClientPool {
     this.initializeTimeout = options.initializeTimeout ?? 60_000
   }
 
-  async lease(file: string): Promise<PoolEntry> {
+  async lease(file: string, signal?: AbortSignal): Promise<PoolEntry> {
     const server = this.discovery.requireServer(file)
     const executable = this.discovery.requireExecutable(server)
     const root = this.discovery.workspaceRoot(server, file)
@@ -79,40 +140,47 @@ export class LspClientPool {
 
       const retirement = this.retiring.get(key)
       if (retirement) {
-        await retirement.promise
+        await raceAbort(retirement.promise, signal)
         continue
       }
 
       let boot = this.boots.get(key)
+      if (boot && boot.cancelled) {
+        // A cancelled boot is converging; wait for it to clear, then start a fresh one.
+        await boot.promise.catch(() => {})
+        continue
+      }
       if (!boot) {
-        let resolveClient!: (client: LspClient) => void
-        let rejectClient!: (err: unknown) => void
-        const bootPromise = new Promise<LspClient>((resolve, reject) => {
-          resolveClient = resolve
-          rejectClient = reject
-        })
-
-        boot = {
-          generation: this.generation,
-          promise: bootPromise,
-          reject: rejectClient,
-        }
+        boot = this.createBoot()
         this.boots.set(key, boot)
-
-        this.startBoot(key, boot, server, root, executable, resolveClient, rejectClient)
+        boot.waiters = 1
+        void this.startBoot(key, boot, server, root, executable)
+      } else {
+        boot.waiters++
       }
 
-      const client = await boot.promise
+      let client: LspClient
+      try {
+        client = await raceAbort(boot.promise, signal)
+      } catch (error) {
+        if (isAbortError(error)) {
+          boot.waiters--
+          if (boot.waiters <= 0 && !boot.published) {
+            // No remaining waiter: cancel the boot so the late process is cleaned up.
+            boot.cancelled = true
+            boot.abort.abort()
+          }
+        }
+        throw error
+      }
 
       if (this.closed) {
         throw new Error('LSP service is closed')
       }
-
       const entry = this.clients.get(key)
       if (!entry || entry.client !== client) {
         throw new Error('LSP service is closed')
       }
-
       entry.inFlight++
       entry.lastUsedAt = Date.now()
       return entry
@@ -166,6 +234,8 @@ export class LspClientPool {
     const pendingBoots = Array.from(this.boots.values())
     this.boots.clear()
     for (const boot of pendingBoots) {
+      boot.cancelled = true
+      boot.abort.abort()
       boot.reject(new Error('LSP service is closed'))
       if (boot.client) {
         stopping.push(boot.client)
@@ -173,16 +243,39 @@ export class LspClientPool {
     }
 
     const retirements = Array.from(this.retiring.values())
-    const stopPromises: Promise<void>[] = []
-    for (const r of retirements) {
-      stopPromises.push(this.stopRetirement(r))
+    const tasks: Promise<void>[] = []
+    for (const retirement of retirements) {
+      tasks.push(this.stopRetirement(retirement))
     }
-
     for (const client of stopping) {
-      stopPromises.push(client.stop(this.shutdownGrace).catch(() => {}))
+      tasks.push(this.stopClient(client))
     }
+    await Promise.all(tasks)
 
-    await Promise.all(stopPromises)
+    if (this.cleanupFailures.length > 0) {
+      throw new Error(
+        `LSP client pool failed to release all resources (${this.cleanupFailures.length} cleanup failure(s))`,
+      )
+    }
+  }
+
+  private createBoot(): Boot {
+    let resolve!: (client: LspClient) => void
+    let reject!: (error: unknown) => void
+    const promise = new Promise<LspClient>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return {
+      generation: this.generation,
+      promise,
+      resolve,
+      reject,
+      abort: new AbortController(),
+      published: false,
+      cancelled: false,
+      waiters: 0,
+    }
   }
 
   private async startBoot(
@@ -191,26 +284,15 @@ export class LspClientPool {
     server: ResolvedServerConfig,
     root: string,
     executable: string,
-    resolve: (client: LspClient) => void,
-    reject: (err: unknown) => void,
   ): Promise<void> {
     let client: LspClient | null = null
-    let published = false
     try {
       client = await LspClient.launch(server, root, executable, this.processes)
       boot.client = client
+      this.requireUsable(key, boot)
 
-      if (this.closed || boot.generation !== this.generation) {
-        this.boots.delete(key)
-        throw new Error('LSP client startup cancelled')
-      }
-
-      await client.initialize(this.initializeTimeout)
-
-      if (this.closed || boot.generation !== this.generation) {
-        this.boots.delete(key)
-        throw new Error('LSP client startup cancelled')
-      }
+      await client.initialize(this.initializeTimeout, boot.abort.signal)
+      this.requireUsable(key, boot)
 
       const entry: PoolEntry = {
         key,
@@ -219,15 +301,42 @@ export class LspClientPool {
         lastUsedAt: Date.now(),
       }
       this.clients.set(key, entry)
-      this.boots.delete(key)
-      published = true
-      resolve(client)
-    } catch (error) {
-      if (client && !published) {
-        await client.stop(this.shutdownGrace).catch(() => {})
+      if (this.boots.get(key) === boot) {
+        this.boots.delete(key)
       }
-      this.boots.delete(key)
-      reject(error)
+      boot.published = true
+      boot.resolve(client)
+    } catch (error) {
+      if (client) {
+        try {
+          await client.stop(this.shutdownGrace)
+        } catch (cleanupError) {
+          // Preserve the release failure; surface it at close and on the rejected boot.
+          const failure = toError(cleanupError)
+          this.cleanupFailures.push(failure)
+          boot.reject(
+            new AggregateError([error, failure], 'LSP client startup failed and cleanup failed'),
+          )
+          if (this.boots.get(key) === boot) {
+            this.boots.delete(key)
+          }
+          return
+        }
+      }
+      if (this.boots.get(key) === boot) {
+        this.boots.delete(key)
+      }
+      boot.reject(error)
+    }
+  }
+
+  /** Throws when the boot may no longer publish; the caller removes the registration and stops. */
+  private requireUsable(key: string, boot: Boot): void {
+    if (this.closed || boot.generation !== this.generation || boot.cancelled) {
+      if (this.boots.get(key) === boot) {
+        this.boots.delete(key)
+      }
+      throw new Error('LSP client startup cancelled')
     }
   }
 
@@ -285,10 +394,18 @@ export class LspClientPool {
     }
 
     for (const retirement of expired) {
-      this.stopRetirement(retirement)
+      void this.stopRetirement(retirement)
     }
 
     this.armIdleCheck()
+  }
+
+  private async stopClient(client: LspClient): Promise<void> {
+    try {
+      await client.stop(this.shutdownGrace)
+    } catch (error) {
+      this.cleanupFailures.push(toError(error))
+    }
   }
 
   private async stopRetirement(retirement: Retiring): Promise<void> {
@@ -298,7 +415,8 @@ export class LspClientPool {
     retirement.claimed = true
     try {
       await retirement.entry.client.stop(this.shutdownGrace)
-    } catch {
+    } catch (error) {
+      this.cleanupFailures.push(toError(error))
     } finally {
       this.retiring.delete(retirement.entry.key)
       retirement.resolve()
@@ -306,15 +424,6 @@ export class LspClientPool {
   }
 
   private key(root: string, server: ResolvedServerConfig): string {
-    return (
-      root +
-      '\n' +
-      server.id +
-      '\n' +
-      server.command.join(',') +
-      server.extensions.join(',') +
-      server.rootMarkers.join(',') +
-      server.firstMatchMarkers.join(',')
-    )
+    return poolKey(root, server)
   }
 }

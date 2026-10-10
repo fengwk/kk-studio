@@ -10,11 +10,14 @@ import type {
   ResourceUploader,
 } from '../../src/contracts.js'
 import {
+  awaitEvent,
   createJdtlsWrapper,
   fakeDaemonLspConfig,
   fakeServerConfig,
   readEvents,
 } from './fake-lsp-helper.js'
+import { LspDiscovery } from '../../src/coding/lsp-discovery.js'
+import { LspService } from '../../src/coding/lsp-service.js'
 import { TestProcessSupervisor } from './test-process-supervisor.js'
 
 describe('Lsp Capabilities Group End-to-End', () => {
@@ -203,6 +206,45 @@ describe('Lsp Capabilities Group End-to-End', () => {
     expect(r9.error).toBe(true)
     expect((r9.contents[0] as any).text).toContain('target must not be blank')
 
+    // Blank path string
+    const r10 = await gotoDef(
+      {
+        invocationId: 'call-10',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: '   ', line: 1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config),
+    )
+    expect(r10.error).toBe(true)
+    expect((r10.contents[0] as any).text).toContain('path is required')
+
+    // Non-existent path
+    const r11 = await gotoDef(
+      {
+        invocationId: 'call-11',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: path.join(tempDir, 'nonexistent.java'), line: 1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config),
+    )
+    expect(r11.error).toBe(true)
+    expect((r11.contents[0] as any).text).toContain('path does not exist')
+
+    // Invalid non-integer limit
+    const r12 = await wsSyms(
+      {
+        invocationId: 'call-12',
+        capabilityId: 'lsp.workspace-symbols',
+        arguments: { path: file, query: 'App', limit: -5 },
+        timeoutMillis: 5000,
+      },
+      createContext(config),
+    )
+    expect(r12.error).toBe(true)
+    expect((r12.contents[0] as any).text).toContain('limit must be a non-negative integer')
+
     // Assert that no server was started during validation failures
     const events = readEvents(transcript)
     expect(events).toHaveLength(0)
@@ -231,7 +273,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       {
         invocationId: 'call-def',
         capabilityId: 'lsp.goto-definition',
-        arguments: { path: file, line: 1 },
+        arguments: { path: file, line: 1, character: 0 },
         timeoutMillis: 5000,
       },
       createContext(config),
@@ -241,6 +283,9 @@ describe('Lsp Capabilities Group End-to-End', () => {
       type: 'text',
       text: `${file}:10:5`,
     })
+
+    // fileChanged triggers client.refresh on active leased client
+    group.fileChanged(file)
 
     // 2. Workspace symbols
     const symRes = await group.capabilities['lsp.workspace-symbols']!(
@@ -467,6 +512,69 @@ describe('Lsp Capabilities Group End-to-End', () => {
     expect(r7.error).toBe(true)
     expect((r7.contents[0] as any).text).toBe('Error: Operation cancelled')
 
+    // In-flight abort during workspace-symbols and java-decompile
+    const slowTranscript1 = path.join(tempDir, 'slow-abort-ws.jsonl')
+    const slowJdtls1 = createJdtlsWrapper(tempDir, 'slow-init', slowTranscript1)
+    const slowConfig1 = createConfig({
+      java: {
+        command: slowJdtls1.command,
+        extensions: slowJdtls1.extensions,
+        rootMarkers: slowJdtls1.rootMarkers,
+        firstMatchMarkers: slowJdtls1.firstMatchMarkers,
+      },
+    })
+    const slowGroup1 = createLspCapabilities(slowConfig1, supervisor)
+    try {
+      const acWs = new AbortController()
+      const pWs = slowGroup1.capabilities['lsp.workspace-symbols']!(
+        {
+          invocationId: 'c-abort-ws',
+          capabilityId: 'lsp.workspace-symbols',
+          arguments: { path: file, query: 'A' },
+          timeoutMillis: 10000,
+        },
+        createContext(slowConfig1, acWs.signal),
+      )
+      await awaitEvent(slowTranscript1, (e) => e.event === 'start')
+      acWs.abort()
+      const wsAbortRes = await pWs
+      expect(wsAbortRes.error).toBe(true)
+      expect((wsAbortRes.contents[0] as any).text).toBe('Error: Operation cancelled')
+    } finally {
+      await slowGroup1.close()
+    }
+
+    const slowTranscript2 = path.join(tempDir, 'slow-abort-dec.jsonl')
+    const slowJdtls2 = createJdtlsWrapper(tempDir, 'slow-init', slowTranscript2)
+    const slowConfig2 = createConfig({
+      java: {
+        command: slowJdtls2.command,
+        extensions: slowJdtls2.extensions,
+        rootMarkers: slowJdtls2.rootMarkers,
+        firstMatchMarkers: slowJdtls2.firstMatchMarkers,
+      },
+    })
+    const slowGroup2 = createLspCapabilities(slowConfig2, supervisor)
+    try {
+      const acDec = new AbortController()
+      const pDec = slowGroup2.capabilities['lsp.java-decompile']!(
+        {
+          invocationId: 'c-abort-dec',
+          capabilityId: 'lsp.java-decompile',
+          arguments: { path: file, target: 'Test.class' },
+          timeoutMillis: 10000,
+        },
+        createContext(slowConfig2, acDec.signal),
+      )
+      await awaitEvent(slowTranscript2, (e) => e.event === 'start')
+      acDec.abort()
+      const decAbortRes = await pDec
+      expect(decAbortRes.error).toBe(true)
+      expect((decAbortRes.contents[0] as any).text).toBe('Error: Operation cancelled')
+    } finally {
+      await slowGroup2.close()
+    }
+
     // Unexpected internal error handling
     const brokenSupervisor = {
       start: async () => ({
@@ -514,5 +622,21 @@ describe('Lsp Capabilities Group End-to-End', () => {
     )
     expect(r10.error).toBe(true)
     expect((r10.contents[0] as any).text).toContain('The capability failed while running')
+  })
+
+  it('exposes activeClientCount on LspService', async () => {
+    const transcript = path.join(tempDir, 'active-count.jsonl')
+    const server = fakeServerConfig('java', 'normal', transcript)
+    const discovery = LspDiscovery.of([server])
+    const service = new LspService(discovery, supervisor)
+    try {
+      expect(service.activeClientCount()).toBe(0)
+      const file = path.join(tempDir, 'App.java')
+      fs.writeFileSync(file, 'class App {}\n')
+      await service.gotoDefinition(file, 1, 0, 5000)
+      expect(service.activeClientCount()).toBe(1)
+    } finally {
+      await service.close()
+    }
   })
 })

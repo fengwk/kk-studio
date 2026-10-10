@@ -185,6 +185,27 @@ describe('LspClient Protocol & Handshake', () => {
     expect(locs).toEqual([`${file}:10:5`])
   })
 
+  it('accepts a Content-Length header fragmented across writes', async () => {
+    const { client } = await startClient('fragment-header')
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const locs = await client.definition(file, 1, 0, 5000)
+    expect(locs).toEqual([`${file}:10:5`])
+  })
+
+  it('fails closed instead of buffering an unbounded pre-header banner', async () => {
+    const transcript = path.join(tempDir, 'huge-banner-transcript.jsonl')
+    const config = fakeServerConfig('huge', 'huge-banner', transcript)
+    const client = await LspClient.launch(config, tempDir, config.command[0]!, supervisor)
+    clients.push(client)
+
+    const startedAt = Date.now()
+    await expect(client.initialize(60_000)).rejects.toThrow(/non-protocol output/)
+    expect(Date.now() - startedAt).toBeLessThan(5000)
+    expect(client.isAlive()).toBe(false)
+  })
+
   it('answers server-side requests and ignores notifications', async () => {
     const { client, transcript } = await startClient('server-requests')
     const file = path.join(tempDir, 'App.java')
@@ -332,5 +353,92 @@ describe('LspClient Protocol & Handshake', () => {
     await client.definition(file, 1, 0, 5000)
     expect(receivedMessages(transcript, 'textDocument/didChange')).toHaveLength(0)
     expect(receivedMessages(transcript, 'textDocument/didSave')).toHaveLength(0)
+  })
+
+  it('formats definitions with bare URI, custom URI scheme, and null items safely', async () => {
+    const { client } = await startClient('bare-definition')
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const results = await client.definition(file, 1, 0, 5000)
+    expect(results).toHaveLength(2)
+    expect(results[0]).toBe('custom://some/uri')
+    expect(results[1]).toBe('file://invalid host/path')
+  })
+
+  it('formats symbols with string kind and missing URI safely', async () => {
+    const { client } = await startClient('custom-symbols')
+    const results = await client.workspaceSymbols('query', 10, 5000)
+    expect(results).toHaveLength(1)
+    expect(results[0]).toBe('CustomSym (customInterface) - unknown')
+  })
+
+  it('falls back to server id for unknown file extension during sync and handles refresh', async () => {
+    const { client, transcript } = await startClient('normal')
+    const file = path.join(tempDir, 'custom.unknownext')
+    fs.writeFileSync(file, 'content\n')
+
+    // Test sync with unknown extension
+    client.sync(file)
+    const openEvent = await awaitEvent(
+      transcript,
+      (e) => e.event === 'recv' && e.message?.method === 'textDocument/didOpen',
+    )
+    expect(openEvent).toBeDefined()
+    expect(openEvent.message?.params?.textDocument?.languageId).toBe('fake')
+
+    // Refresh on open document
+    client.refresh(file)
+
+    // Refresh on non-open document is a no-op
+    client.refresh(path.join(tempDir, 'nonexistent.txt'))
+
+    // Stop client and verify refresh on dead client is a no-op
+    await client.stop(500)
+    client.refresh(file)
+  })
+
+  it('sync rejects missing file and binary file, and requests reject after client is stopped', async () => {
+    const { client } = await startClient('normal')
+    const missingFile = path.join(tempDir, 'missing.java')
+    expect(() => client.sync(missingFile)).toThrow('LSP request failed: the source file could not be read')
+
+    const binaryFile = path.join(tempDir, 'binary.java')
+    fs.writeFileSync(binaryFile, Buffer.from([0x00, 0x01, 0x02]))
+    expect(() => client.sync(binaryFile)).toThrow('LSP request failed: the source file is not valid text')
+
+    await client.stop(500)
+    expect(() => client.sync(binaryFile)).toThrow('LSP client stopped')
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    await expect(client.definition(file, 1, 0, 5000)).rejects.toThrow('LSP client stopped')
+  })
+
+  it('javaDecompile rejects invalid file URI, non-existent target, and directory target', async () => {
+    const transcript = path.join(tempDir, 'jdtls-invalid-target.jsonl')
+    const jdtlsConfig = createJdtlsWrapper(tempDir, 'normal', transcript)
+    const client = await LspClient.launch(jdtlsConfig, tempDir, jdtlsConfig.command[0]!, supervisor)
+    clients.push(client)
+    await client.initialize(5000)
+
+    // Invalid file URI
+    await expect(client.javaDecompile('file://invalid host/App.class', 5000)).rejects.toThrow(/invalid class target URI/)
+
+    // Non-existent file
+    const missing = path.join(tempDir, 'Missing.class')
+    await expect(client.javaDecompile(missing, 5000)).rejects.toThrow(/target is not a readable class file/)
+
+    // Directory
+    await expect(client.javaDecompile(tempDir, 5000)).rejects.toThrow(/target is not a readable class file/)
+  })
+
+  it('rejects immediately when signal is already aborted', async () => {
+    const { client } = await startClient('normal')
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const ac = new AbortController()
+    ac.abort()
+    await expect(client.definition(file, 1, 0, 5000, ac.signal)).rejects.toThrow(/Operation cancelled/)
   })
 })

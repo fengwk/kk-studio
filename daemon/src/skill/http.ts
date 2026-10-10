@@ -18,7 +18,7 @@ export class TimeoutSocketError extends Error {
   }
 }
 
-class TimeoutHttpAgent extends http.Agent {
+export class TimeoutHttpAgent extends http.Agent {
   private readonly connectMillis: number
   private readonly readMillis: number
   private readonly signal?: AbortSignal
@@ -39,7 +39,7 @@ class TimeoutHttpAgent extends http.Agent {
   }
 }
 
-class TimeoutHttpsAgent extends https.Agent {
+export class TimeoutHttpsAgent extends https.Agent {
   private readonly connectMillis: number
   private readonly readMillis: number
   private readonly signal?: AbortSignal

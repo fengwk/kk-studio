@@ -7,6 +7,7 @@ import type { DaemonConfig } from '../contracts.js'
 import {
   type DirectoryMover,
   type InstalledSkillPackage,
+  type PrivateFs,
   type SkillPackageInstallerOptions,
   SkillSyncException,
 } from './types.js'
@@ -18,8 +19,10 @@ import {
   canFallback,
   isAbortError,
 } from './http.js'
+import { loadNativePrivateFs } from './private-fs.js'
 
-const COMMIT_PATTERN = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/
+const SHA1_PATTERN = /^[0-9a-f]{40}$/
+const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const SUPPORTED_REPOSITORY_SCHEMES = new Set(['http', 'https', 'file'])
 
 class PackageLocks {
@@ -48,10 +51,13 @@ export class SkillPackageInstaller {
   private readonly _skillsRoot: string
   private readonly _stagingRoot: string
   private readonly _backupRoot: string
+  private readonly options: SkillPackageInstallerOptions
   private readonly connectMillis: number
   private readonly readMillis: number
   private readonly directoryMover: DirectoryMover
   private readonly packageLocks = new PackageLocks()
+  private privateFs?: PrivateFs
+  private initPromise?: Promise<void>
 
   constructor(
     skillsRoot: string,
@@ -62,6 +68,7 @@ export class SkillPackageInstaller {
     this._skillsRoot = path.resolve(skillsRoot)
     this._stagingRoot = path.resolve(stagingRoot)
     this._backupRoot = path.resolve(backupRoot)
+    this.options = options ?? {}
     this.connectMillis = options?.connectMillis ?? DEFAULT_CONNECT_MILLIS
     this.readMillis = options?.readMillis ?? DEFAULT_READ_MILLIS
     this.directoryMover =
@@ -69,16 +76,6 @@ export class SkillPackageInstaller {
       (async (source: string, target: string): Promise<void> => {
         await fs.promises.rename(source, target)
       })
-
-    createOwnerOnlyDirectorySync(this._skillsRoot)
-    createOwnerOnlyDirectorySync(this._stagingRoot)
-    createOwnerOnlyDirectorySync(this._backupRoot)
-
-    assertRealDirectorySync(this._skillsRoot, 'skillsRoot')
-    assertRealDirectorySync(this._stagingRoot, 'stagingRoot')
-    assertRealDirectorySync(this._backupRoot, 'backupRoot')
-
-    this.recoverArtifacts()
   }
 
   static open(config: DaemonConfig, options?: SkillPackageInstallerOptions): SkillPackageInstaller {
@@ -103,35 +100,53 @@ export class SkillPackageInstaller {
     return this._backupRoot
   }
 
-  recoverArtifacts(): void {
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        this.privateFs = this.options.privateFs ?? (await loadNativePrivateFs())
+        await this.privateFs.ensurePrivateDirectory(this._skillsRoot)
+        await this.privateFs.ensurePrivateDirectory(this._stagingRoot)
+        await this.privateFs.ensurePrivateDirectory(this._backupRoot)
+
+        await assertRealDirectory(this._skillsRoot, 'skillsRoot')
+        await assertRealDirectory(this._stagingRoot, 'stagingRoot')
+        await assertRealDirectory(this._backupRoot, 'backupRoot')
+
+        await this.recoverArtifacts()
+      })()
+    }
+    return this.initPromise
+  }
+
+  async recoverArtifacts(): Promise<void> {
+    // 1. Staging cleanup: only remove entries whose name matches ^<validPackageName>\.<uuid>(\.clone)?$
     try {
-      const entries = fs.readdirSync(this._stagingRoot)
+      const entries = await fs.promises.readdir(this._stagingRoot)
       for (const entry of entries) {
-        deleteRecursivelyQuietlySync(path.join(this._stagingRoot, entry))
+        if (parseStagingArtifact(entry)) {
+          await deleteRecursivelyQuietly(path.join(this._stagingRoot, entry))
+        }
       }
     } catch (error) {
-      throw new Error(`failed to clean staging root during recovery: ${error}`)
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error(`failed to clean staging root during recovery: ${(error as Error).message}`)
+      }
     }
 
+    // 2. Backup recovery: only consider names matching ^<validPackageName>\.<uuid>$
     try {
-      const entries = fs.readdirSync(this._backupRoot)
+      const entries = await fs.promises.readdir(this._backupRoot)
       for (const entry of entries) {
+        const parsed = parseBackupArtifact(entry)
+        if (!parsed) {
+          // Non-conforming names are LEFT UNTOUCHED (do not delete)
+          continue
+        }
         const fullPath = path.join(this._backupRoot, entry)
-        const lastDot = entry.lastIndexOf('.')
-        if (lastDot <= 0) {
-          deleteRecursivelyQuietlySync(fullPath)
-          continue
-        }
-        const pkgName = entry.slice(0, lastDot)
-        const uuidPart = entry.slice(lastDot + 1)
-        if (!isValidUuid(uuidPart) || !isValidPackageNameQuietly(pkgName)) {
-          deleteRecursivelyQuietlySync(fullPath)
-          continue
-        }
-        const target = path.join(this._skillsRoot, pkgName)
+        const target = path.join(this._skillsRoot, parsed.packageName)
         let targetExists = false
         try {
-          fs.lstatSync(target)
+          await fs.promises.lstat(target)
           targetExists = true
         } catch {
           targetExists = false
@@ -139,16 +154,19 @@ export class SkillPackageInstaller {
 
         if (!targetExists) {
           try {
-            fs.renameSync(fullPath, target)
-          } catch {
-            deleteRecursivelyQuietlySync(fullPath)
+            await this.directoryMover(fullPath, target)
+          } catch (err) {
+            // If restoring a matching backup via rename fails, DO NOT delete the backup — throw a clear safe failure
+            throw new Error(`failed to restore backup ${entry} to ${target}: ${(err as Error).message}`)
           }
         } else {
-          deleteRecursivelyQuietlySync(fullPath)
+          await deleteRecursivelyQuietly(fullPath)
         }
       }
     } catch (error) {
-      throw new Error(`failed to recover backup root during recovery: ${error}`)
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error(`failed to recover backup root during recovery: ${(error as Error).message}`)
+      }
     }
   }
 
@@ -164,6 +182,8 @@ export class SkillPackageInstaller {
     validateTargetCommit(targetCommit)
     validateRepositoryUrl(repositoryUrl)
     validateBranch(branch)
+
+    await this.ensureInitialized()
 
     return this.packageLocks.acquire(packageName, async () => {
       return this.doInstall(packageName, repositoryUrl, branch, targetCommit, credential, signal)
@@ -181,105 +201,332 @@ export class SkillPackageInstaller {
     checkAbort(signal)
 
     const uuid = randomUUID()
-    const cloneDir = path.join(this._stagingRoot, `${packageName}.${uuid}.clone`)
     const stagingDir = path.join(this._stagingRoot, `${packageName}.${uuid}`)
     const backupDir = path.join(this._backupRoot, `${packageName}.${uuid}`)
     const packageDir = path.join(this._skillsRoot, packageName)
 
     const cleanCredential = credential && credential.trim().length > 0 ? credential.trim() : null
+    const isFileScheme = repositoryUrl.toLowerCase().startsWith('file:')
+
+    if (isFileScheme) {
+      return this.installFromFileRepo(
+        packageName,
+        repositoryUrl,
+        branch,
+        targetCommit,
+        stagingDir,
+        backupDir,
+        packageDir,
+        signal,
+      )
+    }
+
+    return this.installFromHttpRepo(
+      packageName,
+      repositoryUrl,
+      branch,
+      targetCommit,
+      cleanCredential,
+      uuid,
+      stagingDir,
+      backupDir,
+      packageDir,
+      signal,
+    )
+  }
+
+  private async installFromFileRepo(
+    packageName: string,
+    repositoryUrl: string,
+    branch: string,
+    targetCommit: string,
+    stagingDir: string,
+    backupDir: string,
+    packageDir: string,
+    signal?: AbortSignal,
+  ): Promise<InstalledSkillPackage> {
+    checkAbort(signal)
+
+    let sourcePath: string
+    try {
+      sourcePath = fileURLToPath(repositoryUrl)
+    } catch {
+      throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
+    }
+
+    const dotGit = path.join(sourcePath, '.git')
+    let dotGitStat: fs.Stats | null = null
+    try {
+      dotGitStat = await fs.promises.lstat(dotGit)
+    } catch {
+      dotGitStat = null
+    }
+
+    let gitdir: string
+    if (dotGitStat && dotGitStat.isDirectory()) {
+      gitdir = dotGit
+    } else if (dotGitStat && dotGitStat.isFile()) {
+      const content = await fs.promises.readFile(dotGit, 'utf8')
+      const trimmed = content.trim()
+      const prefix = 'gitdir:'
+      if (!trimmed.startsWith(prefix)) {
+        throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
+      }
+      const rawTarget = trimmed.slice(prefix.length).trim()
+      gitdir = path.resolve(sourcePath, rawTarget)
+    } else {
+      try {
+        const headStat = await fs.promises.lstat(path.join(sourcePath, 'HEAD'))
+        if (headStat.isFile()) {
+          gitdir = sourcePath
+        } else {
+          throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
+        }
+      } catch {
+        throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
+      }
+    }
+
+    const commondirFile = path.join(gitdir, 'commondir')
+    let objectsGitdir = gitdir
+    try {
+      const commondirStat = await fs.promises.lstat(commondirFile)
+      if (commondirStat.isFile()) {
+        const commonRaw = (await fs.promises.readFile(commondirFile, 'utf8')).trim()
+        objectsGitdir = path.resolve(gitdir, commonRaw)
+      }
+    } catch {}
+
+    // Verify branch ref exists (parity with Java clone setBranch)
+    let branchResolved = false
+    try {
+      await git.resolveRef({ fs, dir: sourcePath, gitdir: objectsGitdir, ref: branch })
+      branchResolved = true
+    } catch {
+      if (gitdir !== objectsGitdir) {
+        try {
+          await git.resolveRef({ fs, dir: sourcePath, gitdir, ref: branch })
+          branchResolved = true
+        } catch {}
+      }
+    }
+    if (!branchResolved) {
+      throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
+    }
+
+    checkAbort(signal)
+
+    // Verify commit exists
+    try {
+      await git.readCommit({ fs, dir: sourcePath, gitdir: objectsGitdir, oid: targetCommit })
+    } catch {
+      throw new SkillSyncException(
+        'COMMIT_NOT_FOUND',
+        'Target commit could not be resolved from remote repository',
+      )
+    }
+
+    checkAbort(signal)
+
+    return this.materializeAndPublish(
+      packageName,
+      { dir: sourcePath, gitdir: objectsGitdir },
+      targetCommit,
+      stagingDir,
+      backupDir,
+      packageDir,
+      signal,
+    )
+  }
+
+  private async installFromHttpRepo(
+    packageName: string,
+    repositoryUrl: string,
+    branch: string,
+    targetCommit: string,
+    credential: string | null,
+    uuid: string,
+    stagingDir: string,
+    backupDir: string,
+    packageDir: string,
+    signal?: AbortSignal,
+  ): Promise<InstalledSkillPackage> {
+    checkAbort(signal)
+
+    const cloneDir = path.join(this._stagingRoot, `${packageName}.${uuid}.clone`)
+    await this.privateFs!.ensurePrivateDirectory(cloneDir)
 
     try {
-      await createOwnerOnlyDirectory(cloneDir)
+      const http = createGitHttpClient({
+        connectMillis: this.connectMillis,
+        readMillis: this.readMillis,
+        signal,
+      })
 
-      const isFileScheme = repositoryUrl.toLowerCase().startsWith('file:')
+      const onAuth = credential
+        ? (): { username: string; password: string } => ({
+            username: 'x-access-token',
+            password: credential,
+          })
+        : undefined
 
-      if (isFileScheme) {
-        await this.prepareFileClone(repositoryUrl, branch, targetCommit, cloneDir, signal)
-      } else {
-        await this.prepareHttpClone(
-          repositoryUrl,
-          branch,
-          targetCommit,
-          cleanCredential,
-          cloneDir,
-          signal,
-        )
-      }
-
-      checkAbort(signal)
-
-      let backedUp = false
       try {
-        await createOwnerOnlyDirectory(stagingDir)
-
-        await this.materializeTree(cloneDir, targetCommit, stagingDir, signal)
-
-        checkAbort(signal)
-
-        const commitFile = path.join(stagingDir, '.kkstudio-commit')
-        try {
-          await fs.promises.unlink(commitFile)
-        } catch {}
-        await fs.promises.writeFile(commitFile, `${targetCommit}\n`, {
-          encoding: 'utf8',
-          flag: 'wx',
-          mode: 0o600,
+        await git.clone({
+          fs,
+          http,
+          dir: cloneDir,
+          url: repositoryUrl,
+          ref: branch,
+          singleBranch: false,
+          noCheckout: true,
+          onAuth,
         })
-        await fs.promises.chmod(commitFile, 0o600)
-
-        checkAbort(signal)
-
-        let packageDirExists = false
-        try {
-          await fs.promises.lstat(packageDir)
-          packageDirExists = true
-        } catch {
-          packageDirExists = false
-        }
-
-        if (packageDirExists) {
-          await this.directoryMover(packageDir, backupDir)
-          backedUp = true
-        }
-
-        try {
-          await this.directoryMover(stagingDir, packageDir)
-        } catch (moveError) {
-          if (backedUp) {
-            try {
-              await this.directoryMover(backupDir, packageDir)
-            } catch (rollbackError) {
-              // Rollback failed; suppressed
-            }
-          }
-          throw new SkillSyncException(
-            'INSTALL_FAILED',
-            'Failed to swap installed package directory',
-            moveError,
-          )
-        }
-
-        if (backedUp) {
-          await deleteRecursivelyQuietly(backupDir)
-        }
-
-        return {
-          packageName,
-          installedCommit: targetCommit,
-          localPath: path.resolve(packageDir),
-        }
       } catch (error) {
-        if (error instanceof SkillSyncException) {
-          throw error
-        }
         if (isAbortError(error) || signal?.aborted) {
           const abortErr = new Error('Operation cancelled')
           abortErr.name = 'AbortError'
           throw abortErr
         }
-        throw new SkillSyncException('INSTALL_FAILED', 'Skill package installation failed', error)
-      } finally {
-        await deleteRecursivelyQuietly(stagingDir)
+        const code = classifyGitError(error)
+        throw new SkillSyncException(code, 'Git branch fetch failed', error)
+      }
+
+      checkAbort(signal)
+
+      let hasCommit = false
+      try {
+        await git.readCommit({
+          fs,
+          dir: cloneDir,
+          oid: targetCommit,
+        })
+        hasCommit = true
+      } catch {
+        hasCommit = false
+      }
+
+      if (!hasCommit) {
+        try {
+          await git.fetch({
+            fs,
+            http,
+            dir: cloneDir,
+            url: repositoryUrl,
+            ref: targetCommit,
+            singleBranch: true,
+            onAuth,
+          })
+        } catch (error) {
+          if (isAbortError(error) || signal?.aborted) {
+            const abortErr = new Error('Operation cancelled')
+            abortErr.name = 'AbortError'
+            throw abortErr
+          }
+          if (!canFallback(error)) {
+            const code = classifyGitError(error)
+            throw new SkillSyncException(code, 'Git remote fetch failed', error)
+          }
+        }
+      }
+
+      checkAbort(signal)
+
+      try {
+        await git.readCommit({
+          fs,
+          dir: cloneDir,
+          oid: targetCommit,
+        })
+      } catch {
+        throw new SkillSyncException(
+          'COMMIT_NOT_FOUND',
+          'Target commit could not be resolved from remote repository',
+        )
+      }
+
+      checkAbort(signal)
+
+      return await this.materializeAndPublish(
+        packageName,
+        { dir: cloneDir, gitdir: path.join(cloneDir, '.git') },
+        targetCommit,
+        stagingDir,
+        backupDir,
+        packageDir,
+        signal,
+      )
+    } finally {
+      await deleteRecursivelyQuietly(cloneDir)
+    }
+  }
+
+  private async materializeAndPublish(
+    packageName: string,
+    source: { dir: string; gitdir: string },
+    targetCommit: string,
+    stagingDir: string,
+    backupDir: string,
+    packageDir: string,
+    signal?: AbortSignal,
+  ): Promise<InstalledSkillPackage> {
+    let backedUp = false
+    try {
+      await this.privateFs!.ensurePrivateDirectory(stagingDir)
+
+      await this.materializeTree(source, targetCommit, stagingDir, signal)
+
+      checkAbort(signal)
+
+      const commitFile = path.join(stagingDir, '.kkstudio-commit')
+      try {
+        await fs.promises.unlink(commitFile)
+      } catch {}
+      await this.privateFs!.writePrivateFile(commitFile, `${targetCommit}\n`)
+
+      checkAbort(signal)
+
+      let packageDirExists = false
+      try {
+        await fs.promises.lstat(packageDir)
+        packageDirExists = true
+      } catch {
+        packageDirExists = false
+      }
+
+      if (packageDirExists) {
+        await this.directoryMover(packageDir, backupDir)
+        backedUp = true
+      }
+
+      try {
+        await this.directoryMover(stagingDir, packageDir)
+      } catch (moveError) {
+        if (backedUp) {
+          try {
+            await this.directoryMover(backupDir, packageDir)
+          } catch (rollbackError) {
+            throw new SkillSyncException(
+              'INSTALL_FAILED',
+              'Failed to swap installed package directory and rollback of the previous package failed',
+              rollbackError,
+            )
+          }
+        }
+        throw new SkillSyncException(
+          'INSTALL_FAILED',
+          'Failed to swap installed package directory',
+          moveError,
+        )
+      }
+
+      if (backedUp) {
+        await deleteRecursivelyQuietly(backupDir)
+      }
+
+      return {
+        packageName,
+        installedCommit: targetCommit,
+        localPath: path.resolve(packageDir),
       }
     } catch (error) {
       if (error instanceof SkillSyncException) {
@@ -292,192 +539,12 @@ export class SkillPackageInstaller {
       }
       throw new SkillSyncException('INSTALL_FAILED', 'Skill package installation failed', error)
     } finally {
-      await deleteRecursivelyQuietly(cloneDir)
-    }
-  }
-
-  private async prepareFileClone(
-    repositoryUrl: string,
-    branch: string,
-    targetCommit: string,
-    cloneDir: string,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    checkAbort(signal)
-
-    let sourcePath: string
-    try {
-      sourcePath = fileURLToPath(repositoryUrl)
-    } catch {
-      throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-    }
-
-    const dotGit = path.join(sourcePath, '.git')
-    let sourceGitDir: string
-    try {
-      const dotGitStat = await fs.promises.lstat(dotGit)
-      if (dotGitStat.isDirectory()) {
-        sourceGitDir = dotGit
-      } else {
-        sourceGitDir = sourcePath
-      }
-    } catch {
-      sourceGitDir = sourcePath
-    }
-
-    try {
-      const headStat = await fs.promises.lstat(path.join(sourceGitDir, 'HEAD'))
-      if (!headStat.isFile()) {
-        throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-      }
-    } catch {
-      throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-    }
-
-    try {
-      await git.resolveRef({
-        fs,
-        dir: sourcePath,
-        gitdir: sourceGitDir,
-        ref: branch,
-      })
-    } catch {
-      throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-    }
-
-    checkAbort(signal)
-
-    const cloneGit = path.join(cloneDir, '.git')
-    await fs.promises.cp(sourceGitDir, cloneGit, { recursive: true })
-
-    await this.ensureCommitCheckedOut(cloneDir, targetCommit)
-  }
-
-  private async prepareHttpClone(
-    repositoryUrl: string,
-    branch: string,
-    targetCommit: string,
-    credential: string | null,
-    cloneDir: string,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    checkAbort(signal)
-
-    const http = createGitHttpClient({
-      connectMillis: this.connectMillis,
-      readMillis: this.readMillis,
-      signal,
-    })
-
-    const onAuth = credential
-      ? (): { username: string; password: string } => ({
-          username: 'x-access-token',
-          password: credential,
-        })
-      : undefined
-
-    try {
-      await git.clone({
-        fs,
-        http,
-        dir: cloneDir,
-        url: repositoryUrl,
-        ref: branch,
-        singleBranch: false,
-        noCheckout: true,
-        onAuth,
-      })
-    } catch (error) {
-      if (isAbortError(error) || signal?.aborted) {
-        const abortErr = new Error('Operation cancelled')
-        abortErr.name = 'AbortError'
-        throw abortErr
-      }
-      const code = classifyGitError(error)
-      throw new SkillSyncException(code, 'Git branch fetch failed', error)
-    }
-
-    checkAbort(signal)
-
-    let hasCommit = false
-    try {
-      await git.readCommit({
-        fs,
-        dir: cloneDir,
-        oid: targetCommit,
-      })
-      hasCommit = true
-    } catch {
-      hasCommit = false
-    }
-
-    if (!hasCommit) {
-      try {
-        await git.fetch({
-          fs,
-          http,
-          dir: cloneDir,
-          url: repositoryUrl,
-          ref: targetCommit,
-          singleBranch: true,
-          onAuth,
-        })
-      } catch (error) {
-        if (isAbortError(error) || signal?.aborted) {
-          const abortErr = new Error('Operation cancelled')
-          abortErr.name = 'AbortError'
-          throw abortErr
-        }
-        if (!canFallback(error)) {
-          const code = classifyGitError(error)
-          throw new SkillSyncException(code, 'Git remote fetch failed', error)
-        }
-      }
-    }
-
-    checkAbort(signal)
-
-    await this.ensureCommitCheckedOut(cloneDir, targetCommit)
-  }
-
-  private async ensureCommitCheckedOut(cloneDir: string, targetCommit: string): Promise<void> {
-    try {
-      await git.readCommit({
-        fs,
-        dir: cloneDir,
-        oid: targetCommit,
-      })
-    } catch {
-      throw new SkillSyncException(
-        'COMMIT_NOT_FOUND',
-        'Target commit could not be resolved from remote repository',
-      )
-    }
-
-    try {
-      await git.checkout({
-        fs,
-        dir: cloneDir,
-        ref: targetCommit,
-        force: true,
-      })
-    } catch (error) {
-      throw new SkillSyncException('COMMIT_NOT_FOUND', 'Target commit could not be checked out', error)
-    }
-
-    try {
-      await git.readCommit({
-        fs,
-        dir: cloneDir,
-        oid: targetCommit,
-      })
-    } catch (error) {
-      throw new SkillSyncException('COMMIT_NOT_FOUND', 'Target commit could not be parsed as a commit', error)
+      await deleteRecursivelyQuietly(stagingDir)
     }
   }
 
   private async materializeTree(
-    cloneDir: string,
+    source: { dir: string; gitdir: string },
     targetCommit: string,
     stagingDir: string,
     signal?: AbortSignal,
@@ -486,7 +553,8 @@ export class SkillPackageInstaller {
 
     await git.walk({
       fs,
-      dir: cloneDir,
+      dir: source.dir,
+      gitdir: source.gitdir,
       trees: [git.TREE({ ref: targetCommit })],
       map: async (filepath, [entry]): Promise<string | undefined> => {
         checkAbort(signal)
@@ -506,7 +574,7 @@ export class SkillPackageInstaller {
               'Path traversal detected in package entry',
             )
           }
-          await createParentDirectoriesOwnerOnly(normalizedStaging, targetDir)
+          await this.createParentDirectories(normalizedStaging, targetDir)
           return filepath
         }
 
@@ -543,7 +611,7 @@ export class SkillPackageInstaller {
 
         const parent = path.dirname(targetFile)
         if (parent !== normalizedStaging) {
-          await createParentDirectoriesOwnerOnly(normalizedStaging, parent)
+          await this.createParentDirectories(normalizedStaging, parent)
         }
 
         const content = await entry.content()
@@ -554,10 +622,57 @@ export class SkillPackageInstaller {
           )
         }
 
-        await writeFileOwnerOnly(targetFile, content, mode === 0o100755)
+        // Refuse to overwrite if target already exists or is a symbolic link
+        let stat: fs.Stats | null = null
+        try {
+          stat = await fs.promises.lstat(targetFile)
+        } catch {
+          stat = null
+        }
+        if (stat !== null) {
+          throw new SkillSyncException(
+            'UNSAFE_PACKAGE_ENTRY',
+            'Target file already exists or is a symbolic link',
+          )
+        }
+
+        await this.privateFs!.writePrivateFile(targetFile, content)
+
+        // For executable entries (mode 100755):
+        // ONLY on POSIX, set the exec bit (chmod 0o700); on Windows rely on writePrivateFile DACL.
+        if (mode === 0o100755 && process.platform !== 'win32') {
+          await fs.promises.chmod(targetFile, 0o700)
+        }
+
         return filepath
       },
     })
+  }
+
+  private async createParentDirectories(root: string, target: string): Promise<void> {
+    const relative = path.relative(root, target)
+    if (!relative || relative === '.') return
+    const parts = relative.split(path.sep)
+    let current = root
+    for (const part of parts) {
+      current = path.join(current, part)
+      let stat: fs.Stats | null = null
+      try {
+        stat = await fs.promises.lstat(current)
+      } catch {
+        stat = null
+      }
+      if (stat !== null) {
+        if (stat.isSymbolicLink()) {
+          throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Symbolic link encountered in path')
+        }
+        if (!stat.isDirectory()) {
+          throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Path element is not a directory')
+        }
+      } else {
+        await this.privateFs!.ensurePrivateDirectory(current)
+      }
+    }
   }
 }
 
@@ -598,11 +713,19 @@ export function validatePackageName(packageName: unknown): asserts packageName i
 }
 
 export function validateTargetCommit(targetCommit: unknown): asserts targetCommit is string {
-  if (
-    targetCommit == null ||
-    typeof targetCommit !== 'string' ||
-    !COMMIT_PATTERN.test(targetCommit)
-  ) {
+  if (targetCommit == null || typeof targetCommit !== 'string') {
+    throw new SkillSyncException(
+      'INVALID_TARGET_COMMIT',
+      'Target commit must be 40 or 64 lowercase hex characters',
+    )
+  }
+  if (SHA256_PATTERN.test(targetCommit)) {
+    throw new SkillSyncException(
+      'INVALID_TARGET_COMMIT',
+      'Target commit must be a 40-character SHA-1 commit; SHA-256 commits are not supported by the local Git backend',
+    )
+  }
+  if (!SHA1_PATTERN.test(targetCommit)) {
     throw new SkillSyncException(
       'INVALID_TARGET_COMMIT',
       'Target commit must be 40 or 64 lowercase hex characters',
@@ -696,98 +819,10 @@ export function validatePackageEntryPath(pathString: string): void {
   }
 }
 
-export async function createParentDirectoriesOwnerOnly(root: string, target: string): Promise<void> {
-  const relative = path.relative(root, target)
-  if (!relative || relative === '.') return
-  const parts = relative.split(path.sep)
-  let current = root
-  for (const part of parts) {
-    current = path.join(current, part)
-    let stat: fs.Stats | null = null
-    try {
-      stat = await fs.promises.lstat(current)
-    } catch {
-      stat = null
-    }
-    if (stat !== null) {
-      if (stat.isSymbolicLink()) {
-        throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Symbolic link encountered in path')
-      }
-      if (!stat.isDirectory()) {
-        throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Path element is not a directory')
-      }
-    } else {
-      await fs.promises.mkdir(current, { mode: 0o700 })
-      await fs.promises.chmod(current, 0o700)
-    }
-  }
-}
-
-export async function writeFileOwnerOnly(
-  targetFile: string,
-  content: Uint8Array,
-  executable: boolean,
-): Promise<void> {
-  let stat: fs.Stats | null = null
-  try {
-    stat = await fs.promises.lstat(targetFile)
-  } catch {
-    stat = null
-  }
-  if (stat !== null) {
-    throw new SkillSyncException(
-      'UNSAFE_PACKAGE_ENTRY',
-      'Target file already exists or is a symbolic link',
-    )
-  }
-
-  await fs.promises.writeFile(targetFile, content, {
-    flag: 'wx',
-    mode: executable ? 0o700 : 0o600,
-  })
-  await fs.promises.chmod(targetFile, executable ? 0o700 : 0o600)
-}
-
-function createOwnerOnlyDirectorySync(dir: string): void {
-  let stat: fs.Stats | null = null
-  try {
-    stat = fs.lstatSync(dir)
-  } catch {
-    stat = null
-  }
-  if (!stat) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-    fs.chmodSync(dir, 0o700)
-    stat = fs.lstatSync(dir)
-  }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error(`directory path must be a real directory: ${dir}`)
-  }
-  fs.chmodSync(dir, 0o700)
-}
-
-export async function createOwnerOnlyDirectory(dir: string): Promise<void> {
+export async function assertRealDirectory(dir: string, name: string): Promise<void> {
   let stat: fs.Stats | null = null
   try {
     stat = await fs.promises.lstat(dir)
-  } catch {
-    stat = null
-  }
-  if (!stat) {
-    await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 })
-    await fs.promises.chmod(dir, 0o700)
-    stat = await fs.promises.lstat(dir)
-  }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error(`directory path must be a real directory: ${dir}`)
-  }
-  await fs.promises.chmod(dir, 0o700)
-}
-
-export function assertRealDirectorySync(dir: string, name: string): void {
-  let stat: fs.Stats | null = null
-  try {
-    stat = fs.lstatSync(dir)
   } catch {
     stat = null
   }
@@ -805,10 +840,30 @@ async function deleteRecursivelyQuietly(targetPath: string): Promise<void> {
   } catch {}
 }
 
-function deleteRecursivelyQuietlySync(targetPath: string): void {
-  try {
-    fs.rmSync(targetPath, { recursive: true, force: true })
-  } catch {}
+function parseStagingArtifact(entryName: string): { packageName: string; uuid: string } | null {
+  let name = entryName
+  if (name.endsWith('.clone')) {
+    name = name.slice(0, -6)
+  }
+  const lastDot = name.lastIndexOf('.')
+  if (lastDot <= 0) return null
+  const pkg = name.slice(0, lastDot)
+  const uuid = name.slice(lastDot + 1)
+  if (!isValidUuid(uuid) || !isValidPackageNameQuietly(pkg)) {
+    return null
+  }
+  return { packageName: pkg, uuid }
+}
+
+function parseBackupArtifact(entryName: string): { packageName: string; uuid: string } | null {
+  const lastDot = entryName.lastIndexOf('.')
+  if (lastDot <= 0) return null
+  const pkg = entryName.slice(0, lastDot)
+  const uuid = entryName.slice(lastDot + 1)
+  if (!isValidUuid(uuid) || !isValidPackageNameQuietly(pkg)) {
+    return null
+  }
+  return { packageName: pkg, uuid }
 }
 
 function isValidUuid(text: string | null | undefined): boolean {
