@@ -21,10 +21,8 @@ import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.AgentSkillReferenceDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
 import java.util.List;
@@ -171,7 +169,7 @@ public final class ModelRequestDebugService {
   /**
    * subagent binding 事实（name/description）来自本次规划的冻结 spec；当前配置声明再按同名 Agent definition 只读补齐。
    *
-   * <p>规划已保证该名称存在，所以此处查不到、或配置非法都说明 durable 事实已经不一致，必须明确失败而不是静默返回空配置。
+   * <p>声明读取时同名定义缺失或配置非法必须明确失败，不静默返回空配置。
    */
   private HarnessModelRequestDebugDTO.SubagentDTO subagent(SubagentBinding binding) {
     AgentDefinition definition = agentDefinitionRepository.getByName(binding.name());
@@ -183,8 +181,7 @@ public final class ModelRequestDebugService {
     dto.setName(binding.name());
     dto.setDescription(binding.description());
     dto.setTools(List.copyOf(config.getTools()));
-    dto.setSkills(
-        config.getSkills().stream().map(ModelRequestDebugService::skillReference).toList());
+    dto.setSkills(List.copyOf(config.getSkills()));
     dto.setSubagents(List.copyOf(config.getSubagents()));
     // canonical config JSON 只含 tools/skills/subagents/inheritParentEnvironment，不含任何凭据。
     dto.setConfigurationJson(agentConfigCodec.encode(config));
@@ -198,13 +195,6 @@ public final class ModelRequestDebugService {
       throw new IllegalStateException(
           "subagent has an invalid configuration: " + definition.getName(), error);
     }
-  }
-
-  private static AgentSkillReferenceDTO skillReference(SkillRefDTO reference) {
-    AgentSkillReferenceDTO dto = new AgentSkillReferenceDTO();
-    dto.setPackageName(reference.getPackageName());
-    dto.setName(reference.getName());
-    return dto;
   }
 
   private static HarnessModelRequestDebugDTO.CacheControlDTO cacheControl(

@@ -51,10 +51,10 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugServic
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.AgentSkillReferenceDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -478,7 +478,7 @@ class StudioHarnessThreadControllerTest {
     subagent.setName("coder");
     subagent.setDescription("Codes solutions.");
     subagent.setTools(List.of("read"));
-    AgentSkillReferenceDTO skillReference = new AgentSkillReferenceDTO();
+    SkillRefDTO skillReference = new SkillRefDTO();
     skillReference.setPackageName("pkg");
     skillReference.setName("sk");
     subagent.setSkills(List.of(skillReference));
