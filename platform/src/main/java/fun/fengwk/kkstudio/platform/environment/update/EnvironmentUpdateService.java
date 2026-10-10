@@ -5,6 +5,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentUpdateListener;
@@ -114,8 +118,26 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     if (updateRepository.findActive(environmentId).isPresent()) {
       throw new AiInUseException(RESOURCE, "an update is already in progress for this environment");
     }
-    if (!isReadyNow(environmentId)) {
-      throw new AiInUseException(RESOURCE, "environment is not ready for update");
+    EnvironmentConnection connection =
+        registry
+            .find(environmentId)
+            .filter(
+                candidate ->
+                    candidate.isReady(
+                        clock.instant(),
+                        Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())))
+            .orElseThrow(
+                () -> new AiInUseException(RESOURCE, "environment is not ready for update"));
+    DaemonEnvironmentInfo host = connection.daemonCapabilities().environment();
+    DaemonOperatingSystem operatingSystem = host.operatingSystem();
+    DaemonArchitecture architecture = host.architecture();
+    if (!DaemonUpdateArtifact.isSupported(operatingSystem, architecture)) {
+      throw new AiInUseException(
+          RESOURCE,
+          "no official daemon release for "
+              + DaemonUpdateArtifact.osSegment(operatingSystem)
+              + "-"
+              + architecture.wireValue());
     }
     if (gateway.server().activeInvocationCount(environmentId) > 0) {
       throw new AiInUseException(RESOURCE, "cannot update environment with in-flight invocations");
@@ -126,7 +148,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     }
     DaemonReleaseTarget target =
         releaseProvider
-            .resolveTarget()
+            .resolveTarget(operatingSystem, architecture)
             .orElseThrow(
                 () ->
                     new AiInUseException(RESOURCE, "the official daemon release is not available"));
