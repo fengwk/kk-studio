@@ -180,8 +180,6 @@ function toApplyTiming(value: SystemSettingsSchemaApplyTiming | null): ApplyTimi
       return 'nextInvocation'
     case 'NEXT_HTTP_REQUEST':
       return 'nextHttpRequest'
-    case 'NEXT_CHAT':
-      return 'nextChat'
     case 'RESTART':
       return 'restart'
     default:

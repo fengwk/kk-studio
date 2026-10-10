@@ -51,13 +51,13 @@ describe('system settings draft codec', () => {
 
   it('assembles a complete update with expectedVersion and correct wire types', () => {
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    draft.tool.defaultYolo = true
+    draft.tool.modelGatewayBusyRetryMillis = '6000'
     draft.aiRuntime.retryMaxRetries = '5'
     draft.aiRuntime.subagentMaxTotalConcurrency = '12'
     const update = assembleSettingsUpdate(draft, '0')
 
     expect(update.expectedVersion).toBe('0')
-    expect(update.tool.defaultYolo).toBe(true)
+    expect(update.tool.modelGatewayBusyRetryMillis).toBe('6000')
     expect(update.aiRuntime.retryMaxRetries).toBe(5)
     expect(update.aiRuntime.subagentMaxTotalConcurrency).toBe(12)
     expect(update.aiRuntime.retryMaxDelayMillis).toBe('60000')

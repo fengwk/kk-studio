@@ -46,7 +46,7 @@ describe('systemSettingsService', () => {
       expectedVersion: '0',
     }
     const updated = makeSettingsDto({ version: '1' })
-    updated.tool.defaultYolo = true
+    updated.tool.modelGatewayBusyRetryMillis = '6000'
     vi.mocked(client.put).mockResolvedValue(updated)
     const service = createSystemSettingsService(client)
 
@@ -76,6 +76,6 @@ describe('systemSettingsService', () => {
     expect(sent.advanced.processorLeaseDurationMillis).toBe('30000')
     expect(sent.advanced.applicationEventQueueCapacity).toBe(512)
     expect(sent.aiRuntime.retryMaxRetries).toBe(3)
-    expect(sent.tool.defaultYolo).toBe(false)
+    expect(sent.tool.modelGatewayBusyRetryMillis).toBe('5000')
   })
 })

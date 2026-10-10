@@ -23,7 +23,6 @@ const FIELD_TYPES = new Set<SystemSettingsSchemaFieldType>([
 const APPLY_TIMINGS = new Set<SystemSettingsSchemaApplyTiming>([
   'NEXT_INVOCATION',
   'NEXT_HTTP_REQUEST',
-  'NEXT_CHAT',
   'RESTART',
 ])
 

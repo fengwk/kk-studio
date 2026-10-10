@@ -20,7 +20,6 @@ export type PermissionAction = 'allow' | 'ask' | 'deny'
 export interface SystemSettingsToolDTO {
   /** permission key 为全局通配符 `*` 或模型可见工具名；键与数组顺序都由后端返回并原样回写。 */
   permission: Record<string, PermissionRuleDTO[]>
-  defaultYolo: boolean
   modelGatewayBusyRetryMillis: DecimalLong
   toolGatewayBusyRetryMillis: DecimalLong
   toolGatewayOverloadRetryMillis: DecimalLong
@@ -172,7 +171,6 @@ export type SystemSettingsSchemaFieldType =
 export type SystemSettingsSchemaApplyTiming =
   | 'NEXT_INVOCATION'
   | 'NEXT_HTTP_REQUEST'
-  | 'NEXT_CHAT'
   | 'RESTART'
 
 export interface SystemSettingsSchemaOption {

@@ -145,17 +145,16 @@ describe('system settings schema renderer', () => {
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'tool')
     // 抹掉 gateway 的显式 timing 并标 restart，模拟「只在卡片上回退重启徽标」。
-    section.groups[2]!.applyTiming = null
-    section.groups[2]!.restartRequired = true
+    section.groups[1]!.applyTiming = null
+    section.groups[1]!.restartRequired = true
     const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const cards = container.querySelectorAll('.settings-card')
-    expect(cards).toHaveLength(3)
-    // permission / yolo 不是 restart：无 restart 徽标；gateway 走 fallback 出现 restart 徽标。
+    expect(cards).toHaveLength(2)
+    // permission 不是 restart：无 restart 徽标；gateway 走 fallback 出现 restart 徽标。
     expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
-    expect(within(cards[1] as HTMLElement).queryByText('重启后生效')).toBeNull()
-    expect(within(cards[2] as HTMLElement).getByText('重启后生效')).toBeInTheDocument()
+    expect(within(cards[1] as HTMLElement).getByText('重启后生效')).toBeInTheDocument()
     expect(screen.queryByRole('note')).toBeNull()
   })
 
