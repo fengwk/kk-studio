@@ -182,6 +182,9 @@ export function TerminalPanel() {
     if (activeEnvironmentId === null || session === null) {
       return <div className="terminal-panel__empty">{t('shell.empty.selectEnvironment')}</div>
     }
+    if (environmentReady) {
+      return <div className="terminal-panel__empty">{t('shell.empty.waitingScreen')}</div>
+    }
     return <div className="terminal-panel__empty">{t('shell.empty.offline')}</div>
   })()
 

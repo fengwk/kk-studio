@@ -363,6 +363,20 @@ describe('TerminalPanel', () => {
     expect(screen.queryByText('未配置环境')).toBeNull()
   })
 
+  it('does not label a READY environment offline while waiting for its first screen', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([card({ id: READY_ID })])
+    setTerminal({
+      visible: true,
+      sessions: new Map([[READY_ID, session({ pending: true })]]),
+      activeEnvironmentId: READY_ID,
+    })
+    renderPanel()
+
+    expect(await screen.findByText('等待终端画面…')).toBeInTheDocument()
+    expect(screen.queryByText(/环境离线/)).toBeNull()
+    expect(screen.queryByRole('button', { name: '获取控制' })).toBeNull()
+  })
+
   it('shows the fixed error copy without echoing the message and keeps the empty state honest', async () => {
     vi.mocked(environmentService.listEnvironments).mockRejectedValue(new Error('env boom payload'))
     setTerminal({ visible: true })
@@ -569,7 +583,11 @@ describe('TerminalPanel', () => {
       hasControl: true,
     })
     setTerminal(
-      { visible: true, sessions: new Map([[OFFLINE_ID, other]]), activeEnvironmentId: OFFLINE_ID },
+      {
+        visible: true,
+        sessions: new Map([[READY_ID, frozen], [OFFLINE_ID, other]]),
+        activeEnvironmentId: OFFLINE_ID,
+      },
       controller,
     )
     rerenderPanel()

@@ -28,6 +28,10 @@ export const shellCatalog = {
     'zh-CN': '环境离线，仅就绪环境可启动新终端',
     'en-US': 'Environment offline. Only ready environments can start a new terminal',
   },
+  'shell.empty.waitingScreen': {
+    'zh-CN': '等待终端画面…',
+    'en-US': 'Waiting for the terminal screen…',
+  },
   'shell.status.running': {
     'zh-CN': '运行中',
     'en-US': 'Running',

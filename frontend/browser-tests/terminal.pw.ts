@@ -155,12 +155,18 @@ test.describe('Global terminal panel (offline harness)', () => {
     expect(copied).toContain('COPY_ME')
   })
 
-  test('copies via the copy event only, without the async clipboard API', async ({ page }) => {
-    // 移除 navigator.clipboard，证明复制只用原生 copy 事件，不依赖仅安全上下文可用的异步 API。
-    await page.addInitScript(() => {
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, get: () => undefined })
+  test('copies on an insecure HTTP origin without the async clipboard API', async ({ page, baseURL }) => {
+    if (baseURL === undefined) {
+      throw new Error('layout fixture base URL is unavailable')
+    }
+    // 只转发静态产物；非安全 HTTP 页面仍使用真实键盘与原生 copy 事件。
+    await page.route('http://terminal.test/**', async (route) => {
+      const source = new URL(route.request().url())
+      const response = await route.fetch({ url: new URL(source.pathname + source.search, baseURL).href })
+      await route.fulfill({ response })
     })
-    await page.goto(HARNESS)
+    await page.goto(`http://terminal.test${HARNESS}`)
+    expect(await page.evaluate(() => window.isSecureContext)).toBe(false)
     expect(await page.evaluate(() => navigator.clipboard === undefined)).toBe(true)
 
     await page.evaluate(() => window.__terminalHarness.watchCopy())

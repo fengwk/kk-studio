@@ -68,16 +68,16 @@ function buildView(version = 1, modes: TerminalInputModes = BASE_MODES): Termina
     version,
     cursorVisible: true,
     cursorShape: null,
-    inputModeRevision: 0,
+    inputModeRevision: 1,
     inputModes: modes,
-    lines: grid.lines.map((line, index) => ({ ...line, id: index })),
+    lines: grid.lines.map((line, index) => ({ ...line, id: index + 1 })),
   }
 }
 
 function buildSession(): TerminalSessionSnapshot {
   return {
     environmentId: ENVIRONMENT_ID,
-    identity: { daemonInstanceId: 'daemon-1', terminalId: TERMINAL_ID },
+    identity: { daemonInstanceId: 'dddddddd-0000-4000-8000-000000000001', terminalId: TERMINAL_ID },
     streamId: STREAM_ID,
     executable: '/bin/bash',
     status: 'RUNNING',
