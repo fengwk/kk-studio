@@ -36,6 +36,7 @@ column	agent_provider	version	type=bigint notnull=t default=0 generated= collati
 column	chat	agent_name	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	chat	archived_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
 column	chat	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	chat	environment_name	type=character varying(64) notnull=f default=<null> generated= collation="default"
 column	chat	id	type=uuid notnull=t default=<null> generated= collation=-
 column	chat	title	type=character varying(256) notnull=f default=<null> generated= collation="default"
 column	chat	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
@@ -249,6 +250,7 @@ constraint	agent_provider	ck_agent_provider_provider_type	CHECK (((provider_type
 constraint	agent_provider	ck_agent_provider_version_nonneg	CHECK ((version >= 0))
 constraint	chat	chat_pkey	PRIMARY KEY (id)
 constraint	chat	ck_chat_agent_name	CHECK ((((agent_name)::text !~ '^[[:space:]]'::text) AND ((agent_name)::text !~ '[[:space:]]$'::text) AND (char_length((agent_name)::text) > 0) AND (POSITION(('/'::text) IN (agent_name)) = 0)))
+constraint	chat	ck_chat_environment_name	CHECK (((environment_name IS NULL) OR (((environment_name)::text !~ '^[[:space:]]'::text) AND ((environment_name)::text !~ '[[:space:]]$'::text) AND (char_length((environment_name)::text) > 0) AND (POSITION(('/'::text) IN (environment_name)) = 0))))
 constraint	chat	ck_chat_version_nonneg	CHECK ((version >= 0))
 constraint	environment	ck_environment_install_config_object	CHECK (((install_config IS NULL) OR (jsonb_typeof(install_config) = 'object'::text)))
 constraint	environment	ck_environment_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))

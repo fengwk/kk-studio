@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,13 +29,12 @@ class PermissionContractsTest {
                 + " ?\",\"action\":\"allow\"}]}}");
     assertTrue(canonical.contains("\"other\":1"));
     assertEquals(PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BASH).get(0).action());
-    assertFalse(codec.decode("{\"permission\":null}").defaultYolo());
+    assertTrue(codec.decode("{\"permission\":null}").permission().isEmpty());
 
     for (String invalid :
         List.of(
             "[]",
             "not-json",
-            "{\"defaultYolo\":1}",
             "{\"permission\":\"invalid\"}",
             "{\"permission\":\"allow\"}",
             "{\"permission\":\"ask\"}",
@@ -97,7 +95,7 @@ class PermissionContractsTest {
     permission.put(PermissionKeyValidator.GLOBAL_KEY, globalRules);
     permission.put(BASH, toolRules);
 
-    ToolSettings settings = new ToolSettings(permission, false);
+    ToolSettings settings = new ToolSettings(permission);
 
     assertEquals(globalRules, settings.globalRules());
     assertEquals(toolRules, settings.rulesFor(BASH));
@@ -107,7 +105,7 @@ class PermissionContractsTest {
       invalidPermission.put(invalid, toolRules);
       assertThrows(
           IllegalArgumentException.class,
-          () -> new ToolSettings(invalidPermission, false),
+          () -> new ToolSettings(invalidPermission),
           String.valueOf(invalid));
     }
   }
@@ -122,7 +120,7 @@ class PermissionContractsTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("file?.txt", PermissionAction.ALLOW),
             new PermissionRule("secret", PermissionAction.DENY)));
-    ToolSettings settings = new ToolSettings(rules, false);
+    ToolSettings settings = new ToolSettings(rules);
 
     assertEquals(
         PermissionAction.ALLOW, evaluate(WRITE, "{\"path\":\"file1.txt\"}", settings).action());
@@ -140,7 +138,7 @@ class PermissionContractsTest {
                 BASH,
                 "{\"command\":\"\"}",
                 new ToolSettings(
-                    Map.of(BASH, List.of(new PermissionRule("*", PermissionAction.ASK))), false))
+                    Map.of(BASH, List.of(new PermissionRule("*", PermissionAction.ASK)))))
             .action());
   }
 
@@ -215,7 +213,7 @@ class PermissionContractsTest {
   private static ToolSettings settings(String toolName, PermissionRule... rules) {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put(toolName, List.of(rules));
-    return new ToolSettings(permission, false);
+    return new ToolSettings(permission);
   }
 
   /** path 规则夹具：把相对 fixture 根到 filesystem root（坐标即 fixture 文本）；其余形态原样评估。 */

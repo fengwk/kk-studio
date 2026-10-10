@@ -18,7 +18,7 @@ const STALE_DELAY = '2504'
 function createSettingsWorld(network) {
   let version = 7n
   const state = {
-    tool: { permission: { bash: [{ pattern: '*', action: 'ASK' }] }, defaultYolo: false },
+    tool: { permission: { bash: [{ pattern: '*', action: 'ASK' }] } },
     aiRuntime: {
       retryMaxRetries: 3,
       retryBackoffStrategy: 'EXPONENTIAL',

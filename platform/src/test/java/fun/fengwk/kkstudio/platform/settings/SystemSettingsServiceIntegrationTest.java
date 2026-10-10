@@ -36,7 +36,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     SystemSettingsDTO current = systemSettingsService.get();
 
     SystemSettingsUpdateDTO update = updateFrom(current, "0");
-    update.getTool().setDefaultYolo(true);
+    update.getTool().setModelGatewayBusyRetryMillis(6000L);
     update.getAiRuntime().setCompactionKeepRecentTokens(8_192);
     update.getStorageMedia().setUploadExpiresSeconds(7200L);
     // 配置只持久化；此测试不连接代理或重启任何运行实例。
@@ -45,7 +45,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
 
     SystemSettingsDTO updated = systemSettingsService.update(update);
     assertEquals("1", updated.getVersion());
-    assertEquals(true, updated.getTool().getDefaultYolo());
+    assertEquals(6000L, updated.getTool().getModelGatewayBusyRetryMillis());
     assertEquals(8_192, updated.getAiRuntime().getCompactionKeepRecentTokens());
     assertEquals(7200L, updated.getStorageMedia().getUploadExpiresSeconds());
     assertEquals("http://proxy:3128", updated.getNetwork().getProxyUrl());

@@ -102,8 +102,7 @@ class ToolExecutionGatewayPreflightTest {
         new ToolSettings(
             Map.of(
                 "*", List.of(new PermissionRule("*", PermissionAction.ASK)),
-                "host-tool", List.of(new PermissionRule("*", PermissionAction.DENY))),
-            false);
+                "host-tool", List.of(new PermissionRule("*", PermissionAction.DENY))));
     ToolGateway.PreflightResult result =
         preflight(
             new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR),
@@ -330,8 +329,7 @@ class ToolExecutionGatewayPreflightTest {
                 "*",
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
-                    new PermissionRule("repo/sub/src/**", PermissionAction.DENY))),
-            false);
+                    new PermissionRule("repo/sub/src/**", PermissionAction.DENY))));
     ToolGateway.PreflightResult result =
         environmentPreflight(environmentId, "{\"path\":\"/repo/sub/src/Main.java\"}", settings);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);

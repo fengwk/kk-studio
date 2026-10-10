@@ -300,10 +300,11 @@ class PermissionEvaluatorTest {
         codec.canonicalize(
             "{\"permission\":{\"write\":[{\"pattern\":\"*\",\"action\":\"ask\"}],"
                 + "\"bash\":[{\"pattern\":\"*\",\"action\":\"ask\"},{\"pattern\":\"git *\",\"action\":\"allow\"}]},"
-                + "\"defaultYolo\":true}");
+                + "\"unknownToolSetting\":true}");
     JsonNode root = objectMapper.readTree(canonical);
 
-    assertTrue(root.path("defaultYolo").asBoolean());
+    // canonicalize 保留未知 Tool 设置，只规范化 permission。
+    assertTrue(root.path("unknownToolSetting").asBoolean());
     assertTrue(root.path("permission").path("write").isArray());
     assertEquals("*", root.path("permission").path("write").get(0).path("pattern").asText());
     assertEquals("git *", root.path("permission").path("bash").get(1).path("pattern").asText());
@@ -343,6 +344,6 @@ class PermissionEvaluatorTest {
   }
 
   private static ToolSettings settings(Map<String, List<PermissionRule>> rules) {
-    return new ToolSettings(rules, false);
+    return new ToolSettings(rules);
   }
 }

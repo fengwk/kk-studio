@@ -807,11 +807,13 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
                 "providers:\n  - name: " + name + "\n    providerType: openai\n" + planned));
 
     // 计划后并发写入另一份完整 settings，推进版本；旧计划的 CAS 必须失败并整体回滚。
-    boolean concurrentYolo = !before.path("tool").path("defaultYolo").asBoolean();
+    long concurrentBusyRetry = before.path("tool").path("modelGatewayBusyRetryMillis").asLong() + 1;
     importYaml(
         mutateYaml(
             settingsYaml,
-            document -> settingsSection(document, "tool").put("defaultYolo", concurrentYolo)));
+            document ->
+                settingsSection(document, "tool")
+                    .put("modelGatewayBusyRetryMillis", concurrentBusyRetry)));
     JsonNode concurrent = getData("/api/settings");
 
     assertThrows(SystemSettingsVersionConflictException.class, () -> applier.apply(plan));

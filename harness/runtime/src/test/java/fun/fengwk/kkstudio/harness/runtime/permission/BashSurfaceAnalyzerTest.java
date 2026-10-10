@@ -138,8 +138,7 @@ class BashSurfaceAnalyzerTest {
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("echo *", PermissionAction.ALLOW),
-                    new PermissionRule("rm *", PermissionAction.DENY))),
-            false);
+                    new PermissionRule("rm *", PermissionAction.DENY))));
     String arguments = "{\"command\":\"echo ok && rm -rf tmp\",\"workdir\":\"/tmp/environment\"}";
 
     assertEquals(
@@ -184,6 +183,6 @@ class BashSurfaceAnalyzerTest {
   }
 
   private static ToolSettings settings(List<PermissionRule> bashRules) {
-    return new ToolSettings(Map.of(BASH, bashRules), false);
+    return new ToolSettings(Map.of(BASH, bashRules));
   }
 }

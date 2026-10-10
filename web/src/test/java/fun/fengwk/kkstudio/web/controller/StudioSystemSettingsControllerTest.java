@@ -41,7 +41,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .perform(get("/api/settings"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("0"))
-        .andExpect(jsonPath("$.data.tool.defaultYolo").value(false))
+        .andExpect(jsonPath("$.data.tool.modelGatewayBusyRetryMillis").value("5000"))
         .andExpect(jsonPath("$.data.tool.permission['bash'][0].pattern").value("*"))
         .andExpect(jsonPath("$.data.tool.permission['bash'][0].action").value("ask"))
         .andExpect(jsonPath("$.data.aiRuntime.retryBackoffStrategy").value("EXPONENTIAL"))
@@ -139,9 +139,9 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         // restartRequired section 标记：aiRuntime live，tool 不需要重启。
         .andExpect(jsonPath("$.data.sections[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[1].groups[2].key").value("tool.gateway"))
-        .andExpect(jsonPath("$.data.sections[1].groups[2].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[1].groups[2].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[1].groups[1].key").value("tool.gateway"))
+        .andExpect(jsonPath("$.data.sections[1].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[1].groups[1].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
         .andExpect(jsonPath("$.data.sections[2].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[2].groups[0].key").value("environment.runtime"))
@@ -169,26 +169,26 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "0");
-              body.withObject("tool").put("defaultYolo", true);
+              body.withObject("tool").put("modelGatewayBusyRetryMillis", 6000L);
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(first))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("1"))
-        .andExpect(jsonPath("$.data.tool.defaultYolo").value(true));
+        .andExpect(jsonPath("$.data.tool.modelGatewayBusyRetryMillis").value("6000"));
 
     // 再次 PUT 必须使用最新版本。
     String second =
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "1");
-              body.withObject("tool").put("defaultYolo", false);
+              body.withObject("tool").put("modelGatewayBusyRetryMillis", 7000L);
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(second))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("2"))
-        .andExpect(jsonPath("$.data.tool.defaultYolo").value(false));
+        .andExpect(jsonPath("$.data.tool.modelGatewayBusyRetryMillis").value("7000"));
   }
 
   @Test
@@ -197,7 +197,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "99");
-              update.withObject("tool").put("defaultYolo", true);
+              update.withObject("tool").put("modelGatewayBusyRetryMillis", 6000L);
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))

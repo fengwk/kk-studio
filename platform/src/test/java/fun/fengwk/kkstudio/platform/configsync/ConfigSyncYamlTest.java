@@ -191,7 +191,7 @@ class ConfigSyncYamlTest {
   @Test
   void removeUnknownPropertiesKeepsDynamicMapKeysAndPrunesOnlyUnknownLeaves() {
     Map<String, Object> tool = new LinkedHashMap<>();
-    tool.put("defaultYolo", true);
+    tool.put("modelGatewayBusyRetryMillis", 5000L);
     tool.put("bogus", 1);
     tool.put(
         "permission",
@@ -204,7 +204,7 @@ class ConfigSyncYamlTest {
     assertEquals(List.of("settings.tool.bogus", "settings.tool.permission.bash[0].extra"), removed);
     @SuppressWarnings("unchecked")
     Map<String, Object> result = (Map<String, Object>) cleaned;
-    assertEquals(Boolean.TRUE, result.get("defaultYolo"));
+    assertEquals(5000L, result.get("modelGatewayBusyRetryMillis"));
     assertNotNull(result.get("permission"));
     assertFalse(result.containsKey("bogus"));
   }

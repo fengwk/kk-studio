@@ -783,6 +783,19 @@ update chat set archived_at = now() where id = pg_temp.uid(1300);
 select pg_temp.assert_true('archived Chats leave the default list but stay queryable',
     (select count(*) = 0 from chat where id = pg_temp.uid(1300) and archived_at is null)
     and (select count(*) = 1 from chat where id = pg_temp.uid(1300) and archived_at is not null));
+select pg_temp.assert_true('chat environment_name is nullable with no default',
+    (select is_nullable = 'YES' and column_default is null
+        from information_schema.columns
+        where table_name = 'chat' and column_name = 'environment_name'));
+update chat set environment_name = 'install-fixture' where id = pg_temp.uid(1300);
+select pg_temp.assert_true('chat accepts a canonical environment name reference',
+    (select environment_name = 'install-fixture' from chat where id = pg_temp.uid(1300)));
+select pg_temp.rejects('chat environment_name rejects a slash',
+    $$update chat set environment_name = 'a/b' where id = pg_temp.uid(1300)$$, '23514',
+    'ck_chat_environment_name');
+select pg_temp.rejects('chat environment_name rejects surrounding whitespace',
+    $$update chat set environment_name = ' a' where id = pg_temp.uid(1300)$$, '23514',
+    'ck_chat_environment_name');
 select pg_temp.rejects('a Chat Session blocks deleting its Chat',
     $$delete from chat where id=pg_temp.uid(1300)$$, '23503', 'fk_chat_session_chat');
 

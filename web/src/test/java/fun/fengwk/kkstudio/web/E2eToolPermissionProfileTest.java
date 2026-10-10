@@ -33,15 +33,12 @@ class E2eToolPermissionProfileTest {
    */
   @Test
   void productionDefaultKeepsReadUnrestricted() {
-    ToolSettings settings =
-        new ToolSettings(
-            SystemSettings.Tool.DEFAULT.permission(), SystemSettings.Tool.DEFAULT.defaultYolo());
+    ToolSettings settings = new ToolSettings(SystemSettings.Tool.DEFAULT.permission());
 
     assertEquals(ASK_ALL, settings.rulesFor("write"));
     assertEquals(ASK_ALL, settings.rulesFor("edit"));
     assertEquals(ASK_ALL, settings.rulesFor("bash"));
     assertTrue(settings.rulesFor("read").isEmpty(), "production default must not restrict read");
-    assertFalse(settings.defaultYolo());
   }
 
   /**
