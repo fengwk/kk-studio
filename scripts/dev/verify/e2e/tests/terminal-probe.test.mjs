@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { inputDigest, resizeDigest, TerminalProbe } from '../lib/terminal-probe.mjs'
+import { inputDigest, resizeDigest, TerminalProbe, openRunningTerminal } from '../lib/terminal-probe.mjs'
 import {
   NotificationPacket,
   carrierChunk,
@@ -157,6 +157,48 @@ function sendAttached(probe, socket, overrides = {}) {
   socket.deliver(attached(overrides, frame))
   return frame
 }
+
+test('running baseline restarts an ended session once through expectedExited', async () => {
+  const { probe, socket } = openProbe()
+  let opens = 0
+  socket.onSend = (logical) => {
+    const command = logical.command
+    if (command?.type !== 'OPEN') return
+    opens++
+    if (opens === 1) {
+      assert.equal(command.payload.expectedExited, null)
+      const ended = attached({}, command.requestId)
+      ended.event.payload.status = 'FAILED'
+      socket.deliver(ended)
+    } else {
+      assert.deepEqual(command.payload.expectedExited, { daemonInstanceId: DAEMON, terminalId: TERMINAL })
+      socket.deliver(attached({
+        identity: { daemonInstanceId: DAEMON, terminalId: '88888888-8888-4888-8888-888888888888' },
+      }, command.requestId))
+    }
+  }
+  try {
+    const result = await openRunningTerminal(probe, 1_000)
+    assert.equal(result.status, 'RUNNING')
+    assert.notEqual(result.terminalId, TERMINAL)
+    assert.equal(opens, 2)
+  } finally { await probe.close() }
+})
+
+test('attach request error fails promptly rather than being hidden as a timeout', async () => {
+  const { probe, socket } = openProbe()
+  try {
+    const requestId = probe.open()
+    socket.deliver({
+      version: 2, type: 'shell.event', event: {
+        version: 1, requestId, environmentId: ENV, viewerId: VIEWER, identity: null,
+        type: 'ERROR', payload: { code: 'ROUTE_UNAVAILABLE', disposition: 'NOT_EXECUTED' },
+      },
+    })
+    await assert.rejects(() => probe.waitAttached(requestId, 1_000),
+      /attach rejected: ROUTE_UNAVAILABLE\/NOT_EXECUTED/)
+  } finally { await probe.close() }
+})
 
 function writerChangedEvent(requestId, result, identity = { daemonInstanceId: DAEMON, terminalId: TERMINAL }) {
   return {

@@ -7,6 +7,7 @@ import path from 'node:path'
 
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import { redactSecrets } from './redact.mjs'
+import { sleep } from './http.mjs'
 
 export const NODE_IDS = ['a', 'b']
 
@@ -50,6 +51,22 @@ export function assertDistributedContext(ctx) {
       throw new Error(`case '${ctx.caseId}' is missing base URL for node ${node}`)
     }
   }
+}
+
+/** DB 可读不代表 LISTEN 已恢复；跨节点命令必须等通知总线也进入健康态。 */
+export async function waitForNodeHealth(ctx, node, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const response = await ctx.callNode(node, 'GET', '/actuator/health', undefined,
+        Math.min(2_000, deadline - Date.now()))
+      if (response.json?.status === 'UP') return
+    } catch {
+      // 只轮询无副作用的恢复事实；不重发终端命令或业务提交。
+    }
+    await sleep(Math.min(100, Math.max(0, deadline - Date.now())))
+  }
+  throw new Error(`node '${node}' health did not recover within ${timeoutMs}ms`)
 }
 
 /**

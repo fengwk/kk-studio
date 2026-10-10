@@ -10,6 +10,7 @@ import {
   createNodeCall,
   copyDistributedAppLogs,
   runDistributedCommand,
+  waitForNodeHealth,
 } from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
 import { HttpError } from '../lib/http.mjs'
@@ -71,6 +72,24 @@ test('createNodeCall forwards the body as JSON like the single-node path', async
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('recovery health barrier waits for LISTEN health, not only a successful DB read', async () => {
+  let calls = 0
+  await waitForNodeHealth({
+    async callNode(node, method, requestPath, body, timeoutMs) {
+      assert.equal(node, 'a')
+      assert.equal(method, 'GET')
+      assert.equal(requestPath, '/actuator/health')
+      assert.ok(timeoutMs > 0 && timeoutMs <= 2_000)
+      if (++calls === 1) throw new HttpError(503, 'not ready', requestPath)
+      return { json: { status: calls === 2 ? 'DOWN' : 'UP' } }
+    },
+  }, 'a', 1_000)
+  assert.equal(calls, 3)
+  await assert.rejects(() => waitForNodeHealth({
+    async callNode() { return { json: { status: 'DOWN' } } },
+  }, 'a', 1), /health did not recover/)
 })
 
 test('host-mock cases stay in the single-instance matrix and leave distributed', async () => {

@@ -21,6 +21,24 @@ import { createHash, randomUUID } from 'node:crypto'
 import { assert, sleep } from './http.mjs'
 import { FramedEventSocket, eventUrl } from './framed-event-socket.mjs'
 
+/**
+ * Plain OPEN preserves an ended session's last screen. Establish a RUNNING baseline by restarting
+ * that exact identity through OPEN.expectedExited, without retrying a failed native start.
+ */
+export async function openRunningTerminal(probe, timeoutMs = 40_000) {
+  const attached = await probe.waitAttached(probe.open(), timeoutMs)
+  if (attached.status === 'RUNNING') {
+    return attached
+  }
+  const restarted = await probe.waitAttached(
+    probe.open({ expectedExited: { daemonInstanceId: attached.daemonInstanceId, terminalId: attached.terminalId } }),
+    timeoutMs,
+  )
+  assert(restarted.terminalId !== attached.terminalId, 'restart after an ended session must allocate a fresh terminalId')
+  assert(restarted.status === 'RUNNING', `restart must attach RUNNING, got ${restarted.status}`)
+  return restarted
+}
+
 /** Bounded retained metadata records; terminal output must never accumulate without limit. */
 const MAX_RETAINED_RECORDS = 64
 
@@ -606,7 +624,11 @@ export class TerminalProbe {
   }
 
   async waitAttached(requestId, timeoutMs = 30_000) {
-    await this.waitUntil(() => this.attachResults.some((item) => item.requestId === requestId), timeoutMs)
+    await this.waitUntil(() => {
+      const error = this.errorEvents.find((item) => item.requestId === requestId)
+      if (error) throw new Error(`terminal attach rejected: ${error.code}/${error.disposition}`)
+      return this.attachResults.some((item) => item.requestId === requestId)
+    }, timeoutMs)
     return this.attachResults.find((item) => item.requestId === requestId)
   }
 

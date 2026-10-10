@@ -8,10 +8,10 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { assert, envelopeData, sleep } from '../lib/http.mjs'
-import { assertDistributedContext } from '../lib/distributed.mjs'
+import { assert, envelopeData, instantEpochMillis, sleep } from '../lib/http.mjs'
+import { assertDistributedContext, waitForNodeHealth } from '../lib/distributed.mjs'
 import { withCleanup } from '../lib/event-probe.mjs'
-import { TerminalProbe } from '../lib/terminal-probe.mjs'
+import { TerminalProbe, openRunningTerminal } from '../lib/terminal-probe.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 /** Fixture Environment connected to app-a / daemon-a. */
@@ -21,11 +21,13 @@ function sentinel(prefix) {
   return `KKS_${prefix}_${randomUUID().replaceAll('-', '').slice(0, 12)}`
 }
 
-async function waitEnvReady(callNode, node, envId, maxAttempts = 30) {
+async function waitEnvReady(callNode, node, envId, maxAttempts = 30, afterLastSeen = null) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const card = envelopeData((await callNode(node, 'GET', `/api/harness/environments/${encodeURIComponent(envId)}`)).json)
-      if (card?.ready === true && card?.status === 'READY') return card
+      const fresh = afterLastSeen === null
+        || instantEpochMillis(card.lastSeen) > instantEpochMillis(afterLastSeen)
+      if (card?.ready === true && card?.status === 'READY' && fresh) return card
     } catch {
       // transient startup / reconnecting
     }
@@ -69,9 +71,7 @@ registerCase({
       // 1. browserPeer on app-b opens the terminal through the cross-node route.
       await peerB.waitOpen()
       await peerA.waitOpen()
-      const openB = peerB.open()
-      const attachedB = await peerB.waitAttached(openB, 40_000)
-      assert(attachedB.status === 'RUNNING', `remote OPEN must attach RUNNING, got ${attachedB.status}`)
+      const attachedB = await openRunningTerminal(peerB)
       await peerB.waitUntil(() => peerB.lastAppliedVersion >= 1, 30_000)
       peerB.ack()
       peerB.setAutoApplied(true)
@@ -199,9 +199,7 @@ registerCase({
 
     await withCleanup(async () => {
       await peer1.waitOpen()
-      const openId = peer1.open()
-      const attached1 = await peer1.waitAttached(openId, 40_000)
-      assert(attached1.status === 'RUNNING', `OPEN must attach RUNNING, got ${attached1.status}`)
+      const attached1 = await openRunningTerminal(peer1)
       await peer1.waitUntil(() => peer1.lastAppliedVersion >= 1, 30_000)
       peer1.ack()
       peer1.setAutoApplied(true)
@@ -293,10 +291,8 @@ registerCase({
 
     await withCleanup(async () => {
       await peerB.waitOpen()
-      // Baseline terminal reached through app-b.
-      const openId = peerB.open()
-      const attachedB = await peerB.waitAttached(openId, 40_000)
-      assert(attachedB.status === 'RUNNING', `remote OPEN must attach RUNNING, got ${attachedB.status}`)
+      // Baseline terminal reached through app-b; an already ended session is restarted deterministically.
+      const attachedB = await openRunningTerminal(peerB)
       await peerB.waitUntil(() => peerB.lastAppliedVersion >= 1, 30_000)
       peerB.ack()
       peerB.setAutoApplied(true)
@@ -350,11 +346,15 @@ registerCase({
         )
       }
 
+      // DB 的旧 READY 行可在租约到期前仍可读；恢复还须有新 READY/心跳，而不是重用断网前投影。
+      const outageCard = envelopeData((await ctx.callNode('b', 'GET', `/api/harness/environments/${ENV_A_ID}`)).json)
+      instantEpochMillis(outageCard.lastSeen, 'owner heartbeat baseline')
       // Recover the shared DB and rebuild a fresh stream / writer from the authoritative route.
       ctx.runDistributedCommand('reconnect-db-a')
       restoreDb = false
-      await waitEnvReady(ctx.callNode, 'a', ENV_A_ID, 60)
-      await waitEnvReady(ctx.callNode, 'b', ENV_A_ID, 60)
+      await waitForNodeHealth(ctx, 'a')
+      await waitEnvReady(ctx.callNode, 'a', ENV_A_ID, 60, outageCard.lastSeen)
+      await waitEnvReady(ctx.callNode, 'b', ENV_A_ID, 60, outageCard.lastSeen)
 
       const attachId = peerB.attach({ daemonInstanceId: attachedB.daemonInstanceId, terminalId: attachedB.terminalId })
       const reattached = await peerB.waitAttached(attachId, 40_000)

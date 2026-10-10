@@ -35,7 +35,7 @@ registerCase({
   level: 'L3',
   title: '单实例真实 PTY 终端控制全流程',
   requires: ['tools'],
-  docs: '在 READY tool 环境经唯一 app-events v2 carrier 驱动真实 PTY：OPEN 后首个结构化 RESET 未确认时 CLAIM 必须 VIEW_NOT_APPLIED，VIEW_APPLIED 后 CLAIM 取得 grant；INPUT printf 哨兵整行出现在屏幕且 OP_ACK CONFIRMED/WRITTEN；RESIZE 产生带新尺寸的 RESET；Ctrl-C 中断前台进程后 shell 仍可继续输出；CLOSE 收敛为 EXITED、末屏可再次 ATTACH 读回；OPEN.expectedExited 旧身份只新建 terminalId。仅断言行为、计数与尺寸，不落盘屏幕、token 或输入字节。',
+  docs: '在 READY tool 环境经唯一 app-events v2 carrier 驱动真实 PTY：OPEN 后首个结构化 RESET 未确认时 CLAIM 必须 VIEW_NOT_APPLIED，VIEW_APPLIED 后 CLAIM 取得 grant；INPUT printf 哨兵整行出现在屏幕且 OP_ACK CONFIRMED/WRITTEN；RESIZE 产生带新尺寸的 RESET；Ctrl-C 中断前台进程后 shell 仍可继续输出；CLOSE 产生 EXITED 终态事件、末屏可再次 ATTACH 读回；OPEN.expectedExited 旧身份只新建 terminalId。仅断言行为、计数与尺寸，不落盘屏幕、token 或输入字节。',
   async run(ctx) {
     const environment = await requireReadyEnvironment(ctx, ctx.daemonEnv)
     // autoApplied=false so the very first structured RESET stays unacknowledged for the gating check.
@@ -100,7 +100,7 @@ registerCase({
       assert(Date.now() - ctrlCAt < 5_000, 'shell must resume within 5s of Ctrl-C')
       assert(probe.screenRowCount(ctrlEnd) === 0, 'Ctrl-C must interrupt the sleep before the end marker')
 
-      // CLOSE: converge to a terminal EXITED state, keeping the last screen attachable.
+      // CLOSE emits the terminal event without fabricating a natural exit code; keep the last screen.
       const oldIdentity = { ...probe.identity }
       probe.sendClose(epoch)
       const exit = await probe.waitExit(15_000)

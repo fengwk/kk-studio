@@ -79,14 +79,22 @@ test('strict v2 frames reject legacy v1, malformed coordinates, extra fields and
   const canvas = { version: 2, type: 'event', resource: { kind: 'canvas', id }, name: 'revision', cursor: '1', data: { revision: '1' } }
   const environment = { version: 2, type: 'event', resource: { kind: 'environments' }, name: 'changed', data: {} }
   for (const frame of [changed, canvas, environment, { version: 2, type: 'heartbeat' },
-    { version: 2, type: 'resync', resource: { kind: 'projects' } }]) assert.doesNotThrow(() => validateFrame(frame))
+    { version: 2, type: 'resync', resource: { kind: 'projects' } },
+    { version: 2, type: 'error', code: 'SEND_FAILED', message: 'event channel is shutting down' },
+    { version: 2, type: 'error', resource: { kind: 'projects' }, code: 'SUBSCRIBE_FAILED', message: '' },
+  ]) assert.doesNotThrow(() => validateFrame(frame))
   for (const frame of [
     null, [], { ...changed, version: 1 }, { ...changed, cursor: '0' },
     { ...changed, data: { projectId: 'bad' } }, { ...changed, resource: { kind: 'projects', id } },
     { ...canvas, cursor: '01' }, { ...canvas, data: { revision: '2' } },
     { ...environment, data: { environmentId: id } },
     { version: 2, type: 'subscribed', resource: { kind: 'projects' }, cursor: '1' },
-    { version: 2, type: 'error', code: 'SEND_FAILED', message: 'failed' },
+    { version: 2, type: 'error', message: 'failed' },
+    { version: 2, type: 'error', code: '', message: 'failed' },
+    { version: 2, type: 'error', code: 'SEND_FAILED', message: 7 },
+    { version: 2, type: 'error', code: 'SEND_FAILED', message: 'failed', extra: 1 },
+    { version: 2, type: 'error', resource: { kind: 'threads' }, code: 'SEND_FAILED', message: 'failed' },
+    { version: 2, type: 'error', resource: { kind: 'canvas' }, code: 'SEND_FAILED', message: 'failed' },
   ]) assert.throws(() => validateFrame(frame))
 })
 
@@ -198,6 +206,56 @@ test('case rejects duplicate events delivered before create HTTP returns and sti
   } finally {
     globalThis.WebSocket = original
   }
+})
+
+test('DB recovery closes the resynced connection and waits for LISTEN before creating a new baseline', async () => {
+  const original = globalThis.WebSocket
+  const sockets = []
+  let healthCalls = 0
+  globalThis.WebSocket = class extends Socket {
+    constructor() {
+      super()
+      if (sockets.length >= 2) assert.ok(healthCalls >= 2, 'new baseline must follow healthy LISTEN')
+      sockets.push(this)
+    }
+  }
+  let fixture
+  let disconnected = false
+  let deleted = false
+  const ctx = {
+    baseUrls: { a: 'http://a.test', b: 'http://b.test' },
+    writeArtifact() {},
+    runDistributedCommand(command) {
+      disconnected = command === 'disconnect-db-a'
+      if (disconnected) {
+        sockets[0].deliver({ version: 2, type: 'resync', resource: { kind: 'projects' } })
+        sockets[0].deliver({ version: 2, type: 'error', code: 'SEND_FAILED', message: 'event channel is shutting down' })
+        assert.equal(sockets[0].readyState, 1, 'resync can arrive before the close handshake')
+      } else {
+        assert.equal(sockets[0].readyState, 3, 'end old connection explicitly before recovery')
+      }
+    },
+    async callNode(node, method, requestPath, body) {
+      if (requestPath === '/actuator/health') {
+        return { json: { status: ++healthCalls === 1 ? 'DOWN' : 'UP' } }
+      }
+      if (method === 'POST' || method === 'PUT') {
+        fixture = { id, version: method === 'POST' ? '0' : String(Number(fixture.version) + 1), title: body.title }
+        for (const socket of sockets) {
+          if (socket.readyState === 1 && (!disconnected || socket === sockets[1])) socket.deliver(changed)
+        }
+      }
+      if (method === 'DELETE') deleted = true
+      return { json: { data: fixture } }
+    },
+  }
+  try {
+    await ALL_CASES.find((entry) => entry.id === 'distributed.notification_db_recovery').run(ctx)
+    assert.equal(sockets.length, 3)
+    assert.equal(healthCalls, 2)
+    assert.equal(deleted, true)
+    assert.ok(sockets.every((socket) => socket.readyState === 3 && socket.registered.size === 0))
+  } finally { globalThis.WebSocket = original }
 })
 
 test('DB-fault case restores network, closes sockets and deletes fixture even if mutation and restore both fail', async () => {

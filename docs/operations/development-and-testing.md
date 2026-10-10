@@ -466,7 +466,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   OPEN/CLAIM/INPUT/RESIZE/VIEW_APPLIED/CLOSE。首个结构化 RESET 未 `VIEW_APPLIED` 前
   `CLAIM` 必须 `VIEW_NOT_APPLIED`；`INPUT` 以随机哨兵整行比对（绝不做子串，避免命令行回显假阳性）；
   `RESIZE` 的 `OP_ACK` 后必须收到新尺寸 RESET；`Ctrl-C` 后 shell 仍可继续输出；
-  `CLOSE` 收敛为 `EXITED` 且末屏可再次 `ATTACH` 读回；`OPEN.expectedExited` 旧身份只重建新
+  `CLOSE` 产生 `EXITED` 终态事件且末屏可再次 `ATTACH` 读回（强制终止不伪造自然退出码）；`OPEN.expectedExited` 旧身份只重建新
   `terminalId`。探针只从数值 UTF-16 槽提取整行文本、不解释 VT，报告只含行为布尔、计数与尺寸。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
@@ -582,7 +582,8 @@ L5 通知 case 使用两节点真实 `/api/events/v1` WebSocket（逻辑 version
 `app.events.v2` carrier 分片承载）：Projects 双向 CRUD/CAS 的提交可见性与
 逐提交去重、Canvas revision 与 Environment 跨 topic 隔离及失败事务静默、订阅释放与重连新基线、
 DB 网络断开后的 fail-closed 和权威 resync。先等待 `subscribed`，保存全部帧，并在收到通知时
-立即读取权威 API；去重与静默断言使用 400ms 有界稳定窗。Environment v1 全局事件不携带实体 ID，
+立即读取权威 API；故障恢复先结束旧连接，等包含通知总线的健康检查恢复，再用新连接建立订阅基线。
+去重与静默断言使用 400ms 有界稳定窗。Environment v1 全局事件不携带实体 ID，
 因此只按 topic 验证独占变更窗口，不宣称实体级过滤；重连不宣称旧事件回放。仅 `--distributed`
 启用这些 case，精确 case ID 和描述由 `--list` / `--docs` 输出。
 
@@ -595,7 +596,9 @@ B→PG→A→DaemonA→A→PG→B 真路由对同一 terminal identity 建立两
 OP_ACK（不改服务端），在新连接以 `CLAIM.recovery {previous,seq,digest}` 原子核对去重水位，明确
 得到 `WRITTEN`、且不自动重放 INPUT。`distributed.shell_db_fault` 用白名单 `disconnect-db-a`
 验证 owner DB 断网时命令一律 `NOT_EXECUTED`/不确定而绝不假 `WRITTEN` 或本地 fallback，
-`reconnect-db-a` 后重新 ATTACH 建立新 stream/baseline 并再次写入哨兵。
+`reconnect-db-a` 后等待通知健康以及新的 READY/心跳事实，再重新 ATTACH 建立新 stream/baseline
+并再次写入哨兵。各终端 case 遇到已结束的会话时只通过该精确 identity 的 `OPEN.expectedExited`
+建立运行基线，不隐式重试启动失败。
 
 ## 可靠性
 

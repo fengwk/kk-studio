@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { assert, envelopeData, expectHttpError, HttpError, sleep } from '../lib/http.mjs'
-import { assertDistributedContext } from '../lib/distributed.mjs'
+import { assertDistributedContext, waitForNodeHealth } from '../lib/distributed.mjs'
 import { EventProbe, withCleanup } from '../lib/event-probe.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
@@ -254,17 +254,18 @@ register('notification_db_recovery', 'DB 网络故障通知 fail-closed 与权�
         async () => { assert((await data(ctx, 'b', 'GET', `/api/projects/${id}`)).title === 'during-outage', 'B commit not visible') })
       await pair[0].until(() => pair[0].closed || pair[0].frames.slice(mark).some((f) => f.type === 'resync'), 15_000, true)
       assert(pair[0].count(projectEvent(id), mark) === 0, 'isolated A delivered stale notification')
-      const recoveryMark = pair[0].frames.length
+      // resync 会触发 1012 关闭；立即观测 closed 会与关闭握手竞态。明确结束旧连接后再建新基线。
+      const old = pair[0]
+      await old.close()
+      const closedCount = old.frames.length
       ctx.runDistributedCommand('reconnect-db-a')
       restore = false
-      if (pair[0].closed) {
-        const fresh = new EventProbe(ctx.baseUrls.a)
-        all.push(fresh)
-        await fresh.subscribe(projects)
-        pair = [fresh, pair[1]]
-      } else {
-        await pair[0].until(() => pair[0].frames.slice(recoveryMark).some((f) => f.type === 'resync'), 30_000)
-      }
+      await waitForNodeHealth(ctx, 'a')
+      const fresh = new EventProbe(ctx.baseUrls.a)
+      all.push(fresh)
+      await fresh.subscribe(projects)
+      pair = [fresh, pair[1]]
+      assert(old.frames.length === closedCount, 'closed socket received recovery frames')
       // Resync is invalidation, not replay. Only the authoritative GET establishes current state.
       const deadline = Date.now() + 30_000
       let current

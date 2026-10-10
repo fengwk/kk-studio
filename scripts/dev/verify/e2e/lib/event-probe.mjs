@@ -5,6 +5,13 @@ export { eventUrl }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
+/** Validates the resource coordinate shared by every resource-scoped frame. */
+function assertResource(resource) {
+  assert(['projects', 'environments', 'canvas'].includes(resource?.kind), 'unexpected resource kind')
+  assertExactFields(resource, resource.kind === 'canvas' ? ['kind', 'id'] : ['kind'])
+  if (resource.kind === 'canvas') assert(UUID.test(resource.id), 'invalid canvas UUID')
+}
+
 /** Strict subset used by distributed notification cases; unexpected frames fail, never disappear. */
 export function validateFrame(frame) {
   assert(frame?.version === 2, 'event frame version must be 2')
@@ -12,11 +19,24 @@ export function validateFrame(frame) {
     assertExactFields(frame, ['version', 'type'])
     return
   }
+  if (frame.type === 'error') {
+    // A channel closing by protocol (for example SEND_FAILED followed by close 1012 while the bus
+    // resyncs) still carries a typed error frame; it is part of the v2 wire set and must not be
+    // mistaken for a malformed frame. Field rules mirror the browser decoder exactly.
+    assertExactFields(
+      frame,
+      frame.resource === undefined
+        ? ['version', 'type', 'code', 'message']
+        : ['version', 'type', 'code', 'message', 'resource'],
+    )
+    assert(typeof frame.code === 'string' && frame.code.length > 0, 'error frame code must be a non-empty string')
+    assert(typeof frame.message === 'string', 'error frame message must be a string')
+    if (frame.resource !== undefined) assertResource(frame.resource)
+    return
+  }
   assert(['subscribed', 'event', 'resync'].includes(frame.type), 'unexpected event frame type')
   const resource = frame.resource
-  assert(['projects', 'environments', 'canvas'].includes(resource?.kind), 'unexpected resource kind')
-  assertExactFields(resource, resource.kind === 'canvas' ? ['kind', 'id'] : ['kind'])
-  if (resource.kind === 'canvas') assert(UUID.test(resource.id), 'invalid canvas UUID')
+  assertResource(resource)
   if (frame.type === 'resync') {
     assertExactFields(frame, ['version', 'type', 'resource'])
   } else if (frame.type === 'subscribed') {
