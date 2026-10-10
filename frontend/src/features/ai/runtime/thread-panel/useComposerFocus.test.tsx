@@ -301,16 +301,84 @@ describe('useComposerFocus', () => {
     expect(focusSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('skips pending auto-focus while disabled', async () => {
+  it('preserves focus intent when pending drops while temporarily disabled and restores when editable', async () => {
     const user = userEvent.setup()
     const { rerender } = render(<Harness pending disabled />)
     const editor = screen.getByLabelText('给 AI 发送消息')
     const outside = screen.getByRole('button', { name: 'outside' })
     await user.click(outside)
 
+    // pending 下降时 disabled 仍为 true：editor 不抢焦
     rerender(<Harness pending={false} disabled />)
     expect(outside).toHaveFocus()
     expect(editor).not.toHaveFocus()
+
+    // 随后 disabled 变为 false（流式结束或元数据就绪）：消费恢复意图并聚焦
+    rerender(<Harness pending={false} disabled={false} />)
+    await waitFor(() => expect(editor).toHaveFocus())
+    expectCaretAtEnd(editor)
+  })
+
+  it('drops deferred restore intent if pane loses focus before becoming editable', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<Harness pending disabled focusOnEscape />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    const outside = screen.getByRole('button', { name: 'outside' })
+    await user.click(outside)
+
+    // pending 结束但仍 disabled
+    rerender(<Harness pending={false} disabled focusOnEscape />)
+    expect(outside).toHaveFocus()
+
+    // 在恢复可编辑前，用户切换了 pane（focusOnEscape 变为 false）
+    rerender(<Harness pending={false} disabled focusOnEscape={false} />)
+
+    // 随后该 pane 变回 enabled：不抢其他已聚焦区域的焦点
+    rerender(<Harness pending={false} disabled={false} focusOnEscape={false} />)
+    expect(outside).toHaveFocus()
+    expect(editor).not.toHaveFocus()
+  })
+
+  it('does not steal focus from a blocking modal when pending drops or delayed focus executes', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <>
+        <Harness pending />
+        <div className="modal-backdrop">
+          <button type="button">Modal action</button>
+        </div>
+      </>,
+    )
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    const modalAction = screen.getByRole('button', { name: 'Modal action' })
+    await user.click(modalAction)
+    expect(modalAction).toHaveFocus()
+
+    // pending 结束：因为存在 blocking modal，页面 Composer 不得抢焦
+    rerender(
+      <>
+        <Harness pending={false} />
+        <div className="modal-backdrop">
+          <button type="button">Modal action</button>
+        </div>
+      </>,
+    )
+
+    expect(modalAction).toHaveFocus()
+    expect(editor).not.toHaveFocus()
+  })
+
+  it('allows a Composer located inside a blocking modal to focus normally', async () => {
+    render(
+      <div className="modal-backdrop" aria-modal="true">
+        <Harness />
+      </div>,
+    )
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    const focusBtn = screen.getByRole('button', { name: 'focus composer' })
+    fireEvent.click(focusBtn)
+
+    await waitFor(() => expect(editor).toHaveFocus())
   })
 
   it('cancels pending retry timers on blurComposer so no focus stealing occurs after timeout > 32ms', () => {
