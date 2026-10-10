@@ -116,8 +116,8 @@ export function CreateIssueModal({
             <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
               {t('projects.cancel')}
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? t('projects.create.submitting') : t('projects.issue.createSubmit')}
+            <Button type="submit" loading={isSubmitting}>
+              {t('projects.issue.createSubmit')}
             </Button>
           </div>
         </form>

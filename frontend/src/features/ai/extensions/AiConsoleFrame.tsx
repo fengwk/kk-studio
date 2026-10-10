@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { SearchField } from '@/shared/ui/controls/SearchField'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
@@ -30,7 +31,7 @@ export function AiConsoleFrame({
         <SearchField value={search} onChange={onSearchChange} />
       </nav>
       <div className="screen-body">
-        {busy && <StateBlock title={t('ai.common.loadingResources')} />}
+        {busy && <ResourceCardSkeleton label={t('ai.common.loadingResources')} />}
         {Boolean(error) && (
           <StateBlock
             title={error instanceof Error ? error.message : t('ai.common.resourceLoadFailed')}

@@ -494,7 +494,11 @@ function EditProjectModalContent({
         </label>
 
         <div className="edit-project-form-actions">
-          <Button type="submit" disabled={isPending}>
+          <Button
+            type="submit"
+            loading={activeSubmission === 'basic'}
+            disabled={isPending && activeSubmission !== 'basic'}
+          >
             {activeSubmission === 'basic' ? t('projects.edit.saving') : t('projects.saveBasic')}
           </Button>
         </div>
@@ -527,7 +531,11 @@ function EditProjectModalContent({
         />
 
         <div className="edit-project-form-actions">
-          <Button type="submit" disabled={isPending}>
+          <Button
+            type="submit"
+            loading={activeSubmission === 'yolo'}
+            disabled={isPending && activeSubmission !== 'yolo'}
+          >
             {activeSubmission === 'yolo' ? t('projects.edit.saving') : t('projects.saveYolo')}
           </Button>
         </div>
@@ -824,7 +832,11 @@ function EditProjectModalContent({
       </div>
 
       <div className="edit-project-form-actions">
-        <Button type="submit" disabled={isPending || Boolean(workflowLockedReason)}>
+        <Button
+          type="submit"
+          loading={activeSubmission === 'workflow'}
+          disabled={(isPending && activeSubmission !== 'workflow') || Boolean(workflowLockedReason)}
+        >
           {activeSubmission === 'workflow' ? t('projects.edit.saving') : t('projects.workflowSave')}
         </Button>
       </div>

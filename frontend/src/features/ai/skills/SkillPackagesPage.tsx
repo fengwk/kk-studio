@@ -214,7 +214,8 @@ export function SkillPackagesPage() {
                 <Button
                   size="compact"
                   aria-label={`${t('ai.skillPackages.check')} ${pkg.packageName}`}
-                  disabled={isChecking || isUpdating}
+                  disabled={isUpdating}
+                  loading={isChecking}
                   onClick={() =>
                     checkMutation.mutate({
                       name: pkg.packageName,
@@ -222,10 +223,7 @@ export function SkillPackagesPage() {
                     })
                   }
                 >
-                  <RefreshCw
-                    aria-hidden="true"
-                    className={isChecking ? 'animate-spin' : undefined}
-                  />
+                  {!isChecking && <RefreshCw aria-hidden="true" />}
                   {t('ai.skillPackages.check')}
                 </Button>
                 {hasUpdate ? (
@@ -233,7 +231,8 @@ export function SkillPackagesPage() {
                     variant="ghost"
                     size="compact"
                     aria-label={`${t('ai.skillPackages.update')} ${pkg.packageName}`}
-                    disabled={isChecking || isUpdating}
+                    disabled={isChecking}
+                    loading={isUpdating}
                     onClick={() =>
                       publishMutation.mutate({
                         name: pkg.packageName,
@@ -242,7 +241,7 @@ export function SkillPackagesPage() {
                       })
                     }
                   >
-                    <ArrowUpCircle aria-hidden="true" />
+                    {!isUpdating && <ArrowUpCircle aria-hidden="true" />}
                     {t('ai.skillPackages.update')}
                   </Button>
                 ) : null}
@@ -468,8 +467,8 @@ function CreatePackageModal({
             <Button variant="inline" onClick={onClose} disabled={createMutation.isPending}>
               {t('shared.cancel')}
             </Button>
-            <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? '...' : t('ai.catalog.action.confirmCreate')}
+            <Button type="submit" loading={createMutation.isPending}>
+              {t('ai.catalog.action.confirmCreate')}
             </Button>
           </div>
         </form>
@@ -611,8 +610,8 @@ function EditPackageModal({
             <Button variant="inline" onClick={onClose} disabled={editMutation.isPending}>
               {t('shared.cancel')}
             </Button>
-            <Button type="submit" disabled={editMutation.isPending}>
-              {editMutation.isPending ? '...' : t('ai.catalog.action.saveChanges')}
+            <Button type="submit" loading={editMutation.isPending}>
+              {t('ai.catalog.action.saveChanges')}
             </Button>
           </div>
         </form>

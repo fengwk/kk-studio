@@ -37,6 +37,45 @@ describe('Button', () => {
     expect(disabled).toBeDisabled()
     expect(disabled).toHaveAttribute('type', 'button')
   })
+
+  it('handles loading state with spinner, aria-busy, prevents click triggers, and retains original label', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    const { rerender } = render(
+      <Button loading onClick={onSubmit}>
+        保存更改
+      </Button>,
+    )
+
+    const button = screen.getByRole('button', { name: '保存更改' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('aria-busy', 'true')
+    expect(button).toHaveClass('is-loading')
+    expect(button.querySelector('.ui-loading-spinner')).toBeInTheDocument()
+
+    // 验证 loading 时无法触发点击
+    await user.click(button)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    // 验证 loading 结束后恢复可点击且去除 aria-busy 与 spinner
+    rerender(<Button onClick={onSubmit}>保存更改</Button>)
+    expect(button).toBeEnabled()
+    expect(button).not.toHaveAttribute('aria-busy')
+    expect(button).not.toHaveClass('is-loading')
+    expect(button.querySelector('.ui-loading-spinner')).toBeNull()
+
+    await user.click(button)
+    expect(onSubmit).toHaveBeenCalledOnce()
+  })
+
+  it('does not infer loading from disabled prop alone', () => {
+    render(<Button disabled>仅无权限禁用</Button>)
+    const button = screen.getByRole('button', { name: '仅无权限禁用' })
+    expect(button).toBeDisabled()
+    expect(button).not.toHaveAttribute('aria-busy')
+    expect(button).not.toHaveClass('is-loading')
+    expect(button.querySelector('.ui-loading-spinner')).toBeNull()
+  })
 })
 
 describe('IconButton', () => {

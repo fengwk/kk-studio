@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, ArrowRight, FolderKanban, Pencil, Trash2 } from 'lucide-react'
 import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
+import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
@@ -113,13 +114,16 @@ export function ProjectsPage({
         </div>
       )}
 
-      {isLoading && projects.length === 0 && <StateBlock title={t('projects.loading')} />}
+      {isLoading && projects.length === 0 && (
+        <ResourceCardSkeleton label={t('projects.loading')} />
+      )}
 
       {Boolean(searchQuery.trim()) && filteredProjects.length === 0 && !isLoading && (
         <StateBlock title={t('projects.empty.noMatch')} />
       )}
 
-      <ResourceGrid>
+      {!(isLoading && projects.length === 0) && (
+        <ResourceGrid>
         <CreateCard
           title={t('projects.create')}
           subtitle={t('projects.createCardSubtitle')}
@@ -186,6 +190,7 @@ export function ProjectsPage({
           />
         ))}
       </ResourceGrid>
+      )}
 
       {/* Modals */}
       <CreateProjectModal

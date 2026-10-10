@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { pluginsService } from '@/shared/api/plugins-service'
@@ -35,7 +36,7 @@ export function PluginsTab() {
   })
 
   if (pluginsQuery.isLoading) {
-    return <StateBlock title={t('settings.loading')} />
+    return <ResourceCardSkeleton label={t('settings.loading')} />
   }
 
   if (pluginsQuery.isError) {
