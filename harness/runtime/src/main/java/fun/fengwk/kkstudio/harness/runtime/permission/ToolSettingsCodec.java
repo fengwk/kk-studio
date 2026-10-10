@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Tool settings 规范 JSON 编解码器，解析并校验严格的 permission 规则与 defaultYolo。 */
+/** Tool settings 规范 JSON 编解码器，解析并校验严格的 permission 规则。 */
 public final class ToolSettingsCodec {
   private final ObjectMapper objectMapper;
 
@@ -22,18 +22,14 @@ public final class ToolSettingsCodec {
 
   public ToolSettings decode(String settingsJson) {
     ObjectNode root = readRoot(settingsJson);
-    return new ToolSettings(
-        decodePermission(root.get("permission")), root.path("defaultYolo").asBoolean(false));
+    return new ToolSettings(decodePermission(root.get("permission")));
   }
 
-  /** 保留未知 Tool 设置，但将 permission/defaultYolo 统一编码为规范 JSON。 */
+  /** 保留未知 Tool 设置，但将 permission 统一编码为规范 JSON。 */
   public String canonicalize(String settingsJson) {
     ObjectNode root = readRoot(settingsJson);
-    ToolSettings settings =
-        new ToolSettings(
-            decodePermission(root.get("permission")), root.path("defaultYolo").asBoolean(false));
+    ToolSettings settings = new ToolSettings(decodePermission(root.get("permission")));
     root.set("permission", encodePermission(settings.permission()));
-    root.put("defaultYolo", settings.defaultYolo());
     try {
       return objectMapper.writeValueAsString(root);
     } catch (JsonProcessingException error) {
@@ -47,10 +43,6 @@ public final class ToolSettingsCodec {
       JsonNode node = objectMapper.readTree(input);
       if (!(node instanceof ObjectNode object)) {
         throw new IllegalArgumentException("settingsJson must be a JSON object");
-      }
-      JsonNode defaultYolo = object.get("defaultYolo");
-      if (defaultYolo != null && !defaultYolo.isBoolean()) {
-        throw new IllegalArgumentException("defaultYolo must be boolean");
       }
       return object.deepCopy();
     } catch (JsonProcessingException error) {

@@ -55,7 +55,8 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
       tx.executeWithoutResult(
           status -> {
             SystemSettingsRepository.SystemSettingsRecord current = systemSettingsRepository.get();
-            assertTrue(systemSettingsRepository.update(withYolo(true), current.version()));
+            assertTrue(
+                systemSettingsRepository.update(withToolBusyRetry(6_000L), current.version()));
             assertNoNotification(pg);
           });
 
@@ -77,13 +78,15 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
       tx.executeWithoutResult(
           status -> {
             SystemSettingsRepository.SystemSettingsRecord current = systemSettingsRepository.get();
-            assertTrue(systemSettingsRepository.update(withYolo(true), current.version()));
+            assertTrue(
+                systemSettingsRepository.update(withToolBusyRetry(6_000L), current.version()));
             status.setRollbackOnly();
           });
 
       assertNoNotification(pg);
       assertEquals(0L, currentVersion());
-      assertFalse(systemSettingsRepository.get().settings().tool().defaultYolo());
+      assertEquals(
+          5_000L, systemSettingsRepository.get().settings().tool().modelGatewayBusyRetryMillis());
     }
   }
 
@@ -97,7 +100,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
       tx.executeWithoutResult(
-          status -> assertFalse(systemSettingsRepository.update(withYolo(true), 5L)));
+          status -> assertFalse(systemSettingsRepository.update(withToolBusyRetry(6_000L), 5L)));
 
       assertNoNotification(pg);
       assertEquals(0L, currentVersion());
@@ -154,10 +157,11 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
 
       assertThrows(
           IllegalStateException.class,
-          () -> systemSettingsRepository.update(withYolo(true), versionBefore));
+          () -> systemSettingsRepository.update(withToolBusyRetry(6_000L), versionBefore));
 
       assertEquals(versionBefore, currentVersion());
-      assertFalse(systemSettingsRepository.get().settings().tool().defaultYolo());
+      assertEquals(
+          5_000L, systemSettingsRepository.get().settings().tool().modelGatewayBusyRetryMillis());
       assertNoNotification(pg);
     }
   }
@@ -196,13 +200,12 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
     }
   }
 
-  private static SystemSettings withYolo(boolean yolo) {
+  private static SystemSettings withToolBusyRetry(long busyRetryMillis) {
     SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
             base.permission(),
-            yolo,
-            base.modelGatewayBusyRetryMillis(),
+            busyRetryMillis,
             base.toolGatewayBusyRetryMillis(),
             base.toolGatewayOverloadRetryMillis()),
         SystemSettings.DEFAULT.aiRuntime(),

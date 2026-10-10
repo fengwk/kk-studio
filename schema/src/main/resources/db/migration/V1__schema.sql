@@ -627,6 +627,9 @@ create table chat (
     -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
     -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 AgentDefinition。
     agent_name          varchar(64)   not null,
+    -- environment_name 故意不加 FK：它只按名称引用 Environment。Environment 硬删除期间该引用
+    -- 失效（发送时 planner fail closed），同名重建后既有 Chat 引用解析到当前 Environment。
+    environment_name    varchar(64),
     yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
@@ -638,6 +641,13 @@ create table chat (
         and agent_name !~ '[[:space:]]$'
         and char_length(agent_name) > 0
         and position('/' in agent_name) = 0
+    ),
+    constraint ck_chat_environment_name check (
+        environment_name is null
+        or (environment_name !~ '^[[:space:]]'
+            and environment_name !~ '[[:space:]]$'
+            and char_length(environment_name) > 0
+            and position('/' in environment_name) = 0)
     )
 );
 
@@ -786,7 +796,7 @@ insert into system_setting (id, config) values (
       "integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},
       "network":{"noProxyHosts":"localhost,127.*,::1"},
       "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
-      "tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}
+      "tool":{"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}
     }'::jsonb
 );
 

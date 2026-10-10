@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.chat.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -15,7 +15,7 @@ import java.util.UUID;
  * 规范化 Chat 可变字段并分配 Chat id。
  *
  * <p>更新语义：{@code null} 字段保留当前值。提供时 Chat title 必填；提供的 {@code agentName} 必须非空白。 catalog 存在性由 {@link
- * ChatGuard} 校验。
+ * ChatGuard} 校验。创建省略 YOLO 时为 {@code false}；创建省略 Environment 时无默认环境。
  */
 @Component
 public class ChatMutationFactory {
@@ -24,12 +24,9 @@ public class ChatMutationFactory {
   private static final int TITLE_MAX_LENGTH = 256;
 
   private final AgentEditableSupport editableSupport;
-  private final ToolSettingsProvider toolSettingsProvider;
 
-  public ChatMutationFactory(
-      AgentEditableSupport editableSupport, ToolSettingsProvider toolSettingsProvider) {
+  public ChatMutationFactory(AgentEditableSupport editableSupport) {
     this.editableSupport = editableSupport;
-    this.toolSettingsProvider = toolSettingsProvider;
   }
 
   public Chat newChat(ChatCreateDTO createDTO) {
@@ -45,10 +42,8 @@ public class ChatMutationFactory {
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setAgentName(parseRequiredAgentName(createDTO.getAgentName()));
-    chat.setYoloEnabled(
-        createDTO.getYoloEnabled() == null
-            ? toolSettingsProvider.get().defaultYolo()
-            : createDTO.getYoloEnabled());
+    chat.setEnvironmentName(parseEnvironmentName(createDTO.getEnvironmentName()));
+    chat.setYoloEnabled(Boolean.TRUE.equals(createDTO.getYoloEnabled()));
     return chat;
   }
 
@@ -69,6 +64,9 @@ public class ChatMutationFactory {
     }
     if (updateDTO.getAgentName() != null) {
       chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
+    }
+    if (updateDTO.isEnvironmentNameProvided()) {
+      chat.setEnvironmentName(parseEnvironmentName(updateDTO.getEnvironmentName()));
     }
     if (updateDTO.isYoloEnabledProvided()) {
       if (updateDTO.getYoloEnabled() == null) {
@@ -96,5 +94,14 @@ public class ChatMutationFactory {
     }
     editableSupport.validateMaxLength(RESOURCE, "agentName", trimmed, 64);
     return trimmed;
+  }
+
+  /** 规范化 nullable Environment 名：null 表示无默认环境，非 null 复用 BranchSettings 的 canonical 规则。 */
+  private String parseEnvironmentName(String raw) {
+    try {
+      return BranchSettings.requireCanonicalEnvironmentName(raw, "environmentName");
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, error.getMessage());
+    }
   }
 }

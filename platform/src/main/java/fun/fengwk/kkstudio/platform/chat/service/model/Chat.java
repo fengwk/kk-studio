@@ -18,7 +18,10 @@ public class Chat {
   /** 必填 Agent definition name；不建立外键，Agent 硬删除期间该名称暂时无法解析，同名重建后重新生效。 */
   private String agentName;
 
-  /** YOLO 模式开关：true 时工具调用跳过权限评估直接 Allow；创建时未显式指定则捕获当时数据库 SystemSettings.Tool.defaultYolo。 */
+  /** 默认 Environment name（nullable）；不建立外键，Environment 删除期间该名称暂时无法解析，发送时按正常 planner fail closed。 */
+  private String environmentName;
+
+  /** YOLO 模式开关：true 时工具调用跳过权限评估直接 Allow；创建时未显式指定则为 false。 */
   private boolean yoloEnabled;
 
   /** 乐观锁版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */

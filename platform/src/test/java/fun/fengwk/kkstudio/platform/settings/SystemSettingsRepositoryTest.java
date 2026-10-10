@@ -57,7 +57,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
 
   @Test
   public void casUpdatePersistsCanonicalConfigAndBumpsVersion() {
-    SystemSettings modified = withYolo(true);
+    SystemSettings modified = withToolBusyRetry(6_000L);
     TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
     Boolean firstCas = transaction.execute(status -> systemSettingsRepository.update(modified, 0L));
@@ -65,7 +65,10 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     SystemSettingsRepository.SystemSettingsRecord updated = systemSettingsRepository.get();
     assertEquals(1L, updated.version());
     assertEquals(modified, updated.settings());
-    assertTrue(updated.settings().tool().defaultYolo(), "yolo flag must be persisted");
+    assertEquals(
+        6_000L,
+        updated.settings().tool().modelGatewayBusyRetryMillis(),
+        "tool gateway busy retry must be persisted");
 
     Boolean staleCas = transaction.execute(status -> systemSettingsRepository.update(modified, 0L));
     assertFalse(staleCas, "stale version must lose CAS");
@@ -77,7 +80,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
 
   @Test
   public void concurrentCasAllowsExactlyOneWinner() throws Exception {
-    SystemSettings first = withYolo(true);
+    SystemSettings first = withToolBusyRetry(6_000L);
     SystemSettings second =
         withPermission(Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))));
 
@@ -108,7 +111,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
       SystemSettingsRepository.SystemSettingsRecord reread = systemSettingsRepository.get();
       assertEquals(1L, reread.version());
       assertTrue(
-          reread.settings().tool().defaultYolo()
+          reread.settings().tool().modelGatewayBusyRetryMillis() == 6_000L
               || PermissionAction.DENY
                   == reread.settings().tool().permission().get("write").get(0).action(),
           "winner's config must be persisted");
@@ -117,13 +120,12 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     }
   }
 
-  private static SystemSettings withYolo(boolean yolo) {
+  private static SystemSettings withToolBusyRetry(long busyRetryMillis) {
     SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
             base.permission(),
-            yolo,
-            base.modelGatewayBusyRetryMillis(),
+            busyRetryMillis,
             base.toolGatewayBusyRetryMillis(),
             base.toolGatewayOverloadRetryMillis()),
         SystemSettings.DEFAULT.aiRuntime(),
@@ -142,7 +144,6 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     return new SystemSettings(
         new SystemSettings.Tool(
             merged,
-            base.defaultYolo(),
             base.modelGatewayBusyRetryMillis(),
             base.toolGatewayBusyRetryMillis(),
             base.toolGatewayOverloadRetryMillis()),
