@@ -448,13 +448,13 @@ export function McpServersPage() {
             tone="danger"
           />
         )}
-        {!serversQuery.isLoading && !serversQuery.error && (
+        {!serversQuery.isLoading && (
           <ResourceGrid>
-          <CreateCard
-            title={t('ai.mcp.create')}
-            subtitle={t('ai.mcp.createDescription')}
-            onClick={handleOpenCreate}
-          />
+            <CreateCard
+              title={t('ai.mcp.create')}
+              subtitle={t('ai.mcp.createDescription')}
+              onClick={handleOpenCreate}
+            />
           {servers.map((server: McpServerDTO) => {
             const updateTime = formatIsoTime(server.updateTime, locale)
 
@@ -515,7 +515,7 @@ export function McpServersPage() {
             )
           })}
         </ResourceGrid>
-        )}
+      )}
       </div>
 
       {createModal && (

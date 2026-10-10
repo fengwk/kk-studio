@@ -56,9 +56,9 @@ export function Button({
     <button
       type={type}
       className={classes}
+      {...rest}
       disabled={disabled || loading}
       aria-busy={loading ? 'true' : rest['aria-busy']}
-      {...rest}
     >
       {loading ? <LoadingSpinner size={spinnerSize} decorative /> : null}
       {children}

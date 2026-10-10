@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { McpServersPage } from '@/features/ai/mcp/McpServersPage'
@@ -102,6 +102,30 @@ describe('McpServersPage', () => {
     renderPage()
 
     expect(await screen.findByText('Network offline')).toBeInTheDocument()
+  })
+
+  it('retains cached servers and create action when background refetch fails with an error', async () => {
+    vi.mocked(mcpServerService.pageServers).mockResolvedValueOnce({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      results: [mockServer({ name: 'cached-server' })],
+    })
+    const { queryClient } = renderPage()
+
+    expect(await screen.findByText('cached-server')).toBeInTheDocument()
+    expect(screen.getByText('创建 MCP 服务')).toBeInTheDocument()
+
+    // 模拟后台 refetch 发生网络错误
+    vi.mocked(mcpServerService.pageServers).mockRejectedValueOnce(new Error('background mcp error'))
+    await act(async () => {
+      await queryClient.refetchQueries()
+    })
+
+    // 验证：既展示错误提示，又保留已有缓存数据与创建卡操作
+    expect(await screen.findByText('background mcp error')).toBeInTheDocument()
+    expect(screen.getByText('cached-server')).toBeInTheDocument()
+    expect(screen.getByText('创建 MCP 服务')).toBeInTheDocument()
   })
 
   it('opens create modal, validates inputs, and submits new HTTP MCP server', async () => {

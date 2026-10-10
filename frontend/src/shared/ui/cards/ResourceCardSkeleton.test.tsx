@@ -23,9 +23,9 @@ describe('ResourceCardSkeleton', () => {
     })
   })
 
-  it('allows customizing placeholder count and accessible label', () => {
-    const { container } = render(<ResourceCardSkeleton count={3} label="加载模型..." />)
+  it('supports custom accessible label with default 6 fixed cards', () => {
+    const { container } = render(<ResourceCardSkeleton label="加载模型..." />)
     expect(screen.getByRole('status', { name: '加载模型...' })).toBeInTheDocument()
-    expect(container.querySelectorAll('.resource-card-skeleton').length).toBe(3)
+    expect(container.querySelectorAll('.resource-card-skeleton').length).toBe(6)
   })
 })
