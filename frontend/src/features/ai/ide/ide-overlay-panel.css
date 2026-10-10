@@ -168,3 +168,19 @@
   margin-top: 8px;
 }
 
+.ide-panel-terminal-error {
+  padding: 6px 12px;
+  background: var(--danger-subtle, rgba(239, 68, 68, 0.1));
+  color: var(--danger, #ef4444);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ide-panel-error-banner {
+  padding: 6px 12px;
+  background: var(--danger-subtle, rgba(239, 68, 68, 0.1));
+  color: var(--danger, #ef4444);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+

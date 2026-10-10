@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { paneTargetViewKey, type ThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
@@ -16,7 +16,7 @@ import { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
 import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import { isBoundTarget, samePaneTarget } from '@/features/ai/runtime/agent-pane'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
-import { IdeOverlayPanel, type ResolvedEnvironmentInfo } from '@/features/ai/ide/IdeOverlayPanel'
+import { IdeOverlayPanel, type IdeCommandAction, type ResolvedEnvironmentInfo } from '@/features/ai/ide/IdeOverlayPanel'
 import type {
   AgentPaneCapabilities,
   AgentPaneDefaults,
@@ -84,7 +84,8 @@ export function AgentPane({
   const [viewId] = useState(() => createUuid())
 
   const [ideOpen, setIdeOpen] = useState(false)
-  const [ideInitialMode, setIdeInitialMode] = useState<'files' | 'shell'>('files')
+  const [ideAction, setIdeAction] = useState<IdeCommandAction | null>(null)
+  const ideActionIdRef = useRef(0)
   const [layoutMode, setLayoutMode] = useState<'wide' | 'narrow'>('wide')
 
   useEffect(() => {
@@ -108,7 +109,8 @@ export function AgentPane({
 
   const handleOpenIde = useCallback(
     (options: { mode: 'files' | 'shell' }) => {
-      setIdeInitialMode(options.mode)
+      ideActionIdRef.current += 1
+      setIdeAction({ id: ideActionIdRef.current, mode: options.mode })
       setIdeOpen(true)
       onFocus?.()
     },
@@ -227,15 +229,17 @@ export function AgentPane({
     ? environments.find((env) => env.name === activeLayerEnvironmentName) ?? null
     : null
 
-  const resolvedEnvironment: ResolvedEnvironmentInfo | null =
-    matchedEnvCard != null && isCanonicalUuid(matchedEnvCard.id)
-      ? {
-          id: matchedEnvCard.id,
-          name: matchedEnvCard.name,
-          ready: matchedEnvCard.ready,
-          homeDirectory: matchedEnvCard.homeDirectory,
-        }
-      : null
+  const resolvedEnvironment: ResolvedEnvironmentInfo | null = useMemo(() => {
+    if (matchedEnvCard == null || !isCanonicalUuid(matchedEnvCard.id)) {
+      return null
+    }
+    return {
+      id: matchedEnvCard.id,
+      name: matchedEnvCard.name,
+      ready: matchedEnvCard.ready,
+      homeDirectory: matchedEnvCard.homeDirectory,
+    }
+  }, [matchedEnvCard])
 
   // 只有根面板能接管 pane 内导航；只读路径不提供接管者（ThreadLink 保留独立地址）。
   return (
@@ -332,7 +336,7 @@ export function AgentPane({
           viewId={viewId}
           environment={resolvedEnvironment}
           availableEnvironments={environments}
-          initialMode={ideInitialMode}
+          action={ideAction}
           isNarrow={layoutMode === 'narrow'}
           onCollapse={() => setIdeOpen(false)}
           onClose={() => {
