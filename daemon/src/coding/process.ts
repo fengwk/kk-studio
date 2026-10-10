@@ -19,6 +19,9 @@ import { OutputSpool, alignToCharacterBoundary, textOutputStoreFor } from './out
  * <p>与 Java 参考实现对齐：命令以参数传入（不读 stdin），stdout/stderr 合并后持续排空，读取永不因输出体积停止；超过内联阈值时落本地文件，超出捕获预算时只停止文件捕获并继续
  * 计数，两种情况都不终止进程。超时与取消都终止执行范围并保留已捕获输出，终态用 {@code details.process.outcome} 与文本说明区分三种失败。live 阶段按块或时间合并发出
  * {@code APPEND} partial，捕获被截断时补发一条 {@code SNAPSHOT}。
+ *
+ * <p>收敛语义：终止请求只发起一次并缓存为同一个 Promise（发起时即挂拒绝处理，绝无 unhandled rejection）；主路径与 {@code finally} 都 await 同一 Promise，
+ * 因此返回前执行范围一定已收敛。收敛失败是必须显式暴露的事实：返回安全的 FAILED 结果，绝不报告成功。取消/超时在 shell 放行前与启动 await 之后都设围栏。
  */
 
 /** 单条 live partial 的文本上界：远低于 256 KiB 的单条 partial 协议上限。 */
@@ -38,10 +41,35 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
   let timer: NodeJS.Timeout | null = null
   let cancelled = false
   let timedOut = false
+  let terminationFailure: unknown = null
+  let termination: Promise<void> | null = null
+
+  /**
+   * 只发起一次终止并缓存；发起即处理拒绝，主路径与 finally await 同一 Promise。
+   *
+   * <p>尚未启动时（{@code managed === null}）不缓存：取消可能发生在 shell 放行之前，此时没有可终止的范围，必须在启动 await 之后重新收敛。
+   */
+  const requestTermination = (): Promise<void> => {
+    if (termination !== null) {
+      return termination
+    }
+    if (managed === null) {
+      return Promise.resolve()
+    }
+    termination = (async () => {
+      try {
+        await managed?.terminate()
+      } catch (error) {
+        terminationFailure = error
+      }
+    })()
+    return termination
+  }
   const onAbort = (): void => {
     cancelled = true
-    void managed?.terminate()
+    void requestTermination()
   }
+
   try {
     const args = call.arguments
     const command = requiredString(args, 'command')
@@ -49,7 +77,7 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     const timeoutMillis = call.timeoutMillis
 
     if (context.signal.aborted) {
-      // 取消早于执行线程开始：不启动 helper、不产生任何本地文件。
+      // 取消早于执行线程开始：不启动 shell、不产生任何本地文件。
       return terminatedBeforeStart(call.invocationId, 'CANCELLED', timeoutMillis)
     }
 
@@ -58,33 +86,45 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     const emitter = new LiveEmitter(call.invocationId, context, () => cancelled || timedOut)
     const decoder = new ProcessUtf8Decoder()
 
+    // deadline 覆盖 shell 冷启动预算；取消/超时在 shell 放行前也生效。
+    if (timeoutMillis > 0) {
+      timer = setTimeout(() => {
+        timedOut = true
+        void requestTermination()
+      }, timeoutMillis)
+    }
+    context.signal.addEventListener('abort', onAbort, { once: true })
+
     try {
       managed = await context.processes.start({
         executable: context.config.bashExecutable,
         args: ['-lc', command],
         cwd: workdir,
+        signal: context.signal,
       })
     } catch {
-      return errorResult(
-        call.invocationId,
-        guide(
-          `the shell could not be started: ${context.config.bashExecutable}`,
-          'NOT_EXECUTED',
-          'Review the command and the reported process state before deciding what to do next',
-        ),
-        'FAILED',
-      )
-    }
-    // 命令以参数传入，进程不会从 stdin 读取；立刻关闭写端，等待 EOF 的命令才能自然退出。
-    managed.stdin.end()
-    context.signal.addEventListener('abort', onAbort, { once: true })
-    if (timeoutMillis > 0) {
-      timer = setTimeout(() => {
-        timedOut = true
-        void managed?.terminate()
-      }, timeoutMillis)
+      await requestTermination()
+      if (cancelled) {
+        return terminatedBeforeStart(call.invocationId, 'CANCELLED', timeoutMillis)
+      }
+      if (timedOut) {
+        return terminatedBeforeStart(call.invocationId, 'TIMED_OUT', timeoutMillis)
+      }
+      return shellStartFailure(call.invocationId, context.config.bashExecutable)
     }
 
+    // 启动 await 之后再次设围栏：取消/超时窗口内绝不继续排空，先收敛再给出明确去向。
+    if (cancelled || timedOut) {
+      await requestTermination()
+      return terminatedBeforeStart(
+        call.invocationId,
+        cancelled ? 'CANCELLED' : 'TIMED_OUT',
+        timeoutMillis,
+      )
+    }
+
+    // 命令以参数传入，进程不会从 stdin 读取；立刻关闭写端，等待 EOF 的命令才能自然退出。
+    managed.stdin.end()
     const running = managed
     await drainMerged([running.stdout, running.stderr], async (chunk) => {
       await spool?.write(chunk)
@@ -98,6 +138,12 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     await emitter.flush()
 
     const exit = await running.exit
+    // 自然退出时这里是幂等空操作；超时/取消时等到终止完全收敛。
+    await requestTermination()
+    if (terminationFailure !== null) {
+      return convergenceFailure(call.invocationId, spool)
+    }
+
     const outcome: ProcessOutcome = cancelled ? 'CANCELLED' : timedOut ? 'TIMED_OUT' : 'EXITED'
     const naturalExit = exit.exitCode
     const exitCode = naturalExit ?? 0
@@ -106,14 +152,19 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     const captured = await spool.finish(failed, note)
     return withProcessOutcome(captured, outcome, naturalExit, exit.signal)
   } catch (error) {
+    // 异常路径同样先收敛，再决定终态；收敛失败绝不报告成功。
+    await requestTermination()
+    if (terminationFailure !== null) {
+      return convergenceFailure(call.invocationId, spool)
+    }
     return toErrorResult(call.invocationId, error)
   } finally {
     if (timer !== null) {
       clearTimeout(timer)
     }
     context.signal.removeEventListener('abort', onAbort)
-    // 兜底：参数校验失败、资源只创建了一部分等未走到上面路径的情况都不能遗留进程或未收尾的中转文件。
-    void managed?.terminate()
+    // 兜底：返回前收敛执行范围并释放全部中转资源；收敛是幂等的。
+    await requestTermination()
     if (spool !== null) {
       await spool.close()
     }
@@ -143,44 +194,43 @@ async function resolveWorkdir(raw: string): Promise<string> {
   return real
 }
 
+/**
+ * 真正 Readable 背压合并：每个流最多保留一个在途读取，`onChunk` 变慢时不会把整段 stdout 积进内存。
+ *
+ * <p>终止/断流导致的流错误或 premature close 视为该流结束：不丢已读字节，也不会因为缺少 `end` 而挂起。两个流按就绪顺序公平合并。
+ */
+async function* mergeStreams(streams: Readable[]): AsyncGenerator<Uint8Array> {
+  const iterators = streams.map(
+    (stream) => stream[Symbol.asyncIterator]() as AsyncIterator<Uint8Array>,
+  )
+  type Step = { index: number; result: IteratorResult<Uint8Array> }
+  const step = (index: number): Promise<Step> =>
+    (iterators[index] as AsyncIterator<Uint8Array>).next().then(
+      (result) => ({ index, result }),
+      () => ({ index, result: { done: true, value: undefined } as IteratorResult<Uint8Array> }),
+    )
+  const pending = new Map<number, Promise<Step>>()
+  for (let index = 0; index < iterators.length; index++) {
+    pending.set(index, step(index))
+  }
+  while (pending.size > 0) {
+    const { index, result } = await Promise.race(pending.values())
+    pending.delete(index)
+    if (result.done) {
+      continue
+    }
+    yield result.value
+    // 消费完当前 chunk 才请求下一块：形成真实背压。
+    pending.set(index, step(index))
+  }
+}
+
 /** 持续排空合并输出：读取永不停止，输出体积与本地磁盘状态都不构成终止进程的理由。 */
 async function drainMerged(
   streams: Readable[],
   onChunk: (chunk: Uint8Array) => Promise<void>,
 ): Promise<void> {
-  const queue: Uint8Array[] = []
-  let ended = 0
-  let notify: (() => void) | null = null
-  const wake = (): void => {
-    if (notify !== null) {
-      const resolve = notify
-      notify = null
-      resolve()
-    }
-  }
-  for (const stream of streams) {
-    stream.on('data', (chunk: Buffer | string) => {
-      queue.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
-      wake()
-    })
-    stream.on('end', () => {
-      ended++
-      wake()
-    })
-    // 终止导致的流异常关闭：已读取的字节仍然有效，不能因此丢弃已捕获输出。
-    stream.on('error', () => {
-      ended++
-      wake()
-    })
-  }
-  while (ended < streams.length || queue.length > 0) {
-    if (queue.length === 0) {
-      await new Promise<void>((resolve) => {
-        notify = resolve
-      })
-      continue
-    }
-    const chunk = queue.shift() as Uint8Array
+  for await (const chunk of mergeStreams(streams)) {
     await onChunk(chunk)
   }
 }
@@ -207,13 +257,15 @@ class ProcessUtf8Decoder {
 /**
  * live partial 合并器：按时间与块大小两个维度合并，保证单条 partial 有界、区间精确且不丢字节。
  *
- * <p>{@code APPEND} 模式承载连续新区间；捕获被截断时用 {@code SNAPSHOT} 携带最新有界尾部，明确提示全文不完整。
+ * <p>{@code APPEND} 模式承载连续新区间；捕获被截断时用 {@code SNAPSHOT} 携带最新有界尾部，明确提示全文不完整。progress 投递失败只关闭后续 live
+ * 通知，绝不因此停止读取流或伪造 deadline。
  */
 class LiveEmitter {
   private pending: number[] = []
   private observedBytes = 0
   private nextOffset = 0
   private lastFlush = Date.now()
+  private disabled = false
   truncationReported = false
 
   constructor(
@@ -268,21 +320,26 @@ class LiveEmitter {
   }
 
   private async emit(text: string, mode: string, start: number, end: number): Promise<void> {
-    if (text.length === 0 || this.stopped()) {
+    if (this.disabled || text.length === 0 || this.stopped()) {
       return
     }
-    await this.context.progress({
-      callId: this.callId,
-      error: false,
-      details: {
-        kind: PARTIAL_KIND,
-        mode,
-        startOffset: start,
-        endOffset: end,
-        observedBytes: this.observedBytes,
-      },
-      contents: [{ type: 'text', text }],
-    })
+    try {
+      await this.context.progress({
+        callId: this.callId,
+        error: false,
+        details: {
+          kind: PARTIAL_KIND,
+          mode,
+          startOffset: start,
+          endOffset: end,
+          observedBytes: this.observedBytes,
+        },
+        contents: [{ type: 'text', text }],
+      })
+    } catch {
+      // progress 通道失败只抑制后续 live 通知：流仍继续读取，命令事实由终态与 durable 全文决定。
+      this.disabled = true
+    }
   }
 }
 
@@ -357,7 +414,7 @@ function withProcessOutcome(
   return { ...captured, details: { ...captured.details, process } }
 }
 
-/** 启动前已被取消的收尾：不启动 shell、不创建任何本地文件，直接给出明确的进程去向。 */
+/** 启动前已被取消或超时的收尾：不启动 shell、不创建任何本地文件，直接给出明确的进程去向。 */
 function terminatedBeforeStart(
   callId: string,
   outcome: ProcessOutcome,
@@ -369,6 +426,44 @@ function terminatedBeforeStart(
     details: { process: { outcome } },
     contents: [{ type: 'text', text: terminationNote(outcome, 0, timeoutMillis, null) }],
   }
+}
+
+/** shell 无法启动的收尾：命令从未执行，声明 NOT_EXECUTED 而非含混失败。 */
+function shellStartFailure(callId: string, bashExecutable: string): CapabilityResult {
+  return errorResult(
+    callId,
+    guide(
+      `the shell could not be started: ${bashExecutable}`,
+      'NOT_EXECUTED',
+      'Review the command and the reported process state before deciding what to do next',
+    ),
+    'FAILED',
+  )
+}
+
+/**
+ * 执行范围未能收敛的收尾：绝不报告成功。
+ *
+ * <p>已捕获输出仍是真实内容，因此以 error 结果保留（有内容时落盘并附说明），但绝不能声称调用已正常完成。
+ */
+async function convergenceFailure(
+  callId: string,
+  spool: OutputSpool | null,
+): Promise<CapabilityResult> {
+  const note =
+    '[The process scope did not converge; processes may still be running. Captured output above may be incomplete; side effects already performed are not rolled back.]'
+  if (spool !== null && spool.totalBytes() > 0) {
+    return spool.finish(true, note)
+  }
+  return errorResult(
+    callId,
+    guide(
+      'the process scope did not converge; processes may still be running',
+      'UNCERTAIN',
+      'Verify whether the command and its descendants have stopped before deciding what to do next',
+    ),
+    'FAILED',
+  )
 }
 
 export const processCapability: CapabilityExecutor = processExecutor

@@ -1,17 +1,20 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   OutputSpool,
   TextOutputStore,
+  TemporaryResourceStore,
   alignToCharacterBoundary,
   leadingCharacterBoundary,
+  writeAll,
   type PrivateFs,
 } from '../../src/coding/output.js'
 import { fileCapabilities, buildDiff, parseLineEndingDocument } from '../../src/coding/files.js'
 import { searchCapabilities } from '../../src/coding/search.js'
-import { callCapability, makeConfig, makeContext, openTestStore, testPrivateFs, textOf } from './helpers.js'
+import { callCapability, makeConfig, makeContext, openTestStore, textOf } from './helpers.js'
+import { ensurePrivateDirectory } from '../../src/native/index.js'
 
 const tempDirs: string[] = []
 
@@ -67,7 +70,7 @@ describe('OutputSpool 分支', () => {
   it('落盘失败时只降级为有界预览并明确说明', async () => {
     const dir = await tempDir()
     const failing: PrivateFs = {
-      ensurePrivateDirectory: testPrivateFs.ensurePrivateDirectory,
+      ensurePrivateDirectory,
       writePrivateFile: async () => {
         throw new Error('private fs unavailable')
       },
@@ -150,6 +153,52 @@ describe('TemporaryResourceStore 分支', () => {
     expect(alignToCharacterBoundary(new Uint8Array([0x80]), 1)).toBe(0)
     expect(alignToCharacterBoundary(new Uint8Array([0x41]), 0)).toBe(0)
     expect(leadingCharacterBoundary(new Uint8Array([0x80, 0x80]))).toBe(2)
+  })
+
+  it('Workspace.close 幂等：double close 只释放一次租约', async () => {
+    const dir = await tempDir()
+    let now = 1000
+    const resources = await TemporaryResourceStore.open(dir, () => now)
+    const workspace = await resources.create()
+    expect(resources.hasActiveLease(workspace.id)).toBe(true)
+    workspace.close()
+    workspace.close()
+    expect(resources.hasActiveLease(workspace.id)).toBe(false)
+    now += 100
+    // 释放后即可被 TTL 清扫，且不会因为第二次 close 而影响其它租约。
+    expect(await resources.sweep(10)).toBe(1)
+  })
+
+  it('writeAll 补齐短写并拒绝无进展', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4, 5])
+    const received: number[] = []
+    const shortWriter = {
+      async write(buffer: Uint8Array, offset: number, length: number) {
+        const take = Math.min(2, length)
+        for (let index = 0; index < take; index++) {
+          received.push(buffer[offset + index] as number)
+        }
+        return { bytesWritten: take }
+      },
+    }
+    await writeAll(shortWriter, bytes)
+    expect(received).toEqual([1, 2, 3, 4, 5])
+    const stuck = { async write() { return { bytesWritten: 0 } } }
+    await expect(writeAll(stuck, bytes)).rejects.toThrowError(/no progress/)
+  })
+
+  it.skipIf(process.platform !== 'linux')('发布与关闭后不泄漏文件描述符', async () => {
+    const dir = await tempDir()
+    const store = await openTestStore(dir)
+    const before = (await readdir('/proc/self/fd')).length
+    for (let index = 0; index < 5; index++) {
+      const spool = new OutputSpool(store, `c${index}`, 5, 2000, store.captureBudgetBytes())
+      await spool.write(utf8('x'.repeat(2000)))
+      await spool.finish(false)
+      await spool.close()
+    }
+    const after = (await readdir('/proc/self/fd')).length
+    expect(after).toBeLessThanOrEqual(before)
   })
 })
 

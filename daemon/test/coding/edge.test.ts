@@ -21,7 +21,8 @@ import {
   encodeText,
   forEachLine,
 } from '../../src/coding/text.js'
-import { callCapability, makeContext, openTestStore, testPrivateFs, textOf } from './helpers.js'
+import { callCapability, makeContext, openTestStore, textOf } from './helpers.js'
+import { ensurePrivateDirectory } from '../../src/native/index.js'
 
 const tempDirs: string[] = []
 
@@ -476,7 +477,7 @@ describe('output 边界', () => {
     const dir = await tempDir()
     const store = await openTestStore(dir)
     const failing: PrivateFs = {
-      ensurePrivateDirectory: testPrivateFs.ensurePrivateDirectory,
+      ensurePrivateDirectory,
       writePrivateFile: async () => {
         throw new Error('private fs unavailable')
       },

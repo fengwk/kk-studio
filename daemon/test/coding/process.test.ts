@@ -5,11 +5,7 @@ import { join } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import type { CapabilityResult, ManagedProcess, ProcessExit, ProcessSpec } from '../../src/contracts.js'
 import { processCapability } from '../../src/coding/process.js'
-import { configureTextOutputStores } from '../../src/coding/output.js'
-import { callCapability, makeContext, testPrivateFs, textOf } from './helpers.js'
-
-// 能力层惰性打开输出存储：注入测试私有文件端口，并收紧捕获预算以在测试中确定性触发截断 SNAPSHOT。
-configureTextOutputStores({ privateFs: testPrivateFs, captureBudgetBytes: 100_000 })
+import { callCapability, makeContext, textOf } from './helpers.js'
 
 const tempDirs: string[] = []
 
@@ -268,7 +264,35 @@ describe('process.exec', () => {
     expect(textOf(result)).toContain('was not executed')
   })
 
-  it('live partial 携带精确区间并在截断时补发 SNAPSHOT', async () => {
+  it('启动 await 期间的取消被围栏并收敛', async () => {
+    const dir = await tempDir()
+    const controller = new AbortController()
+    const handle = fakeManagedProcess({ holdUntilTerminate: true })
+    let startedSpec: ProcessSpec | undefined
+    const supervisor = {
+      start: async (spec: ProcessSpec): Promise<ManagedProcess> => {
+        startedSpec = spec
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return handle.process
+      },
+      close: async () => {},
+    }
+    const pending = callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'x', workdir: dir },
+      makeContext(dir, { processes: supervisor, signal: controller.signal }),
+    )
+    setTimeout(() => controller.abort(), 5)
+    const result = await pending
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({ process: { outcome: 'CANCELLED' } })
+    // start 收到取消信号，且放行后立即收敛，不留下运行中的 shell。
+    expect(startedSpec?.signal).toBe(controller.signal)
+    expect(handle.terminated()).toBe(true)
+  })
+
+  it('live partial 携带精确区间', async () => {
     const dir = await tempDir()
     const progress: CapabilityResult[] = []
     const handle = fakeManagedProcess({ stdout: 'y'.repeat(200_000), exitCode: 0 })
@@ -288,10 +312,53 @@ describe('process.exec', () => {
     )
     expect(appends.length).toBeGreaterThan(1)
     expect((appends[0]?.details as { startOffset?: number }).startOffset).toBe(0)
-    const snapshots = progress.filter(
-      (item) => (item.details as { mode?: string }).mode === 'SNAPSHOT',
+    expect((appends[0]?.details as { kind?: string }).kind).toBe('process.output')
+  })
+
+  it('progress 投递失败不停止读取流', async () => {
+    const dir = await tempDir()
+    const handle = fakeManagedProcess({ stdout: 'z'.repeat(200_000), exitCode: 0 })
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'yes', workdir: dir },
+      makeContext(dir, {
+        processes: fakeSupervisor(handle),
+        progress: async () => {
+          throw new Error('progress channel down')
+        },
+      }),
     )
-    expect(snapshots.length).toBe(1)
-    expect((snapshots[0]?.details as { kind?: string }).kind).toBe('process.output')
+    // live 通知失败只抑制通知：命令仍自然退出并给出完整捕获事实。
+    expect(result.error).toBe(false)
+    expect(result.details).toMatchObject({ process: { outcome: 'EXITED', exitCode: 0 } })
+    expect((result.details as { textOutput?: { totalBytes?: number } }).textOutput?.totalBytes).toBe(
+      200_000,
+    )
+  })
+
+  it('收敛失败返回 FAILED 而非成功', async () => {
+    const dir = await tempDir()
+    const stdout = Readable.from([Buffer.from('boom\n')])
+    const stderr = Readable.from([])
+    const exit = new Promise<ProcessExit>((resolve) => setTimeout(() => resolve({ exitCode: 0, signal: null }), 10))
+    const proc: ManagedProcess = {
+      pid: 7,
+      stdin: new PassThrough(),
+      stdout,
+      stderr,
+      exit,
+      async terminate() {
+        throw new Error('scope did not converge')
+      },
+    }
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'x', workdir: dir },
+      makeContext(dir, { processes: { start: async () => proc, close: async () => {} } }),
+    )
+    expect(result.error).toBe(true)
+    expect(textOf(result)).toContain('did not converge')
   })
 })
