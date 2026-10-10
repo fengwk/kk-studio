@@ -11,7 +11,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 进程内一次性 IDE 流 ticket 实现：委托 {@link OneTimeTicketStore}，把绑定值编码为 Environment+租约+模式。
+ * 进程内一次性 IDE 流 ticket 实现：委托 {@link OneTimeTicketStore}，绑定值编码为连接代际 + 模式。
  *
  * <p>只在本节点（当前 owner）内有效，不做跨节点复制：跨节点请求先由 owner 定位再本地消费。
  */
@@ -32,11 +32,10 @@ public final class InMemoryIdeStreamTicketService implements IdeStreamTicketServ
   }
 
   @Override
-  public Issued issue(EnvironmentId environmentId, UUID leaseToken, IdeStreamMode mode) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
+  public Issued issue(IdeSessionIdentity identity, IdeStreamMode mode) {
+    Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(mode, "mode");
-    String ticket = store.issue(new Consumed(environmentId, leaseToken, mode));
+    String ticket = store.issue(new Consumed(identity, mode));
     return new Issued(ticket, mode);
   }
 
@@ -51,8 +50,8 @@ public final class InMemoryIdeStreamTicketService implements IdeStreamTicketServ
     Objects.requireNonNull(leaseToken, "leaseToken");
     store.revoke(
         consumed ->
-            consumed.environmentId().equals(environmentId)
-                && consumed.leaseToken().equals(leaseToken));
+            consumed.identity().environmentId().equals(environmentId)
+                && consumed.identity().leaseToken().equals(leaseToken));
   }
 
   /** 当前未消费 ticket 数量（用于测试与诊断，不暴露 ticket 值）。 */
