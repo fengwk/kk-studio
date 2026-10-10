@@ -55,8 +55,8 @@ public sealed interface AcceptCommandsTarget {
   }
 
   /**
-   * 在既有 Session 的合法 fork 边界 {@code startEntryId}（ROOT 或已闭合 {@code TURN_END}）下独立 fork 新执行根；不复制
-   * Entry， Thread head 直接指向该 Entry。分支显示名由调用方显式给出并经 {@link Names#normalize} 规范，是创建请求身份的一部分。
+   * 在既有 Session 的合法 fork 边界 {@code startEntryId}（ROOT 或已闭合 {@code TURN_END}）下独立 fork 新执行根；不复制 前缀
+   * Entry，Thread head 指向切点之后新追加的 FORK Entry。分支显示名由调用方显式给出并经 {@link Names#normalize} 规范，是创建请求身份的一部分。
    */
   record NewThread(
       UUID sessionId, UUID startEntryId, UUID threadId, String threadName, boolean yoloEnabled)

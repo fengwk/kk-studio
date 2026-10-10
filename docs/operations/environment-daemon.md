@@ -411,8 +411,8 @@ SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 
 数据目录持有 `daemon.lock`，同一目录只允许一个 Daemon。`tmp/workspaces/<uuid>` 保存命令与检索的大文本
 全文（`*.part` 中转后原子发布 `*.log`），模型历史可能仍引用其绝对路径。定时清扫（默认 30 分钟一次）
 只回收超过当前保留期（默认 3 天）且未被使用的 workspace，历史引用的全文因此在保留期后可能被自动回收。
-`skills` 保存已安装包，`skill-work` 保存 Git 缓存及安装中间产物；安装器负责恢复或清理 staging/backup，
-并保留已发布的全文与技能。
+`skills` 保存已安装包，`skill-work` 保存安装暂存与替换备份；安装器负责恢复或清理 staging/backup，
+并保留已发布的技能包。
 
 ## 参数与排错
 
