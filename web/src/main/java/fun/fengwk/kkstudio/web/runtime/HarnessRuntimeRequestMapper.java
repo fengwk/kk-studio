@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
@@ -326,6 +327,22 @@ public final class HarnessRuntimeRequestMapper {
         requireText(dto.getModelName(), "model.modelName"),
         requireText(dto.getVariant(), "model.variant"));
   }
+
+  /**
+   * Model Request Debug 的草稿选择：{@code model} 必填并复用 canonical {@link ModelSelection} 校验；{@code
+   * environmentName} 可空但复用 branch settings 的 canonical Environment name 规则（null 明确表示未选择）。
+   */
+  public static ModelRequestDebugSelection toModelRequestDebugSelection(
+      HarnessModelRequestDebugRequestDTO dto) {
+    requireNonNull(dto, "modelRequestDebugRequest");
+    return new ModelRequestDebugSelection(
+        toModelSelection(dto.getModel()),
+        BranchSettings.requireCanonicalEnvironmentName(
+            dto.getEnvironmentName(), "environmentName"));
+  }
+
+  /** Model Request Debug 的草稿选择：canonical model selection 与可空 Environment name。 */
+  public record ModelRequestDebugSelection(ModelSelection model, String environmentName) {}
 
   private static NewThreadCommand toNewHttpCommand(HarnessCommandCreateDTO dto) {
     requireNonNull(dto, "command");
