@@ -871,19 +871,41 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  /** 重连 READY 后重发已知更新回执：进行中重发 ACCEPTED，否则重发最近一次已完成回执。 */
-  private void resendUpdateResultAfterReconnect() {
+  /**
+   * 冻结 READY 放行前已存在的更新 operation 身份：进行中的 operation 优先，否则取最近一次已完成回执的 operation。
+   *
+   * <p>只在 READY 放行前读取，因此只承载握手前已有的事实；握手期间新受理的 UPDATE 由自身回执路径收敛，不属于该身份，也不会被 READY 完成回调当历史回执重复重放。
+   */
+  private String knownUpdateOperationId() {
     String active = activeUpdateOperationId.get();
-    if (active != null && !updateResults.containsKey(active)) {
-      sendUpdateResult(DaemonUpdateResult.accepted(active));
+    if (active != null) {
+      return active;
+    }
+    String latest = null;
+    synchronized (updateResults) {
+      for (DaemonUpdateResult result : updateResults.values()) {
+        latest = result.operationId();
+      }
+    }
+    return latest;
+  }
+
+  /**
+   * 重发握手前已冻结 operation 的最新已知回执：已完成重发冻结结果，仍在途重发 ACCEPTED；无已知 operation 时不重发。
+   *
+   * <p>按需读取当前结果而非冻结回执，避免把冻结时的 ACCEPTED 当作已过期阶段重放；operation 已不在进程事实中（如被逐出缓存）时不重发。
+   */
+  private void resendKnownUpdateResult(String operationId) {
+    if (operationId == null) {
       return;
     }
-    List<DaemonUpdateResult> snapshot;
-    synchronized (updateResults) {
-      snapshot = new ArrayList<>(updateResults.values());
+    DaemonUpdateResult completed = updateResults.get(operationId);
+    if (completed != null) {
+      sendUpdateResult(completed);
+      return;
     }
-    if (!snapshot.isEmpty()) {
-      sendUpdateResult(snapshot.get(snapshot.size() - 1));
+    if (operationId.equals(activeUpdateOperationId.get())) {
+      sendUpdateResult(DaemonUpdateResult.accepted(operationId));
     }
   }
 
@@ -1058,15 +1080,18 @@ public final class DaemonRuntime implements AutoCloseable {
    *
    * <p>只有仍是当前活跃连接、代际未过期且运行时未停止/关闭时才 READY：旧绑定的异步完成绝不会令新连接 READY，也不会覆盖新绑定。绑定放行（{@code markReady} +
    * {@code state=READY}）刻意早于 READY 递交完成，以覆盖合法 peer 在极速回执后立即补发命令的 callback 竞态；但上传与心跳的资格必须等到 READY
-   * 的传输完成信号。
+   * 的传输完成信号。放行前先冻结当时已知的更新 operation，完成回调只重发该 operation，绝不复述放行后新受理的 UPDATE。
    */
   private void completeReady(ActiveConnection connection) {
     CompletionStage<Void> ready;
+    String knownUpdateOperationId;
     synchronized (connection) {
       synchronized (lifecycleLock) {
         if (!isCurrentConnection(connection)) {
           return;
         }
+        // 必须在放行 READY 之前冻结：放行后受理的新 UPDATE 不属于握手前事实，不能进完成回调重放。
+        knownUpdateOperationId = knownUpdateOperationId();
         connection.markReady();
         state = DaemonRuntimeState.READY;
         try {
@@ -1082,15 +1107,18 @@ public final class DaemonRuntime implements AutoCloseable {
       }
     }
     // 不在锁内等待/汇合 stage，也不在 sendOn 的通用语义里另注册一次断开：READY 这条自己唯一回调。
-    ready.whenComplete((ignored, error) -> onReadyTransmitted(connection, error));
+    ready.whenComplete(
+        (ignored, error) -> onReadyTransmitted(connection, error, knownUpdateOperationId));
   }
 
   /**
-   * READY 传输完成后的唯一收敛点：失败即关闭该代际握手重连；成功且仍为当前连接才放行上传与心跳。
+   * READY 传输完成后的唯一收敛点：失败即关闭该代际握手重连；成功且仍为当前连接才放行上传与心跳，并重发握手前已冻结 operation 的最新回执。
    *
-   * <p>当前代际复核与上传门控放行和断开复位共用生命周期锁，旧代际的迟到成功不影响当前连接。
+   * <p>当前代际复核与上传门控放行和断开复位共用生命周期锁，旧代际的迟到成功不影响当前连接。重发严格限定在 {@code knownUpdateOperationId}（READY
+   * 放行前冻结）：握手期间新受理的 UPDATE 由其自身回执路径收敛，绝不被当历史事实二次重放。
    */
-  private void onReadyTransmitted(ActiveConnection connection, Throwable error) {
+  private void onReadyTransmitted(
+      ActiveConnection connection, Throwable error, String knownUpdateOperationId) {
     if (error != null) {
       closeFailedHandshake(connection);
       return;
@@ -1103,8 +1131,8 @@ public final class DaemonRuntime implements AutoCloseable {
       connection.markReadyTransmitted();
       // 与断开复位共用生命周期锁，旧成功回调不能在新连接复位后重新放行上传。
       resourceTransferClient.onConnectionReady();
-      // 断开不改变已接受的更新事实：READY 递交成功后重发已知回执，让 Platform 重新收敛而不是判定失败。
-      resendUpdateResultAfterReconnect();
+      // 断开不改变已接受的更新事实：READY 递交成功后重发握手前已知 operation 的最新回执，让 Platform 重新收敛而不是判定失败。
+      resendKnownUpdateResult(knownUpdateOperationId);
     }
   }
 
