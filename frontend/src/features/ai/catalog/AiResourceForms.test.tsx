@@ -100,24 +100,25 @@ describe('AiResourceForms', () => {
 
     render(<ProviderLifecycleHarness />)
 
-    // 1. Initially "继承系统配置" is checked; modelHttpRetryStatusCodes is null
-    expect(screen.getByLabelText('继承系统配置')).toBeChecked()
-    expect(screen.getByLabelText('自定义重试名单')).not.toBeChecked()
+    // 1. Initially "继承系统配置" is selected; modelHttpRetryStatusCodes is null
+    const retryPolicyTrigger = screen.getByLabelText('HTTP 错误重试策略')
+    expect(retryPolicyTrigger).toHaveAttribute('data-value', 'inherit')
+    expect(retryPolicyTrigger).toHaveTextContent('继承系统配置')
     expect(currentDraft.modelHttpRetryStatusCodes).toBeNull()
     expect(validateCurrent().ok).toBe(true)
     expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toBeNull()
     expect(toEditableProviderUpdate(currentDraft).modelHttpRetryStatusCodes).toBeNull()
 
-    // 2. Toggle to "自定义重试名单" -> draft becomes []
-    await user.click(screen.getByLabelText('自定义重试名单'))
-    expect(screen.getByLabelText('自定义重试名单')).toBeChecked()
+    // 2. Select "自定义重试名单" -> draft becomes []
+    await selectFormOption(user, 'HTTP 错误重试策略', '自定义重试名单')
+    expect(screen.getByLabelText('HTTP 错误重试策略')).toHaveAttribute('data-value', 'custom')
     expect(currentDraft.modelHttpRetryStatusCodes).toEqual([])
     expect(validateCurrent().ok).toBe(true)
     expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toEqual([])
     expect(toEditableProviderUpdate(currentDraft).modelHttpRetryStatusCodes).toEqual([])
 
     // 3. Add valid custom status codes via TagInput
-    const tagInput = screen.getByRole('textbox', { name: 'HTTP 错误重试策略' })
+    const tagInput = screen.getByRole('textbox', { name: '自定义重试名单' })
     await user.type(tagInput, '408{enter}')
     expect(screen.getByText('408')).toBeInTheDocument()
     expect(currentDraft.modelHttpRetryStatusCodes).toEqual([408])
@@ -156,8 +157,8 @@ describe('AiResourceForms', () => {
     expect(validateCurrent().ok).toBe(true)
 
     // 7. Toggle back to "继承系统配置" -> draft becomes null
-    await user.click(screen.getByLabelText('继承系统配置'))
-    expect(screen.getByLabelText('继承系统配置')).toBeChecked()
+    await selectFormOption(user, 'HTTP 错误重试策略', '继承系统配置')
+    expect(screen.getByLabelText('HTTP 错误重试策略')).toHaveAttribute('data-value', 'inherit')
     expect(currentDraft.modelHttpRetryStatusCodes).toBeNull()
     expect(validateCurrent().ok).toBe(true)
     expect(toEditableProvider(currentDraft).modelHttpRetryStatusCodes).toBeNull()

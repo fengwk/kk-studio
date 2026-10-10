@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type ClipboardEvent,
 } from 'react'
+import { X } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 import {
   parseIntegerListTokens,
@@ -120,6 +121,11 @@ export function TagInput({
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (disabled) return
 
+    // IME composition guard: do not commit tokens during composition
+    if (event.nativeEvent.isComposing || event.key === 'Process') {
+      return
+    }
+
     if (event.key === 'Enter' || event.key === ',') {
       event.preventDefault()
       commitTokens(inputValue)
@@ -195,7 +201,7 @@ export function TagInput({
                   removeTag(index)
                 }}
               >
-                ×
+                <X size={12} aria-hidden="true" />
               </button>
             )}
           </span>
@@ -205,7 +211,7 @@ export function TagInput({
           ref={inputRef}
           id={inputId}
           type="text"
-          className="ui-tag-inline-input"
+          className="ui-tag-input-field"
           value={inputValue}
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
