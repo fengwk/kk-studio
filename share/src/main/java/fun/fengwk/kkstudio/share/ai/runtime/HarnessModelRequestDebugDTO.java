@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Instant;
 import java.util.List;
@@ -143,7 +144,7 @@ public class HarnessModelRequestDebugDTO {
     private List<String> tools;
 
     /** 目标 Agent 配置声明的 Skill 引用，按声明顺序；只含 {@code (packageName, name)} 身份。 */
-    private List<AgentSkillReferenceDTO> skills;
+    private List<SkillRefDTO> skills;
 
     /** 目标 Agent 配置声明的 subagent 短名，按声明顺序；不递归展开。 */
     private List<String> subagents;

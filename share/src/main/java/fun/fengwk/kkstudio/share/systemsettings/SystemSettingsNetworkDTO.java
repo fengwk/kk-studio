@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.Data;
 
-/** Backend 全局代理（重启生效）；null proxyUrl 表示明确直连，不支持认证或模块覆盖。 */
+/** Backend 全局代理（新 HTTP 请求生效）；null proxyUrl 表示明确直连，不支持认证或模块覆盖。 */
 @Data
 public class SystemSettingsNetworkDTO {
 
