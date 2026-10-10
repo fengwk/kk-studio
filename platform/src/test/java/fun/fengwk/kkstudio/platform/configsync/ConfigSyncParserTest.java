@@ -425,7 +425,7 @@ class ConfigSyncParserTest {
         () ->
             parser.parse(
                 "agents:\n"
-                    + "  - name: compaction\n"
+                    + "  - name: Compaction\n"
                     + "    model: p/m\n"
                     + "    config:\n"
                     + "      tools: []\n"
