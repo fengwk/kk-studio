@@ -32,6 +32,17 @@ test.describe('Canvas library real browser regression', () => {
       const icon = element.querySelector('.resource-card-icon') as HTMLElement
       const title = element.querySelector('.resource-card-title') as HTMLElement
       const action = element.querySelector('.resource-card-actions button') as HTMLElement
+      const actionStyle = getComputedStyle(action)
+      const actionSvg = action.querySelector('svg') as SVGElement | null
+      const probe = document.createElement('button')
+      probe.className = 'btn-primary is-compact'
+      document.body.appendChild(probe)
+      const refStyle = getComputedStyle(probe)
+      const expectedBg = refStyle.backgroundImage
+      const expectedColor = refStyle.color
+      const expectedBorder = refStyle.borderTopColor
+      const expectedPadding = refStyle.padding
+      probe.remove()
       return {
         padding: cardStyle.padding,
         borderRadius: cardStyle.borderRadius,
@@ -40,6 +51,15 @@ test.describe('Canvas library real browser regression', () => {
         titleFontSize: getComputedStyle(title).fontSize,
         titleFontWeight: getComputedStyle(title).fontWeight,
         actionHeight: Math.round(action.getBoundingClientRect().height),
+        actionPadding: actionStyle.padding,
+        actionBg: actionStyle.backgroundImage,
+        actionColor: actionStyle.color,
+        actionBorder: actionStyle.borderTopColor,
+        actionSvgWidth: actionSvg ? Math.round(actionSvg.getBoundingClientRect().width) : 0,
+        expectedBg,
+        expectedColor,
+        expectedBorder,
+        expectedPadding,
       }
     })
     // 与共享资源卡基座一致，而不是旧的 project-card 皮肤。
@@ -50,14 +70,74 @@ test.describe('Canvas library real browser regression', () => {
     expect(metrics.titleFontSize).toBe('15px')
     expect(metrics.titleFontWeight).toBe('600')
     expect(metrics.actionHeight).toBe(28)
+    expect(metrics.actionPadding).toBe(metrics.expectedPadding)
+    expect(metrics.actionBg).toBe(metrics.expectedBg)
+    expect(metrics.actionBg).not.toBe('none')
+    expect(metrics.actionColor).toBe(metrics.expectedColor)
+    expect(metrics.actionBorder).toBe(metrics.expectedBorder)
+    expect(metrics.actionSvgWidth).toBe(14)
 
     expect(await grid.evaluate((element) => getComputedStyle(element).gap)).toBe('16px')
 
-    // 桌面多列。
-    const desktopXs = await grid.locator('> *').evaluateAll(
-      (items) => items.map((item) => Math.round(item.getBoundingClientRect().x)),
-    )
-    expect(new Set(desktopXs).size).toBeGreaterThanOrEqual(2)
+    // 验证 1280 / 580 / 390 视口无额外横向 padding/margin，卡片宽度落在合理上限内且不溢出。
+    for (const viewport of [
+      { width: 1280, height: 900, expectedPaddingX: 32, minCols: 2 },
+      { width: 580, height: 900, expectedPaddingX: 16, minCols: 1 },
+      { width: 390, height: 900, expectedPaddingX: 16, minCols: 1 },
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      const layoutMetrics = await page.evaluate(() => {
+        const feature = document.querySelector('.canvas-feature') as HTMLElement
+        const view = document.querySelector('#libraryView') as HTMLElement
+        const content = document.querySelector('.library-content') as HTMLElement
+        const cards = [...document.querySelectorAll<HTMLElement>('.canvas-library-grid > *')]
+        const featureStyle = getComputedStyle(feature)
+        const viewStyle = getComputedStyle(view)
+        const contentStyle = getComputedStyle(content)
+        const contentRect = content.getBoundingClientRect()
+        return {
+          docScrollWidth: document.documentElement.scrollWidth,
+          docClientWidth: document.documentElement.clientWidth,
+          featurePaddingX:
+            Number.parseFloat(featureStyle.paddingLeft) + Number.parseFloat(featureStyle.paddingRight),
+          viewPaddingX:
+            Number.parseFloat(viewStyle.paddingLeft) + Number.parseFloat(viewStyle.paddingRight),
+          contentMarginLeft: Number.parseFloat(contentStyle.marginLeft),
+          contentMarginRight: Number.parseFloat(contentStyle.marginRight),
+          contentPaddingLeft: Number.parseFloat(contentStyle.paddingLeft),
+          contentPaddingRight: Number.parseFloat(contentStyle.paddingRight),
+          contentLeft: Math.round(contentRect.left),
+          contentWidth: Math.round(contentRect.width),
+          cardWidths: cards.map((item) => Math.round(item.getBoundingClientRect().width)),
+          cardXs: cards.map((item) => Math.round(item.getBoundingClientRect().x)),
+        }
+      })
+      expect(layoutMetrics.docScrollWidth).toBeLessThanOrEqual(layoutMetrics.docClientWidth + 1)
+      expect(layoutMetrics.featurePaddingX).toBe(0)
+      expect(layoutMetrics.viewPaddingX).toBe(0)
+      expect(layoutMetrics.contentMarginLeft).toBe(0)
+      expect(layoutMetrics.contentMarginRight).toBe(0)
+      expect(layoutMetrics.contentLeft).toBe(0)
+      expect(layoutMetrics.contentWidth).toBe(viewport.width)
+      expect(layoutMetrics.contentPaddingLeft).toBe(viewport.expectedPaddingX)
+      expect(layoutMetrics.contentPaddingRight).toBe(viewport.expectedPaddingX)
+      for (const cardWidth of layoutMetrics.cardWidths) {
+        expect(cardWidth).toBeGreaterThanOrEqual(280)
+        expect(cardWidth).toBeLessThanOrEqual(360)
+      }
+      expect(new Set(layoutMetrics.cardXs).size).toBeGreaterThanOrEqual(viewport.minCols)
+      await page.screenshot({
+        path: test.info().outputPath(`canvas-library-${viewport.width}.png`),
+      })
+    }
+
+    // 进入按钮支持 hover 与键盘 focus-visible。
+    const openButton = page.getByRole('button', { name: '进入画布「Research board」' })
+    await openButton.hover()
+    await openButton.focus()
+    await expect(openButton).toBeFocused()
+    const focusShadow = await openButton.evaluate((el) => getComputedStyle(el).boxShadow)
+    expect(focusShadow).toContain('113, 231, 154')
 
     // 窄屏单列且不横向溢出。
     await page.setViewportSize({ width: 360, height: 900 })

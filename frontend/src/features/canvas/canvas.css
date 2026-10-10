@@ -62,10 +62,17 @@
   display: block;
 }
 
-.canvas-feature .library-content {
-  width: min(1180px, 100%);
-  margin: 0 auto;
-  padding: 32px;
+.canvas-feature .library-view.active {
+  display: flex;
+}
+
+.canvas-feature .canvas-library-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+}
+
+.canvas-feature .canvas-library-grid > * {
+  width: 100%;
+  max-width: 360px;
 }
 
 .canvas-feature h1,
@@ -1655,10 +1662,6 @@
 }
 
 @media (max-width: 700px) {
-  .canvas-feature .library-content {
-    padding: 20px 16px;
-  }
-
   .canvas-feature .library-heading h1 {
     font-size: 20px;
   }

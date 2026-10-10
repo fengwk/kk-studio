@@ -3494,7 +3494,11 @@ export const aiCatalog = {
   },
   'ai.interaction.empty': {
     'en-US': 'No pending interactions',
-    'zh-CN': '暂无待处理项',
+    'zh-CN': '暂无待处理事项',
+  },
+  'ai.interaction.emptyDescription': {
+    'en-US': 'Requests requiring your approval, input, or environment availability will appear here.',
+    'zh-CN': '需要审批、补充输入或等待环境的请求会显示在这里。',
   },
   'ai.interaction.refresh': {
     'en-US': 'Refresh',
