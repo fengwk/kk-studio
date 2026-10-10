@@ -65,7 +65,7 @@ Daemon 没有绑定该门禁。筛选测试得到的报告不能代表整个模�
 直接调用本地 `fs.read`，固定以下分派边界：
 
 - `path` 必填，由 `EnvironmentCapabilityCatalogTest` 冻结；空对象不是读取当前目录。
-  绝对路径无需 workdir，相对路径必须提供本次调用的绝对 workdir（`relativePathRequiresExplicitWorkdir`），
+  `path` 必须是绝对路径，相对路径直接拒绝且不接受 workdir（`relativePathIsRejected`），
   文件名中的非 ASCII 空格保持原样（`nonAsciiSpacesInFileNamesArePreserved`）。
 - 本地文本只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE（`bomEncodedTextIsDecodedWithoutBomInBody`）。
   受管文本按严格 UTF-8；NUL、非法字节与无 BOM 的旧编码不做字符集猜测（`binaryContentIsRejected`、

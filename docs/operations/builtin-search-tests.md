@@ -27,7 +27,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 | [`FindGrepCapabilitiesTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/FindGrepCapabilitiesTest.java) | glob、结果格式、全文落盘、`SearchFiles` 遍历 |
 | [`GitIgnoreDiscoveryTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/GitIgnoreDiscoveryTest.java) | 祖先 `.gitignore`、`info/exclude`、`.git` 文件与 linked worktree 的发现 |
 | `CodingCapabilitiesTest`、`CodingCapabilitiesEdgeTest` | schema 参数、有效调用预算、注入执行器与取消 |
-| `WorkdirPathSemanticsTest` | 每次调用独立的路径解析基准、相对路径、缺失或不可用 workdir |
+| `WorkdirPathSemanticsTest` | 每次调用独立的绝对路径解析、相对路径拒绝与不可用 workdir |
 
 只跑检索可用上述类名筛选 `-Dtest`，同时保留 `-am -Dsurefire.failIfNoSpecifiedTests=false`，
 并确认 Daemon 的 `target/surefire-reports` 有实际执行记录。`test` 生成
@@ -37,13 +37,14 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 
 ## 先验证检索范围
 
-绝对 path 不需 workdir，相对 path 必须有显式绝对 workdir，不继承 Daemon cwd。
-`WorkdirPathSemanticsTest.eachInvocationUsesItsOwnWorkdir`、
-`relativePathsResolveFromExplicitWorkdir`、`relativeWorkdirIsRejected`、`unusableWorkdirIsRejected`
+绝对 path 不需 workdir，相对 path 直接拒绝，不继承 Daemon cwd。
+`WorkdirPathSemanticsTest.eachInvocationUsesItsOwnAbsolutePath`、
+`relativePathIsRejectedWithoutDefaultFallback`、`relativeWorkdirIsRejected`、`unusableWorkdirIsRejected`
+与 `NativeSearchCapabilitiesTest.searchRejectsRelativePath`、`searchRejectsRelativePathsEvenIfExists`
 守卫这条边界。schema 必填、类型和未知参数由
 `CodingCapabilitiesEdgeTest.everyDescriptorRejectsWrongTypedAndUnknownArguments` 验证。
 
-忽略规则从**检索目标自身**向上发现，与调用 workdir 无关；`.git` 目录或文件界定仓库上界。
+忽略规则从**检索目标自身**向上发现，与调用目录无关；`.git` 目录或文件界定仓库上界。
 `GitIgnoreDiscoveryTest` 是发现规则的直接证据，`NativeSearchCapabilitiesTest` 与
 `FindGrepCapabilitiesTest` 验证规则对实际结果的影响。
 符号链接的遍历行为由 `searchFilesIgnoresSymlinksAndValidatesDirectory` 固定；
@@ -63,8 +64,8 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 | 未搜索路径有界枚举，不能伪装成无匹配 | `grepEnumeratesAndBoundsUnsearchedPaths`、`grepReportsUnreadableDirectFile` |
 | 大结果在共享输出层落盘，返回有界预览与路径 | `grepSpoolsLargeResultsToBoundedTextResultWithPath` |
 
-定位结果包含可再次访问的路径、行号与命中文本；提供 workdir 时使用相对展示，
-无 workdir 的绝对目标保留绝对路径。
+定位结果包含可再次访问的绝对路径、行号与命中文本
+（`searchAcceptsAbsolutePathWithoutWorkdirAndReportsAbsolutePaths`、`searchAlwaysReportsAbsolutePaths`）。
 只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE；直接二进制目标报错，目录中的二进制文件跳过。
 非法编码不能静默替换成乱码或漏报匹配（`grepRejectsInvalidTextEncodingInsteadOfMissingMatches`、
 `grepDetectsBinaryContentBeyondProbePrefix`）。单行保留上限为 1,048,576 个字符，超出时以无法完整搜索失败，

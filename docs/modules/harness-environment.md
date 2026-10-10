@@ -24,15 +24,15 @@ id / version / inputSchema / defaultTimeout
 
 | capabilityId | 默认超时 | `workdir` | 模型映射 |
 | --- | --- | --- | --- |
-| `fs.read` | 1 分钟 | 相对 path 时需要 | `read` |
-| `fs.write` | 1 分钟 | 相对 path 时需要 | `write` |
-| `fs.edit` | 1 分钟 | 相对 path 时需要 | `edit` |
+| `fs.read` | 1 分钟 | 无 | `read` |
+| `fs.write` | 1 分钟 | 无 | `write` |
+| `fs.edit` | 1 分钟 | 无 | `edit` |
 | `process.exec` | 5 分钟 | 必填 | `bash` |
-| `fs.grep` | 1 分钟 | 相对 path 时需要 | `grep` |
-| `fs.find` | 1 分钟 | 相对 path 时需要 | `find` |
-| `lsp.goto-definition` | 2 分钟 | 相对 path 时需要 | `lsp_goto_definition` |
-| `lsp.workspace-symbols` | 2 分钟 | 相对 path 时需要 | `lsp_workspace_symbols` |
-| `lsp.java-decompile` | 2 分钟 | 相对 path 或 target 时需要 | `lsp_java_decompile` |
+| `fs.grep` | 1 分钟 | 无 | `grep` |
+| `fs.find` | 1 分钟 | 无 | `find` |
+| `lsp.goto-definition` | 2 分钟 | 无 | `lsp_goto_definition` |
+| `lsp.workspace-symbols` | 2 分钟 | 无 | `lsp_workspace_symbols` |
+| `lsp.java-decompile` | 2 分钟 | 无 | `lsp_java_decompile` |
 | `skill.sync` | 不设总时限 | 无 | 内部控制面 |
 
 `skill.sync` 由 Platform 内部调用，其余 9 项由 Contributor 映射为模型工具。
@@ -43,9 +43,9 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力只在给出的 path
-（`lsp.java-decompile` 还包括 `target`）相对时要求它，绝对路径可直接执行；`skill.sync` 不接受
-workdir。提供 `workdir` 时它仍必须是目标 Daemon 文件系统上的绝对现存目录，
+`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的 `path`
+（`lsp.java-decompile` 还包括 `target`）必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`；
+`skill.sync` 不接受 `workdir`。`process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 
 能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据相同的能力标识与版本注册本地实现。能力标识未知或版本不匹配都是确定性的协议错误，没有回退路径。
@@ -61,7 +61,7 @@ EnvironmentCapabilityExecutionHandle execute(
     EnvironmentCapabilityExecutionListener listener);
 ```
 
-[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）和 timeout，构造时按 descriptor schema 归一化并严格校验。workdir 属于具体 arguments；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
+[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）和 timeout，构造时按 descriptor schema 归一化并严格校验。`workdir` 只属于具体工具的 arguments（仅 `process.exec`）；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
 
 [`EnvironmentCapabilityTransport`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java) 是调用方的传输窄端口：
 
@@ -104,6 +104,7 @@ HELLO / WELCOME / READY / HEARTBEAT
 INVOKE / STARTED / PROGRESS / COMPLETED / FAILED
 CANCEL / CANCELLED / ERROR
 RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
+TEMPORARY_RESOURCE_POLICY / UPDATE / UPDATE_RESULT
 ```
 
 [`DaemonEnvelope`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelope.java) 的固定字段为：
@@ -112,7 +113,7 @@ RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
 protocolVersion / messageType / environmentId / invocationId? / payload
 ```
 
-`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR` 外的全部消息都必须携带非空的 `invocationId`，资源上传控制消息也以它关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
+`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR`、`TEMPORARY_RESOURCE_POLICY` 外的全部消息都必须携带非空的 `invocationId`；`TEMPORARY_RESOURCE_POLICY` 由已绑定连接发出，只携带非空 `environmentId`，`invocationId` 为 null。资源上传控制消息也以 `invocationId` 关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
 
 重连去重以 invocationId 与 Daemon journal 关联消息，各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion。同实例恢复的进程生命周期限制见下文。
 
@@ -120,8 +121,8 @@ protocolVersion / messageType / environmentId / invocationId? / payload
 
 ```text
 Daemon -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=2, daemonVersion, daemonInstanceId)
-Gateway -> WELCOME(environmentId, name, maxResourceBytes)
-Daemon -> READY(version=3, daemonVersion, environment)
+Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
+Daemon -> READY(version=4, daemonVersion, environment)
 Daemon -> HEARTBEAT*
 
 Gateway -> INVOKE
@@ -137,7 +138,7 @@ Gateway -> CANCEL
 Daemon -> CANCELLED | 已冻结的终态重放
 ```
 
-`WELCOME` payload 携带认证结果 `environmentId`、展示用 `name` 与本连接的资源字节预算 `maxResourceBytes`；Daemon 在收到它之前不接受任何 resource/binary 结果。
+`WELCOME` payload 携带认证结果 `environmentId`、展示用 `name`、本连接的资源字节预算 `maxResourceBytes` 与临时资源 `temporaryResourceTtlSeconds` / `temporaryResourceCleanupIntervalSeconds`（缺失或非正数是协议错误）；Daemon 在收到它之前不接受任何 resource/binary 结果。TTL 或扫描间隔变化时 Gateway 在同一心跳通道推送 `TEMPORARY_RESOURCE_POLICY`，热更只作用于尚未回收的 workspace。
 
 `daemonInstanceId` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Gateway 保有在途记录时，同实例重连以相同 `invocationId` 恢复（已取消的调用只重发 CANCEL），Daemon journal 去重，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启或迁移的执行恢复。握手失败时 Gateway 以 `ERROR` 收尾，`REGISTRATION_REJECTED` 与 `RETRY_LATER` 是仅有的两个冻结错误码。
 
@@ -148,17 +149,17 @@ Daemon -> CANCELLED | 已冻结的终态重放
 [`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码 READY 载荷：
 
 ```text
-version=3
+version=4
 daemonVersion=构建版本
-environment: operatingSystem / timeZone / userName / homeDirectory / note
+environment: operatingSystem / timeZone / userName / homeDirectory / note / tempDirectory
 ```
 
-READY 只公开宿主侧的五项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 shaded JAR manifest 的
+READY 只公开宿主侧的六项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 shaded JAR manifest 的
 `Implementation-Version`，未打包运行时为固定标记 `development`（明确表示不是发布版本），与 Card 上的 CAS
-`version` 是两个不同事实。五项数据为目标操作系统、时区、Daemon 进程用户、该用户的
-HOME 与可信操作者备注（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
+`version` 是两个不同事实。六项数据为目标操作系统、时区、Daemon 进程用户、该用户的
+HOME、可信操作者备注与受控临时目录 `tempDirectory`（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
 OS 依据；`userName` 与 `homeDirectory` 只用于 Card 和当前 Environment Prompt 展示，
-不构成 cwd、默认 workdir 或沙箱。`environment` 是必填对象且字段固定；未知字段、必填
+不构成 cwd、默认 workdir 或沙箱；`tempDirectory` 是受控临时 workspace 的 canonical 绝对路径，同样只是展示事实。`environment` 是必填对象且字段固定；未知字段、必填
 字段缺失或类型错误都是协议错误。
 
 载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符；未指定 note 时 Daemon 按 OS 生成默认说明。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
@@ -201,7 +202,7 @@ Tool，READY 与 Package 发布后的同步由 Platform 发起。
 网络读取空闲超时 180 秒；持续收到数据时不因累计时长终止。`skill.sync` 的 timeout 为 0，
 没有外层总期限，但断线、关闭和取消仍会收尾在途任务。其他 capability 的默认超时不变。
 
-## workdir 词法契约
+## workdir 词法契约（`process.exec`）
 
 [`DaemonWorkdirSyntax`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntax.java) 的 `requireAbsolute(workdir, operatingSystem)` 是发送前的纯文本校验：
 
