@@ -5,6 +5,7 @@ import { encodeInvoke, decodeEnvelope } from '../src/protocol.js'
 import {
   Runtime,
   defaultNote,
+  detectArchitecture,
   detectEnvironmentInfo,
   utf8LengthOf,
   type RuntimeOptions,
@@ -16,6 +17,7 @@ import { FakeConnection, FakeTransport, fakeProcessSupervisor, serverMessage, te
 const ENV = '11111111-2222-4333-8444-555555555555'
 const environment = {
   operatingSystem: 'linux' as const,
+  architecture: 'amd64' as const,
   timeZone: 'UTC',
   userName: 'dev',
   homeDirectory: '/home/dev',
@@ -446,6 +448,19 @@ describe('environment detection helpers', () => {
         delete process.env.WSL_DISTRO_NAME
       } else {
         process.env.WSL_DISTRO_NAME = previous
+      }
+    }
+  })
+
+  it('maps process.arch to the release architecture and fails closed otherwise', () => {
+    expect(['amd64', 'arm64']).toContain(detectArchitecture())
+    const original = Object.getOwnPropertyDescriptor(process, 'arch')
+    Object.defineProperty(process, 'arch', { value: 'ia32', configurable: true })
+    try {
+      expect(() => detectArchitecture()).toThrow(/unsupported daemon architecture/)
+    } finally {
+      if (original !== undefined) {
+        Object.defineProperty(process, 'arch', original)
       }
     }
   })

@@ -36,7 +36,7 @@ import {
 const ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
 
 function envelope(messageType: string, extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ protocolVersion: 3, messageType, payload: {}, ...extra })
+  return JSON.stringify({ protocolVersion: 4, messageType, payload: {}, ...extra })
 }
 
 describe('envelope codec', () => {
@@ -147,6 +147,7 @@ describe('envelope codec', () => {
 describe('READY capabilities codec', () => {
   const environment = {
     operatingSystem: 'linux' as const,
+    architecture: 'amd64' as const,
     timeZone: 'Asia/Shanghai',
     userName: 'dev',
     homeDirectory: '/home/dev',
@@ -155,27 +156,30 @@ describe('READY capabilities codec', () => {
   }
 
   it('round-trips capabilities', () => {
-    const text = encodeCapabilities({ version: 4, daemonVersion: '1.0.12', environment })
+    const text = encodeCapabilities({ version: 5, daemonVersion: '1.0.12', environment })
     const decoded = decodeCapabilities(text)
-    expect(decoded.version).toBe(4)
+    expect(decoded.version).toBe(5)
     expect(decoded.daemonVersion).toBe('1.0.12')
     expect(decoded.environment).toEqual(environment)
   })
 
   it('rejects unknown fields, wrong version and invalid OS/daemonVersion', () => {
-    expect(() => decodeCapabilities(JSON.stringify({ version: 4, daemonVersion: '1.0.12', environment, x: 1 }))).toThrow(
+    expect(() => decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.12', environment, x: 1 }))).toThrow(
       /unexpected|unknown/,
     )
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 3, daemonVersion: '1.0.12', environment })),
+      decodeCapabilities(JSON.stringify({ version: 4, daemonVersion: '1.0.12', environment })),
     ).toThrow(/unsupported READY capabilities version/)
     expect(() =>
       decodeCapabilities(
-        JSON.stringify({ version: 4, daemonVersion: '1.0.12', environment: { ...environment, operatingSystem: 'plan9' } }),
+        JSON.stringify({ version: 5, daemonVersion: '1.0.12', environment: { ...environment, operatingSystem: 'plan9' } }),
       ),
     ).toThrow(/unsupported daemon operating system/)
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 4, daemonVersion: 'bad version', environment })),
+      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.12', environment: { ...environment, architecture: 'ia32' } })),
+    ).toThrow(/unsupported daemon architecture/)
+    expect(() =>
+      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: 'bad version', environment })),
     ).toThrow(ProtocolError)
   })
 })

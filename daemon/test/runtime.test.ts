@@ -17,6 +17,7 @@ const OTHER_ENV = '99999999-2222-4333-8444-555555555555'
 
 const environment = {
   operatingSystem: 'linux' as const,
+  architecture: 'amd64' as const,
   timeZone: 'UTC',
   userName: 'dev',
   homeDirectory: '/home/dev',
@@ -97,7 +98,7 @@ describe('runtime handshake', () => {
     const hello = sent(setup.transport).find((envelope) => envelope.messageType === 'HELLO')
     expect(hello).toBeDefined()
     expect(hello?.environmentId).toBeNull()
-    expect(hello?.payload.protocolVersion).toBe(3)
+    expect(hello?.payload.protocolVersion).toBe(4)
     expect(hello?.payload.capabilityCatalogVersion).toBe('2')
     expect(hello?.payload.daemonVersion).toBe('1.0.12')
     expect(hello?.payload.registrationToken).toBe('test-registration-token')
@@ -111,7 +112,7 @@ describe('runtime handshake', () => {
     expect(setup.runtime.getBoundEnvironmentId()).toBe(ENV)
     const ready = sent(setup.transport).find((envelope) => envelope.messageType === 'READY')
     expect(ready?.environmentId).toBe(ENV)
-    expect((ready?.payload as { version: number }).version).toBe(4)
+    expect((ready?.payload as { version: number }).version).toBe(5)
     setup.runtime.close()
   })
 

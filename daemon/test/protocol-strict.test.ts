@@ -26,7 +26,7 @@ const SHA = 'a'.repeat(64)
 const TINY_LIMITS = { maxBytes: 64, maxNestingDepth: 4, maxNumberLength: 8, maxStringBytes: 4 }
 
 function envelope(messageType: string, extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ protocolVersion: 3, messageType, payload: {}, ...extra })
+  return JSON.stringify({ protocolVersion: 4, messageType, payload: {}, ...extra })
 }
 
 function result(contents: unknown[]): CapabilityResult {
@@ -95,6 +95,7 @@ describe('envelope field validation branches', () => {
 describe('READY capabilities validation branches', () => {
   const environment = {
     operatingSystem: 'linux',
+    architecture: 'arm64',
     timeZone: 'UTC',
     userName: 'dev',
     homeDirectory: '/home/dev',
@@ -107,7 +108,7 @@ describe('READY capabilities validation branches', () => {
       decodeCapabilities(JSON.stringify({ version: 'four', daemonVersion: '1.0.12', environment })),
     ).toThrow(/version must be an integer/)
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 4, daemonVersion: 'bad version', environment })),
+      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: 'bad version', environment })),
     ).toThrow(/READY capabilities validation failed/)
   })
 })

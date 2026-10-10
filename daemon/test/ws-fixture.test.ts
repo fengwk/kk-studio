@@ -18,6 +18,7 @@ const welcomePayload = {
 }
 const environment = {
   operatingSystem: 'linux' as const,
+  architecture: 'amd64' as const,
   timeZone: 'UTC',
   userName: 'dev',
   homeDirectory: '/home/dev',

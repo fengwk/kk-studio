@@ -13,13 +13,13 @@ import type { CapabilityResult, IdeCommand, IdeReply, ResultContent } from './co
  */
 
 /** 当前 Daemon wire 协议版本；其他版本一律拒绝，不做双协议 fallback。 */
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 
 /** capability catalog 版本；HELLO 上报、Platform 据此判定能否执行普通能力调用。 */
 export const CAPABILITY_CATALOG_VERSION = '2'
 
 /** READY capabilities 协议版本。 */
-export const READY_CAPABILITIES_VERSION = 4
+export const READY_CAPABILITIES_VERSION = 5
 
 /** 结果 payload 的 UTF-8 上限（解码前与最终编码输出）：16 MiB。 */
 export const MAX_PAYLOAD_UTF8_BYTES = 16 * 1024 * 1024
@@ -426,6 +426,8 @@ export function decodeEnvelope(text: string): Envelope {
 
 export interface EnvironmentInfo {
   operatingSystem: 'windows' | 'wsl' | 'linux' | 'macos'
+  /** 宿主 CPU 架构；用于新版归档选择 amd64/arm64 制品，不支持时构建期即失败关闭。 */
+  architecture: 'amd64' | 'arm64'
   timeZone: string
   userName: string
   homeDirectory: string
@@ -442,6 +444,7 @@ export interface Capabilities {
 const READY_ROOT_FIELDS = new Set(['version', 'daemonVersion', 'environment'])
 const READY_ENVIRONMENT_FIELDS = new Set([
   'operatingSystem',
+  'architecture',
   'timeZone',
   'userName',
   'homeDirectory',
@@ -449,6 +452,7 @@ const READY_ENVIRONMENT_FIELDS = new Set([
   'tempDirectory',
 ])
 const OPERATING_SYSTEMS = new Set(['windows', 'wsl', 'linux', 'macos'])
+const ARCHITECTURES = new Set(['amd64', 'arm64'])
 const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
 
 export function validateDaemonVersion(value: string): string {
@@ -464,6 +468,7 @@ export function encodeCapabilities(capabilities: Capabilities): string {
     daemonVersion: capabilities.daemonVersion,
     environment: {
       operatingSystem: capabilities.environment.operatingSystem,
+      architecture: capabilities.environment.architecture,
       timeZone: capabilities.environment.timeZone,
       userName: capabilities.environment.userName,
       homeDirectory: capabilities.environment.homeDirectory,
@@ -495,11 +500,16 @@ export function decodeCapabilities(text: string): Capabilities {
   if (!OPERATING_SYSTEMS.has(operatingSystem)) {
     throw new ProtocolError(`unsupported daemon operating system: ${operatingSystem}`)
   }
+  const architecture = requiredText(environment, 'architecture', 'READY environment')
+  if (!ARCHITECTURES.has(architecture)) {
+    throw new ProtocolError(`unsupported daemon architecture: ${architecture}`)
+  }
   return {
     version,
     daemonVersion,
     environment: {
       operatingSystem: operatingSystem as EnvironmentInfo['operatingSystem'],
+      architecture: architecture as EnvironmentInfo['architecture'],
       timeZone: requiredText(environment, 'timeZone', 'READY environment'),
       userName: requiredText(environment, 'userName', 'READY environment'),
       homeDirectory: requiredText(environment, 'homeDirectory', 'READY environment'),

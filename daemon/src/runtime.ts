@@ -19,6 +19,7 @@ import { DAEMON_VERSION, readRegistrationToken } from './config.js'
 import {
   CAPABILITY_CATALOG_VERSION,
   PROTOCOL_VERSION,
+  READY_CAPABILITIES_VERSION,
   ProtocolError,
   decodeEnvelope,
   decodeIdeCommand,
@@ -366,7 +367,7 @@ export class Runtime {
 
   private sendReady(connection: ActiveConnection): boolean {
     const payload = encodeCapabilities({
-      version: 4,
+      version: READY_CAPABILITIES_VERSION,
       daemonVersion: this.daemonVersion,
       environment: this.environment,
     })
@@ -1091,11 +1092,24 @@ export function detectEnvironmentInfo(config: DaemonConfig, tempDirectory?: stri
   const home = canonicalHomeDirectory(homedir())
   return {
     operatingSystem,
+    architecture: detectArchitecture(),
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     userName: safeUserName(),
     homeDirectory: home,
     note: config.note ?? defaultNote(operatingSystem),
     tempDirectory: tempDirectory ?? join(resolve(config.dataDir), 'tmp'),
+  }
+}
+
+/** 把 Node 的 process.arch 归一到发行制品命名；不支持的架构失败关闭，绝不猜测。 */
+export function detectArchitecture(): EnvironmentInfo['architecture'] {
+  switch (process.arch) {
+    case 'x64':
+      return 'amd64'
+    case 'arm64':
+      return 'arm64'
+    default:
+      throw new Error(`unsupported daemon architecture: ${process.arch}`)
   }
 }
 
