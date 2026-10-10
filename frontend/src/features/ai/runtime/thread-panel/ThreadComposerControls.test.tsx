@@ -512,7 +512,7 @@ describe('ThreadComposerControls environment menu', () => {
     expect(onMenuChange).toHaveBeenCalledWith(null, true)
   })
 
-  it('renders the draft / pending settings status chip and omits it when applied', () => {
+  it('omits the draft status chip and only renders the pending settings status chip', () => {
     const { rerender } = render(
       <ThreadComposerControls
         settings={createSettings({ status: 'draft' })}
@@ -521,8 +521,8 @@ describe('ThreadComposerControls environment menu', () => {
         onMenuChange={vi.fn()}
       />,
     )
-    const draftChip = screen.getByText('草稿')
-    expect(draftChip).toHaveAttribute('data-settings-status', 'draft')
+    expect(screen.queryByText('草稿')).toBeNull()
+    expect(screen.queryByText('待生效')).toBeNull()
 
     rerender(
       <ThreadComposerControls

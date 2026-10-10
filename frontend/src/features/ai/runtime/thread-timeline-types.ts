@@ -1,4 +1,5 @@
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
+import type { SkillRefDTO } from '@/shared/api/contracts/ai-catalog'
 
 type DialogueRole =
   | 'user'
@@ -315,6 +316,10 @@ export interface ThreadModelRequestDebugSkill {
 export interface ThreadModelRequestDebugSubagent {
   name: string
   description: string
+  tools: string[]
+  skills: SkillRefDTO[]
+  subagents: string[]
+  configurationJson: string
 }
 
 export interface ThreadModelRequestDebugCacheControl {

@@ -104,7 +104,7 @@ describe('ThreadEventView', () => {
         }}
       />,
     )
-    const preview = screen.getByRole('region', { name: /当前规划|Current planning/ })
+    const preview = screen.getByRole('region', { name: /请求预览|Request preview/ })
     expect(preview).toHaveTextContent('line1')
     expect(preview).toHaveTextContent('line11')
     expect(preview.querySelector('.thread-system-prompt-body')).not.toBeNull()
@@ -525,13 +525,17 @@ describe('ThreadEventView', () => {
       expect(detailTab).toHaveAttribute('aria-selected', 'false')
     })
 
-    it('waits for an external preview selection and returns to the inspect action after closing', async () => {
-      // 异步检查记录来源/焦点，但加载或失败不提前切详情；关闭恢复操作按钮焦点。
+    it('waits for an external preview selection and returns to the preview tab after closing', async () => {
+      // 异步检查记录来源/焦点，但加载或失败不提前切详情；关闭恢复到请求预览 tab。
       const user = userEvent.setup()
-      const onPreview = vi.fn()
       const onSelectInspector = vi.fn()
-      const debug = sampleDebugData()
-      const view = (selection: DebugInspectorSelection | null, loading = false, error: string | null = null) => (
+      const debug = sampleDebugData({
+        frozenInvocation: {
+          kind: 'FROZEN_INVOCATION',
+          requestJson: '{"model":"minimax"}',
+        },
+      })
+      const view = (selection: DebugInspectorSelection | null, error: string | null = null) => (
         <ThreadEventView
           events={[]}
           selectedEventId={null}
@@ -539,8 +543,6 @@ describe('ThreadEventView', () => {
           debug={debug}
           debugSelection={selection}
           onSelectInspector={onSelectInspector}
-          onPreview={onPreview}
-          previewLoading={loading}
           previewError={error}
         />
       )
@@ -549,22 +551,14 @@ describe('ThreadEventView', () => {
       const previewTab = screen.getByRole('tab', { name: '请求预览' })
       const detailTab = screen.getByRole('tab', { name: '详情' })
       await user.click(previewTab)
-      const title = screen.getByRole('button', { name: '预览当前草稿' })
-      await user.click(title)
-      expect(onPreview).toHaveBeenCalledTimes(1)
-      expect(previewTab).toHaveAttribute('aria-selected', 'true')
-      expect(detailTab).toHaveAttribute('aria-selected', 'false')
-
-      rerender(view(null, true))
-      expect(title).toBeDisabled()
-      expect(previewTab).toHaveAttribute('aria-selected', 'true')
-      rerender(view(null, false, '请求预览失败'))
+      const frozenTrigger = screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' })
+      rerender(view(null, '请求预览失败'))
       expect(screen.getByRole('alert')).toHaveTextContent('请求预览失败')
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
       expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
 
-      // 再次点击并由上级异步更新 selection，模拟 controller 成功响应。
-      await user.click(title)
+      // 点击冻结调用触发器并由上级更新 selection。
+      await user.click(frozenTrigger)
       rerender(view({
         type: 'preview',
         preview: {
@@ -584,7 +578,7 @@ describe('ThreadEventView', () => {
       rerender(view(null))
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
       expect(detailTab).toHaveAttribute('aria-selected', 'false')
-      await waitFor(() => expect(title).toHaveFocus())
+      await waitFor(() => expect(frozenTrigger).toHaveFocus())
     })
 
     it('automatically activates detail tab on subagent chip click and restores focus on Escape', async () => {
@@ -592,7 +586,16 @@ describe('ThreadEventView', () => {
       render(
         <ResponsiveHarness
           initialDebug={sampleDebugData({
-            subagents: [{ name: 'Explorer', description: 'Read-only exploration subagent' }],
+            subagents: [
+              {
+                name: 'Explorer',
+                description: 'Read-only exploration subagent',
+                tools: ['read'],
+                skills: [{ packageName: 'dev-tools', name: 'dev' }],
+                subagents: ['helper'],
+                configurationJson: '{"tools":["read"]}',
+              },
+            ],
           })}
         />,
       )
