@@ -218,6 +218,8 @@ final class PgTransport implements CrossNodeTransport {
     while (!isClosed()) {
       try (Connection connection = dataSource.getConnection()) {
         connection.setAutoCommit(true);
+        // Health probes replace pg_stat_activity.query; the reader identity must remain stable.
+        connection.setClientInfo("ApplicationName", "kk-studio-notification-" + self);
         synchronized (this) {
           if (closed) {
             return;

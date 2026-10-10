@@ -31,7 +31,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -312,8 +311,9 @@ class NotificationPostgresqlIntegrationTest {
       JdbcTemplate jdbc = new JdbcTemplate(source);
       Integer pid =
           jdbc.queryForObject(
-              "select pid from pg_stat_activity where application_name = ? and query like 'LISTEN %'",
-              Integer.class, source.applicationName);
+              "select pid from pg_stat_activity where application_name = ?",
+              Integer.class,
+              "kk-studio-notification-" + bus.nodeId());
       assertTrue(jdbc.queryForObject("select pg_terminate_backend(?)", Boolean.class, pid));
       // Disconnection and LISTEN-completed recovery both schedule authoritative reconciliation.
       while (take(resyncs) < 3 || !bus.healthy()) {
@@ -334,6 +334,39 @@ class NotificationPostgresqlIntegrationTest {
       assertThrows(
           IllegalStateException.class,
           () -> bus.publish(EVENTS, NotificationAddress.broadcast(), "closed"));
+    }
+  }
+
+  @Test
+  void listenerRemainsDiscoverableAfterIdleValidation() throws Exception {
+    CountingDataSource source = dataSource();
+    BlockingQueue<String> values = new LinkedBlockingQueue<>();
+    try (DefaultNotificationBus bus = bus(source)) {
+      bus.subscribe(EVENTS, values::add, () -> {});
+      bus.start();
+      awaitHealthy(bus);
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (source.validations.get() == 0 && System.nanoTime() < deadline) {
+        Thread.sleep(10);
+      }
+      assertTrue(source.validations.get() > 0, "the reader must complete a real JDBC health probe");
+      JdbcTemplate jdbc = new JdbcTemplate(source);
+      String applicationName = "kk-studio-notification-" + bus.nodeId();
+      assertEquals(
+          "",
+          jdbc.queryForObject(
+              "select query from pg_stat_activity where application_name = ?",
+              String.class,
+              applicationName),
+          "a JDBC health probe replaces the last LISTEN query");
+      NotificationPacket frame = wire(UUID.randomUUID(), bus.nodeId(), "after-validation");
+      sendRaw(
+          jdbc,
+          PgTransport.inboxChannel(bus.nodeId()),
+          NotificationCarrier.chunk(frame, 0).encode());
+      assertEquals(
+          "after-validation", take(values), "the identified reader must still be listening");
+      assertTrue(bus.healthy());
     }
   }
 
@@ -857,26 +890,21 @@ class NotificationPostgresqlIntegrationTest {
     DriverManagerDataSource delegate =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    String name = "notification-test-" + UUID.randomUUID();
-    Properties properties = new Properties();
-    properties.setProperty("ApplicationName", name);
-    delegate.setConnectionProperties(properties);
-    return new CountingDataSource(delegate, name);
+    return new CountingDataSource(delegate);
   }
 
   private static final class CountingDataSource extends AbstractDataSource {
     final DriverManagerDataSource delegate;
-    final String applicationName;
     final AtomicInteger notifies = new AtomicInteger();
+    final AtomicInteger validations = new AtomicInteger();
     final AtomicBoolean failNextValidation = new AtomicBoolean();
     final AtomicInteger failedValidationTimeout = new AtomicInteger();
     volatile boolean failNotify;
     volatile CountDownLatch notifyStarted;
     volatile CountDownLatch notifyRelease;
 
-    CountingDataSource(DriverManagerDataSource delegate, String applicationName) {
+    CountingDataSource(DriverManagerDataSource delegate) {
       this.delegate = delegate;
-      this.applicationName = applicationName;
     }
 
     @Override
@@ -914,7 +942,11 @@ class NotificationPostgresqlIntegrationTest {
                   }
                 }
                 try {
-                  return method.invoke(actual, args);
+                  Object result = method.invoke(actual, args);
+                  if (method.getName().equals("isValid") && Boolean.TRUE.equals(result)) {
+                    validations.incrementAndGet();
+                  }
+                  return result;
                 } catch (InvocationTargetException error) {
                   throw error.getCause();
                 }

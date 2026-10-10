@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
+import fun.fengwk.kkstudio.notification.NotificationBus;
 import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
 import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -23,6 +24,7 @@ import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -48,6 +50,8 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   @LocalServerPort private int port;
 
   @Autowired private DataSource dataSource;
+
+  @Autowired private NotificationBus notificationBus;
 
   @Test
   void handshakeDecodesStrictlyAndClosesOnInvalidFrame() throws Exception {
@@ -220,14 +224,16 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
   private int terminateListenBackendsOnce() throws SQLException {
     try (Connection connection = dataSource.getConnection();
+        PreparedStatement listener =
+            connection.prepareStatement(
+                "select pid from pg_stat_activity"
+                    + " where datname = current_database()"
+                    + " and application_name = ?"
+                    + " and pid <> pg_backend_pid()");
         Statement statement = connection.createStatement()) {
+      listener.setString(1, "kk-studio-notification-" + notificationBus.nodeId());
       List<Integer> pids = new ArrayList<>();
-      try (ResultSet rs =
-          statement.executeQuery(
-              "select pid from pg_stat_activity"
-                  + " where datname = current_database()"
-                  + " and query like 'LISTEN %'"
-                  + " and pid <> pg_backend_pid()")) {
+      try (ResultSet rs = listener.executeQuery()) {
         while (rs.next()) {
           pids.add(rs.getInt(1));
         }
