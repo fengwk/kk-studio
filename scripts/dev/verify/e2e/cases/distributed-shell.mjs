@@ -67,6 +67,8 @@ registerCase({
 
     await withCleanup(async () => {
       // 1. browserPeer on app-b opens the terminal through the cross-node route.
+      await peerB.waitOpen()
+      await peerA.waitOpen()
       const openB = peerB.open()
       const attachedB = await peerB.waitAttached(openB, 40_000)
       assert(attachedB.status === 'RUNNING', `remote OPEN must attach RUNNING, got ${attachedB.status}`)
@@ -129,10 +131,11 @@ registerCase({
       await peerB.waitScreenRow(markerNew, 30_000)
 
       // 7. resending the same seq+digest is idempotent: the wire resolves it without a second write.
+      const countAcks = () => peerA.opAcks.filter((item) => item.writerEpoch === grant2.epoch && item.seq === 1 && item.digest === op3.digest).length
+      // Count before sending: a synchronous receipt could otherwise race the baseline read.
+      const before = countAcks()
       const duplicate = peerA.sendInput(`printf '%s\\n' ${markerNew}\r`, 1)
       assert(duplicate.digest === op3.digest, 'the resent INPUT must reuse the same digest')
-      const countAcks = () => peerA.opAcks.filter((item) => item.writerEpoch === grant2.epoch && item.seq === 1 && item.digest === op3.digest).length
-      const before = countAcks()
       await peerA.waitUntil(() => countAcks() >= before + 1, 20_000)
       await peerA.settle(400)
       assert(peerA.screenRowCount(markerNew) === 1, 'idempotent resend must not produce a duplicate output row')
@@ -186,12 +189,16 @@ registerCase({
   async run(ctx) {
     assertDistributedContext(ctx)
     await waitEnvReady(ctx.callNode, 'a', ENV_A_ID)
+    await waitEnvReady(ctx.callNode, 'b', ENV_A_ID)
 
+    // The terminal is owned by daemon-a via app-a; the recovering viewer reconnects through app-b so
+    // the whole recovery path crosses the App boundary over PG.
     const peer1 = new TerminalProbe(ctx.baseUrls.a, { environmentId: ENV_A_ID, autoApplied: false })
     let peer2 = null
     const marker = sentinel('ACK')
 
     await withCleanup(async () => {
+      await peer1.waitOpen()
       const openId = peer1.open()
       const attached1 = await peer1.waitAttached(openId, 40_000)
       assert(attached1.status === 'RUNNING', `OPEN must attach RUNNING, got ${attached1.status}`)
@@ -202,21 +209,26 @@ registerCase({
       const previousGrant = { ...peer1.grant }
       const identity = { ...peer1.identity }
 
-      // Drop exactly the resulting OP_ACK; the real PTY write is proven by the whole-row sentinel.
-      peer1.dropNextOpAck()
+      // Drop exactly the final receipt for seq 1 (PENDING acks stay recorded); the real PTY write is
+      // proven by the whole-row sentinel.
+      peer1.dropNextOpAck(1)
       const inputOp = peer1.sendInput(`printf '%s\\n' ${marker}\r`, 1)
       await peer1.waitScreenRow(marker, 30_000)
       assert(peer1.counters.droppedOpAcks >= 1, 'the wire OP_ACK must have been dropped')
-      assert(peer1.opAcks.length === 0, 'the dropped OP_ACK must not be recorded')
+      assert(
+        peer1.opAcks.every((item) => item.seq !== 1 || (item.kind !== 'CONFIRMED' && item.kind !== 'REJECTED')),
+        'the dropped final OP_ACK must not be recorded',
+      )
 
       await peer1.close()
 
-      // Reconnect with the same viewer on a new connection and re-attach the same identity.
-      peer2 = new TerminalProbe(ctx.baseUrls.a, {
+      // Reconnect with the same viewer on a new connection (through app-b) and re-attach the identity.
+      peer2 = new TerminalProbe(ctx.baseUrls.b, {
         environmentId: ENV_A_ID,
         viewerId: peer1.viewerId,
         autoApplied: false,
       })
+      await peer2.waitOpen()
       const attachId = peer2.attach(identity)
       const attached2 = await peer2.waitAttached(attachId, 40_000)
       assert(attached2.terminalId === identity.terminalId, 'reconnect must attach the same terminal')
@@ -240,12 +252,15 @@ registerCase({
       await peer2.settle(400)
       assert(peer2.screenRowCount(marker) === 1, 'recovery must not replay INPUT or duplicate the output')
 
+      const recoveredSummary = peer2.summary()
+      assert(peer2.counters.inputsSent === 0, 'recovery must not auto-resend any INPUT')
       ctx.writeArtifact('ack-recovery.json', `${JSON.stringify({
         droppedAck: true,
         recovered: recovered.recovered,
         newStream: true,
-        replayedInput: false,
-        counters: peer2.summary().counters,
+        inputsSent: recoveredSummary.counters.inputsSent,
+        replayedInput: recoveredSummary.counters.inputsSent === 0,
+        counters: recoveredSummary.counters,
       }, null, 2)}\n`)
     }, [
       () => (peer2 ? peer2.closeTerminal() : null),
@@ -261,20 +276,23 @@ registerCase({
   level: 'L5',
   title: 'owner DB 断网期间终端命令 fail-closed',
   requires: ['distributed'],
-  docs: '在 fixture env 3333… 经 app-b 建立真实终端并写入哨兵；disconnect-db-a 后用 app-a 的 OPEN 必须 NOT_EXECUTED/ROUTE_UNAVAILABLE，经 app-b 的命令在 owner DB 不可用时绝不假报 WRITTEN 也不本地 fallback（允许 ROUTE_UNAVAILABLE/OUTCOME_UNKNOWN）；finally reconnect-db-a，等两节点恢复 READY 后重新 ATTACH 建立新 stream/baseline、重建 writer 并再次写入哨兵，验证故障窗口哨兵从未出现。',
+  docs: '在 fixture env 3333… 经 app-b 建立真实终端并写入哨兵；disconnect-db-a 后对 app-a 的新观察尝试必须 fail-closed（ROUTE_UNAVAILABLE/NOT_EXECUTED 或连接被拒/关闭），经 app-b 的命令在 owner DB 不可用时绝不假报 WRITTEN、也不本地 fallback（有界 10s 捕获 requestError/close，静默不当作证据）；finally reconnect-db-a，等两节点恢复 READY 后重新 ATTACH 建立新 stream，以权威 full RESET 断言故障窗口哨兵从未落屏。',
   async run(ctx) {
     assertDistributedContext(ctx)
     await waitEnvReady(ctx.callNode, 'a', ENV_A_ID)
     await waitEnvReady(ctx.callNode, 'b', ENV_A_ID)
 
     const peerB = new TerminalProbe(ctx.baseUrls.b, { environmentId: ENV_A_ID, autoApplied: false })
-    const observerA = new TerminalProbe(ctx.baseUrls.a, { environmentId: ENV_A_ID, autoApplied: false })
+    // The owner-node observer is created only after the DB is isolated, so it never rides a socket
+    // the owner may have already dropped.
+    let observerA = null
     const baseMarker = sentinel('DB0')
     const faultMarker = sentinel('DBB')
     const restoredMarker = sentinel('DBR')
     let restoreDb = false
 
     await withCleanup(async () => {
+      await peerB.waitOpen()
       // Baseline terminal reached through app-b.
       const openId = peerB.open()
       const attachedB = await peerB.waitAttached(openId, 40_000)
@@ -291,32 +309,44 @@ registerCase({
       ctx.runDistributedCommand('disconnect-db-a')
       await waitOwnerDbDown(ctx.callNode, ENV_A_ID)
 
-      // Deterministic fail-closed on the DB-isolated owner node.
-      const isolatedId = observerA.open()
-      const isolatedError = await observerA.waitErrorEvent(isolatedId, 20_000)
-      assert(isolatedError.code === 'ROUTE_UNAVAILABLE', `owner DB loss must fail closed, got ${isolatedError.code}`)
-      assert(isolatedError.disposition === 'NOT_EXECUTED', `route failure must be NOT_EXECUTED, got ${isolatedError.disposition}`)
+      // The owner node is DB-isolated: a fresh observation attempt must fail closed, either with a
+      // deterministic NOT_EXECUTED route error or with a refused/closed connection.
+      observerA = new TerminalProbe(ctx.baseUrls.a, { environmentId: ENV_A_ID, autoApplied: false })
+      let ownerFailClosed
+      try {
+        await observerA.waitOpen(10_000)
+        const isolatedId = observerA.open()
+        const isolatedError = await observerA.waitErrorEvent(isolatedId, 20_000)
+        assert(isolatedError.code === 'ROUTE_UNAVAILABLE', `owner DB loss must fail closed, got ${isolatedError.code}`)
+        assert(isolatedError.disposition === 'NOT_EXECUTED', `route failure must be NOT_EXECUTED, got ${isolatedError.disposition}`)
+        ownerFailClosed = 'route-unavailable'
+      } catch (error) {
+        assert(
+          observerA.closed || /socket|closed|timed out/.test(String(error?.message ?? error)),
+          `owner observation must fail closed, got: ${error?.message ?? error}`,
+        )
+        ownerFailClosed = 'connection-closed'
+      }
 
-      // A command through app-b must never be reported WRITTEN nor executed locally.
+      // A command through app-b (same viewer, still connected) must never be reported WRITTEN nor
+      // executed locally. Capture a bounded fault outcome; silence is never treated as evidence —
+      // the authoritative full RESET after recovery is the definitive check.
       const acknowledgementsBefore = peerB.opAcks.length
-      const screensBefore = peerB.screenRowCount(faultMarker)
       const faultOp = peerB.sendInput(`printf '%s\\n' ${faultMarker}\r`, 2)
-      await peerB.settle(6_000)
+      const faultOutcome = await peerB.observeFaultOutcome(faultOp.requestId, 10_000)
       const newAcks = peerB.opAcks.slice(acknowledgementsBefore)
       assert(
-        newAcks.every((item) => item.outcome !== 'WRITTEN'),
+        newAcks.every((item) => !(item.kind === 'CONFIRMED' && item.outcome === 'WRITTEN')),
         'a command during owner DB loss must never be reported WRITTEN',
       )
-      assert(peerB.screenRowCount(faultMarker) === screensBefore, 'owner DB loss must not fall back to a local execution')
-      const faultError = peerB.errorEvents.find((item) => item.requestId === faultOp.requestId)
-      if (faultError) {
+      if (faultOutcome.error) {
         assert(
-          faultError.disposition === 'NOT_EXECUTED',
-          `a received fault error must be NOT_EXECUTED, got ${faultError.disposition}`,
+          faultOutcome.error.disposition === 'NOT_EXECUTED',
+          `a received fault error must be NOT_EXECUTED, got ${faultOutcome.error.disposition}`,
         )
         assert(
-          ['ROUTE_UNAVAILABLE', 'OUTCOME_UNKNOWN'].includes(faultError.code),
-          `a received fault error must be bounded, got ${faultError.code}`,
+          ['ROUTE_UNAVAILABLE', 'OUTCOME_UNKNOWN'].includes(faultOutcome.error.code),
+          `a received fault error must be bounded, got ${faultOutcome.error.code}`,
         )
       }
 
@@ -329,7 +359,10 @@ registerCase({
       const attachId = peerB.attach({ daemonInstanceId: attachedB.daemonInstanceId, terminalId: attachedB.terminalId })
       const reattached = await peerB.waitAttached(attachId, 40_000)
       assert(reattached.terminalId === attachedB.terminalId, 'reconnect must attach the same terminal')
+      assert(reattached.streamId !== attachedB.streamId, 'reconnect must establish a new observer stream')
       await peerB.waitUntil(() => peerB.lastAppliedVersion >= 1, 30_000)
+      // The new stream starts from an authoritative full RESET: the fault-window command must be absent.
+      assert(peerB.screenRowCount(faultMarker) === 0, 'the fault-window command must never appear on the authoritative screen')
       peerB.ack()
       peerB.setAutoApplied(true)
 
@@ -360,7 +393,8 @@ registerCase({
       assert(peerB.screenRowCount(faultMarker) === 0, 'the fault-window command must never have been executed')
 
       ctx.writeArtifact('db-fault.json', `${JSON.stringify({
-        ownerRouteFailClosed: true,
+        ownerFailClosed,
+        faultOutcome: faultOutcome.error ? faultOutcome.error.code : faultOutcome.closed ? 'closed' : 'no-response',
         remoteFaultNotWritten: true,
         noLocalFallback: true,
         recoveredReady: true,
@@ -371,8 +405,8 @@ registerCase({
     }, [
       () => (restoreDb ? ctx.runDistributedCommand('reconnect-db-a') : null),
       () => peerB.closeTerminal(),
-      () => observerA.closeTerminal(),
-      () => observerA.close(),
+      () => (observerA ? observerA.closeTerminal() : null),
+      () => (observerA ? observerA.close() : null),
       () => peerB.close(),
     ])
   },

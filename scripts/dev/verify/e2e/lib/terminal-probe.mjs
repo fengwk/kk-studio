@@ -12,14 +12,20 @@
  * one observer stream, matching the daemon observer key `(route,viewerId)`. It applies the
  * structured RESET/PATCH view wire into a bounded numeric mirror and derives `VIEW_APPLIED` from the
  * applied `version` — never from a transport ack.
+ *
+ * Connections are explicit: a case must `await probe.waitOpen()` before its first command, because
+ * the native socket starts CONNECTING. There is no reconnect/retry policy inside the probe.
  */
 
 import { createHash, randomUUID } from 'node:crypto'
 import { assert, sleep } from './http.mjs'
 import { FramedEventSocket, eventUrl } from './framed-event-socket.mjs'
 
-/** Bounded retained logical frames; terminal output must never accumulate without limit. */
-const MAX_RETAINED_FRAMES = 64
+/** Bounded retained metadata records; terminal output must never accumulate without limit. */
+const MAX_RETAINED_RECORDS = 64
+
+/** Bounded in-flight request correlation entries (attached/control/error receipts). */
+const MAX_PENDING_REQUESTS = 64
 
 /** SHA-256 digest of an INPUT operation: tag 0x01 || big-endian int64 inputModeRevision || bytes. */
 export function inputDigest(bytes, inputModeRevision) {
@@ -38,7 +44,18 @@ export function resizeDigest(cols, rows) {
 
 function record(list, item) {
   list.push(item)
-  if (list.length > MAX_RETAINED_FRAMES) list.splice(0, list.length - MAX_RETAINED_FRAMES)
+  if (list.length > MAX_RETAINED_RECORDS) list.splice(0, list.length - MAX_RETAINED_RECORDS)
+}
+
+function sameIdentity(left, right) {
+  return Boolean(left) && Boolean(right)
+    && left.daemonInstanceId === right.daemonInstanceId
+    && left.terminalId === right.terminalId
+}
+
+/** OP_ACK terminal kinds: a write is only resolved by CONFIRMED/REJECTED, never by PENDING. */
+function isFinalOpAck(kind) {
+  return kind === 'CONFIRMED' || kind === 'REJECTED'
 }
 
 export class TerminalProbe {
@@ -89,6 +106,7 @@ export class TerminalProbe {
       exited: 0,
       errors: 0,
       keepalives: 0,
+      inputsSent: 0,
     }
     this.attachResults = []
     this.controlResults = []
@@ -96,7 +114,10 @@ export class TerminalProbe {
     this.exitEvents = []
     this.errorEvents = []
 
+    /** In-flight requestIds -> { type, identity } used for ATTACHED/ERROR correlation fences. */
+    this.pending = new Map()
     this.dropOpAcks = 0
+    this.dropOpAckSeq = null
     this.heartbeatTimer = null
 
     this.#hook = (frame) => {
@@ -105,16 +126,38 @@ export class TerminalProbe {
       } catch (error) {
         this.failure ||= error
       } finally {
-        this.#trimFrames()
+        // Raw logical frames are never retained: assertions rely on the bounded mirror and metadata.
+        this.framed.frames.length = 0
       }
     }
     this.framed.hooks.add(this.#hook)
     this.#startHeartbeat()
   }
 
+  // ------------------------------------------------------------------ connection lifecycle
+
+  /** Waits until the native socket is OPEN; a framing/native failure throws immediately. */
+  async connect(timeoutMs = 15_000) {
+    await this.waitUntil(() => this.socket.readyState === 1, timeoutMs)
+    return this
+  }
+
+  /** Alias of {@link connect}: every case must await this before its first command. */
+  async waitOpen(timeoutMs = 15_000) {
+    return this.connect(timeoutMs)
+  }
+
   // ------------------------------------------------------------------ commands
 
-  #sendCommand(type, payload) {
+  #trackPending(requestId, type, identity) {
+    this.pending.set(requestId, { type, identity })
+    while (this.pending.size > MAX_PENDING_REQUESTS) {
+      this.pending.delete(this.pending.keys().next().value)
+    }
+  }
+
+  #sendCommand(type, payload, { identity = null } = {}) {
+    assert(this.socket.readyState === 1, 'terminal probe socket is not open; await waitOpen() first')
     const requestId = randomUUID()
     const command = {
       version: 1,
@@ -124,6 +167,7 @@ export class TerminalProbe {
       type,
       payload,
     }
+    this.#trackPending(requestId, type, identity)
     assert(this.framed.send({ type: 'shell.command', command }), 'failed to queue shell.command')
     return requestId
   }
@@ -143,7 +187,7 @@ export class TerminalProbe {
   }
 
   attach(identity = this.#requireIdentity()) {
-    return this.#sendCommand('ATTACH', { identity })
+    return this.#sendCommand('ATTACH', { identity }, { identity })
   }
 
   /** DETACH this viewer's stream; the terminal keeps running and this probe stops scoping commands. */
@@ -172,7 +216,7 @@ export class TerminalProbe {
 
   input(bytes, { seq, inputModeRevision = this.inputModeRevision, grant = this.grant } = {}) {
     assert(grant, 'INPUT requires a writer grant')
-    return this.#sendCommand('INPUT', {
+    const requestId = this.#sendCommand('INPUT', {
       identity: this.#requireIdentity(),
       streamId: this.#requireStream(),
       grant,
@@ -180,6 +224,8 @@ export class TerminalProbe {
       inputModeRevision,
       bytes: Buffer.from(bytes).toString('base64'),
     })
+    this.counters.inputsSent += 1
+    return requestId
   }
 
   resize(cols, rows, { seq }) {
@@ -244,9 +290,14 @@ export class TerminalProbe {
     this.autoApplied = !!value
   }
 
-  /** Drops exactly the next wire OP_ACK (test-only hook); the real write is still observed via screen. */
-  dropNextOpAck() {
+  /**
+   * Drops the next *terminal* wire OP_ACK (test-only hook). PENDING acknowledgements are never
+   * dropped, so only the final CONFIRMED/REJECTED receipt for the optional `seq` is hidden; the
+   * real write is still observed through the structured screen.
+   */
+  dropNextOpAck(seq = null) {
     this.dropOpAcks += 1
+    this.dropOpAckSeq = seq ?? null
   }
 
   // ------------------------------------------------------------------ incoming events
@@ -256,8 +307,9 @@ export class TerminalProbe {
       this.failure ||= new Error('invalid shell.event frame')
       return
     }
-    // Identity/stream fences: only this viewer's events for the targeted environment are consumable.
+    // Scope fence: only this viewer's events for the targeted environment are consumable.
     if (event.viewerId !== this.viewerId || event.environmentId !== this.environmentId) return
+    if (!this.#accepted(event)) return
     switch (event.type) {
       case 'ATTACHED':
         this.#onAttached(event)
@@ -282,13 +334,43 @@ export class TerminalProbe {
     }
   }
 
+  /**
+   * Typed identity fence. Stale/foreign events are dropped without touching current state:
+   * - ATTACHED must answer a still-pending OPEN/ATTACH (and match a declared ATTACH identity);
+   * - every identity-carrying event must match the currently bound daemon/terminal identity;
+   * - only the deterministic identity-free NOT_EXECUTED errors tied to a pending request pass.
+   */
+  #accepted(event) {
+    const identity = event.identity == null
+      ? null
+      : { daemonInstanceId: event.identity.daemonInstanceId, terminalId: event.identity.terminalId }
+    if (event.type === 'ATTACHED') {
+      const pending = this.pending.get(event.requestId)
+      if (!pending || (pending.type !== 'OPEN' && pending.type !== 'ATTACH')) return false
+      if (!identity) return false
+      if (pending.identity && !sameIdentity(pending.identity, identity)) return false
+      return true
+    }
+    if (identity != null) {
+      return this.identity != null && sameIdentity(this.identity, identity)
+    }
+    return event.type === 'ERROR' && this.pending.has(event.requestId)
+  }
+
   #onAttached(event) {
     const payload = event.payload
     assert(payload && typeof payload === 'object', 'ATTACHED must carry a payload')
     assert(event.identity && typeof event.identity === 'object', 'ATTACHED must carry an identity')
-    this.identity = {
+    this.pending.delete(event.requestId)
+    const identity = {
       daemonInstanceId: event.identity.daemonInstanceId,
       terminalId: event.identity.terminalId,
+    }
+    const previousTerminalId = this.identity ? this.identity.terminalId : null
+    this.identity = identity
+    if (previousTerminalId !== identity.terminalId) {
+      // A fresh terminal lifecycle must not inherit the previous terminal's EXITED history.
+      this.exitEvents.length = 0
     }
     this.streamId = payload.streamId
     this.terminalStatus = payload.status
@@ -309,8 +391,8 @@ export class TerminalProbe {
       requestId: event.requestId,
       status: payload.status,
       exitCode: payload.exitCode,
-      terminalId: this.identity.terminalId,
-      daemonInstanceId: this.identity.daemonInstanceId,
+      terminalId: identity.terminalId,
+      daemonInstanceId: identity.daemonInstanceId,
       streamId: payload.streamId,
       inputModeRevision: payload.inputModeRevision,
     })
@@ -336,6 +418,8 @@ export class TerminalProbe {
       this.grant = null
     }
     if (event.requestId != null && payload.result != null) {
+      // Only a direct response (requestId + result) is a request receipt; a broadcast keeps result null.
+      this.pending.delete(event.requestId)
       const result = payload.result
       record(this.controlResults, {
         requestId: event.requestId,
@@ -355,15 +439,18 @@ export class TerminalProbe {
   }
 
   #onOpAck(event) {
-    if (this.dropOpAcks > 0) {
-      this.dropOpAcks -= 1
-      this.counters.droppedOpAcks += 1
-      return
-    }
     const payload = event.payload
     assert(payload && typeof payload === 'object', 'OP_ACK must carry a payload')
     const result = payload.result
     assert(result && typeof result === 'object', 'OP_ACK must carry a result')
+    if (this.dropOpAcks > 0
+        && isFinalOpAck(result.kind)
+        && (this.dropOpAckSeq === null || this.dropOpAckSeq === result.seq)) {
+      this.dropOpAcks -= 1
+      this.dropOpAckSeq = null
+      this.counters.droppedOpAcks += 1
+      return
+    }
     record(this.opAcks, {
       writerEpoch: payload.writerEpoch,
       kind: result.kind,
@@ -392,6 +479,7 @@ export class TerminalProbe {
   #onError(event) {
     const payload = event.payload
     assert(payload && typeof payload === 'object', 'ERROR must carry a payload')
+    this.pending.delete(event.requestId)
     record(this.errorEvents, {
       requestId: event.requestId,
       code: payload.code,
@@ -427,6 +515,7 @@ export class TerminalProbe {
   #applyUpdate(update) {
     assert(this.identity && this.streamId, 'VIEW_UPDATE received before ATTACHED')
     assert(update && typeof update === 'object', 'VIEW_UPDATE must carry an update object')
+    // A stale stream is a protocol violation on this connection: it is neither applied nor ACKed.
     assert(update.terminalId === this.identity.terminalId, 'VIEW_UPDATE terminalId does not match the attached identity')
     assert(update.streamId === this.streamId, 'VIEW_UPDATE streamId does not match the attached stream')
     const cols = update.cols
@@ -476,16 +565,12 @@ export class TerminalProbe {
     this.counters.patches += 1
   }
 
-  // ------------------------------------------------------------------ bounded retention & heartbeat
-
-  #trimFrames() {
-    const frames = this.framed.frames
-    if (frames.length > MAX_RETAINED_FRAMES) frames.splice(0, frames.length - MAX_RETAINED_FRAMES)
-  }
+  // ------------------------------------------------------------------ heartbeat
 
   #startHeartbeat() {
     if (!this.heartbeatMs) return
     this.heartbeatTimer = setInterval(() => {
+      // No owned scope or a closed socket means there is nothing to renew; never fake a fallback.
       if (this.closed || !this.identity || !this.streamId) return
       try {
         this.keepalive(this.grant)
@@ -504,6 +589,8 @@ export class TerminalProbe {
   }
 
   check() {
+    // Transport/framing failures are fatal and must surface immediately, not at a 40s timeout.
+    this.framed.check()
     if (this.failure) throw this.failure
   }
 
@@ -531,6 +618,23 @@ export class TerminalProbe {
   async waitErrorEvent(requestId, timeoutMs = 20_000) {
     await this.waitUntil(() => this.errorEvents.some((item) => item.requestId === requestId), timeoutMs)
     return this.errorEvents.find((item) => item.requestId === requestId)
+  }
+
+  /**
+   * Bounded capture of a fault outcome for one request: a request-scoped ERROR, an explicit socket
+   * close, or neither within the window. Absence is reported as `timedOut` rather than treated as
+   * proof, because the definitive not-executed evidence is the post-recovery authoritative RESET.
+   */
+  async observeFaultOutcome(requestId, timeoutMs = 10_000) {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      this.check()
+      const error = this.errorEvents.find((item) => item.requestId === requestId)
+      if (error) return { error, closed: this.closed, timedOut: false }
+      if (this.closed) return { error: null, closed: true, timedOut: false }
+      if (Date.now() >= deadline) return { error: null, closed: false, timedOut: true }
+      await sleep(20)
+    }
   }
 
   async waitOpAck({ epoch, seq, digest }, timeoutMs = 20_000) {
@@ -594,31 +698,29 @@ export class TerminalProbe {
 
   // ------------------------------------------------------------------ teardown
 
-  /** Best-effort explicit CLOSE of the live terminal, taking over the writer if we lost it. */
+  /**
+   * Explicit CLOSE of the live terminal, taking over the writer if needed. Any failure to observe
+   * *this* close's EXITED is reported, so a leaked PTY cannot be silently hidden: cleanup problems
+   * surface through withCleanup without replacing a primary assertion failure.
+   */
   async closeTerminal(timeoutMs = 8_000) {
-    try {
-      if (!this.identity || this.closed) return
-      if (this.terminalStatus && this.terminalStatus !== 'RUNNING') return
-      if (this.lastAppliedVersion <= 0) return
-      const currentEpoch = this.writer ? this.writer.writerEpoch : null
-      if (this.grant && this.grant.epoch === currentEpoch) {
-        this.sendClose(currentEpoch)
-      } else if (currentEpoch === null) {
-        this.sendClose(null)
-      } else {
-        const takeoverId = this.takeover(currentEpoch)
-        await this.waitUntil(
-          () => this.controlResults.some((item) => item.requestId === takeoverId),
-          timeoutMs,
-          { allowClosed: true },
-        ).catch(() => {})
-        if (!this.grant) return
-        this.sendClose(this.grant.epoch)
-      }
-      await this.waitUntil(() => this.exitEvents.length > 0, timeoutMs, { allowClosed: true }).catch(() => {})
-    } catch {
-      // Cleanup is best-effort; the primary assertion failure stays the reported one.
+    if (!this.identity || this.closed) return
+    if (this.terminalStatus && this.terminalStatus !== 'RUNNING') return
+    if (this.lastAppliedVersion <= 0) return
+    // Only an EXITED observed *after* this call belongs to this close attempt.
+    const baseline = this.exitEvents.length
+    const currentEpoch = this.writer ? this.writer.writerEpoch : null
+    if (this.grant && this.grant.epoch === currentEpoch) {
+      this.sendClose(currentEpoch)
+    } else if (currentEpoch === null) {
+      this.sendClose(null)
+    } else {
+      const takeoverId = this.takeover(currentEpoch)
+      await this.waitUntil(() => this.controlResults.some((item) => item.requestId === takeoverId), timeoutMs)
+      if (!this.grant) throw new Error('cleanup TAKEOVER did not grant the writer')
+      this.sendClose(this.grant.epoch)
     }
+    await this.waitUntil(() => this.exitEvents.length > baseline, timeoutMs)
   }
 
   /** Closes the WebSocket and stops the heartbeat timer. */
@@ -631,6 +733,7 @@ export class TerminalProbe {
       if (!this.closed) this.socket.close(1000, 'E2E complete')
       const deadline = Date.now() + 5_000
       while (!this.closed && Date.now() < deadline) await sleep(20)
+      assert(this.closed, 'timed out closing terminal probe socket')
     } finally {
       this.framed.hooks.delete(this.#hook)
       this.framed.close()

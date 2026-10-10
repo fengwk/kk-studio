@@ -16,9 +16,13 @@ const VIEWER = '11111111-1111-4111-8111-111111111111'
 const TERMINAL = '22222222-2222-4222-8222-222222222222'
 const DAEMON = '44444444-4444-4444-8444-444444444444'
 const STREAM = '55555555-5555-4555-8555-555555555555'
+const EPOCH = '66666666-6666-4666-8666-666666666666'
+const TOKEN = '77777777-7777-4777-8777-777777777777'
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
 let frameSeq = 0
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Real shared carrier fragments: server frames are never raw JSON. */
 function serverFrames(logical, { topic = 'app.events.v2', target = null } = {}) {
@@ -34,9 +38,9 @@ function serverFrames(logical, { topic = 'app.events.v2', target = null } = {}) 
     carrierChunk(packet, index).encode())
 }
 
-/** Fake native socket that both directions use real shared carriers, and can auto-respond on send. */
+/** Fake native socket that starts CONNECTING and both directions use real shared carriers. */
 class MockSocket extends EventTarget {
-  readyState = 1
+  readyState = 0
   sent = []
   logical = []
   listeners = new Set()
@@ -50,6 +54,18 @@ class MockSocket extends EventTarget {
   removeEventListener(type, listener, options) {
     this.listeners.delete(listener)
     return super.removeEventListener(type, listener, options)
+  }
+
+  open() {
+    if (this.readyState === 1) return
+    this.readyState = 1
+    this.dispatchEvent(new Event('open'))
+  }
+
+  fail() {
+    this.readyState = 3
+    this.dispatchEvent(new Event('error'))
+    this.dispatchEvent(new Event('close'))
   }
 
   send(physical) {
@@ -89,7 +105,9 @@ function openProbe(options = {}) {
     heartbeatMs: 0,
     ...options,
   })
-  return { probe, socket: created[0] }
+  const socket = created[0]
+  if (!options.deferredOpen) socket.open()
+  return { probe, socket }
 }
 
 function lastCommand(socket, type) {
@@ -99,13 +117,13 @@ function lastCommand(socket, type) {
   return type ? commands.filter((command) => command.type === type).at(-1) : commands.at(-1)
 }
 
-function attached(overrides = {}) {
+function attached(overrides = {}, requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') {
   return {
     version: 2,
     type: 'shell.event',
     event: {
       version: 1,
-      requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      requestId,
       environmentId: ENV,
       viewerId: VIEWER,
       identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
@@ -129,6 +147,49 @@ function attached(overrides = {}) {
         },
       },
       ...overrides,
+    },
+  }
+}
+
+/** Delivers an ATTACHED that answers the probe's most recent OPEN/ATTACH request. */
+function sendAttached(probe, socket, overrides = {}) {
+  const frame = probe.open()
+  socket.deliver(attached(overrides, frame))
+  return frame
+}
+
+function writerChangedEvent(requestId, result, identity = { daemonInstanceId: DAEMON, terminalId: TERMINAL }) {
+  return {
+    version: 2,
+    type: 'shell.event',
+    event: {
+      version: 1,
+      requestId,
+      environmentId: ENV,
+      viewerId: VIEWER,
+      identity,
+      type: 'WRITER_CHANGED',
+      payload: { writer: { writerEpoch: result?.grant?.epoch ?? EPOCH }, result },
+    },
+  }
+}
+
+function opAckEvent(kind, seq, digest, { epoch = EPOCH, identity = { daemonInstanceId: DAEMON, terminalId: TERMINAL }, code = null } = {}) {
+  return {
+    version: 2,
+    type: 'shell.event',
+    event: {
+      version: 1,
+      requestId: null,
+      environmentId: ENV,
+      viewerId: VIEWER,
+      identity,
+      type: 'OP_ACK',
+      payload: {
+        writerEpoch: epoch,
+        result: { kind, seq, digest, outcome: kind === 'CONFIRMED' ? 'WRITTEN' : null, reason: null },
+        code,
+      },
     },
   }
 }
@@ -216,6 +277,27 @@ test('requires an environment id', () => {
   assert.throws(() => new TerminalProbe('http://a.test', { Socket: MockSocket, heartbeatMs: 0 }), /environmentId/)
 })
 
+test('waitOpen blocks on CONNECTING, sends nothing before OPEN, and surfaces a native failure', async () => {
+  // Test intent: a command queued while the socket is still CONNECTING must never be silently dropped.
+  const { probe, socket } = openProbe({ deferredOpen: true })
+  let opened = false
+  const pending = probe.waitOpen(2_000).then(() => { opened = true })
+  await delay(30)
+  assert.equal(opened, false, 'waitOpen must not resolve while CONNECTING')
+  assert.throws(() => probe.open(), /not open/, 'a command before OPEN must fail loudly')
+  assert.equal(socket.logical.length, 0, 'no command may be queued while CONNECTING')
+  socket.open()
+  await pending
+  assert.equal(probe.socket.readyState, 1)
+
+  const { probe: failing, socket: dead } = openProbe({ deferredOpen: true })
+  const waiting = failing.waitOpen(2_000)
+  dead.fail()
+  await assert.rejects(() => waiting, /application event socket error/)
+  await probe.close()
+  await failing.close()
+})
+
 test('encodes commands as typed shell.command wrappers over real carrier fragments', () => {
   // Test intent: the probe must send the exact v2 wrapper plus a version=1 TerminalCommand, never raw JSON.
   const { probe, socket } = openProbe()
@@ -237,36 +319,24 @@ test('encodes commands as typed shell.command wrappers over real carrier fragmen
 test('encodes INPUT bytes as canonical Base64 with the current mode revision and grant', () => {
   // Test intent: raw bytes never appear as a JSON array; the payload carries Base64 plus the exact digest inputs.
   const { probe, socket } = openProbe()
-  socket.deliver(attached())
+  sendAttached(probe, socket)
   socket.deliver(viewEvent(reset(['', '', ''])))
-  const grant = { epoch: '66666666-6666-4666-8666-666666666666', token: '77777777-7777-4777-8777-777777777777' }
-  socket.deliver({
-    version: 2,
-    type: 'shell.event',
-    event: {
-      version: 1,
-      requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      environmentId: ENV,
-      viewerId: VIEWER,
-      identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
-      type: 'WRITER_CHANGED',
-      payload: { writer: { writerEpoch: grant.epoch }, result: { status: 'GRANTED', grant, recovered: null, reason: null } },
-    },
-  })
+  socket.deliver(writerChangedEvent('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { status: 'GRANTED', grant: { epoch: EPOCH, token: TOKEN }, recovered: null, reason: null }))
   const bytes = Buffer.from('printf hi\r', 'utf8')
   probe.sendInput(bytes, 1)
   const command = lastCommand(socket, 'INPUT')
   assert.equal(command.payload.bytes, bytes.toString('base64'))
   assert.equal(command.payload.seq, 1)
   assert.equal(command.payload.inputModeRevision, 1)
-  assert.deepEqual(command.payload.grant, grant)
+  assert.deepEqual(command.payload.grant, { epoch: EPOCH, token: TOKEN })
+  assert.equal(probe.counters.inputsSent, 1)
   probe.close()
 })
 
 test('applies structured RESET/PATCH and ACKs the exact in-flight version', () => {
   // Test intent: VIEW_APPLIED targets the applied structured version and screen text comes from numeric slots.
   const { probe, socket } = openProbe()
-  socket.deliver(attached())
+  sendAttached(probe, socket)
   socket.deliver(viewEvent(reset(['KKS_ABCDEF', '', ''])))
   assert.equal(probe.lastAppliedVersion, 1)
   assert.ok(probe.screen.includes('KKS_ABCDEF'))
@@ -286,7 +356,7 @@ test('applies structured RESET/PATCH and ACKs the exact in-flight version', () =
 test('with autoApplied disabled the ack is explicit', () => {
   // Test intent: an unacked RESET must stay unacked so a test can prove VIEW_NOT_APPLIED gating.
   const { probe, socket } = openProbe({ autoApplied: false })
-  socket.deliver(attached())
+  sendAttached(probe, socket)
   socket.deliver(viewEvent(reset(['Z', '', ''])))
   assert.equal(lastCommand(socket, 'VIEW_APPLIED'), undefined)
   probe.ack()
@@ -295,81 +365,93 @@ test('with autoApplied disabled the ack is explicit', () => {
   probe.close()
 })
 
+test('ignores an ATTACHED that does not answer a pending OPEN/ATTACH', () => {
+  // Test intent: a stale or foreign ATTACHED must never bind identity or a stream.
+  const { probe, socket } = openProbe()
+  probe.open()
+  socket.deliver(attached({}, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'))
+  assert.equal(probe.identity, null, 'a stale ATTACHED must not bind identity')
+  assert.equal(probe.streamId, null)
+  assert.equal(probe.attachResults.length, 0)
+  probe.close()
+})
+
+test('drops identity-carrying events from a foreign daemon/terminal without touching state', () => {
+  // Test intent: WRITER_CHANGED/OP_ACK/EXITED for another terminal must never mutate this scope.
+  const { probe, socket } = openProbe()
+  sendAttached(probe, socket)
+  const foreign = { daemonInstanceId: DAEMON, terminalId: '99999999-9999-4999-8999-999999999999' }
+  socket.deliver(writerChangedEvent(null, null, foreign))
+  socket.deliver(opAckEvent('CONFIRMED', 1, inputDigest(Buffer.from('x'), 1), { identity: foreign }))
+  socket.deliver({
+    version: 2,
+    type: 'shell.event',
+    event: {
+      version: 1,
+      requestId: null,
+      environmentId: ENV,
+      viewerId: VIEWER,
+      identity: foreign,
+      type: 'EXITED',
+      payload: { status: 'FAILED', exitCode: 1 },
+    },
+  })
+  assert.equal(probe.counters.writerChanged, 0)
+  assert.equal(probe.counters.opAcks, 0)
+  assert.equal(probe.counters.exited, 0)
+  assert.equal(probe.controlResults.length, 0)
+  assert.equal(probe.opAcks.length, 0)
+  assert.equal(probe.exitEvents.length, 0)
+  probe.close()
+})
+
+test('ATTACH must answer its own request and match the declared identity', () => {
+  // Test intent: an ATTACHED with the wrong terminal identity must not rebind the observer stream.
+  const { probe, socket } = openProbe()
+  sendAttached(probe, socket)
+  const declared = { daemonInstanceId: DAEMON, terminalId: TERMINAL }
+  const attachId = probe.attach(declared)
+  socket.deliver(attached({ identity: { daemonInstanceId: DAEMON, terminalId: '99999999-9999-4999-8999-999999999999' } }, attachId))
+  assert.equal(probe.attachResults.length, 1, 'a mismatched ATTACHED must be dropped')
+  socket.deliver(attached({}, attachId))
+  assert.equal(probe.attachResults.length, 2)
+  probe.close()
+})
+
 test('fences foreign identity and a mismatched stream', () => {
   // Test intent: events for another viewer/environment are ignored; a wrong streamId is a fatal fault.
   const { probe, socket } = openProbe()
-  socket.deliver(attached())
+  sendAttached(probe, socket)
   socket.deliver(viewEvent(reset(['A', '', '']), null))
   // Foreign viewer and environment events are silently ignored.
   const foreign = attached({ viewerId: '99999999-9999-4999-8999-999999999999' })
   socket.deliver(foreign)
   assert.equal(probe.identity.terminalId, TERMINAL)
+  // A stale stream is never accepted (nor ACKed): it is a protocol violation on this connection.
   socket.deliver(viewEvent({ ...reset(['A', '', '']), streamId: '99999999-9999-4999-8999-999999999999' }))
   assert.ok(probe.failure)
   assert.throws(() => probe.check(), /streamId/)
   probe.close()
 })
 
-test('correlates OP_ACK by epoch/seq/digest and supports the drop hook', async () => {
-  // Test intent: OP_ACK has no requestId, so matching uses the writer fence; the drop hook hides exactly one ack.
+test('an identity-free ERROR is accepted only while its request is pending', () => {
+  // Test intent: deterministic local NOT_EXECUTED errors correlate by requestId, not by identity.
   const { probe, socket } = openProbe()
-  socket.deliver(attached())
-  socket.deliver(viewEvent(reset(['', '', ''])))
-  const epoch = '66666666-6666-4666-8666-666666666666'
-  const digest = inputDigest(Buffer.from('x'), 1)
+  const openId = probe.open()
   socket.deliver({
     version: 2,
     type: 'shell.event',
     event: {
       version: 1,
-      requestId: null,
+      requestId: openId,
       environmentId: ENV,
       viewerId: VIEWER,
-      identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
-      type: 'OP_ACK',
-      payload: { writerEpoch: epoch, result: { kind: 'CONFIRMED', seq: 1, digest, outcome: 'WRITTEN', reason: null }, code: null },
+      identity: null,
+      type: 'ERROR',
+      payload: { code: 'ROUTE_UNAVAILABLE', disposition: 'NOT_EXECUTED' },
     },
   })
-  const ack = await probe.waitOpAck({ epoch, seq: 1, digest }, 1_000)
-  assert.equal(ack.kind, 'CONFIRMED')
-  probe.dropNextOpAck()
-  socket.deliver({
-    version: 2,
-    type: 'shell.event',
-    event: {
-      version: 1,
-      requestId: null,
-      environmentId: ENV,
-      viewerId: VIEWER,
-      identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
-      type: 'OP_ACK',
-      payload: { writerEpoch: epoch, result: { kind: 'CONFIRMED', seq: 2, digest: resizeDigest(80, 24), outcome: 'WRITTEN', reason: null }, code: null },
-    },
-  })
-  assert.equal(probe.counters.droppedOpAcks, 1)
-  assert.equal(probe.opAcks.length, 1)
-  probe.close()
-})
-
-test('retains at most 64 logical frames and clears the heartbeat on close', async () => {
-  // Test intent: terminal output must not accumulate without bound, and close must release the timer/listeners.
-  const { probe, socket } = openProbe()
-  socket.deliver(attached())
-  socket.deliver(viewEvent(reset(['', '', ''])))
-  for (let index = 0; index < 200; index++) socket.deliver({ version: 2, type: 'heartbeat' })
-  assert.ok(probe.framed.frames.length <= 64, `frames must stay bounded, got ${probe.framed.frames.length}`)
-  await probe.close()
-  assert.equal(probe.closed, true)
-  assert.equal(socket.readyState, 3)
-  assert.equal(probe.framed.hooks.size, 0)
-  assert.ok(probe.framed.frames.length <= 64)
-})
-
-test('heartbeat renews the owned writer lease and stops after detach', async () => {
-  // Test intent: a 5s-style heartbeat keeps the observer/writer alive but releases after DETACH.
-  const { probe, socket } = openProbe({ heartbeatMs: 25 })
-  socket.deliver(attached())
-  socket.deliver(viewEvent(reset(['', '', ''])))
+  assert.equal(probe.errorEvents.length, 1)
   socket.deliver({
     version: 2,
     type: 'shell.event',
@@ -378,26 +460,61 @@ test('heartbeat renews the owned writer lease and stops after detach', async () 
       requestId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       environmentId: ENV,
       viewerId: VIEWER,
-      identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
-      type: 'WRITER_CHANGED',
-      payload: {
-        writer: { writerEpoch: '66666666-6666-4666-8666-666666666666' },
-        result: {
-          status: 'GRANTED',
-          grant: { epoch: '66666666-6666-4666-8666-666666666666', token: '77777777-7777-4777-8777-777777777777' },
-          recovered: null,
-          reason: null,
-        },
-      },
+      identity: null,
+      type: 'ERROR',
+      payload: { code: 'ROUTE_UNAVAILABLE', disposition: 'NOT_EXECUTED' },
     },
   })
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  assert.equal(probe.errorEvents.length, 1, 'an identity-free error with no pending request must be dropped')
+  probe.close()
+})
+
+test('correlates OP_ACK by epoch/seq/digest and supports the seq-limited drop hook', async () => {
+  // Test intent: PENDING acks stay recorded; only the final receipt for the selected seq is dropped.
+  const { probe, socket } = openProbe()
+  sendAttached(probe, socket)
+  socket.deliver(viewEvent(reset(['', '', ''])))
+  const digest = inputDigest(Buffer.from('x'), 1)
+  probe.dropNextOpAck(1)
+  socket.deliver(opAckEvent('PENDING', 1, digest))
+  assert.equal(probe.opAcks.length, 1, 'PENDING must be recorded even while a drop is armed')
+  socket.deliver(opAckEvent('CONFIRMED', 1, digest))
+  assert.equal(probe.opAcks.length, 1, 'the final CONFIRMED for seq 1 must be dropped')
+  assert.equal(probe.counters.droppedOpAcks, 1)
+  socket.deliver(opAckEvent('CONFIRMED', 2, resizeDigest(80, 24)))
+  assert.equal(probe.opAcks.length, 2, 'a different seq must be unaffected by the drop')
+  const ack = await probe.waitOpAck({ epoch: EPOCH, seq: 2, digest: resizeDigest(80, 24) }, 1_000)
+  assert.equal(ack.kind, 'CONFIRMED')
+  probe.close()
+})
+
+test('clears raw logical frames and keeps bounded metadata', async () => {
+  // Test intent: terminal output must not accumulate without bound, and close must release the hooks.
+  const { probe, socket } = openProbe()
+  sendAttached(probe, socket)
+  socket.deliver(viewEvent(reset(['', '', ''])))
+  for (let index = 0; index < 200; index++) socket.deliver({ version: 2, type: 'heartbeat' })
+  assert.equal(probe.framed.frames.length, 0, 'raw logical frames must not be retained')
+  assert.ok(probe.attachResults.length <= 64 && probe.opAcks.length <= 64)
+  await probe.close()
+  assert.equal(probe.closed, true)
+  assert.equal(socket.readyState, 3)
+  assert.equal(probe.framed.hooks.size, 0)
+})
+
+test('heartbeat renews the owned writer lease and stops after detach', async () => {
+  // Test intent: a 5s-style heartbeat keeps the observer/writer alive but releases after DETACH.
+  const { probe, socket } = openProbe({ heartbeatMs: 25 })
+  sendAttached(probe, socket)
+  socket.deliver(viewEvent(reset(['', '', ''])))
+  socket.deliver(writerChangedEvent('cccccccc-cccc-4ccc-8ccc-cccccccccccc', { status: 'GRANTED', grant: { epoch: EPOCH, token: TOKEN }, recovered: null, reason: null }))
+  await delay(60)
   const keepalive = lastCommand(socket, 'KEEPALIVE')
   assert.ok(keepalive, 'heartbeat must emit KEEPALIVE')
   assert.deepEqual(keepalive.payload.grant, probe.grant)
   probe.detach()
   const before = socket.logical.filter((frame) => frame.command?.type === 'KEEPALIVE').length
-  await new Promise((resolve) => setTimeout(resolve, 80))
+  await delay(80)
   const after = socket.logical.filter((frame) => frame.command?.type === 'KEEPALIVE').length
   assert.equal(after, before, 'detached probe must stop sending KEEPALIVE')
   await probe.close()
@@ -406,9 +523,9 @@ test('heartbeat renews the owned writer lease and stops after detach', async () 
 test('claimGranted retries VIEW_NOT_APPLIED then accepts the grant; a rejection fails fast', async () => {
   // Test intent: VIEW_APPLIED has no ack, so a claim raced before it is retried; a real reject must surface.
   const { probe, socket } = openProbe()
-  socket.deliver(attached())
+  const openId = probe.open()
+  socket.deliver(attached({}, openId))
   socket.deliver(viewEvent(reset(['', '', ''])))
-  const grant = { epoch: '66666666-6666-4666-8666-666666666666', token: '77777777-7777-4777-8777-777777777777' }
   let claims = 0
   socket.onSend = (logical) => {
     if (logical.type !== 'shell.command' || logical.command.type !== 'CLAIM') return
@@ -430,40 +547,16 @@ test('claimGranted retries VIEW_NOT_APPLIED then accepts the grant; a rejection 
       })
       return
     }
-    socket.deliver({
-      version: 2,
-      type: 'shell.event',
-      event: {
-        version: 1,
-        requestId,
-        environmentId: ENV,
-        viewerId: VIEWER,
-        identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
-        type: 'WRITER_CHANGED',
-        payload: { writer: { writerEpoch: grant.epoch }, result: { status: 'GRANTED', grant, recovered: null, reason: null } },
-      },
-    })
+    socket.deliver(writerChangedEvent(requestId, { status: 'GRANTED', grant: { epoch: EPOCH, token: TOKEN }, recovered: null, reason: null }))
   }
   const result = await probe.claimGranted({ timeoutMs: 2_000 })
   assert.equal(result.status, 'GRANTED')
   assert.equal(claims, 2)
-  assert.deepEqual(probe.grant, grant)
+  assert.deepEqual(probe.grant, { epoch: EPOCH, token: TOKEN })
 
   socket.onSend = (logical) => {
     if (logical.type !== 'shell.command' || logical.command.type !== 'CLAIM') return
-    socket.deliver({
-      version: 2,
-      type: 'shell.event',
-      event: {
-        version: 1,
-        requestId: logical.command.requestId,
-        environmentId: ENV,
-        viewerId: VIEWER,
-        identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
-        type: 'WRITER_CHANGED',
-        payload: { writer: { writerEpoch: grant.epoch }, result: { status: 'REJECTED', grant: null, recovered: null, reason: 'NOT_OWNER' } },
-      },
-    })
+    socket.deliver(writerChangedEvent(logical.command.requestId, { status: 'REJECTED', grant: null, recovered: null, reason: 'NOT_OWNER' }))
   }
   await assert.rejects(() => probe.claimGranted({ timeoutMs: 1_000 }), /NOT_OWNER/)
   probe.close()
@@ -473,25 +566,11 @@ test('a broadcast WRITER_CHANGED is never mistaken for the request receipt', asy
   // Test intent: the daemon emits a broadcast (requestId=null, result=null) before the direct
   // request response (requestId set, result GRANTED); only the direct frame may resolve a control wait.
   const { probe, socket } = openProbe()
-  socket.deliver(attached())
+  sendAttached(probe, socket)
   socket.deliver(viewEvent(reset(['', '', ''])))
-  const grant = { epoch: '66666666-6666-4666-8666-666666666666', token: '77777777-7777-4777-8777-777777777777' }
-  const writerChanged = (requestId, result) => ({
-    version: 2,
-    type: 'shell.event',
-    event: {
-      version: 1,
-      requestId,
-      environmentId: ENV,
-      viewerId: VIEWER,
-      identity: { daemonInstanceId: DAEMON, terminalId: TERMINAL },
-      type: 'WRITER_CHANGED',
-      payload: { writer: { writerEpoch: grant.epoch }, result },
-    },
-  })
 
-  socket.deliver(writerChanged(null, null))
-  assert.equal(probe.writer.writerEpoch, grant.epoch, 'the broadcast still updates the observed writer')
+  socket.deliver(writerChangedEvent(null, null))
+  assert.equal(probe.writer.writerEpoch, EPOCH, 'the broadcast still updates the observed writer')
   assert.equal(probe.grant, null, 'a broadcast must never grant the writer')
   assert.equal(probe.controlResults.length, 0, 'a broadcast must not be recorded as a request receipt')
   await assert.rejects(
@@ -499,10 +578,10 @@ test('a broadcast WRITER_CHANGED is never mistaken for the request receipt', asy
     /timed out/,
   )
 
-  socket.deliver(writerChanged('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { status: 'GRANTED', grant, recovered: null, reason: null }))
+  socket.deliver(writerChangedEvent('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { status: 'GRANTED', grant: { epoch: EPOCH, token: TOKEN }, recovered: null, reason: null }))
   const result = await probe.waitControlResult('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 1_000)
   assert.equal(result.status, 'GRANTED')
-  assert.deepEqual(probe.grant, grant)
+  assert.deepEqual(probe.grant, { epoch: EPOCH, token: TOKEN })
 
   // A later broadcast that rotates the epoch away from our grant releases the owned writer.
   socket.deliver({
@@ -525,7 +604,7 @@ test('a broadcast WRITER_CHANGED is never mistaken for the request receipt', asy
 test('RESET must carry a full history append and the current input mode revision', () => {
   // Test intent: keep the mirror strict against the Java TerminalViewUpdate invariants.
   const { probe, socket } = openProbe()
-  socket.deliver(attached())
+  sendAttached(probe, socket)
   socket.deliver(viewEvent({ ...reset(['', '', '']), history: 1, historyTrim: 0, historyAppend: [] }))
   assert.ok(probe.failure, 'RESET with a mismatched historyAppend length must fault')
   probe.close()

@@ -41,6 +41,7 @@ registerCase({
     // autoApplied=false so the very first structured RESET stays unacknowledged for the gating check.
     const probe = new TerminalProbe(ctx.baseUrl, { environmentId: environment.id, autoApplied: false })
     await withCleanup(async () => {
+      await probe.waitOpen()
       const openId = probe.open()
       const attached = await probe.waitAttached(openId, 30_000)
       assert(attached.status === 'RUNNING', `OPEN must attach a RUNNING terminal, got ${attached.status}`)
@@ -81,15 +82,23 @@ registerCase({
       await probe.waitUntil(() => probe.cols === 100 && probe.rows === 30 && probe.lastAppliedVersion >= 2, 25_000)
       assert(probe.cols === 100 && probe.rows === 30, 'RESET after RESIZE must carry the new dimensions')
 
-      // Lifecycle: Ctrl-C must interrupt a foreground sleep and leave the shell responsive.
-      const sleepOp = probe.sendInput('sleep 60\r', 3)
-      await probe.waitOperation(sleepOp, 25_000)
+      // Lifecycle: an interruptible foreground command proves Ctrl-C interrupts the *running* job.
+      // The start marker only appears once the foreground subshell is actually executing, so the
+      // later Ctrl-C cannot race an unstarted command.
+      const ctrlStart = sentinel('CS')
+      const ctrlEnd = sentinel('CE')
+      const fgOp = probe.sendInput(`(printf '%s\\n' ${ctrlStart}; sleep 60; printf '%s\\n' ${ctrlEnd})\r`, 3)
+      await probe.waitOperation(fgOp, 25_000)
+      await probe.waitScreenRow(ctrlStart, 25_000)
       const ctrlCOp = probe.sendInput(Buffer.from([0x03]), 4)
       await probe.waitOperation(ctrlCOp, 25_000)
+      const ctrlCAt = Date.now()
       const lifecycleSentinel = sentinel('LIFE')
       const lifecycleOp = probe.sendInput(`printf '%s\\n' ${lifecycleSentinel}\r`, 5)
       await probe.waitOperation(lifecycleOp, 25_000)
-      await probe.waitScreenRow(lifecycleSentinel, 30_000)
+      await probe.waitScreenRow(lifecycleSentinel, 8_000)
+      assert(Date.now() - ctrlCAt < 5_000, 'shell must resume within 5s of Ctrl-C')
+      assert(probe.screenRowCount(ctrlEnd) === 0, 'Ctrl-C must interrupt the sleep before the end marker')
 
       // CLOSE: converge to a terminal EXITED state, keeping the last screen attachable.
       const oldIdentity = { ...probe.identity }
