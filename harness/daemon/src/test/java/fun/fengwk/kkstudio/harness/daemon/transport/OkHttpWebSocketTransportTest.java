@@ -337,6 +337,8 @@ class OkHttpWebSocketTransportTest {
     CompletionStage<Void> stage = connection.sendText("boom");
 
     assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
+    // 发送 future 先失败；异步 drain 随后完成独立的断开通知。
+    await(() -> listener.disconnections.get() == 1);
     assertEquals(1, webSocket.cancelCalls.get());
     assertEquals(1, listener.disconnections.get());
     assertFalse(connection.isOpen());
