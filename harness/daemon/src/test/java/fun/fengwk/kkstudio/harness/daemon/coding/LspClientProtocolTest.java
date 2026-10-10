@@ -71,6 +71,8 @@ class LspClientProtocolTest {
         assertThrows(
             IllegalStateException.class, () -> client.definition(file, 1, 0, REQUEST_TIMEOUT));
     assertTrue(error.getMessage().contains("textDocument/definition"), error.getMessage());
+    // 服务端错误应答的正文（cause message）绝不进入模型可见文案。
+    assertFalse(error.getMessage().contains("boom"), error.getMessage());
     assertTrue(client.isAlive(), "错误应答不是连接故障");
   }
 
@@ -115,10 +117,10 @@ class LspClientProtocolTest {
     // 末行没有换行符：整行是合法位置，恰好等于码点数的列也合法。
     Path noNewline = write("NoNewline.java", "class App {}\nclass Last {}");
     client.definition(noNewline, 2, 13, REQUEST_TIMEOUT);
-    IllegalArgumentException beyondTail =
+    // 位置越界发生在 sync 已经把文档交给服务器之后：保守按服务失败报告。
+    IllegalStateException beyondTail =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> client.definition(noNewline, 3, 0, REQUEST_TIMEOUT));
+            IllegalStateException.class, () -> client.definition(noNewline, 3, 0, REQUEST_TIMEOUT));
     assertTrue(beyondTail.getMessage().contains("beyond the end"), beyondTail.getMessage());
 
     LspClient utf32 = start("utf32");
@@ -141,22 +143,21 @@ class LspClientProtocolTest {
 
     assertEquals(
         FakeLspServer.DECOMPILED_SOURCE,
-        client.javaDecompile(root, classFile.toString(), REQUEST_TIMEOUT));
+        client.javaDecompile(classFile.toString(), REQUEST_TIMEOUT));
     assertEquals(
         FakeLspServer.DECOMPILED_SOURCE,
-        client.javaDecompile(root, classFile.toUri().toString(), REQUEST_TIMEOUT));
+        client.javaDecompile(classFile.toUri().toString(), REQUEST_TIMEOUT));
     assertThrows(
         IllegalArgumentException.class,
-        () -> client.javaDecompile(root, "missing/App.class", REQUEST_TIMEOUT));
+        () -> client.javaDecompile("missing/App.class", REQUEST_TIMEOUT));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> client.javaDecompile(root, "file://", REQUEST_TIMEOUT));
+        IllegalArgumentException.class, () -> client.javaDecompile("file://", REQUEST_TIMEOUT));
 
     LspClient empty = start("empty-decompile");
     IllegalStateException noSource =
         assertThrows(
             IllegalStateException.class,
-            () -> empty.javaDecompile(root, "build/App.class", REQUEST_TIMEOUT));
+            () -> empty.javaDecompile(classFile.toString(), REQUEST_TIMEOUT));
     assertTrue(
         noSource.getMessage().contains("Could not load or decompile"), noSource.getMessage());
   }
@@ -234,6 +235,10 @@ class LspClientProtocolTest {
             () -> LspClient.launch(config, root, config.command().getFirst(), dispatch));
     assertTrue(error.getMessage().contains("exited before initialization"), error.getMessage());
     assertTrue(error.getMessage().contains("exit code 7"), error.getMessage());
+    // sentinel：模型可见文案只保留固定 server id 与已知退出码，绝不回显命令参数（如 shell 脚本正文）。
+    assertTrue(error.getMessage().contains("'died'"), error.getMessage());
+    assertFalse(error.getMessage().contains("exit 7"), error.getMessage());
+    assertFalse(error.getMessage().contains("/bin/sh"), error.getMessage());
   }
 
   /** 意图：初始化不返回时握手在有效超时内失败，进程被收敛。 */
@@ -252,7 +257,7 @@ class LspClientProtocolTest {
     FakeLspServers.awaitProcessGone(FakeLspServers.startedPid(transcript), Duration.ofSeconds(10));
   }
 
-  /** 意图：服务器崩溃后的后续调用与关闭都稳定，错误信息带上真实的退出码与有界诊断。 */
+  /** 意图：服务器崩溃后的后续调用与关闭都稳定；错误信息只带固定 server id 与真实退出码，绝不携带服务器 stderr。 */
   @Test
   void crashedServerReportsExitCodeAndBoundedDiagnostics() throws Exception {
     LspClient client = start("crash-noisy");
@@ -265,9 +270,12 @@ class LspClientProtocolTest {
             IllegalStateException.class, () -> client.definition(file, 1, 0, REQUEST_TIMEOUT));
     assertTrue(afterCrash.getMessage().contains("exited"), afterCrash.getMessage());
     assertTrue(afterCrash.getMessage().contains("exit code 11"), afterCrash.getMessage());
+    assertFalse(
+        afterCrash.getMessage().contains("fake-lsp:"),
+        "服务端 stderr（含 sentinel）绝不能进入模型可见文案：" + afterCrash.getMessage());
     assertTrue(
         afterCrash.getMessage().length() < 2 * 1024,
-        "stderr 诊断尾部必须有界：" + afterCrash.getMessage().length());
+        "文案只含固定字段，必须有界：" + afterCrash.getMessage().length());
 
     // 重复关闭幂等。
     client.stop(Duration.ofMillis(200));
@@ -321,7 +329,7 @@ class LspClientProtocolTest {
     assertTrue(error.getMessage().contains("does not advertise"), error.getMessage());
   }
 
-  /** 意图：可执行文件无法执行时启动失败并给出命令与目录；不存在的文件在同步阶段被拒绝。 */
+  /** 意图：可执行文件无法执行时启动失败并给出固定 server id 与可信二进制名（不回显原始启动错误与目录）；不存在的文件在同步阶段被拒绝。 */
   @Test
   void unexecutableCommandAndMissingFileFailClearly() throws Exception {
     // 目录不可能被执行：启动必须失败并带上命令本身，而不是把目录当成服务器。
@@ -338,11 +346,14 @@ class LspClientProtocolTest {
     assertTrue(error.getMessage().contains(notAProgram.toString()), error.getMessage());
 
     LspClient client = start("normal");
-    IllegalArgumentException missing =
+    Path missingFile = root.resolve("missing.java");
+    // 读取失败可能发生在同一服务器已经 didOpen 之后：按服务失败报告，且只给固定说明、不回显路径。
+    IllegalStateException missing =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> client.definition(root.resolve("missing.java"), 1, 0, REQUEST_TIMEOUT));
-    assertTrue(missing.getMessage().contains("cannot read"), missing.getMessage());
+            IllegalStateException.class,
+            () -> client.definition(missingFile, 1, 0, REQUEST_TIMEOUT));
+    assertTrue(missing.getMessage().contains("could not be read"), missing.getMessage());
+    assertFalse(missing.getMessage().contains(missingFile.toString()), missing.getMessage());
   }
 
   /** 意图：只有时间戳变化（内容一致）时只刷新文档事实，不发送 didChange。 */
@@ -360,9 +371,9 @@ class LspClientProtocolTest {
     assertEquals(2, FakeLspServers.received(transcript, "textDocument/definition").size());
   }
 
-  /** 意图：相对 class target 在没有 workdir 时被拒绝，绝不回退到守护进程 cwd，也不发出任何请求。 */
+  /** 意图：相对 class target 被直接拒绝，绝不发任何请求。 */
   @Test
-  void relativeClassTargetWithoutWorkdirIsRejected() throws Exception {
+  void relativeClassTargetIsRejected() throws Exception {
     LspClient client = start("normal");
     Path file = write("App.java", "class App {}\n");
     Path classFile = Files.createDirectories(root.resolve("build")).resolve("App.class");
@@ -371,16 +382,19 @@ class LspClientProtocolTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> client.javaDecompile(null, "build/App.class", REQUEST_TIMEOUT));
+            () -> client.javaDecompile("build/App.class", REQUEST_TIMEOUT));
     assertTrue(
-        error.getMessage().contains("workdir is required when target is a relative class path"),
+        error
+            .getMessage()
+            .contains(
+                "target must be an absolute class path, a file: URI, or a jdt:// URI: build/App.class"),
         error.getMessage());
     assertTrue(FakeLspServers.received(transcript, "workspace/executeCommand").isEmpty());
 
-    // 绝对 class 路径不需要 workdir。
+    // 绝对 class 路径被接受。
     assertEquals(
         FakeLspServer.DECOMPILED_SOURCE,
-        client.javaDecompile(null, classFile.toString(), REQUEST_TIMEOUT));
+        client.javaDecompile(classFile.toString(), REQUEST_TIMEOUT));
     assertFalse(client.definition(file.toAbsolutePath(), 1, 0, REQUEST_TIMEOUT).isEmpty());
   }
 

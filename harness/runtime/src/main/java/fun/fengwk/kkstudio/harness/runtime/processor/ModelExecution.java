@@ -65,9 +65,19 @@ final class ModelExecution implements ModelGateway.Listener {
   private final UUID invocationId;
   private final UUID threadId;
   private final int attempt;
-  private final boolean compaction;
+
+  /**
+   * prepare 时冻结的压缩子身份事实：本 Thread 是 COMPACTION Join 的 child。只用于摘要完整性校验（截断 / 空 final 不成为摘要），
+   * 其余执行路径与普通 Runtime 完全一致。
+   */
+  private final boolean compactionChild;
+
   private final List<ToolBinding> bindings;
   private final ModelProcessorConfig config;
+
+  /** 冻结到本次 Invocation 的 Provider 名称；解析 HTTP 失败重试策略时读取其覆盖。 */
+  private final String providerName;
+
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
   private final ScheduledExecutorService scheduler;
@@ -100,15 +110,20 @@ final class ModelExecution implements ModelGateway.Listener {
   private long lastCommittedSequence;
   private long lastSafeSequence;
 
+  /**
+   * 完整构造器：{@code providerName} 是本次 Invocation 冻结的 Provider 身份；{@code nanoTime} 是采集流式生成计时的单调时间源，生产默认
+   * {@link System#nanoTime}，测试可注入可控来源。
+   */
   ModelExecution(
       HarnessStore store,
       RealtimeEventSink realtimeEventSink,
       ClaimedWork claim,
       UUID threadId,
       int attempt,
-      boolean compaction,
+      boolean compactionChild,
       List<ToolBinding> bindings,
       ModelProcessorConfig config,
+      String providerName,
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
@@ -120,9 +135,10 @@ final class ModelExecution implements ModelGateway.Listener {
         claim,
         threadId,
         attempt,
-        compaction,
+        compactionChild,
         bindings,
         config,
+        providerName,
         clock,
         scheduler,
         heartbeatWorker,
@@ -131,16 +147,16 @@ final class ModelExecution implements ModelGateway.Listener {
         System::nanoTime);
   }
 
-  /** 完整构造器：{@code nanoTime} 是采集流式生成计时的单调时间源，生产默认 {@link System#nanoTime}，测试可注入可控来源。 */
   ModelExecution(
       HarnessStore store,
       RealtimeEventSink realtimeEventSink,
       ClaimedWork claim,
       UUID threadId,
       int attempt,
-      boolean compaction,
+      boolean compactionChild,
       List<ToolBinding> bindings,
       ModelProcessorConfig config,
+      String providerName,
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
@@ -153,9 +169,10 @@ final class ModelExecution implements ModelGateway.Listener {
     this.invocationId = claim.target().id();
     this.threadId = threadId;
     this.attempt = attempt;
-    this.compaction = compaction;
+    this.compactionChild = compactionChild;
     this.bindings = List.copyOf(Objects.requireNonNull(bindings, "bindings"));
     this.config = Objects.requireNonNull(config, "config");
+    this.providerName = requireProviderName(providerName);
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
@@ -169,6 +186,15 @@ final class ModelExecution implements ModelGateway.Listener {
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+  }
+
+  /** 冻结的 Provider 身份必须非空白：未知名称在策略层按“继承系统名单”处理，但 null/blank 不得进入 live 路径。 */
+  private static String requireProviderName(String providerName) {
+    Objects.requireNonNull(providerName, "providerName");
+    if (providerName.isBlank()) {
+      throw new IllegalArgumentException("providerName must not be blank");
+    }
+    return providerName;
   }
 
   UUID invocationId() {
@@ -850,6 +876,15 @@ final class ModelExecution implements ModelGateway.Listener {
                 ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
             publishes);
       }
+      if (compactionChild) {
+        // 过滤结果明确不可恢复：既不能当作摘要，也不无依据地重放同一请求（INVALID_REQUEST 不属于可重试 kind）。
+        log.info("compaction summary was filtered by the provider for invocation {}", invocationId);
+        return finishFailureLocked(
+            new ModelInvocationError(
+                ProviderErrorKind.INVALID_REQUEST,
+                "compaction model response was filtered and cannot be used as a summary"),
+            publishes);
+      }
       ProviderResponse durableResponse =
           validatedResponse.withDecodeDurationMillis(decodeDurationMillis);
       boolean committed = safeTerminal(() -> commitSuccess(durableResponse, null, null));
@@ -886,8 +921,23 @@ final class ModelExecution implements ModelGateway.Listener {
       gapItems.add(new BatchItem(gap, seq, isSafe));
     }
 
-    String text = compaction ? validatedResponse.text() : accumulator.text();
-    String thinking = compaction ? validatedResponse.thinking() : accumulator.thinking();
+    String text = accumulator.text();
+    String thinking = accumulator.thinking();
+    if (compactionChild && invalidCompactionFinal(validatedResponse, text)) {
+      // 摘要完整性：截断的结果（LENGTH，含截断的 tool intent）与空 final 都不能成为摘要，也绝不执行截断的 tool call。走既有调用重试
+      // （同一预算、无第二套预算），上限耗尽即 FAILED；父 Join 冻结前绝不产生成功回执，也不把部分输出当摘要交给父 Agent。
+      String reason =
+          validatedResponse.stopReason() == GenerationStopReason.LENGTH
+              ? "compaction model response was truncated before the summary completed"
+              : "compaction model returned an empty summary";
+      log.info(
+          "invalid compaction summary for invocation {} (attempt {}): {}",
+          invocationId,
+          attempt,
+          reason);
+      return finishFailureLocked(
+          new ModelInvocationError(ProviderErrorKind.INVALID_RESPONSE, reason), publishes);
+    }
     StreamCheckpoint finalCheckpoint = null;
     if (!text.isEmpty() || !thinking.isEmpty()) {
       finalCheckpoint = new StreamCheckpoint(attempt, lastSafeSequence, text, thinking);
@@ -895,8 +945,7 @@ final class ModelExecution implements ModelGateway.Listener {
     final StreamCheckpoint checkpointToCommit = finalCheckpoint;
 
     ProviderReplayState replayState = null;
-    if (!compaction
-        && (validatedResponse.stopReason() == GenerationStopReason.COMPLETE
+    if ((validatedResponse.stopReason() == GenerationStopReason.COMPLETE
             || validatedResponse.stopReason() == GenerationStopReason.LENGTH
             // CONTINUE 是撤下工具意图的续写终止态：下一请求必须原样回放上游 native 字段。
             || validatedResponse.stopReason() == GenerationStopReason.CONTINUE)
@@ -966,10 +1015,34 @@ final class ModelExecution implements ModelGateway.Listener {
     return Applied.LOST;
   }
 
-  /** TRANSIENT 与 INVALID_RESPONSE 共享 {@link InvocationRetryPolicy}：两者耗尽后都转为 FAILED terminal。 */
-  private static boolean isRetryable(ModelInvocationError error) {
-    return error.kind() == ProviderErrorKind.TRANSIENT
-        || error.kind() == ProviderErrorKind.INVALID_RESPONSE;
+  /**
+   * 模型失败是否重试：先做统一候选判定（OVERFLOW/CANCELLED 排除，非 HTTP AUTHENTICATION/BILLING 排除），带 HTTP 状态时由现读的 {@link
+   * fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy} 唯一决定，其余非 HTTP
+   * TRANSIENT/INVALID_RESPONSE 走 共享 {@link InvocationRetryPolicy} 预算。
+   */
+  private boolean isRetryable(ModelInvocationError error) {
+    if (!error.retryCandidate()) {
+      return false;
+    }
+    if (error.httpStatus() != null) {
+      return config.httpErrorPolicyProvider().policy(providerName).allowsRetry(error.httpStatus());
+    }
+    return true;
+  }
+
+  /**
+   * 压缩子 final 完整性：LENGTH 一律是被输出上限截断的结果（即使 provider 同时给出 tool call，截断的 tool intent 也不是可执行意图），
+   * COMPLETE 只有在无 tool calls 且文本为空白时才是空摘要（纯空白与空串同样是不可用摘要，绝不能冻结成父 receipt 后被空摘要校验拒绝）。 两者都不是可用摘要。
+   *
+   * <p>COMPLETE / CONTINUE 的合法 tool 回合不在此列：它们按普通 Runtime 语义继续推进（模型得到真实 tool result 后再产出 final）。
+   */
+  private static boolean invalidCompactionFinal(ProviderResponse response, String text) {
+    if (response.stopReason() == GenerationStopReason.LENGTH) {
+      return true;
+    }
+    return response.stopReason() == GenerationStopReason.COMPLETE
+        && response.toolCalls().isEmpty()
+        && text.isBlank();
   }
 
   private Applied finishUnknownLocked(ModelInvocationError error, List<Publish> publishes) {
@@ -1198,9 +1271,6 @@ final class ModelExecution implements ModelGateway.Listener {
    * 绝不改变已提交的 durable 状态或终态。
    */
   private void publishAll(List<Publish> publishes) {
-    if (compaction) {
-      return;
-    }
     StreamFlushConfig publishConfig = config.streamFlushConfig();
     List<RealtimeEvent> chunk = new ArrayList<>();
     long chunkPayloadBytes = 0;

@@ -5,6 +5,8 @@ export {
   isBoundPendingMessageValue,
   isBoundTarget,
   isCommandContent,
+  isDraftHistoryTarget,
+  isForkSessionTarget,
   isImageTier,
   isNewThreadTarget,
   isNewSessionTarget,

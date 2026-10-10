@@ -80,7 +80,7 @@ class LspDaemonWiringTest {
     LspDiscovery discovery = discovery(configFile);
     CodingToolsConfig config =
         CodingToolsConfig.fromRuntime(
-            Files.createDirectories(root.resolve("data/resources")), "bash", discovery);
+            Files.createDirectories(root.resolve("data/tmp")), "bash", discovery);
     LspService service =
         LspService.create(
             discovery,
@@ -97,24 +97,18 @@ class LspDaemonWiringTest {
         config,
         service,
         new SkillPackageInstaller(
-            root.resolve("skills"),
-            root.resolve("cache"),
-            root.resolve("staging"),
-            root.resolve("backup"),
-            executor),
+            root.resolve("skills"), root.resolve("staging"), root.resolve("backup"), executor),
         executor,
         scheduler);
     EnvironmentCapability gotoDefinition =
         registry.find(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION).orElseThrow();
 
     EnvironmentCapabilityResult result =
-        invoke(
-            gotoDefinition,
-            "{\"path\":\"App.java\",\"line\":1,\"workdir\":" + json(repo.toString()) + "}");
+        invoke(gotoDefinition, "{\"path\":" + json(javaFile.toString()) + ",\"line\":1}");
 
     assertFalse(result.error(), text(result));
     assertEquals(javaFile + ":10:5", text(result));
-    // 服务器进程目录就是自动发现的项目根：调用方 workdir 只用于解析相对路径。
+    // 服务器进程目录就是自动发现的项目根。
     assertEquals(
         repo.toRealPath().toString(),
         FakeLspServers.await(transcript, event -> event.path("event").asText().equals("start"))
@@ -124,9 +118,7 @@ class LspDaemonWiringTest {
 
     // .py 没有声明的服务器：能力给出可操作错误，而不是尝试启动别的程序。
     EnvironmentCapabilityResult unconfigured =
-        invoke(
-            gotoDefinition,
-            "{\"path\":\"script.py\",\"line\":1,\"workdir\":" + json(repo.toString()) + "}");
+        invoke(gotoDefinition, "{\"path\":" + json(pythonFile.toString()) + ",\"line\":1}");
     assertTrue(unconfigured.error(), text(unconfigured));
     assertTrue(text(unconfigured).contains("No LSP server configured"), text(unconfigured));
     assertTrue(Files.exists(pythonFile));

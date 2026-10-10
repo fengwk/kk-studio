@@ -22,8 +22,9 @@ import java.util.Set;
  * ModelCost} 构造器保证，此处不再重复校验。Tool 是否在冻结 binding 中可见、参数是否符合 Tool schema 属于 {@link
  * ModelResponsePlanner} 的决策，不在此处校验；stop reason 与 tool call 存在性正交，无等价约束。
  *
- * <p>Compaction 的 stop reason、tool intent、摘要内容与 no-gain 是 reducer 语义，不在 Provider transport
- * 边界改写为重试；这里只拒绝所有调用都不可能接受的 malformed response。
+ * <p>这里只拒绝所有调用都不可能接受的 malformed response（transport 边界）。压缩摘要的完整性（无 tool intent 的 LENGTH 截断 final、空
+ * final、FILTERED）由 {@link ModelExecution} 在冻结的压缩子身份事实上判定并走统一调用重试；摘要收益与父容量由 {@code
+ * CompactionResultEvaluator} 在父侧校验。三者职责互不重叠。
  */
 final class ModelResponseValidator {
 

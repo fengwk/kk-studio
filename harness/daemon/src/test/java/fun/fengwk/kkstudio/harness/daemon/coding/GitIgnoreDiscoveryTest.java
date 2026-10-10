@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,7 +39,7 @@ class GitIgnoreDiscoveryTest {
     executor.shutdownNow();
   }
 
-  /** 祖先 {@code .gitignore} 必须作用于 workdir 之外的目标：workdir 落在子目录时，仓库根的忽略规则仍然生效，且换一个 workdir 不会改变匹配。 */
+  /** 祖先 {@code .gitignore} 必须作用于检索目标：检索子目录时，仓库根的忽略规则仍然生效。 */
   @Test
   void ancestorGitignoreAppliesRegardlessOfWorkdirBoundary() throws Exception {
     Files.createDirectories(repositoryRoot.resolve(".git"));
@@ -49,26 +48,14 @@ class GitIgnoreDiscoveryTest {
     Files.writeString(repositoryRoot.resolve("sub/keep.txt"), "needle\n");
     Files.writeString(repositoryRoot.resolve("sub/ignored.txt"), "needle\n");
 
-    // workdir 是仓库根：规则当然生效。
-    String fromRepositoryRoot =
-        text(
-            invoke(
-                grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\"sub\",\"workdir\":"
-                    + json(repositoryRoot.toString())
-                    + "}"));
-
-    // workdir 落在子目录：旧实现把 workdir 当作继承边界，会漏掉仓库根规则并错误命中 ignored.txt。
     String fromSubdirectory =
         text(
             invoke(
                 grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
+                "{\"pattern\":\"needle\",\"path\":"
                     + json(repositoryRoot.resolve("sub").toString())
                     + "}"));
 
-    assertTrue(fromRepositoryRoot.contains("keep.txt:1:needle"), fromRepositoryRoot);
-    assertFalse(fromRepositoryRoot.contains("ignored.txt"), fromRepositoryRoot);
     assertTrue(fromSubdirectory.contains("keep.txt:1:needle"), fromSubdirectory);
     assertFalse(fromSubdirectory.contains("ignored.txt"), fromSubdirectory);
   }
@@ -85,9 +72,7 @@ class GitIgnoreDiscoveryTest {
         text(
             invoke(
                 grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
-                    + json(repositoryRoot.toString())
-                    + "}"));
+                "{\"pattern\":\"needle\",\"path\":" + json(repositoryRoot.toString()) + "}"));
     assertTrue(grepped.contains("keep.txt:1:needle"), grepped);
     assertFalse(grepped.contains("excluded.txt"), grepped);
 
@@ -95,9 +80,7 @@ class GitIgnoreDiscoveryTest {
         text(
             invoke(
                 find(config()),
-                "{\"pattern\":\"*.txt\",\"path\":\".\",\"workdir\":"
-                    + json(repositoryRoot.toString())
-                    + "}"));
+                "{\"pattern\":\"*.txt\",\"path\":" + json(repositoryRoot.toString()) + "}"));
     assertTrue(found.contains("keep.txt"), found);
     assertFalse(found.contains("excluded.txt"), found);
   }
@@ -123,54 +106,46 @@ class GitIgnoreDiscoveryTest {
         text(
             invoke(
                 grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
-                    + json(worktreeRoot.toString())
-                    + "}"));
+                "{\"pattern\":\"needle\",\"path\":" + json(worktreeRoot.toString()) + "}"));
 
     assertTrue(grepped.contains("keep.txt:1:needle"), grepped);
     assertFalse(grepped.contains("excluded.txt"), grepped);
   }
 
-  /** 相对 path 与绝对 path 指向同一目标时必须给出完全一致的匹配结果（忽略解析只依赖目标自身）。 */
+  /** 相对 path 被拒绝，绝对 path 正常执行搜索。 */
   @Test
   void absoluteAndRelativePathsProduceIdenticalMatches() throws Exception {
     Files.createDirectories(repositoryRoot.resolve("sub/nested"));
     Files.writeString(repositoryRoot.resolve("sub/a.txt"), "needle\n");
     Files.writeString(repositoryRoot.resolve("sub/nested/b.txt"), "needle\n");
 
-    String workdir = json(repositoryRoot.toString());
-    String relativeGrep =
-        text(
-            invoke(
-                grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\"sub\",\"workdir\":" + workdir + "}"));
+    EnvironmentCapabilityResult relativeGrep =
+        invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\"sub\"}");
+    assertTrue(relativeGrep.error());
+    assertTrue(text(relativeGrep).contains("path must be an absolute path"));
+
     String absoluteGrep =
         text(
             invoke(
                 grep(config()),
                 "{\"pattern\":\"needle\",\"path\":"
                     + json(repositoryRoot.resolve("sub").toString())
-                    + ",\"workdir\":"
-                    + workdir
                     + "}"));
-    assertEquals(relativeGrep, absoluteGrep);
+    assertTrue(absoluteGrep.contains("nested/b.txt:1:needle"), absoluteGrep);
 
-    String relativeFind =
-        text(
-            invoke(
-                find(config()),
-                "{\"pattern\":\"*.txt\",\"path\":\"sub\",\"workdir\":" + workdir + "}"));
+    EnvironmentCapabilityResult relativeFind =
+        invoke(find(config()), "{\"pattern\":\"*.txt\",\"path\":\"sub\"}");
+    assertTrue(relativeFind.error());
+    assertTrue(text(relativeFind).contains("path must be an absolute path"));
+
     String absoluteFind =
         text(
             invoke(
                 find(config()),
                 "{\"pattern\":\"*.txt\",\"path\":"
                     + json(repositoryRoot.resolve("sub").toString())
-                    + ",\"workdir\":"
-                    + workdir
                     + "}"));
-    assertEquals(relativeFind, absoluteFind);
-    assertTrue(relativeFind.contains("nested/b.txt"), relativeFind);
+    assertTrue(absoluteFind.contains("nested/b.txt"), absoluteFind);
   }
 
   /** 注释/空行构成的 {@code .gitignore} 不产生任何规则，不影响正常匹配。 */
@@ -184,9 +159,7 @@ class GitIgnoreDiscoveryTest {
         text(
             invoke(
                 grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
-                    + json(repositoryRoot.toString())
-                    + "}"));
+                "{\"pattern\":\"needle\",\"path\":" + json(repositoryRoot.toString()) + "}"));
 
     assertTrue(grepped.contains("keep.txt:1:needle"), grepped);
   }
@@ -253,10 +226,7 @@ class GitIgnoreDiscoveryTest {
     String grepped =
         text(
             invoke(
-                grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
-                    + json(root.toString())
-                    + "}"));
+                grep(config()), "{\"pattern\":\"needle\",\"path\":" + json(root.toString()) + "}"));
     assertTrue(grepped.contains("keep.txt:1:needle"), grepped);
     assertFalse(grepped.contains("excluded.txt"), grepped);
   }
@@ -266,10 +236,7 @@ class GitIgnoreDiscoveryTest {
     String grepped =
         text(
             invoke(
-                grep(config()),
-                "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
-                    + json(root.toString())
-                    + "}"));
+                grep(config()), "{\"pattern\":\"needle\",\"path\":" + json(root.toString()) + "}"));
     assertTrue(grepped.contains("keep.txt:1:needle"), grepped);
     assertFalse(grepped.contains(".git"), grepped);
   }

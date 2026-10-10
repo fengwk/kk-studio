@@ -18,6 +18,10 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
 
       <div className="env-host-grid">
         <div className="env-host-meta-card">
+          <span className="lbl">{t('ai.environment.runtime.daemonVersion')}</span>
+          <span className="val mono">{environment.daemonVersion ?? '—'}</span>
+        </div>
+        <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.runtime.operatingSystem')}</span>
           <span className="val">{environment.operatingSystem ?? '—'}</span>
         </div>

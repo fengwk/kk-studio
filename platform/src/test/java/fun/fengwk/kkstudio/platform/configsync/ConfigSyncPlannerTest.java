@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEnt
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -185,7 +184,7 @@ class ConfigSyncPlannerTest {
             + "a".repeat(40)
             + "\n";
     assertThrows(AiValidationException.class, () -> plan(yamlText));
-    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString());
+    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString(), any());
   }
 
   @Test
@@ -194,7 +193,7 @@ class ConfigSyncPlannerTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     doThrow(new SkillGitException("cannot fetch https://user:pass@example.com/secret.git"))
         .when(skillGitCache)
-        .ensureCommit(anyString(), anyString(), anyString());
+        .ensureCommit(anyString(), anyString(), anyString(), any());
 
     String yamlText =
         "skillPackages:\n"
@@ -248,7 +247,7 @@ class ConfigSyncPlannerTest {
     assertEquals(
         List.of("s2"),
         plan.skillPackages().get(0).manifest().stream().map(SkillManifestEntry::name).toList());
-    verify(skillGitCache).ensureCommit("pkg", "https://example.com/pkg.git", "a".repeat(40));
+    verify(skillGitCache).ensureCommit("pkg", "https://example.com/pkg.git", "a".repeat(40), null);
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
   }
@@ -278,7 +277,7 @@ class ConfigSyncPlannerTest {
     AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
 
     assertFalse(error.getMessage().contains("other.git"));
-    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString());
+    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString(), any());
   }
 
   @Test
@@ -451,7 +450,7 @@ class ConfigSyncPlannerTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     doThrow(new SkillGitException("boom"))
         .when(skillGitCache)
-        .ensureCommit(anyString(), anyString(), anyString());
+        .ensureCommit(anyString(), anyString(), anyString(), any());
 
     String yamlText =
         PROVIDER_AND_MODEL
@@ -530,24 +529,6 @@ class ConfigSyncPlannerTest {
     assertNotNull(plan.settings());
     assertEquals("5", plan.settings().expectedVersion());
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SETTINGS, "settings")));
-  }
-
-  @Test
-  void settingsFallbackModelMissingIsSkipped() {
-    when(snapshotReader.read()).thenReturn(emptySnapshot());
-    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-
-    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
-    HarnessModelSelectionDTO fallback = new HarnessModelSelectionDTO();
-    fallback.setProviderName("p");
-    fallback.setModelName("m");
-    fallback.setVariant("v");
-    sections.getAiRuntime().setCompactionFallbackModel(fallback);
-
-    ConfigSyncPlan plan = plan(ConfigSyncFixtures.settingsYaml(sections));
-
-    assertNull(plan.settings());
-    assertEquals("missing fallback model: p/m", reason(plan.skipped(), "settings", "settings"));
   }
 
   @Test

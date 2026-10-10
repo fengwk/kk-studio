@@ -6,13 +6,11 @@ import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
-import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Objects;
@@ -21,11 +19,11 @@ import java.util.Set;
 /**
  * Daemon 私有本地数据目录：owner-only 目录布局加进程级独占锁。
  *
- * <p>目录布局固定为 {@code <data-dir>/{daemon.lock,resources/{text,staging}}}。锁文件 {@code daemon.lock}
- * 由本进程在打开期间以 {@link FileChannel#tryLock()} 持有；同一目录上的第二个 Daemon 立即以明确错误失败，而不是并发写同一份数据。
+ * <p>目录布局固定为 {@code <data-dir>/{daemon.lock,tmp,skills,skill-work/{staging,backup}}}。锁文件 {@code
+ * daemon.lock} 由本进程在打开期间以 {@link FileChannel#tryLock()} 持有；同一目录上的第二个 Daemon 立即以明确错误失败，而不是并发写同一份数据。
  *
- * <p>启动时只清理 {@code resources/staging} 下遗留的 {@code *.part} 中转文件（上一次进程崩溃的残留）；已发布的 {@code
- * resources/text} 永不自动删除，durable history 可能仍引用其中的路径。
+ * <p>{@code tmp} 是受控临时产物根：工具外化的受控临时 workspace 位于 {@code tmp/workspaces}，其不可变创建登记、保留期与 清扫由 {@link
+ * fun.fengwk.kkstudio.harness.daemon.coding.TextOutputStore} 承担，本类只负责创建受控根并收敛 owner-only 权限。
  *
  * <p>目录与文件权限在支持 POSIX 的文件系统上显式收敛为 owner-only（目录 0700、文件 0600）。
  */
@@ -37,22 +35,16 @@ public final class DaemonDataDirectory implements AutoCloseable {
   /** 默认数据目录：启动用户 HOME 下的 {@code .kk-studio}。 */
   public static final String DEFAULT_DIRECTORY_NAME = ".kk-studio";
 
-  private static final String RESOURCES = "resources";
-  private static final String TEXT = "text";
-  private static final String STAGING = "staging";
-  private static final String STAGING_SUFFIX = ".part";
+  private static final String TMP = "tmp";
   private static final String SKILLS = "skills";
   private static final String SKILL_WORK = "skill-work";
-  private static final String CACHE = "cache";
+  private static final String STAGING = "staging";
   private static final String BACKUP = "backup";
 
   private final Path root;
-  private final Path resources;
-  private final Path text;
-  private final Path staging;
+  private final Path tmp;
   private final Path skills;
   private final Path skillWork;
-  private final Path skillCache;
   private final Path skillStaging;
   private final Path skillBackup;
   private final FileChannel lockChannel;
@@ -60,23 +52,17 @@ public final class DaemonDataDirectory implements AutoCloseable {
 
   private DaemonDataDirectory(
       Path root,
-      Path resources,
-      Path text,
-      Path staging,
+      Path tmp,
       Path skills,
       Path skillWork,
-      Path skillCache,
       Path skillStaging,
       Path skillBackup,
       FileChannel lockChannel,
       FileLock lock) {
     this.root = root;
-    this.resources = resources;
-    this.text = text;
-    this.staging = staging;
+    this.tmp = tmp;
     this.skills = skills;
     this.skillWork = skillWork;
-    this.skillCache = skillCache;
     this.skillStaging = skillStaging;
     this.skillBackup = skillBackup;
     this.lockChannel = lockChannel;
@@ -94,15 +80,12 @@ public final class DaemonDataDirectory implements AutoCloseable {
     if (!configured.isAbsolute()) {
       throw new IllegalArgumentException("dataDir must be an absolute path");
     }
-    Path root = configured.normalize();
     try {
+      Path root = canonicalDataRoot(configured);
       createOwnerOnlyDirectory(root);
-      Path resources = createOwnerOnlyDirectory(root.resolve(RESOURCES));
-      Path text = createOwnerOnlyDirectory(resources.resolve(TEXT));
-      Path staging = createOwnerOnlyDirectory(resources.resolve(STAGING));
+      Path tmp = createOwnerOnlyDirectory(root.resolve(TMP));
       Path skills = createOwnerOnlyDirectory(root.resolve(SKILLS));
       Path skillWork = createOwnerOnlyDirectory(root.resolve(SKILL_WORK));
-      Path skillCache = createOwnerOnlyDirectory(skillWork.resolve(CACHE));
       Path skillStaging = createOwnerOnlyDirectory(skillWork.resolve(STAGING));
       Path skillBackup = createOwnerOnlyDirectory(skillWork.resolve(BACKUP));
       FileChannel channel = openOwnerOnlyLock(root.resolve(LOCK_FILE_NAME));
@@ -117,30 +100,34 @@ public final class DaemonDataDirectory implements AutoCloseable {
         throw new IllegalStateException(
             "data directory is already in use by another daemon process: " + root);
       }
-      DaemonDataDirectory directory =
-          new DaemonDataDirectory(
-              root,
-              resources,
-              text,
-              staging,
-              skills,
-              skillWork,
-              skillCache,
-              skillStaging,
-              skillBackup,
-              channel,
-              lock);
-      try {
-        directory.cleanStaleStagingFiles();
-      } catch (IOException | RuntimeException error) {
-        // 加锁之后、句柄交出之前的任何初始化失败都必须先释放锁与通道，否则该目录在本进程内永久不可再用。
-        directory.close();
-        throw error;
-      }
-      return directory;
+      return new DaemonDataDirectory(
+          root, tmp, skills, skillWork, skillStaging, skillBackup, channel, lock);
     } catch (IOException error) {
-      throw new UncheckedIOException("cannot open daemon data directory: " + root, error);
+      throw new UncheckedIOException("cannot open daemon data directory: " + configured, error);
     }
+  }
+
+  /**
+   * 解析可信数据根：对数据根的<b>父位置</b>做 {@code toRealPath}，从而合法容忍 macOS {@code /var}、{@code /tmp} 等 OS 标准前缀
+   * alias；再拼回数据根本身。
+   *
+   * <p>数据根本身以及受控 {@code tmp}/{@code workspaces} 及其以下分量都不允许是符号链接/reparse：数据根这里显式拒绝，更下层由 {@link
+   * fun.fengwk.kkstudio.harness.daemon.coding.OwnerOnlyFiles} 在可信根之下做组件 NOFOLLOW 检查。返回的路径已
+   * canonical， 因此派生的 {@code tmp} 是上报给模型的 canonical 绝对路径。
+   */
+  private static Path canonicalDataRoot(Path configured) throws IOException {
+    Path normalized = configured.normalize();
+    Path parent = normalized.getParent();
+    Path name = normalized.getFileName();
+    if (parent == null || name == null) {
+      throw new IllegalArgumentException("dataDir must not be a filesystem root: " + normalized);
+    }
+    Files.createDirectories(parent);
+    Path root = parent.toRealPath().resolve(name);
+    if (Files.exists(root, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(root)) {
+      throw new IllegalArgumentException("data directory must not be a symbolic link: " + root);
+    }
+    return root;
   }
 
   /** 未显式配置时的默认数据目录；只计算路径，不创建也不加锁。 */
@@ -156,19 +143,9 @@ public final class DaemonDataDirectory implements AutoCloseable {
     return root;
   }
 
-  /** 全部本地资源根目录（不含锁文件）。 */
-  public Path resources() {
-    return resources;
-  }
-
-  /** 已发布的 durable 全文目录；内容只在显式清理时才可删除。 */
-  public Path text() {
-    return text;
-  }
-
-  /** owner-only 中转目录，只允许出现未发布的 {@code *.part} 文件。 */
-  public Path staging() {
-    return staging;
+  /** 受控临时产物根目录（{@code <data-dir>/tmp}）。 */
+  public Path tmp() {
+    return tmp;
   }
 
   /** 已安装技能根目录。 */
@@ -176,14 +153,9 @@ public final class DaemonDataDirectory implements AutoCloseable {
     return skills;
   }
 
-  /** 技能工作根目录（缓存、暂存与备份的父目录）。 */
+  /** 技能工作根目录（暂存与备份的父目录）。 */
   public Path skillWork() {
     return skillWork;
-  }
-
-  /** 技能裸 Git 缓存目录。 */
-  public Path skillCache() {
-    return skillCache;
   }
 
   /** 技能安装暂存目录。 */
@@ -196,19 +168,7 @@ public final class DaemonDataDirectory implements AutoCloseable {
     return skillBackup;
   }
 
-  /** 只清理本次启动前遗留的中转文件；已发布全文不会被动。 */
-  private void cleanStaleStagingFiles() throws IOException {
-    try (DirectoryStream<Path> entries = Files.newDirectoryStream(staging, "*" + STAGING_SUFFIX)) {
-      for (Path entry : entries) {
-        BasicFileAttributes attributes =
-            Files.readAttributes(entry, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        if (attributes.isRegularFile()) {
-          Files.deleteIfExists(entry);
-        }
-      }
-    }
-  }
-
+  /** 释放目录锁并关闭锁通道；失败不改变进程退出语义。 */
   @Override
   public void close() {
     try {

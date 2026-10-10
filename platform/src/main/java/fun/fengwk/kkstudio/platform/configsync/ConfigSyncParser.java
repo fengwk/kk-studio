@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.configsync;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
 import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
@@ -206,6 +207,7 @@ public final class ConfigSyncParser {
     properties.setCredential(entry.optString("credential"));
     properties.setModelCallTimeoutMillis(entry.optLong("modelCallTimeoutMillis"));
     properties.setModelCallIdleTimeoutMillis(entry.optLong("modelCallIdleTimeoutMillis"));
+    properties.applyModelHttpRetryStatusCodes(entry.optIntegerList("modelHttpRetryStatusCodes"));
     // 先用写入路径校验已知字段，未知字段不能绕过缺必填与非法值。
     validateEntry(
         ConfigSyncKind.PROVIDERS, name, () -> providerFactory.validateImport(name, properties));
@@ -248,6 +250,11 @@ public final class ConfigSyncParser {
   private AgentSpec parseAgent(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqName("name");
+    if (BuiltinAgentDefinitions.isReservedName(name)) {
+      // 内置 Agent 身份由系统持有：文件声明同名条目是硬冲突，不能通过导入覆盖或降级内置定义。
+      throw new AiValidationException(
+          RESOURCE, "agent name is reserved for a built-in agent: " + name);
+    }
     declared.add(name);
     String description = entry.optString("description");
     String systemPrompt = entry.optString("systemPrompt");
@@ -291,17 +298,18 @@ public final class ConfigSyncParser {
     String repositoryUrl = entry.reqString("repositoryUrl");
     String branch = entry.reqString("branch");
     String currentCommit = entry.reqString("currentCommit");
-    // 唯一业务校验入口：SkillCatalogService.validateImport 同时校验 canonical 包名、描述、URL、branch 与 commit。
+    String token = entry.optString("token");
+    // 唯一业务校验入口：SkillCatalogService.validateImport 同时校验 canonical 包名、描述、URL、branch、commit 与令牌。
     validateEntry(
         ConfigSyncKind.SKILL_PACKAGES,
         packageName,
         () ->
             skillCatalogService.validateImport(
-                packageName, description, repositoryUrl, branch, currentCommit));
+                packageName, description, repositoryUrl, branch, currentCommit, token));
     if (skipUnknown(entry, ConfigSyncKind.SKILL_PACKAGES, packageName, skipped)) {
       return null;
     }
-    return new SkillSpec(packageName, description, repositoryUrl, branch, currentCommit);
+    return new SkillSpec(packageName, description, repositoryUrl, branch, currentCommit, token);
   }
 
   private EnvironmentSpec parseEnvironment(
@@ -462,7 +470,8 @@ public final class ConfigSyncParser {
       String description,
       String repositoryUrl,
       String branch,
-      String currentCommit) {}
+      String currentCommit,
+      String token) {}
 
   public record EnvironmentSpec(
       String name, String registrationToken, EnvironmentInstallConfigDTO installConfig) {}
@@ -534,6 +543,47 @@ public final class ConfigSyncParser {
         return number.longValue();
       }
       throw new AiValidationException(RESOURCE, path + "." + key + " must be an integer");
+    }
+
+    List<Integer> optIntegerList(String key) {
+      consumed.add(key);
+      Object value = raw.get(key);
+      if (value == null) {
+        return null;
+      }
+      if (!(value instanceof List<?> list)) {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must be a list of integers");
+      }
+      List<Integer> result = new ArrayList<>(list.size());
+      for (Object item : list) {
+        result.add(toInt(item, key));
+      }
+      return result;
+    }
+
+    private int toInt(Object value, String key) {
+      if (value == null
+          || value instanceof BigDecimal
+          || value instanceof Float
+          || value instanceof Double) {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+      }
+      long longValue;
+      if (value instanceof BigInteger bigInteger) {
+        if (bigInteger.bitLength() > 63) {
+          throw new AiValidationException(
+              RESOURCE, path + "." + key + " must contain only integers");
+        }
+        longValue = bigInteger.longValue();
+      } else if (value instanceof Number number) {
+        longValue = number.longValue();
+      } else {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+      }
+      if (longValue < Integer.MIN_VALUE || longValue > Integer.MAX_VALUE) {
+        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+      }
+      return (int) longValue;
     }
 
     Boolean optBoolean(String key) {

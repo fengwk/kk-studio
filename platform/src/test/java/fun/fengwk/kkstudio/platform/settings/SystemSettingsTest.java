@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +47,6 @@ class SystemSettingsTest {
     assertEquals(2_000L, defaults.aiRuntime().retryBaseDelayMillis());
     assertEquals(60_000L, defaults.aiRuntime().retryMaxDelayMillis());
     assertEquals(20_000, defaults.aiRuntime().compactionKeepRecentTokens());
-    assertEquals(null, defaults.aiRuntime().compactionFallbackModel());
     assertEquals(2, defaults.aiRuntime().subagentMaxDepth());
     assertEquals(10, defaults.aiRuntime().subagentMaxConcurrency());
     assertEquals(0, defaults.aiRuntime().subagentMaxTotalConcurrency());
@@ -91,12 +91,14 @@ class SystemSettingsTest {
     assertEquals(1_800_000L, integrations.minimaxH3().comfyMaxWaitMillis());
 
     SystemSettings.StorageMedia storageMedia = defaults.storageMedia();
-    assertEquals(3_600L, storageMedia.uploadExpiresSeconds());
-    assertEquals(600L, storageMedia.s3PresignDefaultExpiresSeconds());
+    assertEquals(86_400L, storageMedia.uploadExpiresSeconds());
+    assertEquals(1_800L, storageMedia.s3PresignDefaultExpiresSeconds());
     assertEquals(3_600L, storageMedia.s3PresignMaxExpiresSeconds());
     assertEquals(30_000L, storageMedia.canvasMediaProcessTimeoutMillis());
     assertEquals(512, storageMedia.thumbnailMaxDimension());
     assertEquals(80, storageMedia.thumbnailQuality());
+    assertEquals(259_200L, storageMedia.temporaryResourceTtlSeconds());
+    assertEquals(1_800L, storageMedia.temporaryResourceCleanupIntervalSeconds());
 
     SystemSettings.Advanced advanced = defaults.advanced();
     assertEquals(16L * 1024 * 1024, advanced.resourceMaxBytes());
@@ -168,11 +170,11 @@ class SystemSettingsTest {
                 60_000L,
                 2_000L,
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                base.subagentMaxTurns()));
+                base.subagentMaxTurns(),
+                base.modelHttpRetryStatusCodes()));
   }
 
   @Test
@@ -187,11 +189,11 @@ class SystemSettingsTest {
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 0,
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                base.subagentMaxTurns()));
+                base.subagentMaxTurns(),
+                base.modelHttpRetryStatusCodes()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -201,11 +203,11 @@ class SystemSettingsTest {
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 -1,
-                base.subagentMaxTurns()));
+                base.subagentMaxTurns(),
+                base.modelHttpRetryStatusCodes()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -215,11 +217,55 @@ class SystemSettingsTest {
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
                 base.compactionKeepRecentTokens(),
-                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                0));
+                0,
+                base.modelHttpRetryStatusCodes()));
+  }
+
+  @Test
+  void defaultHttpRetryListMatchesDocumentedDefault() {
+    assertEquals(
+        List.of(408, 429, 500, 502, 503, 504),
+        SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
+  }
+
+  @Test
+  void rejectsInvalidHttpRetryStatusList() {
+    SystemSettings.AiRuntime base = SystemSettings.DEFAULT.aiRuntime();
+    // 空列表合法：明确表示不自动重试任何 HTTP 错误。
+    assertEquals(
+        List.of(),
+        new SystemSettings.AiRuntime(
+                base.retryMaxRetries(),
+                base.retryBackoffStrategy(),
+                base.retryBaseDelayMillis(),
+                base.retryMaxDelayMillis(),
+                base.compactionKeepRecentTokens(),
+                base.subagentMaxDepth(),
+                base.subagentMaxConcurrency(),
+                base.subagentMaxTotalConcurrency(),
+                base.subagentMaxTurns(),
+                List.of())
+            .modelHttpRetryStatusCodes());
+    for (List<Integer> invalid :
+        List.of(Arrays.asList(429, null), List.of(399), List.of(600), List.of(429, 429))) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              new SystemSettings.AiRuntime(
+                  base.retryMaxRetries(),
+                  base.retryBackoffStrategy(),
+                  base.retryBaseDelayMillis(),
+                  base.retryMaxDelayMillis(),
+                  base.compactionKeepRecentTokens(),
+                  base.subagentMaxDepth(),
+                  base.subagentMaxConcurrency(),
+                  base.subagentMaxTotalConcurrency(),
+                  base.subagentMaxTurns(),
+                  invalid));
+    }
   }
 
   @Test
@@ -256,7 +302,9 @@ class SystemSettingsTest {
                 3_600L,
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
-                base.thumbnailQuality()));
+                base.thumbnailQuality(),
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -266,7 +314,9 @@ class SystemSettingsTest {
                 base.s3PresignMaxExpiresSeconds(),
                 0L,
                 base.thumbnailMaxDimension(),
-                base.thumbnailQuality()));
+                base.thumbnailQuality(),
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -276,7 +326,38 @@ class SystemSettingsTest {
                 base.s3PresignMaxExpiresSeconds(),
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
-                101));
+                101,
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds()));
+  }
+
+  @Test
+  void rejectsNonPositiveTemporaryResourcePolicy() {
+    SystemSettings.StorageMedia base = SystemSettings.DEFAULT.storageMedia();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.StorageMedia(
+                base.uploadExpiresSeconds(),
+                base.s3PresignDefaultExpiresSeconds(),
+                base.s3PresignMaxExpiresSeconds(),
+                base.canvasMediaProcessTimeoutMillis(),
+                base.thumbnailMaxDimension(),
+                base.thumbnailQuality(),
+                0L,
+                base.temporaryResourceCleanupIntervalSeconds()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.StorageMedia(
+                base.uploadExpiresSeconds(),
+                base.s3PresignDefaultExpiresSeconds(),
+                base.s3PresignMaxExpiresSeconds(),
+                base.canvasMediaProcessTimeoutMillis(),
+                base.thumbnailMaxDimension(),
+                base.thumbnailQuality(),
+                base.temporaryResourceTtlSeconds(),
+                0L));
   }
 
   @Test

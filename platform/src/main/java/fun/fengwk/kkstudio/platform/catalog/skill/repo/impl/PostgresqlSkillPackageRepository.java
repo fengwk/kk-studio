@@ -90,6 +90,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
     target.setHeadCheckedAt(row.getHeadCheckedAt());
     target.setHeadCheckError(row.getHeadCheckError());
     target.setSkills(SkillManifestJson.decode(row.getSkillsJson()));
+    target.setEncryptedToken(row.getEncryptedToken());
     target.setVersion(row.getVersion() == null ? 0L : row.getVersion());
     target.setCreateTime(row.getCreateTime());
     target.setUpdateTime(row.getUpdateTime());
@@ -107,6 +108,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
     target.setHeadCheckedAt(model.getHeadCheckedAt());
     target.setHeadCheckError(model.getHeadCheckError());
     target.setSkillsJson(SkillManifestJson.encode(requireSkills(model)));
+    target.setEncryptedToken(model.getEncryptedToken());
     target.setVersion(model.getVersion());
     return target;
   }

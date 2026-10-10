@@ -911,7 +911,8 @@ class OpenAiResponsesRequestEncoderTest {
   void test_replayState_thinkingConsistencyValidation() throws Exception {
     ProviderDescriptor desc = createDescriptor();
 
-    // 1. durable 包含 thinking，但 replay 只有 opaque reasoning（只有 encrypted_content，无 summary）：必须被拒绝
+    // 1. durable 包含 thinking，replay 只有 opaque reasoning（只有 encrypted_content，无 summary）：
+    //    原生 encrypted item 必须原位保留，缺失的 durable 可读思考作为普通 assistant 文本附带。
     ObjectNode opaquePayload = MAPPER.createObjectNode();
     ArrayNode out1 = opaquePayload.putArray("output");
     ObjectNode r1 = out1.addObject();
@@ -929,11 +930,30 @@ class OpenAiResponsesRequestEncoderTest {
             List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
             replayOpaqueOnly);
 
-    ProviderException ex1 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(request(List.of(msgWithDurableThinking)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+    JsonNode opaqueInput =
+        MAPPER
+            .readTree(
+                encoder.encode(request(List.of(msgWithDurableThinking)), desc).bodyUtf8Bytes())
+            .get("input");
+    JsonNode opaqueReasoning = null;
+    boolean readableThinkingInWire = false;
+    for (JsonNode item : opaqueInput) {
+      if ("reasoning".equals(item.path("type").asText())) {
+        opaqueReasoning = item;
+      }
+      if ("message".equals(item.path("type").asText())) {
+        for (JsonNode block : item.path("content")) {
+          if (block.path("text").asText().contains("durable thought")) {
+            readableThinkingInWire = true;
+          }
+        }
+      }
+    }
+    assertNotNull(opaqueReasoning, "native opaque reasoning item must be preserved");
+    assertEquals("opaque_blob", opaqueReasoning.path("encrypted_content").asText());
+    assertFalse(
+        opaqueReasoning.has("summary"), "must not forge a reasoning summary from durable thinking");
+    assertTrue(readableThinkingInWire, "durable readable thinking must survive into the wire");
 
     // 2. durable 包含 thinking，但 replay 的 summary 文本不一致：必须被拒绝
     ObjectNode mismatchSummaryPayload = MAPPER.createObjectNode();

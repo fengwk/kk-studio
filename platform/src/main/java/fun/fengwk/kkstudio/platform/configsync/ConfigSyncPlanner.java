@@ -139,7 +139,8 @@ public final class ConfigSyncPlanner {
       }
       List<SkillManifestEntry> manifest;
       try {
-        skillGitCache.ensureCommit(spec.packageName(), spec.repositoryUrl(), spec.currentCommit());
+        skillGitCache.ensureCommit(
+            spec.packageName(), spec.repositoryUrl(), spec.currentCommit(), spec.token());
         manifest = skillGitCache.scanManifest(spec.packageName(), spec.currentCommit());
       } catch (SkillGitException error) {
         // 不回显 Git 错误文本：其中可能包含 repositoryUrl 或凭据。
@@ -174,7 +175,8 @@ public final class ConfigSyncPlanner {
               spec.repositoryUrl(),
               spec.branch(),
               spec.currentCommit(),
-              manifest));
+              manifest,
+              spec.token()));
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, spec.packageName()));
       availableSkills.put(spec.packageName(), skillNames(manifest));
     }
@@ -445,14 +447,6 @@ public final class ConfigSyncPlanner {
 
   private String settingsUnsatisfiedReason(
       SystemSettingsSectionsDTO settings, Set<String> availableModelKeys, Set<String> agentPool) {
-    if (settings.getAiRuntime() != null
-        && settings.getAiRuntime().getCompactionFallbackModel() != null) {
-      var fallback = settings.getAiRuntime().getCompactionFallbackModel();
-      String key = ConfigSyncRefs.modelName(fallback.getProviderName(), fallback.getModelName());
-      if (!availableModelKeys.contains(key)) {
-        return "missing fallback model: " + key;
-      }
-    }
     if (settings.getIntegrations() != null
         && settings.getIntegrations().getMinimaxH3() != null
         && settings.getIntegrations().getMinimaxH3().getPromptAgentName() != null) {

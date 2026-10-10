@@ -155,4 +155,40 @@ describe('environmentService', () => {
     expect(client.get).toHaveBeenCalledWith('/harness/environments/env%2Fspecial%3A1/events')
     expect(result).toEqual(events)
   })
+
+  it('reads managed daemon update status via GET /harness/environments/{id}/update', async () => {
+    const update = {
+      operationId: 'op-1',
+      targetVersion: '1.3.0',
+      phase: 'RUNNING' as const,
+      createdAt: '2026-10-09T00:00:00.000Z',
+      updatedAt: '2026-10-09T00:01:00.000Z',
+    }
+    const client = {
+      get: vi.fn(async () => update),
+      post: vi.fn(async () => ({})),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    const result = await service.getEnvironmentUpdate('env/a')
+    expect(client.get).toHaveBeenCalledWith('/harness/environments/env%2Fa/update')
+    expect(client.post).not.toHaveBeenCalled()
+    expect(result).toEqual(update)
+  })
+
+  it('starts managed daemon update via POST /harness/environments/{id}/update with no body', async () => {
+    const card = { id: 'env/a', name: 'local', version: '2' }
+    const client = {
+      get: vi.fn(async () => ({})),
+      post: vi.fn(async () => card),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    const result = await service.startEnvironmentUpdate('env/a')
+    expect(client.post).toHaveBeenCalledWith('/harness/environments/env%2Fa/update')
+    expect(client.get).not.toHaveBeenCalled()
+    expect(result).toEqual(card)
+  })
 })

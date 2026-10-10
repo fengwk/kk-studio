@@ -261,9 +261,33 @@ export const settingsCatalog = {
     'en-US': 'A required numeric field is empty; fill it in before saving.',
     'zh-CN': '存在为空的必需数值字段，请填写后再保存。',
   },
-  'settings.error.partialModelSelection': {
-    'en-US': 'The fallback model selection is incomplete; fill in all three fields or clear all of them.',
-    'zh-CN': '回退模型选择不完整，请填齐三个字段或全部清空。',
+  'settings.error.httpStatusNotInteger': {
+    'en-US': 'HTTP status codes must be integers without decimals or empty entries.',
+    'zh-CN': 'HTTP 状态码必须为整数，不能包含小数、非法字符或空条目。',
+  },
+  'settings.error.httpStatusOutOfRange': {
+    'en-US': 'HTTP status codes must be between 400 and 599.',
+    'zh-CN': 'HTTP 状态码必须在 400 至 599 之间。',
+  },
+  'settings.error.httpStatusDuplicate': {
+    'en-US': 'HTTP status code list contains duplicate entries.',
+    'zh-CN': 'HTTP 状态码列表中包含重复的状态码。',
+  },
+  'settings.error.integerListEmptyToken': {
+    'en-US': 'Contains an empty or incomplete status code entry.',
+    'zh-CN': '包含未完成或空的状态码条目。',
+  },
+  'settings.error.integerListInvalidToken': {
+    'en-US': '"{{token}}" is not a valid integer status code.',
+    'zh-CN': '“{{token}}”不是有效的整数状态码。',
+  },
+  'settings.error.integerListOutOfRange': {
+    'en-US': '"{{token}}" is outside the valid range ({{min}}–{{max}}).',
+    'zh-CN': '“{{token}}”超出有效范围（{{min}}–{{max}}）。',
+  },
+  'settings.error.integerListDuplicate': {
+    'en-US': 'Duplicate status code: "{{token}}".',
+    'zh-CN': '状态码“{{token}}”重复出现。',
   },
 
   // --- General / notifications / shortcuts ---
@@ -335,8 +359,8 @@ export const settingsCatalog = {
 
   // --- AI Runtime ---
   'settings.section.aiRuntime.description': {
-    'en-US': 'Shared invocation retry, compaction fallback and subagent budgets.',
-    'zh-CN': '共享调用重试、压缩回退与子代理预算。',
+    'en-US': 'Shared invocation retry, automatic compaction and subagent budgets.',
+    'zh-CN': '共享调用重试、自动压缩与子代理预算。',
   },
   'settings.section.aiRuntime.retry.title': {
     'en-US': 'Invocation retry',
@@ -402,26 +426,6 @@ export const settingsCatalog = {
     'en-US': 'Token budget for recent context to preserve during automatic conversation compaction. Messages within this budget remain uncompressed.',
     'zh-CN': '对话自动压缩时保留的最近上下文 Token 预算。低于此预算的最新消息将被完整保留而不被压缩。',
   },
-  'settings.field.aiRuntime.compactionFallbackModel': {
-    'en-US': 'Compaction fallback model',
-    'zh-CN': '压缩回退模型',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.hint': {
-    'en-US': 'Fallback model and variant used when the active conversation model cannot complete a compaction turn. Leave empty to disable fallback.',
-    'zh-CN': '当前会话模型无法完成压缩轮次时使用的备选模型与变体。留空表示不使用回退模型。',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.providerName': {
-    'en-US': 'Provider',
-    'zh-CN': 'Provider',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.modelName': {
-    'en-US': 'Model',
-    'zh-CN': '模型',
-  },
-  'settings.field.aiRuntime.compactionFallbackModel.variant': {
-    'en-US': 'Variant',
-    'zh-CN': '变体',
-  },
   'settings.field.aiRuntime.subagentMaxDepth': {
     'en-US': 'Max depth',
     'zh-CN': '最大嵌套深度',
@@ -461,6 +465,22 @@ export const settingsCatalog = {
   'settings.option.retryBackoff.exponential': {
     'en-US': 'Exponential',
     'zh-CN': '指数',
+  },
+  'settings.section.aiRuntime.httpErrors.title': {
+    'en-US': 'HTTP error policy',
+    'zh-CN': 'HTTP 错误策略',
+  },
+  'settings.section.aiRuntime.httpErrors.description': {
+    'en-US': 'Configure retry behavior for model HTTP errors. Takes effect on next invocation.',
+    'zh-CN': '配置模型调用遇到 HTTP 错误时的重试行为。下次调用生效。',
+  },
+  'settings.field.aiRuntime.modelHttpRetryStatusCodes': {
+    'en-US': 'Retry HTTP status codes',
+    'zh-CN': '重试 HTTP 状态码',
+  },
+  'settings.field.aiRuntime.modelHttpRetryStatusCodes.hint': {
+    'en-US': 'HTTP errors matching this list retry within existing attempt and backoff budgets. Unlisted HTTP errors fail directly. Takes effect on next invocation.',
+    'zh-CN': '匹配此列表的 HTTP 错误在现有重试次数与退避预算内自动重试；未列出的 HTTP 错误直接失败。下次调用生效。',
   },
 
   // --- Tools & Permissions ---
@@ -527,10 +547,6 @@ export const settingsCatalog = {
   'settings.field.tool.toolGatewayOverloadRetryMillis.hint': {
     'en-US': 'Delay in milliseconds before retrying when the tool gateway encounters system overload.',
     'zh-CN': '工具网关在系统过载时的重试等待毫秒数。',
-  },
-  'settings.modelSelection.none': {
-    'en-US': 'None',
-    'zh-CN': '不使用回退',
   },
   'settings.permission.empty': {
     'en-US': 'No permission rules configured.',
@@ -954,8 +970,10 @@ export const settingsCatalog = {
     'zh-CN': '上传与 S3 预签名',
   },
   'settings.section.storageMedia.upload.description': {
-    'en-US': 'Upload expiry and S3 presigned URL budgets.',
-    'zh-CN': '上传有效期与 S3 预签名 URL 预算。',
+    'en-US':
+      'Upload lifetime and S3 presigned URL budgets. Upload lifetime applies on the next decision to existing unclaimed uploads, not only to new uploads.',
+    'zh-CN':
+      '上传有效期与 S3 预签名 URL 预算。上传有效期在下次判断时作用于存量未 claim 上传，而不只是新上传。',
   },
   'settings.section.storageMedia.canvasMedia.title': {
     'en-US': 'Canvas media processing',
@@ -965,13 +983,25 @@ export const settingsCatalog = {
     'en-US': 'Timeout and thumbnail budgets for canvas media processing.',
     'zh-CN': '画布媒体处理的超时与缩略图预算。',
   },
+  'settings.section.storageMedia.temporaryResource.title': {
+    'en-US': 'Temporary resources',
+    'zh-CN': '临时资源',
+  },
+  'settings.section.storageMedia.temporaryResource.description': {
+    'en-US':
+      'Retention and scan interval for controlled temporary tool workspaces. Changed values apply to not-yet-collected workspaces on the next scan.',
+    'zh-CN':
+      '受控工具临时工作区的保留期与扫描间隔。修改后的值在下次扫描时对尚未回收的工作区生效。',
+  },
   'settings.field.storageMedia.uploadExpiresSeconds': {
     'en-US': 'Upload expiry (s)',
     'zh-CN': '上传有效期（秒）',
   },
   'settings.field.storageMedia.uploadExpiresSeconds.hint': {
-    'en-US': 'Expiration period in seconds for temporary upload credentials and upload URLs.',
-    'zh-CN': '临时上传凭证与上传链接的有效秒数。',
+    'en-US':
+      'Lifetime in seconds of an upload from its creation. Shortening it immediately expires older unclaimed uploads on their next check; extending it keeps unclaimed uploads alive. Once cleanup has started it never revives.',
+    'zh-CN':
+      '上传自创建起的有效秒数。缩短后存量未 claim 上传会在下次判断时立即过期；延长则让未 claim 上传继续有效；清理一旦开始便不再复活。',
   },
   'settings.field.storageMedia.s3PresignDefaultExpiresSeconds': {
     'en-US': 'S3 presign default expiry (s)',
@@ -1012,6 +1042,24 @@ export const settingsCatalog = {
   'settings.field.storageMedia.thumbnailQuality.hint': {
     'en-US': 'JPEG compression quality (1-100) for generated thumbnails. Higher values improve quality with larger file sizes.',
     'zh-CN': '缩略图生成的 JPEG 压缩质量（1-100）。数值越高画质越好但体积越大。',
+  },
+  'settings.field.storageMedia.temporaryResourceTtlSeconds': {
+    'en-US': 'Temporary resource retention (s)',
+    'zh-CN': '临时资源保留期（秒）',
+  },
+  'settings.field.storageMedia.temporaryResourceTtlSeconds.hint': {
+    'en-US':
+      'Lifetime in seconds of a controlled temporary tool workspace from its recorded creation. Shortening it collects older workspaces on their next scan; workspaces still in use are never collected.',
+    'zh-CN':
+      '受控工具临时工作区自登记创建起的保留秒数。缩短后较旧工作区会在下次扫描时被回收；仍在使用的不会回收。',
+  },
+  'settings.field.storageMedia.temporaryResourceCleanupIntervalSeconds': {
+    'en-US': 'Temporary resource scan interval (s)',
+    'zh-CN': '临时资源扫描间隔（秒）',
+  },
+  'settings.field.storageMedia.temporaryResourceCleanupIntervalSeconds.hint': {
+    'en-US': 'Interval in seconds between controlled temporary workspace cleanup scans.',
+    'zh-CN': '受控临时工作区清理扫描之间的间隔秒数。',
   },
   // --- Advanced ---
   'settings.section.advanced.description': {

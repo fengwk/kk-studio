@@ -35,7 +35,8 @@ class ModelAttemptFailuresJsonCodecTest {
 
     assertEquals(
         "[{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"thinking\","
-            + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"provider unavailable\"},"
+            + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"provider unavailable\","
+            + "\"httpStatus\":null},"
             + "\"failedAt\":\"2026-01-01T00:00:00.123Z\","
             + "\"retryAt\":\"2026-01-01T00:00:02.123Z\"}]",
         json);
@@ -49,7 +50,7 @@ class ModelAttemptFailuresJsonCodecTest {
   void rejectsMalformedShapeAndInvalidDomainFacts() {
     String base =
         "[{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"\","
-            + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"down\"},"
+            + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"down\",\"httpStatus\":null},"
             + "\"failedAt\":\"2026-01-01T00:00:00.123Z\","
             + "\"retryAt\":\"2026-01-01T00:00:02.123Z\"}]";
 

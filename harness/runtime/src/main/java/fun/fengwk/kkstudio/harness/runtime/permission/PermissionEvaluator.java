@@ -9,8 +9,12 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * 基于有序规则的 Tool permission evaluator。path target 只解析为 effective-workdir 相对 POSIX 路径，交给 JGit
- * gitignore 语义匹配；Bash/普通 command 候选仍使用简单 wildcard。这里只生成策略候选，不承担 T09 path/symlink 安全。
+ * 基于有序规则的 Tool permission evaluator。文件工具的 {@code path} 是绝对路径，path target 按 filesystem-root 坐标（Unix
+ * 去掉 root 前缀，Windows 保留 root-qualified）交给 JGit gitignore 语义匹配；Bash/普通 command 候选仍使用简单
+ * wildcard。这里只生成策略候选，不承担 T09 path/symlink 安全。
+ *
+ * <p>非绝对 {@code path}（例如 {@code kkstudio:} 资源 URI、drive-relative 或普通相对文本）不进入 path 规则，而回落 wildcard
+ * 规则；路径本身是否为 合法绝对路径由目标 Daemon 判定。
  */
 public final class PermissionEvaluator {
   private static final int ARGUMENT_PREVIEW_LENGTH = 120;
@@ -31,11 +35,8 @@ public final class PermissionEvaluator {
     PermissionAction action;
     if (input.path("command").isTextual()) {
       action = evaluateBash(input.path("command").asText(), context.settings(), context.toolName());
-    } else if (input.path("path").isTextual()
-        && !input.path("path").asText().trim().isEmpty()
-        && input.hasNonNull("workdir")) {
-      PathTarget target =
-          describePathTarget(input.path("path").asText(), workdirFromArguments(input));
+    } else if (isAbsolutePathTarget(input.path("path"))) {
+      PathTarget target = describePathTarget(input.path("path").asText());
       action = evaluatePathRules(target, context.settings(), context.toolName());
     } else {
       action =
@@ -48,55 +49,20 @@ public final class PermissionEvaluator {
     return promptPreview(context, readArguments(context.argumentsJson()));
   }
 
+  /** 只有绝对 {@code path} 才是文件系统路径目标；URI scheme 与相对文本一律不作为 path 坐标。 */
+  private static boolean isAbsolutePathTarget(JsonNode pathNode) {
+    return pathNode.isTextual()
+        && !pathNode.asText().trim().isEmpty()
+        && LexicalTargetPath.isAbsolute(pathNode.asText());
+  }
+
   /**
-   * 把工具 {@code path} 参数词法解析为相对目标。只保留到该次调用 explicit workdir 的规范相对 POSIX 路径；绝对 target 直接词法
-   * relativize，相对 target 基于该 workdir 解析。全过程不读取 Backend cwd/HOME，Environment root 与 Backend 文件系统都不参与
-   * pattern 坐标。
-   *
-   * <p>workdir 只能来自本次调用的 {@code arguments.workdir}：没有该字段的调用（例如 {@code task}）不会获得隐藏默认目录。
+   * 把绝对 {@code path} 词法解析为 filesystem-root 匹配坐标：Unix 去掉 {@code /} 前缀，Windows drive/UNC 保留
+   * root-qualified；全程不读取 Backend cwd/HOME，Environment root 与 Backend 文件系统都不参与 pattern 坐标。
    */
-  PathTarget describePathTarget(String rawPath, String workdir) {
+  PathTarget describePathTarget(String rawPath) {
     boolean directory = rawPath.endsWith("/") || rawPath.endsWith("\\");
-    String unifiedWorkdir = unifySeparators(workdir);
-    boolean windows = isWindowsAbsolute(unifiedWorkdir) || unifiedWorkdir.startsWith("//");
-    String normalizedWorkdir = LexicalTargetPath.normalizeAbsolute(unifiedWorkdir);
-    String unified = rawPath.indexOf('\\') < 0 ? rawPath : rawPath.replace('\\', '/');
-    if (!windows && unified.startsWith("//")) {
-      unified = collapseUnixRoot(unified);
-    }
-    String absolute =
-        startsWithRoot(unified, windows)
-            ? LexicalTargetPath.normalizeAbsolute(unified)
-            : LexicalTargetPath.normalizeAbsolute(normalizedWorkdir + "/" + unified);
-    return new PathTarget(LexicalTargetPath.relativize(normalizedWorkdir, absolute), directory);
-  }
-
-  /** 按 explicit workdir 的路径族判断 target 是否为绝对路径，避免用 Backend OS 解释远端文本。 */
-  private static boolean startsWithRoot(String unified, boolean windows) {
-    if (!windows) {
-      return unified.startsWith("/");
-    }
-    return unified.startsWith("//") || isWindowsAbsolute(unified);
-  }
-
-  private static boolean isWindowsAbsolute(String unified) {
-    return unified.length() >= 3
-        && Character.isLetter(unified.charAt(0))
-        && unified.charAt(1) == ':'
-        && unified.charAt(2) == '/';
-  }
-
-  private static String unifySeparators(String value) {
-    return value.indexOf('\\') < 0 ? value : value.replace('\\', '/');
-  }
-
-  /** Unix 的多个前导 slash 属于同一 root；折叠后避免被无 OS 上下文的 UNC 解析分支误判。 */
-  private static String collapseUnixRoot(String value) {
-    int index = 1;
-    while (index < value.length() && value.charAt(index) == '/') {
-      index++;
-    }
-    return "/" + value.substring(index);
+    return new PathTarget(LexicalTargetPath.permissionCoordinate(rawPath), directory);
   }
 
   List<String> describeCandidates(JsonNode input) {
@@ -160,7 +126,7 @@ public final class PermissionEvaluator {
     return action;
   }
 
-  /** prompt preview 只展示该调用真实携带的 workdir：没有该字段的工具（{@code task}、MCP 等）不显示任何虚构默认目录。 */
+  /** prompt preview 只展示该调用真实携带的 workdir：没有该字段的工具（文件工具、{@code task}、MCP 等）不显示任何虚构默认目录。 */
   private PermissionPromptPreview promptPreview(
       PermissionEvaluationContext context, JsonNode input) {
     JsonNode workdirNode = input.get("workdir");
@@ -183,22 +149,6 @@ public final class PermissionEvaluator {
       throw new IllegalArgumentException(
           "cannot encode tool arguments for permission preview", error);
     }
-  }
-
-  /** 只读取本次 arguments 的 workdir；空值与非绝对路径是调用方错误，不存在默认值或展示前缀展开。 */
-  private static String workdirFromArguments(JsonNode input) {
-    JsonNode workdirNode = input.get("workdir");
-    if (!workdirNode.isTextual()) {
-      throw new IllegalArgumentException("workdir must be a non-blank string");
-    }
-    String rawWorkdir = workdirNode.asText();
-    if (rawWorkdir.isBlank()) {
-      throw new IllegalArgumentException("workdir must be a non-blank string");
-    }
-    if (!rawWorkdir.equals(rawWorkdir.strip())) {
-      throw new IllegalArgumentException("workdir must not have surrounding whitespace");
-    }
-    return LexicalTargetPath.normalizeAbsolute(rawWorkdir);
   }
 
   private JsonNode readArguments(String argumentsJson) {
@@ -246,8 +196,8 @@ public final class PermissionEvaluator {
     return value.replace('\\', '/');
   }
 
-  /** 单次调用 effective workdir 相对的目标：POSIX 路径与 raw path 末尾分隔符表达的 directory hint。 */
-  record PathTarget(String relativePosixPath, boolean directory) {}
+  /** 单次调用绝对 {@code path} 的 filesystem-root 匹配坐标与 raw path 末尾分隔符表达的 directory hint。 */
+  record PathTarget(String posixPath, boolean directory) {}
 
   public record Evaluation(PermissionAction action, PermissionPromptPreview promptPreview) {
     public Evaluation {

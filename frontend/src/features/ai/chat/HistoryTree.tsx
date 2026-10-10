@@ -29,8 +29,9 @@ const KIND_LABEL_KEYS: Record<HistoryEntryKind, string> = {
  * Thread 状态或重组后的 Turn 结构。
  *
  * 选中任意 Entry 只改变本地查看焦点（绝不调用 durable control API）；只有 ROOT
- * 与已关闭 TURN_END 才能“从此处分支”，其它 Entry 的分支动作禁用并给出原因。
- * 搜索只做定位与高亮，绝不隐藏行或改变图形。
+ * 与已关闭 TURN_END 才能“从此处分支”或“从此处新建会话”，其它 Entry 的动作禁用并
+ * 给出原因。会话 fork 是显式动作：新 Session 无用户可见名称，切点与来源 Thread 由
+ * 目标 pane 的首次输入原子提交。搜索只做定位与高亮，绝不隐藏行或改变图形。
  */
 export function HistoryTree({
   entries,
@@ -39,6 +40,7 @@ export function HistoryTree({
   queryError,
   onClose,
   onFork,
+  onForkSession,
 }: {
   entries: HarnessSessionEntryDTO[]
   headEntryId?: string | null
@@ -46,6 +48,8 @@ export function HistoryTree({
   queryError: unknown
   onClose: () => void
   onFork: (entry: HarnessSessionEntryDTO) => void
+  /** 显式“从此处新建会话”：缺失时（只读/非 Chat 宿主）不渲染该动作。 */
+  onForkSession?: (entry: HarnessSessionEntryDTO) => void
 }) {
   const { t } = useI18n()
   const [searchQuery, setSearchQuery] = useState('')
@@ -140,6 +144,16 @@ export function HistoryTree({
             <Button variant="ghost" onClick={onClose}>
               {t('ai.chat.history.cancel')}
             </Button>
+            {onForkSession ? (
+              <Button
+                variant="ghost"
+                disabled={loading || selectedRow?.canFork !== true}
+                title={selectedRow?.canFork === false ? t('ai.chat.branch.notBoundary') : undefined}
+                onClick={() => selectedRow?.canFork && onForkSession(selectedRow.entry)}
+              >
+                {t('ai.chat.branch.forkSession')}
+              </Button>
+            ) : null}
             <Button
               disabled={loading || selectedRow?.canFork !== true}
               title={selectedRow?.canFork === false ? t('ai.chat.branch.notBoundary') : undefined}

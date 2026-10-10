@@ -812,7 +812,7 @@ class OpenAiChatRequestEncoderTest {
   @Test
   @DisplayName("各种边缘消息角色与非法块校验")
   void testEdgeCasesAndIllegalBlocks() throws Exception {
-    // 1. ASSISTANT 包含 ThinkingBlock（fallback 时静默丢弃）与 ToolCall
+    // 1. ASSISTANT 包含 ThinkingBlock（回退为带来源标记的普通文本）与 ToolCall
     ProviderMessage asstWithThinking =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -835,7 +835,9 @@ class OpenAiChatRequestEncoderTest {
                 .encode(reqAsstThinking, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     JsonNode asstNode = rootAsstThinking.path("messages").get(1);
-    assertEquals("answer text", asstNode.path("content").asText());
+    assertEquals(
+        "<thinking>\ninternal thought\n</thinking>\nanswer text",
+        asstNode.path("content").asText());
     assertEquals(1, asstNode.path("tool_calls").size());
 
     // 2. ASSISTANT 包含非法块（如 ImageBlock）抛异常
@@ -1668,7 +1670,10 @@ class OpenAiChatRequestEncoderTest {
             encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     JsonNode wireAsst = root.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asText());
-    assertEquals("fallback result", wireAsst.path("content").asText());
+    // 可读思考以带来源标记的普通文本保留，与 final text 明确分隔。
+    assertEquals(
+        "<thinking>\nthink dropped\n</thinking>\nfallback result",
+        wireAsst.path("content").asText());
     assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
     assertFalse(wireAsst.has("reasoning_content"));
   }
@@ -1711,7 +1716,9 @@ class OpenAiChatRequestEncoderTest {
             encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     JsonNode wireAsst = root.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asText());
-    assertEquals("fallback result", wireAsst.path("content").asText());
+    assertEquals(
+        "<thinking>\nweigh tradeoffs\n</thinking>\nfallback result",
+        wireAsst.path("content").asText());
     assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
     assertFalse(wireAsst.has("reasoning_content"));
     assertFalse(

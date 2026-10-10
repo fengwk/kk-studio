@@ -43,11 +43,11 @@ class BuiltinHarnessContributorConfigurationTest {
             SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
             SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
             SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
-            SystemSettings.AiRuntime.DEFAULT.compactionFallbackModel(),
             4,
             7,
             13,
-            89);
+            89,
+            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
 
     SubagentConfig config =
         new BuiltinHarnessContributorConfiguration()

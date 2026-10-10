@@ -62,7 +62,7 @@ class PermissionPathPatternTest {
     assertFalse(doubleStar.matches("a.js", false));
   }
 
-  /** root-anchored pattern 只匹配 workdir 相对路径的根；directory-only pattern 可覆盖 descendant。 */
+  /** root-anchored pattern 只匹配 filesystem-root 坐标的根；directory-only pattern 可覆盖 descendant。 */
   @Test
   void keepsLeadingSlashAnchoringAndDirectoryRuleCoverage() {
     PermissionPathPattern anchored = PermissionPathPattern.of("/top.log");

@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -119,7 +120,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   NOW,
-                  NOW));
+                  NOW,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
 
@@ -266,7 +269,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   NOW,
-                  NOW));
+                  NOW,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
 
@@ -329,7 +334,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   NOW,
-                  NOW));
+                  NOW,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
 
@@ -410,7 +417,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   NOW,
-                  NOW));
+                  NOW,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
 
@@ -520,7 +529,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   NOW,
-                  NOW));
+                  NOW,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
 
@@ -634,10 +645,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       childId,
                       100_000,
                       16_384,
-                      new CompactionStart(
+                      CompactionStart.pending(
                           CompactionPhase.FULL,
                           CompactionTrigger.THRESHOLD,
-                          branchSettings().model(),
                           userEntry,
                           null,
                           null)),
@@ -711,7 +721,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
             null,
             null,
             NOW,
-            NOW);
+            NOW,
+            JoinPurpose.TASK,
+            null);
 
     fixture.store.transaction(
         tx -> {
@@ -758,7 +770,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   NOW,
-                  NOW));
+                  NOW,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
 
@@ -1005,7 +1019,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   NOW,
-                  NOW));
+                  NOW,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
   }

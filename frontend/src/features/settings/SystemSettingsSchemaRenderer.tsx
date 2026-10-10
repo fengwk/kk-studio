@@ -1,6 +1,7 @@
 import { useI18n } from '@/shared/i18n'
 import {
   SettingsCard,
+  SettingsIntegerListField,
   SettingsNumberField,
   SettingsSelectField,
   SettingsSwitchRow,
@@ -8,11 +9,9 @@ import {
   type ApplyTiming,
 } from '@/features/settings/settings-primitives'
 import { PermissionEditor } from '@/features/settings/permission/PermissionEditor'
-import { ModelSelectionEditor } from '@/features/settings/model-selection/ModelSelectionEditor'
 import {
   getDraftValue,
   setDraftValue,
-  type ModelSelectionDraft,
   type PermissionGroupDraft,
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
@@ -159,14 +158,16 @@ function SchemaField({
           />
         </div>
       )
-    case 'MODEL_SELECTION':
+    case 'INTEGER_LIST':
       return (
-        <ModelSelectionEditor
-          path={field.path}
-          value={value as ModelSelectionDraft | null}
-          labelKey={field.labelKey}
-          hint={hint ?? null}
+        <SettingsIntegerListField
+          fieldPath={field.path}
           nullable={field.nullable}
+          label={label}
+          value={value as (number | string)[]}
+          min={field.min ?? undefined}
+          max={field.max ?? undefined}
+          hint={hint}
           onChange={update}
         />
       )

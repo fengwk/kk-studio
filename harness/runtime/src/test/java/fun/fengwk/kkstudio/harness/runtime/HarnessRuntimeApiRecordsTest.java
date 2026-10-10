@@ -157,7 +157,7 @@ class HarnessRuntimeApiRecordsTest {
             null,
             T0);
     List<ThreadCommand> commands = new ArrayList<>(List.of(inserted));
-    AcceptedCommands result = new AcceptedCommands(session, root, thread, commands, false);
+    AcceptedCommands result = new AcceptedCommands(session, root, thread, commands, false, false);
     commands.clear();
     // 防御性拷贝：外部 List 变更不影响结果。
     assertEquals(1, result.acceptedCommands().size());
@@ -166,17 +166,17 @@ class HarnessRuntimeApiRecordsTest {
     assertEquals(thread, result.thread());
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptedCommands(null, root, thread, List.of(inserted), false));
+        () -> new AcceptedCommands(null, root, thread, List.of(inserted), false, false));
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptedCommands(session, null, thread, List.of(inserted), false));
+        () -> new AcceptedCommands(session, null, thread, List.of(inserted), false, false));
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptedCommands(session, root, null, List.of(inserted), false));
+        () -> new AcceptedCommands(session, root, null, List.of(inserted), false, false));
     // 空 acceptedCommands 被拒。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AcceptedCommands(session, root, thread, List.of(), false));
+        () -> new AcceptedCommands(session, root, thread, List.of(), false, false));
     // 不属于返回 thread 的 command 被拒。
     ThreadCommand foreign =
         new ThreadCommand(
@@ -191,24 +191,26 @@ class HarnessRuntimeApiRecordsTest {
             T0);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AcceptedCommands(session, root, thread, List.of(foreign), false));
+        () -> new AcceptedCommands(session, root, thread, List.of(foreign), false, false));
     // root 必须属于结果 session。
     Session other = new Session(TestIds.id(50), "session-00000000000000000000000000000050", T0);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AcceptedCommands(other, root, thread, List.of(inserted), false));
+        () -> new AcceptedCommands(other, root, thread, List.of(inserted), false, false));
     // root 必须是 ROOT payload（非 ROOT entry 被拒）。
     Entry nonRoot =
         HarnessRuntimeTestSupport.userMessageEntry(TestIds.id(5), TestIds.id(1), TestIds.id(2), T0);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AcceptedCommands(session, nonRoot, thread, List.of(inserted), false));
+        () -> new AcceptedCommands(session, nonRoot, thread, List.of(inserted), false, false));
     // thread 必须属于结果 session。
     ThreadState foreignSessionThread =
         HarnessRuntimeTestSupport.thread(TestIds.id(3), TestIds.id(51), TestIds.id(2));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AcceptedCommands(session, root, foreignSessionThread, List.of(inserted), false));
+        () ->
+            new AcceptedCommands(
+                session, root, foreignSessionThread, List.of(inserted), false, false));
     // acceptedCommands sequence 必须严格递增。
     ThreadCommand later =
         new ThreadCommand(
@@ -223,7 +225,7 @@ class HarnessRuntimeApiRecordsTest {
             T0);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AcceptedCommands(session, root, thread, List.of(later, inserted), false));
+        () -> new AcceptedCommands(session, root, thread, List.of(later, inserted), false, false));
   }
 
   /** CancelledThreadInput：sequence 必须为正，identity 与 payload 非空。 */

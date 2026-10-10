@@ -290,15 +290,18 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertTrue(ex.getMessage().contains("replay tool call mismatch with durable tool call"));
   }
 
-  /** 意图：含 opaque 密文但无摘要的 replay 无法承载 durable 语义思考时，仍必须严格拒绝。 */
+  /**
+   * 意图：含 opaque 密文但无摘要的 replay 无法承载 durable 语义思考时，必须原位保留密文原生 item，并把缺失的 durable 可读思考 作为普通 assistant
+   * 文本附带——模型请求同时保留 native 密文与可读思考，绝不静默丢弃可读文本，也不伪造 reasoning summary。
+   */
   @Test
-  void encryptedOnlyReplayStillRejectedWhenDurableThinkingCannotBeRepresented() throws Exception {
+  void encryptedOnlyReplayKeepsOpaqueItemAndAttachesReadableThinkingAsText() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
     ObjectNode payload = MAPPER.createObjectNode();
     ArrayNode output = payload.putArray("output");
-    output.addObject().put("type", "reasoning").put("encrypted_content", "opaque_blob");
+    output.addObject().put("type", "reasoning").put("encrypted_content", "synthetic-cipher");
     ObjectNode message = output.addObject();
     message.put("type", "message").put("role", "assistant");
     message.putArray("content").addObject().put("type", "output_text").put("text", "answer");
@@ -309,13 +312,82 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
+            List.of(new ProviderThinkingBlock("durable sentinel"), new ProviderTextBlock("answer")),
             replay);
 
-    ProviderException ex =
-        assertThrows(
-            ProviderException.class, () -> encoder.encode(request(List.of(assistant)), descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    JsonNode input =
+        MAPPER
+            .readTree(encoder.encode(request(List.of(assistant)), descriptor).bodyUtf8Bytes())
+            .get("input");
+
+    // 原生 encrypted item 原样保留（synthetic cipher preserved）。
+    JsonNode reasoning = itemOfType(input, "reasoning");
+    assertNotNull(reasoning, "native encrypted reasoning item must be replayed");
+    assertEquals("synthetic-cipher", reasoning.path("encrypted_content").asText());
+    assertFalse(
+        reasoning.has("summary"), "must not forge a reasoning summary from durable readable text");
+
+    // durable 可读思考必须以普通 assistant 文本出现在 wire 中，不能被静默丢弃。
+    boolean readableThinkingTextSeen = false;
+    for (JsonNode item : input) {
+      if ("message".equals(item.path("type").asText())) {
+        for (JsonNode block : item.path("content")) {
+          if (block.path("text").asText().contains("durable sentinel")) {
+            readableThinkingTextSeen = true;
+            assertEquals("output_text", block.path("type").asText());
+          }
+        }
+      }
+    }
+    assertTrue(readableThinkingTextSeen, "durable readable thinking must survive into the wire");
+  }
+
+  /** 意图：encrypted-only replay 在 affinity 失配时不得强行 native，必须回退语义编码并保留 durable 可读思考。 */
+  @Test
+  void encryptedOnlyReplayFallsBackToSemanticOnAffinityMismatch() throws Exception {
+    ProviderDescriptor descriptor = createDescriptor();
+    OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
+
+    ObjectNode payload = MAPPER.createObjectNode();
+    ArrayNode output = payload.putArray("output");
+    output
+        .addObject()
+        .put("type", "reasoning")
+        .put("encrypted_content", "synthetic-cipher-preserved");
+    ObjectNode message = output.addObject();
+    message.put("type", "message").put("role", "assistant");
+    message.putArray("content").addObject().put("type", "output_text").put("text", "answer");
+
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderThinkingBlock("durable sentinel"), new ProviderTextBlock("answer")),
+            new ProviderReplayState(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                descriptor.affinity("other-model"),
+                payload));
+
+    JsonNode input =
+        MAPPER
+            .readTree(encoder.encode(request(List.of(assistant)), descriptor).bodyUtf8Bytes())
+            .get("input");
+
+    assertEquals(2, input.size());
+    assertEquals("reasoning", input.get(0).path("type").asText());
+    assertEquals("durable sentinel", input.get(0).path("summary").get(0).path("text").asText());
+    assertFalse(
+        input.get(0).has("encrypted_content"),
+        "cross-affinity fallback must not carry the opaque cipher");
+    assertEquals("answer", input.get(1).path("content").get(0).path("text").asText());
+  }
+
+  private static JsonNode itemOfType(JsonNode input, String type) {
+    for (JsonNode item : input) {
+      if (type.equals(item.path("type").asText())) {
+        return item;
+      }
+    }
+    return null;
   }
 
   /** 意图：合法的 encrypted + summary replay 必须原样原位回放，opaque 数据逐字节保持。 */

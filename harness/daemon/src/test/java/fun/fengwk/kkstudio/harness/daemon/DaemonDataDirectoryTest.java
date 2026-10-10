@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,9 +22,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * 针对 {@link DaemonDataDirectory} 的行为断言测试。
  *
- * <p>覆盖目录结构创建、POSIX 0700 权限收敛、进程内与跨 JVM 进程排他锁、重启后锁释放、启动期孤儿 .part 文件清理与已发布持久化数据保留、以及 defaultRoot
- * 纯路径计算等语义。暂存文件的 owner-only 创建语义由 {@code TextOutputStoreTest} 覆盖（生产路径只经 {@code TextOutputStore}
- * 落盘）。
+ * <p>覆盖目录结构创建、POSIX 0700 权限收敛、进程内与跨 JVM 进程排他锁、重启后锁释放、非受控已有数据保留、以及 defaultRoot 纯路径计算等语义。暂存文件的
+ * owner-only 创建语义由 {@code TextOutputStoreTest} 覆盖（生产路径只经 {@code TextOutputStore} 落盘）。
  */
 class DaemonDataDirectoryTest {
 
@@ -32,36 +32,28 @@ class DaemonDataDirectoryTest {
   /** 验证 open 创建完整的固定目录布局，各 accessor 指向正确路径，且在 POSIX 系统上所有目录权限显式收敛为 0700 (owner-only)。 */
   @Test
   void openCreatesFullLayoutAndOwnerOnlyDirectories() throws IOException {
+    Path canonicalRoot = dataDir.toRealPath();
     try (DaemonDataDirectory dir = DaemonDataDirectory.open(dataDir)) {
-      Path lockFile = dataDir.resolve(DaemonDataDirectory.LOCK_FILE_NAME);
-      Path resourcesDir = dataDir.resolve("resources");
-      Path textDir = resourcesDir.resolve("text");
-      Path stagingDir = resourcesDir.resolve("staging");
-      Path skillsDir = dataDir.resolve("skills");
-      Path skillWorkDir = dataDir.resolve("skill-work");
-      Path skillCacheDir = skillWorkDir.resolve("cache");
+      Path lockFile = canonicalRoot.resolve(DaemonDataDirectory.LOCK_FILE_NAME);
+      Path tmpDir = canonicalRoot.resolve("tmp");
+      Path skillsDir = canonicalRoot.resolve("skills");
+      Path skillWorkDir = canonicalRoot.resolve("skill-work");
       Path skillStagingDir = skillWorkDir.resolve("staging");
       Path skillBackupDir = skillWorkDir.resolve("backup");
 
-      assertEquals(dataDir.toAbsolutePath().normalize(), dir.root());
-      assertEquals(resourcesDir, dir.resources());
-      assertEquals(textDir, dir.text());
-      assertEquals(stagingDir, dir.staging());
+      assertEquals(canonicalRoot, dir.root());
+      assertEquals(tmpDir, dir.tmp());
       assertEquals(skillsDir, dir.skills());
       assertEquals(skillWorkDir, dir.skillWork());
-      assertEquals(skillCacheDir, dir.skillCache());
       assertEquals(skillStagingDir, dir.skillStaging());
       assertEquals(skillBackupDir, dir.skillBackup());
 
       assertTrue(Files.isRegularFile(lockFile, LinkOption.NOFOLLOW_LINKS), "daemon.lock 必须为普通文件");
       assertTrue(Files.isDirectory(dir.root(), LinkOption.NOFOLLOW_LINKS), "root 必须为目录");
-      assertTrue(Files.isDirectory(dir.resources(), LinkOption.NOFOLLOW_LINKS), "resources 必须为目录");
-      assertTrue(Files.isDirectory(dir.text(), LinkOption.NOFOLLOW_LINKS), "text 必须为目录");
-      assertTrue(Files.isDirectory(dir.staging(), LinkOption.NOFOLLOW_LINKS), "staging 必须为目录");
+      assertTrue(Files.isDirectory(dir.tmp(), LinkOption.NOFOLLOW_LINKS), "tmp 必须为目录");
       assertTrue(Files.isDirectory(dir.skills(), LinkOption.NOFOLLOW_LINKS), "skills 必须为目录");
       assertTrue(Files.isDirectory(dir.skillWork(), LinkOption.NOFOLLOW_LINKS), "skillWork 必须为目录");
-      assertTrue(
-          Files.isDirectory(dir.skillCache(), LinkOption.NOFOLLOW_LINKS), "skillCache 必须为目录");
+      assertFalse(Files.exists(skillWorkDir.resolve("cache")), "安装路径不创建无用途的 Git 缓存");
       assertTrue(
           Files.isDirectory(dir.skillStaging(), LinkOption.NOFOLLOW_LINKS), "skillStaging 必须为目录");
       assertTrue(
@@ -76,16 +68,25 @@ class DaemonDataDirectoryTest {
         Set<PosixFilePermission> ownerOnlyFilePerms =
             Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.root()));
-        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.resources()));
-        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.text()));
-        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.staging()));
+        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.tmp()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skills()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillWork()));
-        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillCache()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillStaging()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillBackup()));
         assertEquals(ownerOnlyFilePerms, Files.getPosixFilePermissions(lockFile));
       }
+    }
+  }
+
+  /** 安装器不使用的已有目录不能由启动布局初始化擅自清理。 */
+  @Test
+  void openPreservesUnmanagedSkillCache() throws IOException {
+    Path existing = dataDir.resolve("skill-work/cache/objects");
+    Files.createDirectories(existing.getParent());
+    Files.writeString(existing, "existing data");
+
+    try (DaemonDataDirectory ignored = DaemonDataDirectory.open(dataDir)) {
+      assertEquals("existing data", Files.readString(existing));
     }
   }
 
@@ -97,9 +98,38 @@ class DaemonDataDirectoryTest {
         () -> DaemonDataDirectory.open(Path.of("relative-daemon-data")));
   }
 
+  /** 数据根本身是符号链接/reparse 必须失败关闭：不得把数据目录逃逸到链接目标。 */
+  @Test
+  void openRejectsSymlinkedDataRoot() throws IOException {
+    assumeTrue(supportsSymlinks(), "需要支持符号链接的文件系统");
+    Path parent = Files.createDirectories(dataDir.resolve("parent"));
+    Path real = Files.createDirectories(parent.resolve("real-data"));
+    Path link = parent.resolve("linked-data");
+    Files.createSymbolicLink(link, real);
+
+    assertThrows(IllegalArgumentException.class, () -> DaemonDataDirectory.open(link));
+  }
+
+  /**
+   * 数据根的父位置 alias（macOS {@code /var}、{@code /tmp} 等 OS 标准前缀形态）是合法输入：canonical 化后派生 tmp 上报真实绝对路径。
+   */
+  @Test
+  void openCanonicalizesAliasPrefixAboveDataRoot() throws IOException {
+    assumeTrue(supportsSymlinks(), "需要支持符号链接的文件系统");
+    Path realParent = Files.createDirectories(dataDir.resolve("real-parent"));
+    Path alias = dataDir.resolve("alias-parent");
+    Files.createSymbolicLink(alias, realParent);
+
+    try (DaemonDataDirectory dir = DaemonDataDirectory.open(alias.resolve("daemon-data"))) {
+      assertEquals(realParent.resolve("daemon-data"), dir.root());
+      assertEquals(realParent.resolve("daemon-data").resolve("tmp"), dir.tmp());
+      assertFalse(dir.root().startsWith(alias), "canonical 根不得保留 alias 前缀: " + dir.root());
+    }
+  }
+
   /** 验证同进程内对同一数据目录的二次 open 必定失败抛出 IllegalStateException，且在原句柄关闭后新 open 可以重新成功加锁。 */
   @Test
-  void mutualExclusionInProcessAndReacquireOnClose() {
+  void mutualExclusionInProcessAndReacquireOnClose() throws IOException {
     DaemonDataDirectory firstHandle = DaemonDataDirectory.open(dataDir);
     assertNotNull(firstHandle);
 
@@ -112,7 +142,7 @@ class DaemonDataDirectoryTest {
 
     // 释放后重新打开必须成功（模拟 daemon 重启）
     try (DaemonDataDirectory secondHandle = DaemonDataDirectory.open(dataDir)) {
-      assertEquals(dataDir.toAbsolutePath().normalize(), secondHandle.root());
+      assertEquals(dataDir.toRealPath(), secondHandle.root());
     }
   }
 
@@ -150,27 +180,29 @@ class DaemonDataDirectoryTest {
     assertEquals(0, childAfterUnlock.exitValue(), "父进程释放锁后子进程必须成功获取锁退出 0");
   }
 
-  /** 验证 open 启动时仅清理 staging 目录下的残留 *.part 暂存文件，已发布的 durable text 内容完整保留。 */
+  /**
+   * 验证 open 不扫描也不删除已部署的旧 {@code tmp/text} 与 {@code tmp/staging} 内容（受控清扫只针对 {@code tmp/workspaces}）。
+   */
   @Test
-  void staleStagingPartCleanupPreservesPublishedData() throws IOException {
-    Path stagingDir = dataDir.resolve("resources").resolve("staging");
-    Path textDir = dataDir.resolve("resources").resolve("text");
+  void openLeavesLegacyTextAndStagingUntouched() throws IOException {
+    Path stagingDir = dataDir.resolve("tmp").resolve("staging");
+    Path textDir = dataDir.resolve("tmp").resolve("text");
     Files.createDirectories(stagingDir);
     Files.createDirectories(textDir);
 
-    Path stalePartFile = stagingDir.resolve("leftover-abc123.part");
-    Path publishedLogFile = textDir.resolve("existing.log");
+    Path legacyPartFile = stagingDir.resolve("leftover-abc123.part");
+    Path legacyLogFile = textDir.resolve("existing.log");
 
-    Files.writeString(stalePartFile, "uncommitted partial stream data");
-    Files.writeString(publishedLogFile, "durable published log line 1\nline 2\n");
+    Files.writeString(legacyPartFile, "legacy partial stream data");
+    Files.writeString(legacyLogFile, "legacy published log line 1\nline 2\n");
 
-    try (DaemonDataDirectory dir = DaemonDataDirectory.open(dataDir)) {
-      assertFalse(Files.exists(stalePartFile), "未完成的 staging .part 文件必须在 open 时被清理");
-      assertTrue(Files.exists(publishedLogFile), "已发布的 text 文件不得被删除");
+    try (DaemonDataDirectory ignored = DaemonDataDirectory.open(dataDir)) {
+      assertTrue(Files.exists(legacyPartFile), "旧 staging 中转文件不属于受控清扫范围，不得被删除");
+      assertTrue(Files.exists(legacyLogFile), "旧 text 日志不属于受控清扫范围，不得被删除");
       assertEquals(
-          "durable published log line 1\nline 2\n",
-          Files.readString(publishedLogFile),
-          "已发布的 text 文件内容必须保持不变");
+          "legacy published log line 1\nline 2\n",
+          Files.readString(legacyLogFile),
+          "旧 text 日志内容必须保持不变");
     }
   }
 
@@ -198,6 +230,28 @@ class DaemonDataDirectoryTest {
 
   private static boolean isPosixSupported() {
     return FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+  }
+
+  private static boolean supportsSymlinks() {
+    Path probe = null;
+    try {
+      Path base = Files.createTempDirectory("symlink-probe");
+      Path target = Files.createDirectories(base.resolve("target"));
+      probe = base.resolve("link");
+      Files.createSymbolicLink(probe, target);
+      return true;
+    } catch (IOException | UnsupportedOperationException error) {
+      return false;
+    } finally {
+      if (probe != null) {
+        try {
+          Files.deleteIfExists(probe);
+          Files.deleteIfExists(probe.getParent());
+        } catch (IOException ignored) {
+          // 探测目录残留不影响测试结论。
+        }
+      }
+    }
   }
 
   /** 供跨进程互斥排他性测试调用的子进程入口。 */

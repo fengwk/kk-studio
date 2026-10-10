@@ -64,6 +64,23 @@ final class TurnPathValidator {
       visitNotification();
       return;
     }
+    if (payload instanceof SettingsPayload) {
+      // SETTINGS 是安全边界上 append 的 branch settings 快照：只允许位于回合之间，不参与 input/assistant/callIndex 判定，
+      // 也不打开 / 关闭 turn。
+      if (openTurnStart != null) {
+        throw new IllegalArgumentException(
+            "SETTINGS entry must not appear inside an open TURN_START");
+      }
+      return;
+    }
+    if (payload instanceof ForkPayload) {
+      // FORK 是 fork 事实节点：只允许位于回合之间，不参与 input/assistant/callIndex 判定，也不打开 / 关闭 turn，
+      // 更不作为需要模型回应的输入（不设置 pendingNotificationInput）。
+      if (openTurnStart != null) {
+        throw new IllegalArgumentException("FORK entry must not appear inside an open TURN_START");
+      }
+      return;
+    }
     if (payload instanceof TurnStartPayload start) {
       if (openTurnStart != null) {
         throw new IllegalArgumentException(

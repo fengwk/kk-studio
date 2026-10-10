@@ -210,10 +210,9 @@ class HistoryNormalizationTest {
               OWNER_THREAD_ID,
               null,
               null,
-              new CompactionStart(
+              CompactionStart.pending(
                   CompactionPhase.FULL,
                   CompactionTrigger.THRESHOLD,
-                  settings().model(),
                   new UUID(0L, 3L),
                   null,
                   null)));

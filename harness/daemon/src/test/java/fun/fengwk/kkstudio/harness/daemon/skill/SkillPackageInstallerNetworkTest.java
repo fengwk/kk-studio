@@ -104,7 +104,6 @@ class SkillPackageInstallerNetworkTest {
   private SkillPackageInstaller installer(Path root, int readMillis) {
     return new SkillPackageInstaller(
         root.resolve("skills"),
-        root.resolve("cache"),
         root.resolve("staging"),
         root.resolve("backup"),
         1000,

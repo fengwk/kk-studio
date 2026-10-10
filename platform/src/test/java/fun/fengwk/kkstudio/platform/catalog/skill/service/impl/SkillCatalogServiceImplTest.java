@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,6 +24,8 @@ import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipherTestSupport;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
@@ -48,6 +51,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Skill Package 单表 catalog 的契约测试。
@@ -163,6 +167,141 @@ public class SkillCatalogServiceImplTest {
           stale.setBranch("main");
           fixture.service.editPackage("dev-package", stale);
         });
+  }
+
+  /** 测试意图：令牌只以密文落库、只以 hasToken 回显，并原样传给 Git 鉴权；明文绝不进入 DTO 或密文文本。 */
+  @Test
+  public void shouldStoreTokenEncryptedAndPassItToGit() {
+    Fixture fixture = new Fixture();
+    fixture.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    fixture.git.manifest(OLD_COMMIT, List.of(entry("dev", "developer skill")));
+    SkillPackageCreateDTO create = create("dev-package");
+    create.setToken("ghp_plain_secret");
+
+    SkillPackageDTO created = fixture.service.createPackage(create);
+
+    assertTrue(created.isHasToken());
+    assertFalse(created.toString().contains("ghp_plain_secret"));
+    byte[] encrypted = fixture.repository.getPackage("dev-package").getEncryptedToken();
+    assertNotNull(encrypted);
+    assertFalse(new String(encrypted, StandardCharsets.ISO_8859_1).contains("ghp_plain_secret"));
+    assertEquals("ghp_plain_secret", fixture.tokenCipher.decrypt("dev-package", encrypted));
+    // resolveBranchHead 与 ensureCommit 都必须携带同一令牌。
+    assertEquals(List.of("ghp_plain_secret", "ghp_plain_secret"), fixture.git.observedTokens);
+  }
+
+  /** 测试意图：未提供令牌时匿名访问，hasToken=false 且不产生密文。 */
+  @Test
+  public void shouldCreateAnonymouslyWithoutToken() {
+    Fixture fixture = new Fixture();
+    fixture.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    fixture.git.manifest(OLD_COMMIT, List.of(entry("dev", "developer skill")));
+
+    SkillPackageDTO created = fixture.service.createPackage(create("dev-package"));
+
+    assertFalse(created.isHasToken());
+    assertNull(fixture.repository.getPackage("dev-package").getEncryptedToken());
+    assertTrue(fixture.git.observedTokens.stream().allMatch(Objects::isNull));
+  }
+
+  /** 测试意图：编辑令牌三态——省略保留、显式 null 清除、非空替换；空白串按非法请求拒绝。 */
+  @Test
+  public void shouldEditTokenTriState() {
+    Fixture fixture = new Fixture();
+    fixture.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    fixture.git.manifest(OLD_COMMIT, List.of(entry("dev", "developer skill")));
+    SkillPackageCreateDTO create = create("dev-package");
+    create.setToken("first-token");
+    SkillPackageDTO created = fixture.service.createPackage(create);
+
+    SkillPackageEditDTO omitted = new SkillPackageEditDTO();
+    omitted.setExpectedVersion(created.getVersion());
+    omitted.setDescription("skill package");
+    omitted.setBranch("main");
+    SkillPackageDTO preserved = fixture.service.editPackage("dev-package", omitted);
+    assertTrue(preserved.isHasToken());
+    assertEquals("0", preserved.getVersion());
+
+    SkillPackageEditDTO replace = new SkillPackageEditDTO();
+    replace.setExpectedVersion(preserved.getVersion());
+    replace.setDescription("skill package");
+    replace.setBranch("main");
+    replace.applyToken("second-token");
+    SkillPackageDTO replaced = fixture.service.editPackage("dev-package", replace);
+    assertEquals("1", replaced.getVersion());
+    assertEquals(
+        "second-token",
+        fixture.tokenCipher.decrypt(
+            "dev-package", fixture.repository.getPackage("dev-package").getEncryptedToken()));
+
+    SkillPackageEditDTO clear = new SkillPackageEditDTO();
+    clear.setExpectedVersion(replaced.getVersion());
+    clear.setDescription("skill package");
+    clear.setBranch("main");
+    clear.applyToken(null);
+    SkillPackageDTO cleared = fixture.service.editPackage("dev-package", clear);
+    assertFalse(cleared.isHasToken());
+    assertNull(fixture.repository.getPackage("dev-package").getEncryptedToken());
+
+    SkillPackageEditDTO blank = new SkillPackageEditDTO();
+    blank.setExpectedVersion(cleared.getVersion());
+    blank.setDescription("skill package");
+    blank.setBranch("main");
+    blank.applyToken("   ");
+    assertThrows(
+        AiValidationException.class, () -> fixture.service.editPackage("dev-package", blank));
+  }
+
+  /** 测试意图：导入按文件事实整体覆盖令牌——null 清除既有令牌，非空替换。 */
+  @Test
+  public void shouldImportTokenOverwriteSemantics() {
+    Fixture fixture = new Fixture();
+    fixture.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    fixture.git.manifest(OLD_COMMIT, List.of(entry("dev", "developer skill")));
+    SkillPackageCreateDTO create = create("dev-package");
+    create.setToken("existing-token");
+    fixture.service.createPackage(create);
+
+    fixture.service.importPackage(
+        "dev-package",
+        "skill package",
+        REPOSITORY_URL,
+        "main",
+        OLD_COMMIT,
+        List.of(entry("dev", "developer skill")),
+        null);
+    assertFalse(fixture.service.getPackage("dev-package").isHasToken());
+
+    fixture.service.importPackage(
+        "dev-package",
+        "skill package",
+        REPOSITORY_URL,
+        "main",
+        OLD_COMMIT,
+        List.of(entry("dev", "developer skill")),
+        "imported-token");
+    assertTrue(fixture.service.getPackage("dev-package").isHasToken());
+    assertEquals(
+        "imported-token",
+        fixture.tokenCipher.decrypt(
+            "dev-package", fixture.repository.getPackage("dev-package").getEncryptedToken()));
+  }
+
+  /** 测试意图：Check 使用已存储的令牌访问私有仓库。 */
+  @Test
+  public void shouldUseStoredTokenWhenChecking() {
+    Fixture fixture = new Fixture();
+    fixture.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    fixture.git.manifest(OLD_COMMIT, List.of(entry("dev", "developer skill")));
+    SkillPackageCreateDTO create = create("dev-package");
+    create.setToken("check-token");
+    SkillPackageDTO created = fixture.service.createPackage(create);
+    fixture.git.observedTokens.clear();
+
+    fixture.git.resolveHead(REPOSITORY_URL, "main", NEW_COMMIT);
+    fixture.service.checkPackage("dev-package", check(created.getVersion()));
+
+    assertEquals(List.of("check-token"), fixture.git.observedTokens);
   }
 
   /** 测试意图：Check 只更新观察三元组，成功时保留 current commit 与 manifest，失败时保留全部已发布事实。 */
@@ -567,6 +706,7 @@ public class SkillCatalogServiceImplTest {
 
     private final FakeRepository repository = new FakeRepository();
     private final FakeGitCache git = new FakeGitCache();
+    private final SkillTokenCipher tokenCipher = SkillTokenCipherTestSupport.newCipher();
     private final AgentDefinitionRepository agentDefinitionRepository =
         mock(AgentDefinitionRepository.class);
     private final SkillCatalogServiceImpl service;
@@ -596,7 +736,8 @@ public class SkillCatalogServiceImplTest {
                   new SkillCatalogConverter(),
                   new SkillPackageGuard(repository, agentDefinitionRepository),
                   new AgentEditableSupport(new ObjectMapper()),
-                  transactional(new SkillCatalogWrites(), transactions)),
+                  transactional(new SkillCatalogWrites(), transactions),
+                  tokenCipher),
               transactions);
     }
 
@@ -712,6 +853,7 @@ public class SkillCatalogServiceImplTest {
       target.setHeadCheckedAt(source.getHeadCheckedAt());
       target.setHeadCheckError(source.getHeadCheckError());
       target.setSkills(List.copyOf(source.getSkills()));
+      target.setEncryptedToken(source.getEncryptedToken());
       target.setVersion(source.getVersion());
       target.setCreateTime(source.getCreateTime());
       target.setUpdateTime(source.getUpdateTime());
@@ -723,6 +865,7 @@ public class SkillCatalogServiceImplTest {
   private static final class FakeGitCache implements SkillGitCache {
 
     private final List<String> ensuredCommits = new ArrayList<>();
+    private final List<String> observedTokens = new ArrayList<>();
     private final Map<String, String> heads = new LinkedHashMap<>();
     private final Map<String, List<SkillManifestEntry>> manifests = new LinkedHashMap<>();
     private SkillGitException headFailure;
@@ -757,8 +900,9 @@ public class SkillCatalogServiceImplTest {
     }
 
     @Override
-    public String resolveBranchHead(String repositoryUrl, String branch) {
+    public String resolveBranchHead(String repositoryUrl, String branch, String token) {
       network();
+      observedTokens.add(token);
       if (headFailure != null) {
         throw headFailure;
       }
@@ -770,8 +914,10 @@ public class SkillCatalogServiceImplTest {
     }
 
     @Override
-    public void ensureCommit(String packageName, String repositoryUrl, String commit) {
+    public void ensureCommit(
+        String packageName, String repositoryUrl, String commit, String token) {
       network();
+      observedTokens.add(token);
       ensuredCommits.add(commit);
     }
 

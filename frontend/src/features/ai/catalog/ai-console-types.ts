@@ -1,4 +1,5 @@
 import type {
+  AgentDefinitionType,
   AgentModelInputModality,
   AgentProviderType,
   SkillRefDTO,
@@ -13,6 +14,7 @@ export interface ProviderDraft {
   credential: string
   modelCallTimeoutMillis: string
   modelCallIdleTimeoutMillis: string
+  modelHttpRetryStatusCodes: (number | string)[] | null
 }
 
 /**
@@ -91,12 +93,14 @@ export type ResourceModal =
       name: string
       expectedVersion: CatalogVersion
     }
-  | { kind: 'agent'; mode: 'create' }
+  | { kind: 'agent'; mode: 'create'; type: AgentDefinitionType }
   | {
       kind: 'agent'
       mode: 'edit'
       name: string
-      model: string
+      /** 系统持有的 identity 类型；前端据此保护删除等动作，不随请求发送。 */
+      type: AgentDefinitionType
+      model: string | null
       expectedVersion: CatalogVersion
     }
 

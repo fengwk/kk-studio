@@ -215,7 +215,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     if (environmentRepository.getById(id.value()) == null) {
       throw new AiResourceNotFoundException(RESOURCE);
     }
-    // 事件与 Card 的 lastEvent 同源：连接行保留的可重建投影；从未连接的 Environment 没有事件。
+    // 事件是连接行保留的可重建投影：从未连接的 Environment 没有事件。
     EnvironmentConnection connection = environmentRegistry.find(id).orElse(null);
     if (connection == null) {
       return List.of();
@@ -435,7 +435,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setNote(host == null ? null : host.note());
     dto.setUserName(host == null ? null : host.userName());
     dto.setHomeDirectory(host == null ? null : host.homeDirectory());
-    dto.setLastEvent(conn.lastAlert().map(EnvironmentServiceImpl::toEventDto).orElse(null));
+    dto.setDaemonVersion(conn.daemonVersion());
     dto.setCapabilities(
         statusValid
             ? conn.capabilities().stream()

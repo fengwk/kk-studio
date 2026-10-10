@@ -101,6 +101,10 @@ class ModelResponsePlannerTest {
     assertEquals("INVALID_TOOL_ARGUMENTS", slot.error().kind());
     assertEquals("bash", slot.binding().descriptor().name());
     assertTrue(slot.error().message().contains("argumentsJson"));
+    // 验证拒绝是派发前确定性失败：文案必须明确未执行并给出修正动作。
+    assertTrue(
+        slot.error().message().contains("The tool was not executed."), slot.error().message());
+    assertTrue(slot.error().message().contains("match the tool schema"), slot.error().message());
   }
 
   /** unknown tool：FAILED(UNKNOWN_TOOL)，binding 为 null（planner 不做可见性校验，unknown 直接降级）。 */
@@ -118,6 +122,26 @@ class ModelResponsePlannerTest {
     assertEquals(ToolInvocationStatus.FAILED, slot.status());
     assertEquals("UNKNOWN_TOOL", slot.error().kind());
     assertNull(slot.binding());
+    // unknown tool 只列冻结 spec 允许的工具，并明确未执行与下一步（不是 live catalog，也不使用裸重试措辞）。
+    assertTrue(slot.error().message().contains("allowed tools: bash"), slot.error().message());
+    assertTrue(
+        slot.error().message().contains("The tool was not executed."), slot.error().message());
+  }
+
+  /** unknown tool 的允许列表按名称排序去重，且只来自冻结 binding，不受调用顺序影响。 */
+  @Test
+  void unknownToolListsFrozenAllowedToolsSortedAndDeduplicated() {
+    ModelResponsePlan plan =
+        PLANNER.plan(
+            response(
+                GenerationStopReason.COMPLETE,
+                List.of(new ProviderToolCall("call-1", "undeclared", "{}"))),
+            bindings(toolBinding("read"), toolBinding("bash"), toolBinding("bash")));
+
+    ModelResponsePlan.ToolSlot slot = ((ModelResponsePlan.ToolBatch) plan).tools().getFirst();
+
+    assertTrue(
+        slot.error().message().contains("allowed tools: bash, read"), slot.error().message());
   }
 
   /** mixed batch：每 call 一个槽位，READY 与 FAILED 按 callIndex 并存。 */

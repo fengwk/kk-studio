@@ -87,7 +87,7 @@ public final class DaemonMain {
     try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(daemonConfig.dataDir())) {
       CodingToolsConfig toolsConfig =
           CodingToolsConfig.fromRuntime(
-              dataDirectory.resources(), daemonConfig.bashExecutable(), daemonConfig.lsp());
+              dataDirectory.tmp(), daemonConfig.bashExecutable(), daemonConfig.lsp());
       DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig, dataDirectory);
       Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));
       runtime.start();
@@ -155,20 +155,11 @@ public final class DaemonMain {
     }
     switch (args[0]) {
       case "--help", "-h" -> out.print(USAGE);
-      case "--version" -> out.println("kk-studio-daemon " + implementationVersion());
+      case "--version" -> out.println("kk-studio-daemon " + DaemonBuildInfo.version());
       default -> {
         return false;
       }
     }
     return true;
-  }
-
-  /**
-   * Daemon 版本：shaded JAR 的 manifest {@code Implementation-Version}；未打包（直接跑 classes/测试）时为 {@code
-   * development}。
-   */
-  static String implementationVersion() {
-    String version = DaemonMain.class.getPackage().getImplementationVersion();
-    return version == null || version.isBlank() ? "development" : version;
   }
 }

@@ -89,8 +89,14 @@ class EnvironmentSkillSyncOrchestratorTest {
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
+          "1.0.9",
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment."));
+              DaemonOperatingSystem.LINUX,
+              "UTC",
+              "dev",
+              "/home/dev",
+              "Linux environment.",
+              "/tmp/kk-studio"));
 
   private final Map<String, SkillPackage> catalog = new LinkedHashMap<>();
   private final List<EnvironmentSkillState> rowSkillState = new ArrayList<>();
@@ -288,12 +294,14 @@ class EnvironmentSkillSyncOrchestratorTest {
         ENV,
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
+            "1.0.9",
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.WINDOWS,
                 "UTC",
                 "dev",
                 "C:\\Users\\dev",
-                "Windows environment.")));
+                "Windows environment.",
+                "/tmp/kk-studio")));
     transport.responder =
         request ->
             EnvironmentCapabilityResult.json(

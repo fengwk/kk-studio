@@ -14,6 +14,7 @@ export interface AgentProviderDTO {
   version: CatalogVersion
   createTime: InstantTimestamp
   updateTime: InstantTimestamp
+  modelHttpRetryStatusCodes: number[] | null
 }
 
 export interface AgentProviderEditablePropertiesDTO {
@@ -24,6 +25,7 @@ export interface AgentProviderEditablePropertiesDTO {
   credential?: string | null
   modelCallTimeoutMillis?: BackendLong | null
   modelCallIdleTimeoutMillis?: BackendLong | null
+  modelHttpRetryStatusCodes?: number[] | null
 }
 
 export interface AgentProviderCreateDTO extends AgentProviderEditablePropertiesDTO {
@@ -149,6 +151,7 @@ export interface SkillPackageDTO {
   description: string | null
   repositoryUrl: string
   branch: string
+  hasToken: boolean
   currentCommit: string
   observedHeadCommit: string | null
   headCheckedAt: string | null
@@ -165,12 +168,14 @@ export interface SkillPackageCreateDTO {
   description?: string | null
   repositoryUrl: string
   branch: string
+  token?: string | null
 }
 
 export interface SkillPackageEditDTO {
   expectedVersion: string
   description?: string | null
   branch: string
+  token?: string | null
 }
 
 export interface SkillPackageCheckDTO {
@@ -206,12 +211,24 @@ export interface ToolCatalogEntryDTO {
   environmentId?: string | null
 }
 
+/**
+ * 系统持有的 Agent 生命周期类型：`USER` 由用户创建，`BUILTIN` 由系统初始化并保护身份。
+ * 该类型只出现在读取 DTO；创建/更新请求体永不携带，也不能由用户切换。
+ */
+export type AgentDefinitionType = 'USER' | 'BUILTIN'
+
 /** 公开的全局 Agent definition；model/variant 与 config 是 Thread 运行时的输入。 */
 export interface AgentDefinitionDTO {
   name: string
   description: string | null
   systemPrompt: string | null
-  model: string
+  /** 系统持有的不可变类型；`BUILTIN` 不能被删除或改名。 */
+  type: AgentDefinitionType
+  /**
+   * 生效模型引用，序列化形式为 {@code providerName/modelName}。
+   * `BUILTIN` 支持显式的未配置状态（null）；`USER` 始终已配置。
+   */
+  model: string | null
   /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
   config: AgentDefinitionConfigDTO
@@ -220,12 +237,15 @@ export interface AgentDefinitionDTO {
   updateTime: InstantTimestamp
 }
 
-/** 完整的 Agent Definition 创建/PUT 请求体。 */
+/** 完整的 Agent Definition 创建/PUT 请求体；不包含系统持有的 {@link AgentDefinitionType}。 */
 export interface AgentDefinitionEditablePropertiesDTO {
   description: string | null
   systemPrompt: string | null
-  /** 必填模型引用，序列化形式为 {@code providerName/modelName}。 */
-  model: string
+  /**
+   * 模型引用，序列化形式为 {@code providerName/modelName}。
+   * `USER` 必填；`BUILTIN` 允许 null 以表达未配置状态。
+   */
+  model: string | null
   /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
   config: AgentDefinitionConfigDTO

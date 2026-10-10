@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUpCircle, Edit2, Package, RefreshCw, Trash2 } from 'lucide-react'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
 import { Button } from '@/shared/ui/controls/Button'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
@@ -14,6 +15,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import { trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
 import type {
   SkillPackageCheckStatus,
   SkillPackageCreateDTO,
@@ -154,6 +156,12 @@ export function SkillPackagesPage() {
         const rows: ResourceCardMetaRow[] = [
           [t('ai.skillPackages.repositoryUrl'), pkg.repositoryUrl],
           [t('ai.skillPackages.branch'), pkg.branch],
+          [
+            t('ai.skillPackages.token'),
+            pkg.hasToken
+              ? t('ai.skillPackages.tokenConfigured')
+              : t('ai.skillPackages.tokenNotConfigured'),
+          ],
           [
             t('ai.skillPackages.currentCommit'),
             <code title={pkg.currentCommit ?? undefined}>{formatCommit(pkg.currentCommit)}</code>,
@@ -338,6 +346,7 @@ function CreatePackageModal({
   const [description, setDescription] = useState('')
   const [repositoryUrl, setRepositoryUrl] = useState('')
   const [branch, setBranch] = useState('main')
+  const [token, setToken] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
 
   const createMutation = useMutation({
@@ -373,12 +382,17 @@ function CreatePackageModal({
       return
     }
     setFormError(null)
-    createMutation.mutate({
+    const payload: SkillPackageCreateDTO = {
       packageName: packageName.trim(),
       description: description.trim() || null,
       repositoryUrl: repositoryUrl.trim(),
       branch: branch.trim(),
-    })
+    }
+    const trimmedToken = trimToNull(token)
+    if (trimmedToken) {
+      payload.token = trimmedToken
+    }
+    createMutation.mutate(payload)
   }
 
   return (
@@ -435,6 +449,19 @@ function CreatePackageModal({
                 required
               />
             </label>
+
+            <label className="form-group">
+              <FieldLabel>{t('ai.skillPackages.token')}</FieldLabel>
+              <TextInput
+                type="password"
+                autoComplete="off"
+                value={token}
+                placeholder={t('ai.skillPackages.tokenPlaceholder')}
+                onChange={(event) => setToken(event.target.value)}
+                disabled={createMutation.isPending}
+              />
+              <small>{t('ai.skillPackages.tokenCreateHint')}</small>
+            </label>
           </div>
 
           <div className="modal-footer">
@@ -462,6 +489,8 @@ function EditPackageModal({
   const { t } = useI18n()
   const [description, setDescription] = useState(target.description ?? '')
   const [branch, setBranch] = useState(target.branch)
+  const [token, setToken] = useState('')
+  const [clearToken, setClearToken] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
   const editMutation = useMutation({
@@ -488,11 +517,20 @@ function EditPackageModal({
       return
     }
     setFormError(null)
-    editMutation.mutate({
+    const payload: SkillPackageEditDTO = {
       expectedVersion: target.version,
       description: description.trim() || null,
       branch: branch.trim(),
-    })
+    }
+    if (clearToken) {
+      payload.token = null
+    } else {
+      const trimmedToken = trimToNull(token)
+      if (trimmedToken) {
+        payload.token = trimmedToken
+      }
+    }
+    editMutation.mutate(payload)
   }
 
   return (
@@ -528,6 +566,36 @@ function EditPackageModal({
                 required
               />
             </label>
+
+            <label className="form-group">
+              <FieldLabel>{t('ai.skillPackages.token')}</FieldLabel>
+              <TextInput
+                type="password"
+                autoComplete="off"
+                value={token}
+                placeholder={t('ai.skillPackages.tokenEditPlaceholder')}
+                onChange={(event) => {
+                  setToken(event.target.value)
+                  if (clearToken) {
+                    setClearToken(false)
+                  }
+                }}
+                disabled={clearToken || editMutation.isPending}
+              />
+              <small>{t('ai.skillPackages.tokenEditHint')}</small>
+            </label>
+
+            <Checkbox
+              checked={clearToken}
+              onChange={(checked) => {
+                setClearToken(checked)
+                if (checked) {
+                  setToken('')
+                }
+              }}
+              disabled={editMutation.isPending}
+              label={t('ai.skillPackages.clearToken')}
+            />
 
             <label className="form-group">
               <FieldLabel>{t('ai.skillPackages.descriptionLabel')}</FieldLabel>

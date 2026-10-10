@@ -22,6 +22,8 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn().mockResolvedValue([{ name: 'macos' }, { name: 'ubuntu' }]),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
   },
 }))
 

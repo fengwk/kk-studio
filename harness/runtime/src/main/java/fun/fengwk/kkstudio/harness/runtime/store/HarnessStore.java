@@ -238,14 +238,15 @@ public interface HarnessStore {
 
     Optional<ThreadJoin> findJoin(UUID invocationId);
 
-    /** 子 Thread 上尚未冻结 terminal 结果的 Join。 */
+    /** 子 Thread 上尚未冻结 terminal 结果且未被后续续接 supersede 的 Join。 */
     List<ThreadJoin> loadIncompleteJoins(UUID childThreadId);
 
-    /** 父 Thread 恢复时读取已冻结结果但尚未交付的 join。 */
+    /** 父 Thread 恢复时读取已冻结结果但尚未交付的 TASK Join；COMPACTION 与已被 supersede 的 Join 不属于 task 待交付集合。 */
     List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId);
 
     /**
-     * 统计指定父 Thread 下尚未冻结结果的直接子 Join（{@code terminalEntryId == null}）数量；不产生锁。用于子任务并发配额判定。
+     * 统计指定父 Thread 下尚未冻结结果、未被 supersede 的 TASK 直接子 Join（{@code terminalEntryId ==
+     * null}）数量；不产生锁。COMPACTION join 不占普通 task 配额，用于子任务并发配额判定。
      *
      * @param parentThreadId 父 Thread ID，不能为 null
      * @return 未完成的直接子 Join 数量
@@ -253,14 +254,14 @@ public interface HarnessStore {
     int countIncompleteChildJoins(UUID parentThreadId);
 
     /**
-     * 全局统计尚未冻结结果且拥有非空 parentThreadId 的 Join 数量；跨所有 root 聚合，root ticket（parentThreadId 为空）不计入。
-     * 不产生锁。用于 subagent 任务的全局并发上限判定。
+     * 全局统计尚未冻结结果、未被 supersede 且拥有非空 parentThreadId 的 TASK Join 数量；跨所有 root 聚合，root
+     * ticket（parentThreadId 为空）与 COMPACTION join 不计入。 不产生锁。用于 subagent 任务的全局并发上限判定。
      *
      * @return 全局未完成的执行子 Join 数量
      */
     int countIncompleteSubagentJoins();
 
-    /** 只允许首次冻结结果与单调推进提醒，以及首次写入交付引用。 */
+    /** 只允许首次冻结结果、单调推进提醒、首次写入交付引用，以及首次写入 supersede 接管身份。 */
     void updateJoin(ThreadJoin join);
 
     /**
@@ -287,10 +288,9 @@ public interface HarnessStore {
 
     /**
      * GC 删除指定子 Thread 的全部 Join 记录并返回删除行数。要求该子 Thread 已在本事务锁定（未锁定抛 {@link IllegalStateException}）；
-     * 若该子 Thread 下存在任何尚未冻结结果的 Join（{@code terminalEntryId == null}），或存在拥有非空 parentThreadId 且尚未完成向父
-     * Thread 交付结果（{@code deliveryCommandSequence == null}）的 Join，必须抛出 {@link
-     * IllegalArgumentException} 拒绝删除并回滚； 只有已成功交付给父 Thread 的子 Join 以及已冻结结果的根 completion ticket
-     * 方可被显式安全删除。
+     * 若该子 Thread 下存在任何尚未结算的 Join，必须抛出 {@link IllegalArgumentException} 拒绝删除并回滚。已结算可删的 Join
+     * 包括：已被后续续接 supersede 的 Join、已冻结结果的根 completion ticket、已冻结结果的 COMPACTION Join，以及已成功交付给父 Thread
+     * 的 TASK Join；仍缺结果或结果尚未交付给存活父 Thread 的 Join 一律拒绝。
      */
     int deleteJoinsByChild(UUID childThreadId);
 
@@ -298,7 +298,7 @@ public interface HarnessStore {
      * 整体删除一批 Thread 涉及的 Join 记录并返回删除行数（Chat 深删除专用）。要求每个 Thread 已在本事务锁定且位于已加锁的执行树内。
      *
      * <p>当 Join 的 child 与（非空）parent 都位于本删除集合内时，两端将在同一事务内被物理删除，任何存活 Thread 都不会再引用该 Join，因此未匹配或未交付的
-     * pending Join 也可一并删除；只有 child 在集合内而 parent 存活时，仍按 {@link #deleteJoinsByChild} 的单边规则拒绝未匹配或未交付的
+     * pending Join 也可一并删除；只有 child 在集合内而 parent 存活时，仍按 {@link #deleteJoinsByChild} 的单边规则拒绝尚未结算的
      * Join。违反抛 {@link IllegalArgumentException}。
      */
     int deleteJoinsForThreads(List<UUID> threadIds);

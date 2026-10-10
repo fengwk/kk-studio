@@ -480,6 +480,56 @@ describe('thread timeline', () => {
     ])
   })
 
+  it('projects FORK durable entries with the fixed English notice and real ForkPayload facts', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('fork-branch', 'FORK', {
+          mode: 'BRANCH',
+          sourceEntryId: 'turn-end-1',
+          sourceThreadId: null,
+        }),
+        entry('fork-session', 'FORK', {
+          mode: 'SESSION',
+          sourceEntryId: 'turn-end-1',
+          sourceThreadId: 'source-thread-1',
+        }),
+      ],
+      [],
+      [],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        id: 'entry:fork-branch',
+        role: 'entry',
+        kind: 'fork',
+        title: '已从历史切点创建分支',
+        text: 'This thread was forked. Earlier tool calls and background tasks will not resume or report here. Subagent thread IDs inherited from history are no longer valid.',
+        subjectEntryId: 'fork-branch',
+        fork: {
+          mode: 'BRANCH',
+          sourceEntryId: 'turn-end-1',
+          sourceThreadId: null,
+        },
+      },
+      {
+        id: 'entry:fork-session',
+        role: 'entry',
+        kind: 'fork',
+        title: '已从历史切点复制为新会话',
+        text: 'This thread was forked. Earlier tool calls and background tasks will not resume or report here. Subagent thread IDs inherited from history are no longer valid.',
+        subjectEntryId: 'fork-session',
+        fork: {
+          mode: 'SESSION',
+          sourceEntryId: 'turn-end-1',
+          sourceThreadId: 'source-thread-1',
+        },
+      },
+    ])
+    expect(timeline.queuedMessages).toEqual([])
+    expect(timeline.hasPendingInputs).toBe(false)
+  })
+
   it('keeps a blank payload Entry inspectable through the durable Entry fallback', () => {
     const root = {
       ...entry('root', 'ROOT', {}),

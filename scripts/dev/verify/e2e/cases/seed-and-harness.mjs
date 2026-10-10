@@ -118,11 +118,14 @@ registerCase({
     )
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
-    const agent = agents.find((candidate) => candidate.name === 'default-assistant') || agents[0]
+    const agent = agents.find((candidate) => candidate.name === 'default-assistant')
+      || agents.find((candidate) => candidate.type === 'USER' && candidate.model)
+    assert(agent, 'need a configured USER Agent')
     assertExactFields(
       agent,
       [
         'name',
+        'type',
         'description',
         'systemPrompt',
         'model',
@@ -170,6 +173,7 @@ registerCase({
           'configured',
           'modelCallTimeoutMillis',
           'modelCallIdleTimeoutMillis',
+          'modelHttpRetryStatusCodes',
           'version',
           'createTime',
           'updateTime',
@@ -1278,6 +1282,23 @@ registerCase({
       }),
       `branch path must include the branch USER message: ${JSON.stringify(branchedEntries)}`,
     )
+    // NEW_THREAD 分支 fork 在共享前缀边界之后追加 FORK 事实节点（不复制前缀）：
+    // head 路径必须包含该节点，其 parent 是切点 startEntry，payload 只陈述 BRANCH + 切点来源。
+    const forkEntry = branchedEntries.find(
+      (entry) => String(entry.entryType || '').toUpperCase() === 'FORK',
+    )
+    assert(forkEntry, `branch path must include a FORK entry: ${JSON.stringify(branchedEntries)}`)
+    assert(
+      String(forkEntry.parentEntryId) === startEntryId,
+      `FORK entry parent must be the fork cut ${startEntryId}: ${JSON.stringify(forkEntry)}`,
+    )
+    const forkPayload = JSON.parse(forkEntry.payloadJson)
+    assert(
+      forkPayload.mode === 'BRANCH'
+        && String(forkPayload.sourceEntryId) === startEntryId
+        && forkPayload.sourceThreadId === null,
+      `FORK payload must state the branch cut fact: ${JSON.stringify(forkPayload)}`,
+    )
 
     // 非边界 Entry 不得作为 fork 起点：TURN_START / 消息 / ASSISTANT_ERROR 都必须 400，
     // 且不产生任何写入（预分配 threadId 404、原 Session entries 与 head 完全不变）。
@@ -1432,16 +1453,24 @@ registerCase({
     const byId = new Map(entries.map((entry) => [entry.entryId, entry]))
     const originalTurnStart = byId.get(originalUser.parentEntryId)
     const alternateTurnStart = byId.get(alternateUser.parentEntryId)
+    // 分支 fork 在切点后追加 FORK 事实节点：分支 TURN_START 挂在 FORK 上，FORK 再挂回切点；
+    // 原分支继续直接从切点展开。两条历史分支不共享同一 TURN_START。
+    const alternateFork = alternateTurnStart ? byId.get(alternateTurnStart.parentEntryId) : null
+    const alternateForkPayload = alternateFork ? JSON.parse(alternateFork.payloadJson) : null
     assert(
       originalTurnStart?.entryType === 'TURN_START'
         && alternateTurnStart?.entryType === 'TURN_START'
         && originalTurnStart.entryId !== alternateTurnStart.entryId
         && originalTurnStart.parentEntryId === branchPointEntryId
-        && alternateTurnStart.parentEntryId === branchPointEntryId,
+        && alternateFork?.entryType === 'FORK'
+        && String(alternateFork.parentEntryId) === String(branchPointEntryId)
+        && alternateForkPayload?.mode === 'BRANCH'
+        && String(alternateForkPayload.sourceEntryId) === String(branchPointEntryId),
       `historical branches do not share the expected parent: ${JSON.stringify({
         branchPointEntryId,
         originalTurnStart,
         alternateTurnStart,
+        alternateFork,
       })}`,
     )
     assert(

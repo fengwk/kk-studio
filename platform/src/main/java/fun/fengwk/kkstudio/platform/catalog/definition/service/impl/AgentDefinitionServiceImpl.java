@@ -8,6 +8,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDe
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
+import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -23,6 +25,7 @@ import fun.fengwk.kkstudio.platform.persistence.PostgresqlIntegrityViolationClas
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
@@ -50,10 +53,11 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   @Override
   @Transactional
   public AgentDefinitionDTO createAgent(AgentDefinitionCreateDTO createDTO) {
+    String name = createDTO == null ? null : createDTO.getName();
+    rejectReservedName(name);
     ModelRef modelRef = parseModelRef(createDTO == null ? null : createDTO.getModel());
     referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
-    String name = createDTO == null ? null : createDTO.getName();
-    AgentDefinition definition = definitionMutationFactory.newAgent(name, createDTO);
+    AgentDefinition definition = definitionMutationFactory.newUserAgent(name, createDTO);
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
@@ -86,11 +90,17 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     AgentDefinition current = referenceResolver.requireAgent(name);
     ensureExpectedVersion(current, name, rawExpected, expected);
-    ModelRef modelRef = parseModelRef(updateDTO.getModel());
-    referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
+    // 内置 Agent 允许显式未配置模型；用户 Agent 仍要求模型。
+    boolean builtin = current.getType() == AgentDefinitionType.BUILTIN;
+    ModelRef modelRef = parseModelRef(updateDTO.getModel(), !builtin);
+    if (modelRef != null) {
+      referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
+    }
     AgentDefinition definition = copy(current);
     definitionMutationFactory.update(definition, updateDTO);
-    validateVariant(modelRef, definition.getVariant());
+    if (modelRef != null) {
+      validateVariant(modelRef, definition.getVariant());
+    }
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
     referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
@@ -121,6 +131,10 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   public void deleteAgent(String name, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     AgentDefinition definition = referenceResolver.requireAgentForUpdate(name);
+    if (definition.getType() == AgentDefinitionType.BUILTIN) {
+      // 内置 Agent 的名称与存在性由系统持有，用户不能删除。
+      throw new AiInUseException(RESOURCE, "built-in agent cannot be deleted: " + name);
+    }
     ensureExpectedVersion(definition, name, expectedVersion, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
     if (!agentDefinitionRepository.deleteByName(name, expected)) {
@@ -136,6 +150,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   private static AgentDefinition copy(AgentDefinition source) {
     AgentDefinition copy = new AgentDefinition();
     copy.setName(source.getName());
+    copy.setType(source.getType());
     copy.setDescription(source.getDescription());
     copy.setSystemPrompt(source.getSystemPrompt());
     copy.setModelProviderName(source.getModelProviderName());
@@ -157,11 +172,31 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   }
 
   private static ModelRef parseModelRef(String raw) {
+    return parseModelRef(raw, true);
+  }
+
+  /** {@code required} 为 false 时 null/空白表示内置 Agent 的显式未配置模型，返回 null。 */
+  private static ModelRef parseModelRef(String raw, boolean required) {
+    if (!required && (raw == null || raw.isBlank())) {
+      return null;
+    }
     try {
       return ModelRef.parse(raw);
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(
           RESOURCE, "model must identify providerName/modelName", error);
+    }
+  }
+
+  private static void rejectReservedName(String name) {
+    if (name == null) {
+      return;
+    }
+    String normalized = name.strip();
+    if (BuiltinAgentDefinitions.isReservedName(normalized)) {
+      // 内置 Agent 的身份由系统持有：用户不能以同名创建自己的 Agent 覆盖它。
+      throw new AiDuplicateException(
+          RESOURCE, "agent definition name is reserved for a built-in agent: " + normalized);
     }
   }
 

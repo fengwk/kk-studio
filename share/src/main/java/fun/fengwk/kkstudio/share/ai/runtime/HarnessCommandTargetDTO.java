@@ -11,21 +11,24 @@ import lombok.Setter;
 /**
  * 创建型命令批次的严格 target union wire DTO。
  *
- * <p>只表达 NEW_SESSION / NEW_THREAD 两种创建语义；既有 Thread 的继续写入使用 {@link
+ * <p>只表达 NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 三种创建语义；既有 Thread 的继续写入使用 {@link
  * HarnessThreadCommandBatchDTO}，不再通过本 union 以 THREAD target 承载。
  */
 @Data
 public class HarnessCommandTargetDTO {
 
-  /** target 类型：NEW_SESSION 或 NEW_THREAD。 */
+  /** target 类型：NEW_SESSION、NEW_THREAD 或 NEW_FORKED_SESSION。 */
   private String type;
 
   private String sessionId;
   private String startEntryId;
   private String threadId;
 
-  /** NEW_THREAD 的分支显示名；必须显式给出且非 blank（NEW_SESSION 禁用）。 */
+  /** NEW_THREAD 的分支显示名；必须显式给出且非 blank（NEW_SESSION / NEW_FORKED_SESSION 禁用）。 */
   private String threadName;
+
+  /** NEW_FORKED_SESSION 的来源执行根 Thread；必须显式给出（其它类型禁用）。 */
+  private String sourceThreadId;
 
   private HarnessBranchSettingsDTO rootSettings;
   private Boolean yoloEnabled;
@@ -45,6 +48,10 @@ public class HarnessCommandTargetDTO {
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean threadNameFieldPresent;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean sourceThreadIdFieldPresent;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -83,6 +90,13 @@ public class HarnessCommandTargetDTO {
     this.threadNameFieldPresent = true;
   }
 
+  @JsonSetter("sourceThreadId")
+  public void setSourceThreadId(Object value) {
+    this.sourceThreadId =
+        HarnessRuntimeDtoSupport.requireJsonString(value, "target.sourceThreadId");
+    this.sourceThreadIdFieldPresent = true;
+  }
+
   @JsonSetter("rootSettings")
   public void setRootSettings(HarnessBranchSettingsDTO value) {
     this.rootSettings = value;
@@ -113,6 +127,11 @@ public class HarnessCommandTargetDTO {
   @JsonIgnore
   public boolean hasThreadNameField() {
     return threadNameFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasSourceThreadIdField() {
+    return sourceThreadIdFieldPresent;
   }
 
   @JsonIgnore

@@ -684,6 +684,25 @@ div.is-error {
   font-weight: 600;
 }
 
+.form-radio-group {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.form-radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.form-group-hint {
+  color: var(--fg-muted);
+}
+
 /* 表单控件基座（.form-group 后代控件）：普通控件统一 32px 高度、表面与聚焦。
    共享控件自带高度/表面/焦点语义，故显式排除 .ui-text-input/.ui-textarea/
    .number-input-field/.ui-search-input。 */
@@ -2886,6 +2905,23 @@ div.is-error {
 
 .thread-composer-environment-control {
   max-width: min(100%, 200px);
+}
+
+.thread-composer-settings-status {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.thread-composer-settings-status[data-settings-status='pending'] {
+  border-color: var(--border-hover);
+  color: var(--fg);
 }
 
 .thread-composer-model-control {
@@ -5650,39 +5686,6 @@ select.settings-input option {
   color: var(--fg-dim);
   word-break: break-word;
   line-height: 1.4;
-}
-
-.env-last-event {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-raised);
-}
-
-.env-last-event.is-warn {
-  border-color: var(--warning-border);
-}
-
-.env-last-event.is-error {
-  border-color: var(--danger-border);
-}
-
-.env-last-event-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.env-last-event-message {
-  margin: 0;
-  font-size: 11px;
-  color: var(--fg-dim);
-  line-height: 1.35;
-  word-break: break-word;
 }
 
 .env-source-modal-card {

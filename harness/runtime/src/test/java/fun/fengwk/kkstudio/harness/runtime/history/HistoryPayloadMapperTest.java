@@ -266,6 +266,17 @@ class HistoryPayloadMapperTest {
     assertEquals("token expired", payload.error().message());
   }
 
+  /** HTTP 错误正文含超长 / 换行 / 首尾空白时，必须原样映射为 AssistantError，不再触发无依据的 message 限制。 */
+  @Test
+  void assistantErrorPayloadPreservesFullUpstreamErrorBody() {
+    String body = "\n<html>\n  <body>" + "x".repeat(2049) + "</body>\n</html>\n";
+    AssistantErrorPayload payload =
+        MAPPER.assistantErrorPayload(
+            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, body));
+    assertEquals("INVALID_REQUEST", payload.error().code());
+    assertEquals(body, payload.error().message());
+  }
+
   @Test
   void toolResultPayloadSucceededMapsTextAndJsonContents() {
     ToolInvocation invocation =

@@ -201,6 +201,9 @@ class DaemonWorkdirSyntaxTest {
     assertTrue(
         DaemonWorkdirSyntax.isAbsolutePath("/srv/$LITERAL/file", DaemonOperatingSystem.LINUX));
     assertFalse(DaemonWorkdirSyntax.isAbsolutePath("README.md", DaemonOperatingSystem.LINUX));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("src/App.java", DaemonOperatingSystem.LINUX));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("./README.md", DaemonOperatingSystem.LINUX));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("../file.txt", DaemonOperatingSystem.LINUX));
     assertFalse(DaemonWorkdirSyntax.isAbsolutePath("C:\\repo", DaemonOperatingSystem.LINUX));
 
     assertTrue(DaemonWorkdirSyntax.isAbsolutePath("C:\\repo\\file", DaemonOperatingSystem.WINDOWS));
@@ -210,6 +213,9 @@ class DaemonWorkdirSyntaxTest {
     assertFalse(
         DaemonWorkdirSyntax.isAbsolutePath("\\root-relative", DaemonOperatingSystem.WINDOWS));
     assertFalse(DaemonWorkdirSyntax.isAbsolutePath("C:relative", DaemonOperatingSystem.WINDOWS));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("dir/file.txt", DaemonOperatingSystem.WINDOWS));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("./dir", DaemonOperatingSystem.WINDOWS));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("../dir", DaemonOperatingSystem.WINDOWS));
     assertFalse(DaemonWorkdirSyntax.isAbsolutePath(null, DaemonOperatingSystem.WINDOWS));
     assertThrows(
         NullPointerException.class, () -> DaemonWorkdirSyntax.isAbsolutePath("/srv/file", null));

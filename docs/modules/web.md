@@ -52,19 +52,20 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/harness/environments` | Card、注册令牌查询/轮换、安装设置保存、运维 events |
+| Environment | `/api/harness/environments`、`/{id}/update` | Card、注册令牌查询/轮换、安装设置保存、受管二进制在线更新（POST 发起、GET 只读投影）、运维 events |
 
 Session 的 `GET /api/harness/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
-`/api/harness/command-batches` 只服务创建型 `CHAT` owner（`NEW_SESSION` / `NEW_THREAD`；
+`/api/harness/command-batches` 只服务创建型 `CHAT` owner（`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
 `ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/harness/threads/{threadId}/command-batches`
 服务既有 Thread 的 owner-free 续写（path `threadId` + 精确 cursor，body 不带 owner 与 target）。
 Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 
 Harness mapper 校验 canonical UUID、可放入 long 的规范十进字符串，
-以及创建型 `NEW_SESSION`/`NEW_THREAD` 各自互斥字段与续写面的精确 cursor。
+以及创建型 target 各自互斥字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
+`NEW_FORKED_SESSION` 必填 `sourceThreadId` 且禁止 `rootSettings`/`threadName`）与续写面的精确 cursor。
 产品命令批为 SET_AGENT → SET_MODEL → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL；
 `CUSTOM_MESSAGE`、`NOTIFICATION` 与 `SET_CONTRIBUTOR_STATE` 不在产品 HTTP 面。
 附件在接受事务转为 Resource，图片档位随消息冻结。
@@ -89,10 +90,10 @@ GET model-request-debug 返回下一次结构化预览与可空的活动冻结�
 带精确 head/sequence）、`POST /api/harness/sessions/{sessionId}/provider-request-preview`（本地分支草稿，
 `{startEntryId,commands}`）与 `GET /api/harness/sessions/{sessionId}/entries/{entryId}/provider-request-preview`
 （历史模型输出，按该输出记录时间重建）。它们只读检查 READY 附件、复用正式规划/物化/编码器，
-不消费上传、不推进游标、不调用 transport；历史入口接受普通 assistant 输出与带真实 metadata 的压缩结果。
+不消费上传、不推进游标、不调用 transport；历史入口只接受普通 assistant 输出，压缩结果以 `PREVIEW_UNSUPPORTED` 拒绝（父回合没有 ModelInvocation）。
 `kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表点击时快照、
 不等于原始发送字节。`PREVIEW_*` reason 区分 stale cursor、queued、busy、compaction、attachment、
-planning、provider、unsupported（仅 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
+planning、provider、unsupported（父压缩回合无 ModelInvocation，或 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
 
 Canvas commands 返回 patch，Function start 返回 202。
 UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。

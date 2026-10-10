@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.ReadCapability;
 import fun.fengwk.kkstudio.harness.daemon.coding.TestCodingConfig;
+import fun.fengwk.kkstudio.harness.daemon.coding.TextOutputStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
@@ -55,6 +56,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -95,6 +102,9 @@ class DaemonRuntimeTest {
 
   /** WELCOME 通告的资源字节预算；足够覆盖测试中的小资源。 */
   private static final long MAX_RESOURCE_BYTES = 1024L * 1024L;
+
+  private static final long TEMPORARY_RESOURCE_TTL_SECONDS = 3600L;
+  private static final long TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS = 60L;
 
   private static final EnvironmentId ENVIRONMENT_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
@@ -259,14 +269,16 @@ class DaemonRuntimeTest {
     assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
         EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, hello.path("daemonVersion").asText());
     assertTrue(hello.path("toolCatalogVersion").isMissingNode());
     DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
     DaemonEnvironmentInfo firstEnvironment =
         capabilitiesCodec.decode(handshake.get(1).payloadJson()).environment();
     assertEquals("Custom & stable environment.", firstEnvironment.note());
     JsonNode ready = codec.readPayload(handshake.get(1));
-    assertEquals(2, ready.size());
+    assertEquals(3, ready.size());
     assertEquals(DaemonCapabilities.VERSION, ready.path("version").asInt());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, ready.path("daemonVersion").asText());
     assertEquals(expectedProcessUserName(), ready.path("environment").path("userName").asText());
     assertEquals(
         expectedProcessHomeDirectory(), ready.path("environment").path("homeDirectory").asText());
@@ -279,6 +291,171 @@ class DaemonRuntimeTest {
     assertEquals(
         firstEnvironment, capabilitiesCodec.decode(reconnected.get(1).payloadJson()).environment());
     assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  /** 意图：受管更新命令先被立即接受（ACCEPTED），准备成功后回执 PREPARED，并把 handoff 交给分离更新器启动；daemon 只负责编排， 不代替更新器替换二进制。 */
+  @Test
+  void updateIsAcceptedThenPreparedAndLaunched() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    AtomicReference<ManagedUpdateOutcome.Prepared> launched = new AtomicReference<>();
+    runtime.setManagedUpdater(command -> preparedUpdate(command.operationId()));
+    runtime.setUpdateLauncher(
+        prepared -> {
+          launched.set(prepared);
+          return true;
+        });
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    List<DaemonEnvelope> results = transport.takeMessages(2);
+    assertMessageTypes(results, DaemonMessageType.UPDATE_RESULT, DaemonMessageType.UPDATE_RESULT);
+    DaemonUpdateResultCodec updateCodec = new DaemonUpdateResultCodec();
+    assertEquals(
+        DaemonUpdatePhase.ACCEPTED, updateCodec.decode(results.get(0).payloadJson()).phase());
+    assertEquals(
+        DaemonUpdatePhase.PREPARED, updateCodec.decode(results.get(1).payloadJson()).phase());
+    assertEquals(UPDATE_OP, launched.get().handoffDirectory().getFileName().toString());
+  }
+
+  /** 意图：同一 operation 的重发只重放冻结回执，不产生第二次准备（幂等）。 */
+  @Test
+  void duplicateUpdateReplaysResultWithoutRepreparing() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    AtomicInteger preparations = new AtomicInteger();
+    runtime.setManagedUpdater(
+        command -> {
+          preparations.incrementAndGet();
+          return preparedUpdate(command.operationId());
+        });
+    runtime.setUpdateLauncher(prepared -> true);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    List<DaemonEnvelope> replay = transport.takeMessages(1);
+    assertEquals(
+        DaemonUpdatePhase.PREPARED,
+        new DaemonUpdateResultCodec().decode(replay.get(0).payloadJson()).phase());
+    assertEquals(1, preparations.get());
+  }
+
+  /** 意图：分离更新器未能进入运行是确定失败，旧二进制保持不动，回执为 FAILED。 */
+  @Test
+  void launchFailureIsReportedAsFailed() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.setManagedUpdater(command -> preparedUpdate(command.operationId()));
+    runtime.setUpdateLauncher(prepared -> false);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    List<DaemonEnvelope> results = transport.takeMessages(2);
+    DaemonUpdateResultCodec updateCodec = new DaemonUpdateResultCodec();
+    assertEquals(
+        DaemonUpdatePhase.ACCEPTED, updateCodec.decode(results.get(0).payloadJson()).phase());
+    DaemonUpdateResult failed = updateCodec.decode(results.get(1).payloadJson());
+    assertEquals(DaemonUpdatePhase.FAILED, failed.phase());
+    assertEquals("detached updater could not be started", failed.message());
+  }
+
+  /** 意图：一个 Environment 同一时刻只允许一个更新 operation；在途期间的另一个 operation 是协议错误。 */
+  @Test
+  void differentUpdateWhileAnotherIsInFlightIsProtocolError() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    CountDownLatch release = new CountDownLatch(1);
+    runtime.setManagedUpdater(
+        command -> {
+          try {
+            release.await();
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          }
+          return preparedUpdate(command.operationId());
+        });
+    runtime.setUpdateLauncher(prepared -> true);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    transport.takeMessages(1);
+
+    transport.receive(updateCommand(UPDATE_OTHER_OP));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    release.countDown();
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.UPDATE_RESULT);
+  }
+
+  /** 意图：断开不改变已接受的更新事实；重连 READY 后必须重发已知回执，让 Platform 重新收敛而不是判定失败。 */
+  @Test
+  void reconnectResendsKnownUpdateResult() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.setManagedUpdater(command -> preparedUpdate(command.operationId()));
+    runtime.setUpdateLauncher(prepared -> true);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    transport.takeMessages(2);
+
+    transport.disconnect();
+    transport.awaitConnections(1);
+    completeHandshake();
+    List<DaemonEnvelope> reconnected = transport.takeMessages(3);
+    assertMessageTypes(reconnected, HELLO, READY, DaemonMessageType.UPDATE_RESULT);
+    assertEquals(
+        DaemonUpdatePhase.PREPARED,
+        new DaemonUpdateResultCodec().decode(reconnected.get(2).payloadJson()).phase());
+  }
+
+  private static final String UPDATE_OP = "11111111-1111-1111-1111-111111111111";
+  private static final String UPDATE_OTHER_OP = "22222222-2222-2222-2222-222222222222";
+
+  private DaemonEnvelope updateCommand(String operationId) {
+    DaemonUpdateCommand command =
+        new DaemonUpdateCommand(
+            operationId, "1.0.9", DaemonUpdateArtifact.artifactUrl("1.0.9"), "a".repeat(64));
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION,
+        DaemonMessageType.UPDATE,
+        ENVIRONMENT_ID,
+        null,
+        new DaemonUpdateCommandCodec().encode(command));
+  }
+
+  private static ManagedUpdateOutcome.Prepared preparedUpdate(String operationId) {
+    Path updateDirectory = Path.of("/var/lib/kk-studio/updates/" + operationId);
+    Path script = updateDirectory.resolve("kk-studio-daemon-update.sh");
+    return new ManagedUpdateOutcome.Prepared(
+        "1.0.9",
+        updateDirectory,
+        script,
+        updateDirectory.resolve("kk-studio-daemon-v1.0.9.jar"),
+        Path.of("/var/lib/kk-studio/lib/kk-studio-daemon.jar"));
   }
 
   /** 生产构造器不能为不完整的 registry 公布固定的 catalog。 */
@@ -300,6 +477,7 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
+                (TextOutputStore) null,
                 (registry, executor, scheduler, lspExecutor) -> {
                   registry.register(new TestCapability());
                   return null;
@@ -351,6 +529,7 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
+                (TextOutputStore) null,
                 (registry, executor, scheduler, lspExecutor) -> {
                   executorRef.set(executor);
                   schedulerRef.set(scheduler);
@@ -553,13 +732,13 @@ class DaemonRuntimeTest {
   }
 
   /**
-   * 测试意图：相对本地路径的 workdir 只来自该次调用 arguments，缺失时在 capability 执行期确定性拒绝，且绝不回退到任何默认路径。
+   * 测试意图：文件工具只接受绝对路径，相对 path 在 capability 执行期确定性拒绝，且绝不回退到任何默认路径。
    *
    * <p>用真实 {@link ReadCapability}：临时目录下放置同名文件；若实现发生回退，capability 就能读到该文件并在 COMPLETED
    * 内容中出现其文本，从而被本测试捕获。
    */
   @Test
-  void omittedWorkdirIsRejectedWithoutDefaultFallback() throws Exception {
+  void relativePathIsRejectedWithoutDefaultFallback() throws Exception {
     Path root = Files.createTempDirectory("daemon-workdir-root");
     try {
       Files.writeString(root.resolve("local.txt"), "from-local-dir");
@@ -575,10 +754,10 @@ class DaemonRuntimeTest {
       completeHandshake();
       transport.takeMessages(2);
 
-      // 相对 path 省略 workdir：请求形状合法，但执行期拒绝且绝不回退到任何默认目录。
+      // 相对 path：请求形状合法，但执行期拒绝且绝不回退到任何默认目录。
       transport.receive(
           invoke(
-              "missing-workdir",
+              "relative-path",
               "fs.read",
               EnvironmentCapabilityCatalog.version(),
               100,
@@ -586,17 +765,17 @@ class DaemonRuntimeTest {
       List<DaemonEnvelope> missing = transport.takeMessages(2);
       assertMessageTypes(missing, STARTED, DaemonMessageType.COMPLETED);
       String failure = missing.get(1).payloadJson();
-      assertTrue(failure.contains("workdir"), failure);
+      assertTrue(failure.contains("must be an absolute path"), failure);
       assertFalse(failure.contains("from-local-dir"), failure);
 
-      // 显式绝对 workdir 正常执行并读到该目录下的文件；可见内容证明目录来自 arguments 而非 Environment Root。
+      // 显式绝对 path 正常执行并读到该目录下的文件；可见内容证明路径来自 arguments 而非 Environment Root。
       transport.receive(
           invoke(
-              "explicit-workdir",
+              "explicit-path",
               "fs.read",
               EnvironmentCapabilityCatalog.version(),
               100,
-              "{\"path\":\"local.txt\",\"workdir\":\"" + jsonEscape(root.toString()) + "\"}"));
+              "{\"path\":\"" + jsonEscape(root.resolve("local.txt").toString()) + "\"}"));
       assertMessageTypes(transport.takeMessages(2), STARTED, DaemonMessageType.COMPLETED);
     } finally {
       deleteRecursively(root);
@@ -1149,9 +1328,9 @@ class DaemonRuntimeTest {
               "fs.write",
               EnvironmentCapabilityCatalog.version(),
               100,
-              "{\"workdir\":\""
-                  + jsonEscape(root.toString())
-                  + "\",\"path\":\"timeout.txt\",\"content\":\"must not be written\"}"));
+              "{\"path\":\""
+                  + jsonEscape(root.resolve("timeout.txt").toString())
+                  + "\",\"content\":\"must not be written\"}"));
 
       assertMessageTypes(transport.takeMessages(1), STARTED);
       List<DaemonEnvelope> terminal = transport.takeMessages(1);
@@ -1864,20 +2043,22 @@ class DaemonRuntimeTest {
     assertMessageTypes(handshake, HELLO, READY);
 
     JsonNode payload = codec.readPayload(handshake.get(1));
-    assertEquals(2, payload.size());
+    assertEquals(3, payload.size());
     assertFalse(payload.has("tools"));
     assertFalse(payload.has("skills"));
     assertFalse(payload.has("skillSources"));
     assertFalse(payload.has("sourceSetVersion"));
     assertFalse(payload.has("mcpServers"));
     assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, payload.path("daemonVersion").asText());
     JsonNode environment = payload.path("environment");
-    assertEquals(5, environment.size());
+    assertEquals(6, environment.size());
     assertTrue(environment.path("operatingSystem").isTextual());
     assertTrue(environment.path("timeZone").isTextual());
     assertTrue(environment.path("userName").isTextual());
     assertTrue(environment.path("homeDirectory").isTextual());
     assertTrue(environment.path("note").isTextual());
+    assertTrue(environment.path("tempDirectory").isTextual());
     assertTrue(environment.path("rootPath").isMissingNode());
     assertTrue(environment.path("workingDirectory").isMissingNode());
     // 严格 wire 形状：必须能被共享 codec 往返解码。
@@ -2570,6 +2751,79 @@ class DaemonRuntimeTest {
     }
   }
 
+  /** 意图：已 READY 连接收到 TEMPORARY_RESOURCE_POLICY 控制帧后立即应用新策略（同一控制通道热更）。 */
+  @Test
+  void readyConnectionAppliesPushedTemporaryResourcePolicy() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    awaitState(DaemonRuntimeState.READY);
+
+    transport.receive(policyMessage(120L, 30L));
+
+    assertEquals(120L, runtime.temporaryResourceTtlSeconds());
+    assertEquals(30L, runtime.temporaryResourceCleanupIntervalSeconds());
+  }
+
+  /** 意图：READY 之前收到策略帧是协议违规，必须回 ERROR 且不改变尚未绑定的策略。 */
+  @Test
+  void temporaryResourcePolicyBeforeReadyIsProtocolError() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.start();
+    transport.awaitNextMessageType(HELLO);
+    transport.takeMessages(1);
+
+    transport.receive(policyMessage(120L, 30L));
+
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(0L, runtime.temporaryResourceTtlSeconds());
+  }
+
+  /** 意图：策略帧必须绑定到本连接 Environment；scope 不匹配会被控制通道认证拒绝。 */
+  @Test
+  void temporaryResourcePolicyWithForeignScopeIsRejected() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION,
+            DaemonMessageType.TEMPORARY_RESOURCE_POLICY,
+            EnvironmentId.parse("22222222-2222-2222-2222-222222222222"),
+            null,
+            policyPayload(120L, 30L)));
+
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(TEMPORARY_RESOURCE_TTL_SECONDS, runtime.temporaryResourceTtlSeconds());
+    assertEquals(
+        TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS,
+        runtime.temporaryResourceCleanupIntervalSeconds());
+  }
+
+  private DaemonEnvelope policyMessage(long ttlSeconds, long cleanupIntervalSeconds) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION,
+        DaemonMessageType.TEMPORARY_RESOURCE_POLICY,
+        ENVIRONMENT_ID,
+        null,
+        policyPayload(ttlSeconds, cleanupIntervalSeconds));
+  }
+
+  private static String policyPayload(long ttlSeconds, long cleanupIntervalSeconds) {
+    return "{\"temporaryResourceTtlSeconds\":"
+        + ttlSeconds
+        + ",\"temporaryResourceCleanupIntervalSeconds\":"
+        + cleanupIntervalSeconds
+        + "}";
+  }
+
   /** 模拟 Gateway 完成 HELLO/WELCOME 握手：发送 WELCOME 让 daemon 推进到 READY。 */
   private void completeHandshake() throws InterruptedException {
     handshakeTransport.awaitNextMessageType(DaemonMessageType.HELLO);
@@ -2642,14 +2896,20 @@ class DaemonRuntimeTest {
   }
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType) {
-    // WELCOME 必须通告正的资源字节预算（协议要求）；其余平台消息只承载空 payload。
+    // WELCOME 必须通告正的资源字节预算与临时资源策略（协议要求）；其余平台消息只承载空 payload。
     if (messageType == DaemonMessageType.WELCOME) {
       return new DaemonEnvelope(
           DaemonProtocol.VERSION,
           messageType,
           ENVIRONMENT_ID,
           null,
-          "{\"maxResourceBytes\":" + MAX_RESOURCE_BYTES + "}");
+          "{\"maxResourceBytes\":"
+              + MAX_RESOURCE_BYTES
+              + ",\"temporaryResourceTtlSeconds\":"
+              + TEMPORARY_RESOURCE_TTL_SECONDS
+              + ",\"temporaryResourceCleanupIntervalSeconds\":"
+              + TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS
+              + "}");
     }
     return new DaemonEnvelope(DaemonProtocol.VERSION, messageType, ENVIRONMENT_ID, null, "{}");
   }
@@ -2664,6 +2924,18 @@ class DaemonRuntimeTest {
     thread.setDaemon(true);
     thread.start();
     return thread;
+  }
+
+  /** 绑定在终端协调器 owner 上串行完成，READY 是异步的：断言前必须有界等待状态收敛。 */
+  private void awaitState(DaemonRuntimeState expected) throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TEST_TIMEOUT_SECONDS);
+    while (System.nanoTime() < deadline) {
+      if (runtime.state() == expected) {
+        return;
+      }
+      TimeUnit.MILLISECONDS.sleep(1);
+    }
+    assertEquals(expected, runtime.state());
   }
 
   private void awaitCompletion(Thread completion) throws InterruptedException {

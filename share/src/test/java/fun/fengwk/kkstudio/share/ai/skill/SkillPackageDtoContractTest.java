@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,18 +21,30 @@ class SkillPackageDtoContractTest {
 
   @Test
   void createRequestCarriesOnlyRepositoryFacts() throws Exception {
-    // 意图：create 只接收 packageName/description/repositoryUrl/branch；客户端提交 commit 就被拒绝。
+    // 意图：create 只接收 packageName/description/repositoryUrl/branch/token；客户端提交 commit 就被拒绝。
     SkillPackageCreateDTO dto =
         MAPPER.readValue(
             """
             {"packageName":"dev-tools","description":null,
-             "repositoryUrl":"https://example.com/acme/skills.git","branch":"main"}
+             "repositoryUrl":"https://example.com/acme/skills.git","branch":"main",
+             "token":"ghp_example"}
             """,
             SkillPackageCreateDTO.class);
     assertEquals("dev-tools", dto.getPackageName());
     assertNull(dto.getDescription());
     assertEquals("https://example.com/acme/skills.git", dto.getRepositoryUrl());
     assertEquals("main", dto.getBranch());
+    assertEquals("ghp_example", dto.getToken());
+
+    // 令牌省略时保持 null，表示匿名访问。
+    SkillPackageCreateDTO anonymous =
+        MAPPER.readValue(
+            """
+            {"packageName":"dev-tools","repositoryUrl":"https://example.com/acme/skills.git",
+             "branch":"main"}
+            """,
+            SkillPackageCreateDTO.class);
+    assertNull(anonymous.getToken());
 
     assertThrows(
         Exception.class,
@@ -55,14 +68,32 @@ class SkillPackageDtoContractTest {
 
   @Test
   void editCheckAndPublishRequestsAreStrictlyDeclared() throws Exception {
-    // 意图：三个 CAS 请求精确为 {expectedVersion, description, branch}、{expectedVersion}、{expectedVersion,
-    // targetCommit}。
+    // 意图：三个 CAS 请求精确为 {expectedVersion, description, branch, token?}、{expectedVersion}、
+    // {expectedVersion, targetCommit}；编辑 token 是省略保留 / null 清除 / 非空替换的三态。
     SkillPackageEditDTO edit =
         MAPPER.readValue(
-            "{\"expectedVersion\":\"3\",\"description\":\"d\",\"branch\":\"trunk\"}",
+            "{\"expectedVersion\":\"3\",\"description\":\"d\",\"branch\":\"trunk\",\"token\":\"ghp_new\"}",
             SkillPackageEditDTO.class);
     assertEquals("3", edit.getExpectedVersion());
     assertEquals("trunk", edit.getBranch());
+    assertTrue(edit.isTokenProvided());
+    assertEquals("ghp_new", edit.getToken());
+
+    // 省略 token：保留既有令牌。
+    SkillPackageEditDTO preserve =
+        MAPPER.readValue(
+            "{\"expectedVersion\":\"3\",\"description\":\"d\",\"branch\":\"trunk\"}",
+            SkillPackageEditDTO.class);
+    assertFalse(preserve.isTokenProvided());
+    assertNull(preserve.getToken());
+
+    // 显式 null：清除令牌。
+    SkillPackageEditDTO clear =
+        MAPPER.readValue(
+            "{\"expectedVersion\":\"3\",\"description\":\"d\",\"branch\":\"trunk\",\"token\":null}",
+            SkillPackageEditDTO.class);
+    assertTrue(clear.isTokenProvided());
+    assertNull(clear.getToken());
 
     SkillPackageCheckDTO check =
         MAPPER.readValue("{\"expectedVersion\":\"3\"}", SkillPackageCheckDTO.class);

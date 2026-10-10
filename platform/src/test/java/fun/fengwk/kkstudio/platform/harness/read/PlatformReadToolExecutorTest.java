@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -22,6 +24,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -34,6 +38,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -140,19 +145,23 @@ class PlatformReadToolExecutorTest {
     assertTrue(firstText(result).contains("offset must be a positive integer"));
   }
 
-  /** kkstudio URI 指定 workdir 时拒绝并返回错误结果 */
+  /** kkstudio URI 即使携带无意义的 workdir 也不做拦截，workdir 参数被静默忽略。 */
   @Test
-  void kkstudioUriWithWorkdirCompletesWithError() {
+  void kkstudioUriIgnoresWorkdirArgument() {
+    byte[] bytes = "# Dev Skill\nline2\n".getBytes(StandardCharsets.UTF_8);
+    when(skillReader.readSkillFile("p", "s", "SKILL.md")).thenReturn(bytes);
+
     ToolExecutionRequest request =
         mockRequest("{\"path\":\"kkstudio:/skills/p/s/SKILL.md\",\"workdir\":\"/tmp\"}", null);
 
-    executor.read(request, listener);
+    ToolExecutionHandle handle = executor.read(request, listener);
+    assertSame(CompletedToolExecutionHandle.INSTANCE, handle);
 
     ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
     verify(listener).onComplete(captor.capture());
     ToolResult result = captor.getValue();
-    assertTrue(result.error());
-    assertTrue(firstText(result).contains("workdir must be omitted for kkstudio: URIs"));
+    assertFalse(result.error());
+    assertTrue(firstText(result).contains("# Dev Skill"));
   }
 
   /** kkstudio Skill URI 无需 Environment 即可成功读取并格式化 */
@@ -198,9 +207,10 @@ class PlatformReadToolExecutorTest {
     ToolExecutionContext context = mock(ToolExecutionContext.class);
     when(context.threadId()).thenReturn(threadId);
 
-    when(resourceReader.readResourceText(
-            threadId, blobId, null, null, null, "kkstudio:/resources/" + blobId))
-        .thenReturn("path: kkstudio:/resources/" + blobId + "\n\n1|blob-data");
+    when(resourceReader.readResource(
+            threadId, null, "call-1", blobId, null, null, null, "kkstudio:/resources/" + blobId))
+        .thenReturn(
+            new ResourceRead.Text("path: kkstudio:/resources/" + blobId + "\n\n1|blob-data"));
 
     ToolExecutionRequest request =
         mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context);
@@ -214,6 +224,37 @@ class PlatformReadToolExecutorTest {
     assertFalse(result.error());
     assertTrue(firstText(result).contains("path: kkstudio:/resources/" + blobId));
     assertTrue(firstText(result).contains("1|blob-data"));
+  }
+
+  /** kkstudio Resource URI 指向支持的媒体时返回 durable ResourceResultContent，而不是把字节塞进结果。 */
+  @Test
+  void kkstudioMediaResourceUriReturnsDurableResourceResult() {
+    UUID threadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    when(context.threadId()).thenReturn(threadId);
+    ResourceRef ref =
+        new ResourceRef(
+            ResourceRef.sessionResourceUri(blobId),
+            "image/png",
+            blobId.toString(),
+            3L,
+            "0".repeat(64));
+    when(resourceReader.readResource(
+            threadId, null, "call-1", blobId, null, null, null, "kkstudio:/resources/" + blobId))
+        .thenReturn(new ResourceRead.Media(ref, null));
+
+    executor.read(
+        mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context), listener);
+
+    ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(captor.capture());
+    ToolResult result = captor.getValue();
+    assertFalse(result.error());
+    ResourceResultContent content =
+        assertInstanceOf(ResourceResultContent.class, result.contents().get(0));
+    assertEquals(blobId, content.resource().sessionBlobId());
+    assertEquals("image/png", content.resource().mediaType());
   }
 
   /** kkstudio Resource URI 使用非规范 UUID 时返回错误结果 */
@@ -338,7 +379,7 @@ class PlatformReadToolExecutorTest {
     assertFalse(captor.getValue().error());
     assertTrue(firstText(captor.getValue()).contains("1|exact-file"));
     assertFalse(firstText(captor.getValue()).contains("1|root"));
-    verify(gitCache).ensureCommit("pkg", "https://example.com/repo.git", "c1");
+    verify(gitCache).ensureCommit("pkg", "https://example.com/repo.git", "c1", null);
     verify(gitCache).readFile("pkg", "c1", "dev/" + relativePath);
     verifyNoMoreInteractions(gitCache);
   }
@@ -375,8 +416,25 @@ class PlatformReadToolExecutorTest {
     when(context.environment()).thenReturn(Optional.of(environment));
     ToolExecutionHandle expected = mock(ToolExecutionHandle.class);
     ToolExecutionRequest request =
+        mockRequest(objectMapper.writeValueAsString(Map.of("path", path)), context);
+    when(environment.execute(any(), eq(request), eq(listener))).thenReturn(expected);
+
+    assertSame(expected, executor.read(request, listener));
+    verify(environment).execute(any(), eq(request), eq(listener));
+    verifyNoInteractions(skillReader, resourceReader, listener);
+  }
+
+  /** read 调用即使携带多余的 workdir 键也直接忽略并原样委托给 Environment 执行。 */
+  @Test
+  void localPathWithIgnoredWorkdirDelegatesUnchanged() throws Exception {
+    BoundEnvironment environment = mock(BoundEnvironment.class);
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    when(context.environment()).thenReturn(Optional.of(environment));
+    ToolExecutionHandle expected = mock(ToolExecutionHandle.class);
+    ToolExecutionRequest request =
         mockRequest(
-            objectMapper.writeValueAsString(Map.of("path", path, "workdir", "work")), context);
+            objectMapper.writeValueAsString(Map.of("path", "/tmp/file.txt", "workdir", "/tmp")),
+            context);
     when(environment.execute(any(), eq(request), eq(listener))).thenReturn(expected);
 
     assertSame(expected, executor.read(request, listener));
@@ -401,7 +459,7 @@ class PlatformReadToolExecutorTest {
 
     UUID threadId = UUID.randomUUID();
     when(context.threadId()).thenReturn(threadId);
-    when(resourceReader.readResourceText(threadId, blobId, null, null, null, uri))
+    when(resourceReader.readResource(threadId, null, "call-1", blobId, null, null, null, uri))
         .thenThrow(new PlatformReadException("resource not authorized"));
     ToolExecutionListener deniedListener = mock(ToolExecutionListener.class);
     executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), deniedListener);
@@ -410,7 +468,7 @@ class PlatformReadToolExecutorTest {
     verifyNoMoreInteractions(deniedListener);
     assertTrue(denied.getValue().error());
     assertTrue(firstText(denied.getValue()).contains("resource not authorized"));
-    verify(resourceReader).readResourceText(threadId, blobId, null, null, null, uri);
+    verify(resourceReader).readResource(threadId, null, "call-1", blobId, null, null, null, uri);
     verifyNoMoreInteractions(resourceReader);
   }
 
@@ -492,7 +550,7 @@ class PlatformReadToolExecutorTest {
         List.of(new IllegalStateException("blob failure"), new IllegalStateException())) {
       doThrow(failure)
           .when(resourceReader)
-          .readResourceText(threadId, blobId, null, null, null, uri);
+          .readResource(threadId, null, "call-1", blobId, null, null, null, uri);
       ToolExecutionListener completion = mock(ToolExecutionListener.class);
       executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), completion);
       ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);

@@ -93,10 +93,10 @@ public final class AgentPromptComposer {
   }
 
   /**
-   * 宿主事实按稳定顺序渲染：name、system、user、home、date、note；不可用的可选事实整行省略。
+   * 宿主事实按稳定顺序渲染：name、system、user、home、temp、date、note；不可用的可选事实整行省略。
    *
-   * <p>未选择 Environment 时只渲染 {@code name: none} 与 Platform 当前日期。这里的 name/user/home 只是展示事实，绝不参与路径默认值：
-   * 不存在 workspace、cwd 或任何根目录语义。
+   * <p>未选择 Environment 时只渲染 {@code name: none} 与 Platform 当前日期。这里的 name/user/home/temp
+   * 只是展示事实，绝不参与路径默认值： 不存在 workspace、cwd 或任何根目录语义。
    */
   private static String currentEnvironment(CurrentEnvironmentContext context) {
     List<String> fields = new ArrayList<>();
@@ -108,6 +108,7 @@ public final class AgentPromptComposer {
     }
     addEnvironmentField(fields, "user", context.userName());
     addEnvironmentField(fields, "home", context.homeDirectory());
+    addEnvironmentField(fields, "temp", context.tempDirectory());
     addEnvironmentField(fields, "date", DATE_FORMAT.format(context.currentDate()));
     addEnvironmentField(fields, "note", context.note());
     return SubagentPrompts.currentEnvironmentTemplate()

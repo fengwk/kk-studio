@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.thread.command;
 
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
@@ -16,20 +19,20 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -37,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -72,7 +76,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.ToIntFunction;
 
 /**
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
@@ -162,14 +165,28 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(path, "path");
     try {
       if (compactionPreparation != null) {
-        return resolveCompaction(compactionPreparation);
+        return resolveCompaction(path, compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
       return resolved(plan(path, clock.instant()));
     } catch (Rejection rejection) {
-      // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常原样传播。
+      // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
+    } catch (DataAccessException failure) {
+      if (isTransientInfrastructure(failure)) {
+        // 数据库瞬断（连接失败 / 可重试数据访问）：适配为显式 typed transient，由 Processor reschedule，绝不判成用户错误。
+        throw new TurnResolveTransientException(
+            "turn resolution infrastructure unavailable", failure);
+      }
+      // 非瞬时的数据访问错误（如数据完整性）：确定性失败，交由 Processor 落 durable FAILED。
+      throw failure;
     }
+  }
+
+  /** Spring SQLState 分类下属于瞬时基础设施不可用的数据访问异常。 */
+  private static boolean isTransientInfrastructure(DataAccessException failure) {
+    return failure instanceof TransientDataAccessException
+        || failure instanceof DataAccessResourceFailureException;
   }
 
   /**
@@ -200,28 +217,26 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * 历史模型输出的只读规划：请求前缀是 ROOT 到该输出的 parent。
    *
-   * <p>非压缩输出与 live 共用同一 planner（环境宿主事实用显式 {@code now}）；压缩输出的请求头是 durable COMPACTION
-   * TURN_START，它不属于普通 live 路径，因此只按其冻结的 {@code executionModel} 解析 catalog，并直接使用该 TURN_START 冻结的实际
-   * {@code maxOutputTokens} 作为输出预算——绝不按当前 config 重算或猜测。缺少冻结预算时返回 typed 拒绝（稳定 {@value
-   * #REJECTION_CODE}），绝不拿默认值冒充历史事实。
+   * <p>普通输出与 live 共用同一 planner（环境宿主事实用显式 {@code now}）。父 COMPACTION turn 自身不创建 ModelInvocation：它只冻结
+   * run group 与输出预算，真实 provider 请求属于独立的压缩子 Thread（子请求按父冻结预算收紧），因此这里绝不伪造一份零工具请求，而是返回稳定 typed 拒绝。
    */
   public LiveTurnPlan planHistorical(UUID threadId, EntryPath path, Instant now) {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(now, "now");
-    CompactionStart start = ModelRequestMaterializer.compactionStartAtHead(path);
-    if (start == null) {
-      return planLive(threadId, path, now);
+    if (isCompactionParentTurnStart(path.head())) {
+      return new LiveTurnPlan.Rejected(
+          REJECTION_CODE,
+          "a COMPACTION parent turn has no model invocation; its provider request belongs to the"
+              + " compaction child thread");
     }
-    try {
-      Integer maxOutputTokens = ((TurnStartPayload) path.head().payload()).maxOutputTokens();
-      if (maxOutputTokens == null) {
-        throw rejection("durable compaction turn start is missing the frozen maxOutputTokens");
-      }
-      return compactionPlan(start.executionModel(), parsedModel -> maxOutputTokens);
-    } catch (Rejection rejection) {
-      return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
-    }
+    return planLive(threadId, path, now);
+  }
+
+  /** 请求头是否是父 COMPACTION turn 的 TURN_START：该回合只冻结 run group 与预算，从不发出 provider 请求。 */
+  private static boolean isCompactionParentTurnStart(Entry head) {
+    return head.payload() instanceof TurnStartPayload start
+        && start.reason() == TurnStartReason.COMPACTION;
   }
 
   private static TurnResolver.Resolved resolved(LiveTurnPlan.Planned plan) {
@@ -326,10 +341,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
             contextWindow,
             CompactionPlanner.estimateRequestTokens(path, systemInstruction));
     ProviderCacheControl cacheControl =
-        ProviderCacheControl.session(
-            promptCacheRetention(
-                providerFactory, provider.getConfigJson(), selection.providerName()),
-            sessionId.toString());
+        usesCompactionAgentCacheHint(settings)
+            ? ProviderCacheControl.none()
+            : ProviderCacheControl.session(
+                promptCacheRetention(
+                    providerFactory, provider.getConfigJson(), selection.providerName()),
+                sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
             providerType,
@@ -344,6 +361,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
         contextWindow,
         tools.candidates(),
         skills);
+  }
+
+  /**
+   * 分支是否直接使用了内置压缩 Agent 名称：只影响 cache hint（这类分支不落会话级 cache key 或 Provider 自动缓存档位），绝不作为压缩身份权威。
+   *
+   * <p>压缩执行身份由 runtime 的 durable COMPACTION Join 事实判定：直接压缩子的每一次请求（含工具 loop turn 与失败重试）都由 runtime
+   * 按父冻结 outputBudget 收紧并强制 NONE cache。普通分支即便直接选择该 Agent 名称，也只得到同样的 cache hint，不会改变、也不会覆盖该 Join 规则。
+   */
+  private static boolean usesCompactionAgentCacheHint(BranchSettings settings) {
+    return JoinPurpose.COMPACTION.wireName().equals(settings.agentName());
   }
 
   /**
@@ -367,39 +394,19 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前
    * config 与 removedPrefixTokens 现算。
    */
-  private Result resolveCompaction(CompactionPreparation preparation) {
-    LiveTurnPlan.Planned plan =
-        compactionPlan(
-            preparation.executionModel(),
-            parsedModel -> {
-              long budget =
-                  compactionConfigProvider
-                      .compactionConfig()
-                      .outputBudget(
-                          preparation.phase(),
-                          outputTokens(parsedModel),
-                          preparation.removedPrefixTokens());
-              if (budget <= 0 || budget > Integer.MAX_VALUE) {
-                throw rejection("compaction output budget must be a positive int, got " + budget);
-              }
-              return (int) budget;
-            });
-    return new TurnResolver.Resolved(plan.spec(), plan.contextWindow(), plan.spec().outputTokens());
-  }
-
-  /**
-   * 压缩请求的共享模型 spec 组装：只按 {@code executionModel} 解析 provider/model/variant 与 contextWindow，工具与
-   * skills 为空、cache NONE、摘要 system prompt。切分事实不进入 spec。
-   *
-   * <p>输出预算由调用方按各自事实提供：正式执行按当前 config 与 removedPrefixTokens 现算，历史预览直接使用 durable TURN_START
-   * 冻结的实际预算，绝不猜测。
-   */
-  private LiveTurnPlan.Planned compactionPlan(
-      ModelSelection selection, ToIntFunction<ParsedAgentModelConfig> outputBudget) {
+  private Result resolveCompaction(EntryPath parentPath, CompactionPreparation preparation) {
+    String compactionAgentName = JoinPurpose.COMPACTION.wireName();
+    AgentDefinition agent =
+        require(
+            agentDefinitionRepository.getByName(compactionAgentName),
+            "agent not found: " + compactionAgentName);
+    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+      throw rejection("compaction agent has no configured model");
+    }
     AgentProvider provider =
         require(
-            providerRepository.getByName(selection.providerName()),
-            "provider not found: " + selection.providerName());
+            providerRepository.getByName(agent.getModelProviderName()),
+            "provider not found: " + agent.getModelProviderName());
     ProviderType providerType = provider.getProviderType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
@@ -411,46 +418,46 @@ public final class DatabaseTurnResolver implements TurnResolver {
     AgentModel model =
         require(
             modelRepository.getByProviderNameAndName(
-                selection.providerName(), selection.modelName()),
-            "model not found: " + selection.providerName() + "/" + selection.modelName());
+                agent.getModelProviderName(), agent.getModelName()),
+            "model not found: " + agent.getModelProviderName() + "/" + agent.getModelName());
     ParsedAgentModelConfig parsedModel = parseModel(model);
-    ModelVariant variant = findVariant(parsedModel, selection.variant());
+    String variantName =
+        agent.getVariant() != null && !agent.getVariant().isBlank()
+            ? agent.getVariant()
+            : parsedModel.defaultVariant();
+    ModelVariant variant = findVariant(parsedModel, variantName);
     if (variant == null) {
       throw rejection(
           "model variant not found: "
-              + selection.providerName()
+              + agent.getModelProviderName()
               + "/"
-              + selection.modelName()
+              + agent.getModelName()
               + " variant="
-              + selection.variant());
+              + variantName);
     }
     if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
       throw rejection(
           "model does not support reasoning: "
-              + selection.providerName()
+              + agent.getModelProviderName()
               + "/"
-              + selection.modelName());
+              + agent.getModelName());
     }
-    return new LiveTurnPlan.Planned(
-        new ModelRequestSpec(
-            providerType,
-            providerConnectionGenerationId,
-            new ModelDescriptor(
-                selection.providerName(),
-                selection.modelName(),
-                model.getModelId(),
-                parsedModel.inputModalities(),
-                parsedModel.tools(),
-                parsedModel.reasoning()),
-            variant,
-            outputBudget.applyAsInt(parsedModel),
-            CompactionPrompts.summarizationSystemPrompt(),
-            List.of(),
-            List.of(),
-            ProviderCacheControl.none()),
-        contextWindow(parsedModel),
-        List.of(),
-        List.of());
+    ModelSelection compactorModel =
+        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variant.id());
+    int maxOutputTokens = outputTokens(parsedModel);
+    long outputBudget =
+        compactionConfigProvider
+            .compactionConfig()
+            .outputBudget(preparation.phase(), maxOutputTokens, preparation.removedPrefixTokens());
+    if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
+      throw rejection("compaction output budget must be a positive int, got " + outputBudget);
+    }
+    int contextWindow = contextWindow(parsedModel);
+    BranchSettings childSettings =
+        new BranchSettings(
+            compactionAgentName, compactorModel, parentPath.baseSettings().environmentName(), null);
+    return new TurnResolver.CompactionResolved(
+        compactorModel, outputBudget, contextWindow, maxOutputTokens, childSettings);
   }
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */
@@ -737,10 +744,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
     PromptCacheRetention retention;
     try {
       retention = providerFactory.promptCacheRetention(configJson);
-      if (retention == null) {
-        throw new IllegalStateException("promptCacheRetention returned null");
-      }
-    } catch (Exception error) {
+    } catch (IllegalArgumentException error) {
+      // 只把配置非法 / 解析失败当确定性拒绝；其它异常（含基础设施）照常传播，绝不伪装成 planning 失败。
+      throw rejection("invalid prompt cache configuration for provider: " + providerName);
+    }
+    if (retention == null) {
       throw rejection("invalid prompt cache configuration for provider: " + providerName);
     }
     return retention;

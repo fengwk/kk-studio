@@ -216,8 +216,11 @@ class DaemonTerminalServerIntegrationTest {
                 : Optional.empty(),
         environmentId -> readyCount.incrementAndGet(),
         (leaseToken, daemonInstanceId, response) -> responses.add(response),
+        (environmentId, result) -> {},
         new FakeTicketService(),
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(60), MAX_RESOURCE_BYTES));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(60), MAX_RESOURCE_BYTES, 259_200L, 1_800L));
   }
 
   private void awaitServerReady(int expected) throws InterruptedException {

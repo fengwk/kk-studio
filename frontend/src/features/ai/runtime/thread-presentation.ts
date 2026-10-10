@@ -6,7 +6,10 @@ import type { PaneTarget } from './agent-pane'
 export function paneTargetViewKey(target: PaneTarget): string {
   return target.kind === 'BOUND_THREAD' ? `thread:${target.threadId}`
     : target.kind === 'NEW_THREAD_DRAFT'
-      ? `branch:${target.sessionId}:${target.startEntryId}:${target.threadName}` : ''
+      ? `branch:${target.sessionId}:${target.startEntryId}:${target.threadName}`
+      : target.kind === 'FORK_SESSION_DRAFT'
+        ? `fork-session:${target.sessionId}:${target.sourceThreadId}:${target.startEntryId}`
+        : ''
 }
 
 export type PresentationAction = 'debug' | 'close-debug' | 'restore-focus' | 'parent'

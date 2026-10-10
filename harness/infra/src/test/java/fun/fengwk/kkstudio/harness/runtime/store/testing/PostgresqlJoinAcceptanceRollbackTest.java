@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -120,7 +121,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
         maxTurns,
         3,
         concurrentQuota,
-        3);
+        3,
+        JoinPurpose.TASK);
   }
 
   @Test
@@ -490,7 +492,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
     AcceptCommandsCommand request = newSession(sessionId, threadId, null, commandKey, "root task");
     ThreadJoinRequest ticket =
-        new ThreadJoinRequest(joinInvocationId, null, null, HASH, "test-agent", 5, 3, 3, 3);
+        new ThreadJoinRequest(
+            joinInvocationId, null, null, HASH, "test-agent", 5, 3, 3, 3, JoinPurpose.TASK);
 
     CountDownLatch tx1HoldingTreeLock = new CountDownLatch(1);
     CountDownLatch tx1CanCommit = new CountDownLatch(1);
@@ -630,7 +633,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               new ThreadProcessorConfig(
                   new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                   Duration.ofSeconds(5),
-                  () -> new CompactionConfig(20_000, null)),
+                  () -> new CompactionConfig(20_000)),
               Clock.fixed(now, ZoneOffset.UTC),
               scheduler,
               Runnable::run);
@@ -852,7 +855,16 @@ class PostgresqlJoinAcceptanceRollbackTest {
   private static ThreadJoinRequest globalJoinRequest(
       UUID invocationId, UUID parentThreadId, UUID expectedHead, int globalCap) {
     return new ThreadJoinRequest(
-        invocationId, parentThreadId, expectedHead, HASH, "test-agent", 5, 3, 5, globalCap);
+        invocationId,
+        parentThreadId,
+        expectedHead,
+        HASH,
+        "test-agent",
+        5,
+        3,
+        5,
+        globalCap,
+        JoinPurpose.TASK);
   }
 
   private int incompleteSubagentJoins() {

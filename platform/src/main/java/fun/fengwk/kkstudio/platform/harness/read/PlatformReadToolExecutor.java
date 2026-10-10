@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
 
 import java.util.List;
 import java.util.Objects;
@@ -31,8 +33,8 @@ import java.util.regex.Pattern;
  *       内容，无需 Environment。
  *   <li>{@code kkstudio:/resources/<blobId>}：校验当前 Session 引用后读取已授权 Blob 文本，无需 Environment。
  *   <li>其它 URI scheme（如 {@code http:}、{@code https:}）：直接拒绝，不透传外部网络读取。
- *   <li>本地文件系统路径：若 execution context 存在绑定的 {@link BoundEnvironment}，原样委托至 {@code fs.read}
- *       capability 执行；无绑定时同步报错。
+ *   <li>本地文件系统路径：必须是目标 Environment 上的绝对路径；若 execution context 存在绑定的 {@link BoundEnvironment}，原样委托至
+ *       {@code fs.read} capability 执行；无绑定时同步报错。
  * </ul>
  */
 public class PlatformReadToolExecutor implements ReadToolExecutor {
@@ -77,14 +79,6 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       }
       String path = pathNode.asText();
 
-      JsonNode workdirNode = args.get("workdir");
-      if (workdirNode != null && !workdirNode.isNull() && !workdirNode.isTextual()) {
-        listener.onComplete(ToolResult.error(callId, "workdir must be a string"));
-        return CompletedToolExecutionHandle.INSTANCE;
-      }
-      String workdir =
-          (workdirNode != null && workdirNode.isTextual()) ? workdirNode.asText() : null;
-
       Integer offset = parsePositiveInt(args, "offset", callId, listener);
       if (offset == null && args.hasNonNull("offset")) {
         return CompletedToolExecutionHandle.INSTANCE;
@@ -101,8 +95,7 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       }
 
       if (path.startsWith("kkstudio:")) {
-        return handleKkstudioUri(
-            callId, path, workdir, offset, limit, columnOffset, request, listener);
+        return handleKkstudioUri(callId, path, offset, limit, columnOffset, request, listener);
       }
 
       if (isRemoteSchemeUri(path)) {
@@ -125,17 +118,11 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
   private ToolExecutionHandle handleKkstudioUri(
       String callId,
       String path,
-      String workdir,
       Integer offset,
       Integer limit,
       Integer columnOffset,
       ToolExecutionRequest request,
       ToolExecutionListener listener) {
-    if (workdir != null && !workdir.isBlank()) {
-      listener.onComplete(ToolResult.error(callId, "workdir must be omitted for kkstudio: URIs"));
-      return CompletedToolExecutionHandle.INSTANCE;
-    }
-
     if (path.startsWith(KKSTUDIO_SKILLS_PREFIX)) {
       return handleSkillUri(callId, path, offset, limit, columnOffset, listener);
     }
@@ -233,11 +220,27 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
     }
 
     try {
-      String text =
-          resourceReader.readResourceText(
-              context.threadId(), blobId, offset, limit, columnOffset, path);
-      listener.onComplete(
-          new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}"));
+      ResourceRead read =
+          resourceReader.readResource(
+              context.threadId(),
+              context.invocationId(),
+              callId,
+              blobId,
+              offset,
+              limit,
+              columnOffset,
+              path);
+      ToolResult result =
+          switch (read) {
+            case ResourceRead.Text text -> new ToolResult(
+                callId, List.of(new TextResultContent(text.text())), false, "{}");
+            case ResourceRead.Media media -> new ToolResult(
+                callId,
+                List.of(new ResourceResultContent(media.resource(), media.preview())),
+                false,
+                "{}");
+          };
+      listener.onComplete(result);
     } catch (PlatformReadException e) {
       listener.onComplete(ToolResult.error(callId, e.getMessage()));
     } catch (Exception e) {

@@ -126,7 +126,8 @@ public final class HarnessRuntimeRequestMapper {
     for (HarnessCommandCreateDTO command : requestCommands) {
       commands.add(toNewHttpCommand(command));
     }
-    validateHttpCommandShape(commands);
+    // 创建型 target 必须携带恰一条末尾 user-like 输入；纯设置批次只对既有 Thread 开放。
+    validateHttpCommandShape(commands, true);
     return new AcceptCommandsCommand(toTarget(dto.getTarget()), commands);
   }
 
@@ -224,6 +225,8 @@ public final class HarnessRuntimeRequestMapper {
       case "NEW_SESSION" -> {
         requireForbidden(dto.hasStartEntryIdField(), "target.startEntryId", "target type " + type);
         requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
+        requireForbidden(
+            dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
         yield new AcceptCommandsTarget.NewRootSession(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
@@ -232,11 +235,23 @@ public final class HarnessRuntimeRequestMapper {
       }
       case "NEW_THREAD" -> {
         requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
+        requireForbidden(
+            dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
         yield new AcceptCommandsTarget.NewThread(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getStartEntryId(), "target.startEntryId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
             requireText(dto.getThreadName(), "target.threadName"),
+            requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
+      }
+      case "NEW_FORKED_SESSION" -> {
+        requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
+        requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
+        yield new AcceptCommandsTarget.NewForkedSession(
+            parseUuid(dto.getSourceThreadId(), "target.sourceThreadId"),
+            parseUuid(dto.getStartEntryId(), "target.startEntryId"),
+            parseUuid(dto.getSessionId(), "target.sessionId"),
+            parseUuid(dto.getThreadId(), "target.threadId"),
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
       default -> throw new IllegalArgumentException("unknown target type: " + type);
@@ -258,7 +273,8 @@ public final class HarnessRuntimeRequestMapper {
     for (HarnessCommandCreateDTO command : requestCommands) {
       commands.add(toNewHttpCommand(command));
     }
-    validateHttpCommandShape(commands);
+    // 既有 Thread 允许纯设置批次（0 条 user-like）；最多一条且必须位于末尾，由 Core 在应用边界保证。
+    validateHttpCommandShape(commands, false);
     AcceptCommandsTarget target =
         new AcceptCommandsTarget.Thread(
             parseUuid(threadId, "threadId"),
@@ -269,8 +285,8 @@ public final class HarnessRuntimeRequestMapper {
   }
 
   /**
-   * 映射本地分支草稿预览的命令批：与正式接受完全同一套严格校验（固定 SET_AGENT/SET_MODEL/SET_ENVIRONMENT 顺序 + 恰好一条终止 USER_MESSAGE /
-   * GOAL），因此预览不会接受任何正式发送会拒绝的形状；草稿尚无 Thread，故这里只返回 domain 命令而不构造 target。
+   * 映射本地分支草稿预览的命令批：与正式创建完全同一套严格校验（固定 SET_AGENT/SET_MODEL/SET_ENVIRONMENT 顺序 + 恰好一条终止 USER_MESSAGE /
+   * GOAL），因此预览不会接受任何正式创建会拒绝的形状；草稿尚无 Thread，故这里只返回 domain 命令而不构造 target。
    */
   public static List<NewThreadCommand> toNewThreadCommands(
       List<HarnessCommandCreateDTO> commands, String field) {
@@ -282,7 +298,7 @@ public final class HarnessRuntimeRequestMapper {
     for (HarnessCommandCreateDTO command : requestCommands) {
       mapped.add(toNewHttpCommand(command));
     }
-    validateHttpCommandShape(mapped);
+    validateHttpCommandShape(mapped, true);
     return List.copyOf(mapped);
   }
 
@@ -378,7 +394,15 @@ public final class HarnessRuntimeRequestMapper {
     };
   }
 
-  private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
+  /**
+   * 产品 HTTP 命令批的 shape admission：SET_* 必须按固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
+   * SET_ENVIRONMENT）出现，每种至多一次且位于消息之前；user-like 输入（USER_MESSAGE / GOAL）至多一条且必须位于末尾。
+   *
+   * <p>创建型 target（NEW_SESSION / NEW_THREAD）与本地分支草稿预览要求恰有一条 user-like 输入；既有 Thread 允许纯设置批次（0 条
+   * user-like），额外保证由 Core 在应用边界完成。
+   */
+  private static void validateHttpCommandShape(
+      List<NewThreadCommand> commands, boolean requireUserLike) {
     List<ThreadCommandType> prefixOrder =
         List.of(
             ThreadCommandType.SET_AGENT,
@@ -389,7 +413,7 @@ public final class HarnessRuntimeRequestMapper {
     for (int i = 0; i < commands.size(); i++) {
       ThreadCommandType type = commands.get(i).payload().type();
       if (type == ThreadCommandType.USER_MESSAGE || type == ThreadCommandType.GOAL) {
-        // typed GOAL 与 USER_MESSAGE 都是 user-like 终止输入：恰有一条且必须在最后。
+        // typed GOAL 与 USER_MESSAGE 都是 user-like 终止输入：至多一条且必须在最后。
         userLikeCount++;
         if (i != commands.size() - 1) {
           throw new IllegalArgumentException(
@@ -404,9 +428,11 @@ public final class HarnessRuntimeRequestMapper {
       }
       lastSetOrder = order;
     }
-    if (userLikeCount != 1) {
+    if (requireUserLike ? userLikeCount != 1 : userLikeCount > 1) {
       throw new IllegalArgumentException(
-          "HTTP command batch must contain exactly one USER_MESSAGE or GOAL command");
+          requireUserLike
+              ? "HTTP command batch must contain exactly one USER_MESSAGE or GOAL command"
+              : "HTTP command batch may contain at most one USER_MESSAGE or GOAL command");
     }
   }
 

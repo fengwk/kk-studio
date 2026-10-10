@@ -42,6 +42,11 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeChannel;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
@@ -1015,6 +1020,40 @@ class EnvironmentDaemonServerTest {
     assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
   }
 
+  /** 测试意图：已 READY 连接不会再次收到 WELCOME，设置热更必须经同一控制通道在心跳上推送当前临时资源策略，且策略未变时不产生冗余帧。 */
+  @Test
+  void heartbeatPushesUpdatedTemporaryResourcePolicyToReadyConnection() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-policy-hot");
+    assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes(), "建连只通告一次策略");
+
+    // 设置未变：心跳不得产生策略帧。
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    assertEquals(0, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
+
+    // 设置热更后，下一次心跳把当前策略推送给已 READY 连接。
+    fixture.updateSettings(1L, 2L);
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+
+    assertEquals(1, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
+    DaemonEnvelope policy =
+        channel.envelopes().stream()
+            .filter(
+                envelope -> envelope.messageType() == DaemonMessageType.TEMPORARY_RESOURCE_POLICY)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(ENVIRONMENT_ID, policy.environmentId());
+    assertTrue(
+        policy.payloadJson().contains("\"temporaryResourceTtlSeconds\":1"), policy.payloadJson());
+    assertTrue(
+        policy.payloadJson().contains("\"temporaryResourceCleanupIntervalSeconds\":2"),
+        policy.payloadJson());
+
+    // 已送达的策略不再重复推送。
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    assertEquals(1, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
+  }
+
   /** 测试意图：READY 时围栏已失效不得进入 READY，必须按协议错误关闭连接。 */
   @Test
   void readyFenceLossClosesConnection() {
@@ -1069,7 +1108,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
   }
 
-  /** 测试意图：未注册环境的调用立即不可用，descriptor 漂移与非法 workdir/callId 都在发送前拒绝。 */
+  /** 测试意图：未注册环境的调用立即不可用，descriptor 漂移与非法 callId 都在发送前拒绝。 */
   @Test
   void invokeValidatesRequestBeforeWireSend() {
     Fixture fixture = new Fixture();
@@ -1105,7 +1144,7 @@ class EnvironmentDaemonServerTest {
                 new RecordingListener()));
   }
 
-  /** 测试意图：workdir 在 frame send 前按该连接 READY 中冻结的 OS 做词法校验；read 的相对路径要求 workdir，绝对路径则不要求。 */
+  /** 测试意图：必填 workdir（process.exec）在 frame send 前按该连接 READY 中冻结的 OS 做词法校验。 */
   @Test
   void validatesWorkdirAgainstReadyOperatingSystemBeforeFrameSend() {
     Fixture fixture = new Fixture();
@@ -1114,34 +1153,31 @@ class EnvironmentDaemonServerTest {
     // 缺失 workdir / 相对 workdir / Windows drive 形态（该连接冻结的是 LINUX）都在发送前拒绝。
     // 注意 `/srv/../repo` 仍是形状合法的 Unix 绝对路径：词法校验不折叠 `..`，越界事实由 Daemon 自身 Path 与 permission 处理。
     String[] rejectedArguments = {
-      "{\"path\":\"README.md\"}",
-      "{\"workdir\":\"relative/dir\",\"path\":\"README.md\"}",
-      "{\"workdir\":\"C:\\\\repo\",\"path\":\"README.md\"}",
-      "{\"workdir\":\" /srv/repo\",\"path\":\"README.md\"}"
+      "{\"command\":\"ls\"}",
+      "{\"command\":\"ls\",\"workdir\":\"relative/dir\"}",
+      "{\"command\":\"ls\",\"workdir\":\"C:\\\\repo\"}",
+      "{\"command\":\"ls\",\"workdir\":\" /srv/repo\"}"
     };
     for (String arguments : rejectedArguments) {
       assertThrows(
           IllegalArgumentException.class,
           () ->
               fixture.server.invoke(
-                  ENVIRONMENT_ID, requestWith(arguments, CALL_ONE), new RecordingListener()),
+                  ENVIRONMENT_ID,
+                  processExecRequestWith(arguments, CALL_ONE),
+                  new RecordingListener()),
           "必须在发送前拒绝: " + arguments);
     }
     // 全部被拒：通道上除了 WELCOME 没有任何 INVOKE 帧。
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
 
-    // 相对 path + 显式绝对 workdir，以及绝对 path + 省略 workdir 都通过校验并产生 INVOKE 帧。
+    // 显式绝对 workdir 通过校验并产生 INVOKE 帧。
     fixture.server.invoke(
         ENVIRONMENT_ID,
-        requestWith("{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}", CALL_ONE),
-        new RecordingListener());
-    fixture.server.invoke(
-        ENVIRONMENT_ID,
-        requestWith("{\"path\":\"/srv/repo/README.md\"}", CALL_TWO),
+        processExecRequestWith("{\"command\":\"ls\",\"workdir\":\"/srv/repo\"}", CALL_ONE),
         new RecordingListener());
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
-        channel.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
   }
 
   /** 文件/LSP 能力的路径约定必须穿透发送前门禁，不能只在 Daemon 直调用时成立。 */
@@ -1163,23 +1199,25 @@ class EnvironmentDaemonServerTest {
             case "lsp.java-decompile" -> ",\"target\":\"jdt://contents/library/Foo.class\"";
             default -> "";
           };
-      for (String rejected :
-          List.of(
-              "{\"path\":\"src/App.java\"" + fields + "}",
-              "{\"path\":\"/srv/repo/App.java\",\"workdir\":\"relative\"" + fields + "}")) {
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                fixture.server.invoke(
-                    ENVIRONMENT_ID,
-                    new EnvironmentCapabilityExecutionRequest(
-                        descriptor,
-                        new EnvironmentCapabilityCall(CALL_ONE.toString(), rejected),
-                        Duration.ofSeconds(5)),
-                    new RecordingListener()),
-            descriptor.id().value());
-      }
+      // 携带已移除的 workdir 参数在发送前被 Schema 校验拒绝
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.server.invoke(
+                  ENVIRONMENT_ID,
+                  new EnvironmentCapabilityExecutionRequest(
+                      descriptor,
+                      new EnvironmentCapabilityCall(
+                          CALL_ONE.toString(),
+                          "{\"path\":\"/srv/repo/App.java\",\"workdir\":\"relative\""
+                              + fields
+                              + "}"),
+                      Duration.ofSeconds(5)),
+                  new RecordingListener()),
+          descriptor.id().value());
       assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
+
+      // 绝对路径通过校验并产生 INVOKE 帧发往 Daemon
       fixture.server.invoke(
           ENVIRONMENT_ID,
           new EnvironmentCapabilityExecutionRequest(
@@ -1190,6 +1228,28 @@ class EnvironmentDaemonServerTest {
           new RecordingListener());
       assertEquals(
           List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+
+      // 相对路径不做发送前跨 OS 校验，透传产生 INVOKE 帧发往 Daemon，由 Daemon 自身判定并拒绝
+      RecordingListener relativeListener = new RecordingListener();
+      fixture.server.invoke(
+          ENVIRONMENT_ID,
+          new EnvironmentCapabilityExecutionRequest(
+              descriptor,
+              new EnvironmentCapabilityCall(
+                  CALL_TWO.toString(), "{\"path\":\"src/App.java\"" + fields + "}"),
+              Duration.ofSeconds(5)),
+          relativeListener);
+      assertEquals(
+          List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
+          channel.messageTypes());
+      fixture.receive(
+          channel,
+          DaemonMessageType.FAILED,
+          CALL_TWO.toString(),
+          "{\"message\":\"path must be an absolute path: src/App.java\"}");
+      assertInstanceOf(EnvironmentCapabilityFailedException.class, relativeListener.error);
+      assertEquals(
+          "path must be an absolute path: src/App.java", relativeListener.error.getMessage());
     }
   }
 
@@ -1333,17 +1393,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"daemonInstanceId\":\""
-                + INSTANCE_ID
-                + "\"}"));
-    assertTrue(
-        helloRejected(
-            "channel-catalog-mismatch",
-            "{\"protocolVersion\":"
-                + DaemonProtocol.VERSION
-                + ",\"registrationToken\":\""
-                + TOKEN
-                + "\",\"capabilityCatalogVersion\":\"999\",\"daemonInstanceId\":\""
+                + "\",\"daemonVersion\":\"1.0.9\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
                 + "\"}"));
     assertTrue(
@@ -1355,7 +1405,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"daemonInstanceId\":\""
+                + "\",\"daemonVersion\":\"1.0.9\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
                 + "\",\"extra\":true}"));
     assertTrue(
@@ -1363,7 +1413,7 @@ class EnvironmentDaemonServerTest {
             "channel-missing-token",
             "{\"protocolVersion\":"
                 + DaemonProtocol.VERSION
-                + ",\"capabilityCatalogVersion\":\""
+                + ",\"daemonVersion\":\"1.0.9\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
                 + "\",\"daemonInstanceId\":\""
                 + INSTANCE_ID
@@ -1378,7 +1428,7 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\"}"));
+                + "\",\"daemonVersion\":\"1.0.9\"}"));
     assertTrue(
         helloRejected(
             "channel-non-canonical-instance",
@@ -1447,6 +1497,115 @@ class EnvironmentDaemonServerTest {
     assertFalse(channel.closed());
 
     fixture.receive(channel, DaemonMessageType.ERROR, null, "{\"message\":\"\",\"code\":\"X\"}");
+    assertTrue(channel.closed());
+  }
+
+  /**
+   * 测试意图：HELLO 声明的 capability catalog 与本地目录不一致时，连接仍完成认证（可承载版本查询与受管更新）， 但普通 capability
+   * 调用在起点被拒绝，绝不执行未知工具。
+   */
+  @Test
+  void catalogMismatchKeepsManagementAuthenticatedButRejectsTools() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReadyWithCatalog("channel-catalog-mismatch", "999");
+    assertFalse(channel.closed());
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () ->
+            fixture.server.invoke(
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
+
+    // 管理通道仍可用：目录不匹配的连接可以开始受管更新。
+    String operationId = UUID.randomUUID().toString();
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    assertTrue(fixture.server.isUpdating(ENVIRONMENT_ID));
+  }
+
+  /**
+   * 测试意图：受管更新期间普通 capability 调用在起点被 busy 拒绝，结束更新后恢复；同一 operation 重复准入幂等、不同 operation 被拒绝，保证「一个
+   * Environment 同一时刻至多一次更新」。
+   */
+  @Test
+  void updateAdmissionBlocksOrdinaryInvocationsUntilReleased() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-update-admission");
+    String operationId = UUID.randomUUID().toString();
+
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    assertTrue(fixture.server.isUpdating(ENVIRONMENT_ID));
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () ->
+            fixture.server.invoke(
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
+
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString()));
+
+    fixture.server.endUpdate(ENVIRONMENT_ID, operationId);
+    assertFalse(fixture.server.isUpdating(ENVIRONMENT_ID));
+
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+  }
+
+  /** 测试意图：存在在途普通调用时不得开始更新（busy），避免替换二进制打断执行。 */
+  @Test
+  void updateAdmissionRejectsWhenInvocationInFlight() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-update-inflight");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString()));
+    assertFalse(fixture.server.isUpdating(ENVIRONMENT_ID));
+  }
+
+  /** 测试意图：更新命令只在同一 operation 已准入时下发；下发即写出 UPDATE 帧，非活动 operation 被 busy 拒绝。 */
+  @Test
+  void sendUpdateRequiresActiveOperationAndWritesUpdateFrame() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-send-update");
+    String operationId = UUID.randomUUID().toString();
+    DaemonUpdateCommand command =
+        new DaemonUpdateCommand(
+            operationId, "1.0.9", DaemonUpdateArtifact.artifactUrl("1.0.9"), "a".repeat(64));
+
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.sendUpdate(ENVIRONMENT_ID, command));
+
+    fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
+    fixture.server.sendUpdate(ENVIRONMENT_ID, command);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.UPDATE), channel.messageTypes());
+  }
+
+  /** 测试意图：daemon 上报的受管更新阶段回执只做协议校验后转交宿主；daemon 不得反向发送 UPDATE 命令。 */
+  @Test
+  void updateResultIsDeliveredToHostAndUpdateCommandFromDaemonIsRejected() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-update-result");
+    String operationId = UUID.randomUUID().toString();
+    DaemonUpdateResultCodec codec = new DaemonUpdateResultCodec();
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.UPDATE_RESULT,
+        null,
+        codec.encode(DaemonUpdateResult.prepared(operationId)));
+
+    assertFalse(channel.closed());
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.updateResultEnvironments);
+    assertEquals(DaemonUpdatePhase.PREPARED, fixture.updateResults.get(0).phase());
+
+    fixture.receive(channel, DaemonMessageType.UPDATE, null, "{}");
     assertTrue(channel.closed());
   }
 
@@ -1706,18 +1865,28 @@ class EnvironmentDaemonServerTest {
     assertEquals(Set.of(ENVIRONMENT_ID), fixture.server.readyEnvironments());
   }
 
-  /** 测试意图：会话设置对象拒绝非正的心跳超时与资源上限，避免装配期静默使用无效边界。 */
+  /** 测试意图：会话设置对象拒绝非正的心跳超时、资源上限与临时资源策略，避免装配期静默使用无效边界。 */
   @Test
   void settingsRejectNonPositiveBounds() {
     assertThrows(
-        IllegalArgumentException.class, () -> new EnvironmentServerSettings(Duration.ZERO, 1024L));
+        IllegalArgumentException.class,
+        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L));
-    assertThrows(NullPointerException.class, () -> new EnvironmentServerSettings(null, 1024L));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L));
+    assertThrows(
+        NullPointerException.class,
+        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L));
     assertEquals(
         Duration.ofSeconds(1),
-        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L).heartbeatTimeout());
+        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L)
+            .heartbeatTimeout());
   }
 
   /** 测试意图：同一 transfer 的重复申请（含同实例重连后的重发）必须完全幂等——只发生一次 reserve，且回执同一 uploadId。 */
@@ -2225,10 +2394,15 @@ class EnvironmentDaemonServerTest {
     return EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
   }
 
-  /** 以给定 arguments 构造 fs.read 请求；arguments 原样进入执行请求，用于断言发送前 workdir 校验。 */
-  private static EnvironmentCapabilityExecutionRequest requestWith(String arguments, UUID callId) {
+  private static EnvironmentCapabilityDescriptor processExecDescriptor() {
+    return EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC);
+  }
+
+  /** 以给定 arguments 构造 process.exec 请求；arguments 原样进入执行请求，用于断言发送前 workdir 校验。 */
+  private static EnvironmentCapabilityExecutionRequest processExecRequestWith(
+      String arguments, UUID callId) {
     return new EnvironmentCapabilityExecutionRequest(
-        descriptor(),
+        processExecDescriptor(),
         new EnvironmentCapabilityCall(callId.toString(), arguments),
         Duration.ofSeconds(5));
   }

@@ -545,7 +545,7 @@ class OpenAiChatNativeReplayTest {
     assertEquals("Hello", legacyAsst.path("content").asText());
     assertFalse(legacyAsst.has("function_call"));
 
-    // 3. reasoning_content 即使与 durable thinking 一致，也不跨 affinity 转移
+    // 3. reasoning_content 即使与 durable thinking 一致，也不跨 affinity 转移；可读思考改以带来源标记的普通文本保留
     ObjectNode reasoningPayload = MAPPER.createObjectNode();
     reasoningPayload.put("role", "assistant");
     reasoningPayload.put("content", "Hello");
@@ -557,7 +557,8 @@ class OpenAiChatNativeReplayTest {
                 List.of(new ProviderThinkingBlock("hidden chain"), new ProviderTextBlock("Hello")),
                 other,
                 reasoningPayload));
-    assertEquals("Hello", reasoningAsst.path("content").asText());
+    assertEquals(
+        "<thinking>\nhidden chain\n</thinking>\nHello", reasoningAsst.path("content").asText());
     assertFalse(reasoningAsst.has("reasoning_content"));
 
     // 4. refusal 属于 native 事实：affinity 失配时退回纯文本
@@ -672,9 +673,9 @@ class OpenAiChatNativeReplayTest {
     }
   }
 
-  /** affinity 失配（不同 provider、连接 generation 或 wire 模型）时普通思考一并退回语义编码，不跨边界转移。 */
+  /** affinity 失配（不同 provider、连接 generation 或 wire 模型）时普通思考降级为带来源标记的语义文本，不跨边界转移原生字段。 */
   @Test
-  @DisplayName("affinity 变化时普通思考退回语义编码")
+  @DisplayName("affinity 变化时普通思考降级为带标记的语义文本")
   void fallsBackPlainReasoningAcrossAffinityChanges() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
@@ -699,7 +700,7 @@ class OpenAiChatNativeReplayTest {
                 new UUID(0L, 1L),
                 original.modelId()))) {
       JsonNode asst = assistantNode(wire(user, durable, other, payload));
-      assertEquals("Hello", asst.path("content").asText());
+      assertEquals("<thinking>\nreasoning\n</thinking>\nHello", asst.path("content").asText());
       assertFalse(asst.has("reasoning_content"));
     }
   }

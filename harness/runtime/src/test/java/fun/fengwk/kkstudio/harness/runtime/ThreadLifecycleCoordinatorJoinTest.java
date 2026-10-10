@@ -12,6 +12,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.user
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -77,7 +79,9 @@ class ThreadLifecycleCoordinatorJoinTest {
                   null,
                   null,
                   T0,
-                  T0));
+                  T0,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
   }
@@ -272,7 +276,9 @@ class ThreadLifecycleCoordinatorJoinTest {
                   null,
                   null,
                   T0,
-                  T0));
+                  T0,
+                  JoinPurpose.TASK,
+                  null));
           return null;
         });
   }
@@ -377,6 +383,80 @@ class ThreadLifecycleCoordinatorJoinTest {
 
   private ThreadJoin join(UUID invocationId) {
     return store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+  }
+
+  /**
+   * COMPACTION 终态只冻结 receipt 并唤醒父 Thread Work：不投递 SUBAGENT_RESULT、不进入 task pending
+   * delivery，未完成时也不占普通 task 配额。
+   */
+  @Test
+  void compactionJoinFreezesReceiptAndWakesParentWithoutNotificationOrDelivery() {
+    UUID compactionChildId = UUID.randomUUID();
+    SeededChild compaction = seedQuiescentChild(compactionChildId, root.threadId(), 91L);
+    UUID compactionJoinId = UUID.randomUUID();
+    store.transaction(
+        tx -> {
+          tx.lockThread(compactionChildId);
+          tx.insertJoin(
+              new ThreadJoin(
+                  compactionJoinId,
+                  CREATION_REQUEST_HASH,
+                  root.threadId(),
+                  compactionChildId,
+                  1L,
+                  "compactor",
+                  10,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  T0,
+                  T0,
+                  JoinPurpose.COMPACTION,
+                  null));
+          return null;
+        });
+    // 未完成 COMPACTION join 不占普通 task 配额：计数仍只含 setUp 的 TASK join。
+    assertEquals(
+        1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(root.threadId())));
+
+    // 应用 COMPACTION 子线程的源命令，使其可通过收敛判据。
+    store.transaction(
+        tx -> {
+          tx.lockThread(compactionChildId);
+          tx.loadQueuedCommands(compactionChildId);
+          ThreadCommand source = tx.findCommand(compactionChildId, 1L).orElseThrow();
+          tx.updateCommands(List.of(source.markApplied(compaction.turnStartId())));
+          return null;
+        });
+
+    store.transaction(
+        tx -> {
+          ThreadTreeLocks.lockForThread(tx, compactionChildId);
+          for (UUID threadId :
+              List.of(compactionChildId, root.threadId()).stream()
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList()) {
+            tx.lockThread(threadId);
+          }
+          ThreadState compactionChild = tx.findThread(compactionChildId).orElseThrow();
+          ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+              tx, compactionChild, compaction.turnEndId(), null, T1, false);
+          return null;
+        });
+
+    ThreadJoin matched = join(compactionJoinId);
+    assertTrue(matched.matched());
+    assertNull(matched.deliveryCommandSequence());
+    // 不投递 SUBAGENT_RESULT：父 Thread 不新增任何 command。
+    assertEquals(0, rootCommandCount());
+    // 但唤醒父 Thread Work 供压缩 owner 消费。
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isPresent()));
+    // COMPACTION 冻结结果不属于 task 待交付集合。
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.loadPendingDeliveries(root.threadId()).isEmpty()));
   }
 
   private int rootCommandCount() {

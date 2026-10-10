@@ -21,9 +21,9 @@ import java.util.Objects;
 /**
  * 生产者端有界输出捕获器：内联小输出，本地落盘大文本，从不因为输出体积终止进程。
  *
- * <p>内联阈值（默认 ≤ 50 KiB 且 ≤ 2000 行）之内保持完整内存缓冲；跨越阈值后只在 {@code <data-dir>/resources/staging} 建立
- * owner-only 中转文件并流式写入，{@link #finish} 时原子发布为 durable 全文。本地写入失败（磁盘满、权限等）只降级为有界预览，不抛出、不终止子进程
- * ——输出体积或本地磁盘状态永远不是杀进程的理由。
+ * <p>内联阈值（默认 ≤ 50 KiB 且 ≤ 2000 行）之内保持完整内存缓冲；跨越阈值后只在受控临时根建立 owner-only 中转文件（{@code
+ * <tmp>/workspaces/<uuid>/*.part}）并流式写入，{@link #finish} 时原子发布为 durable
+ * 全文。本地写入失败（磁盘满、权限等）只降级为有界预览，不抛出、不终止子进程——输出体积或本地磁盘状态永远不是杀进程的理由。
  *
  * <p>达到捕获预算（默认 1 GiB）后停止文件捕获，但继续统计总数并继续接收输出；终态明确报告“捕获被截断”，并把已捕获部分作为可读文件发布。
  *
@@ -89,18 +89,18 @@ public final class OutputSpool implements AutoCloseable {
   }
 
   /** 写入单个字节。 */
-  public void write(int b) throws IOException {
+  public void write(int b) {
     write(new byte[] {(byte) b}, 0, 1);
   }
 
   /** 写入字节数组切片。 */
-  public void write(byte[] b) throws IOException {
+  public void write(byte[] b) {
     Objects.requireNonNull(b, "b");
     write(b, 0, b.length);
   }
 
   /** 写入指定范围的字节切片；任何本地 IO 失败都只降级为有界预览。 */
-  public void write(byte[] b, int off, int len) throws IOException {
+  public void write(byte[] b, int off, int len) {
     Objects.requireNonNull(b, "b");
     if (off < 0 || len < 0 || off + len > b.length) {
       throw new IndexOutOfBoundsException();

@@ -1,5 +1,6 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
+import { FORK_NOTICE_TEXT } from '@/features/ai/runtime/thread-timeline/entry-event-projection'
 import { translate } from '@/shared/i18n'
 
 /**
@@ -271,6 +272,9 @@ function messageContents(entry: HarnessSessionEntryDTO): Record<string, unknown>
 }
 
 function historyEntryVisibleText(entry: HarnessSessionEntryDTO): string {
+  if (entry.entryType === 'FORK') {
+    return FORK_NOTICE_TEXT
+  }
   return collectMessageText(messageContents(entry)).join('\n')
 }
 

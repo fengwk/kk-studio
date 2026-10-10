@@ -94,7 +94,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     }
 
     List<UUID> candidates =
-        tx.execute(status -> uploadRepository.listCleanupCandidateIds(16, Instant.now()));
+        tx.execute(
+            status -> uploadRepository.listCleanupCandidateIds(16, Instant.now(), Instant.now()));
 
     assertEquals(Set.copyOf(expired), Set.copyOf(candidates));
     assertEquals(

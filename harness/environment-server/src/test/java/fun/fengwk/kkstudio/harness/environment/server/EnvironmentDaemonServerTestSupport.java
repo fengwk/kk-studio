@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.terminal.TerminalControlCodec;
 import fun.fengwk.kkstudio.harness.environment.terminal.TerminalResponse;
 
@@ -34,6 +35,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -59,6 +61,9 @@ final class EnvironmentDaemonServerTestSupport {
   /** 另一个 Daemon 进程的实例身份：出现即意味着旧进程已不可能再提供终态。 */
   static final String OTHER_INSTANCE_ID = "44444444-4444-4444-4444-444444444444";
 
+  /** 测试 Daemon 上报的构建版本。 */
+  static final String DAEMON_VERSION = "1.0.9";
+
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
   private static final DaemonCapabilityResultCodec RESULT_CODEC = new DaemonCapabilityResultCodec();
@@ -67,8 +72,14 @@ final class EnvironmentDaemonServerTestSupport {
   static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
+          DAEMON_VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "note"));
+              DaemonOperatingSystem.LINUX,
+              "Asia/Shanghai",
+              "dev",
+              "/home/dev",
+              "note",
+              "/tmp/kk-studio"));
 
   /** 测试用单条/聚合资源字节预算：与生产 16 MiB 业务上限一致。 */
   static final long MAX_RESOURCE_BYTES = 16L * 1024 * 1024;
@@ -121,12 +132,19 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static String helloPayload(String token, String daemonInstanceId) {
+    return helloPayload(token, daemonInstanceId, EnvironmentCapabilityCatalog.version());
+  }
+
+  static String helloPayload(
+      String token, String daemonInstanceId, String capabilityCatalogVersion) {
     return "{\"protocolVersion\":"
         + DaemonProtocol.VERSION
         + ",\"registrationToken\":\""
         + token
         + "\",\"capabilityCatalogVersion\":\""
-        + EnvironmentCapabilityCatalog.version()
+        + capabilityCatalogVersion
+        + "\",\"daemonVersion\":\""
+        + DAEMON_VERSION
         + "\",\"daemonInstanceId\":\""
         + daemonInstanceId
         + "\"}";
@@ -138,14 +156,13 @@ final class EnvironmentDaemonServerTestSupport {
         new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, payload));
   }
 
-  /** 一个通过 READY OS（LINUX）发送前 workdir 校验的 fs.read 请求：frame send 前必须携带显式绝对 workdir。 */
+  /** 一个通过 READY OS（LINUX）发送前校验的 fs.read 请求：携带绝对 path。 */
   static EnvironmentCapabilityExecutionRequest capabilityRequest(UUID callId) {
     EnvironmentCapabilityDescriptor descriptor =
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
     return new EnvironmentCapabilityExecutionRequest(
         descriptor,
-        new EnvironmentCapabilityCall(
-            callId.toString(), "{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}"),
+        new EnvironmentCapabilityCall(callId.toString(), "{\"path\":\"/srv/repo/README.md\"}"),
         Duration.ofSeconds(5));
   }
 
@@ -162,6 +179,11 @@ final class EnvironmentDaemonServerTestSupport {
     final List<UUID> terminalDaemonInstanceIds = new ArrayList<>();
     final List<TerminalResponse> terminalResponses = new ArrayList<>();
     Consumer<TerminalResponse> onTerminalResponse = response -> {};
+
+    final List<EnvironmentId> updateResultEnvironments = new ArrayList<>();
+    final List<DaemonUpdateResult> updateResults = new ArrayList<>();
+    final AtomicReference<EnvironmentServerSettings> settings =
+        new AtomicReference<>(defaultSettings());
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
 
@@ -188,8 +210,24 @@ final class EnvironmentDaemonServerTestSupport {
                 terminalResponses.add(response);
                 onTerminalResponse.accept(response);
               },
+              (environmentId, result) -> {
+                updateResultEnvironments.add(environmentId);
+                updateResults.add(result);
+              },
               ticketService,
-              () -> new EnvironmentServerSettings(Duration.ofSeconds(60), 16L * 1024 * 1024));
+              settings::get);
+    }
+
+    /** 热更当前运行期设置；用于验证策略热更经同一控制通道推送到已 READY 连接。 */
+    void updateSettings(long ttlSeconds, long cleanupIntervalSeconds) {
+      settings.set(
+          new EnvironmentServerSettings(
+              Duration.ofSeconds(60), 16L * 1024 * 1024, ttlSeconds, cleanupIntervalSeconds));
+    }
+
+    private static EnvironmentServerSettings defaultSettings() {
+      return new EnvironmentServerSettings(
+          Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L);
     }
 
     void failRegistrationDirectory() {
@@ -204,6 +242,22 @@ final class EnvironmentDaemonServerTestSupport {
       FakeChannel channel = new FakeChannel(connectionId);
       server.open(channel);
       receiveHello(channel, TOKEN, ENVIRONMENT_ID, daemonInstanceId);
+      receiveReady(channel);
+      return channel;
+    }
+
+    /** 用声明的 capability catalog 版本完成握手：用于验证目录不匹配仍可承载版本查询与受管更新。 */
+    FakeChannel connectReadyWithCatalog(String connectionId, String capabilityCatalogVersion) {
+      FakeChannel channel = new FakeChannel(connectionId);
+      server.open(channel);
+      server.receive(
+          channel.connectionId(),
+          encode(
+              null,
+              DaemonMessageType.HELLO,
+              null,
+              helloPayload(TOKEN, INSTANCE_ID, capabilityCatalogVersion)));
+      channel.boundEnvironmentId = ENVIRONMENT_ID;
       receiveReady(channel);
       return channel;
     }

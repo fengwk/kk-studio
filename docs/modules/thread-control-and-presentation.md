@@ -155,7 +155,8 @@ accepted 收据都使用“查看 subagent 执行”链接，字体与正文一�
 “从此处分支”，以及对话中已关闭 TURN_END 回合 footer 的分支按钮（即使该回合没有 usage 文本也
 照常展示）。弹窗要求规范化名称并选择目标位置 1..9；确认只把草稿目标路由到目标 pane，
 不预创建 Thread，隐藏位置先扩展布局显露并移动焦点，在途目标被拒绝，覆盖未发送草稿需二次确认；
-首次发送才原子创建命名 Thread。模型与存储见 [Frontend](frontend.md#chat-提交与控制)。
+首次发送才原子创建命名 Thread。面板底部另有“从此处新建会话”，把切点处的有效上下文复制到新 Session
+并创建独立执行根（`FORK_SESSION_DRAFT`），不经过命名弹窗。模型与存储见 [Frontend](frontend.md#chat-提交与控制)。
 
 ## 思考与阅读
 
@@ -217,10 +218,12 @@ Thread 链接和结果/错误/partial，不重复铺开 task prompt。信封只�
 Footer 不改变当前 Thread 的统计口径：
 
 ```text
-archlinux ∣ ctx 245k/272k ∣ ↑1.4k · ↓1.8k · R244k · $0.055 · cache 99% · 75 tok/s
+archlinux ∣ ctx 245k/272k ∣ ↑1.4k · ↓1.8k · R244k · W0 · $0.055 · cache 99% · 75 tok/s
+archlinux ∣ ctx 0/256k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s
 ```
 
-组间使用 U+2223，统计项使用 U+00B7，环境没有 `env:`。保留未知值、环境不可用、
+组间使用 U+2223，统计项使用 U+00B7，环境没有 `env:`。数值缺失默认显示 0，不省略 R/W；
+hover 保留未计量状态，环境不可用、
 窄屏完整信息及中英文语义一致性；金额、上下文占用与累计口径见
 [Frontend](frontend.md#用量与状态-footer)。
 

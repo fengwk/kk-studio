@@ -88,7 +88,11 @@ class ToolExecutionGatewayPreflightTest {
     ToolGateway.PreflightResult result = preflight(PermissionAction.DENY);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("PERMISSION_DENIED", deny.error().kind());
-    assertEquals("Tool permission was denied.", deny.error().message());
+    assertTrue(
+        deny.error().message().contains("Tool permission was denied"), deny.error().message());
+    // 权限拒绝是派发前确定性失败：必须明确未执行。
+    assertTrue(
+        deny.error().message().contains("The tool was not executed."), deny.error().message());
   }
 
   @Test
@@ -148,8 +152,12 @@ class ToolExecutionGatewayPreflightTest {
                         null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
-    assertEquals(
-        "Frozen tool definition missing is not registered.", unknownDeny.error().message());
+    assertTrue(
+        unknownDeny.error().message().contains("Frozen tool definition missing is not registered"),
+        unknownDeny.error().message());
+    assertTrue(
+        unknownDeny.error().message().contains("The tool was not executed."),
+        unknownDeny.error().message());
 
     ToolDescriptor mismatched = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGateway.Deny mismatchDeny =
@@ -165,8 +173,14 @@ class ToolExecutionGatewayPreflightTest {
                         null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
-    assertEquals(
-        "Frozen tool definition demo does not match its catalog definition.",
+    assertTrue(
+        mismatchDeny
+            .error()
+            .message()
+            .contains("Frozen tool definition demo does not match its catalog definition"),
+        mismatchDeny.error().message());
+    assertTrue(
+        mismatchDeny.error().message().contains("The tool was not executed."),
         mismatchDeny.error().message());
     verifyNoInteractions(evaluator);
   }
@@ -202,7 +216,7 @@ class ToolExecutionGatewayPreflightTest {
 
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("ENVIRONMENT_NOT_SELECTED", deny.error().kind());
-    assertTrue(deny.error().message().contains("select an Environment"), deny.error().message());
+    assertTrue(deny.error().message().contains("Select an Environment"), deny.error().message());
     // 权限策略未被读取，evaluator 也未被调用：绝不会把该错误伪装成审批或权限拒绝。
     verifyNoInteractions(evaluator);
     assertEquals(0, settingsProvider.readCount());
@@ -278,15 +292,13 @@ class ToolExecutionGatewayPreflightTest {
     }
   }
 
-  /** 环境工具的审批理由同样固定，目录仅保留在调用参数中。 */
+  /** 环境工具的审批理由同样固定。 */
   @Test
   void environmentToolAskUsesFixedReason() {
     EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     ToolGateway.PreflightResult result =
         environmentPreflight(
-            environmentId,
-            "{\"path\":\"src/Main.java\",\"workdir\":\"/repo/sub\"}",
-            PermissionAction.ASK);
+            environmentId, "{\"path\":\"/repo/sub/src/Main.java\"}", PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     assertEquals("Permission rules require approval", ask.reason());
   }
@@ -308,9 +320,9 @@ class ToolExecutionGatewayPreflightTest {
     assertEquals("Permission rules require approval", ask.reason());
   }
 
-  /** path 规则坐标系是该次调用 explicit workdir：绝对 target 词法 relativize，与 Environment root 无关。 */
+  /** path 规则以 filesystem root 为坐标系：命中绝对路径对应规则，不同路径分支不命中。 */
   @Test
-  void pathRulesAreGradedAgainstCallWorkdirOnly() {
+  void pathRulesAreGradedAgainstFilesystemRoot() {
     EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     ToolSettings settings =
         new ToolSettings(
@@ -318,22 +330,16 @@ class ToolExecutionGatewayPreflightTest {
                 "*",
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
-                    new PermissionRule("src/**", PermissionAction.DENY))),
+                    new PermissionRule("repo/sub/src/**", PermissionAction.DENY))),
             false);
     ToolGateway.PreflightResult result =
-        environmentPreflight(
-            environmentId,
-            "{\"path\":\"/repo/sub/src/Main.java\",\"workdir\":\"/repo/sub\"}",
-            settings);
+        environmentPreflight(environmentId, "{\"path\":\"/repo/sub/src/Main.java\"}", settings);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("PERMISSION_DENIED", deny.error().kind());
 
-    // 同一 workdir 之外的绝对路径不会命中 workdir 相对规则。
+    // 不同路径分支不命中对应规则，回落 wildcard。
     ToolGateway.PreflightResult outside =
-        environmentPreflight(
-            environmentId,
-            "{\"path\":\"/elsewhere/src/Main.java\",\"workdir\":\"/repo/sub\"}",
-            settings);
+        environmentPreflight(environmentId, "{\"path\":\"/elsewhere/src/Main.java\"}", settings);
     assertInstanceOf(ToolGateway.Ask.class, outside);
   }
 

@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -895,7 +896,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         MAX_TURNS,
         MAX_DEPTH,
         MAX_CONCURRENT_CHILDREN,
-        MAX_CONCURRENT_THREADS);
+        MAX_CONCURRENT_THREADS,
+        JoinPurpose.TASK);
   }
 
   /** 在执行根的产品绑定上插入一个 Chat owner，并返回 chatId。 */

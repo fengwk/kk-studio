@@ -6,6 +6,7 @@ import type {
 } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import { numberToNull, trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
+import { assembleHttpStatusCodeList } from '@/shared/lib/integer-list'
 
 export function emptyProviderDraft(): ProviderDraft {
   return {
@@ -16,6 +17,7 @@ export function emptyProviderDraft(): ProviderDraft {
     credential: '',
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
+    modelHttpRetryStatusCodes: null,
   }
 }
 
@@ -28,6 +30,10 @@ export function toProviderDraft(provider: AgentProviderDTO): ProviderDraft {
     credential: '',
     modelCallTimeoutMillis: String(provider.modelCallTimeoutMillis),
     modelCallIdleTimeoutMillis: String(provider.modelCallIdleTimeoutMillis),
+    modelHttpRetryStatusCodes:
+      provider.modelHttpRetryStatusCodes == null
+        ? null
+        : [...provider.modelHttpRetryStatusCodes],
   }
 }
 
@@ -40,6 +46,12 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
     credential: trimToNull(draft.credential),
     modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
     modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
+    modelHttpRetryStatusCodes:
+      draft.modelHttpRetryStatusCodes === null
+        ? null
+        : (Array.isArray(draft.modelHttpRetryStatusCodes)
+            ? assembleHttpStatusCodeList(draft.modelHttpRetryStatusCodes)
+            : null),
   }
 }
 
@@ -51,5 +63,9 @@ export function toEditableProviderUpdate(draft: ProviderDraft): AgentProviderEdi
     credential: trimToNull(draft.credential),
     modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
     modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
+    modelHttpRetryStatusCodes:
+      draft.modelHttpRetryStatusCodes === null
+        ? null
+        : assembleHttpStatusCodeList(draft.modelHttpRetryStatusCodes),
   }
 }

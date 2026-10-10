@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
@@ -40,7 +38,8 @@ import java.util.Objects;
  * 伪协议，也不产生额外的 TOOL 结果。降级只发生在投影结果中，durable Entry 与 callIndex 永不被改写。
  *
  * <p>同一 assistant 之后的 native TOOL 结果先于该 USER 上下文输出，以保证 provider 要求的 tool-call adjacency；组内保持相对顺序。被
- * 降级改写的 assistant 消息若携带 {@link ProviderReplayState} 则拒绝投影（opaque native payload 无法安全改写）；未被改写的消息保留。
+ * 降级改写的 assistant 消息若携带 {@link ProviderReplayState}，则放弃该消息的 opaque native replay（置 null）并继续语义投影，
+ * 绝不把原生 payload 附着到已被改写的内容上；未被改写的消息原样保留 replay。
  *
  * <p>USER 上下文中每一项的动作来自调用冻结时的 Tool 语义 action（{@link
  * fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent#historyAction()}）；缺失 action
@@ -143,21 +142,19 @@ public final class ProviderMessageProjector {
   /**
    * 一条 assistant 消息的投影：native 调用保留为 wire 调用块并登记待配对，降级调用从消息中移除并登记进 batch 的 USER 上下文；全部内容
    * 都是降级调用时整条消息不再输出（其语义已完整进入 USER 上下文）。
+   *
+   * <p>携带 opaque native replay 的消息一旦发生降级改写，opaque payload 已无法安全附着，直接放弃该消息的 replay 并走语义投影；
+   * 未发生改写的消息原样保留 replay。
    */
   private void projectAssistant(
       AgentMessage message,
       ProviderReplayState replayState,
       Batch batch,
       List<ProviderMessage> result) {
-    // Native replay 是不透明的；在改写 batch 或丢弃纯工具 assistant 前拒绝不兼容的绑定。
-    if (replayState != null) {
-      for (AgentMessageContent content : message.contents()) {
-        if (content instanceof ToolCallMessageContent call && !isNative(call)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "Cannot project assistant replay with changed tool bindings/environment; restore original tool bindings/environment or start a new context with an explicit summary");
-        }
-      }
+    ProviderReplayState effectiveReplayState = replayState;
+    if (replayState != null && hasNonNativeCall(message)) {
+      // Native replay 是不透明的：调用被改写后无法再附着该 opaque payload，放弃 replay 而非拒绝整个请求。
+      effectiveReplayState = null;
     }
     List<ProviderContentBlock> contents = new ArrayList<>(message.contents().size());
     for (AgentMessageContent content : message.contents()) {
@@ -176,7 +173,16 @@ public final class ProviderMessageProjector {
     if (contents.isEmpty()) {
       return;
     }
-    result.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, contents, replayState));
+    result.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, contents, effectiveReplayState));
+  }
+
+  private boolean hasNonNativeCall(AgentMessage message) {
+    for (AgentMessageContent content : message.contents()) {
+      if (content instanceof ToolCallMessageContent call && !isNative(call)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private ProviderToolResultBlock projectToolResult(ToolResultMessageContent content) {

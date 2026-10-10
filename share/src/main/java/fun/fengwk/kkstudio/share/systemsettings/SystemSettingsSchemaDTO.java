@@ -110,10 +110,10 @@ public class SystemSettingsSchemaDTO {
   public enum FieldType {
     BOOLEAN,
     INTEGER,
+    INTEGER_LIST,
     LONG,
     TEXT,
     ENUM,
-    PERMISSION,
-    MODEL_SELECTION
+    PERMISSION
   }
 }

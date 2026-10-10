@@ -76,7 +76,7 @@ export function createAgentEditorPlan(
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> {
   return {
     kind: 'agent',
-    modal: { kind: 'agent', mode: 'create' },
+    modal: { kind: 'agent', mode: 'create', type: 'USER' },
     agentDraft: normalizeAgentDraftDefaultVariant(emptyAgentDraft(models[0]), models),
   }
 }
@@ -96,6 +96,7 @@ export function editAgentEditorPlan(
       kind: 'agent',
       mode: 'edit',
       name: agent.name,
+      type: agent.type,
       model: agent.model,
       expectedVersion: agent.version,
     },

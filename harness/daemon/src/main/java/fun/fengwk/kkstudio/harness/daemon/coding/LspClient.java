@@ -86,7 +86,6 @@ final class LspClient {
   private static final String JAVA_CLASS_FILE_CONTENTS = "java/classFileContents";
   private static final String JAVA_DECOMPILE_COMMAND = "java.decompile";
   private static final Pattern JDT_URI = Pattern.compile("jdt://\\S+");
-  private static final int MAX_DIAGNOSTIC_CHARS = 512;
 
   /** 文档同步使用的 LSP languageId；未覆盖的扩展名回退服务器 id。 */
   private static final Map<String, String> LANGUAGE_IDS =
@@ -118,25 +117,19 @@ final class LspClient {
 
   private final Launcher<JdtlsServer> launcher;
   private final JdtlsServer remote;
-  private final ByteTailBuffer stderrTail;
   private final Map<Path, Document> documents = new ConcurrentHashMap<>();
   private final AtomicBoolean stopped = new AtomicBoolean();
   private volatile ServerCapabilities capabilities;
   private volatile String positionEncoding = PositionEncodingKind.UTF16;
 
   private LspClient(
-      LspServerConfig server,
-      Path root,
-      ProcessScope scope,
-      Launcher<JdtlsServer> launcher,
-      ByteTailBuffer stderrTail) {
+      LspServerConfig server, Path root, ProcessScope scope, Launcher<JdtlsServer> launcher) {
     this.server = server;
     this.root = root;
     this.scope = scope;
     this.process = scope.process();
     this.launcher = launcher;
     this.remote = launcher.getRemoteProxy();
-    this.stderrTail = stderrTail;
   }
 
   /**
@@ -158,7 +151,7 @@ final class LspClient {
       // stderr 排空与后续初始化同属本进程所有权：提交被拒也必须终止整棵范围，不能把泄漏留给调用方。
       dispatch.submit(() -> drain(process.getErrorStream(), stderrTail));
       if (scope.awaitNaturalExit(PROCESS_PROBE_MILLIS)) {
-        throw new IllegalStateException(earlyExitMessage(server, root, command, scope, stderrTail));
+        throw new ToolServiceFailureException(earlyExitMessage(server, command, scope));
       }
       LspClient client =
           new LspClient(
@@ -176,8 +169,7 @@ final class LspClient {
                   .setOutput(process.getOutputStream())
                   .setExecutorService(dispatch)
                   .wrapMessages(Function.identity())
-                  .create(),
-              stderrTail);
+                  .create());
       client.launcher.startListening();
       return client;
     } catch (RuntimeException error) {
@@ -191,47 +183,34 @@ final class LspClient {
     try {
       return ProcessScope.startDuplex(root, command);
     } catch (IOException | RuntimeException error) {
-      throw new IllegalStateException(
-          "LSP server '"
-              + server.id()
-              + "' cannot be started: "
-              + error.getMessage()
-              + ". Command '"
-              + command.getFirst()
-              + "', directory "
-              + root,
-          error);
+      // 只回显固定 server id 与可信的启动命令二进制名：不输出原始启动错误（可能内联 OS 文本与命令参数）或目录。
+      throw new ToolServiceFailureException(
+          "LSP server '" + server.id() + "' cannot be started: " + command.getFirst(), error);
     }
   }
 
   /**
    * 服务器在握手之前就结束（或根本没有启动起来）时的失败说明。
    *
-   * <p>两类事实必须分开：helper 发布的启动失败说明命令从未跑起来（可执行文件不存在、不可执行、工作目录不可用）；否则就是命令自己
-   * 跑过又退出，退出码只能取命令自己发布的那个，诊断尾部仍是有界的 stderr 归集。
+   * <p>两类事实必须分开：范围回答启动失败（可执行文件不存在、不可执行）说明命令从未跑起来；否则就是命令自己跑过又退出，退出码只能取命令自己发布的那个。 模型可见文案只保留固定 server
+   * id、可信的二进制名与已知退出码，绝不携带服务器 stderr、命令行参数或原始启动错误。
    */
   private static String earlyExitMessage(
-      LspServerConfig server,
-      Path root,
-      List<String> command,
-      ProcessScope scope,
-      ByteTailBuffer stderrTail) {
-    String failure = scope.startFailure();
-    if (failure != null) {
-      return "LSP server '"
-          + server.id()
-          + "' cannot be started: "
-          + failure
-          + ". Command '"
-          + command.getFirst()
-          + "', directory "
-          + root;
+      LspServerConfig server, List<String> command, ProcessScope scope) {
+    if (scope.startFailure() != null) {
+      return "LSP server '" + server.id() + "' cannot be started: " + command.getFirst();
     }
     return "LSP server '"
         + server.id()
-        + "' exited before initialization for "
-        + root
-        + exitDetail(scope, stderrTail);
+        + "' exited before initialization (exit code "
+        + knownExitCode(scope)
+        + ")";
+  }
+
+  /** 已知退出码；命令尚未发布退出码时如实说「未知」，不拿别的数字顶替。 */
+  private static String knownExitCode(ProcessScope scope) {
+    Integer exitCode = scope.naturalExitCode();
+    return exitCode == null ? "unknown" : exitCode.toString();
   }
 
   /**
@@ -331,8 +310,9 @@ final class LspClient {
       modified = Files.getLastModifiedTime(target).toMillis();
       size = Files.size(target);
     } catch (IOException error) {
-      throw new IllegalArgumentException(
-          "cannot read " + target + ": " + error.getMessage(), error);
+      // sync 可能发生在同一服务器已 didOpen 之后：读取失败按服务失败处理，且不输出路径或原始 OS 文本。
+      throw new ToolServiceFailureException(
+          "LSP request failed: the source file could not be read", error);
     }
     if (document != null && document.modified() == modified && document.size() == size) {
       return;
@@ -380,7 +360,7 @@ final class LspClient {
   List<String> definition(Path file, int line, int character, Duration timeout) throws Exception {
     requireRunning();
     if (!supports("textDocument/definition")) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP server '" + server.id() + "' does not advertise go-to-definition support.");
     }
     sync(file);
@@ -400,7 +380,7 @@ final class LspClient {
   List<String> workspaceSymbols(String query, int limit, Duration timeout) throws Exception {
     requireRunning();
     if (!supports("workspace/symbol")) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP server '" + server.id() + "' does not advertise workspace symbol support.");
     }
     Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> result =
@@ -412,17 +392,17 @@ final class LspClient {
   }
 
   /**
-   * 反编译 Java class：{@code jdt://} 目标走 jdtls 的 {@code java/classFileContents}，本地 class 文件走 {@code
-   * java.decompile} 命令。
+   * 反编译 Java class：{@code jdt://} 目标走 jdtls 的 {@code java/classFileContents}，绝对本地 class 文件或 {@code
+   * file:} URI 走 {@code java.decompile} 命令。
    *
    * <p>返回的源码原样透传，不做任何路径改写。
    */
-  String javaDecompile(Path workdir, String target, Duration timeout) throws Exception {
+  String javaDecompile(String target, Duration timeout) throws Exception {
     requireRunning();
     Matcher matcher = JDT_URI.matcher(target);
     if (matcher.find()) {
       if (!supports(JAVA_CLASS_FILE_CONTENTS)) {
-        throw new IllegalStateException("lsp_java_decompile is only supported by jdtls.");
+        throw new ToolServiceFailureException("lsp_java_decompile is only supported by jdtls.");
       }
       String result =
           await(
@@ -431,9 +411,9 @@ final class LspClient {
               JAVA_CLASS_FILE_CONTENTS);
       return requireDecompiledSource(result, target);
     }
-    Path path = resolveLocalTarget(workdir, target);
+    Path path = resolveLocalTarget(target);
     if (!Files.isRegularFile(path)) {
-      throw new IllegalArgumentException("target is not a readable class file: " + path);
+      throw new ToolInputRejectedException("target is not a readable class file: " + path);
     }
     Object result =
         await(
@@ -452,55 +432,34 @@ final class LspClient {
     if (result instanceof String source && !source.isBlank()) {
       return source;
     }
-    throw new IllegalStateException("Could not load or decompile class for target: " + target);
+    throw new ToolServiceFailureException(
+        "Could not load or decompile class for target: " + target);
   }
 
   /**
-   * 缺 workdir 时的前置校验：{@code jdt://}、{@code file:} URI 与绝对 class 路径都不需要 workdir，相对 class 路径必须显式给出
-   * workdir；校验在申请客户端之前完成，因此不会为缺少 workdir 的相对目标启动服务器。
+   * 解析本地 class 目标：完整符号行中的 {@code jdt://} URI 由调用方先行提取；{@code file:} URI 与绝对路径直接使用；
+   * 相对路径一律拒绝，绝不回退到守护进程的 cwd。
    */
-  static void requireWorkdirForRelativeTarget(String target) {
-    String trimmed = target.trim();
-    if (trimmed.startsWith("file:") || JDT_URI.matcher(trimmed).find()) {
-      return;
-    }
-    Path path;
-    try {
-      path = Path.of(trimmed);
-    } catch (RuntimeException ignored) {
-      // 非法目标由真正的解析路径给出更准确的错误。
-      return;
-    }
-    if (!path.isAbsolute()) {
-      throw new IllegalArgumentException(
-          "workdir is required when target is a relative class path: " + target);
-    }
-  }
-
-  /** 解析本地 class 目标：{@code file:} URI 与绝对路径直接使用；相对路径只在调用方显式给出的 workdir 下解析， 绝不回退到守护进程的 cwd。 */
-  private static Path resolveLocalTarget(Path workdir, String target) {
+  private static Path resolveLocalTarget(String target) {
     String trimmed = target.trim();
     if (trimmed.startsWith("file:")) {
       try {
         return Path.of(URI.create(trimmed)).normalize();
       } catch (IllegalArgumentException error) {
-        throw new IllegalArgumentException("invalid class target URI: " + target, error);
+        throw new ToolInputRejectedException("invalid class target URI: " + target, error);
       }
     }
     Path path;
     try {
       path = Path.of(trimmed);
     } catch (RuntimeException error) {
-      throw new IllegalArgumentException("invalid class target: " + target, error);
+      throw new ToolInputRejectedException("invalid class target: " + target, error);
     }
-    if (path.isAbsolute()) {
-      return path.normalize();
+    if (!path.isAbsolute()) {
+      throw new ToolInputRejectedException(
+          "target must be an absolute class path, a file: URI, or a jdt:// URI: " + target);
     }
-    if (workdir == null) {
-      throw new IllegalArgumentException(
-          "workdir is required when target is a relative class path: " + target);
-    }
-    return workdir.resolve(path).normalize();
+    return path.normalize();
   }
 
   /**
@@ -546,11 +505,11 @@ final class LspClient {
 
   private void requireRunning() {
     if (stopped.get()) {
-      throw new IllegalStateException("LSP client stopped");
+      throw new ToolServiceFailureException("LSP client stopped");
     }
     if (!running()) {
-      throw new IllegalStateException(
-          "LSP server '" + server.id() + "' exited" + exitDetail(scope, stderrTail));
+      throw new ToolServiceFailureException(
+          "LSP server '" + server.id() + "' exited (exit code " + knownExitCode(scope) + ")");
     }
   }
 
@@ -575,18 +534,18 @@ final class LspClient {
       return result;
     } catch (TimeoutException error) {
       future.cancel(true);
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP request timed out after " + millis + "ms (" + description + ").", error);
     } catch (InterruptedException error) {
       future.cancel(true);
       Thread.currentThread().interrupt();
       throw error;
     } catch (ExecutionException error) {
+      // 结果不可确认：只声明请求失败与操作名，不附带 cause message（远端/OS 原始文本可能内联凭据）。
       Throwable cause = error.getCause() == null ? error : error.getCause();
-      throw new IllegalStateException(
-          "LSP request failed (" + description + "): " + cause.getMessage(), cause);
+      throw new ToolServiceFailureException("LSP request failed (" + description + ")", cause);
     } catch (CancellationException error) {
-      throw new IllegalStateException(
+      throw new ToolServiceFailureException(
           "LSP client stopped before the request finished (" + description + ").", error);
     }
   }
@@ -598,8 +557,8 @@ final class LspClient {
     for (int current = 1; current < line; current++) {
       int newline = text.indexOf('\n', start);
       if (newline < 0) {
-        throw new IllegalArgumentException(
-            "line " + line + " is beyond the end of " + document.uri());
+        throw new ToolServiceFailureException(
+            "line " + line + " is beyond the end of the synchronized document");
       }
       start = newline + 1;
     }
@@ -611,14 +570,12 @@ final class LspClient {
     String lineText = text.substring(start, lineEnd);
     int codePoints = lineText.codePointCount(0, lineText.length());
     if (character > codePoints) {
-      throw new IllegalArgumentException(
+      throw new ToolServiceFailureException(
           "character "
               + character
               + " is beyond line "
               + line
-              + " of "
-              + document.uri()
-              + " ("
+              + " of the synchronized document ("
               + codePoints
               + " code points)");
     }
@@ -742,12 +699,13 @@ final class LspClient {
     try {
       bytes = Files.readAllBytes(file);
     } catch (IOException error) {
-      throw new IllegalArgumentException("cannot read " + file + ": " + error.getMessage(), error);
+      throw new ToolServiceFailureException("the source file could not be read", error);
     }
     try {
       return TextFileCodec.decode(bytes).text();
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("LSP cannot open binary file: " + file, error);
+      throw new ToolServiceFailureException(
+          "LSP request failed: the source file is not valid text", error);
     }
   }
 
@@ -786,28 +744,6 @@ final class LspClient {
     } catch (IOException ignored) {
       // 进程退出会关闭 stderr，属于正常收敛路径。
     }
-  }
-
-  /**
-   * 退出的诊断说明：退出码取命令自己发布的那一个，而不是承载它的 helper 的退出码。
-   *
-   * <p>命令还没有发布退出码（helper 被杀这类范围失败）时如实说「未知」，不拿别的数字顶替。
-   */
-  private static String exitDetail(ProcessScope scope, ByteTailBuffer tail) {
-    Integer exitCode = scope.naturalExitCode();
-    String detail = " (exit code " + (exitCode == null ? "unknown" : exitCode) + ")";
-    String diagnostics = diagnostics(tail);
-    return diagnostics.isEmpty() ? detail : detail + ": " + diagnostics;
-  }
-
-  private static String diagnostics(ByteTailBuffer tail) {
-    if (tail.size() == 0) {
-      return "";
-    }
-    String text = new String(tail.toByteArray(), StandardCharsets.UTF_8).trim();
-    return text.length() <= MAX_DIAGNOSTIC_CHARS
-        ? text
-        : text.substring(text.length() - MAX_DIAGNOSTIC_CHARS);
   }
 
   /**

@@ -602,6 +602,12 @@ final class GeminiRequestEncoder {
       part.put("text", textBlock.text());
       return;
     }
+    if (block instanceof ProviderJsonBlock jsonBlock) {
+      // assistant JSON 诊断（如 tool_call_diagnostic）降级为普通文本 part。
+      ObjectNode part = parts.addObject();
+      part.put("text", jsonBlock.json());
+      return;
+    }
     if (block instanceof ProviderToolCallBlock toolCallBlock) {
       ProviderToolCall call = toolCallBlock.toolCall();
       ObjectNode part = parts.addObject();

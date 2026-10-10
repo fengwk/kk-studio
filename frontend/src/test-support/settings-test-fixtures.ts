@@ -9,6 +9,11 @@ import type {
 export const DEFAULT_MAX_RESOURCE_BYTES = '16777216'
 
 /**
+ * 默认模型 HTTP 重试状态码列表。
+ */
+export const DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES = [408, 429, 500, 502, 503, 504]
+
+/**
  * 测试基座：与 share DTO / V1 默认行一致的完整 GET {@code /api/settings} 响应形状。
  *
  * 仅用于前端测试验证「严格契约字段映射 / 聚合 hydration / 完整聚合 CAS PUT」，
@@ -33,11 +38,11 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       retryBaseDelayMillis: '2000',
       retryMaxDelayMillis: '60000',
       compactionKeepRecentTokens: 20000,
-      compactionFallbackModel: null,
       subagentMaxDepth: 2,
       subagentMaxConcurrency: 10,
       subagentMaxTotalConcurrency: 0,
       subagentMaxTurns: 50,
+      modelHttpRetryStatusCodes: [...DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES],
     },
     environment: {
       maxResourceBytes: DEFAULT_MAX_RESOURCE_BYTES,
@@ -99,6 +104,8 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       canvasMediaProcessTimeoutMillis: '30000',
       thumbnailMaxDimension: 512,
       thumbnailQuality: 80,
+      temporaryResourceTtlSeconds: '259200',
+      temporaryResourceCleanupIntervalSeconds: '1800',
     },
     advanced: {
       resourceMaxBytes: DEFAULT_MAX_RESOURCE_BYTES,
@@ -204,16 +211,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 max: null,
                 options: null,
               },
-              {
-                path: 'aiRuntime.compactionFallbackModel',
-                labelKey: 'settings.field.aiRuntime.compactionFallbackModel',
-                hintKey: 'settings.field.aiRuntime.compactionFallbackModel.hint',
-                type: 'MODEL_SELECTION',
-                nullable: true,
-                min: null,
-                max: null,
-                options: null,
-              },
             ],
           },
           {
@@ -261,6 +258,25 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 nullable: false,
                 min: 1,
                 max: null,
+                options: null,
+              },
+            ],
+          },
+          {
+            key: 'aiRuntime.httpErrors',
+            labelKey: 'settings.section.aiRuntime.httpErrors.title',
+            descriptionKey: 'settings.section.aiRuntime.httpErrors.description',
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
+            fields: [
+              {
+                path: 'aiRuntime.modelHttpRetryStatusCodes',
+                labelKey: 'settings.field.aiRuntime.modelHttpRetryStatusCodes',
+                hintKey: 'settings.field.aiRuntime.modelHttpRetryStatusCodes.hint',
+                type: 'INTEGER_LIST',
+                nullable: false,
+                min: 400,
+                max: 599,
                 options: null,
               },
             ],
@@ -823,8 +839,8 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'storageMedia.upload',
             labelKey: 'settings.section.storageMedia.upload.title',
             descriptionKey: 'settings.section.storageMedia.upload.description',
-            restartRequired: true,
-            applyTiming: null,
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'storageMedia.uploadExpiresSeconds',
@@ -893,6 +909,36 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 nullable: false,
                 min: 1,
                 max: 100,
+                options: null,
+              },
+            ],
+          },
+          {
+            key: 'storageMedia.temporaryResource',
+            labelKey: 'settings.section.storageMedia.temporaryResource.title',
+            descriptionKey: 'settings.section.storageMedia.temporaryResource.description',
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
+            fields: [
+              {
+                path: 'storageMedia.temporaryResourceTtlSeconds',
+                labelKey: 'settings.field.storageMedia.temporaryResourceTtlSeconds',
+                hintKey: 'settings.field.storageMedia.temporaryResourceTtlSeconds.hint',
+                type: 'LONG',
+                nullable: false,
+                min: 1,
+                max: null,
+                options: null,
+              },
+              {
+                path: 'storageMedia.temporaryResourceCleanupIntervalSeconds',
+                labelKey: 'settings.field.storageMedia.temporaryResourceCleanupIntervalSeconds',
+                hintKey:
+                  'settings.field.storageMedia.temporaryResourceCleanupIntervalSeconds.hint',
+                type: 'LONG',
+                nullable: false,
+                min: 1,
+                max: null,
                 options: null,
               },
             ],

@@ -13,10 +13,8 @@ import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
@@ -141,13 +139,8 @@ class ModelRequestMaterializerTest {
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
     CompactionStart completed =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("kept summary", null)));
     entries.add(
@@ -171,20 +164,24 @@ class ModelRequestMaterializerTest {
     ProviderRequest request =
         MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
 
-    assertEquals(4, request.messages().size());
+    assertEquals(5, request.messages().size());
     assertEquals("Test system instruction.", request.systemInstruction());
     assertEquals(
         CompactionPrompts.compactedContext("kept summary"), textOf(request.messages().get(0)));
-    assertEquals("old-reply", textOf(request.messages().get(1)));
-    assertEquals("kept-user", textOf(request.messages().get(2)));
-    assertEquals("latest-user", textOf(request.messages().get(3)));
+    assertEquals(agentText(GoalMessages.backgroundCleared()), textOf(request.messages().get(1)));
+    assertEquals("old-reply", textOf(request.messages().get(2)));
+    assertEquals("kept-user", textOf(request.messages().get(3)));
+    assertEquals("latest-user", textOf(request.messages().get(4)));
   }
 
-  /** 测试意图：压缩把原始 Goal 输入消息切掉后，当前 Goal 原文作为有界 USER 级背景紧邻摘要插入，且不进入 systemInstruction。 */
+  /**
+   * 测试意图：压缩冻结边界的 Goal 作为有界 USER 级背景紧邻摘要插入（派生自 COMPACTION TURN_START 冻结 settings），不进
+   * systemInstruction。
+   */
   @Test
-  void compactionInjectsGoalBackgroundWhenGoalInputWasCut() {
+  void compactionInjectsFrozenGoalBackground() {
     ProviderRequest request =
-        MATERIALIZER.materialize(goalHistoryPath(true), liveSpec(bashBinding()));
+        MATERIALIZER.materialize(goalHistoryPath(true, false), liveSpec(bashBinding()));
 
     assertEquals("Test system instruction.", request.systemInstruction());
     assertEquals(
@@ -194,50 +191,45 @@ class ModelRequestMaterializerTest {
     assertTrue(textOf(request.messages().get(1)).contains("ship it"));
   }
 
-  /** 测试意图：Goal 输入消息仍在真实近期消息中时不重复插入背景；清除后的输入消息被切掉时背景说明当前无用户设定 Goal。 */
+  /** 测试意图：背景逐字来自冻结快照，不因 Goal 输入消息仍在近期消息中而跳过或去重；后续变更由真实输入消息自身携带。 */
   @Test
-  void compactionBackgroundNeverDuplicatesRetainedGoalInputAndStatesClearedGoal() {
+  void compactionSeedsFrozenGoalBackgroundRegardlessOfRetainedInput() {
     ProviderRequest retained =
-        MATERIALIZER.materialize(goalHistoryPath(false), liveSpec(bashBinding()));
-    assertEquals(agentText(GoalMessages.inputSet("ship it")), textOf(retained.messages().get(1)));
-    assertTrue(
-        retained.messages().stream()
-            .noneMatch(
-                message -> textOf(message).contains("Background for the compacted history")));
+        MATERIALIZER.materialize(goalHistoryPath(false, false), liveSpec(bashBinding()));
 
+    assertEquals(
+        agentText(GoalMessages.backgroundSet("ship it")), textOf(retained.messages().get(1)));
+    assertEquals(agentText(GoalMessages.inputSet("ship it")), textOf(retained.messages().get(2)));
+  }
+
+  /** 测试意图：压缩边界没有生效 Goal 时只陈述该事实，绝不复活更早的目标，也不声称发生过清除。 */
+  @Test
+  void compactionAfterClearStatesNoActiveGoalWithoutReviving() {
     ProviderRequest cleared =
         MATERIALIZER.materialize(goalHistoryPath(true, true), liveSpec(bashBinding()));
+
     assertEquals(agentText(GoalMessages.backgroundCleared()), textOf(cleared.messages().get(1)));
+    assertTrue(textOf(cleared.messages().get(1)).contains("No active user-set goal."));
     assertTrue(
         cleared.messages().stream().noneMatch(message -> textOf(message).contains("ship it")));
   }
 
+  /** 测试意图：压缩边界冻结 Goal 后，后续真实清除输入不得改写已冻结背景（共享前缀逐消息相等），且清除以显式输入消息出现在真实近期消息末尾。 */
   @Test
-  void compactionRequestRebuildsTheSameSummaryPromptFromEntryIds() {
-    EntryPath history = conversationPath(2);
-    CompactionStart compaction =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
-    List<Entry> entries = new ArrayList<>(history.entries());
-    entries.add(
-        entry(id(10L), history.head().id(), resolvedStart(TurnStartReason.COMPACTION, compaction)));
-    EntryPath path = new EntryPath(entries);
-    CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
-    ModelRequestSpec spec = compactionSpec();
+  void clearAfterCompactionKeepsSharedPrefixAndEndsWithExplicitInput() {
+    ProviderRequest before =
+        MATERIALIZER.materialize(goalHistoryPath(true, false), liveSpec(bashBinding()));
+    ProviderRequest after =
+        MATERIALIZER.materialize(goalThenClearAfterCompactionPath(), liveSpec(bashBinding()));
 
-    ProviderRequest request = MATERIALIZER.materialize(path, spec);
-
-    assertEquals(1, request.messages().size());
-    assertEquals(CompactionPrompts.summarizationSystemPrompt(), request.systemInstruction());
+    for (int i = 0; i < before.messages().size(); i++) {
+      assertEquals(textOf(before.messages().get(i)), textOf(after.messages().get(i)));
+    }
+    assertEquals(before.messages().size() + 2, after.messages().size());
     assertEquals(
-        CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary()),
-        textOf(request.messages().get(0)));
-    assertTrue(request.tools().isEmpty());
+        agentText(GoalMessages.inputCleared()),
+        textOf(after.messages().get(after.messages().size() - 2)));
+    assertEquals("cleared reply", textOf(after.messages().get(after.messages().size() - 1)));
   }
 
   @Test
@@ -278,13 +270,8 @@ class ModelRequestMaterializerTest {
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
 
     CompactionStart completed =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(4L),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("summary", null)));
     entries.add(
@@ -302,28 +289,32 @@ class ModelRequestMaterializerTest {
 
     // 结构：
     // 0: summary (USER wrapper, null replay)
-    // 1: old assistant (retained old tail: replay 必须被压制为 null)
-    // 2: new user (null replay)
-    // 3: new assistant (post-compaction new tail: replay 必须保留)
-    assertEquals(4, request.messages().size());
+    // 1: frozen compaction-boundary Goal background (USER, null replay)
+    // 2: old assistant (retained old tail: replay 必须被压制为 null)
+    // 3: new user (null replay)
+    // 4: new assistant (post-compaction new tail: replay 必须保留)
+    assertEquals(5, request.messages().size());
     assertEquals("Test system instruction.", request.systemInstruction());
 
     assertEquals(CompactionPrompts.compactedContext("summary"), textOf(request.messages().get(0)));
     assertFalse(request.messages().get(0).hasReplayState());
 
-    assertEquals("old assistant", textOf(request.messages().get(1)));
+    assertEquals(agentText(GoalMessages.backgroundCleared()), textOf(request.messages().get(1)));
+    assertFalse(request.messages().get(1).hasReplayState());
+
+    assertEquals("old assistant", textOf(request.messages().get(2)));
     assertFalse(
-        request.messages().get(1).hasReplayState(),
+        request.messages().get(2).hasReplayState(),
         "retained old tail assistant entry's replay state must be suppressed");
 
-    assertEquals("new user", textOf(request.messages().get(2)));
-    assertFalse(request.messages().get(2).hasReplayState());
+    assertEquals("new user", textOf(request.messages().get(3)));
+    assertFalse(request.messages().get(3).hasReplayState());
 
-    assertEquals("new assistant", textOf(request.messages().get(3)));
+    assertEquals("new assistant", textOf(request.messages().get(4)));
     assertTrue(
-        request.messages().get(3).hasReplayState(),
+        request.messages().get(4).hasReplayState(),
         "post-compaction assistant entry's replay state must be preserved");
-    assertEquals(newReplayState, request.messages().get(3).replayState());
+    assertEquals(newReplayState, request.messages().get(4).replayState());
   }
 
   /**
@@ -467,73 +458,55 @@ class ModelRequestMaterializerTest {
         ProviderCacheControl.none());
   }
 
-  private static ModelRequestSpec compactionSpec() {
-    return new ModelRequestSpec(
-        ProviderType.OPENAI,
-        new UUID(0L, 1L),
-        descriptor(),
-        variant(),
-        1024,
-        "Test system instruction.",
-        List.of(),
-        List.of(),
-        ProviderCacheControl.none());
-  }
-
   /**
-   * Goal 路径：ROOT(无 Goal) -> INPUT(设置 Goal) + 冻结 Goal USER 消息 -> assistant -> TURN_END -> [可选清除
-   * turn] -> COMPACTION。{@code cutGoalInput} 为 true 时保留区间从 Goal 输入消息之后开始（消息被切掉）。
+   * Goal 路径：ROOT(无 Goal) -> INPUT(设置 Goal，TURN_START 冻结 settings 含 Goal) + 冻结 Goal USER 消息 ->
+   * assistant -> TURN_END -> [可选清除 turn] -> COMPACTION（TURN_START 冻结其自身 settings 中的
+   * Goal，是背景的唯一来源）。{@code cutGoalInput} 为 true 时保留区间从 Goal 输入消息之后开始（消息被切掉）。
    */
-  private static EntryPath goalHistoryPath(boolean cutGoalInput) {
-    return goalHistoryPath(cutGoalInput, false);
-  }
-
   private static EntryPath goalHistoryPath(boolean cutGoalInput, boolean cleared) {
     List<Entry> entries = new ArrayList<>();
+    BranchSettings goalSettings = goalSettings("ship it");
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
     entries.add(
         entry(
             2,
             1,
-            new TurnStartPayload(
-                TurnStartReason.INPUT, goalSettings("ship it"), OWNER, 4096, 1024, null)));
+            new TurnStartPayload(TurnStartReason.INPUT, goalSettings, OWNER, 4096, 1024, null)));
     entries.add(entry(3, 2, new MessagePayload(GoalMessages.inputSet("ship it"), null, null)));
     entries.add(entry(4, 3, assistant("first reply")));
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
     long cutId = cutGoalInput ? 4L : 3L;
     long compactionTurnStart = 6L;
+    BranchSettings boundarySettings = goalSettings;
     UUID parent = id(5L);
     if (cleared) {
+      BranchSettings clearedSettings = SETTINGS.withGoal(null);
       entries.add(
           entry(
               6,
               5,
               new TurnStartPayload(
-                  TurnStartReason.INPUT, SETTINGS.withGoal(null), OWNER, 4096, 1024, null)));
+                  TurnStartReason.INPUT, clearedSettings, OWNER, 4096, 1024, null)));
       entries.add(entry(7, 6, new MessagePayload(GoalMessages.inputCleared(), null, null)));
       entries.add(entry(8, 7, assistant("cleared reply")));
       entries.add(
           entry(9, 8, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
-      // 清除后的输入消息同样必须已被切掉，背景才会说明当前无 Goal。
+      // 清除后的输入消息同样已被切掉；压缩边界冻结的是无 Goal 的设置。
       cutId = 8L;
       parent = id(9L);
       compactionTurnStart = 10L;
+      boundarySettings = clearedSettings;
     }
     CompactionStart compaction =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            SETTINGS.model(),
-            id(cutId),
-            null,
-            null);
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(cutId), null, null);
     entries.add(
         entry(
             id(compactionTurnStart),
             parent,
             new TurnStartPayload(
-                TurnStartReason.COMPACTION, SETTINGS, OWNER, 4096, 1024, compaction)));
+                TurnStartReason.COMPACTION, boundarySettings, OWNER, 4096, 1024, compaction)));
     entries.add(
         entry(
             id(compactionTurnStart + 1),
@@ -545,6 +518,27 @@ class ModelRequestMaterializerTest {
             id(compactionTurnStart + 1),
             new TurnEndPayload(
                 id(compactionTurnStart), TurnEndOutcome.COMPLETED, false, null, null)));
+    return new EntryPath(entries);
+  }
+
+  /** 在压缩边界冻结 Goal 的路径之后追加一个真实清除 turn：压缩（及其冻结 Goal 背景）不变，清除以显式 USER 输入消息出现在真实近期消息末尾。 */
+  private static EntryPath goalThenClearAfterCompactionPath() {
+    List<Entry> entries = new ArrayList<>(goalHistoryPath(true, false).entries());
+    UUID parent = entries.get(entries.size() - 1).id();
+    entries.add(
+        entry(
+            id(20L),
+            parent,
+            new TurnStartPayload(
+                TurnStartReason.INPUT, SETTINGS.withGoal(null), OWNER, 4096, 1024, null)));
+    entries.add(
+        entry(id(21L), id(20L), new MessagePayload(GoalMessages.inputCleared(), null, null)));
+    entries.add(entry(id(22L), id(21L), assistant("cleared reply")));
+    entries.add(
+        entry(
+            id(23L),
+            id(22L),
+            new TurnEndPayload(id(20L), TurnEndOutcome.COMPLETED, false, null, null)));
     return new EntryPath(entries);
   }
 

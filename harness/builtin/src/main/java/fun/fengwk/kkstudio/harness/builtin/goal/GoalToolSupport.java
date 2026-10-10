@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
@@ -94,12 +96,18 @@ final class GoalToolSupport {
     return ToolOutcome.withoutEffects(successResult(call.id(), text));
   }
 
+  /** Goal 工具的一切拒绝都是派发前确定性结果：只声明未执行与下一步，绝不伪造进度或回声原始参数。 */
   static ToolOutcome error(ToolCall call, RuntimeException error) {
     String message = error.getMessage();
+    String whatFailed =
+        message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
     ToolResult errorResult =
         ToolResult.error(
             call.id(),
-            message == null || message.isBlank() ? error.getClass().getSimpleName() : message);
+            ToolErrorGuidance.message(
+                whatFailed,
+                ExecutionFact.NOT_EXECUTED,
+                "Review the reported condition, then call the tool again"));
     return ToolOutcome.withoutEffects(errorResult);
   }
 

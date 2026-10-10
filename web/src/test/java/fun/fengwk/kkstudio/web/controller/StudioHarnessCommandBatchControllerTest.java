@@ -27,7 +27,11 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -76,6 +80,7 @@ class StudioHarnessCommandBatchControllerTest {
                 HarnessRuntimeTestFixtures.rootEntry(),
                 HarnessRuntimeTestFixtures.thread(UUID.fromString(THREAD_ID)),
                 List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
+                false,
                 false));
     when(runtime.getThreadSnapshot(any())).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
   }
@@ -105,7 +110,8 @@ class StudioHarnessCommandBatchControllerTest {
                 HarnessRuntimeTestFixtures.rootEntry(),
                 HarnessRuntimeTestFixtures.thread(UUID.fromString(THREAD_ID)),
                 List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
-                true));
+                true,
+                false));
     mockMvc
         .perform(
             post("/api/harness/command-batches")
@@ -602,6 +608,83 @@ class StudioHarnessCommandBatchControllerTest {
     verify(acceptanceService).accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
 
+  @Test
+  void rejectsSessionForkWhenSourceThreadSessionHostsChildThreads() throws Exception {
+    // 测试意图：NEW_FORKED_SESSION 的来源 Thread 所属会话必须只承载执行根；一旦存在带父关系的 child Thread 一律 409，
+    // 且不触达 acceptance service。
+    UUID sourceThreadId = UUID.fromString(ENTRY_ID);
+    when(runtime.getThreadSnapshot(sourceThreadId)).thenReturn(sessionForkSnapshot(sourceThreadId));
+    when(runtime.listThreadsBySession(UUID.fromString(SESSION_ID)))
+        .thenReturn(
+            List.of(
+                HarnessRuntimeTestFixtures.thread(
+                    UUID.fromString(THREAD_ID),
+                    UUID.fromString(ENTRY_ID),
+                    ThreadExecutionControl.RUNNABLE,
+                    UUID.fromString(ENTRY_ID))));
+
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(batch(newForkedSessionTarget())))
+        .andExpect(status().isConflict());
+
+    verify(acceptanceService, never())
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+  }
+
+  @Test
+  void acceptsSessionForkFromSourceThreadSessionHostingOnlyRootThreads() throws Exception {
+    // 测试意图：来源会话只承载执行根时，NEW_FORKED_SESSION 合法且正常 202 接受。
+    UUID sourceThreadId = UUID.fromString(ENTRY_ID);
+    when(runtime.getThreadSnapshot(sourceThreadId)).thenReturn(sessionForkSnapshot(sourceThreadId));
+    when(runtime.listThreadsBySession(UUID.fromString(SESSION_ID)))
+        .thenReturn(
+            List.of(
+                HarnessRuntimeTestFixtures.thread(
+                    UUID.fromString(THREAD_ID),
+                    null,
+                    ThreadExecutionControl.RUNNABLE,
+                    UUID.fromString(ENTRY_ID))));
+
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(batch(newForkedSessionTarget())))
+        .andExpect(status().isAccepted());
+
+    verify(acceptanceService).accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+  }
+
+  /** 来源 Thread 快照：sessionId 固定为 {@link #SESSION_ID}，只用于 guard 解析来源会话。 */
+  private static ThreadSnapshot sessionForkSnapshot(UUID sourceThreadId) {
+    ThreadState thread =
+        new ThreadState(
+            sourceThreadId,
+            UUID.fromString(SESSION_ID),
+            null,
+            UUID.fromString(ENTRY_ID),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "thread",
+            ThreadYoloPolicy.root(true),
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            4,
+            3,
+            HarnessRuntimeTestFixtures.NOW,
+            HarnessRuntimeTestFixtures.NOW);
+    return new ThreadSnapshot(
+        thread,
+        new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry())),
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of());
+  }
+
   private static String batch(String target) {
     return batchWithCommands(
         target,
@@ -648,6 +731,20 @@ class StudioHarnessCommandBatchControllerTest {
         }
         """
         .formatted(SESSION_ID, THREAD_ID, rootSettings());
+  }
+
+  private static String newForkedSessionTarget() {
+    return """
+        {
+          "type":"NEW_FORKED_SESSION",
+          "sourceThreadId":"%s",
+          "startEntryId":"%s",
+          "sessionId":"%s",
+          "threadId":"%s",
+          "yoloEnabled":false
+        }
+        """
+        .formatted(ENTRY_ID, ENTRY_ID, SESSION_ID, THREAD_ID);
   }
 
   private static String newThreadTarget() {

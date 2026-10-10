@@ -26,7 +26,7 @@ class ModelInvocationErrorJsonCodecTest {
 
   private final ModelInvocationErrorJsonCodec codec = new ModelInvocationErrorJsonCodec();
 
-  /** 规范的 error snapshot 仅含两个 deterministic 字段,且 round-trip 完全不变。 */
+  /** 规范的 error snapshot 含三个 deterministic 字段，且 round-trip 完全不变。 */
   @Test
   void roundTripsCanonicalErrorSnapshot() {
     ModelInvocationError error =
@@ -36,6 +36,17 @@ class ModelInvocationErrorJsonCodecTest {
     assertEquals(expected, codec.encode(error));
     assertEquals(error, codec.decode(expected));
     assertEquals(error, codec.decodeNode(codec.encodeNode(error)));
+  }
+
+  /** HTTP 状态元数据必须结构化 round-trip，包含非预期 3xx 与可配置 4xx/5xx。 */
+  @Test
+  void roundTripsHttpStatusMetadata() {
+    for (int status : new int[] {301, 401, 402, 408, 429, 500, 503, 599}) {
+      ModelInvocationError error =
+          new ModelInvocationError(ProviderErrorKind.TRANSIENT, "http", status);
+      assertEquals(error, codec.decode(codec.encode(error)));
+      assertEquals(status, codec.decode(codec.encode(error)).httpStatus(), "status " + status);
+    }
   }
 
   /** 所有 Provider error 分类在持久化 JSON boundary 上都必须保持显式。 */
@@ -63,13 +74,22 @@ class ModelInvocationErrorJsonCodecTest {
     ObjectNode unknown = canonicalNode().put("extra", true);
     ObjectNode missing = canonicalNode();
     missing.remove("message");
+    ObjectNode missingHttpStatus = canonicalNode();
+    missingHttpStatus.remove("httpStatus");
     ObjectNode wrongKind = canonicalNode().put("kind", 1);
     ObjectNode wrongMessage = canonicalNode().put("message", false);
+    ObjectNode wrongHttpStatus = canonicalNode().put("httpStatus", "429");
+    ObjectNode fractionalHttpStatus = canonicalNode().put("httpStatus", 429.5);
+    ObjectNode outOfRangeHttpStatus = canonicalNode().put("httpStatus", 600);
 
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(unknown));
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missing));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missingHttpStatus));
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(wrongKind));
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(wrongMessage));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(wrongHttpStatus));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(fractionalHttpStatus));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(outOfRangeHttpStatus));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decodeNode(canonicalNode().put("kind", "NETWORK")));

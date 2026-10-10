@@ -372,8 +372,7 @@ public final class HarnessRuntimeResponseMapper {
     HarnessThreadCompactResultDTO dto = new HarnessThreadCompactResultDTO();
     dto.setThread(toThreadDto(currentSnapshot));
     dto.setTurnStartEntryId(result.turnStartEntryId().toString());
-    dto.setModelInvocationId(
-        result.modelInvocationId() == null ? null : result.modelInvocationId().toString());
+    dto.setChildThreadId(result.childThreadId() == null ? null : result.childThreadId().toString());
     return dto;
   }
 

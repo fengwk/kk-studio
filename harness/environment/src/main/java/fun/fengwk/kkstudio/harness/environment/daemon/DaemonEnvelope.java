@@ -42,7 +42,9 @@ public record DaemonEnvelope(
           DaemonMessageType.RESOURCE_UPLOAD_TICKET,
           DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
           DaemonMessageType.SHELL_COMMAND,
-          DaemonMessageType.SHELL_EVENT);
+          DaemonMessageType.SHELL_EVENT,
+          DaemonMessageType.UPDATE,
+          DaemonMessageType.UPDATE_RESULT);
 
   private static final Set<DaemonMessageType> INVOCATION_MESSAGES =
       Set.of(

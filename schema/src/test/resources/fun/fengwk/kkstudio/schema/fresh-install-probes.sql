@@ -69,6 +69,34 @@ insert into agent_model (provider_name, name, model_id, config)
 insert into agent_definition (name, model_provider_name, model_name, config)
     values ('designer', 'fixture', 'fixture', '{}'), ('reviewer', 'fixture', 'fixture', '{}');
 
+-- Catalog ownership and explicit unconfigured built-in models are database facts.
+select pg_temp.assert_true('user agent is the default ownership',
+    (select type = 'USER' from agent_definition where name = 'designer'));
+insert into agent_definition (name, type, config)
+    values ('probe-builtin', 'BUILTIN', '{}');
+select pg_temp.assert_true('built-in agent accepts an unconfigured model',
+    (select model_provider_name is null and model_name is null and variant is null
+        from agent_definition where name = 'probe-builtin'));
+select pg_temp.rejects('unknown agent ownership is rejected',
+    $$insert into agent_definition(name,type,model_provider_name,model_name,config)
+      values('probe-unknown','ROOT','fixture','fixture','{}')$$,
+    '23514', 'ck_agent_definition_type');
+select pg_temp.rejects('agent model pair rejects provider only',
+    $$insert into agent_definition(name,type,model_provider_name,config)
+      values('probe-provider','BUILTIN','fixture','{}')$$,
+    '23514', 'ck_agent_definition_model_pair');
+select pg_temp.rejects('agent model pair rejects model only',
+    $$insert into agent_definition(name,type,model_name,config)
+      values('probe-model','BUILTIN','fixture','{}')$$,
+    '23514', 'ck_agent_definition_model_pair');
+select pg_temp.rejects('agent variant requires a model',
+    $$insert into agent_definition(name,type,variant,config)
+      values('probe-variant','BUILTIN','default','{}')$$,
+    '23514', 'ck_agent_definition_variant_requires_model');
+select pg_temp.rejects('user agent requires a model',
+    $$insert into agent_definition(name,type,config) values('probe-user','USER','{}')$$,
+    '23514', 'ck_agent_definition_user_requires_model');
+
 insert into project (id, title, description, workflow) values
     (pg_temp.uid(1), 'one', '',
         '{"states":[{"state":"INIT","name":"start","next":["WORK"]},'
@@ -99,6 +127,12 @@ insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,
     (pg_temp.uid(205), pg_temp.uid(100), pg_temp.uid(200), 'MESSAGE',
         '{"message":{"role":"ASSISTANT"}}', now()),
     (pg_temp.uid(206), pg_temp.uid(100), pg_temp.uid(205), 'TURN_END', '{}', now());
+insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)
+    values (pg_temp.uid(9700), pg_temp.uid(100), pg_temp.uid(206), 'FORK',
+        '{"mode":"BRANCH","sourceEntryId":"00000000-0000-0000-0000-0000000000ce","sourceThreadId":null}',
+        now());
+select pg_temp.assert_true('fork entry is an accepted history fact',
+    (select entry_type = 'FORK' from harness_entry where id = pg_temp.uid(9700)));
 insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
     yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
     (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', 'ENABLE', null, 'RUNNABLE', 0, 1, 0, now(), now()),
@@ -807,13 +841,16 @@ insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, 
 select pg_temp.assert_true('a pending join and a matched delivered join both persist',
     (select count(*) = 2 from harness_thread_join
         where invocation_id in (pg_temp.uid(1500), pg_temp.uid(1501))));
-select pg_temp.assert_true('join child and parent lookup indexes exist',
+select pg_temp.assert_true('join child and parent lookup indexes only cover live pending joins',
     exists(select 1 from pg_indexes where schemaname = 'public'
         and tablename = 'harness_thread_join'
-        and indexname = 'idx_harness_thread_join_child_pending')
+        and indexname = 'idx_harness_thread_join_child_pending'
+        and strpos(indexdef, 'superseded_by_invocation_id IS NULL') > 0)
     and exists(select 1 from pg_indexes where schemaname = 'public'
         and tablename = 'harness_thread_join'
-        and indexname = 'idx_harness_thread_join_parent_pending'));
+        and indexname = 'idx_harness_thread_join_parent_pending'
+        and strpos(indexdef, '(purpose)::text = ''task''::text') > 0
+        and strpos(indexdef, 'superseded_by_invocation_id IS NULL') > 0));
 select pg_temp.assert_true('execution_control is required and has no default',
     (select is_nullable = 'NO' and column_default is null from information_schema.columns
         where table_name = 'harness_thread' and column_name = 'execution_control'));
@@ -882,6 +919,90 @@ select pg_temp.rejects('one durable identifier owns each join row',
         source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at)
       values(pg_temp.uid(1500),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,now(),now())$$,
     '23505', 'harness_thread_join_pkey');
+select pg_temp.assert_true('a join defaults to the task purpose',
+    (select purpose = 'task' from harness_thread_join where invocation_id = pg_temp.uid(1500)));
+select pg_temp.rejects('an unknown join purpose is rejected',
+    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
+        source_command_sequence,agent,purpose,max_turns,reminder_turn,created_at,updated_at)
+      values(pg_temp.uid(1510),repeat('7',64),null,pg_temp.uid(310),1,'designer','other',10,0,now(),now())$$,
+    '23514', 'ck_harness_thread_join_purpose');
+select pg_temp.rejects('a join cannot supersede itself',
+    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
+        source_command_sequence,agent,max_turns,reminder_turn,superseded_by_invocation_id,
+        created_at,updated_at)
+      values(pg_temp.uid(1511),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,
+        pg_temp.uid(1511),now(),now())$$,
+    '23514', 'ck_harness_thread_join_superseded');
+select pg_temp.rejects('a matched join cannot be superseded',
+    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
+        source_command_sequence,agent,max_turns,reminder_turn,terminal_entry_id,
+        superseded_by_invocation_id,created_at,updated_at)
+      values(pg_temp.uid(1512),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,'designer',10,0,
+        pg_temp.uid(202),pg_temp.uid(1500),now(),now())$$,
+    '23514', 'ck_harness_thread_join_superseded');
+
+-- ---------------------------------------------------------------------------
+-- Storage/Skills/Environment-update baseline changes: removed persisted upload
+-- expiry, encrypted skill token envelope, and managed update admission.
+-- ---------------------------------------------------------------------------
+select pg_temp.assert_true('default HTTP retry list matches the runtime policy',
+    (select config->'aiRuntime'->'modelHttpRetryStatusCodes' = '[408,429,500,502,503,504]'::jsonb
+        from system_setting where id = 1));
+select pg_temp.assert_true('temporary resource defaults are three days and thirty minutes',
+    (select (config->'storageMedia'->>'temporaryResourceTtlSeconds')::bigint = 259200
+        and (config->'storageMedia'->>'temporaryResourceCleanupIntervalSeconds')::bigint = 1800
+        from system_setting where id = 1));
+select pg_temp.assert_true('storage_upload no longer persists an expiry fact',
+    not exists(select 1 from information_schema.columns
+        where table_name = 'storage_upload' and column_name = 'expires_at')
+    and not exists(select 1 from pg_constraint c
+        where c.conrelid = 'storage_upload'::regclass and c.conname = 'ck_storage_upload_expiry')
+    and exists(select 1 from pg_indexes where schemaname = 'public'
+        and indexname = 'idx_storage_upload_cleanup_claim'
+        and strpos(indexdef, 'created_at') > 0));
+select pg_temp.assert_true('skill_package stores an optional encrypted token envelope',
+    exists(select 1 from information_schema.columns
+        where table_name = 'skill_package' and column_name = 'encrypted_token'
+        and data_type = 'bytea' and is_nullable = 'YES'));
+select pg_temp.rejects('an empty encrypted token envelope is rejected',
+    $$insert into skill_package(package_name,repository_url,branch,current_commit,encrypted_token)
+      values('probe-pkg','https://example.invalid/repo.git','main',repeat('a',40),''::bytea)$$,
+    '23514', 'ck_skill_package_encrypted_token');
+select pg_temp.assert_true('environment update activity is uniquely indexed per environment',
+    exists(select 1 from pg_indexes where schemaname = 'public'
+        and indexname = 'uk_environment_update_active'
+        and strpos(indexdef, 'PENDING') > 0
+        and strpos(indexdef, 'PREPARED') > 0
+        and strpos(indexdef, 'SUCCEEDED') = 0));
+insert into environment_update_operation(operation_id,environment_id,target_version,phase)
+    values(pg_temp.uid(1600), pg_temp.uid(9000), '1.0.10', 'PENDING');
+select pg_temp.rejects('an unknown environment update phase is rejected',
+    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
+      values(pg_temp.uid(1601),pg_temp.uid(9000),'1.0.10','RUNNINGX')$$,
+    '23514', 'ck_environment_update_operation_phase');
+select pg_temp.rejects('a targeted environment version must be exact',
+    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
+      values(pg_temp.uid(1602),pg_temp.uid(9000),' 1.0.10','PENDING')$$,
+    '23514', 'ck_environment_update_operation_target_version');
+select pg_temp.rejects('a FAILED environment update must carry an error',
+    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
+      values(pg_temp.uid(1603),pg_temp.uid(9000),'1.0.10','FAILED')$$,
+    '23514', 'ck_environment_update_operation_terminal_error');
+select pg_temp.rejects('only one active environment update may exist at a time',
+    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
+      values(pg_temp.uid(1604),pg_temp.uid(9000),'1.0.10','RUNNING')$$,
+    '23505', 'uk_environment_update_active');
+update environment_update_operation set phase = 'FAILED', error = 'boom',
+    updated_at = statement_timestamp() where operation_id = pg_temp.uid(1600);
+select pg_temp.assert_true('a terminal environment update frees the active slot',
+    not exists(select 1 from environment_update_operation
+        where environment_id = pg_temp.uid(9000)
+        and phase in ('PENDING','RUNNING','PREPARED')));
+insert into environment_update_operation(operation_id,environment_id,target_version,phase)
+    values(pg_temp.uid(1605), pg_temp.uid(9000), '1.0.10', 'PENDING');
+select pg_temp.assert_true('a later active operation is admitted after the terminal history',
+    exists(select 1 from environment_update_operation
+        where operation_id = pg_temp.uid(1605) and phase = 'PENDING'));
 
 -- ---------------------------------------------------------------------------
 -- Explicit dependency-ordered deletion; no cascade bypasses a reference.

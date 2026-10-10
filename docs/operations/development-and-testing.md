@@ -304,10 +304,17 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。
 这些用例只操作测试 Catalog，不调用真实模型；执行仍需可用的隔离 Backend、数据库与 S3。
 
+Provider 级 `modelHttpRetryStatusCodes` 覆盖由 `crud.provider.http_retry_override` 固定：请求省略该字段保留原值，
+显式 `null` 清除覆盖（继承系统 `aiRuntime.modelHttpRetryStatusCodes` 名单），空数组 `[]` 表示该 Provider 不自动重试
+任何 HTTP 错误，非空数组完全替代系统名单（400–599）。
+内置 Agent 目录身份由 `crud.agent.builtin_identity` 固定：保留名称 `compaction`、类型 `BUILTIN`（用户创建为 `USER`），
+`type` 不在可编辑请求体内（携带即按未知字段拒绝），内置身份不可删除；内核压缩执行路径按该名称经普通 Agent 目录读取定义，
+模型可显式未配置。
+
 异步 `task` 的工具结果只表示已接受；完成结果由 Runtime 在子 Thread 到达收敛终态边界结算 join 后，
 作为父 Thread 的一条 `NOTIFICATION`（`NotificationKind.SUBAGENT_RESULT`）命令交付——wire 是系统通知
 而不是用户输入，其消息正文为 `<subagent_result thread_id agent state>`；父为 `STOPPED` 时通知只
-固化进历史、不唤醒模型。`real.task_delegation` 分别验证 JSON 受理收据与同一子 Thread 的完成通知，
+固化进历史、不唤醒模型。`real.task_delegation` 分别验证可读英文受理收据与同一子 Thread 的完成通知，
 不能将受理当作完成；
 它还断言子 Thread 的不可变执行父关系指回发起方（`HarnessThreadDTO.parentThreadId`），且子 ROOT
 payload 只含 settings、不物化任何委派运行树元数据。
@@ -448,6 +455,12 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   Node 探针与浏览器复用同一
   [framed-link.mjs](../../frontend/src/shared/app-events/framed-link.mjs) 与
   [notification.mjs](../../frontend/src/shared/notification/notification.mjs)，旧 version=1 逻辑帧一律拒绝。
+- `settings.system_contract_cas`：系统设置按固定七段（aiRuntime、…、storageMedia、advanced）严格聚合，
+  未知字段与非法值拒绝，整体 CAS 保存与恢复；`storageMedia` 持有临时资源保留期与扫描间隔
+  （默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）以及上传有效期与下载签名默认值。
+- `branch.same_session_new_thread`（L3，`real,branch`）与前端 fork 用例：同 Session 新建 Thread 从历史边界 fork，
+  `FORK` Entry 只记录 `mode`/切点，会话 fork 把切点上下文复制到新 Session；分支不继承源 Thread 的待处理命令、
+  子执行与 Join 订阅，从新分支向旧子执行添加 Join 因直接父不匹配原子拒绝。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `thread.provider_request_preview_readonly`、`model.attempt_failure_visibility` 依赖 case 内自建的宿主

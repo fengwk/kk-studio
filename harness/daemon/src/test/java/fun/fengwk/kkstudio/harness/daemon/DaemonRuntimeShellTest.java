@@ -78,6 +78,12 @@ class DaemonRuntimeShellTest {
 
   private static final long MAX_RESOURCE_BYTES = 1024L * 1024L;
 
+  /** WELCOME 通告的临时资源保留期；测试用短周期。 */
+  private static final long TEMPORARY_RESOURCE_TTL_SECONDS = 259_200L;
+
+  /** WELCOME 通告的临时资源扫描间隔；测试用短周期。 */
+  private static final long TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS = 1_800L;
+
   private static final EnvironmentId ENVIRONMENT_A =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId ENVIRONMENT_B =
@@ -712,7 +718,13 @@ class DaemonRuntimeShellTest {
         WELCOME,
         environmentId,
         null,
-        "{\"maxResourceBytes\":" + MAX_RESOURCE_BYTES + "}");
+        "{\"maxResourceBytes\":"
+            + MAX_RESOURCE_BYTES
+            + ",\"temporaryResourceTtlSeconds\":"
+            + TEMPORARY_RESOURCE_TTL_SECONDS
+            + ",\"temporaryResourceCleanupIntervalSeconds\":"
+            + TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS
+            + "}");
   }
 
   private DaemonEnvelope shellCommand(EnvironmentId scope, TerminalCommand.Payload payload) {

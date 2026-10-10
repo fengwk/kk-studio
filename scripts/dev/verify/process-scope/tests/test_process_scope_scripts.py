@@ -101,6 +101,7 @@ SELECTED_CLASSES = (
     "DaemonRuntimeTest",
     "DaemonRuntimeShellTest",
     "DaemonTerminalServerIntegrationTest",
+    "OwnerOnlyFilesTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -246,6 +247,16 @@ DAEMON_SHELL_CASES = (
     "concurrentCloseIsIdempotent",
 )
 DAEMON_INTEGRATION_CASES = ("fullShellLifecycleOverRealServerAndPty",)
+POSIX_OWNER_ONLY_CASES = (
+    "ensureOwnerOnlyDirectoryCreatesAndConvergesToOwnerOnly",
+    "createOwnerOnlyFileIsOwnerOnly",
+)
+ACL_OWNER_ONLY_CASES = (
+    "ensureOwnerOnlyDirectoryAppliesOwnerOnlyAcl",
+    "createOwnerOnlyFileAppliesOwnerOnlyAcl",
+    "aclDirectoryKeepsDescendantsOwnerOnly",
+    "ensureOwnerOnlyDirectoryStripsBroadAcl",
+)
 CORE_CLASSES = (
     "ProcessScope",
     "ProcessScopeHelper",
@@ -349,6 +360,8 @@ def write_complete_reports(
             cases = DAEMON_SHELL_CASES + ("someOtherShellCase",)
         elif class_name == "DaemonTerminalServerIntegrationTest":
             cases = DAEMON_INTEGRATION_CASES
+        elif class_name == "OwnerOnlyFilesTest":
+            cases = POSIX_OWNER_ONLY_CASES + ACL_OWNER_ONLY_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -771,6 +784,42 @@ class AssertSurefireReportsTest(unittest.TestCase):
             self.assertIn("void " + case + "(", source, case)
         for forbidden in ("assumeTrue(", "assumeFalse(", "Assumptions.", "@Disabled"):
             self.assertNotIn(forbidden, source, forbidden)
+
+
+    def test_owner_only_cases_are_required_by_platform(self):
+        """权限门禁拒绝漏跑与跳过本平台用例，但允许另一平台的前置条件跳过。"""
+        for os_label, required, inapplicable in (
+            ("ubuntu-latest", POSIX_OWNER_ONLY_CASES, ACL_OWNER_ONLY_CASES),
+            ("macos-latest", POSIX_OWNER_ONLY_CASES, ACL_OWNER_ONLY_CASES),
+            ("windows-latest", ACL_OWNER_ONLY_CASES, POSIX_OWNER_ONLY_CASES),
+        ):
+            for outcome in ("complete", "missing", "skipped", "failed"):
+                with self.subTest(os_label=os_label, outcome=outcome):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        cases = required + inapplicable
+                        skipped_cases = inapplicable
+                        if outcome == "missing":
+                            cases = required[1:] + inapplicable
+                        elif outcome == "skipped":
+                            skipped_cases += (required[0],)
+                        write_surefire_report(
+                            reports,
+                            "OwnerOnlyFilesTest",
+                            cases,
+                            failures=int(outcome == "failed"),
+                            skipped=len(skipped_cases),
+                            skipped_cases=skipped_cases,
+                        )
+                        result = run_script("assert-surefire-reports.py", reports, os_label)
+                        self.assertEqual(
+                            int(outcome != "complete"),
+                            result.returncode,
+                            result.stdout + result.stderr,
+                        )
+                        if outcome in ("missing", "skipped"):
+                            self.assertIn(required[0], result.stdout)
 
 
 class CollectCoverageInputsTest(unittest.TestCase):

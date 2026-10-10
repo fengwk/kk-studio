@@ -49,6 +49,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "chat_session",
           "environment",
           "environment_connection",
+          "environment_update_operation",
           "flyway_schema_history",
           "harness_entry",
           "harness_model_invocation",
@@ -144,6 +145,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumns(
         "agent_definition",
         "name",
+        "type",
         "description",
         "system_prompt",
         "model_provider_name",
@@ -385,6 +387,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "head_checked_at",
         "head_check_error",
         "skills",
+        "encrypted_token",
         "version",
         "create_time",
         "update_time");
@@ -411,7 +414,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "declared_media_type",
         "declared_size",
         "declared_sha256",
-        "expires_at",
         "cleanup_requested_at",
         "cleanup_token",
         "cleanup_until",
@@ -579,9 +581,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("plugin_credential.encrypted_payload"),
+        Set.of("plugin_credential.encrypted_payload", "skill_package.encrypted_token"),
         byteaColumns,
-        "only the encrypted credential envelope may use bytea; file and media content lives outside the database");
+        "only encrypted credential/token envelopes may use bytea; file and media content lives outside the database");
   }
 
   @Test
@@ -632,6 +634,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "environment.updated_at",
             "environment_connection.last_seen_at",
             "environment_connection.lease_until",
+            "environment_update_operation.created_at",
+            "environment_update_operation.updated_at",
             "harness_entry.created_at",
             "harness_model_invocation.created_at",
             "harness_model_invocation.updated_at",
@@ -683,11 +687,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "storage_upload.cleanup_requested_at",
             "storage_upload.cleanup_until",
             "storage_upload.created_at",
-            "storage_upload.expires_at",
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 76 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 77 timestamptz(3) columns");
 
     assertEquals(
         128L,
@@ -878,6 +881,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_canvas_resource_slot",
             "uk_environment_name",
             "uk_environment_registration_token",
+            "uk_environment_update_active",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_model_invocation_result",
@@ -897,7 +901,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate"),
         indexes,
-        "the final schema must expose only its declared 24 domain unique keys");
+        "the final schema must expose only its declared 25 domain unique keys");
 
     Set<String> foreignKeys = new TreeSet<>();
     try (Connection conn = newConnection();
@@ -928,6 +932,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_chat_session_chat",
             "fk_chat_session_session",
             "fk_environment_connection_environment",
+            "fk_environment_update_operation_environment",
             "fk_harness_entry_parent",
             "fk_harness_entry_session",
             "fk_harness_model_invocation_request_head",
@@ -942,6 +947,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_join_final_answer_entry",
             "fk_harness_thread_join_parent_thread",
             "fk_harness_thread_join_source_command",
+            "fk_harness_thread_join_superseded_by",
             "fk_harness_thread_join_terminal_entry",
             "fk_harness_thread_parent",
             "fk_harness_thread_session",
@@ -976,7 +982,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_storage_upload_blob",
             "project_issue_project_id_fkey"),
         foreignKeys,
-        "all 63 declared foreign keys must exist in public schema");
+        "all 65 declared foreign keys must exist in public schema");
   }
 
   @Test
@@ -1044,9 +1050,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "exact set of 36 RESTRICT foreign keys");
 
     assertEquals(
-        Set.of("fk_environment_connection_environment", "fk_mcp_tool_server"),
+        Set.of(
+            "fk_environment_connection_environment",
+            "fk_environment_update_operation_environment",
+            "fk_mcp_tool_server"),
         cascadeFks,
-        "exact set of 2 CASCADE foreign keys");
+        "exact set of 3 CASCADE foreign keys");
 
     assertEquals(
         Set.of(
@@ -1066,6 +1075,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_join_final_answer_entry",
             "fk_harness_thread_join_parent_thread",
             "fk_harness_thread_join_source_command",
+            "fk_harness_thread_join_superseded_by",
             "fk_harness_thread_join_terminal_entry",
             "fk_harness_thread_parent",
             "fk_harness_thread_session",
@@ -1076,7 +1086,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_tool_invocation_assistant",
             "fk_harness_tool_invocation_model"),
         noActionFks,
-        "exact set of 25 NO ACTION foreign keys");
+        "exact set of 26 NO ACTION foreign keys");
   }
 
   @Test
@@ -1286,6 +1296,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "child_thread_id",
         "source_command_sequence",
         "agent",
+        "purpose",
+        "superseded_by_invocation_id",
         "max_turns",
         "reminder_turn",
         "terminal_entry_id",
@@ -1300,6 +1312,148 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "harness_thread_join", "terminal_entry_id");
     assertColumnType("uuid", "harness_thread_join", "final_answer_entry_id");
     assertColumnType("bigint", "harness_thread_join", "delivery_command_sequence");
+    // purpose 缺省为 task 且非空；superseded_by_invocation_id 可空（被取代的未完成 join 才写入）。
+    assertColumnType("character varying", "harness_thread_join", "purpose");
+    assertEquals(
+        "NO",
+        singleString(
+            "select is_nullable from information_schema.columns where table_schema = 'public'"
+                + " and table_name = 'harness_thread_join' and column_name = 'purpose'"));
+    assertTrue(
+        singleString(
+                "select column_default from information_schema.columns where table_schema = 'public'"
+                    + " and table_name = 'harness_thread_join' and column_name = 'purpose'")
+            .contains("'task'"),
+        "purpose must default to task");
+    assertColumnType("uuid", "harness_thread_join", "superseded_by_invocation_id");
+    assertEquals(
+        "YES",
+        singleString(
+            "select is_nullable from information_schema.columns where table_schema = 'public'"
+                + " and table_name = 'harness_thread_join'"
+                + " and column_name = 'superseded_by_invocation_id'"));
+  }
+
+  /**
+   * 测试意图：受管更新表暴露固定的持久契约——唯一 operationId、固定去敏目标版本、五个持久阶段与有界错误；活动唯一性由指向 environment
+   * 的部分唯一索引强制，终态行保留历史且不阻塞下一次更新。
+   */
+  @Test
+  void environmentUpdateOperationExposesTheManagedUpdateContract() throws SQLException {
+    assertColumns(
+        "environment_update_operation",
+        "operation_id",
+        "environment_id",
+        "target_version",
+        "phase",
+        "error",
+        "created_at",
+        "updated_at");
+    assertColumnType("uuid", "environment_update_operation", "operation_id");
+    assertColumnType("uuid", "environment_update_operation", "environment_id");
+    assertColumnType("character varying", "environment_update_operation", "target_version");
+    assertColumnType("character varying", "environment_update_operation", "phase");
+    assertColumnType("character varying", "environment_update_operation", "error");
+    assertColumnType("timestamp with time zone", "environment_update_operation", "created_at");
+    assertColumnType("timestamp with time zone", "environment_update_operation", "updated_at");
+
+    // 活动唯一性只覆盖 PENDING/RUNNING/PREPARED；终态行不参与，因此历史不会阻塞下一次更新。
+    String activeIndex =
+        singleString(
+            "select indexdef from pg_indexes where schemaname = 'public'"
+                + " and indexname = 'uk_environment_update_active'");
+    assertTrue(activeIndex.contains("(environment_id)"), activeIndex);
+    assertTrue(activeIndex.contains("WHERE"), activeIndex);
+    for (String active : List.of("'PENDING'", "'RUNNING'", "'PREPARED'")) {
+      assertTrue(activeIndex.contains(active), () -> "active index must cover " + active);
+    }
+    assertFalse(activeIndex.contains("'SUCCEEDED'"), activeIndex);
+    assertFalse(activeIndex.contains("'FAILED'"), activeIndex);
+
+    UUID environmentId = uuid(940_001L);
+    try (Connection conn = newConnection()) {
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into environment (id, name, registration_token)"
+                  + " values (?, 'update-env', 'update-token')")) {
+        ps.setObject(1, environmentId);
+        ps.executeUpdate();
+      }
+      // 合法 PENDING 行可写入，created_at/updated_at 由默认值填充。
+      insertUpdateOperation(conn, uuid(940_002L), environmentId, "1.0.10", "PENDING", null);
+      // 未知阶段被拒绝。
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_update_operation_phase",
+          () ->
+              insertUpdateOperation(
+                  conn, uuid(940_003L), environmentId, "1.0.10", "RUNNINGX", null));
+      // 目标版本必须去除环绕空白且为合法字符。
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_update_operation_target_version",
+          () ->
+              insertUpdateOperation(
+                  conn, uuid(940_004L), environmentId, " 1.0.10", "PENDING", null));
+      // 错误不得包含控制字符。
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_update_operation_error",
+          () ->
+              insertUpdateOperation(
+                  conn, uuid(940_005L), environmentId, "1.0.10", "FAILED", "bad\u0001error"));
+      // FAILED 必须携带错误说明。
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_update_operation_terminal_error",
+          () ->
+              insertUpdateOperation(conn, uuid(940_006L), environmentId, "1.0.10", "FAILED", null));
+      // updated_at 不得早于 created_at。
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_update_operation_updated",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "insert into environment_update_operation"
+                        + " (operation_id, environment_id, target_version, phase, created_at, updated_at)"
+                        + " values (?, ?, '1.0.10', 'PENDING', current_timestamp,"
+                        + " current_timestamp - interval '1 second')")) {
+              ps.setObject(1, uuid(940_007L));
+              ps.setObject(2, environmentId);
+              ps.executeUpdate();
+            }
+          });
+      // 同一 Environment 的第二条活动操作由部分唯一索引拒绝。
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_environment_update_active",
+          () ->
+              insertUpdateOperation(
+                  conn, uuid(940_008L), environmentId, "1.0.10", "RUNNING", null));
+    }
+  }
+
+  private static void insertUpdateOperation(
+      Connection conn,
+      UUID operationId,
+      UUID environmentId,
+      String targetVersion,
+      String phase,
+      String error)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_update_operation"
+                + " (operation_id, environment_id, target_version, phase, error)"
+                + " values (?, ?, ?, ?, ?)")) {
+      ps.setObject(1, operationId);
+      ps.setObject(2, environmentId);
+      ps.setString(3, targetVersion);
+      ps.setString(4, phase);
+      ps.setString(5, error);
+      ps.executeUpdate();
+    }
   }
 
   /**

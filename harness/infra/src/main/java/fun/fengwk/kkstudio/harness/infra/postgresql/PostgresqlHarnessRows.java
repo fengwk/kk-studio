@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
@@ -148,7 +149,9 @@ final class PostgresqlHarnessRows {
               nullableUuid(resultSet, "final_answer_entry_id"),
               (Long) resultSet.getObject("delivery_command_sequence"),
               instant(resultSet, "created_at"),
-              instant(resultSet, "updated_at"));
+              instant(resultSet, "updated_at"),
+              JoinPurpose.fromWireName(resultSet.getString("purpose")),
+              nullableUuid(resultSet, "superseded_by_invocation_id"));
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;

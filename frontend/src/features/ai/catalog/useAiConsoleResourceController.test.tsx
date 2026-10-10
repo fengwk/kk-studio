@@ -9,6 +9,8 @@ import { queryKeys } from '@/shared/lib/query-keys'
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(async () => []),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/agent-service', () => ({
@@ -557,6 +559,7 @@ function agent() {
     name: 'default-assistant',
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
+    type: 'USER' as const,
     model: 'stub/acceptance-stub',
     variant: 'default',
     config: {

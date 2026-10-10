@@ -39,7 +39,9 @@ class ThreadJoinTest {
         null,
         null,
         T0,
-        T0);
+        T0,
+        JoinPurpose.TASK,
+        null);
   }
 
   @Test
@@ -85,7 +87,9 @@ class ThreadJoinTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
 
     assertEquals(invocationId, rootJoin.invocationId());
     assertNull(rootJoin.parentThreadId());
@@ -118,7 +122,9 @@ class ThreadJoinTest {
             finalAnswer,
             5L,
             T0,
-            T2);
+            T2,
+            JoinPurpose.TASK,
+            null);
 
     assertTrue(delivered.matched());
     assertEquals(resultHead, delivered.terminalEntryId());
@@ -132,13 +138,41 @@ class ThreadJoinTest {
     // 测试意图：验证 agent 字段在长度 1 与最大限制 256 字符时的边界行为。
     ThreadJoin join1 =
         new ThreadJoin(
-            id(1), VALID_HASH, id(2), id(3), 1L, "a", null, 0L, null, null, null, T0, T0);
+            id(1),
+            VALID_HASH,
+            id(2),
+            id(3),
+            1L,
+            "a",
+            null,
+            0L,
+            null,
+            null,
+            null,
+            T0,
+            T0,
+            JoinPurpose.TASK,
+            null);
     assertEquals("a", join1.agent());
 
     String maxLenAgent = "x".repeat(256);
     ThreadJoin join2 =
         new ThreadJoin(
-            id(1), VALID_HASH, id(2), id(3), 1L, maxLenAgent, null, 0L, null, null, null, T0, T0);
+            id(1),
+            VALID_HASH,
+            id(2),
+            id(3),
+            1L,
+            maxLenAgent,
+            null,
+            0L,
+            null,
+            null,
+            null,
+            T0,
+            T0,
+            JoinPurpose.TASK,
+            null);
     assertEquals(maxLenAgent, join2.agent());
   }
 
@@ -148,12 +182,40 @@ class ThreadJoinTest {
     assertDoesNotThrow(
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", null, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                null,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertDoesNotThrow(
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", null, 0L, null, null, null, T0, T1));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                null,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T1,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -163,25 +225,81 @@ class ThreadJoinTest {
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                null, VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, T0, T0));
+                null,
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), null, 1L, "agent", 10, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                null,
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, null, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, T0, null));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                null,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -191,7 +309,21 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), null, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, T0, T0));
+                id(1),
+                null,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -209,7 +341,9 @@ class ThreadJoinTest {
                 null,
                 null,
                 T0,
-                T0));
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -227,7 +361,9 @@ class ThreadJoinTest {
                 null,
                 null,
                 T0,
-                T0));
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -245,7 +381,9 @@ class ThreadJoinTest {
                 null,
                 null,
                 T0,
-                T0));
+                T0,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -269,7 +407,9 @@ class ThreadJoinTest {
                     null,
                     null,
                     T0,
-                    T0));
+                    T0,
+                    JoinPurpose.TASK,
+                    null));
     assertEquals("join parent and child must differ", ex.getMessage());
   }
 
@@ -281,21 +421,63 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 0L, "agent", 10, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                0L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     // sourceCommandSequence = -1
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), -1L, "agent", 10, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                -1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     // reminderTurn = -1
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, -1L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                -1L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -305,19 +487,61 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, null, 10, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                null,
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "", 10, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "   ", 10, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "   ",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -335,7 +559,9 @@ class ThreadJoinTest {
                 null,
                 null,
                 T0,
-                T0));
+                T0,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -345,13 +571,41 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 0, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                0,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", -5, 0L, null, null, null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                -5,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -362,7 +616,21 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, id(4), null, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                id(4),
+                null,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -373,28 +641,84 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, null, id(3), 1L, "agent", null, 0L, id(4), null, 1L, T0, T0));
+                id(1),
+                VALID_HASH,
+                null,
+                id(3),
+                1L,
+                "agent",
+                null,
+                0L,
+                id(4),
+                null,
+                1L,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     // deliveryCommandSequence 非空但尚未匹配（terminalEntryId 为空）
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, 1L, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                1L,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     // deliveryCommandSequence 为 0
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, id(4), null, 0L, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                id(4),
+                null,
+                0L,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
 
     // deliveryCommandSequence 为 -1
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, id(4), null, -1L, T0, T0));
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                id(4),
+                null,
+                -1L,
+                T0,
+                T0,
+                JoinPurpose.TASK,
+                null));
   }
 
   @Test
@@ -417,7 +741,9 @@ class ThreadJoinTest {
                     null,
                     null,
                     T1,
-                    T0));
+                    T0,
+                    JoinPurpose.TASK,
+                    null));
     assertEquals("updatedAt precedes createdAt", ex.getMessage());
   }
 
@@ -539,7 +865,9 @@ class ThreadJoinTest {
             delivered.finalAnswerEntryId(),
             delivered.deliveryCommandSequence(),
             delivered.createdAt(),
-            T3.plusSeconds(1));
+            T3.plusSeconds(1),
+            JoinPurpose.TASK,
+            null);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(delivered, deliveredAdvanceTime));
 
     // 相同状态且 updatedAt 推进
@@ -557,7 +885,9 @@ class ThreadJoinTest {
             initial.finalAnswerEntryId(),
             initial.deliveryCommandSequence(),
             initial.createdAt(),
-            T2);
+            T2,
+            JoinPurpose.TASK,
+            null);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(initial, initialAdvanceTime));
 
     // root ticket（parentThreadId 为 null，maxTurns 为 null）生命周期演进
@@ -575,7 +905,9 @@ class ThreadJoinTest {
             null,
             null,
             T0,
-            T0);
+            T0,
+            JoinPurpose.TASK,
+            null);
     ThreadJoin rootReminded = rootInitial.remind(1L, T1);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(rootInitial, rootReminded));
     ThreadJoin rootMatched = rootReminded.match(id(102), null, T2);
@@ -611,7 +943,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateInvocation));
 
@@ -630,7 +964,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateHash));
 
@@ -649,7 +985,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(old, mutateParentToNull));
@@ -657,7 +995,21 @@ class ThreadJoinTest {
     // parentThreadId 篡改（null -> 非空）
     ThreadJoin rootOld =
         new ThreadJoin(
-            id(10), VALID_HASH, null, id(11), 1L, "agent", null, 0L, null, null, null, T0, T0);
+            id(10),
+            VALID_HASH,
+            null,
+            id(11),
+            1L,
+            "agent",
+            null,
+            0L,
+            null,
+            null,
+            null,
+            T0,
+            T0,
+            JoinPurpose.TASK,
+            null);
     ThreadJoin mutateParentFromNull =
         new ThreadJoin(
             rootOld.invocationId(),
@@ -672,7 +1024,9 @@ class ThreadJoinTest {
             null,
             null,
             rootOld.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(rootOld, mutateParentFromNull));
@@ -692,7 +1046,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateParentDiff));
 
@@ -711,7 +1067,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateChild));
 
@@ -730,7 +1088,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateSeq));
 
@@ -749,7 +1109,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateAgent));
 
@@ -768,7 +1130,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(old, mutateMaxTurnsToNull));
@@ -788,7 +1152,9 @@ class ThreadJoinTest {
             null,
             null,
             rootOld.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(rootOld, mutateMaxTurnsFromNull));
@@ -808,7 +1174,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(old, mutateMaxTurnsDiff));
@@ -828,7 +1196,9 @@ class ThreadJoinTest {
             null,
             null,
             T1,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateCreatedAt));
   }
@@ -851,7 +1221,9 @@ class ThreadJoinTest {
             null,
             null,
             T0,
-            T2);
+            T2,
+            JoinPurpose.TASK,
+            null);
 
     // updatedAt 回退（T1 早于 oldAdvancedTime 的 updatedAt T2）
     ThreadJoin timeRegression =
@@ -868,7 +1240,9 @@ class ThreadJoinTest {
             null,
             null,
             T0,
-            T1);
+            T1,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(oldAdvancedTime, timeRegression));
@@ -889,7 +1263,9 @@ class ThreadJoinTest {
             null,
             null,
             old.createdAt(),
-            T2);
+            T2,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(oldReminded, reminderRegression));
@@ -918,7 +1294,9 @@ class ThreadJoinTest {
             id(60),
             null,
             matched.createdAt(),
-            T2);
+            T2,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(matched, mutateFinalAnswer));
@@ -938,7 +1316,9 @@ class ThreadJoinTest {
             null,
             null,
             matched.createdAt(),
-            T2);
+            T2,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(matched, mutateHead));
 
@@ -957,7 +1337,9 @@ class ThreadJoinTest {
             null,
             null,
             matched.createdAt(),
-            T2);
+            T2,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(matched, advanceReminderAfterMatched));
@@ -978,7 +1360,9 @@ class ThreadJoinTest {
             delivered.finalAnswerEntryId(),
             11L,
             delivered.createdAt(),
-            T3);
+            T3,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(delivered, mutateDeliverySeq));
@@ -998,7 +1382,9 @@ class ThreadJoinTest {
             delivered.finalAnswerEntryId(),
             null,
             delivered.createdAt(),
-            T3);
+            T3,
+            JoinPurpose.TASK,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ThreadJoin.validateTransition(delivered, clearDeliverySeq));
@@ -1017,5 +1403,125 @@ class ThreadJoinTest {
     assertNotEquals(join1, null);
     assertNotEquals(join1, "other");
     assertNotNull(join1.toString());
+  }
+
+  @Test
+  void supersededRecordsSuccessorAndKeepsIdentityAndQueuedPrompt() {
+    // 测试意图：supersede 只记录接管身份并保留 invocation identity / 排队源命令事实，且不再 matched。
+    ThreadJoin old = initialJoin(id(1), id(2), id(3));
+    ThreadJoin once = old.superseded(id(9), T1);
+
+    assertEquals(id(9), once.supersededByInvocationId());
+    assertFalse(once.matched());
+    assertEquals(old.invocationId(), once.invocationId());
+    assertEquals(old.requestHash(), once.requestHash());
+    assertEquals(old.sourceCommandSequence(), once.sourceCommandSequence());
+    assertEquals(old.createdAt(), once.createdAt());
+    assertEquals(T1, once.updatedAt());
+    // 已被 supersede 的 join 不能再被匹配：它不会再有独立交付。
+    assertThrows(IllegalArgumentException.class, () -> once.match(id(4), null, T2));
+  }
+
+  @Test
+  void rejectsSupersedingSelfMatchedOrAlreadySuperseded() {
+    // 测试意图：自接管、已匹配后接管、二次接管都必须被拒绝。
+    ThreadJoin initial = initialJoin(id(1), id(2), id(3));
+    assertThrows(IllegalArgumentException.class, () -> initial.superseded(id(1), T1));
+
+    ThreadJoin matched = initial.match(id(5), null, T1);
+    assertThrows(IllegalArgumentException.class, () -> matched.superseded(id(9), T2));
+
+    ThreadJoin once = initial.superseded(id(9), T1);
+    assertThrows(IllegalArgumentException.class, () -> once.superseded(id(10), T2));
+
+    // 构造期同样拒绝自接管，避免绕过 superseded() 的守卫。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadJoin(
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "test-agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T1,
+                JoinPurpose.TASK,
+                id(1)));
+  }
+
+  @Test
+  void rejectsNullPurposeAndImmutablePurposeOrSupersededInTransition() {
+    // 测试意图：purpose 必填；validateTransition 不允许改写 purpose 或已记录的 supersede 身份。
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadJoin(
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "test-agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
+                T0,
+                T0,
+                null,
+                null));
+
+    ThreadJoin old = initialJoin(id(1), id(2), id(3));
+    ThreadJoin changedPurpose =
+        new ThreadJoin(
+            old.invocationId(),
+            old.requestHash(),
+            old.parentThreadId(),
+            old.childThreadId(),
+            old.sourceCommandSequence(),
+            old.agent(),
+            old.maxTurns(),
+            old.reminderTurn(),
+            null,
+            null,
+            null,
+            old.createdAt(),
+            T1,
+            JoinPurpose.COMPACTION,
+            null);
+    assertThrows(
+        IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, changedPurpose));
+
+    ThreadJoin once = old.superseded(id(9), T1);
+    ThreadJoin changedSuperseded =
+        new ThreadJoin(
+            once.invocationId(),
+            once.requestHash(),
+            once.parentThreadId(),
+            once.childThreadId(),
+            once.sourceCommandSequence(),
+            once.agent(),
+            once.maxTurns(),
+            once.reminderTurn(),
+            null,
+            null,
+            null,
+            once.createdAt(),
+            T2,
+            JoinPurpose.TASK,
+            id(10));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ThreadJoin.validateTransition(once, changedSuperseded));
+    // 保留同一 supersede 身份的提醒推进仍是合法跃迁。
+    assertDoesNotThrow(() -> ThreadJoin.validateTransition(once, once.remind(1, T2)));
   }
 }

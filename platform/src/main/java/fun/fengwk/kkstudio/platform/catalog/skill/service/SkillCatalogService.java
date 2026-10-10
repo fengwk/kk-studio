@@ -41,13 +41,18 @@ public interface SkillCatalogService {
 
   /** 只校验导入字段，不访问 Git 或写入数据库。 */
   void validateImport(
-      String packageName, String description, String repositoryUrl, String branch, String commit);
+      String packageName,
+      String description,
+      String repositoryUrl,
+      String branch,
+      String commit,
+      String token);
 
   /**
    * 配置同步导入：按名称新增或更新 Package，并发布调用方在事务外按 exact commit 准备好的 manifest。
    *
    * <p>repositoryUrl 是不可变身份：同名但 URL 不同拒绝导入。Git 对象补齐与 manifest 扫描必须已在事务外完成，
-   * 本方法只写数据库事实并复用既有名称/URL/branch/commit 校验与 Skill 引用保护。
+   * 本方法只写数据库事实并复用既有名称/URL/branch/commit 校验与 Skill 引用保护。token 为 null/空白表示清除既有令牌，非空表示替换。
    */
   SkillPackageDTO importPackage(
       String packageName,
@@ -55,5 +60,6 @@ public interface SkillCatalogService {
       String repositoryUrl,
       String branch,
       String currentCommit,
-      List<SkillManifestEntry> skills);
+      List<SkillManifestEntry> skills,
+      String token);
 }

@@ -7,7 +7,7 @@ import java.util.Objects;
 /**
  * 测试用的 {@link CodingToolsConfig} 构造基座。
  *
- * <p>测试关心的是能力行为而不是资源布局细节，因此这里统一按生产语义在给定根目录下建立 {@code resources/{text,staging}}，避免每个测试各自重复路径拼接。
+ * <p>测试关心的是能力行为而不是资源布局细节，因此这里统一按生产语义在给定根目录下建立 {@code tmp/workspaces}，避免每个测试各自重复路径拼接。
  *
  * <p>LSP 相关的构造只提供"配置视角"：命令取本机真实存在的 {@code bash}，因为 read header 的只读判定只探测可执行程序、绝不启动它；真正需要协议交互的测试 自己启动
  * {@code FakeLspServer}。
@@ -62,10 +62,10 @@ public final class TestCodingConfig {
                 List.of())));
   }
 
-  /** 文本输出落在 {@code <root>/resources/{text,staging}}，与生产数据目录布局一致。 */
+  /** 文本输出落在 {@code <root>/tmp/workspaces} 的受控临时 workspace 内，与生产数据目录布局一致。 */
   public static TextOutputStore textOutputStore(Path root) {
-    Path resources = Objects.requireNonNull(root, "root").resolve("resources");
-    return TextOutputStore.open(resources.resolve("text"), resources.resolve("staging"));
+    Path tmp = Objects.requireNonNull(root, "root").resolve("tmp");
+    return TextOutputStore.open(tmp);
   }
 
   private static CodingToolsConfig build(

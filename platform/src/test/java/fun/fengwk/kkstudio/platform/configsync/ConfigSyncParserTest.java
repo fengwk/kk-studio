@@ -55,6 +55,57 @@ class ConfigSyncParserTest {
   }
 
   @Test
+  void providerHttpRetryOverrideIsParsedAsPresenceAwareList() {
+    var document =
+        parser.parse(
+            "providers:\n"
+                + "  - name: p\n"
+                + "    providerType: openai\n"
+                + "    modelHttpRetryStatusCodes: [500, 503]\n");
+
+    var properties = document.providers().get(0).properties();
+    assertTrue(properties.isModelHttpRetryStatusCodesProvided());
+    assertEquals(List.of(500, 503), properties.getModelHttpRetryStatusCodes());
+  }
+
+  @Test
+  void providerWithoutHttpRetryOverrideParsesAsClearedForImport() {
+    var document = parser.parse("providers:\n" + provider("p", "openai"));
+
+    var properties = document.providers().get(0).properties();
+    assertTrue(properties.isModelHttpRetryStatusCodesProvided());
+    assertNull(properties.getModelHttpRetryStatusCodes());
+  }
+
+  @Test
+  void providerWithInvalidHttpRetryOverrideIsHardRejected() {
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "providers:\n"
+                    + "  - name: p\n"
+                    + "    providerType: openai\n"
+                    + "    modelHttpRetryStatusCodes: [600]\n"));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "providers:\n"
+                    + "  - name: p\n"
+                    + "    providerType: openai\n"
+                    + "    modelHttpRetryStatusCodes: [429, 429]\n"));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "providers:\n"
+                    + "  - name: p\n"
+                    + "    providerType: openai\n"
+                    + "    modelHttpRetryStatusCodes: 429\n"));
+  }
+
+  @Test
   void paddedNamesCannotBypassDuplicateIdentityValidation() {
     // 目录服务会 strip 名称；文件不能用带空白的别名绕过同名条目的硬错误。
     assertThrows(
@@ -364,6 +415,39 @@ class ConfigSyncParserTest {
     assertThrows(
         AiValidationException.class,
         () -> parser.parse("agents:\n  - name: a\n    model: p/m\n    config: []\n"));
+  }
+
+  /** 测试意图：内置 Agent 的保留名称在导入期是硬冲突，文件不能覆盖或降级系统持有的定义。 */
+  @Test
+  void agentNameReservedForBuiltinIsAHardError() {
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "agents:\n"
+                    + "  - name: compaction\n"
+                    + "    model: p/m\n"
+                    + "    config:\n"
+                    + "      tools: []\n"
+                    + "      skills: []\n"
+                    + "      subagents: []\n"));
+  }
+
+  /** 测试意图：可编辑契约不暴露所有权类型；携带 type 字段的条目因未知字段被整体跳过，无法伪造 BUILTIN。 */
+  @Test
+  void forgedAgentTypeIsNotApplied() {
+    ConfigSyncParser.ParsedDocument document =
+        parser.parse(
+            "agents:\n"
+                + "  - name: a\n"
+                + "    type: BUILTIN\n"
+                + "    model: p/m\n"
+                + "    config:\n"
+                + "      tools: []\n"
+                + "      skills: []\n"
+                + "      subagents: []\n");
+    assertTrue(document.agents().isEmpty());
+    assertTrue(document.skipped().stream().anyMatch(skip -> "a".equals(skip.getName())));
   }
 
   @Test

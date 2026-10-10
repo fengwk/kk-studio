@@ -6,26 +6,46 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
@@ -34,7 +54,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -50,6 +72,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
@@ -92,23 +115,30 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
  * closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED / terminal failure / cancel /
  * unknown / compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有
- * queued user demand、HISTORY / OVERFLOW obligation、fallback、hard overflow 或 CONTINUE 的
- * continueModel obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft threshold 自唤醒。失败 / 停止 / complete
- * COMPACTION 由 planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求 THREAD 再 complete，下一 claim
- * 才由 durable continuation 启动续写；Tool sibling batch 追加 outcome 后追加 continueModel=true TURN_END 并同事务删除
+ * queued user demand、HISTORY / OVERFLOW obligation、hard overflow 或 CONTINUE 的 continueModel
+ * obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft threshold 自唤醒。失败 / 停止 / complete COMPACTION 由
+ * planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求 THREAD 再 complete，下一 claim 才由 durable
+ * continuation 启动续写；Tool sibling batch 追加 outcome 后追加 continueModel=true TURN_END 并同事务删除
  * children+parent。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
- * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现 compaction action 时先请求
- * THREAD 再 complete。
+ * （terminal apply 会按 queued 快照重建 wake）；rejected 只在仍保留合法 deferred messages 时先请求 THREAD 再
+ * complete，绝不立即重排同一压缩。
  *
  * <p>持久化变更时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、 complete、request 与
  * reschedule 始终使用未抬升的本地 lease clock，避免未来持久化时间改变 lease 语义。
  *
  * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时门控；hard overflow 立即压缩并只恢复一次。
- * 所有 trigger 共用 MODEL Work、一次 fallback 与 deterministic no-gain；切分先 HISTORY 再以 continueModel
- * obligation 机械启动 TURN_PREFIX。 压缩消费零 queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
+ * 所有 trigger 共用 MODEL Work 与 deterministic no-gain，且统一在隔离的 child Runtime Thread 内执行（父 durable
+ * wait、无父 ModelInvocation）；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
+ * Command，另一 Thread 拥有的共享历史 turn 不压缩，COMPACTION 子执行树内绝不再次规划压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
+
+  /** 确定性 resolver 失败落成的稳定 durable AssistantError：不泄露 raw cause，只说明本轮规划失败与恢复方式。 */
+  private static final AssistantError DETERMINISTIC_FAILURE =
+      new AssistantError(
+          "TURN_RESOLVE_FAILED",
+          "Turn planning failed before the model was invoked. Send a new message to retry.");
 
   private final HarnessStore store;
   private final TurnResolver resolver;
@@ -118,6 +148,7 @@ public final class ThreadProcessor {
   private final Executor heartbeatWorker;
   private final ModelOutcomeAppender modelOutcomeAppender;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
+  private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ThreadContextProbe threadContextProbe = new ThreadContextProbe();
   private final AutomaticCompactionPlanner automaticCompactionPlanner =
@@ -202,6 +233,22 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    Optional<Entry> openTurn = path.openTurnStart();
+    if (openTurn.isPresent()
+        && openTurn.get().payload() instanceof TurnStartPayload startPayload
+        && startPayload.reason() == TurnStartReason.COMPACTION
+        && startPayload.ownerThreadId().equals(thread.id())
+        && startPayload.compaction() != null
+        && startPayload.compaction().joinInvocationId() != null) {
+      settleOpenCompactionTurn(
+          tx, claim, thread, path, startPayload.compaction(), openTurn.get(), now);
+      return null;
+    }
+    // 安全边界先应用全部 standalone 分支设置并追加 SETTINGS 快照；CONTRIBUTOR_STATE 留给普通输入 turn。
+    // STOPPED 线程只结算设置，不恢复执行；存在 open turn 时保留冻结请求。
+    if (path.openTurnStart().isEmpty() && applyPendingSettings(tx, claim, thread, path, now)) {
+      return null;
+    }
     // STOPPED 是持久的执行控制：停止后只固化通知，绝不自动启动模型；只有显式新人工/可信输入在 accept 阶段恢复
     // RUNNABLE 后才会再次进入这里。残留 claim 在这里完成 fencing，不产生任何 durable mutation。
     if (thread.executionControl().isStopped()) {
@@ -255,8 +302,10 @@ public final class ThreadProcessor {
         // owned HISTORY 机械续作仍由 compactionPreparation 保持最高优先级；普通 continuation
         // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
         CompactionPreparation preparation =
-            automaticCompactionPlanner.plan(
-                thread, path, config.compactionProvider().compactionConfig(), true);
+            !CompactionChildScope.isInCompactionChildTree(tx, thread)
+                ? automaticCompactionPlanner.plan(
+                    thread, path, config.compactionProvider().compactionConfig(), true)
+                : null;
         if (preparation != null) {
           yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         }
@@ -273,8 +322,10 @@ public final class ThreadProcessor {
         boolean userDemand = ThreadInputDemand.hasInputDemand(tx, thread);
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
-            automaticCompactionPlanner.plan(
-                thread, path, config.compactionProvider().compactionConfig(), userDemand);
+            !CompactionChildScope.isInCompactionChildTree(tx, thread)
+                ? automaticCompactionPlanner.plan(
+                    thread, path, config.compactionProvider().compactionConfig(), userDemand)
+                : null;
         if (preparation != null) {
           yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         }
@@ -293,6 +344,74 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     tx.completeWork(claim, now);
+  }
+
+  /**
+   * 安全边界上应用 queued 的全部 standalone 设置（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）：从整段 queued snapshot
+   * 按原序 提取这些命令，归约成完整 {@link BranchSettings} 快照并 append 一个 {@link SettingsPayload} Entry，标记命令
+   * applied（指向该 SETTINGS Entry）后推进 head。绝不打开 / 关闭 Turn、绝不创建 ModelInvocation，也绝不 resume STOPPED
+   * Thread——只有显式新输入才会 恢复 RUNNABLE。
+   *
+   * <p>从整段 snapshot 提取而非前导前缀：{@code [USER, SET_MODEL]} 这类交错必须让设置先于任何 input / 压缩生效，同时保留设置内部
+   * 相对顺序；其它输入仍 queued 且输入水位不前进，随后的 INPUT / CONTINUATION 按原序消费，绝不跳过尚未处理的输入。
+   *
+   * <p>SET_CONTRIBUTOR_STATE 不是 standalone 设置：它只在本 Thread 的普通 turn 内作为有序 CUSTOM state Entry 物化，因此留给
+   * 后续 turn，绝不在回合之间越界追加。
+   *
+   * <p>返回 false 表示没有可应用的设置，调用方继续正常分类。
+   */
+  private boolean applyPendingSettings(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      EntryPath path,
+      Instant now) {
+    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    List<ThreadCommand> settings = new ArrayList<>();
+    for (ThreadCommand command : queued) {
+      if (isStandaloneSetting(command.type())) {
+        settings.add(command);
+      }
+    }
+    if (settings.isEmpty()) {
+      return false;
+    }
+    Instant mutationNow =
+        HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
+    BranchSettings applied =
+        settingsReducer.reduce(thread.id(), path.baseSettings(), settings, tx::nextId);
+    UUID settingsEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            settingsEntryId,
+            thread.sessionId(),
+            path.head().id(),
+            new SettingsPayload(applied, thread.id()),
+            mutationNow));
+    List<ThreadCommand> consumed = new ArrayList<>(settings.size());
+    for (ThreadCommand command : settings) {
+      consumed.add(command.markApplied(settingsEntryId));
+    }
+    tx.updateCommands(consumed);
+    tx.updateThread(thread.advanceHead(settingsEntryId, mutationNow));
+    // final fence 最后执行：损失抛内部信号整事务回滚，绝无带 mutation 的 LOST 提交。
+    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
+    // STOPPED 上只落 durable 设置，不唤醒：显式新输入才是恢复 RUNNABLE 的唯一入口。
+    if (!thread.executionControl().isStopped()) {
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+    }
+    tx.completeWork(claim, now);
+    return true;
+  }
+
+  /**
+   * standalone 设置 = branch settings（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）；SET_CONTRIBUTOR_STATE
+   * 不属于此列。
+   */
+  private static boolean isStandaloneSetting(ThreadCommandType type) {
+    return type.isSetting() && type != ThreadCommandType.SET_CONTRIBUTOR_STATE;
   }
 
   /**
@@ -336,19 +455,6 @@ public final class ThreadProcessor {
                         new IllegalStateException(
                             "terminal model must belong to an open TURN_START"))
                 .payload();
-    if (turnStart.compaction() != null) {
-      applyCompactionModel(
-          tx,
-          claim,
-          thread,
-          path,
-          model,
-          turnStart.compaction(),
-          mutationNow,
-          now,
-          hasQueuedMessage);
-      return;
-    }
     ModelOutcomeAppender.Applied applied =
         modelOutcomeAppender.appendModel(tx, path, model, mutationNow);
     UUID head = applied.headEntryId();
@@ -367,13 +473,17 @@ public final class ThreadProcessor {
       // 无新 demand 时不 self-wake。CONTINUE 例外：必须机械请求 THREAD，下一 claim 才偿还 continueModel
       // obligation 并启动续写。
       advancedThread = thread.advanceHead(head, mutationNow);
+      // hard overflow / fallback obligation 与 idle soft threshold 都必须遵守同一条祖先链 guard：位于 COMPACTION
+      // 子执行树内的
+      // Thread（含压缩子自身的超限失败回合）绝不再次规划压缩，从而不产生递归压缩子、也不原样重复超限请求。
       boolean compactionDue =
-          automaticCompactionPlanner.plan(
-                  advancedThread,
-                  tx.loadEntryPath(head),
-                  config.compactionProvider().compactionConfig(),
-                  hasQueuedMessage)
-              != null;
+          !CompactionChildScope.isInCompactionChildTree(tx, advancedThread)
+              && automaticCompactionPlanner.plan(
+                      advancedThread,
+                      tx.loadEntryPath(head),
+                      config.compactionProvider().compactionConfig(),
+                      hasQueuedMessage)
+                  != null;
       requestThread = continueModel || hasQueuedMessage || compactionDue;
       tx.updateThread(advancedThread);
       if (continueModel) {
@@ -413,49 +523,118 @@ public final class ThreadProcessor {
     tx.completeWork(claim, now);
   }
 
-  /** 应用一个 terminal Compaction Model；摘要语义失败也关闭本 turn，让 reducer决定一次 fallback或停止。 */
-  private void applyCompactionModel(
+  /** 结算已 matched 的 COMPACTION Join 并推进父 Thread 历史；子执行失败则落 AssistantErrorPayload。 */
+  private void settleOpenCompactionTurn(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
-      ModelInvocation model,
       CompactionStart start,
-      Instant mutationNow,
-      Instant workNow,
-      boolean hasQueuedDemand) {
-    ModelOutcomeAppender.Applied applied =
-        modelOutcomeAppender.appendCompaction(tx, thread, path, model, start, mutationNow);
-    UUID turnEndId = applied.headEntryId();
-    TurnEndOutcome outcome = applied.outcome();
-    boolean continueModel = applied.continueModel();
-    boolean compactionDue =
-        automaticCompactionPlanner.plan(
-                thread.advanceHead(turnEndId, mutationNow),
-                tx.loadEntryPath(turnEndId),
-                config.compactionProvider().compactionConfig(),
-                hasQueuedDemand)
-            != null;
-    boolean mechanicalWake = outcome == TurnEndOutcome.COMPLETED && continueModel;
-    boolean requestThread = hasQueuedDemand || compactionDue || mechanicalWake;
+      Entry openTurn,
+      Instant now) {
+    ThreadJoin join =
+        tx.findJoin(start.joinInvocationId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "compaction join " + start.joinInvocationId() + " not found"));
+    if (!join.matched()) {
+      completeClaim(tx, claim, now);
+      return;
+    }
+    ThreadJoinReceipt receipt =
+        ThreadJoinProjector.INSTANCE
+            .project(tx, join)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "matched compaction join produced no receipt: " + join.invocationId()));
+    EntryPayload resultPayload;
+    TurnEndOutcome outcome;
+    boolean continueModel = false;
+    if (receipt.outcome() != ThreadJoinOutcome.COMPLETED) {
+      String errorMessage =
+          receipt.error() != null ? receipt.error() : "compaction child thread failed";
+      resultPayload =
+          new AssistantErrorPayload(new AssistantError("COMPACTION_FAILED", errorMessage), null);
+      outcome = TurnEndOutcome.FAILED;
+    } else {
+      String summaryText = receipt.report();
+      AssistantMessageMetadata metadata = null;
+      if (join.terminalEntryId() != null && join.finalAnswerEntryId() != null) {
+        EntryPath childPath = tx.loadEntryPath(join.terminalEntryId());
+        for (Entry e : childPath.entries()) {
+          if (e.id().equals(join.finalAnswerEntryId())
+              && e.payload() instanceof MessagePayload msg) {
+            metadata = msg.assistantMetadata();
+            break;
+          }
+        }
+      }
+      resultPayload =
+          CompactionResultEvaluator.evaluate(
+              path, start, summaryText, metadata, start.outputBudget());
+      if (resultPayload instanceof CompactionPayload) {
+        outcome = TurnEndOutcome.COMPLETED;
+        continueModel =
+            start.phase() == CompactionPhase.HISTORY
+                || start.trigger() == CompactionTrigger.OVERFLOW
+                || (start.trigger() == CompactionTrigger.THRESHOLD
+                    && CompactionHistory.hasPendingOwnedContinuation(thread, path, openTurn.id()));
+      } else {
+        outcome = TurnEndOutcome.FAILED;
+      }
+    }
+    Instant mutationNow =
+        HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
+    UUID resultEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            resultEntryId, path.root().sessionId(), path.head().id(), resultPayload, mutationNow));
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            path.root().sessionId(),
+            resultEntryId,
+            new TurnEndPayload(
+                openTurn.id(),
+                outcome,
+                continueModel,
+                outcome == TurnEndOutcome.FAILED ? TurnEndReason.TURN_FAILED : null,
+                null),
+            mutationNow));
     ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
     tx.updateThread(advanced);
+    // STOPPED 父 Thread 只固化压缩结果，不请求任何 Work、不续作：恢复仍由显式输入驱动（与已停止父的 task 回执交付一致）。
+    boolean stopped = thread.executionControl().isStopped();
+    boolean hasQueuedDemand = ThreadInputDemand.hasQueuedDemand(tx.loadQueuedCommands(thread.id()));
+    boolean compactionDue =
+        !stopped
+            && !CompactionChildScope.isInCompactionChildTree(tx, thread)
+            && automaticCompactionPlanner.plan(
+                    advanced,
+                    tx.loadEntryPath(turnEndId),
+                    config.compactionProvider().compactionConfig(),
+                    hasQueuedDemand)
+                != null;
+    boolean mechanicalWake = !stopped && outcome == TurnEndOutcome.COMPLETED && continueModel;
+    boolean requestThread = hasQueuedDemand && !stopped || compactionDue || mechanicalWake;
     if (mechanicalWake) {
       EntryPath updatedPath = tx.loadEntryPath(turnEndId);
       coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
     }
     if (outcome == TurnEndOutcome.FAILED && !requestThread) {
-      // 不可恢复的 compaction 失败：执行已终止，必须明确结算已应用源的 Join，绝不悬挂。
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
           tx, advanced, turnEndId, null, mutationNow, false);
     }
-    if (tx.lockClaimedWork(claim, workNow).isEmpty()) {
+    if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
     if (requestThread) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     }
-    tx.completeWork(claim, workNow);
+    tx.completeWork(claim, now);
   }
 
   /**
@@ -537,7 +716,7 @@ public final class ThreadProcessor {
     // 回合之间可追加已物化系统通知；续写义务锚点必须看到通知之前的 TURN_END。
     if (reason == TurnStartReason.CONTINUATION
         && (path.openTurnStart().isPresent()
-            || !(path.headIgnoringTrailingNotifications().payload() instanceof TurnEndPayload end
+            || !(path.headIgnoringTrailingControlEntries().payload() instanceof TurnEndPayload end
                 && end.continueModel()))) {
       throw new IllegalStateException(
           "continuation preconditions changed under the same transaction for thread "
@@ -569,9 +748,11 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 事务外解析 + 第二事务 CAS 提交：Resolver 异常 / null / heartbeat 调度失败按失败延迟 reschedule（零 durable mutation）；提交
-   * CAS（source head / cutoff 内 Command 快照 / claim）失败抛 {@link ClaimLostSignal} 由 {@link #process}
-   * 映射为 LOST。YOLO 变化不使 plan 失效：commit 以第二事务锁到的 Thread 当前 YOLO 为准。成功后本 claim 已消费，返回 COMPLETED。
+   * 事务外解析 + 第二事务 CAS 提交：只有显式 typed {@link TurnResolveTransientException}（DB / 网络瞬断）按失败延迟
+   * reschedule（零 durable mutation）；确定性 resolver 异常 / null 结果 / validator 契约失败都落成 durable
+   * AssistantError + FAILED TURN_END 并结算 Join，绝不无限重排，也不把 raw cause 写入 durable。提交 CAS（source head /
+   * cutoff 内 Command 快照 / claim）失败抛 {@link ClaimLostSignal} 由 {@link #process} 映射为 LOST。YOLO 变化不使
+   * plan 失效：commit 以第二事务锁到的 Thread 当前 YOLO 为准。成功后本 claim 已消费，返回 COMPLETED。
    */
   private ThreadProcessResult resolveAndCommit(ClaimedWork claim, TurnPlan plan) {
     AtomicBoolean heartbeatLost = new AtomicBoolean();
@@ -592,23 +773,57 @@ public final class ThreadProcessor {
     TurnResolver.Result result;
     try {
       result = resolver.resolve(plan.threadId(), plan.candidatePath(), plan.preparation());
-    } catch (RuntimeException failure) {
+    } catch (TurnResolveTransientException transientFailure) {
       log.warn(
-          "turn resolver failed for thread {}; rescheduling its work", plan.threadId(), failure);
-      result = null;
+          "turn resolver infrastructure unavailable for thread {}; rescheduling its work",
+          plan.threadId(),
+          transientFailure);
+      return rescheduleIfOwned(claim, config.resolveFailureDelay())
+          ? ThreadProcessResult.RESCHEDULED
+          : ThreadProcessResult.LOST_OWNERSHIP;
+    } catch (RuntimeException deterministicFailure) {
+      // 确定性 resolver 失败（含编程 / 契约错误）：落 durable FAILED 并结算 Join，绝不无限 reschedule。
+      log.warn(
+          "turn resolver failed deterministically for thread {}; failing the turn",
+          plan.threadId(),
+          deterministicFailure);
+      return commitDeterministicFailure(claim, plan);
     } finally {
       heartbeat.stop();
     }
-    if (result == null || heartbeatLost.get()) {
+    if (heartbeatLost.get()) {
       return rescheduleIfOwned(claim, config.resolveFailureDelay())
           ? ThreadProcessResult.RESCHEDULED
           : ThreadProcessResult.LOST_OWNERSHIP;
     }
+    if (result == null) {
+      // null 违反 Resolver 契约：确定性失败，落 durable FAILED 而非无限重排。
+      log.warn("turn resolver returned null for thread {}; failing the turn", plan.threadId());
+      return commitDeterministicFailure(claim, plan);
+    }
     if (result instanceof TurnResolver.Resolved resolved) {
-      // Harness 边界校验：任何不一致都是 Resolver 契约错误，抛 ISE 且此刻零 durable mutation（绝不转 typed rejection）。
-      ResolvedRequestValidator.validate(plan.candidatePath(), plan.preparation(), resolved);
+      try {
+        // Harness 边界校验：不一致即 Resolver 契约错误，此刻零 durable mutation，转为 typed FAILED 而非抛异常。
+        ResolvedRequestValidator.validate(plan.candidatePath(), resolved);
+      } catch (RuntimeException contractFailure) {
+        log.warn(
+            "resolved request violated the harness contract for thread {}; failing the turn",
+            plan.threadId(),
+            contractFailure);
+        return commitDeterministicFailure(claim, plan);
+      }
     }
     commit(claim, plan, result);
+    return ThreadProcessResult.COMPLETED;
+  }
+
+  /**
+   * 把确定性 resolver 失败落成 durable AssistantError + FAILED TURN_END 并结算 Join：复用 {@link
+   * TurnResolver.Rejected} 的 提交流程，durable 文本稳定且绝不泄露 raw cause。若该轮有 deferred user input，commit 会重新请求
+   * Thread 处理它。
+   */
+  private ThreadProcessResult commitDeterministicFailure(ClaimedWork claim, TurnPlan plan) {
+    commit(claim, plan, new TurnResolver.Rejected(DETERMINISTIC_FAILURE));
     return ThreadProcessResult.COMPLETED;
   }
 
@@ -642,35 +857,60 @@ public final class ThreadProcessor {
     for (Entry entry : plan.candidateEntries()) {
       mutationNow = HarnessStoreTime.notBefore(mutationNow, entry.createdAt());
     }
-    Integer contextWindow =
-        result instanceof TurnResolver.Resolved resolved ? resolved.contextWindow() : null;
-    Integer maxOutputTokens =
-        result instanceof TurnResolver.Resolved resolved ? resolved.maxOutputTokens() : null;
+    Integer contextWindow = null;
+    Integer maxOutputTokens = null;
+    CompactionStart compactionStart = null;
+    ModelRequestSpec invocationSpec = null;
+    if (result instanceof TurnResolver.Resolved resolved) {
+      contextWindow = resolved.contextWindow();
+      // 直接压缩子 Thread 的每一次请求（含工具 loop turn 与失败重试）都按父冻结 outputBudget 收紧输出预算并把 cache 固定为 NONE：
+      // 身份只来自 durable COMPACTION Join 事实，事实缺失 fail closed。TURN_START 冻结的 maxOutputTokens 必须等于实际
+      // spec。
+      Optional<CompactionStart> frozen = CompactionChildScope.frozenStartFor(tx, thread.id());
+      invocationSpec =
+          frozen
+              .map(start -> capCompactionChildSpec(resolved.spec(), start))
+              .orElse(resolved.spec());
+      maxOutputTokens =
+          frozen.isPresent() ? invocationSpec.outputTokens() : resolved.maxOutputTokens();
+    } else if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
+      contextWindow = compactionResolved.contextWindow();
+      maxOutputTokens = compactionResolved.maxOutputTokens();
+      CompactionChildStarter.CompactionChild child =
+          CompactionChildStarter.start(
+              tx,
+              thread,
+              plan.candidatePath(),
+              compactionResolved,
+              plan.preparation(),
+              mutationNow);
+      compactionStart = child.frozenStart();
+    }
     // 低序 mutation（Entries / Commands / Thread / ModelInvocation）先完成。
     for (Entry entry : plan.candidateEntries()) {
       tx.insertEntry(
           withCreatedAt(
-              withResolvedTurnStart(entry, plan, contextWindow, maxOutputTokens), mutationNow));
+              withResolvedTurnStart(entry, plan, contextWindow, maxOutputTokens, compactionStart),
+              mutationNow));
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
     for (ThreadCommand command : plan.consumedCommands()) {
       consumed.add(command.markApplied(plan.appliedEntryId(command.sequence())));
     }
     tx.updateCommands(consumed);
-    UUID invocationId = null;
     if (result instanceof TurnResolver.Resolved resolved) {
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(
               plan.candidateHeadEntryId(), nextWatermark(plan, thread), mutationNow);
       tx.updateThread(advanced);
-      invocationId = tx.nextId();
+      UUID invocationId = tx.nextId();
       tx.insertModelInvocation(
           new ModelInvocation(
               invocationId,
               thread.id(),
               plan.turnStartEntryId(),
               plan.candidateHeadEntryId(),
-              resolved.spec(),
+              invocationSpec,
               ModelInvocationStatus.READY,
               0,
               null,
@@ -680,6 +920,20 @@ public final class ThreadProcessor {
               List.of(),
               mutationNow,
               mutationNow));
+      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+        throw new ClaimLostSignal();
+      }
+      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
+      tx.completeWork(claim, now);
+    } else if (result instanceof TurnResolver.CompactionResolved) {
+      ThreadState advanced =
+          thread.advanceHeadAndInputThroughSequence(
+              plan.candidateHeadEntryId(), nextWatermark(plan, thread), mutationNow);
+      tx.updateThread(advanced);
+      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+        throw new ClaimLostSignal();
+      }
+      tx.completeWork(claim, now);
     } else {
       TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
       UUID errorEntryId = tx.nextId();
@@ -703,17 +957,10 @@ public final class ThreadProcessor {
                   TurnEndReason.TURN_FAILED,
                   null),
               mutationNow));
-      // Rejected turn 本身没有 resolved budgets；仅 deferred demand 或更早的 fallback/hard-overflow 事实可重建
-      // wake。
-      boolean deferredUserDemand = plan.hasDeferredUserMessages();
-      boolean compactionDue =
-          automaticCompactionPlanner.plan(
-                  thread.advanceHead(turnEndId, mutationNow),
-                  tx.loadEntryPath(turnEndId),
-                  config.compactionProvider().compactionConfig(),
-                  deferredUserDemand)
-              != null;
-      boolean requestThread = deferredUserDemand || compactionDue;
+      // 确定性 Rejected 失败绝不立即 self-wake 同一自动压缩：失败 turn 已落 durable，马上重排可能再次规划同一压缩而空转。
+      // 只保留合法 queued user 需求——它会在下一 claim 作为 INPUT 正常处理（或同样落 durable 失败）；新的自动压缩只由后续真实
+      // 输入 / 唤醒重新驱动。
+      boolean requestThread = plan.hasDeferredUserMessages();
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(
               turnEndId, nextWatermark(plan, thread), mutationNow);
@@ -724,20 +971,12 @@ public final class ThreadProcessor {
       if (tx.lockClaimedWork(claim, now).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      // rejected：保留 deferred user 或已确定 compaction obligation 时先请求 THREAD 再 complete。
+      // rejected：仅在仍有合法 user 需求时先请求 THREAD 再 complete。
       if (requestThread) {
         tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
       }
       tx.completeWork(claim, now);
-      return;
     }
-    // resolved：final fence 后同层 Work 按 (type, id) 升序只请求 MODEL Work 再 complete（绝不因 deferred
-    // messages 制造无意义 THREAD claim；terminal apply 会按 queued 快照重建 wake）。
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
-      throw new ClaimLostSignal();
-    }
-    tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
-    tx.completeWork(claim, now);
   }
 
   /**
@@ -786,9 +1025,36 @@ public final class ThreadProcessor {
         entry.id(), entry.sessionId(), entry.parentEntryId(), entry.payload(), createdAt);
   }
 
-  /** 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow/maxOutputTokens；rejected 保持 null。 */
+  /**
+   * 压缩子请求的冻结事实收紧：只把输出预算压低到父冻结 {@code outputBudget}（min 语义），并把 cache 固定为 NONE；其余字段（模型、
+   * variant、system instruction、tools、subagents）原样保留，不复制也不新增任何 durable 标志。
+   */
+  private static ModelRequestSpec capCompactionChildSpec(
+      ModelRequestSpec spec, CompactionStart frozen) {
+    long outputBudget = frozen.outputBudget();
+    int outputTokens = (int) Math.min(spec.outputTokens(), outputBudget);
+    return new ModelRequestSpec(
+        spec.providerType(),
+        spec.providerConnectionGenerationId(),
+        spec.model(),
+        spec.variant(),
+        outputTokens,
+        spec.systemInstruction(),
+        spec.toolBindings(),
+        spec.subagentBindings(),
+        ProviderCacheControl.none());
+  }
+
+  /**
+   * 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow/maxOutputTokens/compactionStart；rejected 保持
+   * null。
+   */
   static Entry withResolvedTurnStart(
-      Entry entry, TurnPlan plan, Integer contextWindow, Integer maxOutputTokens) {
+      Entry entry,
+      TurnPlan plan,
+      Integer contextWindow,
+      Integer maxOutputTokens,
+      CompactionStart compactionStart) {
     if (!entry.id().equals(plan.turnStartEntryId())
         || !(entry.payload() instanceof TurnStartPayload start)) {
       return entry;
@@ -803,7 +1069,7 @@ public final class ThreadProcessor {
             start.ownerThreadId(),
             contextWindow,
             maxOutputTokens,
-            start.compaction()),
+            compactionStart != null ? compactionStart : start.compaction()),
         entry.createdAt());
   }
 

@@ -24,12 +24,14 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -45,6 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -343,7 +346,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    *
    * <p>用于解析 branch 生效 settings（等价于 {@link EntryPath#baseSettings()}）：递归仍遍历祖先链，但只返回决定 settings
    * 的必要节点， 减少结果传输与 Java 侧完整 EntryPath 物化，其结果绝不回填完整路径缓存。COMPACTION turn 的 settings 只描述压缩执行模型，因此在 SQL
-   * 侧就被排除，绝不参与 branch settings 解析。
+   * 侧就被排除，绝不参与 branch settings 解析；安全边界上 append 的 SETTINGS 快照则与 TURN_START 一样参与解析。
    */
   private static final String LOAD_BRANCH_SETTINGS =
       """
@@ -362,6 +365,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       where depth = 0
          or entry_type = 'ROOT'
          or is_cycle
+         or entry_type = 'SETTINGS'
          or (entry_type = 'TURN_START' and payload ->> 'reason' <> 'COMPACTION')
       order by depth desc
       """;
@@ -743,6 +747,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         if (start.reason() != TurnStartReason.COMPACTION) {
           return start.settings();
         }
+      } else if (payload instanceof SettingsPayload applied) {
+        return applied.settings();
       } else if (payload instanceof RootPayload root) {
         return root.settings();
       }
@@ -1050,8 +1056,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             invocation_id, request_hash, parent_thread_id, child_thread_id,
             source_command_sequence, agent, max_turns, reminder_turn,
             terminal_entry_id, final_answer_entry_id, delivery_command_sequence,
-            created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?)
+            created_at, updated_at, purpose, superseded_by_invocation_id
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?, ?, null)
         """,
         join.invocationId(),
         join.requestHash(),
@@ -1062,7 +1068,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         join.maxTurns(),
         join.reminderTurn(),
         PostgresqlHarnessRows.timestamp(join.createdAt()),
-        PostgresqlHarnessRows.timestamp(join.updatedAt()));
+        PostgresqlHarnessRows.timestamp(join.updatedAt()),
+        join.purpose().wireName());
   }
 
   @Override
@@ -1083,6 +1090,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         select * from harness_thread_join
         where child_thread_id = ? and terminal_entry_id is null
+          and superseded_by_invocation_id is null
         order by created_at, invocation_id
         """,
         PostgresqlHarnessRows.JOIN,
@@ -1098,6 +1106,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         select * from harness_thread_join
         where parent_thread_id = ? and terminal_entry_id is not null
           and delivery_command_sequence is null
+          and purpose = 'task' and superseded_by_invocation_id is null
         order by created_at, invocation_id
         """,
         PostgresqlHarnessRows.JOIN,
@@ -1114,6 +1123,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             select count(*)
             from harness_thread_join
             where parent_thread_id = ? and terminal_entry_id is null
+              and superseded_by_invocation_id is null and purpose = 'task'
             """,
             Integer.class,
             parentThreadId);
@@ -1129,6 +1139,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             select count(*)
             from harness_thread_join
             where parent_thread_id is not null and terminal_entry_id is null
+              and superseded_by_invocation_id is null and purpose = 'task'
             """,
             Integer.class);
     return count != null ? count : 0;
@@ -1359,18 +1370,22 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             """
         update harness_thread_join
         set terminal_entry_id = ?, final_answer_entry_id = ?,
-            delivery_command_sequence = ?, reminder_turn = ?, updated_at = ?
+            delivery_command_sequence = ?, reminder_turn = ?,
+            superseded_by_invocation_id = ?, updated_at = ?
         where invocation_id = ? and terminal_entry_id is not distinct from ?
           and delivery_command_sequence is not distinct from ?
+          and superseded_by_invocation_id is not distinct from ?
         """,
             join.terminalEntryId(),
             join.finalAnswerEntryId(),
             join.deliveryCommandSequence(),
             join.reminderTurn(),
+            join.supersededByInvocationId(),
             PostgresqlHarnessRows.timestamp(join.updatedAt()),
             join.invocationId(),
             old.terminalEntryId(),
-            old.deliveryCommandSequence());
+            old.deliveryCommandSequence(),
+            old.supersededByInvocationId());
     requireSingleUpdate(updated, "join", join.invocationId());
   }
 
@@ -1388,10 +1403,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             PostgresqlHarnessRows.JOIN,
             childThreadId);
     for (ThreadJoin join : joins) {
+      if (join.supersededByInvocationId() != null) {
+        // 已被后续续接 supersede 的 join 永远不会交付，可安全删除。
+        continue;
+      }
       if (!join.matched()) {
         throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
       }
-      if (join.parentThreadId() != null && join.deliveryCommandSequence() == null) {
+      if (join.purpose() != JoinPurpose.COMPACTION
+          && join.parentThreadId() != null
+          && join.deliveryCommandSequence() == null) {
         throw new IllegalArgumentException(
             "cannot delete join pending delivery " + join.invocationId());
       }
@@ -1422,7 +1443,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     for (ThreadJoin join : joins) {
       boolean parentAlsoDeleted =
           join.parentThreadId() == null || deleting.contains(join.parentThreadId());
-      if (!parentAlsoDeleted && (!join.matched() || join.deliveryCommandSequence() == null)) {
+      if (!parentAlsoDeleted
+          && join.supersededByInvocationId() == null
+          && (!join.matched()
+              || (join.purpose() != JoinPurpose.COMPACTION
+                  && join.deliveryCommandSequence() == null))) {
         throw new IllegalArgumentException(
             "cannot delete join pending delivery " + join.invocationId());
       }
@@ -2718,7 +2743,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   /**
    * {@code appliedEntryId}（若有）必须与命令类型精确匹配：{@code NOTIFICATION} 必须引用自身四字段完全一致的 NOTIFICATION
-   * Entry；其它命令必须引用本 Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
+   * Entry；standalone 分支设置命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）可以引用本 Thread 拥有的 SETTINGS 快照
+   * Entry；其它命令 必须引用本 Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
    */
   private void requireValidAppliedEntry(ThreadCommand command) {
     UUID appliedEntryId = command.appliedEntryId();
@@ -2750,11 +2776,22 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       }
       return;
     }
+    if (isBranchSettingCommand(command.type())
+        && applied.payload() instanceof SettingsPayload settings
+        && command.threadId().equals(settings.ownerThreadId())) {
+      return;
+    }
     if (!(applied.payload() instanceof TurnStartPayload turnStart)
         || !command.threadId().equals(turnStart.ownerThreadId())) {
       throw new IllegalArgumentException(
-          "applied entry must be a TURN_START owned by the command thread");
+          "applied entry must be a TURN_START or SETTINGS entry owned by the command thread");
     }
+  }
+
+  private static boolean isBranchSettingCommand(ThreadCommandType type) {
+    return type == ThreadCommandType.SET_AGENT
+        || type == ThreadCommandType.SET_MODEL
+        || type == ThreadCommandType.SET_ENVIRONMENT;
   }
 
   private static void requireValidCommandLifecycle(ThreadCommand stored, ThreadCommand command) {
@@ -2828,14 +2865,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       return;
     }
     Entry result = requireExistingEntry(resultEntryId);
-    boolean compactionInvocation = isCompactionInvocation(invocation);
-    if (!isModelResultEntry(result, compactionInvocation)) {
+    if (!isModelResultEntry(result)) {
       throw new IllegalArgumentException(
-          compactionInvocation
-              ? "model resultEntryId must reference a compaction, assistant-error or"
-                  + " assistant-aborted entry for a compaction invocation"
-              : "model resultEntryId must reference an assistant, assistant-error or"
-                  + " assistant-aborted entry");
+          "model resultEntryId must reference an assistant, assistant-error or assistant-aborted"
+              + " entry");
     }
     if (resultEntryId.equals(invocation.requestHeadEntryId())) {
       throw new IllegalArgumentException(
@@ -2870,17 +2903,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  private boolean isCompactionInvocation(ModelInvocation invocation) {
-    return requireTurnStartPayload(invocation.turnStartEntryId()).compaction() != null;
-  }
-
-  private static boolean isModelResultEntry(Entry entry, boolean compactionInvocation) {
+  private static boolean isModelResultEntry(Entry entry) {
     return switch (entry.payload().type()) {
       case ASSISTANT_ERROR, ASSISTANT_ABORTED -> true;
-      case MESSAGE -> !compactionInvocation
-          && entry.payload() instanceof MessagePayload message
+      case MESSAGE -> entry.payload() instanceof MessagePayload message
           && message.message().role() == AgentMessageRole.ASSISTANT;
-      case COMPACTION -> compactionInvocation;
       default -> false;
     };
   }

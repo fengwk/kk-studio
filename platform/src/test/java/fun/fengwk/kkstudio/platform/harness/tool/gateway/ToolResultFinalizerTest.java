@@ -515,6 +515,64 @@ class ToolResultFinalizerTest {
     assertTrue(store.puts.isEmpty());
   }
 
+  /**
+   * 平台已授权的 Session Blob durable 引用只做形状校验并原样透传：不读宿主 ResourceStore、不重新 staging，也不受暂存体积上限约束
+   * （字节已在全局对象存储且已按 Session 引用鉴权）。
+   */
+  @Test
+  void sessionResourceReferencePassesThroughWithoutStoreIoOrSizeLimit() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    // 暂存上限刻意小于声明体积，证明该路径不受其约束。
+    ToolResultFinalizer finalizer = finalizer(store, 2);
+    ResourceRef session =
+        new ResourceRef(
+            ResourceRef.sessionResourceUri(UUID.randomUUID()),
+            "image/png",
+            "blob",
+            9L,
+            "a".repeat(64));
+    ResourceResultContent source = new ResourceResultContent(session, "preview");
+
+    ToolResultFinalizer.Outcome.Success success =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Success.class,
+            finalizer.finalizeResult(
+                TOOL_NAME, new ToolResult("call-1", List.of(source), false, "{}")));
+
+    assertEquals(source, success.result().contents().getFirst());
+    assertEquals(0, store.reads);
+    assertTrue(store.puts.isEmpty());
+  }
+
+  /** 已授权 Session Blob 只用于 media：声明文本工件元数据必须在任何 Store I/O 前拒绝。 */
+  @Test
+  void sessionResourceReferenceRejectsTextMetadata() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    ToolResultFinalizer finalizer = finalizer(store, 100);
+    ResourceRef session =
+        new ResourceRef(
+            ResourceRef.sessionResourceUri(UUID.randomUUID()),
+            "image/png",
+            "blob",
+            3L,
+            "a".repeat(64));
+
+    ToolResultFinalizer.Outcome outcome =
+        finalizer.finalizeResult(
+            TOOL_NAME,
+            new ToolResult(
+                "call-1",
+                List.of(new ResourceResultContent(session, null, new TextArtifactMetadata(3, 1))),
+                false,
+                "{}"));
+
+    assertEquals(
+        ToolResultFinalizer.INVALID_RESULT_KIND,
+        assertInstanceOf(ToolResultFinalizer.Outcome.Failed.class, outcome).error().kind());
+    assertEquals(0, store.reads);
+    assertTrue(store.puts.isEmpty());
+  }
+
   /** 终态化器按模型可见 name 识别可信内置 read；该 name 与内置 read 工具常量一致，是加宽预算的唯一入口。 */
   @Test
   void builtinReadIdentityIsTheTrustedNameTheFinalizerWidens() {

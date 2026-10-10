@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInputReceiptJsonCodec;
@@ -23,11 +24,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 10 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
+ * 最终 11 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
  * {@link MessagePayload} / {@link CustomEntryPayload} / {@link ModelAttemptFailurePayload} / {@link
  * CustomMessagePayload} / {@link AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link
- * CompactionPayload} / {@link TurnEndPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload}
- * 实现显式拒绝。
+ * CompactionPayload} / {@link TurnEndPayload} / {@link SettingsPayload}。直接对应 {@link EntryType}；其它
+ * {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -62,6 +63,9 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("summaryText", "assistantMetadata");
   private static final Set<String> NOTIFICATION_FIELDS =
       orderedSet("notificationId", "kind", "sourceThreadId", "message");
+  private static final Set<String> SETTINGS_FIELDS = orderedSet("settings", "ownerThreadId");
+  private static final Set<String> FORK_FIELDS =
+      orderedSet("mode", "sourceEntryId", "sourceThreadId");
   private static final Set<String> TURN_END_FIELDS =
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
@@ -88,7 +92,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   public HistoryEntryPayloadJsonCodec() {}
 
-  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 10 类 history payload，其它实现显式拒绝。 */
+  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 11 类 history payload，其它实现显式拒绝。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
@@ -109,6 +113,8 @@ public final class HistoryEntryPayloadJsonCodec {
       case CompactionPayload value -> encodeCompaction(value);
       case TurnEndPayload value -> encodeTurnEnd(value);
       case NotificationPayload value -> encodeNotification(value);
+      case SettingsPayload value -> encodeSettings(value);
+      case ForkPayload value -> encodeFork(value);
     };
   }
 
@@ -147,6 +153,8 @@ public final class HistoryEntryPayloadJsonCodec {
       case COMPACTION -> decodeCompaction(value);
       case TURN_END -> decodeTurnEnd(value);
       case NOTIFICATION -> decodeNotification(value);
+      case SETTINGS -> decodeSettings(value);
+      case FORK -> decodeFork(value);
     };
   }
 
@@ -291,6 +299,25 @@ public final class HistoryEntryPayloadJsonCodec {
     node.put("kind", value.kind().name());
     node.put("sourceThreadId", value.sourceThreadId().toString());
     node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
+    return node;
+  }
+
+  private static ObjectNode encodeSettings(SettingsPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.set("settings", HistoryValueCodecs.encodeBranchSettings(value.settings()));
+    node.put("ownerThreadId", value.ownerThreadId().toString());
+    return node;
+  }
+
+  private static ObjectNode encodeFork(ForkPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.put("mode", value.mode().name());
+    node.put("sourceEntryId", value.sourceEntryId().toString());
+    if (value.sourceThreadId() == null) {
+      node.putNull("sourceThreadId");
+    } else {
+      node.put("sourceThreadId", value.sourceThreadId().toString());
+    }
     return node;
   }
 
@@ -460,15 +487,27 @@ public final class HistoryEntryPayloadJsonCodec {
           "phase",
           "trigger",
           "executionModel",
+          "outputBudget",
           "cutEntryId",
           "turnPrefixStartEntryId",
-          "historyCompactionEntryId");
+          "historyCompactionEntryId",
+          "childThreadId",
+          "joinInvocationId");
 
   private static ObjectNode encodeCompactionStart(CompactionStart start) {
     ObjectNode node = NODES.objectNode();
     node.put("phase", start.phase().name());
     node.put("trigger", start.trigger().name());
-    node.set("executionModel", HistoryValueCodecs.encodeModelSelection(start.executionModel()));
+    if (start.executionModel() == null) {
+      node.putNull("executionModel");
+    } else {
+      node.set("executionModel", HistoryValueCodecs.encodeModelSelection(start.executionModel()));
+    }
+    if (start.outputBudget() == null) {
+      node.putNull("outputBudget");
+    } else {
+      node.put("outputBudget", start.outputBudget());
+    }
     node.put("cutEntryId", start.cutEntryId().toString());
     if (start.turnPrefixStartEntryId() == null) {
       node.putNull("turnPrefixStartEntryId");
@@ -480,6 +519,16 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.put("historyCompactionEntryId", start.historyCompactionEntryId().toString());
     }
+    if (start.childThreadId() == null) {
+      node.putNull("childThreadId");
+    } else {
+      node.put("childThreadId", start.childThreadId().toString());
+    }
+    if (start.joinInvocationId() == null) {
+      node.putNull("joinInvocationId");
+    } else {
+      node.put("joinInvocationId", start.joinInvocationId().toString());
+    }
     return node;
   }
 
@@ -489,6 +538,12 @@ public final class HistoryEntryPayloadJsonCodec {
     }
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.compaction");
     HistoryValueCodecs.requireExactFields(node, COMPACTION_START_FIELDS, "TURN_START.compaction");
+    JsonNode modelNode = node.get("executionModel");
+    ModelSelection executionModel =
+        modelNode == null || modelNode.isNull()
+            ? null
+            : HistoryValueCodecs.decodeModelSelection(
+                modelNode, "TURN_START.compaction.executionModel");
     return new CompactionStart(
         HistoryValueCodecs.readEnum(
             CompactionPhase.class,
@@ -498,13 +553,15 @@ public final class HistoryEntryPayloadJsonCodec {
             CompactionTrigger.class,
             HistoryValueCodecs.text(node, "trigger"),
             "TURN_START.compaction.trigger"),
-        HistoryValueCodecs.decodeModelSelection(
-            node.get("executionModel"), "TURN_START.compaction.executionModel"),
+        executionModel,
+        HistoryValueCodecs.nullablePositiveLong(node, "outputBudget", "TURN_START.compaction"),
         HistoryValueCodecs.requiredPositiveId(node, "cutEntryId", "TURN_START.compaction"),
         HistoryValueCodecs.nullablePositiveId(
             node, "turnPrefixStartEntryId", "TURN_START.compaction"),
         HistoryValueCodecs.nullablePositiveId(
-            node, "historyCompactionEntryId", "TURN_START.compaction"));
+            node, "historyCompactionEntryId", "TURN_START.compaction"),
+        HistoryValueCodecs.nullablePositiveId(node, "childThreadId", "TURN_START.compaction"),
+        HistoryValueCodecs.nullablePositiveId(node, "joinInvocationId", "TURN_START.compaction"));
   }
 
   private static TurnEndPayload decodeTurnEnd(JsonNode value) {
@@ -528,6 +585,24 @@ public final class HistoryEntryPayloadJsonCodec {
             NotificationKind.class, HistoryValueCodecs.text(node, "kind"), "NOTIFICATION.kind"),
         HistoryValueCodecs.requiredPositiveId(node, "sourceThreadId", "NOTIFICATION"),
         MESSAGE_CODEC.decodeNode(node.get("message")));
+  }
+
+  private static SettingsPayload decodeSettings(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "SETTINGS");
+    HistoryValueCodecs.requireExactFields(node, SETTINGS_FIELDS, "SETTINGS");
+    return new SettingsPayload(
+        HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "SETTINGS.settings"),
+        HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "SETTINGS"));
+  }
+
+  private static ForkPayload decodeFork(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "FORK");
+    HistoryValueCodecs.requireExactFields(node, FORK_FIELDS, "FORK");
+    return new ForkPayload(
+        HistoryValueCodecs.readEnum(
+            ForkMode.class, HistoryValueCodecs.text(node, "mode"), "FORK.mode"),
+        HistoryValueCodecs.requiredPositiveId(node, "sourceEntryId", "FORK"),
+        HistoryValueCodecs.nullablePositiveId(node, "sourceThreadId", "FORK"));
   }
 
   private static AssistantError decodeError(JsonNode value) {

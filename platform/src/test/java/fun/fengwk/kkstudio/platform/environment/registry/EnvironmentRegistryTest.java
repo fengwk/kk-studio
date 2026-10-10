@@ -50,8 +50,14 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
+          "1.0.9",
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment."));
+              DaemonOperatingSystem.LINUX,
+              "UTC",
+              "dev",
+              "/home/dev",
+              "Linux environment.",
+              "/tmp/kk-studio"));
 
   private final UUID node1 = UUID.randomUUID();
   private final UUID node2 = UUID.randomUUID();
@@ -443,11 +449,11 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
             EnvironmentEvent.TYPE_DISCONNECTED),
         eventTypes(offline.recentEvents()));
     assertEquals(EnvironmentEvent.LEVEL_WARN, offline.recentEvents().get(3).level());
-    // 保留事实：断线不清空宿主 metadata、Skill 投影与事件窗口。
+    // 保留事实：断线不清空宿主 metadata、Skill 投影与事件窗口；历史 WARN 事件仍留在窗口内。
     assertNotNull(offline.daemonCapabilities());
     assertEquals(1, offline.skillState().size());
     assertEquals("/home/dev/skills/dev", offline.installedSkillRoot("dev", COMMIT).orElseThrow());
-    assertTrue(offline.lastAlert().isPresent());
+    assertTrue(offline.recentEvents().stream().anyMatch(EnvironmentEvent::isAlert));
   }
 
   /**

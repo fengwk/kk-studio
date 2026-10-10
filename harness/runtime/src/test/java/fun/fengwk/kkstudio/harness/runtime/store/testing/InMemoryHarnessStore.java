@@ -13,12 +13,14 @@ import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -34,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -978,7 +981,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(childThreadId, "childThreadId");
       return state.joins.values().stream()
-          .filter(join -> join.childThreadId().equals(childThreadId) && !join.matched())
+          .filter(
+              join ->
+                  join.childThreadId().equals(childThreadId)
+                      && !join.matched()
+                      && join.supersededByInvocationId() == null)
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
                   .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
@@ -994,7 +1001,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
               join ->
                   parentThreadId.equals(join.parentThreadId())
                       && join.matched()
-                      && join.deliveryCommandSequence() == null)
+                      && join.deliveryCommandSequence() == null
+                      && join.purpose() == JoinPurpose.TASK
+                      && join.supersededByInvocationId() == null)
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
                   .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
@@ -1007,7 +1016,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(parentThreadId, "parentThreadId");
       return (int)
           state.joins.values().stream()
-              .filter(join -> parentThreadId.equals(join.parentThreadId()) && !join.matched())
+              .filter(
+                  join ->
+                      parentThreadId.equals(join.parentThreadId())
+                          && !join.matched()
+                          && join.supersededByInvocationId() == null
+                          && join.purpose() == JoinPurpose.TASK)
               .count();
     }
 
@@ -1030,7 +1044,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       return (int)
           state.joins.values().stream()
-              .filter(join -> join.parentThreadId() != null && !join.matched())
+              .filter(
+                  join ->
+                      join.parentThreadId() != null
+                          && !join.matched()
+                          && join.supersededByInvocationId() == null
+                          && join.purpose() == JoinPurpose.TASK)
               .count();
     }
 
@@ -1269,10 +1288,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
               .filter(j -> j.childThreadId().equals(childThreadId))
               .toList();
       for (ThreadJoin join : childJoins) {
+        if (join.supersededByInvocationId() != null) {
+          // 已被后续续接 supersede 的 join 永远不会交付，可安全删除。
+          continue;
+        }
         if (!join.matched()) {
           throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
         }
-        if (join.parentThreadId() != null && join.deliveryCommandSequence() == null) {
+        if (join.purpose() != JoinPurpose.COMPACTION
+            && join.parentThreadId() != null
+            && join.deliveryCommandSequence() == null) {
           throw new IllegalArgumentException(
               "cannot delete join pending delivery " + join.invocationId());
         }
@@ -1333,7 +1358,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         boolean parentAlsoDeleted =
             join.parentThreadId() == null || deleting.contains(join.parentThreadId());
-        if (!parentAlsoDeleted && (!join.matched() || join.deliveryCommandSequence() == null)) {
+        if (!parentAlsoDeleted
+            && join.supersededByInvocationId() == null
+            && (!join.matched()
+                || (join.purpose() != JoinPurpose.COMPACTION
+                    && join.deliveryCommandSequence() == null))) {
           throw new IllegalArgumentException(
               "cannot delete join pending delivery " + join.invocationId());
         }
@@ -1478,7 +1507,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * appliedEntryId（若有）必须与命令类型精确匹配：NOTIFICATION 必须引用自身四字段完全一致的 NOTIFICATION Entry；其它命令必须 引用本
+     * appliedEntryId（若有）必须与命令类型精确匹配：NOTIFICATION 必须引用自身四字段完全一致的 NOTIFICATION Entry；standalone 分支设置
+     * 命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）可以引用本 Thread 拥有的 SETTINGS 快照 Entry；其它命令必须引用本
      * Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
      */
     private void requireValidAppliedEntry(ThreadCommand command) {
@@ -1510,11 +1540,23 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         return;
       }
+      if (isBranchSettingCommand(command.type())
+          && applied.payload() instanceof SettingsPayload settings
+          && command.threadId().equals(settings.ownerThreadId())) {
+        return;
+      }
       if (!(applied.payload() instanceof TurnStartPayload turnStartPayload)
           || !command.threadId().equals(turnStartPayload.ownerThreadId())) {
         throw new IllegalArgumentException(
-            "appliedEntryId must reference a TURN_START owned by the command thread");
+            "appliedEntryId must reference a TURN_START or SETTINGS entry owned by the command"
+                + " thread");
       }
+    }
+
+    private static boolean isBranchSettingCommand(ThreadCommandType type) {
+      return type == ThreadCommandType.SET_AGENT
+          || type == ThreadCommandType.SET_MODEL
+          || type == ThreadCommandType.SET_ENVIRONMENT;
     }
 
     /**
@@ -1671,14 +1713,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
         return;
       }
       Entry result = requireExistingEntry(resultEntryId);
-      boolean compactionInvocation = isCompactionInvocation(invocation);
-      if (!isModelResultEntry(result, compactionInvocation)) {
+      if (!isModelResultEntry(result)) {
         throw new IllegalArgumentException(
-            compactionInvocation
-                ? "model resultEntryId must reference a compaction, assistant-error or"
-                    + " assistant-aborted entry for a compaction invocation"
-                : "model resultEntryId must reference an assistant, assistant-error or"
-                    + " assistant-aborted entry");
+            "model resultEntryId must reference an assistant, assistant-error or"
+                + " assistant-aborted entry");
       }
       if (resultEntryId.equals(invocation.requestHeadEntryId())) {
         throw new IllegalArgumentException(
@@ -1705,21 +1743,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    private boolean isCompactionInvocation(ModelInvocation invocation) {
-      Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
-      if (!(turnStart.payload() instanceof TurnStartPayload payload)) {
-        throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
-      }
-      return payload.compaction() != null;
-    }
-
-    private static boolean isModelResultEntry(Entry entry, boolean compactionInvocation) {
+    private static boolean isModelResultEntry(Entry entry) {
       return switch (entry.payload().type()) {
         case ASSISTANT_ERROR, ASSISTANT_ABORTED -> true;
-        case MESSAGE -> !compactionInvocation
-            && entry.payload() instanceof MessagePayload message
+        case MESSAGE -> entry.payload() instanceof MessagePayload message
             && message.message().role() == AgentMessageRole.ASSISTANT;
-        case COMPACTION -> compactionInvocation;
         default -> false;
       };
     }

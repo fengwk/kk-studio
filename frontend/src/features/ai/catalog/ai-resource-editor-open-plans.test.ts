@@ -48,6 +48,7 @@ function provider(id: string, name: string): AgentProviderDTO {
     version: '1',
     createTime: null,
     updateTime: null,
+    modelHttpRetryStatusCodes: null,
   }
 }
 
@@ -68,6 +69,7 @@ function agent(id: string, model: string): AgentDefinitionDTO {
     name: id,
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model,
     variant: 'default',
     config: {
@@ -139,7 +141,23 @@ describe('ai-resource-editor-open-plans', () => {
     expect(plan).not.toBeNull()
     if (!plan) return
     expect(plan.kind).toBe('agent')
-    expect(plan.modal).toMatchObject({ mode: 'edit', name: 'a1', expectedVersion: '1' })
+    expect(plan.modal).toMatchObject({ mode: 'edit', name: 'a1', type: 'USER', expectedVersion: '1' })
+  })
+
+  it('carries BUILTIN identity and an unconfigured model into the edit plan without seeding a fallback', () => {
+    const models = [model('MiniMax', 'minimax')]
+    const builtin: AgentDefinitionDTO = {
+      ...agent('summarizer', 'minimax/MiniMax'),
+      type: 'BUILTIN',
+      model: null,
+    }
+    const plan = editAgentEditorPlan([builtin], models, 'summarizer')
+    expect(plan).not.toBeNull()
+    if (!plan) return
+    expect(plan.kind).toBe('agent')
+    expect(plan.modal).toMatchObject({ mode: 'edit', name: 'summarizer', type: 'BUILTIN', model: null })
+    // 未配置模型保持空字符串，不被第一个 model 静默填充。
+    expect(plan.agentDraft.model).toBe('')
   })
 
   it('keeps an Agent edit plan identity when its Model is deleted or off-page', () => {

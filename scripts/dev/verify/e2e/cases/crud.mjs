@@ -1,5 +1,5 @@
 import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
-import { baseModelConfig, providerCreateBody } from '../lib/fixtures.mjs'
+import { baseModelConfig, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
 import {
   assertRootYoloPolicy,
   branchSettingsOf,
@@ -793,6 +793,153 @@ registerCase({
 })
 
 
+/** 列出全部 Provider（分页足够大），用于读回持久化事实。 */
+async function listProviders(ctx) {
+  return pageResults(
+    (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
+  )
+}
+
+registerCase({
+  id: 'crud.provider.http_retry_override',
+  level: 'L1',
+  title: 'Provider HTTP 重试白名单三态覆盖与严格整数校验',
+  docs: 'POST/PUT /api/ai/catalog/providers 的 modelHttpRetryStatusCodes 为 number[]|null：无覆盖显式输出 null（继承系统名单）；数组完全替代系统名单；显式 null 清除覆盖；空数组禁用；省略字段保留既有覆盖；非 400–599 整数/越界/重复/非数组/字符串/小数/null 元素一律 400 且不推进版本；测试结束前按 CAS 删除临时 Provider',
+  async run(ctx) {
+    const suffix = cid().slice(0, 8)
+    const created = envelopeData(
+      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+    )
+    let current = created
+    const put = (overrides) =>
+      ctx.call('PUT', `/api/ai/catalog/providers/${encodeURIComponent(created.name)}`, {
+        ...providerUpdateBody(overrides),
+        expectedVersion: String(current.version),
+      })
+    try {
+      // 无覆盖时字段显式输出 null；断言失败也必须清理已创建资源。
+      assert(
+        Object.hasOwn(created, 'modelHttpRetryStatusCodes') &&
+          created.modelHttpRetryStatusCodes === null,
+        `uncovered Provider must expose explicit null override: ${JSON.stringify(created)}`,
+      )
+      // 数组完全替代系统名单。
+      current = envelopeData((await put({ modelHttpRetryStatusCodes: [500, 503] })).json)
+      assert(
+        JSON.stringify(current.modelHttpRetryStatusCodes) === JSON.stringify([500, 503]),
+        JSON.stringify(current),
+      )
+      // 读回持久化事实。
+      const listed = (await listProviders(ctx)).find(
+        (provider) => provider.name === created.name,
+      )
+      assert(
+        JSON.stringify(listed?.modelHttpRetryStatusCodes) === JSON.stringify([500, 503]),
+        JSON.stringify(listed),
+      )
+      // 空数组表示禁用自动重试，必须与继承(null)区分。
+      current = envelopeData((await put({ modelHttpRetryStatusCodes: [] })).json)
+      assert(
+        Array.isArray(current.modelHttpRetryStatusCodes) &&
+          current.modelHttpRetryStatusCodes.length === 0,
+        JSON.stringify(current),
+      )
+      // 省略字段保留既有覆盖（仍为空数组）。
+      current = envelopeData((await put({})).json)
+      assert(
+        Array.isArray(current.modelHttpRetryStatusCodes) &&
+          current.modelHttpRetryStatusCodes.length === 0,
+        `omitted override must preserve the existing list: ${JSON.stringify(current)}`,
+      )
+      // 显式 null 清除覆盖，恢复继承系统名单。
+      current = envelopeData((await put({ modelHttpRetryStatusCodes: null })).json)
+      assert(
+        current.modelHttpRetryStatusCodes === null,
+        `explicit null must clear the override: ${JSON.stringify(current)}`,
+      )
+      // 严格整数形状：非数组/小数/字符串/越界/重复/null 元素一律 400。
+      const versionBeforeInvalid = String(current.version)
+      for (const invalidList of [
+        429, '429', 429.5, [429.5], ['429'], [399], [600], [429, 429], [null], {},
+      ]) {
+        await expectHttpError(() => put({ modelHttpRetryStatusCodes: invalidList }), {
+          status: 400,
+        })
+      }
+      const afterInvalid = (await listProviders(ctx)).find(
+        (provider) => provider.name === created.name,
+      )
+      assert(
+        afterInvalid && String(afterInvalid.version) === versionBeforeInvalid,
+        `invalid retry status list must not advance version: ${JSON.stringify(afterInvalid)}`,
+      )
+    } finally {
+      const latest = (await listProviders(ctx)).find((provider) => provider.name === created.name)
+      if (latest) await deleteProvider(ctx, latest)
+    }
+  },
+})
+
+registerCase({
+  id: 'crud.agent.builtin_identity',
+  level: 'L1',
+  title: '内置 compaction Agent identity 只读与改名/删除拒绝',
+  docs: 'GET /api/ai/catalog/agents 必含内置 compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为合法 provider/model 引用，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
+  async run(ctx) {
+    const agents = pageResults(
+      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+    )
+    const compaction = agents.find((agent) => agent.name === 'compaction')
+    assert(
+      compaction,
+      `builtin compaction Agent must be listed: ${JSON.stringify(agents.map((a) => a.name))}`,
+    )
+    assert(compaction.type === 'BUILTIN', JSON.stringify(compaction))
+    // model 字段恒在：未配置时显式 null，已配置时是合法 providerName/modelName 引用。
+    assert(
+      Object.hasOwn(compaction, 'model'),
+      `builtin model field must be present: ${JSON.stringify(compaction)}`,
+    )
+    if (compaction.model !== null) {
+      modelSelectionFor(compaction)
+    }
+    // 改名：name 由系统持有，不在可编辑请求体中，携带即被严格反序列化拒绝（写入前失败）。
+    for (const identity of [{ name: 'compaction-renamed' }, { type: 'USER' }]) {
+      await expectHttpError(
+        () =>
+        ctx.call('PUT', '/api/ai/catalog/agents/compaction', {
+          ...identity,
+          description: compaction.description,
+          systemPrompt: compaction.systemPrompt,
+          model: compaction.model,
+          variant: compaction.variant,
+          config: compaction.config,
+          expectedVersion: String(compaction.version),
+        }),
+        { status: 400 },
+      )
+    }
+    // 删除：内置 Agent 的名称与存在性由系统持有。
+    await expectHttpError(
+      () =>
+        ctx.call(
+          'DELETE',
+          `/api/ai/catalog/agents/compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
+        ),
+      { status: 409 },
+    )
+    // 拒绝后 identity/version 严格不变。
+    const after = pageResults(
+      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+    ).find((agent) => agent.name === 'compaction')
+    assert(
+      after && after.type === 'BUILTIN' && String(after.version) === String(compaction.version),
+      `builtin compaction identity must be unchanged: ${JSON.stringify({ before: compaction, after })}`,
+    )
+  },
+})
+
+
 /** 由 Agent 的 provider/model 字符串构造 model selection（只切第一个 '/'，保留 model name 内后续 '/'）。 */
 function modelSelectionFor(agent) {
   const separator = String(agent.model || '').indexOf('/')
@@ -833,8 +980,9 @@ async function firstAgent(ctx) {
   const agents = pageResults(
     (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')).json,
   )
-  assert(agents[0]?.name, 'need seeded Agent')
-  return agents[0]
+  const agent = agents.find((candidate) => candidate.type === 'USER' && candidate.model)
+  assert(agent?.name, 'need a configured USER Agent')
+  return agent
 }
 
 async function findModel(ctx, providerName, name) {

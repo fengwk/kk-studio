@@ -48,26 +48,24 @@ public final class EditCapability extends AbstractCodingCapability {
     String newText = string(args, "new_string");
 
     if (oldText.isEmpty()) {
-      throw new IllegalArgumentException("old_string must not be empty");
+      throw new ToolInputRejectedException("old_string must not be empty");
     }
 
     String normalizedOld = normalizeToLf(oldText);
     String normalizedNew = normalizeToLf(newText);
     if (normalizedOld.equals(normalizedNew)) {
-      throw new IllegalArgumentException(
+      throw new ToolInputRejectedException(
           "No changes to apply: old_string and new_string must differ after line-ending"
               + " normalization");
     }
 
-    String rawWorkdir = optionalString(args, "workdir");
-    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
-    Path path = EnvironmentPaths.existing(rawPath, workdir);
-    String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
+    Path path = EnvironmentPaths.existing(rawPath);
+    String displayPath = EnvironmentPaths.displayPath(path, rawPath);
     if (Files.isDirectory(path)) {
-      throw new IllegalArgumentException("path must be a file: " + displayPath);
+      throw new ToolInputRejectedException("path must be a file: " + displayPath);
     }
     if (!Files.isRegularFile(path)) {
-      throw new IllegalArgumentException("path is not a regular file: " + displayPath);
+      throw new ToolInputRejectedException("path is not a regular file: " + displayPath);
     }
 
     ReentrantLock lock = FileMutations.lock(path);
@@ -84,17 +82,17 @@ public final class EditCapability extends AbstractCodingCapability {
       List<Occurrence> occurrences = buildOccurrences(document, normalizedOld);
 
       if (occurrences.isEmpty()) {
-        throw new IllegalArgumentException("Could not find old_string in " + displayPath);
+        throw new ToolInputRejectedException("Could not find old_string in " + displayPath);
       }
       boolean replaceAll = optionalBoolean(args, "replace_all");
       if (!replaceAll && occurrences.size() > 1) {
-        throw new IllegalArgumentException(
+        throw new ToolInputRejectedException(
             "Found "
                 + occurrences.size()
                 + " exact matches; use replace_all to change every match or provide more context");
       }
       if (replaceAll && hasOverlappingOccurrences(occurrences)) {
-        throw new IllegalArgumentException(
+        throw new ToolInputRejectedException(
             "Found overlapping exact matches for old_string in "
                 + displayPath
                 + "; replace_all cannot safely apply overlapping replacements");
@@ -112,7 +110,7 @@ public final class EditCapability extends AbstractCodingCapability {
           TextFileCodec.encode(
               serializeLineEndingDocument(nextDocument), decoded.charset(), decoded.bomLength());
       if (Arrays.equals(encoded, originalBytes)) {
-        throw new IllegalArgumentException("No changes to apply: edit would not change the file");
+        throw new ToolInputRejectedException("No changes to apply: edit would not change the file");
       }
 
       // 真实行级 diff 只依赖内存中的文档：在提交前算好，提交后不再有可失败的展示步骤。
@@ -461,7 +459,7 @@ public final class EditCapability extends AbstractCodingCapability {
     if (index == offset) {
       return new Cursor(lastLineIndex, lastLine.length());
     }
-    throw new IllegalArgumentException("line ending document index is out of range");
+    throw new ToolInputRejectedException("line ending document index is out of range");
   }
 
   private static List<Integer> occurrenceStarts(String text, String search) {

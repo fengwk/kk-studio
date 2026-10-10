@@ -1,4 +1,5 @@
 import { Bot, ChevronRight, Cpu, Pencil, Server, ServerCog, Trash2 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { Button } from '@/shared/ui/controls/Button'
@@ -24,22 +25,27 @@ export function ResourceCardLayout({
   icon,
   title,
   subtitle,
+  badge,
   rows,
   onStart,
   onEdit,
   onDelete,
   deletePending,
+  deleteDisabled = false,
   editAriaLabel,
   deleteAriaLabel,
 }: {
   icon: ResourceIcon
   title: string
   subtitle: string
+  badge?: ReactNode
   rows: ResourceCardRow[]
   onStart?: () => void
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean
+  /** 受保护资源（如系统内置）禁止删除时保持按钮可见但不可用。 */
+  deleteDisabled?: boolean
   editAriaLabel?: string
   deleteAriaLabel?: string
 }) {
@@ -51,6 +57,7 @@ export function ResourceCardLayout({
       icon={<Icon aria-hidden="true" />}
       title={title}
       subtitle={subtitle}
+      badge={badge}
       meta={rows}
       actions={
         <>
@@ -79,7 +86,7 @@ export function ResourceCardLayout({
             danger
             aria-label={deleteAriaLabel ?? `${t('ai.catalog.action.delete')} ${title}`}
             onClick={onDelete}
-            disabled={deletePending}
+            disabled={deletePending || deleteDisabled}
           >
             <Trash2 aria-hidden="true" />
             {t('ai.catalog.action.delete')}

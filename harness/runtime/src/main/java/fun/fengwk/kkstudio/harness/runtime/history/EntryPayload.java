@@ -16,7 +16,9 @@ public sealed interface EntryPayload
         AssistantAbortedPayload,
         CompactionPayload,
         TurnEndPayload,
-        NotificationPayload {
+        NotificationPayload,
+        SettingsPayload,
+        ForkPayload {
 
   /** 返回该负载对应的 Entry 类型。 */
   EntryType type();

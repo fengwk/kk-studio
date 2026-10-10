@@ -14,12 +14,10 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
@@ -215,11 +213,12 @@ public class SystemSettingsCodec {
         requiredMillis(dto.getRetryBaseDelayMillis(), "aiRuntime.retryBaseDelayMillis"),
         requiredMillis(dto.getRetryMaxDelayMillis(), "aiRuntime.retryMaxDelayMillis"),
         requiredInt(dto.getCompactionKeepRecentTokens(), "aiRuntime.compactionKeepRecentTokens"),
-        toModelSelection(dto.getCompactionFallbackModel()),
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
         requiredInt(dto.getSubagentMaxConcurrency(), "aiRuntime.subagentMaxConcurrency"),
         requiredInt(dto.getSubagentMaxTotalConcurrency(), "aiRuntime.subagentMaxTotalConcurrency"),
-        requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"));
+        requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"),
+        requiredStatusCodes(
+            dto.getModelHttpRetryStatusCodes(), "aiRuntime.modelHttpRetryStatusCodes"));
   }
 
   private static SystemSettings.Environment toEnvironment(SystemSettingsEnvironmentDTO dto) {
@@ -351,7 +350,12 @@ public class SystemSettingsCodec {
             dto.getCanvasMediaProcessTimeoutMillis(),
             "storageMedia.canvasMediaProcessTimeoutMillis"),
         requiredInt(dto.getThumbnailMaxDimension(), "storageMedia.thumbnailMaxDimension"),
-        requiredInt(dto.getThumbnailQuality(), "storageMedia.thumbnailQuality"));
+        requiredInt(dto.getThumbnailQuality(), "storageMedia.thumbnailQuality"),
+        requiredMillis(
+            dto.getTemporaryResourceTtlSeconds(), "storageMedia.temporaryResourceTtlSeconds"),
+        requiredMillis(
+            dto.getTemporaryResourceCleanupIntervalSeconds(),
+            "storageMedia.temporaryResourceCleanupIntervalSeconds"));
   }
 
   private static SystemSettings.Advanced toAdvanced(SystemSettingsAdvancedDTO dto) {
@@ -450,11 +454,11 @@ public class SystemSettingsCodec {
     dto.setRetryBaseDelayMillis(aiRuntime.retryBaseDelayMillis());
     dto.setRetryMaxDelayMillis(aiRuntime.retryMaxDelayMillis());
     dto.setCompactionKeepRecentTokens(aiRuntime.compactionKeepRecentTokens());
-    dto.setCompactionFallbackModel(fromModelSelection(aiRuntime.compactionFallbackModel()));
     dto.setSubagentMaxDepth(aiRuntime.subagentMaxDepth());
     dto.setSubagentMaxConcurrency(aiRuntime.subagentMaxConcurrency());
     dto.setSubagentMaxTotalConcurrency(aiRuntime.subagentMaxTotalConcurrency());
     dto.setSubagentMaxTurns(aiRuntime.subagentMaxTurns());
+    dto.setModelHttpRetryStatusCodes(aiRuntime.modelHttpRetryStatusCodes());
     return dto;
   }
 
@@ -463,24 +467,6 @@ public class SystemSettingsCodec {
     SystemSettingsEnvironmentDTO dto = new SystemSettingsEnvironmentDTO();
     dto.setMaxResourceBytes(environment.maxResourceBytes());
     dto.setHeartbeatTimeoutMillis(environment.heartbeatTimeoutMillis());
-    return dto;
-  }
-
-  private static ModelSelection toModelSelection(HarnessModelSelectionDTO dto) {
-    if (dto == null) {
-      return null;
-    }
-    return new ModelSelection(dto.getProviderName(), dto.getModelName(), dto.getVariant());
-  }
-
-  private static HarnessModelSelectionDTO fromModelSelection(ModelSelection selection) {
-    if (selection == null) {
-      return null;
-    }
-    HarnessModelSelectionDTO dto = new HarnessModelSelectionDTO();
-    dto.setProviderName(selection.providerName());
-    dto.setModelName(selection.modelName());
-    dto.setVariant(selection.variant());
     return dto;
   }
 
@@ -570,6 +556,9 @@ public class SystemSettingsCodec {
     dto.setCanvasMediaProcessTimeoutMillis(storageMedia.canvasMediaProcessTimeoutMillis());
     dto.setThumbnailMaxDimension(storageMedia.thumbnailMaxDimension());
     dto.setThumbnailQuality(storageMedia.thumbnailQuality());
+    dto.setTemporaryResourceTtlSeconds(storageMedia.temporaryResourceTtlSeconds());
+    dto.setTemporaryResourceCleanupIntervalSeconds(
+        storageMedia.temporaryResourceCleanupIntervalSeconds());
     return dto;
   }
 
@@ -614,6 +603,13 @@ public class SystemSettingsCodec {
   }
 
   private static String requiredText(String value, String field) {
+    if (value == null) {
+      throw new IllegalArgumentException(field + " is required");
+    }
+    return value;
+  }
+
+  private static List<Integer> requiredStatusCodes(List<Integer> value, String field) {
     if (value == null) {
       throw new IllegalArgumentException(field + " is required");
     }

@@ -37,8 +37,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * TaskTool 薄适配器的严格参数解析、持久接受委托与错误降级测试。
  *
- * <p>异步契约下 TaskTool 只有「持久接受」一个阶段：接受成功即回一次唯一 JSON {@code {"thread_id","status"}} 的
- * tool_result，不等待终态、不返回可取消句柄。
+ * <p>异步契约下 TaskTool 只有「持久接受」一个阶段：接受成功即回一次英文自然语言接受正文（首行 {@code Task accepted. thread_id: <uuid>.}）的
+ * tool_result，不等待终态、不返回可取消句柄；busy follow-up 时正文额外说明已取代旧的 pending wait，只会有一份汇总结果。
  */
 class TaskToolTest {
 
@@ -107,9 +107,11 @@ class TaskToolTest {
 
     ToolResult result = outcomeRef.get().result();
     assertFalse(result.error());
-    // 即时回执是唯一形状的 JSON，不重复 prompt。
-    assertEquals(
-        "{\"thread_id\":\"" + CHILD_THREAD_ID + "\",\"status\":\"accepted\"}", text(result));
+    // 即时回执是英文自然语言接受正文，首行显式给出 thread_id，不重复 prompt。
+    assertEquals(SubagentTaskMessages.accepted(CHILD_THREAD_ID), text(result));
+    assertTrue(
+        text(result).startsWith("Task accepted. thread_id: " + CHILD_THREAD_ID + "."),
+        text(result));
     assertFalse(text(result).contains("write code"), text(result));
     // details 与回执表达同一份事实，并保留 UI 需要的 kind/会话/幂等元数据。
     String details = result.detailsJson();
@@ -205,6 +207,23 @@ class TaskToolTest {
     assertTrue(result.detailsJson().contains("\"replayed\":true"));
   }
 
+  /** busy follow-up：Runner 报告取代了旧未完成委派时，回执正文明确只会有最新一次的一份汇总结果。 */
+  @Test
+  void reportsReplacedPendingWaitOnContinuation() {
+    TaskTool tool = new TaskTool(request -> replacedAcceptance());
+    AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
+    ToolExecutionRequest request =
+        createRequest(tool, "call-replaced", "{\"subagent_type\":\"coder\",\"prompt\":\"p\"}");
+
+    tool.execute(request, createListener(outcomeRef));
+
+    ToolResult result = outcomeRef.get().result();
+    assertFalse(result.error());
+    assertTrue(text(result).contains("replaces the previous pending wait"), text(result));
+    assertTrue(text(result).contains("only one consolidated result"), text(result));
+    assertTrue(result.detailsJson().contains("\"replaced\":true"));
+  }
+
   /** Runner 拒绝或抛异常时捕获并安全通知 listener，绝不逃出调用线程。 */
   @Test
   void catchesRunnerExceptionsAndCompletesListenerWithError() {
@@ -242,7 +261,11 @@ class TaskToolTest {
   }
 
   private static SubagentTaskAcceptance acceptance(boolean replayed) {
-    return new SubagentTaskAcceptance(CHILD_SESSION_ID, CHILD_THREAD_ID, replayed);
+    return new SubagentTaskAcceptance(CHILD_SESSION_ID, CHILD_THREAD_ID, replayed, false);
+  }
+
+  private static SubagentTaskAcceptance replacedAcceptance() {
+    return new SubagentTaskAcceptance(CHILD_SESSION_ID, CHILD_THREAD_ID, false, true);
   }
 
   private static void assertRejection(
@@ -292,5 +315,24 @@ class TaskToolTest {
 
   private static String text(ToolResult result) {
     return ((TextResultContent) result.contents().get(0)).text();
+  }
+
+  /** task 参数被拒：明确未执行、父线程保留，并列出继续参数 subagent_type/prompt/thread_id，不含重试倾向措辞。 */
+  @Test
+  void rejectionGuidanceStatesNotExecutedAndContinuationParameters() {
+    TaskTool tool = new TaskTool(request -> acceptance(false));
+    AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
+    ToolExecutionRequest request =
+        createRequest(tool, "call-guidance", "{\"subagent_type\":\" coder \",\"prompt\":\"p\"}");
+
+    tool.execute(request, createListener(outcomeRef));
+
+    String message = text(outcomeRef.get().result());
+    assertTrue(message.contains("subagent_type must not contain surrounding whitespace"), message);
+    assertTrue(message.contains("The tool was not executed."), message);
+    assertTrue(message.contains("subagent_type"), message);
+    assertTrue(message.contains("prompt"), message);
+    assertTrue(message.contains("thread_id"), message);
+    assertFalse(message.toLowerCase().contains("do not retry"), message);
   }
 }

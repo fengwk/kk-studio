@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 
 import java.util.List;
@@ -15,16 +14,14 @@ import java.util.UUID;
 /** Transient CompactionPreparation 的非空摘要范围与 phase anchor 不变量。 */
 class CompactionPreparationTest {
 
-  private static final ModelSelection MODEL = new ModelSelection("p", "m", "v");
   private static final List<AgentMessage> MESSAGES = List.of(AgentMessage.user("message"));
 
   @Test
-  void frozenStartContainsOnlyDurableFacts() {
+  void pendingStartContainsOnlyDurableFacts() {
     CompactionPreparation preparation =
         new CompactionPreparation(
             CompactionPhase.FULL,
             CompactionTrigger.MANUAL,
-            MODEL,
             id(4L),
             null,
             null,
@@ -33,9 +30,8 @@ class CompactionPreparationTest {
             10);
 
     assertEquals(
-        new CompactionStart(
-            CompactionPhase.FULL, CompactionTrigger.MANUAL, MODEL, id(4L), null, null),
-        preparation.frozenStart());
+        CompactionStart.pending(CompactionPhase.FULL, CompactionTrigger.MANUAL, id(4L), null, null),
+        preparation.pendingStart());
   }
 
   @Test
@@ -60,7 +56,6 @@ class CompactionPreparationTest {
             new CompactionPreparation(
                 phase,
                 CompactionTrigger.THRESHOLD,
-                MODEL,
                 id(4L),
                 turnPrefixStartEntryId,
                 historyCompactionEntryId,

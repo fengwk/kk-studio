@@ -26,48 +26,56 @@ public class CurrentEnvironmentContextTest {
   public void shouldRejectHostFactsWithoutSelectedEnvironment() {
     LocalDate today = LocalDate.of(2026, 9, 13);
     CurrentEnvironmentContext unselected =
-        new CurrentEnvironmentContext(null, null, null, null, null, today, null);
+        new CurrentEnvironmentContext(null, null, null, null, null, null, today, null);
     assertNull(unselected.environmentId());
     assertNull(unselected.environmentName());
     assertNull(unselected.operatingSystem());
     assertNull(unselected.userName());
     assertNull(unselected.homeDirectory());
+    assertNull(unselected.tempDirectory());
     assertNull(unselected.note());
     assertEquals(today, unselected.currentDate());
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(null, "env", null, null, null, today, null));
+        () -> new CurrentEnvironmentContext(null, "env", null, null, null, null, today, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CurrentEnvironmentContext(
-                null, null, DaemonOperatingSystem.LINUX, null, null, today, null));
+                null, null, DaemonOperatingSystem.LINUX, null, null, null, today, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(null, null, null, "dev", null, today, null));
+        () -> new CurrentEnvironmentContext(null, null, null, "dev", null, null, today, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(null, null, null, null, "/home/dev", today, null));
+        () ->
+            new CurrentEnvironmentContext(null, null, null, null, "/home/dev", null, today, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(null, null, null, null, null, today, "some-note"));
+        () ->
+            new CurrentEnvironmentContext(
+                null, null, null, null, null, "/tmp/kk-studio", today, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CurrentEnvironmentContext(null, null, null, null, null, null, today, "some-note"));
   }
 
-  // 测试意图: 已选环境必须携带 name，且 userName/homeDirectory/note 复用宿主事实的结构校验
+  // 测试意图: 已选环境必须携带 name，且 userName/homeDirectory/tempDirectory/note 复用宿主事实的结构校验
   @Test
   public void shouldValidateSelectedEnvironmentFacts() {
     LocalDate today = LocalDate.of(2026, 9, 13);
     EnvironmentId envId = new EnvironmentId(UUID.randomUUID());
     assertThrows(
         NullPointerException.class,
-        () -> new CurrentEnvironmentContext(null, null, null, null, null, null, null));
+        () -> new CurrentEnvironmentContext(null, null, null, null, null, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(envId, null, null, null, null, today, null));
+        () -> new CurrentEnvironmentContext(envId, null, null, null, null, null, today, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(envId, "   ", null, null, null, today, null));
+        () -> new CurrentEnvironmentContext(envId, "   ", null, null, null, null, today, null));
 
     CurrentEnvironmentContext selected =
         new CurrentEnvironmentContext(
@@ -76,6 +84,7 @@ public class CurrentEnvironmentContextTest {
             DaemonOperatingSystem.MACOS,
             "dev",
             "/Users/dev",
+            "/tmp/kk-studio",
             today,
             "developer machine");
     assertEquals(envId, selected.environmentId());
@@ -83,26 +92,35 @@ public class CurrentEnvironmentContextTest {
     assertEquals(DaemonOperatingSystem.MACOS, selected.operatingSystem());
     assertEquals("dev", selected.userName());
     assertEquals("/Users/dev", selected.homeDirectory());
+    assertEquals("/tmp/kk-studio", selected.tempDirectory());
     assertEquals("developer machine", selected.note());
 
     // 宿主事实是可选项，缺失时保持 null 而不是伪造默认值。
     CurrentEnvironmentContext nameOnly =
-        new CurrentEnvironmentContext(envId, "nas-dev", null, null, null, today, null);
+        new CurrentEnvironmentContext(envId, "nas-dev", null, null, null, null, today, null);
     assertNull(nameOnly.operatingSystem());
     assertNull(nameOnly.userName());
     assertNull(nameOnly.homeDirectory());
+    assertNull(nameOnly.tempDirectory());
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(envId, "nas-dev", null, " dev ", null, today, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CurrentEnvironmentContext(
-                envId, "nas-dev", null, null, "relative/home", today, null));
+                envId, "nas-dev", null, " dev ", null, null, today, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(envId, "nas-dev", null, null, null, today, " "));
+        () ->
+            new CurrentEnvironmentContext(
+                envId, "nas-dev", null, null, "relative/home", null, today, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CurrentEnvironmentContext(
+                envId, "nas-dev", null, null, null, "relative/tmp", today, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CurrentEnvironmentContext(envId, "nas-dev", null, null, null, null, today, " "));
   }
 
   // 测试意图: 未选择 Environment 的工厂只保留 Platform 时钟时区下的当前日期
@@ -116,6 +134,7 @@ public class CurrentEnvironmentContextTest {
     assertNull(none.operatingSystem());
     assertNull(none.userName());
     assertNull(none.homeDirectory());
+    assertNull(none.tempDirectory());
     assertNull(none.note());
   }
 
@@ -140,6 +159,7 @@ public class CurrentEnvironmentContextTest {
     assertEquals("nas-dev", unreported.environmentName());
     assertNull(unreported.userName());
     assertNull(unreported.homeDirectory());
+    assertNull(unreported.tempDirectory());
 
     DaemonEnvironmentInfo hostFacts =
         new DaemonEnvironmentInfo(
@@ -147,13 +167,15 @@ public class CurrentEnvironmentContextTest {
             "America/Los_Angeles",
             "dev",
             "/home/dev",
-            "Linux environment.");
+            "Linux environment.",
+            "/tmp/kk-studio");
     CurrentEnvironmentContext reported =
         CurrentEnvironmentContext.selected(envId, "nas-dev", hostFacts, NOW, ZoneOffset.UTC);
     assertEquals(LocalDate.of(2026, 9, 12), reported.currentDate());
     assertEquals(DaemonOperatingSystem.LINUX, reported.operatingSystem());
     assertEquals("dev", reported.userName());
     assertEquals("/home/dev", reported.homeDirectory());
+    assertEquals("/tmp/kk-studio", reported.tempDirectory());
     assertEquals("Linux environment.", reported.note());
   }
 }

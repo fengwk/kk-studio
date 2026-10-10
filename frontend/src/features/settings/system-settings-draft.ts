@@ -3,7 +3,7 @@ import type {
   SystemSettingsSectionsDTO,
   SystemSettingsUpdateDTO,
 } from '@/shared/api/contracts/system-settings'
-import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
+import { assembleHttpStatusCodeList, IntegerListValidationError } from '@/shared/lib/integer-list'
 
 /** 前端 draft 的共享数字/文本基元。 */
 export type DraftNumericField = string
@@ -33,18 +33,12 @@ export interface SystemSettingsAiRuntimeDraft {
   retryBaseDelayMillis: DraftNumericField
   retryMaxDelayMillis: DraftNumericField
   compactionKeepRecentTokens: DraftNumericField
-  compactionFallbackModel: ModelSelectionDraft | null
   subagentMaxDepth: DraftNumericField
   subagentMaxConcurrency: DraftNumericField
   /** '' 表示不额外限制（无 cap）。 */
   subagentMaxTotalConcurrency: DraftNumericField
   subagentMaxTurns: DraftNumericField
-}
-
-export interface ModelSelectionDraft {
-  providerName: string
-  modelName: string
-  variant: string
+  modelHttpRetryStatusCodes: (number | string)[]
 }
 
 export interface SystemSettingsEnvironmentDraft {
@@ -120,6 +114,8 @@ export interface SystemSettingsStorageMediaDraft {
   canvasMediaProcessTimeoutMillis: DraftNumericField
   thumbnailMaxDimension: DraftNumericField
   thumbnailQuality: DraftNumericField
+  temporaryResourceTtlSeconds: DraftNumericField
+  temporaryResourceCleanupIntervalSeconds: DraftNumericField
 }
 
 export interface SystemSettingsAdvancedDraft {
@@ -154,7 +150,9 @@ export type DraftValidationReason =
   | 'duplicateToolName'
   | 'blankPattern'
   | 'emptyNumericField'
-  | 'partialModelSelection'
+  | 'httpStatusNotInteger'
+  | 'httpStatusOutOfRange'
+  | 'httpStatusDuplicate'
 
 export class DraftValidationError extends Error {
   readonly reason: DraftValidationReason
@@ -198,6 +196,9 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       canvasMediaProcessTimeoutMillis: dto.storageMedia.canvasMediaProcessTimeoutMillis,
       thumbnailMaxDimension: String(dto.storageMedia.thumbnailMaxDimension),
       thumbnailQuality: String(dto.storageMedia.thumbnailQuality),
+      temporaryResourceTtlSeconds: dto.storageMedia.temporaryResourceTtlSeconds,
+      temporaryResourceCleanupIntervalSeconds:
+        dto.storageMedia.temporaryResourceCleanupIntervalSeconds,
     },
     advanced: {
       resourceMaxBytes: dto.advanced.resourceMaxBytes,
@@ -226,18 +227,13 @@ function aiRuntimeToDraft(
     retryBaseDelayMillis: dto.retryBaseDelayMillis,
     retryMaxDelayMillis: dto.retryMaxDelayMillis,
     compactionKeepRecentTokens: String(dto.compactionKeepRecentTokens),
-    compactionFallbackModel:
-      dto.compactionFallbackModel == null
-        ? null
-        : {
-            providerName: dto.compactionFallbackModel.providerName,
-            modelName: dto.compactionFallbackModel.modelName,
-            variant: dto.compactionFallbackModel.variant,
-          },
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
     subagentMaxTurns: String(dto.subagentMaxTurns),
+    modelHttpRetryStatusCodes: Array.isArray(dto.modelHttpRetryStatusCodes)
+      ? [...dto.modelHttpRetryStatusCodes]
+      : [],
   }
 }
 
@@ -342,15 +338,15 @@ export function assembleSettingsUpdate(
       retryBaseDelayMillis: requiredLong(draft.aiRuntime.retryBaseDelayMillis),
       retryMaxDelayMillis: requiredLong(draft.aiRuntime.retryMaxDelayMillis),
       compactionKeepRecentTokens: requiredInt(draft.aiRuntime.compactionKeepRecentTokens),
-      compactionFallbackModel: assembleModelSelection(
-        draft.aiRuntime.compactionFallbackModel,
-      ),
       subagentMaxDepth: requiredInt(draft.aiRuntime.subagentMaxDepth),
       subagentMaxConcurrency: requiredInt(draft.aiRuntime.subagentMaxConcurrency),
       subagentMaxTotalConcurrency: requiredInt(
         draft.aiRuntime.subagentMaxTotalConcurrency,
       ),
       subagentMaxTurns: requiredInt(draft.aiRuntime.subagentMaxTurns),
+      modelHttpRetryStatusCodes: assembleHttpStatusList(
+        draft.aiRuntime.modelHttpRetryStatusCodes,
+      ),
     },
     environment: {
       maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),
@@ -446,6 +442,10 @@ export function assembleSettingsUpdate(
       ),
       thumbnailMaxDimension: requiredInt(draft.storageMedia.thumbnailMaxDimension),
       thumbnailQuality: requiredInt(draft.storageMedia.thumbnailQuality),
+      temporaryResourceTtlSeconds: requiredLong(draft.storageMedia.temporaryResourceTtlSeconds),
+      temporaryResourceCleanupIntervalSeconds: requiredLong(
+        draft.storageMedia.temporaryResourceCleanupIntervalSeconds,
+      ),
     },
     advanced: {
       resourceMaxBytes: requiredLong(draft.advanced.resourceMaxBytes),
@@ -505,27 +505,25 @@ function nullableText(value: string): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-function assembleModelSelection(
-  value: ModelSelectionDraft | null,
-): HarnessModelSelectionDTO | null {
-  if (value == null) {
-    return null
+export function assembleHttpStatusList(items: unknown): number[] {
+  try {
+    return assembleHttpStatusCodeList(items)
+  } catch (err: unknown) {
+    if (err instanceof IntegerListValidationError) {
+      if (err.code === 'outOfRange') {
+        throw new DraftValidationError('httpStatusOutOfRange')
+      }
+      if (err.code === 'duplicate') {
+        throw new DraftValidationError('httpStatusDuplicate')
+      }
+    }
+    throw new DraftValidationError('httpStatusNotInteger')
   }
-  const providerName = value.providerName.trim()
-  const modelName = value.modelName.trim()
-  const variant = value.variant.trim()
-  if (providerName === '' && modelName === '' && variant === '') {
-    return null
-  }
-  if (providerName === '' || modelName === '' || variant === '') {
-    throw new DraftValidationError('partialModelSelection')
-  }
-  return { providerName, modelName, variant }
 }
 
 const CUSTOM_ATOMIC_FIELD_PATHS = new Set([
   'tool.permission',
-  'aiRuntime.compactionFallbackModel',
+  'aiRuntime.modelHttpRetryStatusCodes',
 ])
 
 /** 严格读取 draft 路径；schema renderer 不维护第二份 server field registry。 */

@@ -156,8 +156,8 @@ class TurnPlanBuilderGoalTest {
             null,
             false);
     assertNull(cleared.candidatePath().baseSettings().goal());
-    // 清除与设置走同一原子路径：候选 turn 内出现明确的取消 USER 消息。
-    assertTrue(textOf(clearedUserMessage(cleared)).contains("clearing the goal of this branch"));
+    // 清除与设置走同一原子路径：候选 turn 内出现明确的取消 USER 消息，正文严格表达无用户设定 Goal。
+    assertEquals("No active user-set goal.", textOf(clearedUserMessage(cleared)));
   }
 
   /** 测试意图：CONTINUATION 只消费 SET_*，排队的 GOAL 必须保持 queued（不得提前消费、不得改 settings、不得产生消息），只留下一次显式 wake。 */

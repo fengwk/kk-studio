@@ -132,7 +132,7 @@ public class S3StorageConfiguration {
   @Bean
   public S3PresignService s3PresignService(
       S3StorageProperties properties, S3Presigner s3Presigner, SystemSettingsSnapshot snapshot) {
-    return new S3PresignServiceImpl(properties, s3Presigner, snapshot.get().storageMedia());
+    return new S3PresignServiceImpl(properties, s3Presigner, snapshot);
   }
 
   /** 默认媒体事实探针：只记录 HEAD 元数据；后续 Canvas 媒体集成可替换为 Ffmpeg 实现。 */
@@ -231,7 +231,7 @@ public class S3StorageConfiguration {
         storageUploadOperationLock,
         maintenanceWakeup,
         s3Properties,
-        snapshot.get().storageMedia(),
+        snapshot,
         maintenanceProperties,
         clock,
         transactionManager);

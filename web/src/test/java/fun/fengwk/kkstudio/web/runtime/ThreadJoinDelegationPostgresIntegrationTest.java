@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
@@ -636,11 +637,11 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 忙子 resume：向仍在执行（已有未消费命令）的子追加源 prompt 立即被接受，不要求子静止；两条 join 都在真正下一次 Idle 结算， 每个 invocation
-   * 恰好交付一条结果消息。
+   * 忙子 resume：向仍在执行（已有未消费命令）的子追加源 prompt 立即被接受，不要求子静止；续接在同一父/子对上 supersede 旧的未完成 join，旧 join 保留
+   * invocation identity 与源命令但不再交付，只在真正下一次 Idle 交付最新一次的一份汇总结果。
    */
   @Test
-  void busyChildResumeIsAcceptedImmediatelyAndSettlesAtNextIdle() {
+  void busyChildResumeSupersedesUnfinishedJoinAndDeliversLatestAtNextIdle() {
     UUID parentThreadId = UUID.randomUUID();
     acceptRootSession(UUID.randomUUID(), parentThreadId, "root work");
 
@@ -670,6 +671,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
             taskJoin(resumeInvocationId, parentThreadId, parentHead, "more child work"),
             AcceptancePreflight.IDENTITY);
     assertFalse(resumed.replayed());
+    assertTrue(resumed.joinReplaced(), "busy resume supersedes the previous unfinished join");
     assertEquals(2, commandsOf(childThreadId).size());
 
     startTestDispatcher();
@@ -679,10 +681,12 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         "resumed join must settle at the next idle");
     ThreadJoin firstJoin = joinOf(firstInvocationId);
     ThreadJoin resumedJoin = joinOf(resumeInvocationId);
-    assertTrue(firstJoin.matched());
+    assertFalse(firstJoin.matched(), "superseded join no longer settles independently");
+    assertEquals(resumeInvocationId, firstJoin.supersededByInvocationId());
+    assertTrue(runtime.projectJoinReceipt(firstInvocationId).isEmpty());
     assertTrue(resumedJoin.matched());
+    assertNull(resumedJoin.supersededByInvocationId());
     assertNotNull(resumedJoin.terminalEntryId(), "resumed join freezes its own terminal entry");
-    assertEquals(ThreadJoinOutcome.COMPLETED, receiptOf(firstInvocationId).outcome());
     assertEquals(ThreadJoinOutcome.COMPLETED, receiptOf(resumeInvocationId).outcome());
     assertEquals(
         ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(childThreadId).runtimeStatus());
@@ -692,10 +696,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         "resumed child must settle every accepted source command");
 
     List<ThreadCommand> delivered = resultCommands(parentThreadId);
-    assertEquals(2, delivered.size(), "each invocation delivers exactly one result message");
-    Set<UUID> deliveredInvocations =
-        delivered.stream().map(ThreadCommand::idempotencyKey).collect(Collectors.toSet());
-    assertEquals(Set.of(firstInvocationId, resumeInvocationId), deliveredInvocations);
+    assertEquals(1, delivered.size(), "busy follow-up delivers exactly one consolidated result");
+    assertEquals(resumeInvocationId, delivered.getFirst().idempotencyKey());
   }
 
   /**
@@ -1104,7 +1106,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         MAX_TURNS,
         maxDepth,
         MAX_CONCURRENT_CHILDREN,
-        MAX_CONCURRENT_THREADS);
+        MAX_CONCURRENT_THREADS,
+        JoinPurpose.TASK);
   }
 
   private static NewThreadCommand promptCommand(UUID idempotencyKey, String prompt) {

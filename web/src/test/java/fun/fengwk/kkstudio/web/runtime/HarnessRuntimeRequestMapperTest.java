@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -116,9 +117,19 @@ class HarnessRuntimeRequestMapperTest {
     AcceptCommandsCommand newThread =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(newThreadTarget(), userCommand("entry")));
+    AcceptCommandsCommand newForkedSession =
+        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+            request(newForkedSessionTarget(), userCommand("fork")));
 
     assertInstanceOf(AcceptCommandsTarget.NewRootSession.class, newSession.target());
     assertInstanceOf(AcceptCommandsTarget.NewThread.class, newThread.target());
+    AcceptCommandsTarget.NewForkedSession forked =
+        assertInstanceOf(AcceptCommandsTarget.NewForkedSession.class, newForkedSession.target());
+    assertEquals(id(1), forked.sourceThreadId());
+    assertEquals(id(2), forked.startEntryId());
+    assertEquals(id(3), forked.sessionId());
+    assertEquals(id(4), forked.threadId());
+    assertFalse(forked.yoloEnabled());
 
     // 既有 Thread 不再经由 target union 承载：type "THREAD" 现在按未知 target 类型拒绝。
     HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
@@ -538,8 +549,8 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   @Test
-  void requiresOneTrailingUserMessageAndOrderedSetPrefix() {
-    // batch 必须使用单调 SET_* 前缀，并且恰好以一条 USER_MESSAGE 收尾。
+  void requiresAtMostOneTrailingUserLikeAndOrderedSetPrefixOnExistingThreads() {
+    // 既有 Thread 的 batch 使用单调 SET_* 前缀；user-like 至多一条且必须以它收尾。
     HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
     agent.setAgentName("default-assistant");
     assertThrows(
@@ -547,11 +558,12 @@ class HarnessRuntimeRequestMapperTest {
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(userCommand("user"), agent)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(agent)));
+    // 纯设置批次在既有 Thread 上合法：只允许 SET_*，不含任何 user-like 输入。
+    AcceptCommandsCommand settingsOnly =
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, threadBatch(agent));
+    assertEquals(
+        List.of(ThreadCommandType.SET_AGENT),
+        settingsOnly.commands().stream().map(command -> command.payload().type()).toList());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -579,6 +591,41 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, empty));
+  }
+
+  /**
+   * 测试意图：纯设置批次（0 条 user-like）只在既有 Thread 上被接受，且保持 SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT
+   * 固定顺序；创建型 target 与本地草稿预览仍要求恰一条末尾 user-like 输入。
+   */
+  @Test
+  void acceptsSettingsOnlyBatchOnExistingThreadButNotOnCreationTargets() {
+    HarnessCommandCreateDTO agent = command("SET_AGENT", "settings-agent");
+    agent.setAgentName("coder");
+    HarnessCommandCreateDTO model = command("SET_MODEL", "settings-model");
+    model.setModel(modelSelection());
+    HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "settings-environment");
+    environment.setEnvironmentName(null);
+
+    AcceptCommandsCommand mapped =
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+            THREAD_ID, threadBatch(agent, model, environment));
+    assertEquals(
+        List.of(
+            ThreadCommandType.SET_AGENT,
+            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_ENVIRONMENT),
+        mapped.commands().stream().map(command -> command.payload().type()).toList());
+
+    // 创建型 target 不接受纯设置批次：必须恰有一条末尾 user-like 输入。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(newSessionTarget(), agent, model)));
+    // 本地分支草稿预览沿用创建契约，同样拒绝纯设置批次。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toNewThreadCommands(List.of(agent, model), "commands"));
   }
 
   /** 测试意图：既有 Thread 批次的 CAS cursor 必须精确映射到 domain target，命令列表缺失/为空一律拒绝。 */
@@ -657,6 +704,35 @@ class HarnessRuntimeRequestMapperTest {
     HarnessCommandTargetDTO sessionWithThreadName = newSessionTarget();
     sessionWithThreadName.setThreadName("branch");
     assertTargetRejected(sessionWithThreadName);
+
+    // NEW_FORKED_SESSION 的字段集合互斥：rootSettings / threadName 禁用，sourceThreadId 必填。
+    HarnessCommandTargetDTO forkedWithRootSettings = newForkedSessionTarget();
+    forkedWithRootSettings.setRootSettings(branchSettings());
+    assertTargetRejected(forkedWithRootSettings);
+
+    HarnessCommandTargetDTO forkedWithThreadName = newForkedSessionTarget();
+    forkedWithThreadName.setThreadName("branch");
+    assertTargetRejected(forkedWithThreadName);
+
+    HarnessCommandTargetDTO missingSourceThreadId = newForkedSessionTarget();
+    missingSourceThreadId.setSourceThreadId(null);
+    assertTargetRejected(missingSourceThreadId);
+
+    // sourceThreadId 只属于 NEW_FORKED_SESSION。
+    HarnessCommandTargetDTO newSessionWithSource = newSessionTarget();
+    newSessionWithSource.setSourceThreadId(idText(7));
+    assertTargetRejected(newSessionWithSource);
+    HarnessCommandTargetDTO newThreadWithSource = newThreadTarget();
+    newThreadWithSource.setSourceThreadId(idText(7));
+    assertTargetRejected(newThreadWithSource);
+    // 显式 null 也按 presence 拒绝：不能靠 null 绕过禁用字段校验。
+    HarnessCommandTargetDTO newSessionWithNullSource = newSessionTarget();
+    newSessionWithNullSource.setSourceThreadId(null);
+    assertTargetRejected(newSessionWithNullSource);
+
+    HarnessCommandTargetDTO forkedMissingYolo = newForkedSessionTarget();
+    forkedMissingYolo.setYoloEnabled(null);
+    assertTargetRejected(forkedMissingYolo);
 
     HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
     thread.setType("THREAD");
@@ -861,6 +937,17 @@ class HarnessRuntimeRequestMapperTest {
     target.setStartEntryId(idText(3));
     target.setThreadId(idText(1));
     target.setThreadName("branch");
+    target.setYoloEnabled(false);
+    return target;
+  }
+
+  private static HarnessCommandTargetDTO newForkedSessionTarget() {
+    HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
+    target.setType("NEW_FORKED_SESSION");
+    target.setSourceThreadId(idText(1));
+    target.setStartEntryId(idText(2));
+    target.setSessionId(idText(3));
+    target.setThreadId(idText(4));
     target.setYoloEnabled(false);
     return target;
   }

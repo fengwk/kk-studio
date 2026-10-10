@@ -177,8 +177,14 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     return CAPABILITIES_CODEC.encode(
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
+            "1.0.9",
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment.")));
+                DaemonOperatingSystem.LINUX,
+                "UTC",
+                "dev",
+                "/home/dev",
+                "Linux environment.",
+                "/tmp/kk-studio")));
   }
 
   private static DaemonEnvelope helloEnvelope() {
@@ -194,6 +200,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
             + "\"capabilityCatalogVersion\":\""
             + EnvironmentCapabilityCatalog.version()
             + "\","
+            + "\"daemonVersion\":\"1.0.9\","
             + "\"registrationToken\":\""
             + REGISTRATION_TOKEN
             + "\","

@@ -59,6 +59,23 @@ export interface EnvironmentEventDTO {
   message: string
 }
 
+export type EnvironmentUpdatePhase =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'PREPARED'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'UNKNOWN'
+
+export interface EnvironmentUpdateDTO {
+  operationId: string
+  targetVersion: string
+  phase: EnvironmentUpdatePhase
+  error?: string | null
+  createdAt: InstantTimestamp
+  updatedAt: InstantTimestamp
+}
+
 /**
  * Environment Card DTO（包含稳定 Card 属性与当前 live 连接投影）。
  *
@@ -95,8 +112,14 @@ export interface EnvironmentCardDTO {
   timeZone?: string | null
   /** 节点备注/说明。 */
   note?: string | null
-  /** 最近一条 WARN/ERROR 运维事件；没有任何此类事件时为 null。 */
-  lastEvent?: EnvironmentEventDTO | null
+  /**
+   * 最近一次被接受的 READY 上报的实际 daemon 构建版本（JAR manifest 版本；未打包时为 `development`）；从未 READY 时为 null。
+   *
+   * 它与下方 CAS `version` 是两个不同事实：前者是运行中的二进制版本，后者是配置行的乐观锁版本。
+   */
+  daemonVersion?: string | null
+  /** Latest managed Daemon update operation; absent or null when never updated. */
+  update?: EnvironmentUpdateDTO | null
   /** CAS 版本。 */
   version: CatalogVersion
   createTime: InstantTimestamp

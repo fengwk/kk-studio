@@ -1,4 +1,4 @@
-Read a text file, directory, or supported image by path.
+Read a text file, directory, or supported media resource by path.
 
 Usage:
 - Use `read` before editing an existing text file.
@@ -13,16 +13,18 @@ Usage:
 - When the result is truncated, the numbered body contains only exact file content (never synthetic truncation markers). The header reports whether the line count (`line_limit`) or the 60000 code point budget (`character_limit`) stopped the read, plus `next`, the first position that was not returned. A `[TRUNCATED: ...]` line after the body repeats that position; it contains no call instructions.
 - To continue, call `read` again with that next position (`offset` is its line, and `column_offset` is its column when it is not 1).
 - Use `read` on directories instead of `bash ls`. Directories keep their own listing format, also paged by `offset`/`limit`.
-- `path` may be a `kkstudio:` resource URI or a local path in the selected Environment.
-- Use `workdir` only to resolve a relative local path. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, cwd, or home directory.
-- Omit `workdir` for `kkstudio:` URIs and absolute local paths.
+- `path` is an absolute path on the target Environment's file system, or one of exactly two complete `kkstudio:` URI forms:
+  - `kkstudio:/resources/<blobId>`: a session resource, for example an externalized tool output. Read it with `read`; `offset`/`limit` apply only when it is returned as a text window, and `grep` accepts local paths only and does not resolve `kkstudio:` URIs. A supported media resource (image, audio, video, or PDF) may be returned to you as the actual media content when the current model and provider protocol allow it; when it cannot be delivered, the call fails with an explicit error instead of returning a path or a description.
+  - `kkstudio:/skills/<package>/<skill>/<relativePath>`: a published skill file.
+- Local paths must be absolute. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project` or `//server/share/project`.
 
 Examples:
-- `read({ path: "src/example.ts", workdir: "/srv/project/packages/web" })`
-- `read({ path: "src/example.ts", workdir: "/srv/project/services/api", offset: 120, limit: 40 })`
-- `read({ path: "src/bundle.js", workdir: "/srv/project", offset: 1, column_offset: 60001 })`
+- `read({ path: "/srv/project/packages/web/src/example.ts" })`
+- `read({ path: "/srv/project/services/api/src/example.ts", offset: 120, limit: 40 })`
+- `read({ path: "/srv/project/src/bundle.js", offset: 1, column_offset: 60001 })`
 - `read({ path: "kkstudio:/skills/review/checklist/SKILL.md" })`
+- `read({ path: "kkstudio:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f", offset: 1, limit: 2000 })`
 - `read({ path: "/var/log/app.log", offset: 120, limit: 40 })`
-- `read({ path: ".", workdir: "/srv/project" })`
-- `read({ path: "src/", workdir: "C:/src/project" })`
-- `read({ path: "screenshot.png", workdir: "/tmp/agent-artifacts" })`
+- `read({ path: "/srv/project" })`
+- `read({ path: "C:/src/project/src/" })`
+- `read({ path: "/tmp/agent-artifacts/screenshot.png" })`

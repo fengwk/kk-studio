@@ -328,6 +328,10 @@ class BuiltinHarnessContributorTest {
     assertEquals(fsRead.inputSchema(), descriptor.inputSchema());
     assertEquals(fsRead.defaultTimeout(), descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
+    assertFalse(descriptor.description().contains("workdir"));
+    assertTrue(descriptor.description().contains("kkstudio:/resources/<blobId>"));
+    assertTrue(
+        descriptor.description().contains("kkstudio:/skills/<package>/<skill>/<relativePath>"));
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
@@ -360,6 +364,10 @@ class BuiltinHarnessContributorTest {
       assertTrue(descriptor.description().contains("Every call must include `workdir`"));
       assertTrue(descriptor.description().contains("expanded absolute directory"));
       assertFalse(descriptor.description().contains("workdir` defaults"));
+    } else {
+      assertFalse(
+          descriptor.description().contains("workdir"),
+          toolName + " prompt must not contain workdir");
     }
 
     assertEquals(capability.inputSchema(), descriptor.inputSchema());

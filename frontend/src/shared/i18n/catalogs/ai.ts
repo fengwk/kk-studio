@@ -189,6 +189,14 @@ export const aiCatalog = {
     'en-US': 'unresolved',
     'zh-CN': '未解析',
   },
+  'ai.catalog.card.builtinBadge': {
+    'en-US': 'Built-in',
+    'zh-CN': '内置',
+  },
+  'ai.catalog.card.modelUnconfigured': {
+    'en-US': 'Not configured',
+    'zh-CN': '未配置',
+  },
   'ai.catalog.card.tools': {
     'en-US': 'Tools',
     'zh-CN': 'Tools',
@@ -244,6 +252,18 @@ export const aiCatalog = {
   'ai.catalog.card.idle': {
     'en-US': 'Idle',
     'zh-CN': 'Idle',
+  },
+  'ai.catalog.card.httpRetry': {
+    'en-US': 'HTTP Retry',
+    'zh-CN': 'HTTP 重试',
+  },
+  'ai.catalog.card.httpRetryInherit': {
+    'en-US': 'Inherit system',
+    'zh-CN': '继承系统',
+  },
+  'ai.catalog.card.httpRetryDisabled': {
+    'en-US': 'Disabled',
+    'zh-CN': '禁用',
   },
   'ai.catalog.card.configured': {
     'en-US': 'Configured',
@@ -352,6 +372,26 @@ export const aiCatalog = {
   'ai.catalog.form.modelCallIdleTimeout': {
     'en-US': 'Model Call Idle Timeout (ms)',
     'zh-CN': 'Model Call Idle Timeout (ms)',
+  },
+  'ai.catalog.form.httpRetryPolicy': {
+    'en-US': 'HTTP Retry Policy',
+    'zh-CN': 'HTTP 错误重试策略',
+  },
+  'ai.catalog.form.httpRetryInherit': {
+    'en-US': 'Inherit system settings',
+    'zh-CN': '继承系统配置',
+  },
+  'ai.catalog.form.httpRetryInheritHint': {
+    'en-US': 'Inherits the system-wide HTTP retry status code list.',
+    'zh-CN': '当前 Provider 继承系统全局配置的 HTTP 重试状态码名单。',
+  },
+  'ai.catalog.form.httpRetryCustom': {
+    'en-US': 'Custom status codes',
+    'zh-CN': '自定义重试名单',
+  },
+  'ai.catalog.form.httpRetryPlaceholder': {
+    'en-US': 'Enter status code (400-599), press Enter or comma',
+    'zh-CN': '输入 400-599 状态码，按 Enter 或逗号添加',
   },
   'ai.catalog.form.contextWindow': {
     'en-US': 'Context Window',
@@ -505,6 +545,15 @@ export const aiCatalog = {
   'ai.catalog.form.fillFirstModel': {
     'en-US': 'Use the first Model to fill the default configuration',
     'zh-CN': '使用第一个 Model 填充默认配置',
+  },
+  'ai.catalog.form.modelUnconfigured': {
+    'en-US': 'Not configured',
+    'zh-CN': '未配置',
+  },
+  'ai.catalog.form.modelUnconfiguredHint': {
+    'en-US':
+      'This built-in Agent has no Model configured. Select a Model and save to activate it.',
+    'zh-CN': '该内置 Agent 尚未配置 Model。选择 Model 后保存即可生效。',
   },
   'ai.catalog.form.unavailable': {
     'en-US': 'Unavailable',
@@ -1015,6 +1064,10 @@ export const aiCatalog = {
     'en-US': 'Branch from here',
     'zh-CN': '从此处分支',
   },
+  'ai.chat.branch.forkSession': {
+    'en-US': 'Fork to new session',
+    'zh-CN': '从此处新建会话',
+  },
   'ai.chat.branch.notBoundary': {
     'en-US': 'Only ROOT or a closed turn end can branch',
     'zh-CN': '仅 ROOT 或已关闭的回合末尾可分支',
@@ -1066,6 +1119,10 @@ export const aiCatalog = {
   'ai.chat.branch.draftEmpty': {
     'en-US': 'Thread draft opened. Send a message to start this thread.',
     'zh-CN': '已打开 thread 草稿，发送消息开始此 thread。',
+  },
+  'ai.chat.branch.forkSessionDraftEmpty': {
+    'en-US': 'Session fork draft opened. Send a message to start this session.',
+    'zh-CN': '已打开会话 fork 草稿，发送消息开始此会话。',
   },
   'ai.chat.branch.draftLabel': {
     'en-US': 'Thread draft',
@@ -1166,6 +1223,22 @@ export const aiCatalog = {
   'ai.runtime.composer.variantOptions': {
     'en-US': 'Variant options',
     'zh-CN': 'Variant 选项',
+  },
+  'ai.runtime.composer.settingsDraftLabel': {
+    'en-US': 'Draft',
+    'zh-CN': '草稿',
+  },
+  'ai.runtime.composer.settingsDraftTitle': {
+    'en-US': 'This selection is a draft and takes effect when you send your next message.',
+    'zh-CN': '当前选择为草稿，发送下一条消息时生效。',
+  },
+  'ai.runtime.composer.settingsPendingLabel': {
+    'en-US': 'Pending',
+    'zh-CN': '待生效',
+  },
+  'ai.runtime.composer.settingsPendingTitle': {
+    'en-US': 'This selection was submitted and is waiting to take effect.',
+    'zh-CN': '当前选择已提交，等待生效。',
   },
   'ai.runtime.composer.strip': {
     'en-US': 'Attachments',
@@ -1995,6 +2068,18 @@ export const aiCatalog = {
     'en-US': 'Collapse compaction summary',
     'zh-CN': '收起压缩摘要',
   },
+  'ai.runtime.entry.forkTitle': {
+    'en-US': 'Thread forked',
+    'zh-CN': '已从历史切点分叉',
+  },
+  'ai.runtime.entry.forkBranchTitle': {
+    'en-US': 'Branched from history',
+    'zh-CN': '已从历史切点创建分支',
+  },
+  'ai.runtime.entry.forkSessionTitle': {
+    'en-US': 'Forked to new session',
+    'zh-CN': '已从历史切点复制为新会话',
+  },
   'ai.runtime.event.list': {
     'en-US': 'Events',
     'zh-CN': '事件',
@@ -2639,6 +2724,14 @@ export const aiCatalog = {
     'en-US': 'Cost',
     'zh-CN': '费用',
   },
+  'ai.runtime.event.detail.forkMode': {
+    'en-US': 'Fork mode',
+    'zh-CN': '分叉模式',
+  },
+  'ai.runtime.event.detail.sourceEntryId': {
+    'en-US': 'Source entry ID',
+    'zh-CN': '来源 Entry ID',
+  },
   'ai.runtime.event.status.PENDING': {
     'en-US': 'Pending',
     'zh-CN': '等待中',
@@ -3023,6 +3116,46 @@ export const aiCatalog = {
     'en-US': 'Process User',
     'zh-CN': '进程用户',
   },
+  'ai.environment.daemonVersion': {
+    'en-US': 'Daemon Version',
+    'zh-CN': 'Daemon 版本',
+  },
+  'ai.environment.update': {
+    'en-US': 'Update Daemon',
+    'zh-CN': '更新 Daemon',
+  },
+  'ai.environment.updateConfirm': {
+    'en-US': 'Update the Daemon for environment "{{name}}" to the latest release? The service will restart and reconnect.',
+    'zh-CN': '确认将环境「{{name}}」的 Daemon 更新至最新发布版本？服务将重启并重新连接。',
+  },
+  'ai.environment.updateStatus': {
+    'en-US': 'Update Status',
+    'zh-CN': '更新状态',
+  },
+  'ai.environment.update.phase.PENDING': {
+    'en-US': 'Pending',
+    'zh-CN': '等待中',
+  },
+  'ai.environment.update.phase.RUNNING': {
+    'en-US': 'Running',
+    'zh-CN': '更新中',
+  },
+  'ai.environment.update.phase.PREPARED': {
+    'en-US': 'Prepared',
+    'zh-CN': '准备切换',
+  },
+  'ai.environment.update.phase.SUCCEEDED': {
+    'en-US': 'Succeeded',
+    'zh-CN': '更新成功',
+  },
+  'ai.environment.update.phase.FAILED': {
+    'en-US': 'Failed',
+    'zh-CN': '更新失败',
+  },
+  'ai.environment.update.phase.UNKNOWN': {
+    'en-US': 'Awaiting Reconnect',
+    'zh-CN': '等待重连确认',
+  },
   'ai.environment.manage': {
     'en-US': 'Manage',
     'zh-CN': '管理',
@@ -3034,6 +3167,10 @@ export const aiCatalog = {
   'ai.environment.runtime.title': {
     'en-US': 'Host Information',
     'zh-CN': '宿主信息',
+  },
+  'ai.environment.runtime.daemonVersion': {
+    'en-US': 'Daemon Version',
+    'zh-CN': 'Daemon 版本',
   },
   'ai.environment.runtime.operatingSystem': {
     'en-US': 'Operating System',
@@ -3182,6 +3319,38 @@ export const aiCatalog = {
   'ai.skillPackages.branch': {
     'en-US': 'Branch',
     'zh-CN': '分支',
+  },
+  'ai.skillPackages.token': {
+    'en-US': 'Access Token',
+    'zh-CN': '访问令牌',
+  },
+  'ai.skillPackages.tokenPlaceholder': {
+    'en-US': 'Personal Access Token (optional)',
+    'zh-CN': 'Personal Access Token（可选）',
+  },
+  'ai.skillPackages.tokenCreateHint': {
+    'en-US': 'Optional Personal Access Token (PAT) for private repositories. Stored encrypted and never echoed.',
+    'zh-CN': '私有仓库的访问令牌（PAT），可选。加密存储且绝不回显。',
+  },
+  'ai.skillPackages.tokenEditPlaceholder': {
+    'en-US': 'Leave blank to keep existing token',
+    'zh-CN': '留空保留已有令牌',
+  },
+  'ai.skillPackages.tokenEditHint': {
+    'en-US': 'Leave blank to keep the configured token; the secret is never echoed.',
+    'zh-CN': '留空保留已配置的访问令牌；密钥绝不回显。',
+  },
+  'ai.skillPackages.clearToken': {
+    'en-US': 'Clear token',
+    'zh-CN': '清除令牌',
+  },
+  'ai.skillPackages.tokenConfigured': {
+    'en-US': 'Configured',
+    'zh-CN': '已配置',
+  },
+  'ai.skillPackages.tokenNotConfigured': {
+    'en-US': 'Not configured',
+    'zh-CN': '未配置',
   },
   'ai.skillPackages.currentCommit': {
     'en-US': 'Current Commit',

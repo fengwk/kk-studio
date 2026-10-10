@@ -81,10 +81,9 @@ class DaemonMainTest {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     assertTrue(DaemonMain.printInfoCommand(new String[] {"--version"}, new PrintStream(out, true)));
 
-    String expected =
-        "kk-studio-daemon " + DaemonMain.implementationVersion() + System.lineSeparator();
+    String expected = "kk-studio-daemon " + DaemonBuildInfo.version() + System.lineSeparator();
     assertEquals(expected, out.toString(StandardCharsets.UTF_8));
-    assertEquals("development", DaemonMain.implementationVersion());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, DaemonBuildInfo.version());
   }
 
   /**

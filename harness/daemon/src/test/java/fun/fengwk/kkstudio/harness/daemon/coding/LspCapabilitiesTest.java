@@ -59,7 +59,7 @@ class LspCapabilitiesTest {
     executor.shutdownNow();
   }
 
-  /** 意图：definition 结果按"路径:行:列"返回，服务器进程目录来自自动发现的项目根而不是调用方 workdir。 */
+  /** 意图：definition 结果按"路径:行:列"返回，服务器进程目录来自自动发现的项目根。 */
   @Test
   void gotoDefinitionReturnsAbsoluteLocationsFromDiscoveredRoot() throws Exception {
     Path repo = Files.createDirectories(root.resolve("repo"));
@@ -74,9 +74,7 @@ class LspCapabilitiesTest {
     EnvironmentCapabilityResult result =
         invoke(
             new LspGotoDefinitionCapability(config, service, executor),
-            "{\"path\":\"module/App.java\",\"line\":1,\"character\":0,\"workdir\":"
-                + json(repo.toString())
-                + "}");
+            "{\"path\":" + json(file.toString()) + ",\"line\":1,\"character\":0}");
 
     assertFalse(result.error(), text(result));
     assertEquals(file + ":10:5", text(result));
@@ -104,14 +102,14 @@ class LspCapabilitiesTest {
     EnvironmentCapabilityResult symbols =
         invoke(
             new LspWorkspaceSymbolsCapability(config, service, executor),
-            "{\"path\":\"App.java\",\"query\":\"A\",\"limit\":2,\"workdir\":"
-                + json(root.toString())
-                + "}");
+            "{\"path\":" + json(file.toString()) + ",\"query\":\"A\",\"limit\":2}");
     EnvironmentCapabilityResult decompiled =
         invoke(
             new LspJavaDecompileCapability(config, service, executor),
-            "{\"path\":\"App.java\",\"target\":\"build/App.class\",\"workdir\":"
-                + json(root.toString())
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"target\":"
+                + json(classFile.toString())
                 + "}");
 
     assertFalse(symbols.error(), text(symbols));
@@ -121,6 +119,34 @@ class LspCapabilitiesTest {
     assertFalse(decompiled.error(), text(decompiled));
     assertEquals(FakeLspServer.DECOMPILED_SOURCE, text(decompiled));
     assertEquals(1, service.activeClientCount(), "三个能力共享同一份客户端");
+  }
+
+  /** 意图：真实 LSP 工具的超大反编译结果由结果级外化落盘，返回有界预览与绝对路径，而不是整段内联回传。 */
+  @Test
+  void largeDecompileOutputIsExternalizedToAbsolutePath() throws Exception {
+    Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
+    Path classFile = Files.createDirectories(root.resolve("build")).resolve("App.class");
+    Files.write(classFile, new byte[] {0x1});
+    Path transcript = FakeLspServers.transcript(root);
+    CodingToolsConfig config = TestCodingConfig.withFakeLsp(root, "large-decompile", transcript);
+    LspService service = service(config);
+
+    EnvironmentCapabilityResult result =
+        invoke(
+            new LspJavaDecompileCapability(config, service, executor),
+            "{\"path\":"
+                + json(file.toString())
+                + ",\"target\":"
+                + json(classFile.toString())
+                + "}");
+
+    assertFalse(result.error(), text(result));
+    assertTrue(text(result).contains("Use read with offset/limit"), text(result));
+    JsonNode textOutput =
+        AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
+    Path published = Path.of(textOutput.path("path").asText());
+    assertTrue(published.isAbsolute(), "外化必须给出绝对路径");
+    assertEquals(FakeLspServer.LARGE_DECOMPILED_SOURCE, Files.readString(published));
   }
 
   /** 意图：超过调用方有效超时的请求在有效超时附近失败返回，并保留共享客户端。 */
@@ -135,7 +161,7 @@ class LspCapabilitiesTest {
     EnvironmentCapabilityResult result =
         invoke(
             new LspGotoDefinitionCapability(config, slow, executor),
-            "{\"path\":\"App.java\",\"line\":1,\"workdir\":" + json(root.toString()) + "}",
+            "{\"path\":" + json(file.toString()) + ",\"line\":1}",
             Duration.ofMillis(500));
     long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
 
@@ -155,7 +181,7 @@ class LspCapabilitiesTest {
     RecordingListener listener =
         invokeAsync(
             new LspGotoDefinitionCapability(config, slow, executor),
-            "{\"path\":\"App.java\",\"line\":1,\"workdir\":" + json(root.toString()) + "}",
+            "{\"path\":" + json(file.toString()) + ",\"line\":1}",
             Duration.ofSeconds(30));
     FakeLspServers.await(transcript, event -> "textDocument/definition".equals(methodOf(event)));
 
@@ -168,18 +194,17 @@ class LspCapabilitiesTest {
   /** 意图：read header 的 LSP 状态完全由配置驱动：未配置为 unsupported，配置命中给出服务器语言标签。 */
   @Test
   void readReportsConfiguredLspStatus() throws Exception {
-    Files.writeString(root.resolve("App.txt"), "x\n");
+    Path txtFile = Files.writeString(root.resolve("App.txt"), "x\n");
     CodingToolsConfig withoutLsp = TestCodingConfig.withoutLsp(root);
     CodingToolsConfig withLsp = TestCodingConfig.withLsp(root);
 
     EnvironmentCapabilityResult disabled =
         invoke(
             new ReadCapability(withoutLsp, executor),
-            "{\"path\":\"App.txt\",\"workdir\":" + json(root.toString()) + "}");
+            "{\"path\":" + json(txtFile.toString()) + "}");
     EnvironmentCapabilityResult enabled =
         invoke(
-            new ReadCapability(withLsp, executor),
-            "{\"path\":\"App.txt\",\"workdir\":" + json(root.toString()) + "}");
+            new ReadCapability(withLsp, executor), "{\"path\":" + json(txtFile.toString()) + "}");
 
     assertFalse(text(disabled).contains("lsp:"), text(disabled));
     assertTrue(
@@ -202,42 +227,36 @@ class LspCapabilitiesTest {
     EnvironmentCapability workspaceSymbols =
         new LspWorkspaceSymbolsCapability(config, service, executor);
     EnvironmentCapability decompile = new LspJavaDecompileCapability(config, service, executor);
-    String workdir = json(root.toString());
+    String filePath = json(file.toString());
 
     IllegalArgumentException missingLine =
         assertThrows(
             IllegalArgumentException.class,
-            () -> execute(gotoDefinition, "{\"path\":\"App.java\",\"workdir\":" + workdir + "}"));
+            () -> execute(gotoDefinition, "{\"path\":" + filePath + "}"));
     assertTrue(missingLine.getMessage().contains("$.line"), missingLine.getMessage());
 
     EnvironmentCapabilityResult zeroLine =
-        invoke(gotoDefinition, "{\"path\":\"App.java\",\"line\":0,\"workdir\":" + workdir + "}");
+        invoke(gotoDefinition, "{\"path\":" + filePath + ",\"line\":0}");
     assertTrue(zeroLine.error(), text(zeroLine));
     assertTrue(text(zeroLine).contains("line"), text(zeroLine));
 
     EnvironmentCapabilityResult negativeCharacter =
-        invoke(
-            gotoDefinition,
-            "{\"path\":\"App.java\",\"line\":1,\"character\":-1,\"workdir\":" + workdir + "}");
+        invoke(gotoDefinition, "{\"path\":" + filePath + ",\"line\":1,\"character\":-1}");
     assertTrue(negativeCharacter.error(), text(negativeCharacter));
     assertTrue(text(negativeCharacter).contains("character"), text(negativeCharacter));
 
     EnvironmentCapabilityResult negativeLimit =
-        invoke(
-            workspaceSymbols,
-            "{\"path\":\"App.java\",\"query\":\"App\",\"limit\":-1,\"workdir\":" + workdir + "}");
+        invoke(workspaceSymbols, "{\"path\":" + filePath + ",\"query\":\"App\",\"limit\":-1}");
     assertTrue(negativeLimit.error(), text(negativeLimit));
 
     EnvironmentCapabilityResult blankTarget =
-        invoke(decompile, "{\"path\":\"App.java\",\"target\":\"  \",\"workdir\":" + workdir + "}");
+        invoke(decompile, "{\"path\":" + filePath + ",\"target\":\"  \"}");
     assertTrue(blankTarget.error(), text(blankTarget));
     assertTrue(text(blankTarget).contains("target"), text(blankTarget));
 
     assertEquals(0, service.activeClientCount(), "参数校验失败不得启动服务器");
     EnvironmentCapabilityResult defaultCharacter =
-        invoke(
-            gotoDefinition,
-            "{\"path\":\"" + file.getFileName() + "\",\"line\":1,\"workdir\":" + workdir + "}");
+        invoke(gotoDefinition, "{\"path\":" + filePath + ",\"line\":1}");
     assertFalse(defaultCharacter.error(), text(defaultCharacter));
     assertEquals(
         0,
@@ -249,7 +268,7 @@ class LspCapabilitiesTest {
             .asInt());
   }
 
-  /** 意图：绝对 path 不需要 workdir——三个能力都能在没有调用方目录的情况下完成真实查询与执行。 */
+  /** 意图：绝对 path 与多种合法 target（绝对 class 路径与 file: URI）都能完成真实查询与反编译。 */
   @Test
   void absolutePathsNeedNoWorkdir() throws Exception {
     Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
@@ -273,11 +292,17 @@ class LspCapabilitiesTest {
         invoke(
             new LspJavaDecompileCapability(config, service, executor),
             "{\"path\":" + absolute + ",\"target\":" + json(classFile.toString()) + "}");
+    EnvironmentCapabilityResult decompiledUri =
+        invoke(
+            new LspJavaDecompileCapability(config, service, executor),
+            "{\"path\":" + absolute + ",\"target\":" + json(classFile.toUri().toString()) + "}");
 
     assertFalse(definition.error(), text(definition));
     assertFalse(symbols.error(), text(symbols));
     assertFalse(decompiled.error(), text(decompiled));
     assertEquals(FakeLspServer.DECOMPILED_SOURCE, text(decompiled));
+    assertFalse(decompiledUri.error(), text(decompiledUri));
+    assertEquals(FakeLspServer.DECOMPILED_SOURCE, text(decompiledUri));
     assertEquals(
         classFile.toUri().toString(),
         FakeLspServers.received(transcript, "workspace/executeCommand")
@@ -286,7 +311,7 @@ class LspCapabilitiesTest {
             .path("arguments")
             .get(0)
             .asText());
-    // 文档 URI 是真实绝对路径；服务器进程目录来自自动发现的项目根，调用方不必提供任何目录。
+    // 文档 URI 是真实绝对路径；服务器进程目录来自自动发现的项目根。
     assertEquals(
         file.toRealPath().toUri().toString(),
         FakeLspServers.received(transcript, "textDocument/didOpen")
@@ -298,7 +323,7 @@ class LspCapabilitiesTest {
     assertEquals(1, service.activeClientCount());
   }
 
-  /** 意图：相对 path 与相对 class target 必须由本次调用显式给出绝对 workdir，缺失时直接拒绝且不启动服务器。 */
+  /** 意图：相对 path 与相对 class target 必须被直接拒绝，缺失时直接拒绝且不启动服务器。 */
   @Test
   void relativePathsRequireAnExplicitWorkdir() throws Exception {
     Files.writeString(root.resolve("App.java"), "class App {}\n");
@@ -311,31 +336,24 @@ class LspCapabilitiesTest {
             new LspGotoDefinitionCapability(config, service, executor),
             "{\"path\":\"App.java\",\"line\":1}");
     assertTrue(definition.error(), text(definition));
-    assertTrue(
-        text(definition).contains("workdir is required when path is a relative path"),
-        text(definition));
+    assertTrue(text(definition).contains("path must be an absolute path"), text(definition));
 
     EnvironmentCapabilityResult symbols =
         invoke(
             new LspWorkspaceSymbolsCapability(config, service, executor),
             "{\"path\":\"App.java\",\"query\":\"A\"}");
     assertTrue(symbols.error(), text(symbols));
-    assertTrue(
-        text(symbols).contains("workdir is required when path is a relative path"), text(symbols));
+    assertTrue(text(symbols).contains("path must be an absolute path"), text(symbols));
 
     EnvironmentCapabilityResult decompiled =
         invoke(
             new LspJavaDecompileCapability(config, service, executor),
-            "{\"path\":"
-                + json(root.resolve("App.java").toString())
-                + ",\"target\":\"build/App.class\"}");
+            "{\"path\":\"App.java\",\"target\":\"jdt://contents/App.class\"}");
     assertTrue(decompiled.error(), text(decompiled));
-    assertTrue(
-        text(decompiled).contains("workdir is required when target is a relative class path"),
-        text(decompiled));
+    assertTrue(text(decompiled).contains("path must be an absolute path"), text(decompiled));
 
-    assertTrue(FakeLspServers.events(transcript).isEmpty(), "缺少 workdir 不得启动服务器");
-    assertEquals(0, service.activeClientCount(), "缺少 workdir 不得占用客户端");
+    assertTrue(FakeLspServers.events(transcript).isEmpty(), "相对路径被拒不得启动服务器");
+    assertEquals(0, service.activeClientCount(), "相对路径被拒不得占用客户端");
   }
 
   private LspService service(CodingToolsConfig config) {

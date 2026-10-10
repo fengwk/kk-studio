@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -107,18 +107,18 @@ public record SystemSettings(
     }
   }
 
-  /** aiRuntime section：共享调用重试、自动压缩 fallback、subagent 预算。 */
+  /** aiRuntime section：共享调用重试、自动压缩保留量、subagent 预算与模型 HTTP 重试状态白名单。 */
   public record AiRuntime(
       int retryMaxRetries,
       InvocationRetryBackoffStrategy retryBackoffStrategy,
       long retryBaseDelayMillis,
       long retryMaxDelayMillis,
       int compactionKeepRecentTokens,
-      ModelSelection compactionFallbackModel,
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
-      int subagentMaxTurns) {
+      int subagentMaxTurns,
+      List<Integer> modelHttpRetryStatusCodes) {
 
     public static final AiRuntime DEFAULT =
         new AiRuntime(
@@ -127,11 +127,11 @@ public record SystemSettings(
             2_000L,
             60_000L,
             20_000,
-            null,
             2,
             10,
             0,
-            50);
+            50,
+            ModelHttpErrorPolicy.DEFAULT_RETRY_STATUS_CODES);
 
     public AiRuntime {
       SystemSettingsValidation.requireNonNegativeInt(retryMaxRetries, "aiRuntime.retryMaxRetries");
@@ -153,6 +153,12 @@ public record SystemSettings(
       SystemSettingsValidation.requireAtLeast(
           subagentMaxTotalConcurrency, 0, "aiRuntime.subagentMaxTotalConcurrency");
       SystemSettingsValidation.requireAtLeast(subagentMaxTurns, 1, "aiRuntime.subagentMaxTurns");
+      // 白名单的唯一权威校验/规范化在 ModelHttpErrorPolicy：这里只复用，不再保留第二份 400–599 规则。
+      modelHttpRetryStatusCodes =
+          new ModelHttpErrorPolicy(
+                  Objects.requireNonNull(
+                      modelHttpRetryStatusCodes, "aiRuntime.modelHttpRetryStatusCodes"))
+              .retryStatusCodes();
     }
   }
 
@@ -422,17 +428,19 @@ public record SystemSettings(
     }
   }
 
-  /** storageMedia section：上传/S3 预签名与 Canvas 媒体处理的非敏感预算。 */
+  /** storageMedia section：上传/S3 预签名、Canvas 媒体处理与受控临时资源的非敏感预算。 */
   public record StorageMedia(
       long uploadExpiresSeconds,
       long s3PresignDefaultExpiresSeconds,
       long s3PresignMaxExpiresSeconds,
       long canvasMediaProcessTimeoutMillis,
       int thumbnailMaxDimension,
-      int thumbnailQuality) {
+      int thumbnailQuality,
+      long temporaryResourceTtlSeconds,
+      long temporaryResourceCleanupIntervalSeconds) {
 
     public static final StorageMedia DEFAULT =
-        new StorageMedia(3_600L, 600L, 3_600L, 30_000L, 512, 80);
+        new StorageMedia(86_400L, 1_800L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L);
 
     public StorageMedia {
       SystemSettingsValidation.requirePositive(
@@ -452,6 +460,11 @@ public record SystemSettings(
           thumbnailMaxDimension, "storageMedia.thumbnailMaxDimension");
       SystemSettingsValidation.requireBounded(
           thumbnailQuality, 1, 100, "storageMedia.thumbnailQuality");
+      SystemSettingsValidation.requirePositive(
+          temporaryResourceTtlSeconds, "storageMedia.temporaryResourceTtlSeconds");
+      SystemSettingsValidation.requirePositive(
+          temporaryResourceCleanupIntervalSeconds,
+          "storageMedia.temporaryResourceCleanupIntervalSeconds");
     }
   }
 

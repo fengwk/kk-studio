@@ -75,6 +75,16 @@ class ReadCapabilityTest {
     }
   }
 
+  private String display(String name) {
+    Path target = resolvePath(name);
+    return target.normalize().toString().replace('\\', '/');
+  }
+
+  private Path resolvePath(String name) {
+    Path path = Path.of(name);
+    return path.isAbsolute() ? path : workdir.resolve(name);
+  }
+
   /** 缺省不配置 LSP：header 不输出 lsp 行，断言只关心契约字段。 */
   private EnvironmentCapabilityResult read(String name, String extra) throws Exception {
     return read(TestCodingConfig.withoutLsp(workdir), name, extra);
@@ -82,11 +92,12 @@ class ReadCapabilityTest {
 
   private EnvironmentCapabilityResult read(CodingToolsConfig config, String name, String extra)
       throws Exception {
-    return invoke(new ReadCapability(config, executor), arguments(name, extra, workdir));
+    return invoke(new ReadCapability(config, executor), arguments(name, extra));
   }
 
-  private static String arguments(String name, String extra, Path workdir) {
-    return "{\"path\":" + json(name) + ",\"workdir\":" + json(workdir.toString()) + extra + "}";
+  private String arguments(String name, String extra) {
+    Path target = resolvePath(name);
+    return "{\"path\":" + json(target.toString()) + extra + "}";
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String argumentsJson)
@@ -140,7 +151,7 @@ class ReadCapabilityTest {
     assertOutput(
         String.join(
             "\n",
-            "path: basic.txt",
+            "path: " + display("basic.txt"),
             "ends_with_newline: yes",
             "range: 2:1-3:5",
             "truncated: yes",
@@ -182,13 +193,15 @@ class ReadCapabilityTest {
     EnvironmentCapabilityResult empty = read("empty.txt", "");
     assertFalse(empty.error());
     assertOutput(
-        String.join("\n", "path: empty.txt", "ends_with_newline: no", "range: empty"), text(empty));
+        String.join("\n", "path: " + display("empty.txt"), "ends_with_newline: no", "range: empty"),
+        text(empty));
 
     write("two.txt", "a\nb\n");
     EnvironmentCapabilityResult beyond = read("two.txt", ",\"offset\":10");
     assertFalse(beyond.error());
     assertOutput(
-        String.join("\n", "path: two.txt", "ends_with_newline: yes", "range: empty"), text(beyond));
+        String.join("\n", "path: " + display("two.txt"), "ends_with_newline: yes", "range: empty"),
+        text(beyond));
   }
 
   /** 单行不再按长度截断：2500 码点整行原样返回且没有截断元数据。 */
@@ -203,7 +216,7 @@ class ReadCapabilityTest {
     assertOutput(
         String.join(
             "\n",
-            "path: long.txt",
+            "path: " + display("long.txt"),
             "ends_with_newline: yes",
             "range: 1:1-1:2500",
             "",
@@ -222,7 +235,7 @@ class ReadCapabilityTest {
     assertOutput(
         String.join(
             "\n",
-            "path: columns.txt",
+            "path: " + display("columns.txt"),
             "ends_with_newline: yes",
             "range: 1:4-2:6",
             "",
@@ -259,7 +272,13 @@ class ReadCapabilityTest {
     EnvironmentCapabilityResult blank = read("blank.txt", ",\"column_offset\":1");
     assertFalse(blank.error());
     assertOutput(
-        String.join("\n", "path: blank.txt", "ends_with_newline: yes", "range: 1:1-1:1", "", "1|"),
+        String.join(
+            "\n",
+            "path: " + display("blank.txt"),
+            "ends_with_newline: yes",
+            "range: 1:1-1:1",
+            "",
+            "1|"),
         text(blank));
   }
 
@@ -273,7 +292,8 @@ class ReadCapabilityTest {
 
     assertFalse(result.error());
     assertOutput(
-        String.join("\n", "path: three.txt", "ends_with_newline: yes", "range: empty"),
+        String.join(
+            "\n", "path: " + display("three.txt"), "ends_with_newline: yes", "range: empty"),
         text(result));
   }
 
@@ -290,7 +310,7 @@ class ReadCapabilityTest {
         output.startsWith(
             String.join(
                 "\n",
-                "path: budget.txt",
+                "path: " + display("budget.txt"),
                 "ends_with_newline: yes",
                 "range: 1:1-1:60000",
                 "truncated: yes",
@@ -316,7 +336,8 @@ class ReadCapabilityTest {
     assertFalse(exactEof.error());
     String eofOutput = text(exactEof);
     assertTrue(
-        eofOutput.startsWith("path: exact-eof.txt\nends_with_newline: no\nrange: 1:1-1:60000\n"),
+        eofOutput.startsWith(
+            "path: " + display("exact-eof.txt") + "\nends_with_newline: no\nrange: 1:1-1:60000\n"),
         eofOutput);
     assertFalse(eofOutput.contains("truncated"), eofOutput);
 
@@ -368,7 +389,7 @@ class ReadCapabilityTest {
     assertOutput(
         String.join(
             "\n",
-            "path: mixed.txt",
+            "path: " + display("mixed.txt"),
             "ends_with_newline: no",
             "range: 1:1-4:1",
             "",
@@ -421,7 +442,7 @@ class ReadCapabilityTest {
     assertOutput(
         String.join(
             "\n",
-            "path: control.txt",
+            "path: " + display("control.txt"),
             "ends_with_newline: yes",
             "range: 1:1-2:11",
             "",
@@ -451,11 +472,11 @@ class ReadCapabilityTest {
     EnvironmentCapabilityResult replaced =
         invoke(
             edit,
-            "{\"path\":\"roundtrip.txt\",\"old_string\":"
+            "{\"path\":"
+                + json(workdir.resolve("roundtrip.txt").toString())
+                + ",\"old_string\":"
                 + json(fragment)
-                + ",\"new_string\":\"REPLACED_CHUNK\",\"workdir\":"
-                + json(workdir.toString())
-                + "}");
+                + ",\"new_string\":\"REPLACED_CHUNK\"}");
     assertFalse(replaced.error(), text(replaced));
     assertEquals(
         "head\nREPLACED_CHUNK\ntail\n", Files.readString(workdir.resolve("roundtrip.txt")));
@@ -639,9 +660,9 @@ class ReadCapabilityTest {
     assertFalse(text(invalidColumn).contains("does not exist"));
   }
 
-  /** 相对路径仍必须显式 workdir；绝对路径无需 workdir。 */
+  /** 相对路径被拒绝；绝对路径正常执行。 */
   @Test
-  void relativePathRequiresExplicitWorkdir() throws Exception {
+  void relativePathIsRejected() throws Exception {
     Path file = write("relative.txt", "content\n");
 
     EnvironmentCapabilityResult absolute =
@@ -656,7 +677,24 @@ class ReadCapabilityTest {
             new ReadCapability(TestCodingConfig.withoutLsp(workdir), executor),
             "{\"path\":\"relative.txt\"}");
     assertTrue(relative.error());
-    assertTrue(text(relative).contains("workdir is required"), text(relative));
+    assertTrue(text(relative).contains("path must be an absolute path"), text(relative));
+  }
+
+  /** 意图：read 结果无论是否超过内联阈值都不再外置落盘（details 无 textOutput 且 tmp/text 目录为空）。 */
+  @Test
+  void readDoesNotSpoolResultsExceedingInlineThreshold() throws Exception {
+    write("budget-large.txt", "a".repeat(70000) + "\n");
+    CodingToolsConfig config = TestCodingConfig.withLimits(workdir, 2000, 1024);
+    EnvironmentCapabilityResult result = read(config, "budget-large.txt", "");
+    assertFalse(result.error());
+    assertTrue(text(result).length() > 1024);
+    assertFalse(result.detailsJson().contains("textOutput"), result.detailsJson());
+    Path workspaces = config.textOutputStore().root();
+    if (Files.isDirectory(workspaces)) {
+      try (var entries = Files.list(workspaces)) {
+        assertEquals(0, entries.count());
+      }
+    }
   }
 
   /**
@@ -754,6 +792,29 @@ class ReadCapabilityTest {
           fragments.get(index + 1).toString(),
           "第 " + (index + 1) + " 行必须逐字符重构");
     }
+  }
+
+  /**
+   * 读取受控临时全文期间持有与 {@code read} 相同的 in-use 租约：进行中的读取不会被定时清扫删除。
+   *
+   * <p>用例把 workspace 的创建登记回填为远早时刻使其立即“过期”，再证明：持租约时清扫不删、且读取照常成功；租约释放后过期 workspace 才被回收。
+   */
+  @Test
+  void readOfControlledTemporaryTextIsProtectedFromSweep() throws Exception {
+    CodingToolsConfig config = TestCodingConfig.withoutLsp(workdir);
+    TextOutputStore store = config.textOutputStore();
+    Path staging = store.createStagingFile("read-lease");
+    Files.writeString(staging, "line one\nline two\n");
+    Path published = store.publish(staging);
+    Files.writeString(published.getParent().resolve("created-at"), "0");
+
+    try (TextOutputStore.Lease lease = store.acquire(published)) {
+      assertEquals(0, store.sweep(1), "在途读取持有的租约必须阻止清扫");
+      String output = text(read(config, published.toString(), ""));
+      assertTrue(output.contains("line one"), output);
+      assertTrue(output.contains("line two"), output);
+    }
+    assertEquals(1, store.sweep(1), "租约释放后过期 workspace 才可回收");
   }
 
   /** 把一次响应中的所有编号正文行片段按行号累加，用于验证续读不丢字符、不重复。 */

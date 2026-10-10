@@ -15,6 +15,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
@@ -208,8 +211,14 @@ class EnvironmentServiceImplTest {
             LiveEnvironmentStatus.READY,
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
+                "1.0.9",
                 new DaemonEnvironmentInfo(
-                    DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
+                    DaemonOperatingSystem.LINUX,
+                    "Asia/Shanghai",
+                    "dev",
+                    "/home/dev",
+                    "Note",
+                    "/tmp/kk-studio")),
             List.of(),
             List.of(),
             NOW,
@@ -303,12 +312,14 @@ class EnvironmentServiceImplTest {
             LiveEnvironmentStatus.CONNECTING,
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
+                "1.0.9",
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.WSL,
                     "Asia/Shanghai",
                     "dev",
                     "/home/dev",
-                    "Retained note")),
+                    "Retained note",
+                    "/tmp/kk-studio")),
             List.of(),
             List.of(),
             NOW,
@@ -545,9 +556,12 @@ class EnvironmentServiceImplTest {
     verify(repo).deleteById(ENV_ID, 0L);
   }
 
-  /** 测试意图：Card 只把最近一条 WARN/ERROR 事件作为 lastEvent 暴露；只有 INFO 事件时为 null。 */
+  /**
+   * 测试意图：Card 不再内嵌历史事件；有历史 WARN 且当前 READY 时只暴露当前 READY 状态， 而完整历史（历史 WARN 与后续 READY）仍由 events
+   * 端点按时间正序保留，不以删除事件让卡片干净。
+   */
   @Test
-  void cardExposesOnlyLatestAlertEvent() {
+  void cardExposesCurrentStatusOnlyWhileEventsRetainHistory() throws Exception {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
@@ -560,36 +574,37 @@ class EnvironmentServiceImplTest {
     env.setVersion(0L);
     when(repo.getById(ENV_ID)).thenReturn(env);
 
-    EnvironmentEvent syncFailed =
-        new EnvironmentEvent(
-            NOW,
-            EnvironmentEvent.LEVEL_ERROR,
-            EnvironmentEvent.TYPE_SKILL_SYNC_FAILED,
-            "skill package sync failed: dev");
-    when(registry.find(EnvironmentId.of(ENV_ID)))
-        .thenReturn(Optional.of(connection(List.of(syncFailed))));
+    List<EnvironmentEvent> history =
+        List.of(
+            new EnvironmentEvent(
+                NOW,
+                EnvironmentEvent.LEVEL_WARN,
+                EnvironmentEvent.TYPE_SKILL_SYNC_FAILED,
+                "skill package sync failed: dev"),
+            new EnvironmentEvent(
+                NOW.plusSeconds(1),
+                EnvironmentEvent.LEVEL_INFO,
+                EnvironmentEvent.TYPE_READY,
+                "environment ready"));
+    when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(connection(history)));
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
 
     EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
-    EnvironmentEventDTO lastEvent = card.getLastEvent();
-    assertNotNull(lastEvent);
-    assertEquals("SKILL_SYNC_FAILED", lastEvent.getType());
-    assertEquals("ERROR", lastEvent.getLevel());
-    assertEquals("skill package sync failed: dev", lastEvent.getMessage());
+    // 卡片只投影当前连接状态，且序列化后不含任何历史事件字段。
+    assertEquals("READY", card.getStatus());
+    assertTrue(card.isReady());
+    ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    JsonNode json = mapper.readTree(mapper.writeValueAsString(card));
+    assertFalse(json.has("lastEvent"));
 
-    when(registry.find(EnvironmentId.of(ENV_ID)))
-        .thenReturn(
-            Optional.of(
-                connection(
-                    List.of(
-                        new EnvironmentEvent(
-                            NOW,
-                            EnvironmentEvent.LEVEL_INFO,
-                            EnvironmentEvent.TYPE_READY,
-                            "environment ready")))));
-    assertNull(service.get(EnvironmentId.of(ENV_ID)).getLastEvent());
+    // 历史事件仍按时间正序完整保留，供管理 Events 展示。
+    List<EnvironmentEventDTO> events = service.listEvents(EnvironmentId.of(ENV_ID));
+    assertEquals(2, events.size());
+    assertEquals("SKILL_SYNC_FAILED", events.get(0).getType());
+    assertEquals("WARN", events.get(0).getLevel());
+    assertEquals("READY", events.get(1).getType());
   }
 
   /** 测试意图：事件端点按时间正序返回同一连接行的保留事件窗口，未知 Environment 抛 404 语义错误。 */
@@ -1104,8 +1119,14 @@ class EnvironmentServiceImplTest {
         LiveEnvironmentStatus.READY,
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
+            "1.0.9",
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
+                DaemonOperatingSystem.LINUX,
+                "Asia/Shanghai",
+                "dev",
+                "/home/dev",
+                "Note",
+                "/tmp/kk-studio")),
         List.of(),
         events,
         NOW,
@@ -1121,8 +1142,14 @@ class EnvironmentServiceImplTest {
         status,
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
+            "1.0.9",
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
+                DaemonOperatingSystem.LINUX,
+                "Asia/Shanghai",
+                "dev",
+                "/home/dev",
+                "Note",
+                "/tmp/kk-studio")),
         List.of(),
         List.of(),
         lastSeenAt,

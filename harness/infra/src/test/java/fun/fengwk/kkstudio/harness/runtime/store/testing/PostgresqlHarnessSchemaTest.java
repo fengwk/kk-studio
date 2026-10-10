@@ -109,6 +109,8 @@ class PostgresqlHarnessSchemaTest {
             "child_thread_id",
             "source_command_sequence",
             "agent",
+            "purpose",
+            "superseded_by_invocation_id",
             "max_turns",
             "reminder_turn",
             "terminal_entry_id",
@@ -258,13 +260,17 @@ class PostgresqlHarnessSchemaTest {
     // Stop 幂等键索引必须按 stop_request_id 聚合并只覆盖非 null 行。
     assertTrue(stopRequest.contains("(thread_id, stop_request_id, sequence)"));
     assertTrue(stopRequest.contains("WHERE (stop_request_id IS NOT NULL)"));
-    // Join 等待匹配与等待投递索引（新模型按 terminal_entry_id 判定 matched）
+    // Join 等待匹配与等待投递索引（新模型按 terminal_entry_id 判定 matched；已 supersede 的 join 不参与）
     assertTrue(childPending.contains("(child_thread_id)"));
-    assertTrue(childPending.contains("WHERE (terminal_entry_id IS NULL)"));
+    assertTrue(
+        childPending.contains(
+            "WHERE ((terminal_entry_id IS NULL) AND (superseded_by_invocation_id IS NULL))"));
     assertTrue(parentPending.contains("(parent_thread_id)"));
     assertTrue(
         parentPending.contains(
-            "WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL))"));
+            "WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL)"
+                + " AND ((purpose)::text = 'task'::text)"
+                + " AND (superseded_by_invocation_id IS NULL))"));
     // Stop 回执集合索引必须按 (root_thread_id, root_stop_request_id) 建键，隔离不同树复用同一请求 UUID。
     String stopReceiptRoot = indexDefinition("idx_harness_thread_stop_receipt_root");
     assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
@@ -1255,5 +1261,151 @@ class PostgresqlHarnessSchemaTest {
                 UUID.randomUUID(),
                 parentThreadId,
                 childThreadId));
+  }
+
+  @Test
+  void harnessThreadJoinPurposeAndSupersededContract() {
+    // 测试意图：真实 PostgreSQL 约束验证 purpose 枚举（task/compaction）与 superseded 自引用契约：
+    // 被取代的 join 必须未 matched，且 superseded_by 必须指向同一表真实存在的 invocation。
+    UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000070");
+    UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000071");
+    UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000072");
+    UUID childThreadId = UUID.fromString("00000000-0000-0000-0000-000000000073");
+    UUID terminalEntryId = UUID.fromString("00000000-0000-0000-0000-000000000074");
+    String hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
+        sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
+        rootEntryId,
+        sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"done\"}]}}'::jsonb, statement_timestamp())",
+        terminalEntryId,
+        sessionId,
+        rootEntryId);
+    jdbc.update(
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, ?, 'parent', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        parentThreadId,
+        sessionId,
+        rootEntryId,
+        hash);
+    jdbc.update(
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, ?, 'child', 'FOLLOW', ?, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        childThreadId,
+        sessionId,
+        parentThreadId,
+        rootEntryId,
+        hash,
+        parentThreadId);
+    jdbc.update(
+        "insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key, request_hash, created_at)"
+            + " values (?, 1, 'USER_MESSAGE', '{\"text\":\"hello\"}'::jsonb, ?, ?, statement_timestamp())",
+        childThreadId,
+        UUID.randomUUID(),
+        hash);
+
+    UUID pendingInvocation = UUID.randomUUID();
+    // 合法 pending join：purpose 默认缺省为 task。
+    jdbc.update(
+        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at)"
+            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp())",
+        pendingInvocation,
+        hash,
+        parentThreadId,
+        childThreadId);
+    assertEquals(
+        "task",
+        jdbc.queryForObject(
+            "select purpose from harness_thread_join where invocation_id = ?",
+            String.class,
+            pendingInvocation));
+
+    // 1. 未知 purpose → ck_harness_thread_join_purpose
+    DataIntegrityViolationException exPurpose =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, purpose, max_turns, reminder_turn, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 'other', 10, 0, statement_timestamp(), statement_timestamp())",
+                    UUID.randomUUID(),
+                    hash,
+                    parentThreadId,
+                    childThreadId),
+            "unknown purpose must be rejected");
+    assertTrue(exPurpose.getMessage().contains("ck_harness_thread_join_purpose"));
+
+    // 2. superseded_by 指向自身 → ck_harness_thread_join_superseded
+    UUID selfSuperseded = UUID.randomUUID();
+    DataIntegrityViolationException exSelf =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, superseded_by_invocation_id, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, statement_timestamp(), statement_timestamp())",
+                    selfSuperseded,
+                    hash,
+                    parentThreadId,
+                    childThreadId,
+                    selfSuperseded),
+            "a join cannot supersede itself");
+    assertTrue(exSelf.getMessage().contains("ck_harness_thread_join_superseded"));
+
+    // 3. 已 matched 的 join 不得被取代 → ck_harness_thread_join_superseded
+    DataIntegrityViolationException exMatched =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, superseded_by_invocation_id, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, ?, statement_timestamp(), statement_timestamp())",
+                    UUID.randomUUID(),
+                    hash,
+                    parentThreadId,
+                    childThreadId,
+                    terminalEntryId,
+                    pendingInvocation),
+            "a matched join must not be superseded");
+    assertTrue(exMatched.getMessage().contains("ck_harness_thread_join_superseded"));
+
+    // 4. superseded_by 指向不存在的 invocation → fk_harness_thread_join_superseded_by
+    DataIntegrityViolationException exFk =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, superseded_by_invocation_id, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, statement_timestamp(), statement_timestamp())",
+                    UUID.randomUUID(),
+                    hash,
+                    parentThreadId,
+                    childThreadId,
+                    UUID.fromString("00000000-0000-0000-0000-000000000099")),
+            "superseded_by must reference a real join");
+    assertTrue(exFk.getMessage().contains("fk_harness_thread_join_superseded_by"));
+
+    // 5. 正向验证：新 join 取代旧未完成 join（superseded_by 指向真实存在的 later invocation）
+    UUID continuationInvocation = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at)"
+            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp())",
+        continuationInvocation,
+        hash,
+        parentThreadId,
+        childThreadId);
+    assertDoesNotThrow(
+        () ->
+            jdbc.update(
+                "update harness_thread_join set superseded_by_invocation_id = ? where invocation_id = ?",
+                continuationInvocation,
+                pendingInvocation));
   }
 }

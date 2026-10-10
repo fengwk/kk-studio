@@ -13,11 +13,14 @@ vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironment: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
     saveInstallConfig: vi.fn(),
     createEnvironment: vi.fn(),
     getRegistrationToken: vi.fn(),
     rotateToken: vi.fn(),
     deleteEnvironment: vi.fn(),
+    listEnvironmentEvents: vi.fn(),
   },
 }))
 
@@ -49,7 +52,6 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
     capabilities: [],
     userName: null,
     homeDirectory: null,
-    lastEvent: null,
     version: '1',
     createTime: '2026-07-20T00:00:00.000Z',
     updateTime: '2026-07-20T00:00:00.000Z',
@@ -104,6 +106,7 @@ describe('EnvironmentsPage', () => {
         statusExpiresAt: '2026-07-20T01:03:03.000Z',
         lastSeen: '2026-07-20T01:02:03.000Z',
         capabilities: [{ id: 'process.exec', version: '2' }],
+        daemonVersion: '1.2.3',
         version: '1',
         createTime: '2026-07-20T00:00:00.000Z',
         updateTime: '2026-07-20T00:00:00.000Z',
@@ -118,6 +121,7 @@ describe('EnvironmentsPage', () => {
         statusExpiresAt: null,
         lastSeen: '2026-07-19T00:00:00.000Z',
         capabilities: [],
+        daemonVersion: 'development',
         version: '1',
         createTime: '2026-07-19T00:00:00.000Z',
         updateTime: '2026-07-19T00:00:00.000Z',
@@ -146,6 +150,10 @@ describe('EnvironmentsPage', () => {
     // 卡片展示最近一次 READY 的宿主进程用户，且不再展示任何 Root 路径。
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('ops-user')).toBeInTheDocument()
+    // 卡片展示实际 daemon 构建版本；development 如实展示而不是伪装成发布版本。
+    expect(screen.getAllByText('Daemon 版本')).toHaveLength(2)
+    expect(screen.getByText('1.2.3')).toBeInTheDocument()
+    expect(screen.getByText('development')).toBeInTheDocument()
     expect(screen.queryByText('/workspace/local-dev')).toBeNull()
     expect(screen.queryByText('Root 路径')).toBeNull()
     // 卡片不展示 skills 字段
@@ -159,10 +167,11 @@ describe('EnvironmentsPage', () => {
     expect(cards).toHaveLength(3)
     for (const card of cards) {
       const footerButtons = within(card).getAllByRole('button')
-      expect(footerButtons).toHaveLength(5)
+      expect(footerButtons).toHaveLength(6)
       expect(within(card).getByRole('button', { name: /安装 \/ 覆盖/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /卸载/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /管理/ })).toBeInTheDocument()
+      expect(within(card).getByRole('button', { name: /更新 Daemon/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /重新生成 Token/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /删除环境/ })).toBeInTheDocument()
     }
@@ -288,6 +297,140 @@ describe('EnvironmentsPage', () => {
     await user.click(confirmBtn)
 
     expect(environmentService.deleteEnvironment).toHaveBeenCalledWith('env-1', '1')
+  })
+
+  it('starts a managed Daemon update after confirmation and invalidates environment queries', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'my-box', daemonVersion: '1.2.0', version: '1' }),
+    ])
+    vi.mocked(environmentService.startEnvironmentUpdate).mockResolvedValue(
+      environment({
+        id: 'env-1',
+        name: 'my-box',
+        daemonVersion: '1.2.0',
+        update: {
+          operationId: 'op-1',
+          targetVersion: '1.3.0',
+          phase: 'PENDING',
+          createdAt: '2026-10-09T00:00:00.000Z',
+          updatedAt: '2026-10-09T00:00:00.000Z',
+        },
+        version: '1',
+      }),
+    )
+    renderPage()
+
+    const card = await screen.findByRole('article')
+    const updateBtn = within(card).getByRole('button', { name: '更新 Daemon my-box' })
+    expect(updateBtn).not.toBeDisabled()
+    await user.click(updateBtn)
+
+    const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
+    expect(within(modal).getByText(/my-box/)).toBeInTheDocument()
+    const confirmBtn = within(modal).getByRole('button', { name: '更新 Daemon' })
+    await user.click(confirmBtn)
+
+    expect(environmentService.startEnvironmentUpdate).toHaveBeenCalledWith('env-1')
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '更新 Daemon' })).toBeNull())
+    await waitFor(() => expect(environmentService.listEnvironments).toHaveBeenCalledTimes(2))
+  })
+
+  it('disables the update action for in-progress phases and renders update status and failure error on the card', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({
+        id: 'env-running',
+        name: 'box-running',
+        update: {
+          operationId: 'op-run',
+          targetVersion: '1.3.0',
+          phase: 'RUNNING',
+          createdAt: '2026-10-09T00:00:00.000Z',
+          updatedAt: '2026-10-09T00:00:01.000Z',
+        },
+      }),
+      environment({
+        id: 'env-unknown',
+        name: 'box-unknown',
+        update: {
+          operationId: 'op-unk',
+          targetVersion: '1.3.0',
+          phase: 'UNKNOWN',
+          createdAt: '2026-10-09T00:00:00.000Z',
+          updatedAt: '2026-10-09T00:00:02.000Z',
+        },
+      }),
+      environment({
+        id: 'env-failed',
+        name: 'box-failed',
+        update: {
+          operationId: 'op-fail',
+          targetVersion: '1.3.0',
+          phase: 'FAILED',
+          error: 'checksum mismatch',
+          createdAt: '2026-10-09T00:00:00.000Z',
+          updatedAt: '2026-10-09T00:00:03.000Z',
+        },
+      }),
+      environment({
+        id: 'env-succeeded',
+        name: 'box-succeeded',
+        update: {
+          operationId: 'op-ok',
+          targetVersion: '1.3.0',
+          phase: 'SUCCEEDED',
+          createdAt: '2026-10-09T00:00:00.000Z',
+          updatedAt: '2026-10-09T00:00:04.000Z',
+        },
+      }),
+    ])
+    renderPage()
+
+    expect(await screen.findByText('box-running')).toBeInTheDocument()
+    expect(screen.getAllByText('更新状态')).toHaveLength(4)
+    expect(screen.getByText('更新中')).toBeInTheDocument()
+    expect(screen.getByText('等待重连确认')).toBeInTheDocument()
+    expect(screen.getByText('更新失败: checksum mismatch')).toBeInTheDocument()
+    expect(screen.getByText('更新成功')).toBeInTheDocument()
+
+    expect(screen.getByRole('button', { name: '更新 Daemon box-running' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '更新 Daemon box-unknown' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '更新 Daemon box-failed' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '更新 Daemon box-succeeded' })).not.toBeDisabled()
+  })
+
+  it('shows visible error on update failure and handles 409 conflict refresh', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'busy-box', version: '1' }),
+    ])
+    vi.mocked(environmentService.startEnvironmentUpdate).mockRejectedValueOnce(
+      new Error('release artifact fetch failed'),
+    )
+    renderPage()
+
+    const updateBtn = await screen.findByRole('button', { name: '更新 Daemon busy-box' })
+    await user.click(updateBtn)
+
+    const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
+    const confirmBtn = within(modal).getByRole('button', { name: '更新 Daemon' })
+    await user.click(confirmBtn)
+
+    expect(await within(modal).findByRole('alert')).toHaveTextContent('release artifact fetch failed')
+
+    vi.mocked(environmentService.startEnvironmentUpdate).mockRejectedValueOnce(
+      new ApiError('环境忙', 409, 'CONFLICT', { reason: 'environment_busy', detail: 'Active tool call running' }),
+    )
+    await user.click(confirmBtn)
+
+    const conflictModal = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
+    expect(within(conflictModal).getByText(/environment_busy/)).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '更新 Daemon' })).toBeNull()
+
+    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog', { name: '数据已发生变化' })).toBeNull()
+    })
   })
 
   it('shows the loading state while the registry request is pending', async () => {
@@ -452,43 +595,42 @@ describe('EnvironmentsPage', () => {
   })
 
   /**
-   * 测试意图：验证环境卡片在存在 lastEvent 时呈现其级别、类型、时间与说明，
-   * 且在没有 lastEvent 时不呈现多余的事件信息。
+   * 测试意图：卡片只呈现当前状态，不内嵌历史事件；同一环境的历史 WARN 与后续 READY 事件
+   * 只在管理弹窗的 Events 列表中可见，不以删除事件让卡片干净。
    */
-  it('surfaces lastEvent when present and renders nothing extra when absent', async () => {
+  it('renders only the current status on the card and keeps event history in the management modal', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({
-        id: 'env-with-event',
-        name: 'error-box',
-        lastEvent: {
-          time: '2026-07-20T01:02:03.000Z',
-          level: 'ERROR',
-          type: 'SKILL_SYNC_FAILED',
-          message: 'Failed to synchronize skill package git repo',
-        },
-      }),
-      environment({
-        id: 'env-without-event',
-        name: 'clean-box',
-        lastEvent: null,
-      }),
+      environment({ id: 'env-recovered', name: 'recovered-box', status: 'READY', ready: true }),
+    ])
+    vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([
+      {
+        time: '2026-07-20T00:00:00.000Z',
+        level: 'WARN',
+        type: 'DISCONNECTED',
+        message: 'daemon connection lost',
+      },
+      {
+        time: '2026-07-20T00:01:00.000Z',
+        level: 'INFO',
+        type: 'READY',
+        message: 'environment ready',
+      },
     ])
     renderPage()
 
-    expect(await screen.findByText('error-box')).toBeInTheDocument()
-    expect(screen.getByText('clean-box')).toBeInTheDocument()
+    expect(await screen.findByText('recovered-box')).toBeInTheDocument()
 
-    // 含有 lastEvent 的卡片呈现 level / type / time / message
-    expect(screen.getByText('ERROR')).toBeInTheDocument()
-    expect(screen.getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
-    expect(screen.getByText('Failed to synchronize skill package git repo')).toBeInTheDocument()
+    // 卡片只显示当前 READY 状态，不再内嵌任何历史事件区域。
+    const card = screen.getByRole('heading', { name: 'recovered-box' }).closest('article')!
+    expect(within(card).getByText('READY')).toBeInTheDocument()
+    expect(card.querySelector('.env-last-event')).toBeNull()
+    expect(within(card).queryByText('daemon connection lost')).not.toBeInTheDocument()
 
-    // 检查卡片，验证 clean-box 不呈现 lastEvent 区域，而 error-box 呈现 lastEvent
-    const errorCard = screen.getByRole('heading', { name: 'error-box' }).closest('article')!
-    const cleanCard = screen.getByRole('heading', { name: 'clean-box' }).closest('article')!
-    expect(within(errorCard).getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
-    expect(within(cleanCard).queryByText('SKILL_SYNC_FAILED')).not.toBeInTheDocument()
-    expect(within(cleanCard).queryByText('ERROR')).not.toBeInTheDocument()
+    // 打开管理弹窗后仍可见完整历史：历史 WARN 与后续 READY 都被保留。
+    const user = userEvent.setup()
+    await user.click(within(card).getByRole('button', { name: /管理/ }))
+    expect(await screen.findByText('daemon connection lost')).toBeInTheDocument()
+    expect(screen.getByText('environment ready')).toBeInTheDocument()
   })
 
   /**

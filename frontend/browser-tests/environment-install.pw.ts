@@ -407,3 +407,45 @@ test('native Tab skips closed details inputs and disabled controls around both S
   await expect(page.getByLabel('Closed after')).toBeHidden()
   await expect(page.getByRole('button', { name: 'Disabled between' })).toBeDisabled()
 })
+
+/**
+ * 卡片只呈现当前状态，历史事件只在管理弹窗的 Events 中可见。
+ *
+ * 通过离线路由 mock 渲染真实 EnvironmentsPage：同一环境有历史 WARN 且当前 READY 时，
+ * 卡片不得内嵌任何事件投影，而管理弹窗仍展示完整历史（WARN 与后续 READY）。
+ */
+test('keeps event history out of the card and inside the management modal', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const history = [
+    { time: '2026-07-20T00:00:00.000Z', level: 'WARN', type: 'DISCONNECTED', message: 'daemon connection lost' },
+    { time: '2026-07-20T00:01:00.000Z', level: 'INFO', type: 'READY', message: 'environment ready' },
+  ]
+  const card: EnvironmentCardDTO = {
+    id: 'env-1', name: 'recovered-box', version: '1', status: 'READY', ready: true,
+    statusExpiresAt: null, lastSeen: '2026-07-20T00:01:00.000Z', capabilities: [], createTime: '', updateTime: '',
+  }
+  await page.route('**/api/harness/environments**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/events')) {
+      return route.fulfill({ json: history })
+    }
+    return route.fulfill({ json: path.endsWith('/env-1') ? card : [card] })
+  })
+
+  await page.goto('/browser-tests/environment-install-harness.html')
+  const cardLocator = page.locator('.environment-card')
+  // 首次冷启动时 vite 需现编译模块图，给首个可见断言更宽的窗口。
+  await expect(cardLocator).toBeVisible({ timeout: 15000 })
+  await expect(cardLocator.getByText('READY', { exact: true })).toBeVisible()
+  // 卡片不含任何历史事件区域，也不回显事件文本。
+  await expect(page.locator('.env-last-event')).toHaveCount(0)
+  await expect(cardLocator).not.toContainText('daemon connection lost')
+  await page.screenshot({ path: testInfo.outputPath('card-without-history.png'), fullPage: true })
+
+  // 管理弹窗仍展示完整历史：历史 WARN 与后续 READY。
+  await cardLocator.getByRole('button', { name: /管理/ }).click()
+  const modal = page.getByRole('dialog', { name: /管理环境/ })
+  await expect(modal.getByText('daemon connection lost')).toBeVisible()
+  await expect(modal.getByText('environment ready')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('management-history.png'), fullPage: true })
+})

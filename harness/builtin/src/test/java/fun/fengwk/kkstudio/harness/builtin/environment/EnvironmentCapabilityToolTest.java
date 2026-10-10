@@ -119,7 +119,7 @@ class EnvironmentCapabilityToolTest {
     ToolExecutionRequest requestWithoutContext =
         new ToolExecutionRequest(
             descriptor,
-            new ToolCall("call-1", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}"),
+            new ToolCall("call-1", "read", "{\"path\":\"/srv/repo/demo.txt\"}"),
             Duration.ZERO);
 
     ToolExecutionHandle handle = tool.execute(requestWithoutContext, listener);
@@ -127,9 +127,11 @@ class EnvironmentCapabilityToolTest {
     assertFalse(handle.isCancelled());
     assertNotNull(outcomeRef.get());
     assertTrue(outcomeRef.get().result().error());
-    assertEquals(
-        "No environment bound in execution context",
-        ((TextResultContent) outcomeRef.get().result().contents().get(0)).text());
+    String message = ((TextResultContent) outcomeRef.get().result().contents().get(0)).text();
+    assertTrue(message.contains("No Environment is bound in the execution context"), message);
+    // 缺少环境绑定是派发前确定性结果：必须声明未执行并给出下一步。
+    assertTrue(message.contains("The tool was not executed."), message);
+    assertTrue(message.contains("Select an Environment"), message);
   }
 
   /** 显式 timeout_seconds 严格覆盖 capability 默认超时：更短与更长都必须原样生效，不做 min clamp。 */
@@ -199,7 +201,7 @@ class EnvironmentCapabilityToolTest {
 
     assertEquals(
         Duration.ofMinutes(1),
-        read.resolveTimeout(call("read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}")));
+        read.resolveTimeout(call("read", "{\"path\":\"/srv/repo/demo.txt\"}")));
   }
 
   /** 以 capability schema 构造 bash Tool，用于验证 arguments 级超时解析。 */
@@ -245,7 +247,7 @@ class EnvironmentCapabilityToolTest {
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             descriptor,
-            new ToolCall("call-2", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}"),
+            new ToolCall("call-2", "read", "{\"path\":\"/srv/repo/demo.txt\"}"),
             Duration.ZERO,
             context);
 
@@ -254,5 +256,38 @@ class EnvironmentCapabilityToolTest {
     ToolExecutionHandle returnedHandle = tool.execute(request, listener);
     assertEquals(mockHandle, returnedHandle);
     verify(boundEnv).execute(FS_READ, request, listener);
+  }
+
+  /** 验证 process.exec（bash）请求在缺少必填 workdir 时在构造期被拒绝。 */
+  @Test
+  void requestCreationRejectsMissingWorkdirForProcessExec() {
+    EnvironmentCapabilityTool bash = bashTool();
+    ToolCall callWithoutWorkdir = new ToolCall("call-bash", "bash", "{\"command\":\"true\"}");
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ToolExecutionRequest(bash.descriptor(), callWithoutWorkdir, Duration.ZERO));
+    assertTrue(error.getMessage().contains("workdir is required"), error.getMessage());
+  }
+
+  /** 验证文件能力请求携带已废弃的 workdir 时在构造期被拒绝。 */
+  @Test
+  void requestCreationRejectsWorkdirForFileTools() {
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "read",
+            "read file",
+            "read",
+            FS_READ.inputSchema(),
+            ToolSideEffect.READ_ONLY,
+            FS_READ.defaultTimeout());
+    ToolCall callWithWorkdir =
+        new ToolCall(
+            "call-read", "read", "{\"path\":\"/srv/repo/demo.txt\",\"workdir\":\"/srv/repo\"}");
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ToolExecutionRequest(descriptor, callWithWorkdir, Duration.ZERO));
+    assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
   }
 }

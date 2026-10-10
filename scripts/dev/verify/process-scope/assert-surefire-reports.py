@@ -225,6 +225,22 @@ REQUIRED_CASES = {
     + "DaemonTerminalServerIntegrationTest": DAEMON_SERVER_INTEGRATION_REQUIRED_CASES,
 }
 
+# owner-only 原语按平台取证：POSIX 腿必须真跑权限位断言，Windows 腿必须真跑 ACL 断言，两侧都不允许被跳过；只按文件系统视图
+# 前置条件跳过（Linux/macOS 无 acl 视图，Windows 无 posix 视图），而不是放宽断言。
+OWNER_ONLY_FILES_TEST = "fun.fengwk.kkstudio.harness.daemon.coding.OwnerOnlyFilesTest"
+OWNER_ONLY_REQUIRED_CASES = {
+    "posix": {
+        "ensureOwnerOnlyDirectoryCreatesAndConvergesToOwnerOnly",
+        "createOwnerOnlyFileIsOwnerOnly",
+    },
+    "acl": {
+        "ensureOwnerOnlyDirectoryAppliesOwnerOnlyAcl",
+        "createOwnerOnlyFileAppliesOwnerOnlyAcl",
+        "aclDirectoryKeepsDescendantsOwnerOnly",
+        "ensureOwnerOnlyDirectoryStripsBroadAcl",
+    },
+}
+
 # Windows 腿仍然要有「用真正的 Git Bash 跑通命令执行」的实证：BashCapabilityTest 自己显式定位 Git Bash（runner 上就是
 # workflow 的 `shell: bash` 用的那个），因此下面这两条在 Windows 上必须真跑且不得跳过——一条证明命令的 stdin 是确定性
 # EOF，一条证明超时预算不会因为算术溢出退化成立即超时。它们不依赖 POSIX 的额外语义，因此在 Windows 上也没有跳过的理由。
@@ -315,6 +331,7 @@ SELECTED_CLASSES = (
     "DaemonRuntimeTest",
     "DaemonRuntimeShellTest",
     "DaemonTerminalServerIntegrationTest",
+    "OwnerOnlyFilesTest",
 )
 
 
@@ -382,6 +399,24 @@ def main() -> int:
         counts, cases, skipped = parsed
         report(simple_name, counts, cases)
         qualified = package_of(simple_name) + simple_name
+        if qualified == OWNER_ONLY_FILES_TEST:
+            # 按平台点名 owner-only 原语用例：Windows 只接受 ACL 断言，非 Windows 只接受 POSIX 权限位断言。
+            required = (
+                OWNER_ONLY_REQUIRED_CASES["acl"]
+                if os_label.startswith("windows")
+                else OWNER_ONLY_REQUIRED_CASES["posix"]
+            )
+            skipped_required = sorted(required & skipped)
+            if skipped_required:
+                failures.append(
+                    f"{simple_name}: required cases must not be skipped on {os_label}: {skipped_required}"
+                )
+            missing = sorted(required - set(cases))
+            if missing:
+                failures.append(
+                    f"{simple_name}: required cases did not run on {os_label}: {missing}"
+                )
+            continue
         strict = REQUIRED_CASES.get(qualified)
         if strict is not None:
             # 这一类是核心验收：它的每个用例在任何平台上都没有跳过的理由。

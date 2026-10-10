@@ -23,6 +23,31 @@ class OpenAiResponsesErrorMapperTest {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+  /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
+  @Test
+  void propagatesStructuredHttpStatusMetadata() {
+    assertEquals(
+        401, OpenAiResponsesErrorMapper.mapTransportException(httpStatus(401, "{}")).httpStatus());
+    assertEquals(
+        503, OpenAiResponsesErrorMapper.mapTransportException(httpStatus(503, "{}")).httpStatus());
+    assertEquals(
+        301, OpenAiResponsesErrorMapper.mapTransportException(httpStatus(301, "")).httpStatus());
+    assertNull(
+        OpenAiResponsesErrorMapper.mapTransportException(
+                new TransportException(TransportErrorKind.IO, "io", 0, null, null, null))
+            .httpStatus());
+  }
+
+  private static TransportException httpStatus(int status, String body) {
+    return new TransportException(
+        TransportErrorKind.HTTP_STATUS,
+        "status",
+        status,
+        body.getBytes(StandardCharsets.UTF_8),
+        null,
+        null);
+  }
+
   /** 验证不同 HTTP 状态码在无响应体时按基线规则正确映射并附带状态码后备信息。 */
   @Test
   void test_httpStatusMapping_withoutBody() {

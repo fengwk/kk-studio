@@ -27,6 +27,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
@@ -41,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
+import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -196,9 +198,9 @@ class ProviderResourceMaterializerTest {
     verify(contentService, never()).readBlobContent(any(), anyLong());
   }
 
-  /** 意图：图片是显式请求的输入，位置能力只声明在另一侧时绝不借用，也绝不降级成文本让模型以为看到了图片。 */
+  /** 意图：工具结果媒体优先走原生 TOOL 位置；只有 USER 位置可用时追加一条标注来源的 USER 媒体消息；两侧都不可用则显式失败。 */
   @Test
-  void toolResultContentsUseToolResultCapabilitiesNotUserCapabilities() {
+  void toolResultMediaUsesNativeToolPositionOrSourcedUserMessage() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
@@ -211,18 +213,29 @@ class ProviderResourceMaterializerTest {
     ProviderMediaCapabilities toolOnly =
         new ProviderMediaCapabilities(Set.of(), Set.of(ModelInputModality.IMAGE));
 
-    // 能力只声明在用户位置：TOOL 内容显式失败，绝不借用用户能力读取内容。
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                materializer(blobManager, contentService)
-                    .materialize(
-                        List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(toolResult))),
-                        Set.of(ModelInputModality.IMAGE),
-                        userOnly));
-    assertTrue(error.getMessage().contains("tool results"), error.getMessage());
-    verify(contentService, never()).readBlobContent(any(), anyLong());
+    // 能力只声明在用户位置：TOOL 结果保留确定性文本事实，随后追加一条标注来源 callId/blobId 的 USER 媒体消息。
+    List<ProviderMessage> deferred =
+        materializer(blobManager, contentService)
+            .materialize(
+                List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(toolResult))),
+                Set.of(ModelInputModality.IMAGE),
+                userOnly);
+    assertEquals(2, deferred.size());
+    ProviderToolResultBlock kept =
+        assertInstanceOf(ProviderToolResultBlock.class, deferred.get(0).contents().get(0));
+    ProviderTextBlock deferredText =
+        assertInstanceOf(ProviderTextBlock.class, kept.contents().get(0));
+    assertTrue(deferredText.text().contains("separate user message"), deferredText.text());
+    ProviderMessage userMedia = deferred.get(1);
+    assertEquals(ProviderMessageRole.USER, userMedia.role());
+    ProviderTextBlock source =
+        assertInstanceOf(ProviderTextBlock.class, userMedia.contents().get(0));
+    assertTrue(source.text().contains("call-image"), source.text());
+    assertTrue(source.text().contains(BLOB_ID.toString()), source.text());
+    ProviderImageBlock image =
+        assertInstanceOf(ProviderImageBlock.class, userMedia.contents().get(1));
+    assertEquals(IMAGE_DATA_URI, image.source());
+    verify(contentService, times(1)).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
 
     // 能力只声明在工具结果位置：TOOL 内容正常内联，用户普通内容显式失败。
     ProviderToolResultBlock inlined =
@@ -236,9 +249,9 @@ class ProviderResourceMaterializerTest {
                 .get(0)
                 .contents()
                 .get(0));
-    ProviderImageBlock image =
+    ProviderImageBlock nativeImage =
         assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(0));
-    assertEquals(IMAGE_DATA_URI, image.source());
+    assertEquals(IMAGE_DATA_URI, nativeImage.source());
     IllegalArgumentException userError =
         assertThrows(
             IllegalArgumentException.class,
@@ -250,6 +263,40 @@ class ProviderResourceMaterializerTest {
                         Set.of(ModelInputModality.IMAGE),
                         toolOnly));
     assertTrue(userError.getMessage().contains("user messages"), userError.getMessage());
+  }
+
+  /** 意图：工具结果图片在两个位置都不可用时显式失败，而不是被静默降级成文本描述。 */
+  @Test
+  void toolResultMediaWithoutAnyLegalPositionFailsExplicitly() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
+    ProviderToolResultBlock toolResult =
+        new ProviderToolResultBlock("call-image", "read", List.of(IMAGE_RESOURCE), false, "{}");
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(toolResult))),
+                        Set.of(ModelInputModality.IMAGE),
+                        ProviderMediaCapabilities.NONE));
+    assertTrue(
+        error.getMessage().contains("neither user messages nor tool results"), error.getMessage());
+    verify(contentService, never()).readBlobContent(any(), anyLong());
+  }
+
+  /**
+   * 意图：非图片媒体（AUDIO / VIDEO / 仅 PDF 的 DOCUMENT）在 TOOL 位置不支持、USER 位置支持时，和图片一样以真实字节投影为带来源的 USER
+   * 消息，而不是被静默降级成文本描述。
+   */
+  @Test
+  void toolResultNonImageMediaProjectsToSourcedUserMessage() {
+    assertProjectedNonImageUserMedia("audio/wav", ModelInputModality.AUDIO);
+    assertProjectedNonImageUserMedia("video/mp4", ModelInputModality.VIDEO);
+    assertProjectedNonImageUserMedia("application/pdf", ModelInputModality.DOCUMENT);
   }
 
   /** 意图：图片没有任何可用位置时显式失败，且失败发生在读取之前。 */
@@ -330,7 +377,7 @@ class ProviderResourceMaterializerTest {
                 ALL_MEDIA);
     ProviderTextBlock text =
         assertInstanceOf(ProviderTextBlock.class, unsupportedModality.get(0).contents().get(0));
-    assertTrue(text.text().contains("blobId: " + BLOB_ID), text.text());
+    assertTrue(text.text().contains("uri: " + SessionResourceUri.format(BLOB_ID)), text.text());
     verify(contentService, never()).readBlobContent(any(), anyLong());
   }
 
@@ -770,9 +817,18 @@ class ProviderResourceMaterializerTest {
         assertInstanceOf(ProviderTextBlock.class, result.get(0).contents().get(0));
     assertTrue(
         text.text()
-            .contains("complete output has been saved as a downloadable user attachment: demo.txt"),
+            .contains(
+                "The complete output is available as a session resource:\n"
+                    + SessionResourceUri.format(BLOB_ID)),
         text.text());
+    assertTrue(text.text().contains("Name: demo.txt"), text.text());
     assertTrue(text.text().contains("Size: 12345 bytes, 100 lines"), text.text());
+    assertTrue(
+        text.text()
+            .contains(
+                "Use the read tool with this resource URI and offset/limit to page through the"
+                    + " complete output."),
+        text.text());
     verify(blobManager, never()).getBlob(any());
     verify(contentService, never()).readBlobContent(any(), anyLong());
     verify(blobManager, never()).presignOriginalUrl(any());
@@ -986,7 +1042,9 @@ class ProviderResourceMaterializerTest {
     assertSame(before, materialized.contents().get(0));
     assertEquals(
         "[Resource: scan.txt]\n"
-            + "blobId: 00000000-0000-0000-0000-000000000001\n"
+            + "uri: "
+            + SessionResourceUri.format(BLOB_ID)
+            + "\n"
             + "mediaType: text/plain\n"
             + "size: 42\n"
             + "preview: tiny preview",
@@ -1182,6 +1240,49 @@ class ProviderResourceMaterializerTest {
       StorageBlobContentService contentService, UUID blobId, String mediaType, byte[] bytes) {
     when(contentService.readBlobContent(eq(blobId), anyLong()))
         .thenReturn(new StorageBlobContent(blobId, bytes, mediaType, bytes.length));
+  }
+
+  /** 单媒体 USER 投影用例基座：TOOL 位置不支持、USER 位置支持时，追加 USER 消息携带真实媒体块。 */
+  private void assertProjectedNonImageUserMedia(String mediaType, ModelInputModality modality) {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setMediaType(mediaType);
+    blob.setSizeBytes(BYTES.length);
+    blob.setState(StorageBlobState.ACTIVE);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    stubContent(contentService, blobId, mediaType, BYTES);
+    String expected = "data:" + mediaType + ";base64," + Base64.getEncoder().encodeToString(BYTES);
+    ProviderToolResultBlock toolResult =
+        new ProviderToolResultBlock(
+            "call-media",
+            "read",
+            List.of(ProviderResourceBlock.media(blobId, "media.bin", "preview")),
+            false,
+            "{}");
+    ProviderMediaCapabilities userOnly = new ProviderMediaCapabilities(Set.of(modality), Set.of());
+
+    List<ProviderMessage> materialized =
+        materializer(blobManager, contentService)
+            .materialize(
+                List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(toolResult))),
+                Set.of(modality),
+                userOnly);
+
+    assertEquals(2, materialized.size(), mediaType + " must append exactly one user media message");
+    ProviderMessage userMedia = materialized.get(1);
+    assertEquals(ProviderMessageRole.USER, userMedia.role());
+    ProviderContentBlock media = userMedia.contents().get(1);
+    String actualSource =
+        switch (modality) {
+          case AUDIO -> assertInstanceOf(ProviderAudioBlock.class, media).source();
+          case VIDEO -> assertInstanceOf(ProviderVideoBlock.class, media).source();
+          case DOCUMENT -> assertInstanceOf(ProviderDocumentBlock.class, media).source();
+          default -> throw new IllegalStateException("unexpected projected modality " + modality);
+        };
+    assertEquals(expected, actualSource, mediaType + " must be inlined as real bytes");
   }
 
   /** 合成 replay state：各 format 使用各自真实的 payload 形态，payload 对本边界保持完全不透明。 */

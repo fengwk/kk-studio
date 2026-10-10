@@ -60,6 +60,11 @@ final class OpenAiChatRequestEncoder {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
+  /** 语义回退中可读思考的来源标记：与 final text 明确分隔，避免无分隔拼接被误读为最终回答。 */
+  private static final String THINKING_OPEN = "<thinking>\n";
+
+  private static final String THINKING_CLOSE = "\n</thinking>\n";
+
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -431,6 +436,13 @@ final class OpenAiChatRequestEncoder {
     for (ProviderContentBlock block : message.contents()) {
       if (block instanceof ProviderTextBlock tb) {
         textBuilder.append(tb.text());
+      } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        // 跨 provider/连接/模型或跨格式时无法保留原生 reasoning 字段：可读思考降级为带来源标记的普通文本，
+        // 与 final text 明确分隔，避免被误读为最终回答。
+        appendMarkedThinking(textBuilder, thinkingBlock.thinking());
+      } else if (block instanceof ProviderJsonBlock jsonBlock) {
+        // assistant JSON 诊断（如 tool_call_diagnostic）降级为普通文本回放。
+        textBuilder.append(jsonBlock.json());
       } else if (block instanceof ProviderToolCallBlock cb) {
         ProviderToolCall call = cb.toolCall();
         parseJsonObject(call.argumentsJson(), "toolCall argumentsJson must be a JSON object");
@@ -440,8 +452,6 @@ final class OpenAiChatRequestEncoder {
         ObjectNode fnNode = callNode.putObject("function");
         fnNode.put("name", call.name());
         fnNode.put("arguments", call.argumentsJson());
-      } else if (block instanceof ProviderThinkingBlock) {
-        // Fallback 时 OpenAI 官方标准不保留 thinking 文本块
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
@@ -455,6 +465,17 @@ final class OpenAiChatRequestEncoder {
       msgNode.set("tool_calls", toolCallsArray);
     }
     return msgNode;
+  }
+
+  /**
+   * 把语义回退的可读思考以带来源标记的普通文本追加进 content：思考为空时不追加任何字节；非空时用 {@code <thinking>}/{@code </thinking>}
+   * 包裹，与后续 final text 明确分隔。
+   */
+  private static void appendMarkedThinking(StringBuilder textBuilder, String thinking) {
+    if (thinking.isEmpty()) {
+      return;
+    }
+    textBuilder.append(THINKING_OPEN).append(thinking).append(THINKING_CLOSE);
   }
 
   /**

@@ -44,28 +44,48 @@ public final class ReadCapability extends AbstractCodingCapability {
     super(config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ));
   }
 
+  /**
+   * {@code read} 的结果本身就是精确有界窗口（正文最多 60000 码点），Platform 侧对内联预算信任它，因此绝不对其二次外化：大窗口保持内联，不会被本地 durable
+   * 全文替换。
+   */
+  @Override
+  boolean spoolsLargeTextOutput() {
+    return false;
+  }
+
   @Override
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
-    String rawWorkdir = optionalString(args, "workdir");
     // 窗口参数先于任何文件系统访问校验，畸形窗口不会以 ENOENT 之类的 I/O 结论掩盖参数错误。
     int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
     int limit = optionalPositiveInt(args, "limit", DEFAULT_LIMIT, MAX_LIMIT);
     // 非法口径仍先于任何文件系统访问校验；合法值对非文本目标（目录/图片）只是被忽略。
     Integer columnOffset = parseOptionalPositiveInt(args, "column_offset");
-    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
-    Path path = EnvironmentPaths.existing(rawPath, workdir);
-    String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
+    Path path = EnvironmentPaths.existing(rawPath);
+    String displayPath = EnvironmentPaths.displayPath(path, rawPath);
+    // 读取受控临时产物期间持有 in-use lease，防止定时清扫删除在途读取的 workspace。
+    try (TextOutputStore.Lease ignored = config.textOutputStore().acquire(path)) {
+      return readExisting(request, path, displayPath, offset, limit, columnOffset);
+    }
+  }
 
+  private EnvironmentCapabilityResult readExisting(
+      EnvironmentCapabilityExecutionRequest request,
+      Path path,
+      String displayPath,
+      int offset,
+      int limit,
+      Integer columnOffset)
+      throws Exception {
     if (Files.isDirectory(path)) {
-      return directoryResponse(request, args, path, displayPath, offset, limit);
+      return directoryResponse(request, path, displayPath, offset, limit);
     }
 
     if (!Files.isRegularFile(path)) {
       // 字符设备、FIFO、socket、块设备等非普通节点必须在任何 I/O 之前拒绝：否则 probe/阅读可能阻塞或给出伪造空文本。
-      throw new IllegalArgumentException("not a regular file: " + displayPath);
+      throw new ToolRunFailureException("not a regular file: " + displayPath);
     }
 
     byte[] probe = TextStreams.probe(path);
@@ -79,7 +99,7 @@ public final class ReadCapability extends AbstractCodingCapability {
 
     TextStreams.Encoding encoding = TextStreams.detectEncoding(probe);
     if (encoding.looksBinary(probe)) {
-      throw new IllegalArgumentException("file appears to be binary");
+      throw new ToolRunFailureException("file appears to be binary");
     }
 
     String text =
@@ -95,7 +115,6 @@ public final class ReadCapability extends AbstractCodingCapability {
 
   private EnvironmentCapabilityResult directoryResponse(
       EnvironmentCapabilityExecutionRequest request,
-      JsonNode args,
       Path path,
       String displayPath,
       int offset,
@@ -220,7 +239,7 @@ public final class ReadCapability extends AbstractCodingCapability {
       return null;
     }
     if (!value.isInt() || value.intValue() < 1) {
-      throw new IllegalArgumentException(name + " must be a positive integer");
+      throw new ToolInputRejectedException(name + " must be a positive integer");
     }
     return value.intValue();
   }

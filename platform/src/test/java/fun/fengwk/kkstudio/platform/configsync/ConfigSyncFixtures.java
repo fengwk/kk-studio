@@ -15,12 +15,15 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestFixtures;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
@@ -39,6 +42,9 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -194,6 +200,20 @@ final class ConfigSyncFixtures {
     }
     pkg.setSkills(skills);
     return pkg;
+  }
+
+  /** 以一次性 owner-only 主密钥构建真实 {@link SkillTokenCipher}，用于凭据导出等真实加解密断言。 */
+  static SkillTokenCipher tokenCipher() {
+    try {
+      Path keyFile = Files.createTempFile("kkstudio-configsync-token", ".key");
+      Files.write(keyFile, "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8));
+      Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
+      return new SkillTokenCipher(
+          new PluginCredentialCodec(),
+          new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString()));
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
   }
 
   static Environment environment(String name) {

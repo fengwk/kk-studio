@@ -30,6 +30,8 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+    getEnvironmentUpdate: vi.fn(),
+    startEnvironmentUpdate: vi.fn(),
   },
 }))
 
@@ -241,6 +243,7 @@ function agent() {
     name: 'default-assistant',
     description: null,
     systemPrompt: null,
+    type: 'USER' as const,
     model: 'model-1',
     variant: 'default',
     config: {

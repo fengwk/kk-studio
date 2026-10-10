@@ -24,8 +24,8 @@ Daemon 没有 `jacoco:check` 门禁。
 直接检查结果与磁盘：
 
 - `writeAcceptsAbsolutePathWithoutWorkdirAndRejectsRelativePathWithoutIt`、
-  `editAcceptsAbsolutePathWithoutWorkdirAndRejectsRelativePathWithoutIt`：绝对 path 不需 workdir，
-  相对 path 必须显式提供绝对 workdir，不能回退 cwd/HOME。
+  `editAcceptsAbsolutePathWithoutWorkdirAndRejectsRelativePathWithoutIt`：本地 `path` 必须是绝对路径，
+  绝对 path 直接执行、相对 path 直接拒绝，不接受 workdir，也不能回退 cwd/HOME。
 - `writesToExplicitWorkdirAndRejectsMissingArguments`、`editSchemaRequiresEveryExecutedArgument`、
   `rejectsMissingNewString`、`rejectsMissingPath`：schema 与能力校验拒绝缺参数。
 - `rejectsMissingOldStringWithoutEchoingIt`、`rejectsMultipleMatchesWithoutReplaceAll`、

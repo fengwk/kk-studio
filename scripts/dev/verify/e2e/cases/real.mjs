@@ -1291,7 +1291,7 @@ registerCase({
   level: 'L2',
   title: '真实 task 委派创建 durable 子 Thread',
   requires: ['real', 'tools'],
-  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与唯一形状 {"thread_id":"...","status":"accepted"}；完成结果由 Runtime 在子 Thread 到达首个终态边界结算 join 后异步交付为 NOTIFICATION Entry（kind=SUBAGENT_RESULT，sourceThreadId=被委派子 Thread，notificationId 由 join 身份确定性派生，message 为 USER 角色、正文唯一形状 <subagent_result thread_id="..." agent="..." state="...">），因此 case 轮询真实 snapshot 直到该通知 durable 且父重新 quiescent；完成身份由 kind=SUBAGENT_RESULT + sourceThreadId + notificationId 与受理回执的子 Thread 匹配，不靠正文 XML，普通 CUSTOM_MESSAGE 与 TASK_BUDGET 通知被排除；thread_id 对应子 Thread 的不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与可读英文 Task accepted. thread_id: <uuid>. 异步说明；完成结果由 Runtime 在子 Thread 到达收敛终态边界结算有效 join 后异步交付为 NOTIFICATION Entry（kind=SUBAGENT_RESULT，sourceThreadId=被委派子 Thread，notificationId 由 join 身份确定性派生，message 为 USER 角色、正文唯一形状 <subagent_result thread_id="..." agent="..." state="...">），因此 case 轮询真实 snapshot 直到该通知 durable 且父重新 quiescent；完成身份由 kind=SUBAGENT_RESULT + sourceThreadId + notificationId 与受理回执的子 Thread 匹配，不靠正文 XML，普通 CUSTOM_MESSAGE 与 TASK_BUDGET 通知被排除；thread_id 对应子 Thread 的不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     const model = await requireBuiltinModel(ctx)
     const modelChoice = builtinModelChoice(model)
@@ -1401,12 +1401,8 @@ registerCase({
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text || ''))
         .join('')
-      const receipt = JSON.parse(taskText)
-      assertExactFields(receipt, ['thread_id', 'status'], 'task accepted receipt')
-      assert(receipt.status === 'accepted', `expected accepted receipt: ${taskText}`)
-      const taskId = receipt.thread_id
-      assert(taskId, `accepted receipt thread_id missing: ${taskText}`)
-      canonicalUuid(taskId, 'task receipt thread id')
+      assert(taskResult.error === false, `task acceptance failed: ${taskText}`)
+      const taskId = taskAcceptedThreadId(taskText)
 
       // 完成结果由 Runtime 在子 Thread 到达首个终态边界结算 join 后异步交付为 NOTIFICATION
       // (kind=SUBAGENT_RESULT, sourceThreadId=被委派子 Thread)，因此必须轮询而非只取一次
@@ -1962,6 +1958,7 @@ registerCase({
       toolAgent,
       [
         'name',
+        'type',
         'description',
         'systemPrompt',
         'model',
@@ -1989,11 +1986,9 @@ registerCase({
       )
       const envRoot = process.env.DAEMON_ENV_ROOT
       assert(envRoot, 'DAEMON_ENV_ROOT must be exported by scripts/dev/verify/e2e/lib.sh')
-      // 具体工具 arguments 必须携带目标 Daemon 上的显式绝对 workdir；E2E 任务工作目录就是
-      // fixture 所在目录，因此该绝对路径同时是 fixture 位置与调用 workdir。
-      const workdir = path.resolve(envRoot)
-      assert(path.isAbsolute(workdir), `workdir must be absolute: ${workdir}`)
-      const fixturePath = path.join(envRoot, 'e2e-resource.txt')
+      // 文件工具只接受目标 Daemon 上的绝对 path，不携带 workdir。
+      const fixturePath = path.resolve(envRoot, 'e2e-resource.txt')
+      assert(path.isAbsolute(fixturePath), `fixture path must be absolute: ${fixturePath}`)
       const fixtureLines = Array.from(
         { length: 32 },
         (_, index) => `E2E-RESOURCE-FIXTURE-${String(index).padStart(2, '0')} ${'x'.repeat(512)}`,
@@ -2002,7 +1997,7 @@ registerCase({
       // 32 行 × 512 字符 fixture 落在 TextReadWindow 的 2000 行 / 60000 码点窗口内：header 只有
       // path/ends_with_newline/range，没有截断元数据，该文件类型也没有可用 LSP 服务器（lsp 行省略）。
       const expectedReadOutput = [
-        'path: e2e-resource.txt',
+        `path: ${fixturePath}`,
         'ends_with_newline: yes',
         `range: 1:1-${fixtureLines.length}:${fixtureLines[0].length}`,
         '',
@@ -2029,7 +2024,7 @@ registerCase({
         commands: [
           userMessageCommand(
             `必须调用 read 工具读取文件 e2e-resource.txt，使用参数 `
-              + `{"path":"e2e-resource.txt","workdir":"${workdir}"}，`
+              + `${JSON.stringify({ path: fixturePath })}，`
               + '不要猜测或跳过工具，然后用一句话总结读取结果。',
             cid(),
           ),
@@ -2114,11 +2109,11 @@ registerCase({
           && readInvocation.attempt === 0,
         safeDiagnosticJson(readInvocation),
       )
-      // workdir 只存在于具体工具 arguments：durable frozen arguments 必须携带显式绝对目录。
+      // durable frozen arguments 必须保留绝对 path，拒绝旧 workdir 字段。
       const readArguments = JSON.parse(readInvocation.argumentsJson || '{}')
       assert(
-        readArguments.path === 'e2e-resource.txt' && readArguments.workdir === workdir,
-        `read arguments must carry the explicit absolute workdir: ${safeDiagnosticJson(readArguments)}`,
+        readArguments.path === fixturePath && !Object.hasOwn(readArguments, 'workdir'),
+        `read arguments must carry only an absolute path: ${safeDiagnosticJson(readArguments)}`,
       )
       const approvalJson = JSON.parse(readInvocation.approvalJson || '{}')
       assert(
@@ -2298,7 +2293,7 @@ function entryType(entry) {
 
 /**
  * 从 Thread 快照 Entry 中收集 `task` 工具的即时回执：真实 wire 是 `MESSAGE` + `role=TOOL` +
- * `tool_result{toolName:"task"}`（`TaskTool.accepted` 唯一形状 `{"thread_id":…,"status":"accepted"}`）。
+ * `tool_result{toolName:"task"}`，正文是可读英文接受说明。
  */
 export function collectTaskToolResults(entries) {
   const results = []
@@ -2313,6 +2308,16 @@ export function collectTaskToolResults(entries) {
     }
   }
   return results
+}
+
+/**
+ * 从唯一接受说明首行读取 canonical child Thread；不接受旧 JSON 回执。
+ */
+export function taskAcceptedThreadId(text) {
+  const match = /^Task accepted\. thread_id: ([0-9a-f-]{36})\.\n/.exec(text)
+  assert(match, 'expected readable task acceptance with a canonical thread_id')
+  canonicalUuid(match[1], 'task receipt thread id')
+  return match[1]
 }
 
 /**

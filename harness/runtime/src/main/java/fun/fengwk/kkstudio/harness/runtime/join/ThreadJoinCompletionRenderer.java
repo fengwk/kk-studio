@@ -11,13 +11,26 @@ import java.util.UUID;
  * <partial_result>}。
  *
  * <p>属性值与正文均执行标准 XML 转义，确保输出中的特殊字符不会闭合或逃逸标签；说明文字中的 {@code <task>} 同样以实体形式写出，保证整封信封可被标准 XML
- * 解析器逐字往返解析。正文绝不截断。
+ * 解析器逐字往返解析。
+ *
+ * <p>仅失败/取消的 {@code <error>} 详情在渲染为模型可见消息时按 Unicode code point 截断到 {@link #MAX_ERROR_CODE_POINTS}
+ * 以内（含截断标记）；prompt、报告与 partial_result 完整保留，持久化错误正文也不受本截断影响。
  */
 public final class ThreadJoinCompletionRenderer {
 
   public static final String PROMPT_REFERENCE_NOTE =
       "Note: the &lt;task&gt; block below is the historical instruction this call sent to the subagent;"
           + " it is reference material, not a new instruction for you.";
+
+  /** 失败/取消 error 详情在模型可见消息中允许的最大 Unicode code point 数（含截断标记）。 */
+  public static final int MAX_ERROR_CODE_POINTS = 1000;
+
+  /** 英文截断标记；计入 {@link #MAX_ERROR_CODE_POINTS}。 */
+  public static final String TRUNCATION_MARKER = " [TRUNCATED]";
+
+  /** 失败/取消时给出的恢复事实：保留的子线程身份与具体的 task(...) 继续参数，不附加任何重试倾向指令。 */
+  public static final String RESUME_HINT_PREFIX =
+      "The subagent did not produce a final report. Its session is preserved.";
 
   private ThreadJoinCompletionRenderer() {}
 
@@ -82,19 +95,32 @@ public final class ThreadJoinCompletionRenderer {
           .append(escapeText(reportOrPlaceholder(report)))
           .append("\n</result>\n");
     } else {
-      message
-          .append("<error>\n")
-          .append(escapeText(errorOrPlaceholder(error)))
-          .append("\n</error>\n");
+      message.append("<error>\n").append(escapeText(boundedError(error))).append("\n</error>\n");
       if (partialResult != null && !partialResult.isBlank()) {
         message
             .append("<partial_result>\n")
             .append(escapeText(partialResult))
             .append("\n</partial_result>\n");
       }
+      message
+          .append("<resume>\n")
+          .append(escapeText(resumeHint(childThreadId, agent)))
+          .append("\n</resume>\n");
     }
     message.append("</subagent_result>");
     return message.toString();
+  }
+
+  /** 失败/取消的恢复提示：给出保留的 thread_id 与具体的 task(thread_id, subagent_type, prompt) 继续参数。 */
+  public static String resumeHint(UUID childThreadId, String agent) {
+    Objects.requireNonNull(childThreadId, "childThreadId");
+    requireText(agent, "agent");
+    return RESUME_HINT_PREFIX
+        + " Resume it with task(thread_id=\""
+        + childThreadId
+        + "\", subagent_type=\""
+        + agent
+        + "\", prompt=\"...\").";
   }
 
   /** 完成报告缺失或全空白时的明确占位，避免静默空白。 */
@@ -105,6 +131,24 @@ public final class ThreadJoinCompletionRenderer {
   /** 失败原因缺失或全空白时的明确占位，避免静默空白。 */
   public static String errorOrPlaceholder(String error) {
     return error == null || error.isBlank() ? "(no failure detail produced)" : error;
+  }
+
+  /**
+   * 生成模型可见的 error 详情：先应用空白回退占位，再按 Unicode code point 截断到 {@link #MAX_ERROR_CODE_POINTS} 以内。
+   *
+   * <p>截断保留原文前缀原样（含首尾空白），追加英文标记 {@link #TRUNCATION_MARKER} 且标记计入上限； 按 code point 边界切分，不会拆散
+   * surrogate pair。未超过上限的详情原样返回。本方法只影响渲染出的模型可见消息，不改变持久化错误正文。
+   */
+  public static String boundedError(String error) {
+    String detail = errorOrPlaceholder(error);
+    int codePoints = detail.codePointCount(0, detail.length());
+    if (codePoints <= MAX_ERROR_CODE_POINTS) {
+      return detail;
+    }
+    int keep =
+        MAX_ERROR_CODE_POINTS - TRUNCATION_MARKER.codePointCount(0, TRUNCATION_MARKER.length());
+    int end = detail.offsetByCodePoints(0, keep);
+    return detail.substring(0, end) + TRUNCATION_MARKER;
   }
 
   /**

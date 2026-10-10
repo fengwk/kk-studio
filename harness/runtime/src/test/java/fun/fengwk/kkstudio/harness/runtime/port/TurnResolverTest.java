@@ -18,8 +18,9 @@ class TurnResolverTest {
   @Test
   void resultIsSealedWithExactlyResolvedAndRejected() {
     List<Class<?>> permitted = List.of(TurnResolver.Result.class.getPermittedSubclasses());
-    assertEquals(2, permitted.size());
+    assertEquals(3, permitted.size());
     assertTrue(permitted.contains(TurnResolver.Resolved.class));
+    assertTrue(permitted.contains(TurnResolver.CompactionResolved.class));
     assertTrue(permitted.contains(TurnResolver.Rejected.class));
   }
 

@@ -226,6 +226,18 @@ function buildCreationTarget(target: PaneTarget, draft: BranchDraft) {
       yoloEnabled: draft.yoloEnabled,
     }
   }
+  if (target.kind === 'FORK_SESSION_DRAFT') {
+    // 会话 fork：新 Session/Thread 身份在此生成；sourceThreadId 与切点由后端解析有效历史，
+    // settings 从源切点 branch 推导，客户端只用 commands 表达相对切点的最小设置差分。
+    return {
+      type: 'NEW_FORKED_SESSION' as const,
+      sourceThreadId: target.sourceThreadId,
+      startEntryId: target.startEntryId,
+      sessionId: createSessionId(),
+      threadId: createThreadId(),
+      yoloEnabled: draft.yoloEnabled,
+    }
+  }
   throw new Error('Existing threads submit through the thread command batch contract')
 }
 
