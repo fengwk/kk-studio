@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Locator } from './fixture'
+import { attachAppEventsAdapter } from './app-events-adapter'
 import type { IssueDetailDTO } from '@/features/projects/types'
 
 const PROJECT = 'a0000000-0000-0000-0000-000000000001'
@@ -29,12 +30,7 @@ const detail: IssueDetailDTO = {
 
 async function transport(page: Page) {
   await page.routeWebSocket('**/api/events/v1', (socket) => {
-    socket.onMessage((raw) => {
-      const message = JSON.parse(String(raw))
-      if (message.type === 'subscribe') socket.send(JSON.stringify({
-        version: 1, type: 'subscribed', resource: message.resource, cursor: '0',
-      }))
-    })
+    attachAppEventsAdapter(socket)
   })
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
