@@ -979,7 +979,9 @@ export async function runComposerMatrix(ui) {
             listbox.locator('[role="option"][aria-selected="true"]')
           const selectedText = async () => (await selectedOption().innerText()).trim()
 
-          assert((await selectedOption().count()) === 1, 'latest model output was not initially selected')
+          assert((await selectedOption().count()) === 0, 'Debug must initially have no selected event')
+          await listbox.press('ArrowDown')
+          assert((await selectedOption().count()) === 0, 'ArrowDown must not select an event before a row click')
 
           const firstOption = listbox.getByRole('option').nth(0)
           const secondOption = listbox.getByRole('option').nth(1)

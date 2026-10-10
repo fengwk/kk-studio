@@ -584,12 +584,13 @@ async function main(argv) {
     assert(await environmentCards.count() > 0, 'environments page has no cards')
     for (const card of await environmentCards.all()) {
       const actions = card.locator('.resource-card-actions button')
-      // 环境卡能力集：安装/覆盖、卸载、管理、重新生成 Token、删除，卡内动作不得缺失或重复。
-      assert(await actions.count() === 5, 'environment card must expose Install, Uninstall, Manage, Rotate Token and Delete')
+      // 环境卡能力集固定六项，卡内动作不得缺失或重复。
+      assert(await actions.count() === 6, 'environment card must expose Install, Uninstall, Manage, Update, Rotate Token and Delete')
       for (const [name, pattern] of [
         ['Install', /安装|Install/],
         ['Uninstall', /卸载|Uninstall/],
         ['Manage', /管理|Manage/],
+        ['Update', /更新|Update/],
         ['Rotate Token', /重新生成 Token|Rotate Token/],
         ['Delete', /删除|Delete/],
       ]) {

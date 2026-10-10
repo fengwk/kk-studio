@@ -21,13 +21,12 @@ import {
 } from '../lib/harness.mjs'
 import {
   assert,
-  assertExactFields,
   cid,
   envelopeData,
   sleep,
 } from '../lib/http.mjs'
 import { expectThreadDraft, readThreadDraft } from '../lib/browser-state.mjs'
-import { collectTaskToolResults } from '../cases/real.mjs'
+import { collectTaskToolResults, taskAcceptedThreadId } from '../cases/real.mjs'
 import { FramedEventObserver } from '../lib/framed-event-observer.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
@@ -250,14 +249,14 @@ export async function runWorkspaceContractMatrix(ui) {
           // 而不是首个 Environment，也不含任何已删除的 workspace 路径。
           const lineText = (await line.innerText()).replace(/\s+/g, ' ').trim()
           // 最新调用未上报上下文用量；累计 tokens、费用与缓存率仍按已有事实精确断言。
-          // 解码速率受墙钟影响，只接受有限非负数或缺失占位。
+          // 解码速率受墙钟影响，只接受有限非负数；缺失样本展示为 0。
           const footerUsagePrefix =
-            `${environmentText} ∣ ctx 0/4.1k ∣ ↑16 · ↓9 · R14 · $0.000034 · cache 47% · `
+            `${environmentText} ∣ ctx 0/4.1k ∣ ↑16 · ↓9 · R14 · W0 · $0.000034 · cache 47% · `
           const speedToken = lineText.slice(footerUsagePrefix.length)
           assert(
             lineText.startsWith(footerUsagePrefix)
-              && /^(?:—|[0-9]+(?:\.[0-9]+)?) tok\/s$/.test(speedToken)
-              && (speedToken === '— tok/s' || Number.isFinite(Number.parseFloat(speedToken))),
+              && /^[0-9]+(?:\.[0-9]+)? tok\/s$/.test(speedToken)
+              && Number.isFinite(Number.parseFloat(speedToken)),
             `Footer facts are incorrect: ${lineText}`,
           )
           const footerTitle = await line.getAttribute('title')
@@ -1136,10 +1135,7 @@ async function resolveTaskChildThread(apiCtx, fixture) {
     .filter((content) => content.type === 'text')
     .map((content) => content.text)
     .join('')
-  const receipt = JSON.parse(text)
-  assertExactFields(receipt, ['thread_id', 'status'], 'task accepted receipt')
-  assert(receipt.status === 'accepted', `unexpected task receipt status: ${receipt.status}`)
-  return canonicalUuid(receipt.thread_id, 'task child thread id')
+  return taskAcceptedThreadId(text)
 }
 
 /** 等待审批回写请求到达：根面板聚合卡提交必须回写原始子 Thread 的原始调用。 */
