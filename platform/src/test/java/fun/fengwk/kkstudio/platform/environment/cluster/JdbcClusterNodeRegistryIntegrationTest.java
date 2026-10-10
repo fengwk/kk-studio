@@ -16,7 +16,6 @@ import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -57,7 +56,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     ClusterProperties properties = new ClusterProperties();
     properties.setInternalUrl("http://node-a.internal:8080");
     properties.setSecret(secret);
-    return new JdbcClusterNodeRegistry(jdbcTemplate, localNodeId, Clock.systemUTC(), properties);
+    return new JdbcClusterNodeRegistry(jdbcTemplate, localNodeId, properties);
   }
 
   private void seedConnection(UUID owner, String status, String runtimeInfo, Instant leaseUntil) {
@@ -164,6 +163,39 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     seedConnection(NODE_B, "READY", "{}", NOW.plusSeconds(60));
     seedNode(NODE_B, "ftp://not-http.internal", NOW.plusSeconds(60));
 
+    assertTrue(registry(NODE_A, SECRET).route(ENV).isEmpty());
+  }
+
+  @Test
+  void remoteRoutingUsesDatabaseNowInsteadOfProcessClock() {
+    jdbcTemplate.update(
+        """
+        insert into environment_connection
+            (environment_id, owner_node_id, lease_token, status, runtime_info, skill_state,
+             recent_events, last_seen_at, lease_until)
+        values (?, ?, ?, 'READY', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
+            statement_timestamp(), statement_timestamp() + interval '1 hour')
+        """,
+        ENV.value(),
+        NODE_B,
+        UUID.randomUUID());
+    jdbcTemplate.update(
+        """
+        insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+        values (?, ?, statement_timestamp() + interval '1 hour', statement_timestamp())
+        """,
+        NODE_B,
+        NODE_B_URL);
+
+    Optional<ClusterIdeOwnerRoute> route = registry(NODE_A, SECRET).route(ENV);
+    assertTrue(route.isPresent());
+    assertFalse(route.get().local());
+
+    // 注册行由数据库现在时判定过期：last_seen 同步后移以满足 lease_until > last_seen 约束。
+    jdbcTemplate.update(
+        "update cluster_node set lease_until = statement_timestamp() - interval '1 hour',"
+            + " last_seen = statement_timestamp() - interval '2 hour' where instance_id = ?",
+        NODE_B);
     assertTrue(registry(NODE_A, SECRET).route(ENV).isEmpty());
   }
 

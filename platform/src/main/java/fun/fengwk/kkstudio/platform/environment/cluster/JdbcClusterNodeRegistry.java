@@ -9,10 +9,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -31,12 +28,18 @@ import java.util.UUID;
  */
 public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
 
-  /** 现有连接行的 owner/lease 快照左连远端 owner 的注册行；过期连接与过期注册都不会被选中。 */
+  /**
+   * 现有连接行的 owner/lease 快照左连远端 owner 的注册行。
+   *
+   * <p>所有时间判定都下推到数据库现在时（{@code statement_timestamp()}），避免本进程时钟与数据库时钟偏移导致误判： {@code local_owner} 与
+   * {@code node_usable} 直接由数据库表达式计算。过期连接与过期注册都不会被选中。
+   */
   private static final String ROUTE_SQL =
       """
       select c.owner_node_id as owner_node_id,
+             (c.owner_node_id = ?) as local_owner,
              n.internal_url as internal_url,
-             n.lease_until as node_lease_until
+             (n.lease_until > statement_timestamp()) as node_usable
       from environment_connection c
       left join cluster_node n on n.instance_id = c.owner_node_id
       where c.environment_id = ?
@@ -66,14 +69,12 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
 
   private final JdbcTemplate jdbcTemplate;
   private final UUID localNodeId;
-  private final Clock clock;
   private final ClusterProperties properties;
 
   public JdbcClusterNodeRegistry(
-      JdbcTemplate jdbcTemplate, UUID localNodeId, Clock clock, ClusterProperties properties) {
+      JdbcTemplate jdbcTemplate, UUID localNodeId, ClusterProperties properties) {
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.localNodeId = Objects.requireNonNull(localNodeId, "localNodeId");
-    this.clock = Objects.requireNonNull(clock, "clock");
     this.properties = Objects.requireNonNull(properties, "properties");
   }
 
@@ -88,12 +89,12 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
       return Optional.empty();
     }
     List<OwnerRow> rows =
-        jdbcTemplate.query(ROUTE_SQL, new OwnerRowMapper(), environmentId.value());
+        jdbcTemplate.query(ROUTE_SQL, new OwnerRowMapper(), localNodeId, environmentId.value());
     if (rows.isEmpty()) {
       return Optional.empty();
     }
     OwnerRow row = rows.get(0);
-    if (row.ownerNodeId().equals(localNodeId)) {
+    if (row.localOwner()) {
       // 本地路由同样由连接行 READY + 未过期租约确认，不因本节点身份绕过。
       return Optional.of(ClusterIdeOwnerRoute.local(localNodeId));
     }
@@ -101,10 +102,7 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
       // 缺少共享秘密时无法对远端签名，明确不可用，绝不回退到请求 Host。
       return Optional.empty();
     }
-    if (row.internalUrl() == null || row.nodeLeaseUntil() == null) {
-      return Optional.empty();
-    }
-    if (!row.nodeLeaseUntil().isAfter(clock.instant())) {
+    if (!Boolean.TRUE.equals(row.nodeUsable()) || row.internalUrl() == null) {
       return Optional.empty();
     }
     return parseOrigin(row.internalUrl())
@@ -152,15 +150,17 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
     return Optional.of(URI.create(scheme.toLowerCase(Locale.ROOT) + "://" + uri.getAuthority()));
   }
 
-  private record OwnerRow(UUID ownerNodeId, String internalUrl, Instant nodeLeaseUntil) {}
+  private record OwnerRow(
+      UUID ownerNodeId, boolean localOwner, String internalUrl, Boolean nodeUsable) {}
 
   private static final class OwnerRowMapper implements RowMapper<OwnerRow> {
     @Override
     public OwnerRow mapRow(ResultSet rs, int rowNum) throws SQLException {
       UUID owner = (UUID) rs.getObject("owner_node_id");
+      boolean localOwner = rs.getBoolean("local_owner");
       String internalUrl = rs.getString("internal_url");
-      OffsetDateTime leaseUntil = rs.getObject("node_lease_until", OffsetDateTime.class);
-      return new OwnerRow(owner, internalUrl, leaseUntil == null ? null : leaseUntil.toInstant());
+      Boolean nodeUsable = (Boolean) rs.getObject("node_usable");
+      return new OwnerRow(owner, localOwner, internalUrl, nodeUsable);
     }
   }
 }

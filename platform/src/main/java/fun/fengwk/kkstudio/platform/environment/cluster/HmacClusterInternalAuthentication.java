@@ -81,9 +81,12 @@ public final class HmacClusterInternalAuthentication implements ClusterInternalA
   public Map<String, String> sign(String method, String requestPath, ClusterIdeOwnerRoute owner) {
     Objects.requireNonNull(owner, "owner");
     requireConfigured();
+    String canonicalMethod = normalizeMethod(method);
+    String canonicalPath = requireCanonicalPath(requestPath);
     long timestamp = clock.millis();
     String nonce = UUID.randomUUID().toString();
-    String signature = signature(method, requestPath, owner.nodeInstanceId(), timestamp, nonce);
+    String signature =
+        signature(canonicalMethod, canonicalPath, owner.nodeInstanceId(), timestamp, nonce);
     return Map.of(
         HEADER_TARGET,
         owner.nodeInstanceId().toString(),
@@ -99,55 +102,94 @@ public final class HmacClusterInternalAuthentication implements ClusterInternalA
   public void verify(String method, String requestPath, Map<String, String> headers) {
     requireConfigured();
     if (headers == null) {
-      throw new ClusterInternalAuthenticationException("missing internal authentication headers");
+      throw authFailure("missing internal authentication headers");
     }
     String target = header(headers, HEADER_TARGET);
     String timestamp = header(headers, HEADER_TIMESTAMP);
     String nonce = header(headers, HEADER_NONCE);
     String signature = header(headers, HEADER_SIGNATURE);
     if (target == null || timestamp == null || nonce == null || signature == null) {
-      throw new ClusterInternalAuthenticationException("missing internal authentication headers");
+      throw authFailure("missing internal authentication headers");
     }
     if (target.length() > MAX_HEADER_LENGTH
         || timestamp.length() > MAX_HEADER_LENGTH
         || nonce.length() > MAX_HEADER_LENGTH
         || signature.length() > MAX_HEADER_LENGTH) {
-      throw new ClusterInternalAuthenticationException("internal authentication header too large");
+      throw authFailure("internal authentication header too large");
     }
-    UUID targetNodeId;
-    try {
-      targetNodeId = UUID.fromString(target);
-    } catch (IllegalArgumentException error) {
-      throw new ClusterInternalAuthenticationException("malformed internal authentication target");
-    }
+    UUID targetNodeId = parseCanonicalUuid(target, "malformed internal authentication target");
     if (!targetNodeId.equals(localNodeId)) {
-      throw new ClusterInternalAuthenticationException("internal authentication target mismatch");
+      throw authFailure("internal authentication target mismatch");
     }
-    long requestTimestamp;
-    try {
-      requestTimestamp = Long.parseLong(timestamp);
-    } catch (NumberFormatException error) {
-      throw new ClusterInternalAuthenticationException(
-          "malformed internal authentication timestamp");
-    }
+    long requestTimestamp = parseTimestamp(timestamp);
     long now = clock.millis();
-    if (Math.abs(now - requestTimestamp) > authWindow.toMillis()) {
-      throw new ClusterInternalAuthenticationException(
-          "internal authentication timestamp out of window");
-    }
-    try {
-      UUID.fromString(nonce);
-    } catch (IllegalArgumentException error) {
-      throw new ClusterInternalAuthenticationException("malformed internal authentication nonce");
-    }
-    String expected = signature(method, requestPath, targetNodeId, requestTimestamp, nonce);
+    requireWithinWindow(now, requestTimestamp);
+    UUID nonceId = parseCanonicalUuid(nonce, "malformed internal authentication nonce");
+    // malformed method/path 一并按认证失败处理，绝不冒泡为 500。
+    String canonicalMethod = authMethod(method);
+    String canonicalPath = authCanonicalPath(requestPath);
+    String expected =
+        signature(canonicalMethod, canonicalPath, targetNodeId, requestTimestamp, nonce);
     if (!MessageDigest.isEqual(
         expected.getBytes(StandardCharsets.US_ASCII),
         signature.getBytes(StandardCharsets.US_ASCII))) {
-      throw new ClusterInternalAuthenticationException(
-          "internal authentication signature mismatch");
+      throw authFailure("internal authentication signature mismatch");
     }
-    recordNonce(nonce, now);
+    recordNonce(nonceId.toString(), now);
+  }
+
+  private void requireWithinWindow(long now, long requestTimestamp) {
+    long delta;
+    try {
+      // Long.MIN 等极端时间戳用精确减法溢出即视为越界，避免 Math.abs 溢出绕过窗口判定。
+      delta = Math.subtractExact(now, requestTimestamp);
+    } catch (ArithmeticException error) {
+      throw authFailure("internal authentication timestamp out of window");
+    }
+    long window = authWindow.toMillis();
+    if (delta > window || delta < -window) {
+      throw authFailure("internal authentication timestamp out of window");
+    }
+  }
+
+  private static UUID parseCanonicalUuid(String value, String failureMessage) {
+    try {
+      UUID parsed = UUID.fromString(value);
+      if (!parsed.toString().equals(value)) {
+        throw authFailure(failureMessage);
+      }
+      return parsed;
+    } catch (IllegalArgumentException error) {
+      throw authFailure(failureMessage);
+    }
+  }
+
+  private static long parseTimestamp(String value) {
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException error) {
+      throw authFailure("malformed internal authentication timestamp");
+    }
+  }
+
+  private static String authMethod(String method) {
+    try {
+      return normalizeMethod(method);
+    } catch (RuntimeException error) {
+      throw authFailure("malformed internal authentication method");
+    }
+  }
+
+  private static String authCanonicalPath(String requestPath) {
+    try {
+      return requireCanonicalPath(requestPath);
+    } catch (RuntimeException error) {
+      throw authFailure("malformed internal authentication request path");
+    }
+  }
+
+  private static ClusterInternalAuthenticationException authFailure(String message) {
+    return new ClusterInternalAuthenticationException(message);
   }
 
   private void recordNonce(String nonce, long now) {
@@ -165,18 +207,11 @@ public final class HmacClusterInternalAuthentication implements ClusterInternalA
     }
   }
 
+  /** 签名材料拼接；method/path 由调用方在签名前完成校验（sign 用 IAE、verify 用认证失败类型）。 */
   private String signature(
-      String method, String requestPath, UUID target, long timestamp, String nonce) {
+      String canonicalMethod, String canonicalPath, UUID target, long timestamp, String nonce) {
     String canonical =
-        normalizeMethod(method)
-            + "\n"
-            + requireCanonicalPath(requestPath)
-            + "\n"
-            + target
-            + "\n"
-            + timestamp
-            + "\n"
-            + nonce;
+        canonicalMethod + "\n" + canonicalPath + "\n" + target + "\n" + timestamp + "\n" + nonce;
     try {
       Mac mac = Mac.getInstance(HMAC_ALGORITHM);
       mac.init(new SecretKeySpec(secret, HMAC_ALGORITHM));
