@@ -103,6 +103,7 @@ public class SystemSettingsSchemaDTO {
 
   public enum ApplyTiming {
     NEXT_INVOCATION,
+    NEXT_HTTP_REQUEST,
     NEXT_CHAT,
     RESTART
   }

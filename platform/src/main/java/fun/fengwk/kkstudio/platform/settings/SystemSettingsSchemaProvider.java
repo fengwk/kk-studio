@@ -236,13 +236,13 @@ public class SystemSettingsSchemaProvider {
                 "network",
                 "settings.tabs.network",
                 "settings.section.network.description",
-                true,
+                false,
                 group(
                     "network.proxy",
                     "settings.section.network.proxy.title",
                     "settings.section.network.proxy.description",
-                    true,
-                    ApplyTiming.RESTART,
+                    false,
+                    ApplyTiming.NEXT_HTTP_REQUEST,
                     field(
                         "network.proxyUrl",
                         "settings.field.network.proxyUrl",

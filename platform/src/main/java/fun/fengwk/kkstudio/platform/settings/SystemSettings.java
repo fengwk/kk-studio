@@ -176,7 +176,7 @@ public record SystemSettings(
     }
   }
 
-  /** network section：Backend 唯一全局 HTTP 代理，重启生效；null 地址明确直连，不读取宿主代理。 */
+  /** network section：Backend 唯一全局 HTTP 代理，保存后新发起请求生效；null 地址明确直连，不读取宿主代理。 */
   public record Network(String proxyUrl, String noProxyHosts) {
 
     public static final Network DEFAULT = new Network(null, "localhost,127.*,::1");
