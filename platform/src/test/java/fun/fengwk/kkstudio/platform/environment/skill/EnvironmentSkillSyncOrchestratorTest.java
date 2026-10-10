@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -96,7 +97,8 @@ class EnvironmentSkillSyncOrchestratorTest {
               "dev",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              DaemonArchitecture.AMD64));
 
   private final Map<String, SkillPackage> catalog = new LinkedHashMap<>();
   private final List<EnvironmentSkillState> rowSkillState = new ArrayList<>();
@@ -301,7 +303,8 @@ class EnvironmentSkillSyncOrchestratorTest {
                 "dev",
                 "C:\\Users\\dev",
                 "Windows environment.",
-                "/tmp/kk-studio")));
+                "/tmp/kk-studio",
+                DaemonArchitecture.AMD64)));
     transport.responder =
         request ->
             EnvironmentCapabilityResult.json(
