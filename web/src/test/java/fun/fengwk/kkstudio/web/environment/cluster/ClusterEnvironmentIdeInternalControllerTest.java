@@ -112,6 +112,22 @@ class ClusterEnvironmentIdeInternalControllerTest {
   }
 
   @Test
+  void authenticatedNonOwnerWithOversizedBodyIsRejectedBeforeBodyIsRead() throws Exception {
+    when(clusterNodeRegistry.route(ENV))
+        .thenReturn(
+            Optional.of(ClusterIdeOwnerRoute.remote(NODE_A, URI.create("http://a.internal"))));
+
+    mockMvc
+        .perform(
+            post(ClusterInternalPaths.viewsPath(ENV))
+                .headers(mockHeaders(validHeaders()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
+        .andExpect(status().isConflict());
+    verifyNoInteractions(localEnvironmentIdeService);
+  }
+
+  @Test
   void authenticatedLocalOwnerDelegatesAndReturnsTheViewDto() throws Exception {
     Map<String, String> headers = validHeaders();
     when(clusterNodeRegistry.route(ENV))

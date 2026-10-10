@@ -47,6 +47,10 @@ mybatis:
 
 server:
   port: 8080
+  tomcat:
+    # 请求读取阶段的 connector socket 读超时。内部 metadata controller 以 readNBytes 有界读取并先认证/核对 owner，
+    # 但持有共享秘密的节点仍可能以 <16KiB 慢速滴流拖住读取线程；本切片不引入线程框架，靠容器读超时兜底（与内部客户端 30s 预算一致）。
+    connection-timeout: 30s
   # Compression
   compression:
     # 启用gzip压缩

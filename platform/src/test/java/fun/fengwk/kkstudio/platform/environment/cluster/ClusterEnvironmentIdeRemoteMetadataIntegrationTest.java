@@ -40,6 +40,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -177,6 +179,59 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
           () -> service.openView(ENV, openViewRequest()));
     } finally {
       oversizeServer.stop(0);
+    }
+  }
+
+  @Test
+  void stalledResponseBodyHitsTheClientDeadlineInsteadOfHanging() throws Exception {
+    CountDownLatch release = new CountDownLatch(1);
+    HttpServer stalledServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    stalledServer.createContext(
+        "/internal/environment-ide/",
+        exchange -> {
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          // 先发合法响应头并以 chunked 开始响应体，随后保持连接不结束，模拟响应体停滞。
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write("{\"viewId\":\"".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            release.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          }
+        });
+    stalledServer.start();
+    try {
+      ClusterInternalClient shortDeadlineClient =
+          new ClusterInternalClient(
+              HttpClient.newHttpClient(),
+              objectMapper,
+              new HmacClusterInternalAuthentication(
+                  SECRET, NODE_A, Clock.systemUTC(), Duration.ofSeconds(30), 1024),
+              Duration.ofMillis(300),
+              64 * 1024);
+      StubRegistry registry = new StubRegistry();
+      registry.current =
+          Optional.of(
+              ClusterIdeOwnerRoute.remote(
+                  NODE_B, URI.create("http://127.0.0.1:" + stalledServer.getAddress().getPort())));
+      EnvironmentIdeServiceImpl local =
+          new EnvironmentIdeServiceImpl(
+              localTransportA, new IdeOriginProperties(), new InMemoryIdeBootstrapTicketService());
+      ClusterEnvironmentIdeService service =
+          new ClusterEnvironmentIdeService(registry, shortDeadlineClient, local);
+
+      long start = System.nanoTime();
+      assertThrows(
+          AiEnvironmentIdeUnavailableException.class,
+          () -> service.openView(ENV, openViewRequest()));
+      long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+      assertTrue(
+          elapsedMillis < 2_000,
+          () -> "client must not hang on a stalled response body, took " + elapsedMillis + "ms");
+    } finally {
+      release.countDown();
+      stalledServer.stop(0);
     }
   }
 
