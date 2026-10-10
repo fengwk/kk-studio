@@ -226,3 +226,93 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* 资源卡列表骨架屏占位 */
+.resource-skeleton-container {
+  width: 100%;
+}
+
+.resource-card.resource-card-skeleton {
+  min-height: 280px;
+  height: 280px;
+  box-sizing: border-box;
+  justify-content: space-between;
+  cursor: default;
+  pointer-events: none;
+  user-select: none;
+}
+
+.resource-card-skeleton:hover {
+  border-color: var(--border);
+  background:
+    radial-gradient(120% 80% at 0% 0%, var(--green-soft), transparent 55%),
+    linear-gradient(180deg, var(--white-02) 0%, transparent 100%),
+    var(--surface);
+  box-shadow: none;
+}
+
+.resource-card-skeleton .skeleton-box {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised) 0%,
+    var(--surface-hover) 50%,
+    var(--surface-raised) 100%
+  );
+  background-size: 200% 100%;
+  animation: resource-skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.resource-card-skeleton .skeleton-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: var(--radius-md);
+}
+
+.resource-card-skeleton .skeleton-title {
+  height: 16px;
+  width: 55%;
+  margin-bottom: 8px;
+}
+
+.resource-card-skeleton .skeleton-subtitle {
+  height: 12px;
+  width: 85%;
+}
+
+.resource-card-skeleton .resource-card-meta {
+  gap: 12px;
+}
+
+.resource-card-skeleton .skeleton-meta-row {
+  height: 14px;
+  width: 90%;
+}
+
+.resource-card-skeleton .skeleton-meta-row.short {
+  width: 60%;
+}
+
+.resource-card-skeleton .skeleton-action {
+  height: 28px;
+  width: 68px;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes resource-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-card-skeleton .skeleton-box {
+    animation: none;
+    background: var(--surface-raised);
+  }
+}
+

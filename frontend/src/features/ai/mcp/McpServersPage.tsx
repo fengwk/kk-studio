@@ -11,7 +11,9 @@ import { Button } from '@/shared/ui/controls/Button'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
+import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { LoadingIndicator } from '@/shared/ui/feedback/LoadingSpinner'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
@@ -435,7 +437,7 @@ export function McpServersPage() {
       </nav>
 
       <div className="screen-body">
-        {serversQuery.isLoading && <StateBlock title={t('ai.mcp.loading')} />}
+        {serversQuery.isLoading && <ResourceCardSkeleton label={t('ai.mcp.loading')} />}
         {serversQuery.error && (
           <StateBlock
             title={
@@ -446,7 +448,8 @@ export function McpServersPage() {
             tone="danger"
           />
         )}
-        <ResourceGrid>
+        {!serversQuery.isLoading && !serversQuery.error && (
+          <ResourceGrid>
           <CreateCard
             title={t('ai.mcp.create')}
             subtitle={t('ai.mcp.createDescription')}
@@ -512,6 +515,7 @@ export function McpServersPage() {
             )
           })}
         </ResourceGrid>
+        )}
       </div>
 
       {createModal && (
@@ -608,7 +612,7 @@ export function McpServersPage() {
                 >
                   {t('shared.cancel')}
                 </Button>
-                <Button type="submit" disabled={createMutation.isPending}>
+                <Button type="submit" loading={createMutation.isPending}>
                   {t('shared.confirm')}
                 </Button>
               </div>
@@ -625,7 +629,7 @@ export function McpServersPage() {
         >
             {editModal.loading ? (
               <div className="modal-body">
-                <StateBlock title={t('ai.mcp.loadingConfig')} />
+                <LoadingIndicator label={t('ai.mcp.loadingConfig')} />
               </div>
             ) : editModal.fetchError ? (
               <div className="modal-body">
@@ -712,12 +716,10 @@ export function McpServersPage() {
                     variant="ghost"
                     className="modal-footer-leading-action"
                     onClick={handleDiscover}
-                    disabled={editModal.discoverPending || updateMutation.isPending}
+                    disabled={updateMutation.isPending}
+                    loading={editModal.discoverPending}
                   >
-                    <RefreshCw
-                      className={editModal.discoverPending ? 'spin' : ''}
-                      aria-hidden="true"
-                    />
+                    {!editModal.discoverPending && <RefreshCw aria-hidden="true" />}
                     {t('ai.mcp.discover')}
                   </Button>
                   <Button
@@ -729,7 +731,8 @@ export function McpServersPage() {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={updateMutation.isPending || editModal.discoverPending}
+                    disabled={editModal.discoverPending}
+                    loading={updateMutation.isPending}
                   >
                     {t('shared.confirm')}
                   </Button>

@@ -39,7 +39,8 @@ export function SettingsToolbar({ editor }: { editor: SystemSettingsEditor }) {
         </span>
         <Button
           variant="primary"
-          disabled={!editor.dirty || editor.saving}
+          disabled={!editor.dirty}
+          loading={editor.saving}
           onClick={() => {
             void editor.save()
           }}

@@ -80,7 +80,7 @@ export function SyncImportModal({
         onClick={() => {
           void handleImport(partial)
         }}
-        disabled={pending}
+        loading={pending}
       >
         {pending ? t('settings.sync.import.importing') : t(labelKey)}
       </Button>
