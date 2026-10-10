@@ -192,7 +192,7 @@ function serializeVariants(
     ids.add(id)
 
     const payload: AgentModelVariantDTO = { id }
-    const reasoningEffort = variant.reasoningEffort.trim().toLowerCase()
+    const reasoningEffort = variant.reasoningEffort.trim()
     if (reasoningEnabled && reasoningEffort) {
       if (reasoningEffort.length > 64) {
         throw new Error(`variant ${id} reasoningEffort must not exceed 64 characters`)
