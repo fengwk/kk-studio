@@ -628,12 +628,14 @@ registerCase({
     let chat = null
     try {
       environment = await createEnvironment(ctx, `e2e-chat-default-env-${suffix}`)
-      // 创建：省略 yoloEnabled（默认 false），携带已存在 Environment 作为默认环境。
-      chat = await createChat(ctx, {
+      // 创建：请求体显式省略 yoloEnabled（服务端默认 false），并携带已存在 Environment 作为默认环境。
+      const created = await ctx.call('POST', '/api/ai/chats', {
         title: `e2e-chat-default-${suffix}`,
         agentName: agent.name,
         environmentName: environment.name,
       })
+      assert(created.status === 201, `create Chat status ${created.status}: ${JSON.stringify(created.json)}`)
+      chat = envelopeData(created.json)
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
@@ -1119,17 +1121,12 @@ async function createEnvironment(ctx, name) {
   return environment
 }
 
-/** 删除一次性 Environment Card：先读回权威版本，避免陈旧 version 导致 CAS 删除失败。 */
+/** 删除一次性 Environment Card：先读回权威版本，再用它做 CAS 删除（GET 失败直接失败，不静默回退陈旧版本）。 */
 async function deleteEnvironment(ctx, environment) {
-  let version = String(environment.version)
-  try {
-    const card = envelopeData(
-      (await ctx.call('GET', `/api/harness/environments/${encodeURIComponent(environment.id)}`)).json,
-    )
-    if (card?.version != null) version = String(card.version)
-  } catch {
-    // 读不到权威版本时退回创建版本。
-  }
+  const card = envelopeData(
+    (await ctx.call('GET', `/api/harness/environments/${encodeURIComponent(environment.id)}`)).json,
+  )
+  const version = String(card.version)
   await ctx.call(
     'DELETE',
     `/api/harness/environments/${encodeURIComponent(environment.id)}?expectedVersion=${encodeURIComponent(version)}`,

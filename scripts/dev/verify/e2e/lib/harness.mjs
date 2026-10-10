@@ -173,9 +173,9 @@ const THREAD_RUNTIME_STATUSES = new Set([
 /**
  * 创建 Chat（name-based Agent 引用；可选默认 Environment name，Chat 不携带任何 workspace 状态）。
  *
- * <p>{@code environmentName} 是可空默认环境：省略/null 表示无默认环境，提供时必须是已存在的 canonical Environment
- * 名。Chat 投影的 {@code environmentName} 是 required-nullable 字段（DTO 用 ALWAYS 显式发 null），helper 断言它
- * 存在且等于请求值；已删除的 workspace 字段（workspacePath/environment/environmentId）绝不出现。
+ * POST 请求体的 `environmentName` 可选：省略或 null 都表示无默认环境，提供时必须是已存在的 canonical
+ * Environment 名。Chat 响应投影的 `environmentName` 是 required-nullable 字段（DTO 用 ALWAYS 显式发 null），
+ * helper 断言它始终存在且等于请求值；已删除的 workspace 字段（workspacePath/environment/environmentId）绝不出现。
  */
 export async function createChat(
   ctx,
