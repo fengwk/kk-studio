@@ -19,5 +19,7 @@ public enum DaemonMessageType {
   RESOURCE_UPLOAD_COMMIT,
   UPDATE,
   UPDATE_RESULT,
+  IDE_COMMAND,
+  IDE_RESULT,
   ERROR
 }
