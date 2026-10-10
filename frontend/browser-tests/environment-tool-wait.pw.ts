@@ -1,5 +1,5 @@
-import type { WebSocketRoute } from '@playwright/test'
 import { expect, test } from './fixture'
+import { attachAppEventsAdapter, type AppEventsAdapter } from './app-events-adapter'
 
 const ROOT = 'a1000000-0000-4000-8000-0000000000a1'
 const CHILD = 'a1000000-0000-4000-8000-0000000000a2'
@@ -15,16 +15,18 @@ for (const scenario of ['pane-root', 'pane-child']) {
     let waiting = true
     let status = 'READY'
     let reads = 0
-    let socket: WebSocketRoute | undefined
+    let adapter: AppEventsAdapter | undefined
     let socketCount = 0
     const subscriptions = new Set<string>()
     const writes: string[] = []
     await page.routeWebSocket(/\/api\/events\/v1$/, (ws) => {
-      socket = ws
       socketCount += 1
-      ws.onMessage((raw) => {
-        const message = JSON.parse(String(raw))
-        if (message.type === 'subscribe') subscriptions.add(message.resource.kind)
+      adapter = attachAppEventsAdapter(ws, {
+        onSubscribe: (resource) => {
+          subscriptions.add(resource.kind)
+        },
+        // 刻意不发送初始 subscribed 以隔离后续 refresh/deadline 计数，保留其旧情景，不改断言
+        autoAck: false,
       })
     })
     await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
@@ -117,9 +119,9 @@ for (const scenario of ['pane-root', 'pane-child']) {
       await expect(page.locator('.thread-control-area')).toHaveCount(0)
       await expect(page.locator('.thread-composer')).toHaveCount(0)
     }
-    const changed = (rootThreadId: string) => socket!.send(JSON.stringify({
-      version: 1, type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId },
-    }))
+    const changed = (rootThreadId: string) => adapter!.send({
+      version: 2, type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId },
+    })
     // 错根提示不触发 snapshot GET；让浏览器完成事件调度而非任意 sleep。
     changed(OTHER)
     await page.clock.runFor(500)

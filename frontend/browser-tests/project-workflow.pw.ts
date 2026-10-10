@@ -1,6 +1,6 @@
-import type { WebSocketRoute } from '@playwright/test'
 import { expect, test, type Page } from './fixture'
 import type { ProjectDTO } from '@/features/projects/types'
+import { attachAppEventsAdapter, type AppEventsAdapter } from './app-events-adapter'
 
 const ID = 'a0000000-0000-0000-0000-000000000001'
 const URL = '/browser-tests/project-workflow-harness.html'
@@ -23,16 +23,10 @@ async function transport(page: Page) {
   const state = {
     project: project(), references: ['OLD'], fail: false,
     snapshotReads: 0, writes: [] as Record<string, unknown>[],
-    socket: null as WebSocketRoute | null,
+    socket: null as AppEventsAdapter | null,
   }
   await page.routeWebSocket('**/api/events/v1', (socket) => {
-    state.socket = socket
-    socket.onMessage((raw) => {
-      const message = JSON.parse(String(raw))
-      if (message.type === 'subscribe') socket.send(JSON.stringify({
-        version: 1, type: 'subscribed', resource: message.resource, cursor: '0',
-      }))
-    })
+    state.socket = attachAppEventsAdapter(socket)
   })
   await page.route('**/api/**', async (route) => {
     const path = new globalThis.URL(route.request().url()).pathname
@@ -115,9 +109,9 @@ test('single WS push updates constraints, not draft or frozen CAS; list entry re
   await dialog.getByLabel('显示名称').fill('Local Init')
   state.project = { ...state.project, version: '9', title: 'Remote Project' }
   state.references = ['OLD', 'REVIEW']
-  state.socket!.send(JSON.stringify({
-    version: 1, type: 'event', resource: { kind: 'projects' }, name: 'changed', data: { projectId: ID },
-  }))
+  state.socket!.send({
+    version: 2, type: 'event', resource: { kind: 'projects' }, name: 'changed', data: { projectId: ID },
+  })
   await expect(dialog.getByRole('button', { name: '删除 评审' })).toBeDisabled()
   await expect(dialog.getByLabel('显示名称')).toHaveValue('Local Init')
   await dialog.getByRole('button', { name: '保存工作流' }).click()

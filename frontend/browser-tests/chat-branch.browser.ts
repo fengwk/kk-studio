@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from './fixture'
-import type { WebSocketRoute } from '@playwright/test'
+import { attachAppEventsAdapter, type AppEventsAdapter } from './app-events-adapter'
 
 /**
  * 新建分支流程真实浏览器回归（独立基座、独立端口 5184）。
@@ -150,31 +150,25 @@ async function installChatApi(
   let boundVersion = 0
   let queuedCommands: Array<Record<string, unknown>> = []
   let grandCompleted = false
-  const sockets: WebSocketRoute[] = []
+  const adapters: AppEventsAdapter[] = []
   const recorded: Recorded = {
     commandBatches: [], branchPreviews: [], treeReads: 0,
     completeGrandchild: () => {
       grandCompleted = true
-      for (const socket of sockets) {
-        socket.send(JSON.stringify({
-          version: 1, type: 'event', resource: { kind: 'thread', id: GRANDCHILD_ID },
+      for (const adapter of adapters) {
+        adapter.send({
+          version: 2, type: 'event', resource: { kind: 'thread', id: GRANDCHILD_ID },
           name: 'version', data: { version: '1' }, cursor: '1',
-        }))
-        socket.send(JSON.stringify({
-          version: 1, type: 'event', resource: { kind: 'tree', id: THREAD_ID },
+        })
+        adapter.send({
+          version: 2, type: 'event', resource: { kind: 'tree', id: THREAD_ID },
           name: 'changed', data: {},
-        }))
+        })
       }
     },
   }
-  await page.routeWebSocket(/\/api\/.*events/, (socket) => {
-    sockets.push(socket)
-    socket.onMessage((message) => {
-      const frame = JSON.parse(String(message))
-      if (frame.type === 'subscribe') {
-        socket.send(JSON.stringify({ version: 1, type: 'subscribed', resource: frame.resource, cursor: '0' }))
-      }
-    })
+  await page.routeWebSocket(/\/api\/events\/v1$/, (socket) => {
+    adapters.push(attachAppEventsAdapter(socket))
   })
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const request = route.request()
