@@ -203,8 +203,8 @@ describe('ai-model-draft-codec', () => {
     ).toThrow('contains duplicate value')
   })
 
-  /** 厂商自定义 reasoningEffort（如 max、xhigh）被正常保留并归一化小写，空白被省略。 */
-  it('accepts and normalizes arbitrary provider reasoning efforts like max and xhigh', () => {
+  /** 厂商自定义 reasoningEffort（如 MAX、xHigh）保留原始大小写且只 trim 空白，全空白被省略。 */
+  it('accepts arbitrary provider reasoning efforts with exact casing and omits blanks', () => {
     const base = emptyModelDraft().variants[0]
     const input = draft({
       reasoning: true,
@@ -217,10 +217,53 @@ describe('ai-model-draft-codec', () => {
     })
     const config = buildModelConfig(input)
     expect(config.variants).toEqual([
-      { id: 'v1', reasoningEffort: 'max' },
-      { id: 'v2', reasoningEffort: 'xhigh' },
+      { id: 'v1', reasoningEffort: 'MAX' },
+      { id: 'v2', reasoningEffort: 'xHigh' },
       { id: 'v3' },
     ])
+  })
+
+  /** reasoningEffort 大小写保真（HIGH / high / xHigh），在 toEditableModel 保存 -> toModelDraft 重新编辑往返中保持不变。 */
+  it('preserves exact casing for HIGH, high, and xHigh across toEditableModel and toModelDraft round-trip', () => {
+    const base = emptyModelDraft().variants[0]
+    const input = draft({
+      reasoning: true,
+      variants: [
+        { ...base, id: 'v-high-upper', reasoningEffort: '  HIGH  ' },
+        { ...base, id: 'v-high-lower', reasoningEffort: 'high' },
+        { ...base, id: 'v-xhigh-mixed', reasoningEffort: 'xHigh' },
+      ],
+      defaultVariant: 'v-high-upper',
+    })
+
+    const createPayload = toEditableModel(input)
+    expect(createPayload.config.variants).toEqual([
+      { id: 'v-high-upper', reasoningEffort: 'HIGH' },
+      { id: 'v-high-lower', reasoningEffort: 'high' },
+      { id: 'v-xhigh-mixed', reasoningEffort: 'xHigh' },
+    ])
+
+    const savedModel: AgentModelDTO = {
+      providerName: createPayload.providerName,
+      name: createPayload.name,
+      modelId: createPayload.modelId,
+      description: createPayload.description,
+      config: createPayload.config,
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    }
+    const editDraft = toModelDraft(savedModel)
+    expect(
+      editDraft.variants.map((v) => ({ id: v.id, reasoningEffort: v.reasoningEffort })),
+    ).toEqual([
+      { id: 'v-high-upper', reasoningEffort: 'HIGH' },
+      { id: 'v-high-lower', reasoningEffort: 'high' },
+      { id: 'v-xhigh-mixed', reasoningEffort: 'xHigh' },
+    ])
+
+    const reSaved = toEditableModel(editDraft)
+    expect(reSaved.config.variants).toEqual(createPayload.config.variants)
   })
 
   /** 自定义 reasoningEffort 在 toModelDraft -> buildModelConfig 往返中完整保留。 */
