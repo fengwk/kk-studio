@@ -36,11 +36,25 @@ function sampleDebug(): HarnessModelRequestDebugDTO {
       },
     ],
     skills: [],
-    subagents: [],
+    subagents: [
+      {
+        name: 'helper',
+        description: 'Isolated helper',
+        tools: ['read'],
+        skills: [{ packageName: 'dev-tools', name: 'dev' }],
+        subagents: [],
+        configurationJson: '{"tools":["read"]}',
+      },
+    ],
     cacheControl: null,
     planningError: null,
     frozenInvocation: null,
   }
+}
+
+const sampleRequest = {
+  model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+  environmentName: null,
 }
 
 describe('useModelRequestDebug', () => {
@@ -62,7 +76,7 @@ describe('useModelRequestDebug', () => {
 
   it('follows invocation and phase while execution stays continuously working', async () => {
     const { result, rerender } = renderHook(
-      ({ revision }) => useModelRequestDebug('thread-1', true, revision),
+      ({ revision }) => useModelRequestDebug('thread-1', true, revision, sampleRequest),
       {
         wrapper,
         initialProps: { revision: 'model-1:READY' },
@@ -85,6 +99,73 @@ describe('useModelRequestDebug', () => {
     await waitFor(() => {
       expect(harnessService.getModelRequestDebug).toHaveBeenCalledTimes(3)
     })
+  })
+
+  it('disables query and does not send requests when request is null', () => {
+    const { result } = renderHook(
+      () => useModelRequestDebug('thread-1', true, 'idle:v1', null),
+      { wrapper },
+    )
+    expect(harnessService.getModelRequestDebug).not.toHaveBeenCalled()
+    expect(result.current.debug).toBeNull()
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('posts draft model/environment selections and isolates late responses from earlier selections', async () => {
+    let finishFirst!: (value: HarnessModelRequestDebugDTO) => void
+    let finishSecond!: (value: HarnessModelRequestDebugDTO) => void
+    vi.mocked(harnessService.getModelRequestDebug)
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishSecond = resolve }))
+
+    const firstSelection = {
+      model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+      environmentName: null,
+    }
+    const secondSelection = {
+      model: { providerName: 'openai', modelName: 'gpt-4o', variant: 'high' },
+      environmentName: 'dev-node',
+    }
+
+    const { result, rerender } = renderHook(
+      ({ selection }) => useModelRequestDebug('thread-1', true, 'idle:v1', selection),
+      {
+        wrapper,
+        initialProps: { selection: firstSelection },
+      },
+    )
+
+    expect(harnessService.getModelRequestDebug).toHaveBeenNthCalledWith(1, 'thread-1', firstSelection)
+    expect(result.current.loading).toBe(true)
+
+    // 切换草稿 model + environment：立即以新身份发起第二次 POST，不等待第一次返回
+    rerender({ selection: secondSelection })
+    expect(harnessService.getModelRequestDebug).toHaveBeenNthCalledWith(2, 'thread-1', secondSelection)
+    expect(result.current.debug).toBeNull()
+
+    // 新选择先返回
+    await act(async () => {
+      finishSecond({
+        ...sampleDebug(),
+        model: secondSelection.model,
+        environmentName: 'dev-node',
+        systemInstruction: 'second selection prompt',
+      })
+    })
+    await waitFor(() => expect(result.current.debug?.systemInstruction).toBe('second selection prompt'))
+    expect(result.current.debug?.environmentName).toBe('dev-node')
+
+    // 旧选择的慢响应随后到达：只落在已废弃的旧 queryKey 上，绝不覆盖当前数据
+    await act(async () => {
+      finishFirst({
+        ...sampleDebug(),
+        model: firstSelection.model,
+        environmentName: null,
+        systemInstruction: 'stale first prompt',
+      })
+    })
+    expect(result.current.debug?.systemInstruction).toBe('second selection prompt')
+    expect(result.current.debug?.environmentName).toBe('dev-node')
   })
 })
 
@@ -169,7 +250,7 @@ describe('request source fences', () => {
       .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
       .mockRejectedValueOnce(new Error('read failed'))
     const { result, rerender } = renderHook(
-      ({ id, enabled }) => useModelRequestDebug(id, enabled, id),
+      ({ id, enabled }) => useModelRequestDebug(id, enabled, id, sampleRequest),
       { wrapper, initialProps: { id: 'old', enabled: true } },
     )
     expect(result.current.loading).toBe(true)
@@ -188,7 +269,7 @@ describe('request source fences', () => {
     client.setQueryData([root, 'list'], {})
     vi.mocked(harnessService.getModelRequestDebug).mockResolvedValue(sampleDebug())
     const { result, rerender } = renderHook(
-      ({ enabled }) => useModelRequestDebug('t', enabled, 'same'),
+      ({ enabled }) => useModelRequestDebug('t', enabled, 'same', sampleRequest),
       { wrapper, initialProps: { enabled: true } },
     )
     await waitFor(() => expect(result.current.debug).not.toBeNull())

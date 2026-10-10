@@ -1,9 +1,0 @@
-/* 草稿按需检查入口；Debug 退出由 workspace 单顶栏负责。 */
-.thread-debug-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex: 0 0 auto;
-  padding: 4px 8px;
-}

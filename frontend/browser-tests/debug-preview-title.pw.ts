@@ -19,16 +19,6 @@ const INITIAL_CURSOR: Cursor = {
   headEntryId: 'e0000000-0000-0000-0000-00000000e001',
   nextCommandSequence: '1',
 }
-/** 宽布局点击预览时 mock GET 返回的游标；与初始游标刻意不同，作为 fresh 证据。 */
-const WIDE_CLICK_CURSOR: Cursor = {
-  headEntryId: 'e0000000-0000-0000-0000-00000000e0f1',
-  nextCommandSequence: '7',
-}
-/** 窄布局点击预览时 mock GET 返回的游标；与前两者都不同，证明窄路径独立取了 fresh 快照。 */
-const NARROW_CLICK_CURSOR: Cursor = {
-  headEntryId: 'e0000000-0000-0000-0000-00000000e0f2',
-  nextCommandSequence: '9',
-}
 
 interface SnapshotRequest {
   kind: 'snapshot'
@@ -175,18 +165,6 @@ interface PreviewFulfillment {
   json: unknown
 }
 
-/** 可控 promise gate：mock 侧标记请求已到达，测试侧显式放行响应。 */
-function createPreviewGate() {
-  let markReached: () => void = () => {}
-  const reached = new Promise<void>((resolveReached) => {
-    markReached = resolveReached
-  })
-  let open: () => void = () => {}
-  const opened = new Promise<void>((resolveOpened) => {
-    open = resolveOpened
-  })
-  return { reached, opened, markReached, open }
-}
 
 /**
  * 安装后端 mock 并返回请求录制器。
@@ -310,29 +288,6 @@ async function installPreviewApiMock(
  * 断言一次点击窗口的请求序列：窗口首条是 fresh 快照 GET，紧邻预览 POST 之前的那条 GET
  * 必须携带本次期望游标，并且窗口内只有一次预览 POST、POST target 与 GET 游标完全一致。
  */
-function expectFreshPreviewWindow(
-  clickWindow: RecordedRequest[],
-  expected: { cursor: Cursor; draft: string },
-): void {
-  const previews = clickWindow.filter((item) => item.kind === 'preview')
-  expect(previews).toHaveLength(1)
-  expect(clickWindow[0]?.kind).toBe('snapshot')
-
-  const previewIndex = clickWindow.findIndex((item) => item.kind === 'preview')
-  expect(previewIndex).toBeGreaterThan(0)
-  const servingSnapshot = clickWindow[previewIndex - 1] as SnapshotRequest
-  expect(servingSnapshot.headEntryId).toBe(expected.cursor.headEntryId)
-  expect(servingSnapshot.nextCommandSequence).toBe(expected.cursor.nextCommandSequence)
-
-  const previewRequest = previews[0] as PreviewRequest
-  // 新 wire：per-thread 预览体只有 CAS 游标与命令，绝不携带产品 owner/target。
-  expect(previewRequest.body).not.toHaveProperty('owner')
-  expect(previewRequest.body).not.toHaveProperty('target')
-  expect(previewRequest.body.expectedHeadEntryId).toBe(expected.cursor.headEntryId)
-  expect(previewRequest.body.expectedNextCommandSequence).toBe(expected.cursor.nextCommandSequence)
-  const userMessage = previewRequest.body.commands.find((command) => command.type === 'USER_MESSAGE')
-  expect(userMessage?.contents?.[0]).toEqual({ type: 'TEXT', text: expected.draft })
-}
 
 /**
  * 打开 + 命令表（plus 模式）：与斜杠命令不同，plus 模式**不消费**编辑器里的草稿，
@@ -444,8 +399,8 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
 
 test.describe('Debug Inspect Actions Real React Browser Regression', () => {
   test('agent selection follows its model in preview and rejects invalid configuration without losing draft', async ({ page }) => {
-    // 真实 /agent 入口必须联动模型；拒绝无效配置后仍可用原选择预览同一草稿。
-    const recorded = await installPreviewApiMock(page, {
+    // 真实 /agent 入口必须联动模型；拒绝无效配置后仍可用原选择。
+    await installPreviewApiMock(page, {
       cursor: () => INITIAL_CURSOR,
       agentSelection: true,
     })
@@ -463,20 +418,12 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await expect(composer).toContainText('Claude')
     await expect(composer).toContainText('fast')
 
-    // 2. + 命令表进入 Debug（不消费草稿），草稿与 Agent/Model 选择随之进入预览
+    // 2. + 命令表进入 Debug（不消费草稿），断言旧预览操作按钮与规划标题已删除
     await enterDebugView(page)
-    await page.locator('.thread-debug-preview-action').click()
-    await expect.poll(() => recorded.filter((item) => item.kind === 'preview').length).toBe(1)
-    const request = recorded.find((item) => item.kind === 'preview') as PreviewRequest
-    expect(request.body.commands).toEqual([
-      expect.objectContaining({ type: 'SET_AGENT', agentName: 'coder' }),
-      expect.objectContaining({
-        type: 'SET_MODEL',
-        model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
-      }),
-      expect.objectContaining({ type: 'USER_MESSAGE', contents: [{ type: 'TEXT', text: DRAFT }] }),
-    ])
-    await expect(page.getByTestId('preview-request-body')).toContainText('"model": "Claude"')
+    await expect(page.locator('.thread-debug-preview-action')).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: '当前规划' })).toHaveCount(0)
+    await expect(page.getByText('检查操作', { exact: true })).toHaveCount(0)
+    await expect(editor).toHaveText(DRAFT)
 
     // 3. 退出 Debug 才能重选 Agent；退出只切视图，草稿与既有选择原地保留。
     await exitDebugView(page)
@@ -492,13 +439,13 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await page.screenshot({ path: resolve(reportsDir, 'agent-model-follow.png') })
   })
 
-  test('inspect action previews with a fresh cursor in both layouts and restores action focus without losing the draft', async ({
+  test('inspect action and redundant headings are removed in both layouts without losing the draft', async ({
     page,
   }) => {
-    // 当前规划标题不可点击；检查操作按需取 fresh GET -> preview POST，
-    // 自动切详情后关闭恢复检查操作焦点，草稿全程不变。
-    let cursor: Cursor = INITIAL_CURSOR
-    const recorded = await installPreviewApiMock(page, { cursor: () => cursor })
+    // .thread-debug-preview-action、当前规划与检查操作已移除；
+    // 宽窄布局下均断言旧入口已删除，草稿全程不变。
+    const cursor: Cursor = INITIAL_CURSOR
+    await installPreviewApiMock(page, { cursor: () => cursor })
 
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/browser-tests/debug-preview-harness.html')
@@ -534,267 +481,49 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     expect(dockMetrics.dockScrollWidth).toBeLessThanOrEqual(dockMetrics.dockClientWidth + 1)
     expect(dockMetrics.composerScrollWidth).toBeLessThanOrEqual(dockMetrics.composerClientWidth + 1)
 
-    // 4. 带草稿进入 Debug：预览检查操作立即可用
+    // 4. 带草稿进入 Debug：宽布局下断言旧操作按钮与冗余标题已删除
     await enterDebugView(page)
 
     const shell = page.locator('.thread-events-shell')
     await expect(shell).toHaveAttribute('data-layout', 'wide')
     const previewTitleBtn = page.locator('.thread-debug-preview-action')
-    await expect(page.getByRole('heading', { name: '当前规划' })).toBeVisible()
-    await expect(page.locator('.thread-debug-preview-header button')).toHaveCount(0)
-    await expect(page.getByText('检查操作', { exact: true })).toBeVisible()
-    await expect(previewTitleBtn).toBeVisible()
-    await expect(previewTitleBtn).toBeEnabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿')
+    await expect(page.getByRole('heading', { name: '当前规划' })).toHaveCount(0)
+    await expect(page.getByText('检查操作', { exact: true })).toHaveCount(0)
+    await expect(previewTitleBtn).toHaveCount(0)
     await expect(editor).toHaveText(DRAFT)
     await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
-    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
 
-    // 5. 空草稿的禁用契约：退出 Debug 清空草稿，再进来必须禁用并给出原因
+    // 5. 空草稿的同步：退出 Debug 清空草稿，再进来旧按钮依然不存在
     await exitDebugView(page)
     await editor.click()
     await editor.fill('')
     await expect(editor).toHaveText('')
     await enterDebugView(page)
-    await expect(previewTitleBtn).toBeDisabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿 (草稿为空)')
+    await expect(previewTitleBtn).toHaveCount(0)
 
-    // 6. 检查操作区与规划列均无横向滚动，按钮不越出操作区
-    const headerMetrics = await page.evaluate(() => {
-      const header = document.querySelector('.thread-debug-preview-actions') as HTMLElement
-      const btn = document.querySelector('.thread-debug-preview-action') as HTMLElement
-      const column = document.querySelector('.thread-debug-col-preview') as HTMLElement
-      const headerBox = header.getBoundingClientRect()
-      const btnBox = btn.getBoundingClientRect()
-      return {
-        headerScrollWidth: header.scrollWidth,
-        headerClientWidth: header.clientWidth,
-        columnScrollWidth: column.scrollWidth,
-        columnClientWidth: column.clientWidth,
-        btnRight: btnBox.right,
-        headerRight: headerBox.right,
-        btnWidth: btnBox.width,
-      }
-    })
-    expect(headerMetrics.btnWidth).toBeGreaterThan(0)
-    expect(headerMetrics.headerScrollWidth).toBeLessThanOrEqual(headerMetrics.headerClientWidth + 1)
-    expect(headerMetrics.columnScrollWidth).toBeLessThanOrEqual(headerMetrics.columnClientWidth + 1)
-    expect(headerMetrics.btnRight).toBeLessThanOrEqual(headerMetrics.headerRight + 1)
-
-    // 7. 退出 Debug 在会话里重新输入草稿，再重进 Debug：入口解禁
+    // 6. 重新填写草稿后重进 Debug
     await exitDebugView(page)
     await editor.click()
     await editor.fill(DRAFT)
     await expect(editor).toHaveText(DRAFT)
     await enterDebugView(page)
-    await expect(previewTitleBtn).toBeEnabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿')
-    await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
-    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-
-    // 8. 宽布局点击检查操作：先 fresh GET，再用 fresh 游标 POST 预览
-    const wideMark = recorded.length
-    cursor = WIDE_CLICK_CURSOR
-    await previewTitleBtn.click()
-    await expect
-      .poll(() => recorded.slice(wideMark).filter((item) => item.kind === 'preview').length)
-      .toBe(1)
-    expectFreshPreviewWindow(recorded.slice(wideMark), { cursor: WIDE_CLICK_CURSOR, draft: DRAFT })
-
-    // 9. 结果落在既有 inspector（复用详情列，无新弹层）
-    const inspector = page.locator('[data-testid="thread-debug-inspector"]')
-    await expect(inspector).toHaveCount(1)
-    await expect(inspector).toHaveAttribute('aria-label', '请求预览')
-    await expect(page.locator('.thread-debug-col-detail [data-testid="thread-debug-inspector"]')).toBeVisible()
-    await expect(page.locator('[role="dialog"]')).toHaveCount(0)
-    await expect(inspector.getByText(WIDE_CLICK_CURSOR.headEntryId, { exact: true })).toBeVisible()
-    await expect(page.getByTestId('preview-request-body')).toContainText(WIDE_CLICK_CURSOR.headEntryId)
-    await expect(page.getByTestId('preview-request-body')).toContainText(DRAFT)
-
-    // 7. 草稿仍在，入口回到可用态，且没有失败提示
-    await expect(editor).toHaveText(DRAFT)
-    await expect(previewTitleBtn).toBeEnabled()
-    await expect(page.locator('.thread-debug-preview-error')).toHaveCount(0)
-
-    // Composer 底栏的溢出契约已在会话可见态（步骤 3）测量；Debug 激活后控制区不可见。
+    await expect(previewTitleBtn).toHaveCount(0)
 
     await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-wide.png'), animations: 'disabled' })
 
-    // 9. 窄布局复核：同一棵已 mount 的 Debug，检查操作不溢出
+    // 7. 窄布局复核：同一棵 Debug，旧入口与标题同样已删除
     await page.setViewportSize(NARROW_VIEWPORT)
     await expect(shell).toHaveAttribute('data-layout', 'narrow')
     const tabs = page.locator('.thread-debug-tabs')
     const previewTab = tabs.getByRole('tab', { name: '请求预览' })
-    const eventsTab = tabs.getByRole('tab', { name: '事件' })
-    const detailTab = tabs.getByRole('tab', { name: '详情' })
     await expect(tabs).toBeVisible()
     await previewTab.click()
     await expect(shell).toHaveAttribute('data-active-tab', 'preview')
-    await expect(previewTitleBtn).toBeVisible()
-    const narrowMetrics = await page.evaluate(() => {
-      const header = document.querySelector('.thread-debug-preview-actions') as HTMLElement
-      const btn = document.querySelector('.thread-debug-preview-action') as HTMLElement
-      const column = document.querySelector('.thread-debug-col-preview') as HTMLElement
-      const headerBox = header.getBoundingClientRect()
-      const btnBox = btn.getBoundingClientRect()
-      return {
-        headerScrollWidth: header.scrollWidth,
-        headerClientWidth: header.clientWidth,
-        columnScrollWidth: column.scrollWidth,
-        columnClientWidth: column.clientWidth,
-        btnRight: btnBox.right,
-        headerRight: headerBox.right,
-      }
-    })
-    expect(narrowMetrics.headerScrollWidth).toBeLessThanOrEqual(narrowMetrics.headerClientWidth + 1)
-    expect(narrowMetrics.columnScrollWidth).toBeLessThanOrEqual(narrowMetrics.columnClientWidth + 1)
-    expect(narrowMetrics.btnRight).toBeLessThanOrEqual(narrowMetrics.headerRight + 1)
+    await expect(previewTitleBtn).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: '当前规划' })).toHaveCount(0)
+    await expect(page.getByText('检查操作', { exact: true })).toHaveCount(0)
+    await expect(editor).toHaveText(DRAFT)
 
     await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-narrow.png'), animations: 'disabled' })
-
-    // 10. 清掉宽布局遗留的详情选择，保证接下来的窄点击是 debugSelection 从 null 变为新选择
-    await detailTab.click()
-    await expect(detailTab).toHaveAttribute('aria-selected', 'true')
-    await inspector.getByRole('button', { name: '关闭检查器' }).click()
-    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-    // 详情列回到空占位：debugSelection 已经从 {preview} 变回 null
-    await expect(page.locator('.thread-debug-col-detail [data-testid="thread-debug-placeholder"]')).toHaveCount(1)
-    await previewTab.click()
-    await expect(shell).toHaveAttribute('data-active-tab', 'preview')
-    await expect(detailTab).toHaveAttribute('aria-selected', 'false')
-    await expect(editor).toHaveText(DRAFT)
-
-    // 11. 窄布局检查操作独立走 fresh GET -> preview POST，自动切到详情 Tab
-    const narrowMark = recorded.length
-    cursor = NARROW_CLICK_CURSOR
-    await previewTitleBtn.click()
-    await expect
-      .poll(() => recorded.slice(narrowMark).filter((item) => item.kind === 'preview').length)
-      .toBe(1)
-    const narrowWindow = recorded.slice(narrowMark)
-    expectFreshPreviewWindow(narrowWindow, { cursor: NARROW_CLICK_CURSOR, draft: DRAFT })
-    // 窄路径没有复用宽布局的响应：POST 游标与 inspector 渲染游标都必须是窄点击自己取到的 fresh 游标
-    expect(narrowWindow.some(
-      (item) => item.kind === 'snapshot' && item.headEntryId === WIDE_CLICK_CURSOR.headEntryId,
-    )).toBe(false)
-
-    await expect(detailTab).toHaveAttribute('aria-selected', 'true')
-    await expect(previewTab).toHaveAttribute('aria-selected', 'false')
-    await expect(eventsTab).toHaveAttribute('aria-selected', 'false')
-    await expect(shell).toHaveAttribute('data-active-tab', 'detail')
-    await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
-    await expect(page.locator('.thread-debug-col-preview')).toBeHidden()
-    await expect(page.locator('.thread-debug-col-detail [data-testid="thread-debug-inspector"]')).toBeVisible()
-    await expect(page.getByTestId('preview-request-body')).toContainText(NARROW_CLICK_CURSOR.headEntryId)
-    await expect(page.getByTestId('preview-request-body')).toContainText(DRAFT)
-    await expect(page.locator('.thread-debug-preview-error')).toHaveCount(0)
-
-    await page.screenshot({ path: resolve(reportsDir, 'narrow-preview-inspector.png'), animations: 'disabled' })
-
-    // 12. 关闭详情：所有返回契约（含焦点恢复）落定后再截图，避免记录过渡帧。
-    const requestsBeforeClose = recorded.length
-    await page.locator('.thread-debug-col-detail [data-testid="thread-debug-inspector"]')
-      .getByRole('button', { name: '关闭检查器' })
-      .click()
-    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-    // 返回契约：回到 preview Tab，焦点还给检查操作，草稿不变且不发新请求
-    await expect(previewTab).toHaveAttribute('aria-selected', 'true')
-    await expect(detailTab).toHaveAttribute('aria-selected', 'false')
-    await expect(eventsTab).toHaveAttribute('aria-selected', 'false')
-    await expect(shell).toHaveAttribute('data-active-tab', 'preview')
-    await expect(previewTitleBtn).toBeFocused()
-    await expect(page.locator('.thread-debug-col-preview')).toBeVisible()
-    await expect(editor).toHaveText(DRAFT)
-    await expect(previewTitleBtn).toBeEnabled()
-    await expect(recorded).toHaveLength(requestsBeforeClose)
-    await page.screenshot({ path: resolve(reportsDir, 'narrow-return.png'), animations: 'disabled' })
-  })
-
-  test('narrow preview blocks re-entry while loading and a failed preview keeps the inspect action usable', async ({
-    page,
-  }) => {
-    // 测试意图：预览期间必须锁住唯一入口（按钮禁用 + loading 语义 + 不重复发请求）；
-    // 预览失败时错误留在 Debug 预览列内，不能把用户甩到空详情，入口要恢复可用以便重试。
-    let cursor: Cursor = INITIAL_CURSOR
-    const gate = createPreviewGate()
-    const recorded = await installPreviewApiMock(page, {
-      cursor: () => cursor,
-      // 预览 POST 到达后先扣住响应，由测试显式放行，从而把「加载中」窗口固定住
-      onPreview: async () => {
-        gate.markReached()
-        await gate.opened
-        return {
-          status: 409,
-          json: {
-            status: 409,
-            code: 'PREVIEW_REJECTED',
-            message: 'preview cursor is stale',
-            errors: { reason: 'PREVIEW_STALE_CURSOR' },
-          },
-        }
-      },
-    })
-
-    await page.setViewportSize(NARROW_VIEWPORT)
-    await page.goto('/browser-tests/debug-preview-harness.html')
-
-    // 会话里先写草稿（Debug 激活后控制区 display:none + inert），再带草稿进入 Debug。
-    const composer = page.locator('.thread-composer')
-    const editor = composer.locator('.composer-editor')
-    await expect(editor).toBeVisible()
-    await editor.click()
-    await editor.fill(DRAFT)
-    await expect(editor).toHaveText(DRAFT)
-    await enterDebugView(page)
-
-    const shell = page.locator('.thread-events-shell')
-    await expect(shell).toHaveAttribute('data-layout', 'narrow')
-    const tabs = page.locator('.thread-debug-tabs')
-    const previewTab = tabs.getByRole('tab', { name: '请求预览' })
-    const detailTab = tabs.getByRole('tab', { name: '详情' })
-    await previewTab.click()
-    await expect(shell).toHaveAttribute('data-active-tab', 'preview')
-    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-
-    const previewTitleBtn = page.locator('.thread-debug-preview-action')
-    await expect(previewTitleBtn).toBeVisible()
-    await expect(previewTitleBtn).toBeEnabled()
-
-    // 点击后把预览 POST 挂在 gate 上：GET 已发出，POST 响应被测试扣住
-    cursor = NARROW_CLICK_CURSOR
-    const mark = recorded.length
-    await previewTitleBtn.click()
-    await gate.reached
-    await expect
-      .poll(() => recorded.slice(mark).filter((item) => item.kind === 'preview').length)
-      .toBe(1)
-
-    // 加载期：入口禁用并给出 loading 语义，视图不跳转，也不会重复发第二次预览
-    await expect(previewTitleBtn).toBeDisabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '正在生成请求预览…')
-    await expect(previewTitleBtn.locator('svg.preview-icon.spin')).toHaveCount(1)
-    await expect(previewTab).toHaveAttribute('aria-selected', 'true')
-    await expect(detailTab).toHaveAttribute('aria-selected', 'false')
-    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-    // 加载期用户再点一次：真实指针点击落在禁用按钮上，浏览器不派发事件，绝不产生第二次预览
-    const loadingBox = (await previewTitleBtn.boundingBox())!
-    await page.mouse.click(loadingBox.x + loadingBox.width / 2, loadingBox.y + loadingBox.height / 2)
-    expect(recorded.slice(mark).filter((item) => item.kind === 'preview')).toHaveLength(1)
-
-    await page.screenshot({ path: resolve(reportsDir, 'narrow-preview-loading.png') })
-
-    // 放行 409：错误留在预览列，入口恢复可用，详情列仍是空占位
-    gate.open()
-    await expect(page.locator('.thread-debug-preview-error')).toBeVisible()
-    await expect(page.locator('.thread-debug-preview-error')).toContainText('会话游标已过期')
-    await expect(previewTitleBtn).toBeEnabled()
-    await expect(previewTitleBtn).toHaveAttribute('aria-label', '预览当前草稿')
-    await expect(previewTab).toHaveAttribute('aria-selected', 'true')
-    await expect(detailTab).toHaveAttribute('aria-selected', 'false')
-    await expect(page.locator('[data-testid="thread-debug-inspector"]')).toHaveCount(0)
-    await expect(editor).toHaveText(DRAFT)
-    expectFreshPreviewWindow(recorded.slice(mark), { cursor: NARROW_CLICK_CURSOR, draft: DRAFT })
-
-    await page.screenshot({ path: resolve(reportsDir, 'narrow-preview-error.png') })
   })
 })

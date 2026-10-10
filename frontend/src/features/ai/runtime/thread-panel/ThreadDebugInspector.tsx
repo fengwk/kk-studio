@@ -264,7 +264,64 @@ export function ThreadDebugInspector({
               <dt>{t('ai.runtime.debug.inspector.description')}</dt>
               <dd>{selection.subagent.description || '—'}</dd>
             </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.subagentTools')}</dt>
+              <dd>
+                {(selection.subagent.tools?.length ?? 0) > 0 ? (
+                  <div className="thread-debug-rail" data-testid="subagent-tools-tags">
+                    {selection.subagent.tools.map((tool) => (
+                      <code key={tool} className="thread-debug-tag">{tool}</code>
+                    ))}
+                  </div>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.subagentSkills')}</dt>
+              <dd>
+                {(selection.subagent.skills?.length ?? 0) > 0 ? (
+                  <div className="thread-debug-rail" data-testid="subagent-skills-tags">
+                    {selection.subagent.skills.map((skill) => {
+                      const skillRef = `${skill.packageName}/${skill.name}`
+                      return (
+                        <code key={skillRef} className="thread-debug-tag">{skillRef}</code>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.subagentSubagents')}</dt>
+              <dd>
+                {(selection.subagent.subagents?.length ?? 0) > 0 ? (
+                  <div className="thread-debug-rail" data-testid="subagent-subagents-tags">
+                    {selection.subagent.subagents.map((subagentName) => (
+                      <code key={subagentName} className="thread-debug-tag">{subagentName}</code>
+                    ))}
+                  </div>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
           </dl>
+          <div className="thread-debug-payload-section">
+            <span className="thread-debug-payload-title">
+              {t('ai.runtime.debug.inspector.subagentConfigurationJson')}
+            </span>
+            <pre
+              className="thread-event-detail-payload"
+              data-testid="subagent-configuration-json"
+              tabIndex={0}
+            >
+              {formatJson(selection.subagent.configurationJson) || '—'}
+            </pre>
+          </div>
         </div>
       )}
 

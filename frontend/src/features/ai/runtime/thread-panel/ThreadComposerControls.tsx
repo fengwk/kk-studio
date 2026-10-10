@@ -330,21 +330,15 @@ export function ThreadComposerControls({
           <span>{environmentLabel}</span>
           <ChevronDown aria-hidden="true" />
         </button>
-        {settingsStatus == null ? null : (
+        {settingsStatus === 'pending' ? (
           <span
             className="thread-composer-settings-status"
-            data-settings-status={settingsStatus}
-            title={
-              settingsStatus === 'pending'
-                ? t('ai.runtime.composer.settingsPendingTitle')
-                : t('ai.runtime.composer.settingsDraftTitle')
-            }
+            data-settings-status="pending"
+            title={t('ai.runtime.composer.settingsPendingTitle')}
           >
-            {settingsStatus === 'pending'
-              ? t('ai.runtime.composer.settingsPendingLabel')
-              : t('ai.runtime.composer.settingsDraftLabel')}
+            {t('ai.runtime.composer.settingsPendingLabel')}
           </span>
-        )}
+        ) : null}
       </div>
       <div className="thread-composer-controls-right">
         <button
