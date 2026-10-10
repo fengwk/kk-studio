@@ -99,31 +99,24 @@ export function ProviderForm({
       </label>
       <div className="form-group">
         <FieldLabel>{t('ai.catalog.form.httpRetryPolicy')}</FieldLabel>
-        <div className="form-radio-group">
-          <label className="form-radio-label">
-            <input
-              type="radio"
-              name="provider-http-retry-mode"
-              checked={!isCustomRetry}
-              onChange={() => onChange({ ...draft, modelHttpRetryStatusCodes: null })}
-            />
-            {t('ai.catalog.form.httpRetryInherit')}
-          </label>
-          <label className="form-radio-label">
-            <input
-              type="radio"
-              name="provider-http-retry-mode"
-              checked={isCustomRetry}
-              onChange={() =>
-                onChange({
-                  ...draft,
-                  modelHttpRetryStatusCodes: draft.modelHttpRetryStatusCodes ?? [],
-                })
-              }
-            />
-            {t('ai.catalog.form.httpRetryCustom')}
-          </label>
-        </div>
+        <Select
+          aria-label={t('ai.catalog.form.httpRetryPolicy')}
+          value={isCustomRetry ? 'custom' : 'inherit'}
+          options={[
+            { value: 'inherit', label: t('ai.catalog.form.httpRetryInherit') },
+            { value: 'custom', label: t('ai.catalog.form.httpRetryCustom') },
+          ]}
+          onChange={(value) => {
+            if (value === 'inherit') {
+              onChange({ ...draft, modelHttpRetryStatusCodes: null })
+            } else {
+              onChange({
+                ...draft,
+                modelHttpRetryStatusCodes: draft.modelHttpRetryStatusCodes ?? [],
+              })
+            }
+          }}
+        />
         {isCustomRetry ? (
           <TagInput
             value={draft.modelHttpRetryStatusCodes ?? []}
@@ -131,7 +124,7 @@ export function ProviderForm({
             min={400}
             max={599}
             placeholder={t('ai.catalog.form.httpRetryPlaceholder')}
-            ariaLabel={t('ai.catalog.form.httpRetryPolicy')}
+            ariaLabel={t('ai.catalog.form.httpRetryCustom')}
           />
         ) : (
           <small className="form-group-hint">
