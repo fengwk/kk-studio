@@ -30,8 +30,6 @@ import {
 import { THREAD_COMMANDS, type ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { AttachmentStrip } from '@/features/ai/composer/attachment-strip'
 import {
-  hasMessageContent,
-  partsKey,
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
@@ -73,21 +71,8 @@ function extractGoalCommand(parts: ComposerPart[]): { isGoalCommand: boolean; ob
   }
 }
 
-export type ComposerPreviewDisabledReason =
-  | 'EMPTY_DRAFT'
-  | 'SLASH_COMMAND'
-  | 'GOAL_COMMAND'
-  | 'UPLOADS_PENDING'
-  | 'COMPOSER_DISABLED'
-
-export interface ComposerPreviewReadiness {
-  canPreview: boolean
-  reason: ComposerPreviewDisabledReason | null
-}
-
 export interface ThreadComposerHandle {
   focus: () => void
-  preparePreview: () => { payload: ComposerPart[]; localDraft: ComposerPart[] } | null
 }
 
 export interface ThreadComposerProps {
@@ -120,7 +105,6 @@ export interface ThreadComposerProps {
   settings?: ThreadComposerSettingsInput
   scope?: string
   ref?: Ref<ThreadComposerHandle>
-  onPreviewReadinessChange?: (readiness: ComposerPreviewReadiness) => void
 }
 
 /**
@@ -154,7 +138,6 @@ export function ThreadComposer({
   restoreOnActivate = true,
   settings,
   scope,
-  onPreviewReadinessChange,
 }: ThreadComposerProps) {
   const { t } = useI18n()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -317,48 +300,8 @@ export function ThreadComposer({
     [disabled, isGoalCommand, parts, slashMode, uploads],
   )
 
-  const previewReadiness = useMemo((): ComposerPreviewReadiness => {
-    if (disabled) {
-      return { canPreview: false, reason: 'COMPOSER_DISABLED' }
-    }
-    if (slashMode) {
-      return { canPreview: false, reason: 'SLASH_COMMAND' }
-    }
-    if (isGoalCommand) {
-      return { canPreview: false, reason: 'GOAL_COMMAND' }
-    }
-    const hasAttachments = parts.some((part) => part.type === 'attachment')
-    if (hasAttachments && !canSubmitParts(parts, uploads)) {
-      return { canPreview: false, reason: 'UPLOADS_PENDING' }
-    }
-    const trimmed = trimMessageParts(parts)
-    if (!hasMessageContent(trimmed)) {
-      return { canPreview: false, reason: 'EMPTY_DRAFT' }
-    }
-    return { canPreview: true, reason: null }
-  }, [disabled, slashMode, isGoalCommand, parts, uploads])
-
-  useEffect(() => {
-    onPreviewReadinessChange?.(previewReadiness)
-  }, [onPreviewReadinessChange, previewReadiness])
-
   useImperativeHandle(ref, () => ({
     focus: () => focusComposer(true),
-    preparePreview: () => {
-      const domParts = editorApiRef.current?.syncDraft() ?? null
-      if (!previewReadiness.canPreview) {
-        return null
-      }
-      const localDraft = localDraftSnapshot()
-      // DOM 同步会异步更新受控 parts；尚未对齐时不拼接旧 payload 与新草稿。
-      if (domParts == null || partsKey(trimMessageParts(domParts)) !== partsKey(trimMessageParts(parts))) {
-        return null
-      }
-      return {
-        payload: resolveUploadIds(parts),
-        localDraft,
-      }
-    },
   }))
 
   // 提交 settle 状态机：本地草稿快照、发送失败恢复与成功后 detached 上传释放。

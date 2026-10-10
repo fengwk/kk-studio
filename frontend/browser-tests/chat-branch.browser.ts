@@ -509,10 +509,10 @@ async function bindFirstPaneToBranchDraft(page: Page, startEntryId: string) {
 }
 
 /**
- * 本地分支草稿的 Debug 预检：整 pane 只读覆盖 + 会话级 preview + 可见退出，
- * 且绝不为了预览创建 Thread。这里验证 jsdom 无法证明的真实布局与真实 display:none。
+ * 本地分支草稿的 Debug 视图：整 pane 只读覆盖 + 可见退出，不渲染草稿预览动作，
+ * 且绝不向后端发出写请求或会话级草稿预览请求。
  */
-test('the local branch draft Debug previews through the session endpoint without creating a Thread', async ({
+test('the local branch draft Debug provides read-only overlay with clean exit without creating a Thread', async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 720, height: 820 })
@@ -539,16 +539,11 @@ test('the local branch draft Debug previews through the session endpoint without
   await expect(back).toBeVisible()
   await expect(composer).toContainText('branch draft preview')
 
-  await page.locator('.thread-debug-preview').click()
-  await expect.poll(() => recorded.branchPreviews.length).toBe(1)
-  expect(recorded.branchPreviews[0]?.startEntryId).toBe('entry-2')
-  expect(recorded.branchPreviews[0]?.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
-  // 预览是纯读取：没有创建 Thread、没有提交任何批次。
+  // 已移除草稿预览操作按钮，且未触发任何分支预览或命令批次请求。
+  await expect(page.locator('.thread-debug-preview')).toHaveCount(0)
+  await expect(page.locator('.thread-debug-preview-action')).toHaveCount(0)
+  expect(recorded.branchPreviews).toEqual([])
   expect(recorded.commandBatches).toEqual([])
-
-  // 窄 pane 下详情页签自动接管并渲染最终请求体。
-  await expect(page.getByTestId('preview-request-body')).toBeVisible()
-  await expect(page.getByText('DRAFT_REQUEST_PREVIEW')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('branch-draft-debug-narrow.png') })
 
   await back.click()

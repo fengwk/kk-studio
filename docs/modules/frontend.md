@@ -97,15 +97,11 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 与冻结请求，排除 credential、认证 header 和 Base64 正文。Subagent 详情展示自己的能力声明与
 配置 JSON，不递归展开下级；缓存 NONE 表示无显式缓存控制，不排除 Provider 自动缓存。
 
-下一次请求预览冻结草稿与附件身份，先读取最新 Snapshot，复验设置基线、空闲、队列与活动 Invocation，
-再用精确 cursor 请求 provider-request-preview。等待期间草稿或目标变更、组件卸载使迟到结果失效；
-请求单飞，409 使用 PREVIEW reason 白名单文案，预览不消费草稿、上传与命令，随后发送仍须独立接受。
 运行中的 Thread 另给 FROZEN_INVOCATION：只读取当时已存在的活动 Invocation 的冻结请求，不新建、
-复制或延长任何持久事实，现算预览被拒时冻结事实仍然成立。事件详情可按需重建某个历史模型输出的请求：
+复制或延长任何持久事实。事件详情可按需重建某个历史模型输出的请求：
 它只接受模型输出 Entry，请求前缀严格截断在该输出的 parent，展示的是用当前 catalog 与配置重建的结果，
-不是原始网络快照，压缩回合不支持重建。
-本地新建分支草稿的预览走 session 级 POST provider-request-preview，body 只带 `startEntryId` 与
-有序命令（起点必须是 ROOT 或 TURN_END），只为预览检查协议 JSON，绝不为此预创建 Thread。
+不是原始网络快照，压缩回合不支持重建。本地新建分支草稿进入 Debug 同样提供只读事件与请求覆盖，
+绝不为此预创建 Thread。
 
 ## Chat 提交与控制
 
