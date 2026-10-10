@@ -4684,6 +4684,10 @@ describe('AgentPane root control mounting', () => {
     const shellCmd = await screen.findByText('shell')
     await user.click(shellCmd)
 
+    // Wait for iframe and trigger load
+    const iframe = await screen.findByTestId('ide-iframe')
+    fireEvent.load(iframe)
+
     await waitFor(() => {
       expect(environmentService.openIdeViewTerminal).toHaveBeenCalledWith(
         envCard.id,
