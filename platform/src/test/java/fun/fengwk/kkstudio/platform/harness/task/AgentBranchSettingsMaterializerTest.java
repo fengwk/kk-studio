@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
@@ -174,13 +175,19 @@ class AgentBranchSettingsMaterializerTest {
   @Test
   void rejectsUnconfiguredAgentModelExplicitly() {
     AgentDefinition unconfigured = new AgentDefinition();
-    unconfigured.setName("compaction");
+    unconfigured.setName(BuiltinAgentDefinitions.COMPACTION_NAME);
     unconfigured.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
-    when(agentRepository.getByName("compaction")).thenReturn(unconfigured);
+    when(agentRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME))
+        .thenReturn(unconfigured);
 
     IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("compaction"));
-    assertTrue(error.getMessage().contains("agent model is not configured: compaction"));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> materializer.materialize(BuiltinAgentDefinitions.COMPACTION_NAME));
+    assertTrue(
+        error
+            .getMessage()
+            .contains("agent model is not configured: " + BuiltinAgentDefinitions.COMPACTION_NAME));
   }
 
   private static String validModelConfig() {

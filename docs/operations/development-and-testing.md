@@ -303,7 +303,7 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 Provider 级 `modelHttpRetryStatusCodes` 覆盖由 `crud.provider.http_retry_override` 固定：请求省略该字段保留原值，
 显式 `null` 清除覆盖（继承系统 `aiRuntime.modelHttpRetryStatusCodes` 名单），空数组 `[]` 表示该 Provider 不自动重试
 任何 HTTP 错误，非空数组完全替代系统名单（400–599）。
-内置 Agent 目录身份由 `crud.agent.builtin_identity` 固定：保留名称 `compaction`、类型 `BUILTIN`（用户创建为 `USER`），
+内置 Agent 目录身份由 `crud.agent.builtin_identity` 固定：保留名称 `Compaction`、类型 `BUILTIN`（用户创建为 `USER`），
 `type` 不在可编辑请求体内（携带即按未知字段拒绝），内置身份不可删除；内核压缩执行路径按该名称经普通 Agent 目录读取定义，
 模型可显式未配置。
 

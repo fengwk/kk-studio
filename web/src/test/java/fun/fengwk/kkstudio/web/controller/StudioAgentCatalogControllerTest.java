@@ -620,7 +620,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isBadRequest());
 
     ObjectNode reserved = objectMapper.createObjectNode();
-    reserved.put("name", "compaction");
+    reserved.put("name", "Compaction");
     reserved.put("model", "p/m");
     reserved.set("config", objectMapper.valueToTree(config));
     mockMvc
@@ -635,7 +635,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     builtinAgentInitializer.afterPropertiesSet();
     JsonNode page =
         data(mockMvc.perform(get("/api/ai/catalog/agents")).andExpect(status().isOk()).andReturn());
-    JsonNode builtin = findResult(page, "compaction");
+    JsonNode builtin = findResult(page, "Compaction");
     assertEquals("BUILTIN", builtin.path("type").asText());
     // 未配置模型的内置 Agent 显式序列化 null，而不是字段缺失。
     assertTrue(builtin.has("model"));
@@ -643,7 +643,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            delete("/api/ai/catalog/agents/{name}", "compaction").param("expectedVersion", "0"))
+            delete("/api/ai/catalog/agents/{name}", "Compaction").param("expectedVersion", "0"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
