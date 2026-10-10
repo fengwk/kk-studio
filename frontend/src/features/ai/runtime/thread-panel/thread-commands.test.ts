@@ -24,6 +24,8 @@ describe('AgentPane command registry', () => {
       'rename-session',
       'rename-thread',
       'goal',
+      'files',
+      'shell',
     ])
   })
 
@@ -74,8 +76,17 @@ describe('AgentPane command registry', () => {
       'rename-session',
       'rename-thread',
       'goal',
+      'files',
+      'shell',
     ])
     expect(THREAD_COMMANDS.every((command) => command.disabled === undefined)).toBe(true)
+  })
+
+  it('filters files and shell commands and strips slash prefix', () => {
+    expect(filterThreadCommands('/files', THREAD_COMMANDS).map((c) => c.id)).toEqual(['files'])
+    expect(filterThreadCommands('/shell', THREAD_COMMANDS).map((c) => c.id)).toEqual(['shell'])
+    expect(filterThreadCommands('terminal', THREAD_COMMANDS).map((c) => c.id)).toEqual(['shell'])
+    expect(filterThreadCommands('explorer', THREAD_COMMANDS).map((c) => c.id)).toEqual(['files'])
   })
 
   it('enables subagent only for bound targets, including readonly, and autocompletes the read command', () => {

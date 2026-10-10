@@ -98,6 +98,7 @@ function ChatWorkspaceContent({
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chat.id))
   const [presentations, setPresentations] = useState<Record<string, ThreadPresentation | null>>({})
   const [debugSource, setDebugSource] = useState<{ paneId: string; viewKey: string } | null>(null)
+  const [ideMountedPaneIds, setIdeMountedPaneIds] = useState<Set<string>>(() => new Set())
   const paneStateRef = useRef(paneState)
   useLayoutEffect(() => { paneStateRef.current = paneState }, [paneState])
   const handlePresentation = useCallback((paneId: string, report: ThreadPresentation | null) => {
@@ -227,6 +228,22 @@ function ChatWorkspaceContent({
     })
   }, [])
 
+  const handleIdeMounted = useCallback((paneId: string, mounted: boolean) => {
+    setIdeMountedPaneIds((current) => {
+      const has = current.has(paneId)
+      if (has === mounted) {
+        return current
+      }
+      const next = new Set(current)
+      if (mounted) {
+        next.add(paneId)
+      } else {
+        next.delete(paneId)
+      }
+      return next
+    })
+  }, [])
+
   const handleRequestBranch = useCallback((sourcePaneId: string, request: BranchRequestInput) => {
     branchCheckId.current += 1
     setBranchChecking(false)
@@ -336,7 +353,9 @@ function ChatWorkspaceContent({
   })
   const visiblePanes = visibleChatPanes(paneState)
   const visiblePaneIds = new Set(visiblePanes.map((pane) => pane.id))
-  const mountedPanes = paneState.panes.filter((pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending)
+  const mountedPanes = paneState.panes.filter(
+    (pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending || ideMountedPaneIds.has(pane.id),
+  )
   const currentView = presentations[debugSource?.paneId ?? paneState.focusedPaneId] ?? null
   const focusedPaneVisible = visiblePaneIds.has(paneState.focusedPaneId)
   useLayoutEffect(() => {
@@ -425,6 +444,7 @@ function ChatWorkspaceContent({
               onRequestBranch={handleRequestBranch}
               onPaneReport={handlePaneReport}
               onPresentation={handlePresentation}
+              onIdeMounted={handleIdeMounted}
             />
           )
         })}

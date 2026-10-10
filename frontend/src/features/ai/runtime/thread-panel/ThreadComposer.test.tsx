@@ -52,6 +52,8 @@ describe('ThreadComposer and commands', () => {
       'rename-session',
       'rename-thread',
       'goal',
+      'files',
+      'shell',
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
@@ -67,6 +69,8 @@ describe('ThreadComposer and commands', () => {
       'models',
       'upload',
       'shortcuts',
+      'files',
+      'shell',
     ])
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'history')?.disabled).toBe(true)

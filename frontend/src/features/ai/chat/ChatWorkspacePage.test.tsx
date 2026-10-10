@@ -45,6 +45,10 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn(),
     getEnvironmentUpdate: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
+    createIdeView: vi.fn().mockResolvedValue({}),
+    changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
+    openIdeViewTerminal: vi.fn().mockResolvedValue(undefined),
+    closeIdeView: vi.fn().mockResolvedValue(undefined),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -957,6 +961,75 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     })
     expect(document.querySelector('[data-breadcrumb="session"]')).toBeNull()
     expect(document.querySelector('[data-breadcrumb="branch"]')).toBeNull()
+  })
+
+  it('retains pane in DOM when it has an active IDE view after layout shrinks, without fake pending effect', async () => {
+    const user = userEvent.setup()
+    seedLayout('split-2')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      {
+        id: 'a1000000-0000-4000-8000-000000000001',
+        name: 'env-1',
+        ready: true,
+        status: 'READY',
+        version: '1',
+        createTime: '2026-10-01T00:00:00Z',
+        updateTime: '2026-10-01T00:00:00Z',
+        capabilities: [],
+        statusExpiresAt: null,
+        lastSeen: null,
+        homeDirectory: '/home/user',
+      },
+    ])
+    vi.mocked(environmentService.createIdeView).mockResolvedValue({
+      viewId: 'v-pane-2',
+      environmentId: 'a1000000-0000-4000-8000-000000000001',
+      directory: '/home/user',
+      entryUrl: 'https://ide.test/?workspace=p2',
+    })
+
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
+
+    // Open IDE on pane-2
+    const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
+    await user.click(plusButtons[1]!)
+    const filesCommands = await screen.findAllByText('files')
+    await user.click(filesCommands[0]!)
+
+    // Pane-2 has no bound environment, so it presents the inline environment selector. Confirming starts the view.
+    const confirmBtn = await screen.findByRole('button', { name: '确认' })
+    await user.click(confirmBtn)
+
+    // Wait for pane-2 IDE view to mount
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenCalled()
+    })
+
+    // Switch layout to 1 pane
+    const layoutTrigger = screen.getByRole('button', { name: '布局' })
+    await user.click(layoutTrigger)
+    await user.click(screen.getByRole('option', { name: '1' }))
+
+    // Pane-2 must still be retained in mountedPanes with hidden and inert
+    const paneElements = document.querySelectorAll('.chat-pane')
+    expect(paneElements.length).toBe(2)
+    const hiddenPane = Array.from(paneElements).find((el) => el.getAttribute('data-pane-id') === 'pane-2')
+    expect(hiddenPane).toHaveAttribute('hidden')
+    expect(hiddenPane).toHaveAttribute('inert')
+
+    // And it must NOT block new branch dialog destination (not fake pending effect)
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'branch-to-hidden')
+    await chooseDestination(user, 2)
+    await confirmBranch(user)
+
+    // Branch creation succeeds and closes dialog without blocking on destination
+    await waitFor(() => {
+      expect(document.querySelector('.new-branch-dialog')).toBeNull()
+    })
   })
 
   // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费本切片
