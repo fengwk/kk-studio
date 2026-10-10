@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from 'react'
 import { placeCaretAtEnd } from '@/features/ai/composer/composer-dom'
-import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 
 const MAX_FOCUS_ATTEMPTS = 5
 const FOCUS_RETRY_DELAY_MS = 16
@@ -142,6 +142,9 @@ export function useComposerFocus({
         if (!el || !activeRef.current) {
           return
         }
+        if (shouldDeferToBlockingModal(el)) {
+          return
+        }
         if (el.getAttribute('contenteditable') !== 'true') {
           if (attempt < MAX_FOCUS_ATTEMPTS) {
             scheduleFocus(attempt + 1, FOCUS_RETRY_DELAY_MS)
@@ -251,7 +254,7 @@ export function useComposerFocus({
     ) {
       return
     }
-    if (hasBlockingModal()) {
+    if (shouldDeferToBlockingModal(editorRef.current)) {
       return
     }
     event.preventDefault()
@@ -262,10 +265,27 @@ export function useComposerFocus({
       return
     }
     blurComposer()
-  }, [active, blurComposer, disabled, focusComposer])
+  }, [active, blurComposer, disabled, editorRef, focusComposer])
+
+  // 发送完成后（pending true -> false）：无条件标 restoreFocusRef。
+  // 若当前已 active 且可编辑，立即消费并恢复键入焦点；若 disabled 暂为 true
+  // 或处于 inactive，保留 restoreFocusRef，由 active/disabled effect 在恢复可编辑时消费一次。
+  useEffect(() => {
+    if (wasPendingRef.current && !pending) {
+      restoreFocusRef.current = true
+      if (active && !disabled && restoreOnActivate) {
+        restoreFocusRef.current = false
+        if (!shouldDeferToBlockingModal(editorRef.current)) {
+          focusComposer()
+        }
+      }
+    }
+    wasPendingRef.current = pending
+  }, [active, disabled, editorRef, focusComposer, pending, restoreOnActivate])
 
   // interaction panel 接管（active=false）后清掉焦点恢复请求与定时器；重新
-  // active 且可编辑时恢复焦点到编辑器末尾。
+  // active 且可编辑时恢复焦点到编辑器末尾。pending 降沿若遭遇 disabled 暂为 true，
+  // 也在 disabled 降为 false 时在此处消费 restoreFocusRef。
   useEffect(() => {
     if (!active) {
       restoreFocusRef.current = true
@@ -279,10 +299,12 @@ export function useComposerFocus({
       restoreFocusRef.current = false
       // workspace 重新显露多个 pane 时，只有当前焦点 pane 可以恢复键入焦点。
       if (restoreOnActivate) {
-        focusComposer(true)
+        if (!shouldDeferToBlockingModal(editorRef.current)) {
+          focusComposer(true)
+        }
       }
     }
-  }, [active, clearFocusTimer, disabled, focusComposer, restoreOnActivate])
+  }, [active, clearFocusTimer, disabled, editorRef, focusComposer, restoreOnActivate])
 
   // 全局 Escape：Modal/alertdialog/lightbox 保留自己的 Escape 语义；
   // 仅负责未聚焦且当前活动 pane 处于 focusOnEscape 时，恢复焦点到编辑器末尾。
@@ -300,7 +322,7 @@ export function useComposerFocus({
       ) {
         return
       }
-      if (hasBlockingModal()) {
+      if (shouldDeferToBlockingModal(editorRef.current)) {
         return
       }
       if (editorRef.current?.getAttribute('contenteditable') !== 'true') {
@@ -316,20 +338,6 @@ export function useComposerFocus({
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
   }, [active, containerRef, disabled, editorRef, focusComposer, focusOnEscape])
-
-  // 发送完成后（pending true -> false）：active 且可编辑时立即恢复键入焦点；若
-  // interaction panel 仍接管（active=false），隐藏 editor 不得抢焦点，只保留
-  // 恢复意图；active 重新打开且 enabled 时由 active effect 恢复一次。
-  useEffect(() => {
-    if (wasPendingRef.current && !pending) {
-      if (!active) {
-        restoreFocusRef.current = true
-      } else if (!disabled && restoreOnActivate) {
-        focusComposer()
-      }
-    }
-    wasPendingRef.current = pending
-  }, [active, disabled, focusComposer, pending, restoreOnActivate])
 
   // 卸载清理：取消尚未执行的延迟聚焦。
   useEffect(() => () => clearFocusTimer(), [clearFocusTimer])

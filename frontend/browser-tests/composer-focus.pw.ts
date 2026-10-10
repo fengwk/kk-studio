@@ -263,3 +263,144 @@ test.describe('Composer Focus Menu Real React Browser Regression', () => {
     await expect(editor).not.toBeFocused()
   })
 })
+
+const BROWSER_VIEWPORTS = [
+  { width: 390, height: 844, name: 'mobile-390' },
+  { width: 1280, height: 800, name: 'desktop-1280' },
+]
+
+for (const vp of BROWSER_VIEWPORTS) {
+  test.describe(`First-Send Draft Acceptance & Composer Focus at ${vp.width}x${vp.height} (${vp.name})`, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/browser-tests/composer-harness.html')
+      await page.waitForSelector('[data-testid="pane-1"]')
+    })
+
+    test('首次草稿发送并重挂载后，新 editor 在 enabled 时恢复焦点并可立即继续键入', async ({
+      page,
+    }) => {
+      const pane1 = page.locator('[data-testid="pane-1"]')
+      const editor = pane1.locator('.composer-editor')
+      const sendBtn = pane1.locator('button[aria-label="发送消息"]')
+      const firstSendCheck = page.locator('#chk-first-send-mode')
+      const pane1State = page.locator('#pane1-state')
+
+      // 开启首次发送模拟模式（提交 -> pending/disabled -> remount 新 key -> disabled 降沿）
+      await firstSendCheck.check()
+
+      await editor.click()
+      await editor.fill('第一句草稿')
+
+      if (vp.width === 390) {
+        await sendBtn.click()
+      } else {
+        await page.keyboard.press('Enter')
+      }
+
+      // 等待首发绑定与重新挂载完成且 disabled 降为 false
+      await expect(pane1State).toHaveAttribute('data-disabled', 'false', { timeout: 5000 })
+      await expect(pane1State).toHaveAttribute('data-pending', 'false')
+
+      // 重新挂载后的 bound editor 成功恢复键入焦点
+      await expect(editor).toBeFocused({ timeout: 5000 })
+
+      // 无需重新点击，直接继续键入第二句
+      await page.keyboard.type('第二句键入')
+      await expect(editor).toHaveText('第二句键入')
+    })
+
+    test('pending 降沿遭遇 temporary disabled 时不丢意图，disabled 解除时恢复焦点', async ({
+      page,
+    }) => {
+      const pane1 = page.locator('[data-testid="pane-1"]')
+      const editor = pane1.locator('.composer-editor')
+      const outsideBtn = page.locator('#outside-btn')
+      const togglePendingBtn = page.locator('#btn-toggle-pane1-pending')
+      const toggleDisabledBtn = page.locator('#btn-toggle-pane1-disabled')
+
+      // 1. 初始聚焦 editor 并输入
+      await editor.click()
+      await expect(editor).toBeFocused()
+
+      // 2. 模拟进入 pending 与 disabled 状态
+      await togglePendingBtn.click()
+      await toggleDisabledBtn.click()
+
+      // 焦点移至外部按钮
+      await outsideBtn.click()
+      await expect(outsideBtn).toBeFocused()
+      await expect(editor).not.toBeFocused()
+
+      // 3. pending 降沿（请求完成），但此时 disabled 暂未解除
+      await togglePendingBtn.click()
+      // 验证仍在 disabled 时不抢焦，editor 依然不获得焦点
+      await expect(togglePendingBtn).toBeFocused()
+      await expect(editor).not.toBeFocused()
+
+      // 4. disabled 解除（流式结束或元数据就绪）
+      await toggleDisabledBtn.click()
+
+      // 消费保留的恢复意图，焦点成功回到 editor
+      await expect(editor).toBeFocused({ timeout: 5000 })
+    })
+
+    test('首次发送绑定完成时若存在 blocking modal，不得抢占模态框焦点', async ({
+      page,
+    }) => {
+      const pane1 = page.locator('[data-testid="pane-1"]')
+      const editor = pane1.locator('.composer-editor')
+      const sendBtn = pane1.locator('button[aria-label="发送消息"]')
+      const firstSendCheck = page.locator('#chk-first-send-mode')
+      const openModalBtn = page.locator('#open-modal-btn')
+      const modalCloseBtn = page.locator('#modal-close-btn')
+      const pane1State = page.locator('#pane1-state')
+
+      await firstSendCheck.check()
+      await editor.click()
+      await editor.fill('模态测试草稿')
+      await sendBtn.click()
+
+      // 在首发 acceptance 完成前打开 blocking modal
+      await openModalBtn.click()
+      await expect(modalCloseBtn).toBeVisible()
+      await modalCloseBtn.focus()
+      await expect(modalCloseBtn).toBeFocused()
+
+      // 等待首发绑定流程结束且 disabled 恢复为 false
+      await expect(pane1State).toHaveAttribute('data-disabled', 'false', { timeout: 5000 })
+
+      // 验证模态框按钮依然保有焦点，底层的 Pane 1 没有抢占焦点
+      await expect(modalCloseBtn).toBeFocused()
+      await expect(editor).not.toBeFocused()
+    })
+
+    test('首次发送绑定完成时若焦点已切换到其他 pane，不得抢占其他 pane 焦点', async ({
+      page,
+    }) => {
+      const pane1 = page.locator('[data-testid="pane-1"]')
+      const pane2 = page.locator('[data-testid="pane-2"]')
+      const editor1 = pane1.locator('.composer-editor')
+      const editor2 = pane2.locator('.composer-editor')
+      const sendBtn1 = pane1.locator('button[aria-label="发送消息"]')
+      const firstSendCheck = page.locator('#chk-first-send-mode')
+      const pane1State = page.locator('#pane1-state')
+
+      await firstSendCheck.check()
+      await editor1.click()
+      await editor1.fill('Pane 1 首次发送')
+      await sendBtn1.click()
+
+      // 在 Pane 1 响应返回前，用户切换到 Pane 2 键入
+      await editor2.click()
+      await expect(editor2).toBeFocused()
+
+      // 等待 Pane 1 绑定流程完成
+      await expect(pane1State).toHaveAttribute('data-disabled', 'false', { timeout: 5000 })
+
+      // Pane 2 保持聚焦，Pane 1 不得夺走焦点
+      await expect(editor2).toBeFocused()
+      await expect(editor1).not.toBeFocused()
+    })
+  })
+}
