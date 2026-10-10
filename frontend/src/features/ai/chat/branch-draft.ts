@@ -28,6 +28,7 @@ export function materializeBlankBranchDraft(
   agent: AgentDefinitionDTO | undefined,
   yoloEnabled: boolean,
   models: AgentModelView[],
+  environmentName?: string | null,
 ): BranchDraft | null {
   if (!agent || !agent.model) {
     return null
@@ -48,7 +49,7 @@ export function materializeBlankBranchDraft(
       modelName: model.name,
       variant: variantId,
     },
-    environmentName: null,
+    environmentName: environmentName ?? null,
     yoloEnabled,
   }
 }
@@ -62,11 +63,13 @@ export function materializeAgentBranchDraft(
   models: AgentModelView[],
   existing: BranchDraft | null,
   fallbackYoloEnabled?: boolean,
+  fallbackEnvironmentName?: string | null,
 ): BranchDraft | null {
   const materialized = materializeBlankBranchDraft(
     agent,
     existing?.yoloEnabled ?? fallbackYoloEnabled ?? false,
     models,
+    existing != null ? existing.environmentName : (fallbackEnvironmentName ?? null),
   )
   if (materialized == null) {
     return null

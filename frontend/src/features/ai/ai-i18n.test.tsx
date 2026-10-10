@@ -142,17 +142,19 @@ describe('AI i18n live-switch contracts', () => {
   it('switches the Chat creation flow labels live', () => {
     act(() => setLocale('en-US'))
     render(
-      <CreateChatModal
-        open
-        agents={[agent]}
-        selectedAgentName=""
-        title=""
-        pending={false}
-        onClose={() => undefined}
-        onSelectAgent={() => undefined}
-        onTitleChange={() => undefined}
-        onSubmit={(event) => event.preventDefault()}
-      />,
+      <QueryClientProvider client={new QueryClient()}>
+        <CreateChatModal
+          open
+          agents={[agent]}
+          selectedAgentName=""
+          title=""
+          pending={false}
+          onClose={() => undefined}
+          onSelectAgent={() => undefined}
+          onTitleChange={() => undefined}
+          onSubmit={(event) => event.preventDefault()}
+        />
+      </QueryClientProvider>,
     )
 
     expect(screen.getByRole('form', { name: 'Create Chat' })).toBeInTheDocument()

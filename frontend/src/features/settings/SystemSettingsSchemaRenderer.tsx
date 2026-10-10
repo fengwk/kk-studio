@@ -178,8 +178,6 @@ function toApplyTiming(value: SystemSettingsSchemaApplyTiming | null): ApplyTimi
   switch (value) {
     case 'NEXT_INVOCATION':
       return 'nextInvocation'
-    case 'NEXT_CHAT':
-      return 'nextChat'
     case 'RESTART':
       return 'restart'
     default:

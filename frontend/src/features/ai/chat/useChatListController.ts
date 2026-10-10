@@ -38,6 +38,8 @@ export function useChatListController(
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
   const [selectedAgentName, setSelectedAgentName] = useState('')
   const [title, setTitle] = useState('')
+  const [yoloEnabled, setYoloEnabled] = useState(false)
+  const [selectedEnvironmentName, setSelectedEnvironmentName] = useState<string | null>(null)
   const [formError, setFormError] = useState('')
   const [nameError, setNameError] = useState('')
 
@@ -56,11 +58,15 @@ export function useChatListController(
       chatService.createChat({
         title: title.trim(),
         agentName: selectedAgentName,
+        yoloEnabled,
+        environmentName: selectedEnvironmentName || null,
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
       setModalOpen(false)
       setTitle('')
+      setYoloEnabled(false)
+      setSelectedEnvironmentName(null)
       setFormError('')
       setNameError('')
       navigate(`/chats/${encodeURIComponent(chat.id)}`)
@@ -75,6 +81,8 @@ export function useChatListController(
       return chatService.updateChat(editingChat.id, {
         title: title.trim(),
         agentName: selectedAgentName,
+        yoloEnabled,
+        environmentName: selectedEnvironmentName ?? null,
         expectedVersion: editingChat.version,
       })
     },
@@ -83,6 +91,8 @@ export function useChatListController(
       setModalOpen(false)
       setEditingChat(null)
       setTitle('')
+      setYoloEnabled(false)
+      setSelectedEnvironmentName(null)
       setFormError('')
       setNameError('')
     },
@@ -105,6 +115,8 @@ export function useChatListController(
     const nextAgentName = resolveChatAgentName(agentName, selectedAgentName, agents)
     setSelectedAgentName(nextAgentName)
     setTitle('')
+    setYoloEnabled(false)
+    setSelectedEnvironmentName(null)
     setFormError('')
     setNameError('')
     setModalOpen(true)
@@ -117,6 +129,8 @@ export function useChatListController(
     setEditingChat(chat)
     setSelectedAgentName(chat.agentName || resolveChatAgentName(undefined, '', agents))
     setTitle(chat.title ?? '')
+    setYoloEnabled(chat.yoloEnabled)
+    setSelectedEnvironmentName(chat.environmentName ?? null)
     setFormError('')
     setNameError('')
     setModalOpen(true)
@@ -153,10 +167,26 @@ export function useChatListController(
     if (updateChatMutation.error) updateChatMutation.reset()
   }
 
+  function handleYoloChange(next: boolean) {
+    setYoloEnabled(next)
+    if (formError) setFormError('')
+    if (createChatMutation.error) createChatMutation.reset()
+    if (updateChatMutation.error) updateChatMutation.reset()
+  }
+
+  function handleSelectEnvironment(next: string | null) {
+    setSelectedEnvironmentName(next)
+    if (formError) setFormError('')
+    if (createChatMutation.error) createChatMutation.reset()
+    if (updateChatMutation.error) updateChatMutation.reset()
+  }
+
   function closeModal() {
     setModalOpen(false)
     setEditingChat(null)
     setTitle('')
+    setYoloEnabled(false)
+    setSelectedEnvironmentName(null)
     setFormError('')
     setNameError('')
     createChatMutation.reset()
@@ -204,12 +234,16 @@ export function useChatListController(
       agents,
       selectedAgentName,
       title,
+      yoloEnabled,
+      selectedEnvironmentName,
       pending: activeMutation.isPending,
       formError: effectiveFormError,
       nameError,
       onClose: closeModal,
       onSelectAgent: handleSelectAgent,
       onTitleChange: handleTitleChange,
+      onYoloChange: handleYoloChange,
+      onSelectEnvironment: handleSelectEnvironment,
       onSubmit: submitChat,
     },
     deleteConfirmModal: {
