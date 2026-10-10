@@ -14,6 +14,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
@@ -31,6 +32,22 @@ class StrictJacksonConfigurationTest {
       new ApplicationContextRunner()
           .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class))
           .withUserConfiguration(StrictJacksonConfiguration.class);
+
+  /** Chat 默认环境是 required-nullable，不能被全局 NON_NULL 配置省略。 */
+  @Test
+  void shouldAlwaysIncludeChatDefaultEnvironment() {
+    runner.run(
+        context -> {
+          JsonMapper mapper = context.getBean(JsonMapper.class);
+          ChatDTO chat = new ChatDTO();
+          assertEquals(
+              "{\"environmentName\":null,\"yoloEnabled\":false}", mapper.writeValueAsString(chat));
+          chat.setEnvironmentName("dev");
+          assertEquals(
+              "{\"environmentName\":\"dev\",\"yoloEnabled\":false}",
+              mapper.writeValueAsString(chat));
+        });
+  }
 
   /** 测试意图：验证可选字段为 null 时默认省略，且存在非 null 可选字段时按 DTO 声明顺序输出。 */
   @Test
