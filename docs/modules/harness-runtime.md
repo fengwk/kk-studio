@@ -140,7 +140,7 @@ durable 事实。Skill 的 name、description 与稳定 path 已经完整写入
 派生的 Provider tools、Branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在
 各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java)
 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`
-（压缩回合的请求来自 `compaction` 内置 Agent
+（压缩回合的请求来自 `Compaction` 内置 Agent
 目录定义：默认 summarization systemInstruction 与单条 USER 摘要命令、无 tools/skills，
 均可由用户编辑）。
 
@@ -211,12 +211,12 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 
 ```text
 父 TURN_START(COMPACTION) -> COMPACTION(summaryText) -> TURN_END
-子 TURN_START(INPUT)      -> ModelInvocation（compaction Agent 的 systemInstruction + USER 摘要命令）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
+子 TURN_START(INPUT)      -> ModelInvocation（Compaction Agent 的 systemInstruction + USER 摘要命令）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
 
 父在 durable wait 中等待 Join 结算，不持长事务、不阻塞 `Future`；冻结的输入范围、Goal、设置与子身份不受后来排队输入污染。COMPACTION Join 只唤醒 owner，不产生公开 `SUBAGENT_RESULT` 通知；压缩子执行树内禁止再次创建压缩子线程，所有 compactor 请求 cache hint 固定 `NONE`（不承诺关闭厂商自动缓存）。
 
-[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionConfig.java) 只保存 `keepRecentTokens`（默认 20_000；模型/Agent 选择由 `compaction` 目录定义承担），并派生全部阈值：`effectiveKeep = min(keepRecentTokens, C/2)`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeep, C - effectiveReserve)`、`manualMinimum = min(keepRecentTokens*2, C/2)`；压缩输出预算取 `min(maxOutputTokens, floor(reserve * 0.8), removedPrefixTokens)`，TURN_PREFIX 阶段把 0.8 换成 0.5。最近上下文保留量与摘要输出预留量是两个不同参数，分别受上下文窗口与输出上限约束。
+[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionConfig.java) 只保存 `keepRecentTokens`（默认 20_000；模型/Agent 选择由 `Compaction` 目录定义承担），并派生全部阈值：`effectiveKeep = min(keepRecentTokens, C/2)`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeep, C - effectiveReserve)`、`manualMinimum = min(keepRecentTokens*2, C/2)`；压缩输出预算取 `min(maxOutputTokens, floor(reserve * 0.8), removedPrefixTokens)`，TURN_PREFIX 阶段把 0.8 换成 0.5。最近上下文保留量与摘要输出预留量是两个不同参数，分别受上下文窗口与输出上限约束。
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 是纯函数：只读 `EntryPath` 与配置，从尾部累计估算长度（`ceil(chars/4)`，媒体占位 4800 字符）越过 `effectiveKeep` 后取下一个合法切分点，绝不切在 ToolResult 或 COMPACTION 回合内部；切分落在 Agent 轮次中间时先出 HISTORY 中间摘要，再由 continuation 义务驱动 TURN_PREFIX 生成最终摘要。历史压缩输入由 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 的 `reconstructSummaryInput` 按冻结的 `CompactionStart` Entry ID 重建，不重新运行切分选择。[`CompactionResultEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluator.java) 把 LENGTH 截断、FILTERED 过滤、非法 stop reason、返回工具调用、空摘要、保留段解析失败与无 token 收益判定为失败（`COMPACTION_OUTPUT_TRUNCATED`、`COMPACTION_CONTENT_FILTERED`、`COMPACTION_INVALID_RESPONSE`、`COMPACTION_EMPTY_SUMMARY`、`COMPACTION_INVALID_SUMMARY`、`COMPACTION_NO_GAIN`）；空摘要、输出截断（LENGTH）与破损结果在成功回执冻结前进入普通调用重试路径（同一 `InvocationRetryPolicy` 预算，不新建压缩预算、不用 `max_turns`），重试耗尽则 child 失败、父执行失败且不交付 partial；过滤结果与输入超限直接失败，hard overflow 最多触发一次恢复。
 

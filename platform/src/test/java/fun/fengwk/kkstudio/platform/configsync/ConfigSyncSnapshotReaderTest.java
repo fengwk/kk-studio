@@ -18,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
@@ -94,7 +95,11 @@ class ConfigSyncSnapshotReaderTest {
         agent("user-agent", "p", "m", agentConfig(List.of(), List.of(), List.of()));
     user.setType(AgentDefinitionType.USER);
     AgentDefinition builtin =
-        agent("compaction", null, null, agentConfig(List.of(), List.of(), List.of()));
+        agent(
+            BuiltinAgentDefinitions.COMPACTION_NAME,
+            null,
+            null,
+            agentConfig(List.of(), List.of(), List.of()));
     builtin.setType(AgentDefinitionType.BUILTIN);
     when(definitionRepository.listAll()).thenReturn(List.of(user, builtin));
 
