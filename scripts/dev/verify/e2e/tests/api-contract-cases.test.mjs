@@ -7,6 +7,7 @@ import test from 'node:test'
 import '../cases/crud.mjs'
 import '../cases/system-settings.mjs'
 import { providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
+import { HttpError } from '../lib/http.mjs'
 import { ALL_CASES, getCase } from '../lib/registry.mjs'
 
 const RUN_MATRIX = fileURLToPath(new URL('../run-matrix.mjs', import.meta.url))
@@ -14,8 +15,111 @@ const RUN_MATRIX = fileURLToPath(new URL('../run-matrix.mjs', import.meta.url))
 const FREE_L1_CASES = [
   'crud.provider.http_retry_override',
   'crud.agent.builtin_identity',
+  'crud.chat.default_environment',
   'settings.system_contract_cas',
 ]
+
+/**
+ * 只 fake HTTP 的 Chat + Environment 有状态后端：按当前契约建模 required-nullable 默认环境、
+ * 部分更新（省略保留 / 显式 null 清空）与未知/非 canonical Environment 的 400 拒绝，用来真实执行
+ * `crud.chat.default_environment` case 并断言它发出的 method/path/body（含 omit-null 语义）。
+ */
+function chatDefaultEnvironmentFixture() {
+  const agent = {
+    name: 'fixture-agent',
+    type: 'USER',
+    model: 'fixture-provider/fixture-model',
+    variant: 'default',
+  }
+  const environments = new Map()
+  const chats = new Map()
+  const requests = []
+  let seq = 0
+  const nextId = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`
+  const call = async (method, path, body) => {
+    requests.push({ method, path, body })
+    const pathname = new URL(path, 'http://fixture.local').pathname
+    if (method === 'GET' && pathname === '/api/ai/catalog/agents') {
+      return { status: 200, json: { data: { results: [agent] } } }
+    }
+    if (method === 'POST' && pathname === '/api/harness/environments') {
+      const environment = {
+        id: nextId(),
+        name: body.name,
+        version: '0',
+        registrationToken: `tok-${body.name}`,
+      }
+      environments.set(environment.id, environment)
+      return { status: 201, json: { data: environment } }
+    }
+    if (method === 'POST' && pathname === '/api/ai/chats') {
+      const chat = {
+        id: nextId(),
+        title: body.title,
+        agentName: body.agentName,
+        environmentName: body.environmentName ?? null,
+        yoloEnabled: body.yoloEnabled === true,
+        version: '0',
+      }
+      chats.set(chat.id, chat)
+      return { status: 201, json: { data: { ...chat } } }
+    }
+    const chatMatch = pathname.match(/^\/api\/ai\/chats\/([^/]+)$/)
+    if (chatMatch) {
+      const id = decodeURIComponent(chatMatch[1])
+      const chat = chats.get(id)
+      if (method === 'GET') {
+        return { status: 200, json: { data: { ...chat } } }
+      }
+      if (method === 'PUT') {
+        if (body.expectedVersion !== chat.version) {
+          throw new HttpError(409, JSON.stringify({ message: 'version conflict' }), pathname)
+        }
+        if (body.title !== undefined) chat.title = body.title
+        if (Object.hasOwn(body, 'environmentName')) {
+          if (body.environmentName === null) {
+            chat.environmentName = null
+          } else {
+            if (String(body.environmentName).includes('/')) {
+              throw new HttpError(
+                400,
+                JSON.stringify({ message: "environmentName must not contain '/'" }),
+                pathname,
+              )
+            }
+            if (![...environments.values()].some((env) => env.name === body.environmentName)) {
+              throw new HttpError(
+                400,
+                JSON.stringify({ message: `unknown environment: ${body.environmentName}` }),
+                pathname,
+              )
+            }
+            chat.environmentName = body.environmentName
+          }
+        }
+        chat.version = String(Number(chat.version) + 1)
+        return { status: 200, json: { data: { ...chat } } }
+      }
+      if (method === 'DELETE') {
+        chats.delete(id)
+        return { status: 204, json: null }
+      }
+    }
+    const environmentMatch = pathname.match(/^\/api\/harness\/environments\/([^/]+)$/)
+    if (environmentMatch) {
+      const id = decodeURIComponent(environmentMatch[1])
+      if (method === 'GET') {
+        return { status: 200, json: { data: { ...environments.get(id) } } }
+      }
+      if (method === 'DELETE') {
+        environments.delete(id)
+        return { status: 204, json: null }
+      }
+    }
+    throw new Error(`unexpected call ${method} ${pathname}`)
+  }
+  return { ctx: { call }, requests }
+}
 
 test('provider HTTP retry and builtin Agent contracts are registered as free L1 cases', () => {
   // 测试意图：这些是零模型成本的 API 契约回归，必须注册为 L1 且无 real/tools 依赖，
@@ -88,6 +192,38 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
   await assert.rejects(getCase('settings.system_contract_cas').run(ctx), (error) => error === mutationError)
   assert.equal(puts, 1, 'empty existing list must pass validation and reach the CAS update')
   assert.deepEqual(before.aiRuntime.modelHttpRetryStatusCodes, [])
+})
+
+test('chat default environment case executes the create/retain/clear wire with omit-null semantics', async () => {
+  // 测试意图：真实执行 crud.chat.default_environment（只 fake HTTP），证明它创建的 POST 请求体确实省略
+  // yoloEnabled（由服务端默认 false）并携带默认环境、省略 environmentName 的 PUT 不携带该键、显式清空携带
+  // environmentName:null，且非法值确实被发出并拒绝。
+  const fake = chatDefaultEnvironmentFixture()
+  await getCase('crud.chat.default_environment').run(fake.ctx)
+
+  const create = fake.requests.find(
+    (request) => request.method === 'POST' && request.path === '/api/ai/chats',
+  )
+  const environmentCreate = fake.requests.find(
+    (request) => request.method === 'POST' && request.path === '/api/harness/environments',
+  )
+  // 创建请求必须真的省略 yoloEnabled：只有服务端默认才产生响应里的 false。
+  assert.equal(Object.hasOwn(create.body, 'yoloEnabled'), false)
+  assert.equal(create.body.environmentName, environmentCreate.body.name)
+
+  const chatPuts = fake.requests.filter(
+    (request) => request.method === 'PUT' && request.path.startsWith('/api/ai/chats/'),
+  )
+  // 只改 title 的 PUT 省略 environmentName：键必须缺席（部分更新保留当前默认环境）。
+  assert.equal(Object.hasOwn(chatPuts[0].body, 'environmentName'), false)
+  // 显式清空：键必须存在且为 null。
+  const clear = chatPuts.find(
+    (request) => Object.hasOwn(request.body, 'environmentName') && request.body.environmentName === null,
+  )
+  assert.ok(clear, 'explicit null must appear in the PUT wire')
+  // 非法值确实被发出（而不是被 case 本地吞掉）。
+  assert.ok(chatPuts.some((request) => request.body.environmentName === 'bad/name'))
+  assert.ok(chatPuts.some((request) => /^missing-env-/.test(String(request.body.environmentName))))
 })
 
 test('run-matrix --list/--docs execute fully offline and include the new contract cases', () => {

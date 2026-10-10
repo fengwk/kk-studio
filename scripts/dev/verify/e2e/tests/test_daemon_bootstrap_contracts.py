@@ -258,7 +258,7 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertNotEqual(token_a, token_b)
 
     def test_ui_smoke_creates_agent_without_implicit_environment(self):
-        """UI smoke must verify creating a chat with an agent does not bind an implicit environment."""
+        """UI smoke must verify creating a chat with an agent does not auto-assign a default Environment."""
         ui_smoke = UI_SMOKE_MJS.read_text(encoding="utf-8")
         self.assertNotIn("选择 Environment", ui_smoke)
         self.assertIn("ui.chat.create_agent_no_implicit_environment", ui_smoke)
@@ -276,6 +276,11 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertIn("button.environment-binding-trigger", ui_smoke)
         self.assertIn("Create Chat still rendered a workspace path selector", ui_smoke)
         self.assertIn("environmentText === '未选择环境'", ui_smoke)
+        # 当前契约：Create Chat 渲染默认 Environment 选择器，并显式投影 required-nullable environmentName。
+        self.assertIn("name: '默认环境', exact: true", ui_smoke)
+        self.assertIn("created.environmentName === null", ui_smoke)
+        self.assertIn("required-nullable environmentName:null", ui_smoke)
+        # 已删除的 workspace/environment 字段仍必须被拒绝。
         self.assertIn("for (const field of ['workspacePath', 'environment', 'environmentId'])", ui_smoke)
         self.assertIn("!Object.hasOwn(created, field)", ui_smoke)
         self.assertIn("apiDeleteByName(args.backendUrl, 'chats', title)", ui_smoke)

@@ -224,10 +224,6 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           await route.fulfill({ json: { status: 200, data: [] } })
           return
         }
-        if (path === `/api/harness/threads/${VALID_THREAD_ID}/model-request-debug`) {
-          await route.fulfill({ json: { status: 200, data: null } })
-          return
-        }
         if (path === `/api/harness/environments`) {
           await route.fulfill({ json: { status: 200, data: [] } })
           return

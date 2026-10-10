@@ -17,7 +17,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
     },
     async call(method, path, body) {
       if (method === 'POST' && path === '/api/ai/chats') {
-        return { status: 201, json: { data: { id: id(1), agentName: body.agentName } } }
+        return { status: 201, json: { data: { id: id(1), agentName: body.agentName, environmentName: body.environmentName ?? null } } }
       }
       if (method === 'POST' && path === '/api/harness/command-batches') {
         assert.match(body.target.rootSettings.agentName, /^e2e-preview-missing-/)
@@ -119,6 +119,169 @@ test('readonly preview builds its local model config and cleans up a failed fixt
   assert.deepEqual(config.limit, { context: 4096, output: 128 })
   assert.ok(config.pricing)
   assert.equal(deleted, true)
+})
+
+/**
+ * 只 fake HTTP 的 Model Request Debug 后端：按当前契约建模只读 POST（草稿 model/environmentName
+ * 回显、缺失 Agent 确定性 PLANNING_FAILED 的安全空投影）与缺 model / 非 canonical environmentName
+ * 的 400、GET 的 405，用来真实执行 `thread.model_request_debug_draft_settings` case。
+ */
+function modelRequestDebugFixture() {
+  const agent = {
+    name: 'fixture-agent',
+    type: 'USER',
+    model: 'fixture-provider/fixture-model',
+    variant: 'default',
+  }
+  const model = {
+    providerName: 'fixture-provider',
+    name: 'fixture-model',
+    config: { defaultVariant: 'default' },
+    version: '1',
+  }
+  const requests = []
+  let chat = null
+  let thread = null
+  const call = async (method, path, body) => {
+    requests.push({ method, path, body })
+    const pathname = new URL(path, 'http://fixture.local').pathname
+    if (method === 'GET' && pathname === '/api/ai/catalog/agents') {
+      return { status: 200, json: { data: { results: [agent] } } }
+    }
+    if (method === 'GET' && pathname === '/api/ai/catalog/models') {
+      return { status: 200, json: { data: { results: [model] } } }
+    }
+    if (method === 'POST' && pathname === '/api/ai/chats') {
+      chat = {
+        id: id(1),
+        title: body.title,
+        agentName: body.agentName,
+        environmentName: body.environmentName ?? null,
+        yoloEnabled: body.yoloEnabled === true,
+        version: '0',
+      }
+      return { status: 201, json: { data: { ...chat } } }
+    }
+    if (method === 'POST' && pathname === '/api/harness/command-batches') {
+      assert.match(body.target.rootSettings.agentName, /^missing-debug-agent-/)
+      const { threadId, sessionId } = body.target
+      thread = {
+        threadId,
+        sessionId,
+        headEntryId: id(2),
+        parentThreadId: null,
+        name: 'main',
+        version: '1',
+        nextCommandSequence: '2',
+        status: 'IDLE',
+        processing: false,
+        executionControl: 'RUNNABLE',
+        yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+      }
+      return {
+        status: 202,
+        json: {
+          data: {
+            session: { sessionId, name: 'fixture' },
+            rootEntry: { entryId: id(2), entryType: 'ROOT', sessionId },
+            thread,
+            replayed: false,
+            acceptedCommands: body.commands.map((command, index) => ({
+              type: command.type,
+              idempotencyKey: command.idempotencyKey,
+              threadId,
+              sequence: String(index + 1),
+            })),
+          },
+        },
+      }
+    }
+    if (method === 'GET' && pathname === `/api/harness/threads/${thread.threadId}`) {
+      return {
+        status: 200,
+        json: {
+          data: {
+            thread: { ...thread },
+            entries: [],
+            queuedCommands: [],
+            modelInvocation: null,
+            toolInvocations: [],
+            modelAttemptFailures: [],
+            stopReceipts: [],
+          },
+        },
+      }
+    }
+    if (pathname === `/api/harness/threads/${thread.threadId}/model-request-debug`) {
+      if (method === 'GET') {
+        throw new HttpError(405, JSON.stringify({ message: 'Method Not Allowed' }), pathname)
+      }
+      assert.equal(method, 'POST')
+      if (body.model == null) {
+        throw new HttpError(400, JSON.stringify({ message: 'model must not be null' }), pathname)
+      }
+      if (body.environmentName != null && String(body.environmentName).includes('/')) {
+        throw new HttpError(
+          400,
+          JSON.stringify({ message: "environmentName must not contain '/'" }),
+          pathname,
+        )
+      }
+      return {
+        status: 200,
+        json: {
+          data: {
+            kind: 'NEXT_REQUEST_PREVIEW',
+            generatedAt: '2026-10-02T00:00:00Z',
+            model: body.model,
+            environmentName: body.environmentName ?? null,
+            systemInstruction: '',
+            tools: [],
+            skills: [],
+            subagents: [],
+            cacheControl: null,
+            planningError: 'PLANNING_FAILED',
+            frozenInvocation: null,
+          },
+        },
+      }
+    }
+    if (method === 'DELETE' && pathname === `/api/ai/chats/${chat.id}`) {
+      return { status: 204, json: null }
+    }
+    throw new Error(`unexpected call ${method} ${pathname}`)
+  }
+  return { ctx: { call }, requests }
+}
+
+test('model request debug case executes the draft wire and read-only invariants', async () => {
+  // 测试意图：真实执行 thread.model_request_debug_draft_settings（只 fake HTTP），证明它发送
+  // {model, environmentName:null} 草稿、GET 被 405 拒绝，并且查询前后 head/version/sequence 不变。
+  const fake = modelRequestDebugFixture()
+  await getCase('thread.model_request_debug_draft_settings').run(fake.ctx)
+
+  const debugPosts = fake.requests.filter(
+    (request) => request.method === 'POST' && request.path.endsWith('/model-request-debug'),
+  )
+  assert.ok(debugPosts.length >= 1)
+  const draft = debugPosts[0].body
+  assert.deepEqual(draft.model, {
+    providerName: 'fixture-provider',
+    modelName: 'fixture-model',
+    variant: 'default',
+  })
+  // environmentName 是 required-nullable：显式出现且为 null。
+  assert.equal(Object.hasOwn(draft, 'environmentName'), true)
+  assert.equal(draft.environmentName, null)
+  // 缺 model 与非 canonical environmentName 的拒绝请求确实被发出。
+  assert.ok(debugPosts.some((request) => request.body.model == null))
+  assert.ok(debugPosts.some((request) => request.body.environmentName === 'bad/name'))
+  assert.ok(
+    fake.requests.some(
+      (request) =>
+        request.method === 'GET' && request.path.endsWith('/model-request-debug'),
+    ),
+  )
 })
 
 test('preview trap only counts calls, retains no request material, and closes cleanly', async () => {
