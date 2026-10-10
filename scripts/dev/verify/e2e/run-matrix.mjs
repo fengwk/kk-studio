@@ -61,6 +61,8 @@ await import('./cases/thread-queued-batch.mjs')
 await import('./cases/real.mjs')
 await import('./cases/distributed.mjs')
 await import('./cases/distributed-events.mjs')
+await import('./cases/shell.mjs')
+await import('./cases/distributed-shell.mjs')
 
 class CaseContext {
   constructor({
