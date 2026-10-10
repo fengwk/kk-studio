@@ -112,3 +112,27 @@ test('run-matrix --list/--docs execute fully offline and include the new contrac
     )
   }
 })
+
+test('run-matrix drains asynchronous stdout writes before exiting the offline docs command', () => {
+  // Emulate a pipe whose writes remain queued until the next event-loop turn.
+  const bootstrap = `
+    const write = process.stdout.write.bind(process.stdout)
+    process.stdout.write = (...args) => {
+      setImmediate(() => write(...args))
+      return true
+    }
+    process.argv = [process.execPath, ${JSON.stringify(RUN_MATRIX)}, '--docs']
+    await import(${JSON.stringify(new URL('../run-matrix.mjs', import.meta.url).href)})
+  `
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], {
+    encoding: 'utf8',
+  })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stderr, '')
+  const total = result.stdout.match(/Total registered: (\d+)/)
+  assert.ok(total, 'queued stdout must include the final registered count')
+  assert.equal(
+    Number(total[1]),
+    result.stdout.split('\n').filter((line) => /^\[L\d\] /.test(line)).length,
+  )
+})
