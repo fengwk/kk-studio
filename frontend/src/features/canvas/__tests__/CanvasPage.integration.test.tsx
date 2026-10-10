@@ -150,9 +150,18 @@ describe('CanvasPage integration', () => {
 
   it('opens an existing card at its own id without creating anything', async () => {
     const user = userEvent.setup()
-    renderPage(['/canvas'])
+    const { container } = renderPage(['/canvas'])
 
-    await user.click(await screen.findByRole('button', { name: '进入画布「Research board」' }))
+    const openBtn = await screen.findByRole('button', { name: '进入画布「Research board」' })
+    // 验证画布库复用公共页面容器与局部紧凑栅格，且进入动作采用紧凑主按钮与图标。
+    expect(container.querySelector('#libraryView')).toHaveClass('screen', 'library-view', 'active')
+    expect(container.querySelector('.library-content')).toHaveClass('screen-body', 'library-content')
+    expect(container.querySelector('.resource-grid')).toHaveClass('resource-grid', 'canvas-library-grid')
+    expect(openBtn).toHaveClass('btn-primary', 'is-compact')
+    expect(openBtn).not.toHaveClass('ghost-btn')
+    expect(openBtn.querySelector('svg')).not.toBeNull()
+
+    await user.click(openBtn)
 
     await waitFor(() => expect(getCanvas).toHaveBeenCalledWith(CANVAS_ID, expect.anything()))
     expect(createCanvas).not.toHaveBeenCalled()

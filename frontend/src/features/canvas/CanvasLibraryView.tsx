@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Grid2X2 } from 'lucide-react'
+import { ArrowRight, Grid2X2 } from 'lucide-react'
 import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { createCanvas, listCanvases } from '@/shared/api/studio-service'
@@ -88,12 +88,12 @@ export function CanvasLibraryView() {
 
   return (
     <section
-      className="view library-view active"
+      className="view library-view screen active"
       id="libraryView"
       tabIndex={-1}
       aria-labelledby="libraryTitle"
     >
-      <div className="library-content">
+      <div className="screen-body library-content">
         <header className="library-heading">
           <h1 id="libraryTitle">{t('canvas.library.title')}</h1>
           <p>{t('canvas.library.description')}</p>
@@ -118,7 +118,7 @@ export function CanvasLibraryView() {
           </div>
         ) : null}
 
-        <ResourceGrid>
+        <ResourceGrid className="canvas-library-grid">
           <CreateCard
             title={t('canvas.library.createTitle')}
             subtitle={t('canvas.library.createSubtitle')}
@@ -134,12 +134,12 @@ export function CanvasLibraryView() {
               ]}
               actions={
                 <Button
-                  variant="ghost"
                   size="compact"
                   aria-label={t('canvas.library.openAria', { title: canvas.title })}
                   onClick={() => navigate(`/canvas/${canvas.id}`)}
                 >
-                  {t('canvas.library.open')}
+                  <span>{t('canvas.library.open')}</span>
+                  <ArrowRight aria-hidden="true" />
                 </Button>
               }
             />
