@@ -5033,6 +5033,170 @@ describe('AgentPane root control mounting', () => {
     expect(controlMounts.unmount).not.toHaveBeenCalled()
   })
 
+  it('restores focus to the newly mounted editor after draft acceptance via send button', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
+      acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const draftEditor = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(draftEditor, '第一句')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // draft -> bound 重新挂载后，新 editor ready 时恢复焦点
+    await waitFor(() => {
+      const boundEditor = screen.getByLabelText('给 AI 发送消息')
+      expect(document.activeElement).toBe(boundEditor)
+    })
+
+    const boundEditor = screen.getByLabelText('给 AI 发送消息')
+    // 再次键入直接进入新 editor
+    await user.type(boundEditor, '第二句')
+    expect(boundEditor).toHaveTextContent('第二句')
+  })
+
+  it('restores focus to the newly mounted editor after draft acceptance via Enter key', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
+      acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const draftEditor = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(draftEditor, '回车发送')
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => {
+      const boundEditor = screen.getByLabelText('给 AI 发送消息')
+      expect(document.activeElement).toBe(boundEditor)
+    })
+
+    const boundEditor = screen.getByLabelText('给 AI 发送消息')
+    await user.type(boundEditor, '继续键入')
+    expect(boundEditor).toHaveTextContent('继续键入')
+  })
+
+  it('does not steal focus if pane lost focus before draft acceptance finishes', async () => {
+    const user = userEvent.setup()
+    let resolveAcceptance: (value: ReturnType<typeof acceptedResponse>) => void
+    const acceptancePromise = new Promise<ReturnType<typeof acceptedResponse>>((resolve) => {
+      resolveAcceptance = resolve
+    })
+    vi.mocked(harnessService.acceptCommandBatch).mockReturnValue(
+      acceptancePromise as unknown as ReturnType<typeof harnessService.acceptCommandBatch>,
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+
+    function HarnessWithFocus({ focused }: { focused: boolean }) {
+      return (
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <button type="button">outside button</button>
+            <AgentPane
+              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              paneId="pane-1"
+              agents={agents}
+              focused={focused}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    }
+
+    const { rerender } = render(<HarnessWithFocus focused={true} />)
+    const draftEditor = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(draftEditor, '发送中')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // 在 acceptance 处理期间，用户切换了 pane / 焦点离开当前 pane
+    const outsideBtn = screen.getByRole('button', { name: 'outside button' })
+    await user.click(outsideBtn)
+    expect(outsideBtn).toHaveFocus()
+    rerender(<HarnessWithFocus focused={false} />)
+
+    // acceptance 迟到完成
+    resolveAcceptance!(acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新会话根' })))
+
+    // 验证新绑定的 editor 没有抢焦，outsideBtn 仍保持焦点
+    await waitFor(() => {
+      expect(screen.getByLabelText('给 AI 发送消息')).toBeInTheDocument()
+    })
+    expect(outsideBtn).toHaveFocus()
+    expect(screen.getByLabelText('给 AI 发送消息')).not.toHaveFocus()
+  })
+
+  it('does not steal focus from a blocking modal after draft acceptance finishes', async () => {
+    const user = userEvent.setup()
+    let resolveAcceptance: (value: ReturnType<typeof acceptedResponse>) => void
+    const acceptancePromise = new Promise<ReturnType<typeof acceptedResponse>>((resolve) => {
+      resolveAcceptance = resolve
+    })
+    vi.mocked(harnessService.acceptCommandBatch).mockReturnValue(
+      acceptancePromise as unknown as ReturnType<typeof harnessService.acceptCommandBatch>,
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+
+    function HarnessWithModal({ showModal }: { showModal: boolean }) {
+      return (
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <AgentPane
+              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              paneId="pane-1"
+              agents={agents}
+              focused
+            />
+            {showModal && (
+              <div className="modal-backdrop" role="dialog" aria-modal="true">
+                <button type="button">Modal action</button>
+              </div>
+            )}
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    }
+
+    const { rerender } = render(<HarnessWithModal showModal={false} />)
+    const draftEditor = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(draftEditor, '发送中')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // 在 acceptance 完成前，页面弹出了 blocking modal
+    rerender(<HarnessWithModal showModal={true} />)
+    const modalBtn = screen.getByRole('button', { name: 'Modal action' })
+    await user.click(modalBtn)
+    expect(modalBtn).toHaveFocus()
+
+    // acceptance 完成
+    resolveAcceptance!(acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新会话根' })))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('给 AI 发送消息')).toBeInTheDocument()
+    })
+    // 验证 blocking modal 的按钮没有失焦，页面 Composer 没有抢焦
+    expect(modalBtn).toHaveFocus()
+    expect(screen.getByLabelText('给 AI 发送消息')).not.toHaveFocus()
+  })
+
   it('resolves timeline resources through the pane blob adapter and degrades safely', async () => {
     // 资源消息的下载/预览 URL 由 pane 的适配层解析；服务端缺字段时不伪造可预览 URL。
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
