@@ -208,7 +208,8 @@ export function SyncExportModal({ items, onClose, onExported }: SyncExportModalP
             onClick={() => {
               void handleExport()
             }}
-            disabled={pending || empty}
+            disabled={empty}
+            loading={pending}
           >
             {pending ? t('settings.sync.export.exporting') : t('settings.sync.export.confirm')}
           </Button>

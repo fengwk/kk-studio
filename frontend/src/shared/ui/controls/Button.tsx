@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes } from 'react'
+import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 
 /** 设计系统按钮变体：对应既有的三类按钮视觉。 */
 export type ButtonVariant = 'primary' | 'ghost' | 'inline'
@@ -16,6 +17,12 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** danger 用于破坏性动作（配合主题的 danger 色）。 */
   danger?: boolean
   size?: ButtonSize
+  /**
+   * loading 状态：
+   * 显示匹配 currentColor 的 LoadingSpinner，设置 aria-busy="true"，
+   * 自动禁用以阻止重复点击提交，并保持原有按钮文本清晰稳定（无需替换为“...”）。
+   */
+  loading?: boolean
 }
 
 /**
@@ -26,8 +33,10 @@ export function Button({
   variant = 'primary',
   danger = false,
   size = 'normal',
+  loading = false,
   className,
   type = 'button',
+  disabled,
   children,
   ...rest
 }: ButtonProps) {
@@ -35,12 +44,23 @@ export function Button({
     VARIANT_CLASS[variant],
     danger ? 'danger' : '',
     size === 'compact' ? 'is-compact' : '',
+    loading ? 'is-loading' : '',
     className,
   ]
     .filter(Boolean)
     .join(' ')
+
+  const spinnerSize = size === 'compact' ? 14 : 16
+
   return (
-    <button type={type} className={classes} {...rest}>
+    <button
+      type={type}
+      className={classes}
+      disabled={disabled || loading}
+      aria-busy={loading ? 'true' : rest['aria-busy']}
+      {...rest}
+    >
+      {loading ? <LoadingSpinner size={spinnerSize} decorative /> : null}
       {children}
     </button>
   )

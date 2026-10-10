@@ -12,6 +12,7 @@ import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
@@ -254,7 +255,7 @@ export function EnvironmentsPage() {
         <AiNavigation />
       </nav>
       <div className="screen-body">
-        {environmentsQuery.isLoading && <StateBlock title={t('ai.environment.loading')} />}
+        {environmentsQuery.isLoading && <ResourceCardSkeleton label={t('ai.environment.loading')} />}
         {environmentsQuery.error && (
           <StateBlock
             title={
@@ -265,7 +266,8 @@ export function EnvironmentsPage() {
             tone="danger"
           />
         )}
-        <ResourceGrid>
+        {!environmentsQuery.isLoading && !environmentsQuery.error && (
+          <ResourceGrid>
           <CreateCard
             title={t('ai.environment.create')}
             subtitle={t('ai.environment.createDescription')}
@@ -396,6 +398,7 @@ export function EnvironmentsPage() {
             )
           })}
         </ResourceGrid>
+        )}
       </div>
 
       {createModalOpen && (
@@ -429,7 +432,7 @@ export function EnvironmentsPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={createMutation.isPending}
+                  loading={createMutation.isPending}
                 >
                   {t('shared.confirm')}
                 </Button>
