@@ -7,6 +7,7 @@ import { interactionService } from '@/shared/api/interaction-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { setLocale } from '@/shared/i18n'
 import { projectsApi } from '@/features/projects/projects-api'
 import type { IssueDetailDTO } from '@/features/projects/types'
 import { InteractionsPage } from './InteractionsPage'
@@ -51,11 +52,24 @@ describe('InteractionsPage', () => {
       freshnessAt: null,
     })
 
-    render(<InteractionsPage />, { wrapper })
+    const { container } = render(<InteractionsPage />, { wrapper })
 
     await waitFor(() => {
-      expect(screen.getByText('暂无待处理项')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '暂无待处理事项' })).toBeInTheDocument()
     })
+    expect(
+      screen.getByText('需要审批、补充输入或等待环境的请求会显示在这里。'),
+    ).toBeInTheDocument()
+    expect(container.querySelector('.interactions-empty-icon svg')).not.toBeNull()
+    expect(container.querySelector('.state-block')).toBeNull()
+
+    setLocale('en-US')
+    expect(await screen.findByRole('heading', { name: 'No pending interactions' })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Requests requiring your approval, input, or environment availability will appear here.',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('shows loading feedback and disables refresh until the initial read completes', async () => {
@@ -63,12 +77,14 @@ describe('InteractionsPage', () => {
     vi.spyOn(interactionService, 'listInteractions').mockReturnValue(new Promise((done) => {
       resolve = done
     }))
-    render(<InteractionsPage />, { wrapper })
+    const { container } = render(<InteractionsPage />, { wrapper })
 
-    expect(screen.getByText('正在加载资源')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载资源')
+    expect(container.querySelector('.interactions-loading-spinner.animate-spin')).not.toBeNull()
+    expect(container.querySelector('.interactions-empty-state')).toBeNull()
     expect(screen.getByRole('button', { name: '刷新' })).toBeDisabled()
     resolve({ items: [], nextCursor: null, total: 0, freshnessAt: null })
-    expect(await screen.findByText('暂无待处理项')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '暂无待处理事项' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled()
   })
 
@@ -82,17 +98,18 @@ describe('InteractionsPage', () => {
       return { items: [], nextCursor: null, total: 0, freshnessAt: null }
     })
 
-    render(<InteractionsPage />, { wrapper })
+    const { container } = render(<InteractionsPage />, { wrapper })
 
     await waitFor(() => {
       expect(screen.getByText('Network disconnected')).toBeInTheDocument()
     })
+    expect(container.querySelector('.interactions-empty-state')).toBeNull()
 
     const retryBtn = screen.getByRole('button', { name: '重试' })
     fireEvent.click(retryBtn)
 
     await waitFor(() => {
-      expect(screen.getByText('暂无待处理项')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '暂无待处理事项' })).toBeInTheDocument()
     })
     expect(listSpy).toHaveBeenCalled()
   })

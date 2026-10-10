@@ -1,5 +1,7 @@
 import {
+  CheckCircle2,
   ExternalLink,
+  LoaderCircle,
   MessageSquare,
   RotateCw,
   Workflow,
@@ -99,7 +101,14 @@ export function InteractionsPage() {
 
       <main className="interactions-page-content">
         {isLoading && items.length === 0 ? (
-          <StateBlock title={t('ai.common.loadingResources')} />
+          <div className="interactions-loading-state" role="status" aria-live="polite">
+            <LoaderCircle
+              size={20}
+              className="interactions-loading-spinner animate-spin"
+              aria-hidden="true"
+            />
+            <span>{t('ai.common.loadingResources')}</span>
+          </div>
         ) : isError && items.length === 0 ? (
           <>
             <StateBlock tone="danger" title={error?.message || t('ai.common.operationFailed')} />
@@ -108,7 +117,13 @@ export function InteractionsPage() {
             </Button>
           </>
         ) : items.length === 0 ? (
-          <StateBlock title={t('ai.interaction.empty')} />
+          <section className="interactions-empty-state" role="status">
+            <div className="interactions-empty-icon" aria-hidden="true">
+              <CheckCircle2 size={20} />
+            </div>
+            <h2 className="interactions-empty-title">{t('ai.interaction.empty')}</h2>
+            <p className="interactions-empty-description">{t('ai.interaction.emptyDescription')}</p>
+          </section>
         ) : (
           <div className="interactions-list">
             {isError ? (
