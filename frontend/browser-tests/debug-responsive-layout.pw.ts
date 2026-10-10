@@ -43,16 +43,13 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(colEvents).toBeVisible()
     await expect(colDetail).toBeVisible()
 
-    // 配置/历史不会随大屏无限增长，详情获得所有余宽。
+    // 宽面板三列等宽并排
     const boxPreview = (await colPreview.boundingBox())!
     const boxEvents = (await colEvents.boundingBox())!
     const boxDetail = (await colDetail.boundingBox())!
 
-    expect(boxPreview.width).toBeGreaterThanOrEqual(280)
-    expect(boxPreview.width).toBeLessThanOrEqual(360)
-    expect(boxEvents.width).toBeGreaterThanOrEqual(280)
-    expect(boxEvents.width).toBeLessThanOrEqual(420)
-    expect(boxDetail.width).toBeGreaterThan(1100)
+    expect(boxPreview.width).toBeCloseTo(boxEvents.width, 1)
+    expect(boxEvents.width).toBeCloseTo(boxDetail.width, 1)
     expect(boxPreview.width + boxEvents.width + boxDetail.width).toBeCloseTo((await shell.boundingBox())!.width, 0)
 
     // 4. 断言外框无纵向及横向滚动 (overflow hidden)
@@ -120,13 +117,12 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await composerInput.fill('测试任务指令')
     expect(await composerInput.inputValue()).toBe('测试任务指令')
 
-    // 8. 验证快照按钮和复制按钮存在
+    // 8. 验证快照按钮存在，复制按钮已移除
     await colPreview.evaluate((el) => { el.scrollTop = 0 })
     const snapshotBtn = page.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）', exact: true })
     await expect(snapshotBtn).toBeVisible()
     await expect(snapshotBtn).toHaveText('冻结调用输入')
-    const copyBtn = page.getByRole('button', { name: /复制系统提示词|Copy system prompt/ })
-    await expect(copyBtn).toBeVisible()
+    await expect(page.locator('.thread-debug-prompt-copy')).toHaveCount(0)
 
     // 9. 保存截图
     await colDetail.evaluate((el) => { el.scrollTop = 0 })
@@ -135,7 +131,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
   })
 
   // Case 2: 3834x681 超宽矮窗口
-  test('3834x681 ultrawide short layout: bounded side columns without squishing composer', async ({
+  test('3834x681 ultrawide short layout: three equal width columns without squishing composer', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 3834, height: 681 })
@@ -146,14 +142,13 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     const colDetail = page.locator('.thread-debug-col-detail')
     const composer = page.locator('[data-testid="pane-main-composer"]')
 
-    // 超宽屏仍保持有界侧栏，不把详情限制在三分之一。
+    // 宽屏三列等宽并排
     const boxPreview = (await colPreview.boundingBox())!
     const boxEvents = (await colEvents.boundingBox())!
     const boxDetail = (await colDetail.boundingBox())!
 
-    expect(boxPreview.width).toBe(360)
-    expect(boxEvents.width).toBe(420)
-    expect(boxDetail.width).toBeGreaterThan(3000)
+    expect(boxPreview.width).toBeCloseTo(boxEvents.width, 1)
+    expect(boxEvents.width).toBeCloseTo(boxDetail.width, 1)
 
     // 外层容器无滚动
     const shell = page.locator('.thread-events-shell')
@@ -456,6 +451,9 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(inspector).toHaveAttribute('aria-label', 'helper')
     await expect(colDetail.locator('h3')).toHaveText('helper')
     await expect(colDetail.getByText('Execution and verification helper')).toBeVisible()
+    await expect(colDetail.locator('[data-testid="subagent-tools-tags"]')).toContainText('read')
+    await expect(colDetail.locator('[data-testid="subagent-skills-tags"]')).toContainText('dev-tools/dev')
+    await expect(colDetail.locator('[data-testid="subagent-configuration-json"]')).toContainText('tools')
 
     // 按 Escape 局部关闭详情，焦点恢复至 helperBtn
     await page.keyboard.press('Escape')
@@ -531,18 +529,46 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     expect(await shell.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
   })
 
-  test('shared prompt copy writes the real Chromium clipboard and exposes temporary success', async ({ page, context }) => {
+  test('system prompt copy action is removed', async ({ page }) => {
     await page.setViewportSize({ width: 1400, height: 900 })
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto('/browser-tests/debug-harness.html')
-    const prompt = await page.locator('.thread-system-prompt-body').textContent()
-    const button = page.locator('.thread-debug-prompt-copy')
-    await expect(button).toHaveAttribute('title', '复制系统提示词')
-    await button.click()
-    await expect(button).toHaveAccessibleName('已复制')
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(prompt)
-    await expect(button).toHaveAccessibleName('复制系统提示词')
-    await expect(button).toHaveAttribute('title', '复制系统提示词')
-    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.locator('.thread-debug-prompt-copy')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /复制系统提示词|Copy system prompt/ })).toHaveCount(0)
+  })
+
+  test('390px mobile viewport: narrow layout with tabs and no horizontal overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/browser-tests/debug-harness.html')
+
+    const shell = page.locator('.thread-events-shell')
+    await expect(shell).toHaveAttribute('data-layout', 'narrow')
+    await expect(page.locator('.thread-debug-tabs')).toBeVisible()
+
+    const shellScroll = await shell.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }))
+    expect(shellScroll.scrollWidth).toBeLessThanOrEqual(shellScroll.clientWidth + 1)
+  })
+
+  test('1280px desktop viewport: wide layout with three equal width columns', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto('/browser-tests/debug-harness.html')
+
+    const shell = page.locator('.thread-events-shell')
+    await expect(shell).toHaveAttribute('data-layout', 'wide')
+    await expect(page.locator('.thread-debug-tabs')).toHaveCount(0)
+
+    const colPreview = page.locator('.thread-debug-col-preview')
+    const colEvents = page.locator('.thread-debug-col-events')
+    const colDetail = page.locator('.thread-debug-col-detail')
+
+    const boxPreview = (await colPreview.boundingBox())!
+    const boxEvents = (await colEvents.boundingBox())!
+    const boxDetail = (await colDetail.boundingBox())!
+
+    expect(boxPreview.width).toBeCloseTo(boxEvents.width, 1)
+    expect(boxEvents.width).toBeCloseTo(boxDetail.width, 1)
+    expect(boxPreview.width + boxEvents.width + boxDetail.width).toBeCloseTo((await shell.boundingBox())!.width, 0)
   })
 })

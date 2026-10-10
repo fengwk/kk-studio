@@ -125,8 +125,22 @@ function createDebugData(): ThreadModelRequestDebugData {
       },
     ],
     subagents: [
-      { name: 'helper', description: 'Execution and verification helper' },
-      { name: 'explorer', description: 'Workspace code inspection and tracing' },
+      {
+        name: 'helper',
+        description: 'Execution and verification helper',
+        tools: ['read'],
+        skills: [{ packageName: 'dev-tools', name: 'dev' }],
+        subagents: [],
+        configurationJson: '{"tools":["read"]}',
+      },
+      {
+        name: 'explorer',
+        description: 'Workspace code inspection and tracing',
+        tools: [],
+        skills: [],
+        subagents: [],
+        configurationJson: null,
+      },
     ],
     cacheControl: {
       retention: 'SHORT',

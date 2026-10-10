@@ -1248,14 +1248,6 @@ export const aiCatalog = {
     'en-US': 'Variant options',
     'zh-CN': 'Variant 选项',
   },
-  'ai.runtime.composer.settingsDraftLabel': {
-    'en-US': 'Draft',
-    'zh-CN': '草稿',
-  },
-  'ai.runtime.composer.settingsDraftTitle': {
-    'en-US': 'This selection is a draft and takes effect when you send your next message.',
-    'zh-CN': '当前选择为草稿，发送下一条消息时生效。',
-  },
   'ai.runtime.composer.settingsPendingLabel': {
     'en-US': 'Pending',
     'zh-CN': '待生效',
@@ -2164,18 +2156,6 @@ export const aiCatalog = {
     'en-US': 'Debug views',
     'zh-CN': '调试视图',
   },
-  'ai.runtime.debug.previewTitle': {
-    'en-US': 'Preview current draft',
-    'zh-CN': '预览当前草稿',
-  },
-  'ai.runtime.debug.currentPlanningTitle': {
-    'en-US': 'Current planning',
-    'zh-CN': '当前规划',
-  },
-  'ai.runtime.debug.inspectActions': {
-    'en-US': 'Inspect',
-    'zh-CN': '检查操作',
-  },
   'ai.runtime.debug.plannedToolEnvironment': {
     'en-US': 'Currently planned tool environment',
     'zh-CN': '当前规划的工具环境',
@@ -2199,22 +2179,6 @@ export const aiCatalog = {
   'ai.runtime.debug.requestSnapshotTitle': {
     'en-US': 'View frozen canonical ProviderRequest for current invocation (not raw HTTP wire payload)',
     'zh-CN': '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）',
-  },
-  'ai.runtime.debug.copyPrompt': {
-    'en-US': 'Copy Prompt',
-    'zh-CN': '复制提示词',
-  },
-  'ai.runtime.debug.copyPromptTitle': {
-    'en-US': 'Copy system prompt',
-    'zh-CN': '复制系统提示词',
-  },
-  'ai.runtime.debug.copied': {
-    'en-US': 'Copied',
-    'zh-CN': '已复制',
-  },
-  'ai.runtime.debug.copyFailed': {
-    'en-US': 'Copy failed',
-    'zh-CN': '复制失败',
   },
   'ai.runtime.debug.planningError': {
     'en-US': 'Planning Error',
@@ -2289,8 +2253,8 @@ export const aiCatalog = {
     'zh-CN': '缓存',
   },
   'ai.runtime.debug.cacheRetention.none': {
-    'en-US': 'No cache',
-    'zh-CN': '无缓存',
+    'en-US': 'No explicit cache control',
+    'zh-CN': '无显式缓存控制',
   },
   'ai.runtime.debug.cacheRetention.short': {
     'en-US': 'Short (SHORT)',
@@ -2437,8 +2401,24 @@ export const aiCatalog = {
     'zh-CN': '会话缓存键',
   },
   'ai.runtime.debug.inspector.cacheProviderDisclaimer': {
-    'en-US': 'Provider automatic caching is not guaranteed',
-    'zh-CN': '不保证 Provider 自动缓存',
+    'en-US': 'No explicit cache control; provider may still cache automatically',
+    'zh-CN': '无显式缓存控制，Provider 仍可能自动缓存',
+  },
+  'ai.runtime.debug.inspector.subagentTools': {
+    'en-US': 'Tools',
+    'zh-CN': '工具',
+  },
+  'ai.runtime.debug.inspector.subagentSkills': {
+    'en-US': 'Skills',
+    'zh-CN': '技能',
+  },
+  'ai.runtime.debug.inspector.subagentSubagents': {
+    'en-US': 'Subagents',
+    'zh-CN': 'Subagents',
+  },
+  'ai.runtime.debug.inspector.subagentConfigurationJson': {
+    'en-US': 'Configuration JSON:',
+    'zh-CN': '配置 JSON：',
   },
   'ai.runtime.debug.noFrozenInvocation': {
     'en-US': 'No corresponding model invocation is currently readable. Frozen input is no longer available after the invocation is materialized and cleaned up.',

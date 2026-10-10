@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
-import { Button } from '@/shared/ui/controls/Button'
-import '@/features/ai/runtime/thread-panel/debug-view-toolbar.css'
 import {
   ThreadEventView,
   useThreadPanelViewState,
@@ -13,6 +11,7 @@ import type { ThreadPaneLabels } from '@/features/ai/runtime/ThreadPane'
 import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { HarnessModelRequestDebugRequestDTO } from '@/shared/api/contracts/ai-runtime'
 
 /**
  * Bound Thread 只读视图需要的投影字段；生产 root/readOnly 都传入完整 {@link ThreadProjection}
@@ -31,10 +30,11 @@ export interface BoundThreadPreviewOptions {
    * 与预览结果。缺省时回退到真实 threadId（已绑定 Thread 与只读查看的唯一身份）。
    */
   viewKey?: string
-  onPreview?: () => void
-  previewLoading?: boolean
-  previewDisabled?: boolean
-  previewDisabledReason?: string | null
+  /**
+   * 当前界面草稿选中的 model / environment；由根控制面传入，使 Debug 预览按界面当前选择
+   * 请求服务端只读规划，不要求先行持久化分支设置。缺省时回退到 Thread branchSettings。
+   */
+  debugSettings?: HarnessModelRequestDebugRequestDTO | null
   previewError?: string | null
   historyLoading?: boolean
   historyError?: string | null
@@ -59,11 +59,37 @@ export function useBoundThreadPanelViews(
     initialEventsScrollTop,
   } = useThreadPanelViewState(viewKey, controller.bodyRef, controller.events)
 
+  const rawDebugSettings = previewOptions?.debugSettings !== undefined
+    ? previewOptions.debugSettings
+    : controller.thread?.branchSettings
+  const debugModelProvider = rawDebugSettings?.model?.providerName ?? null
+  const debugModelName = rawDebugSettings?.model?.modelName ?? null
+  const debugModelVariant = rawDebugSettings?.model?.variant ?? ''
+  const debugEnvironmentName = rawDebugSettings?.environmentName ?? null
+
+  const debugRequest = useMemo<HarnessModelRequestDebugRequestDTO | null>(() => {
+    if (!debugModelProvider || !debugModelName) {
+      return null
+    }
+    return {
+      model: {
+        providerName: debugModelProvider,
+        modelName: debugModelName,
+        variant: debugModelVariant,
+      },
+      environmentName: debugEnvironmentName,
+    }
+  }, [debugModelProvider, debugModelName, debugModelVariant, debugEnvironmentName])
+
   // Debug 请求投影的读取身份：调用 id/phase/requestHead、head 与规划 settings/目录事实。
   // working 一直为 true 的连续 model -> tool -> 下一 model 期间，调用身份已经改变，
   // 因此 revision 必须由这些事实构成，而不是 working 的一次 true/false。
   const debugRevision = useMemo(() => {
     const settings = controller.thread?.branchSettings
+    const model = debugRequest?.model ?? settings?.model
+    const environmentName = debugRequest !== null
+      ? debugRequest.environmentName
+      : (settings?.environmentName ?? null)
     const catalog = controller.models
       .map((item) => `${item.providerName}/${item.name}`)
       .join(',')
@@ -76,21 +102,21 @@ export function useBoundThreadPanelViews(
       controller.modelInvocation?.id ?? '',
       controller.modelInvocation?.status ?? '',
       controller.modelInvocation?.requestHeadEntryId ?? '',
-      settings?.model?.providerName ?? '',
-      settings?.model?.modelName ?? '',
-      settings?.model?.variant ?? '',
+      model?.providerName ?? '',
+      model?.modelName ?? '',
+      model?.variant ?? '',
       settings?.agentName ?? '',
       settings?.goal?.id ?? '',
-      settings?.environmentName ?? '',
+      environmentName ?? '',
       catalog,
     ].join('|')
-  }, [controller.modelInvocation, controller.thread, controller.models, viewKey])
+  }, [controller.modelInvocation, controller.thread, controller.models, debugRequest, viewKey])
 
   const {
     debug,
     loading: debugLoading,
     error: debugError,
-  } = useModelRequestDebug(threadId, mode === 'debug', debugRevision)
+  } = useModelRequestDebug(threadId, mode === 'debug', debugRevision, debugRequest)
   const historicalPreview = useHistoricalRequestPreview(controller.sessionId, viewKey)
   const lastSelectedRef = useRef(selectedEventId)
   useEffect(() => {
@@ -130,79 +156,43 @@ export function useBoundThreadPanelViews(
     selectedEventId == null
       ? null
       : (controller.events.find((event) => event.id === selectedEventId) ?? null)
-  // 本地分支草稿没有可读取的 per-thread Debug 投影，预览入口因此不在请求预览面板里；
-  // 由 Debug 工具条提供与绑定 Thread 同名的「下一次请求预览」触发点，走同一份
-  // previewOptions（会话级 branch preview，不创建 Thread）。绑定 Thread 仍只由面板内的
-  // 标题按钮触发，避免出现两个入口。
-  const draftPreviewTrigger = threadId === '' && previewOptions?.onPreview != null
-  const previewTitle = t('ai.runtime.debug.previewTitle')
-  const previewDisabledReason = previewOptions?.previewDisabledReason ?? null
-  const previewTriggerLabel = previewOptions?.previewLoading
-    ? t('ai.runtime.composer.previewLoading')
-    : previewDisabledReason
-      ? `${previewTitle} (${previewDisabledReason})`
-      : previewTitle
   const mainView: ThreadPanelMainView = {
     debug:
       mode === 'debug' ? (
-        <>
-          {/* 控制区保持挂载但隐藏；退出只切换视图，不修改草稿或 pane 绑定。 */}
-          {draftPreviewTrigger ? <div className="thread-debug-toolbar">
-              <Button
-                variant="ghost"
-                size="compact"
-                className="thread-debug-preview"
-                disabled={
-                  previewOptions?.previewDisabled
-                  || previewOptions?.previewLoading
-                  || previewOptions?.onPreview == null
-                }
-                aria-label={previewTriggerLabel}
-                title={previewTriggerLabel}
-                onClick={() => previewOptions?.onPreview?.()}
-              >
-                <span>{previewTitle}</span>
-              </Button>
-          </div> : null}
-          <ThreadEventView
-            events={controller.events}
-            historyLoading={previewOptions?.historyLoading}
-            historyError={previewOptions?.historyError}
-            onRetryHistory={previewOptions?.onRetryHistory}
-            selectedEventId={selectedEventId}
-            onSelectedEventIdChange={(id) => {
-              if (id != null) {
-                setDebugSelection(null)
-              }
-              selectEvent(id)
-            }}
-            bodyRef={eventsBodyRef}
-            initialScrollTop={initialEventsScrollTop}
-            debug={debug}
-            debugLoading={debugLoading}
-            debugError={debugError ? t('ai.runtime.debug.previewLoadFailed') : null}
-            debugSelection={debugSelection}
-            onSelectInspector={(selection) => {
-              historicalPreview.dismiss()
-              if (selection != null) {
-                selectEvent(null)
-              }
-              setDebugSelection(selection)
-            }}
-            onPreview={previewOptions?.onPreview}
-            previewLoading={previewOptions?.previewLoading}
-            previewDisabled={previewOptions?.previewDisabled}
-            previewDisabledReason={previewOptions?.previewDisabledReason}
-            previewError={previewOptions?.previewError}
-            historicalPreview={historicalPreview.preview}
-            historicalPreviewLoading={historicalPreview.loading}
-            historicalPreviewError={
-              historicalPreview.error ? t('ai.runtime.debug.previewFailed') : null
+        <ThreadEventView
+          events={controller.events}
+          historyLoading={previewOptions?.historyLoading}
+          historyError={previewOptions?.historyError}
+          onRetryHistory={previewOptions?.onRetryHistory}
+          selectedEventId={selectedEventId}
+          onSelectedEventIdChange={(id) => {
+            if (id != null) {
+              setDebugSelection(null)
             }
-            onRequestHistoricalPreview={historicalPreview.request}
-            onDismissHistoricalPreview={historicalPreview.dismiss}
-          />
-        </>
+            selectEvent(id)
+          }}
+          bodyRef={eventsBodyRef}
+          initialScrollTop={initialEventsScrollTop}
+          debug={debug}
+          debugLoading={debugLoading}
+          debugError={debugError ? t('ai.runtime.debug.previewLoadFailed') : null}
+          debugSelection={debugSelection}
+          onSelectInspector={(selection) => {
+            historicalPreview.dismiss()
+            if (selection != null) {
+              selectEvent(null)
+            }
+            setDebugSelection(selection)
+          }}
+          previewError={previewOptions?.previewError}
+          historicalPreview={historicalPreview.preview}
+          historicalPreviewLoading={historicalPreview.loading}
+          historicalPreviewError={
+            historicalPreview.error ? t('ai.runtime.debug.previewFailed') : null
+          }
+          onRequestHistoricalPreview={historicalPreview.request}
+          onDismissHistoricalPreview={historicalPreview.dismiss}
+        />
       ) : undefined,
   }
   return {

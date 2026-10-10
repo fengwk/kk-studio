@@ -3,6 +3,7 @@ import type {
   DecimalLong,
   InstantTimestamp,
 } from '@/shared/api/contracts/base'
+import type { SkillRefDTO } from '@/shared/api/contracts/ai-catalog'
 
 /**
  * 冻结进 branch settings 快照的不可变 provider/model/variant 选择。
@@ -99,10 +100,22 @@ export interface HarnessModelRequestDebugSkillDTO {
   promptXml: string
 }
 
-/** subagent allowlist 元素。 */
+/** subagent allowlist 元素：binding 事实与目标 Agent 当前配置声明。 */
 export interface HarnessModelRequestDebugSubagentDTO {
   name: string
   description: string
+  tools: string[]
+  skills: SkillRefDTO[]
+  subagents: string[]
+  configurationJson: string
+}
+
+/**
+ * Model Request Debug 的请求预览入参。
+ */
+export interface HarnessModelRequestDebugRequestDTO {
+  model: HarnessModelSelectionDTO
+  environmentName: string | null
 }
 
 /** Provider cache control 事实。 */

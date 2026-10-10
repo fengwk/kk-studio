@@ -155,11 +155,17 @@ describe('harnessService', () => {
     const http = createClient()
     const service = createHarnessService(http)
 
-    await service.getModelRequestDebug('thread /1')
+    await service.getModelRequestDebug('thread /1', {
+      model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+      environmentName: 'dev-node',
+    })
     await service.setThreadYolo('thread /1', { yoloEnabled: true })
     await service.stopThread('thread /1', { stopRequestId: 'req-1', expectedVersion: '2' })
 
-    expect(http.get).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/model-request-debug')
+    expect(http.post).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/model-request-debug', {
+      model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+      environmentName: 'dev-node',
+    })
     expect(http.put).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/yolo', {
       yoloEnabled: true,
     })
