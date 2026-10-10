@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -24,6 +25,9 @@ public final class DaemonIdeStreamCodec {
 
   /** 单个二进制帧载荷上限（帧头不计）。 */
   public static final int MAX_PAYLOAD_BYTES = 65536;
+
+  /** 单条文本控制帧 UTF-8 字节上限（与 Node peer 一致）。 */
+  public static final int MAX_TEXT_FRAME_BYTES = 16 * 1024;
 
   private static final byte FLAG_HTTP_BODY = 1;
   private static final byte FLAG_HTTP_END = 2;
@@ -69,6 +73,10 @@ public final class DaemonIdeStreamCodec {
   }
 
   public IdeStreamControlFrame decodeControl(String json) {
+    Objects.requireNonNull(json, "json");
+    if (json.getBytes(StandardCharsets.UTF_8).length > MAX_TEXT_FRAME_BYTES) {
+      throw new DaemonProtocolException("stream control frame exceeds control message limit");
+    }
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
