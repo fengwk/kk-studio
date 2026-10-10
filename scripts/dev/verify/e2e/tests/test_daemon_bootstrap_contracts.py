@@ -106,7 +106,10 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
                 "from pathlib import Path\n"
                 'Path(os.environ["PROBE_ARGV"]).write_text("\\n".join(sys.argv[1:]))\n'
                 'Path(os.environ["PROBE_ENVIRON"]).write_text(json.dumps({\n'
-                '    "prompt": os.environ.get("PS1"),\n'
+                '    "promptConfigured": os.environ.get("PS1") == "KKS_E2E_READY",\n'
+                '    "historyDisabled": os.environ.get("HISTFILE") == "/dev/null",\n'
+                '    "inputrcDisabled": os.environ.get("INPUTRC") == "/dev/null",\n'
+                '    "promptCommandEmpty": os.environ.get("PROMPT_COMMAND") == "",\n'
                 '    "tokenPresent": "DAEMON_REGISTRATION_TOKEN" in os.environ,\n'
                 '    "legacyTokenPresent": "KK_STUDIO_DAEMON_REGISTRATION_TOKEN" in os.environ,\n'
                 "}))\n"
@@ -149,7 +152,10 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
             recorded_environment = json.loads(environ_file.read_text())
             self.assertFalse(recorded_environment["tokenPresent"])
             self.assertFalse(recorded_environment["legacyTokenPresent"])
-            self.assertEqual("KKS_E2E_READY", recorded_environment["prompt"])
+            self.assertTrue(recorded_environment["promptConfigured"])
+            self.assertTrue(recorded_environment["historyDisabled"])
+            self.assertTrue(recorded_environment["inputrcDisabled"])
+            self.assertTrue(recorded_environment["promptCommandEmpty"])
             self.assertNotIn(secret, result.stdout + result.stderr)
             self.assertNotIn(secret, config_path.read_text())
 

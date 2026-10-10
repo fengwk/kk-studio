@@ -464,7 +464,9 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `shell.interactive_pty`（`requires=tools`，L3）：在 READY tool 环境经同一条 `/api/events/v1`
   承载 `{version:2,type:"shell.command",command:<TerminalCommand>}`，驱动真实 PTY 的
   OPEN/CLAIM/INPUT/RESIZE/VIEW_APPLIED/CLOSE。隔离 bootstrap 将终端配置为不读取 profile/rc 的
-  Bash，工作目录为该测试 Daemon 的私有目录，不继承宿主 `$SHELL` 或个人提示符配置。
+  Bash，禁用个人 INPUTRC/PROMPT_COMMAND 与 shell 历史文件并提供确定性提示符，工作目录为该测试 Daemon 的
+  私有目录，不继承宿主 `$SHELL`。普通命令输入前先观察 shell 已完成初始化并显示提示符，
+  不把空白 RESET 或 `WRITTEN` 当成 shell 就绪。
   首个结构化 RESET 未 `VIEW_APPLIED` 前
   `CLAIM` 必须 `VIEW_NOT_APPLIED`；`INPUT` 以随机哨兵整行比对（绝不做子串，避免命令行回显假阳性）；
   `RESIZE` 的 `OP_ACK` 后必须收到新尺寸 RESET；`Ctrl-C` 后观察本次前台任务结束才会出现的独立

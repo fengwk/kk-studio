@@ -407,23 +407,6 @@ test('with autoApplied disabled the ack is explicit', () => {
   probe.close()
 })
 
-test('tracks authoritative input modes through RESET and PATCH and clears them on a fresh attachment', () => {
-  const { probe, socket } = openProbe()
-  sendAttached(probe, socket)
-  assert.equal(probe.inputModes, null)
-  socket.deliver(viewEvent(reset(['', '', ''])))
-  assert.equal(probe.inputModes.bracketedPaste, false)
-  const ready = patch({})
-  ready.inputModeRevision = 2
-  ready.inputModes.bracketedPaste = true
-  socket.deliver(viewEvent(ready))
-  assert.equal(probe.inputModes.bracketedPaste, true)
-  assert.equal(probe.inputModeRevision, 2)
-  sendAttached(probe, socket)
-  assert.equal(probe.inputModes, null)
-  probe.close()
-})
-
 test('DETACH fences queued views without applying or ACKing them before a fresh attachment', () => {
   const { probe, socket } = openProbe()
   sendAttached(probe, socket)

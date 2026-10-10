@@ -63,4 +63,5 @@ fs.writeFileSync(target, JSON.stringify(config) + "\n", { mode: 0o600 });' "$con
 chmod 600 "$config_file"
 unset DAEMON_CONFIG_STUDIO_URL DAEMON_CONFIG_NOTE
 
-PS1=KKS_E2E_READY exec "$java_bin" -jar "$jar" --config "$config_file"
+HISTFILE=/dev/null INPUTRC=/dev/null PROMPT_COMMAND= PS1=KKS_E2E_READY \
+  exec "$java_bin" -jar "$jar" --config "$config_file"
