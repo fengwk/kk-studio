@@ -535,7 +535,7 @@ describe('ThreadEventView', () => {
           requestJson: '{"model":"minimax"}',
         },
       })
-      const view = (selection: DebugInspectorSelection | null, error: string | null = null) => (
+      const view = (selection: DebugInspectorSelection | null) => (
         <ThreadEventView
           events={[]}
           selectedEventId={null}
@@ -543,7 +543,6 @@ describe('ThreadEventView', () => {
           debug={debug}
           debugSelection={selection}
           onSelectInspector={onSelectInspector}
-          previewError={error}
         />
       )
       const { rerender } = render(view(null))
@@ -552,10 +551,6 @@ describe('ThreadEventView', () => {
       const detailTab = screen.getByRole('tab', { name: '详情' })
       await user.click(previewTab)
       const frozenTrigger = screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' })
-      rerender(view(null, '请求预览失败'))
-      expect(screen.getByRole('alert')).toHaveTextContent('请求预览失败')
-      expect(previewTab).toHaveAttribute('aria-selected', 'true')
-      expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
 
       // 点击冻结调用触发器并由上级更新 selection。
       await user.click(frozenTrigger)

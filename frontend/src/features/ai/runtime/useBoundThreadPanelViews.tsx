@@ -35,7 +35,6 @@ export interface BoundThreadPreviewOptions {
    * 请求服务端只读规划，不要求先行持久化分支设置。缺省时回退到 Thread branchSettings。
    */
   debugSettings?: HarnessModelRequestDebugRequestDTO | null
-  previewError?: string | null
   historyLoading?: boolean
   historyError?: string | null
   onRetryHistory?: () => void
@@ -184,7 +183,6 @@ export function useBoundThreadPanelViews(
             }
             setDebugSelection(selection)
           }}
-          previewError={previewOptions?.previewError}
           historicalPreview={historicalPreview.preview}
           historicalPreviewLoading={historicalPreview.loading}
           historicalPreviewError={
