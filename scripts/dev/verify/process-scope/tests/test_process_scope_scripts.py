@@ -12,8 +12,17 @@ import unittest
 from pathlib import Path
 
 PACKAGE = "fun.fengwk.kkstudio.harness.daemon.coding"
+DAEMON_PACKAGE = "fun.fengwk.kkstudio.harness.daemon"
 PROCESS_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.process"
 TERMINAL_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.terminal"
+# Daemon 运行时协议/生命周期与真实 server 桥接集成测试位于 daemon 根包；它们不属于 coding 子包。
+DAEMON_CLASSES = frozenset(
+    {
+        "DaemonRuntimeTest",
+        "DaemonRuntimeShellTest",
+        "DaemonTerminalServerIntegrationTest",
+    }
+)
 # 进程基座类已经整体迁到 daemon.process；终端内核与 launch 规格在 daemon.terminal；其余被选中的类仍在 daemon.coding。
 PROCESS_CLASSES = frozenset(
     {
@@ -47,6 +56,8 @@ TERMINAL_CLASSES = frozenset(
 
 
 def package_of(class_name):
+    if class_name in DAEMON_CLASSES:
+        return DAEMON_PACKAGE
     if class_name in PROCESS_CLASSES:
         return PROCESS_PACKAGE
     if class_name in TERMINAL_CLASSES:
@@ -87,6 +98,9 @@ SELECTED_CLASSES = (
     "TerminalRuntimeRealPtyTest",
     "TerminalWriterTest",
     "TerminalCoordinatorTest",
+    "DaemonRuntimeTest",
+    "DaemonRuntimeShellTest",
+    "DaemonTerminalServerIntegrationTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -221,6 +235,17 @@ TERMINAL_COORDINATOR_CASES = (
     "staleGenerationReceiveHasNoSideEffect",
     "snapshotFailureEmitsFixedErrorAndRejectsLaterAttach",
 )
+# Daemon 运行时生命周期与真实 server 协议桥接：无平台前置条件，三平台都必须真跑且不得跳过。
+DAEMON_SHELL_CASES = (
+    "bindGateHoldsReadyUntilBindCompletes",
+    "bindBackpressureClosesHandshakeAndRecovers",
+    "staleWelcomeDoesNotOverwriteNewBinding",
+    "readySendFailureClosesHandshakeAndReconnects",
+    "mailboxOverflowEmitsBackpressureNotExecuted",
+    "shutdownFailureIsExplicitAndConvergesResources",
+    "concurrentCloseIsIdempotent",
+)
+DAEMON_INTEGRATION_CASES = ("fullShellLifecycleOverRealServerAndPty",)
 CORE_CLASSES = (
     "ProcessScope",
     "ProcessScopeHelper",
@@ -320,6 +345,10 @@ def write_complete_reports(
             cases = TERMINAL_WRITER_CASES
         elif class_name == "TerminalCoordinatorTest":
             cases = TERMINAL_COORDINATOR_CASES + ("someOtherCoordinatorCase",)
+        elif class_name == "DaemonRuntimeShellTest":
+            cases = DAEMON_SHELL_CASES + ("someOtherShellCase",)
+        elif class_name == "DaemonTerminalServerIntegrationTest":
+            cases = DAEMON_INTEGRATION_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -593,6 +622,23 @@ class AssertSurefireReportsTest(unittest.TestCase):
     def test_every_platform_requires_the_terminal_reports(self):
         """每条矩阵腿都必须包含终端基座报告，视图流也不能漏跑。"""
         for class_name in sorted(TERMINAL_CLASSES):
+            for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
+                with self.subTest(class_name=class_name, os_label=os_label):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        (reports / f"TEST-{package_of(class_name)}.{class_name}.xml").unlink()
+                        result = run_script("assert-surefire-reports.py", reports, os_label)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(
+                            f"{class_name}: missing surefire report on {os_label}",
+                            result.stdout,
+                        )
+
+    def test_every_platform_requires_the_daemon_root_package_reports(self):
+        """daemon 根包（运行时生命周期与真实 server 桥接）报告必须在每条腿出现，且 package_of 不能落 coding。"""
+        for class_name in sorted(DAEMON_CLASSES):
+            self.assertEqual(DAEMON_PACKAGE, package_of(class_name))
             for os_label in ("ubuntu-latest", "macos-latest", "windows-latest"):
                 with self.subTest(class_name=class_name, os_label=os_label):
                     with tempfile.TemporaryDirectory() as tmp:

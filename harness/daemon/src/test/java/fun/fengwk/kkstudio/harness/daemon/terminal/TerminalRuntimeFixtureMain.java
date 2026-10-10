@@ -32,14 +32,14 @@ import java.util.regex.Pattern;
 public final class TerminalRuntimeFixtureMain {
 
   /** 自然退出与输出回传的固定标记。 */
-  static final String MARKER = "__TTY_RUNTIME_FIXTURE__";
+  public static final String MARKER = "__TTY_RUNTIME_FIXTURE__";
 
   private static final long HOLD_MILLIS = 600_000L;
 
   private TerminalRuntimeFixtureMain() {}
 
   /** 构造运行本夹具的 argv（测试用）：同一 JVM 与类路径，并转发父进程的覆盖率代理。 */
-  static List<String> fixtureCommand(String... arguments) {
+  public static List<String> fixtureCommand(String... arguments) {
     List<String> command = new ArrayList<>();
     command.add(javaBinary());
     command.addAll(forwardedCoverageArguments());
