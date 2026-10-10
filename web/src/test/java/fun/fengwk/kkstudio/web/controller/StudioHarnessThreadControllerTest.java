@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -50,6 +51,7 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugServic
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.AgentSkillReferenceDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
@@ -266,15 +268,23 @@ class StudioHarnessThreadControllerTest {
   }
 
   /**
-   * 意图：验证 GET /api/harness/threads/{threadId}/model-request-debug 只读转发到结构化 Debug 服务并按 DTO 契约序列化
-   * （required-nullable 字段显式发射 null），且绝不触碰 HarnessRuntime（无任何写入/控制面副作用）。
+   * 意图：POST /api/harness/threads/{threadId}/model-request-debug 以请求体草稿 model/environment 只读转发到结构化
+   * Debug 服务并按 DTO 契约序列化（required-nullable 字段显式发射 null），且绝不触碰 HarnessRuntime（无任何写入/控制面副作用）。
    */
   @Test
   void modelRequestDebugReturnsStructuredPreviewWithoutTouchingRuntime() throws Exception {
-    when(modelRequestDebugService.getModelRequestDebug(id(1))).thenReturn(sampleDebug());
+    ModelSelection draftModel =
+        new ModelSelection("draft-provider", "draft-model", "draft-variant");
+    when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, "env-c"))
+        .thenReturn(sampleDebug());
 
     mockMvc
-        .perform(get("/api/harness/threads/" + idText(1) + "/model-request-debug"))
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"draft-provider\",\"modelName\":\"draft-model\","
+                        + "\"variant\":\"draft-variant\"},\"environmentName\":\"env-c\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.kind").value("NEXT_REQUEST_PREVIEW"))
         .andExpect(jsonPath("$.data.model.providerName").value("provider"))
@@ -292,6 +302,11 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.skills[0].delivery").value("PLATFORM"))
         .andExpect(jsonPath("$.data.skills[0].observedHeadCommit").value(nullValue()))
         .andExpect(jsonPath("$.data.subagents[0].name").value("coder"))
+        .andExpect(jsonPath("$.data.subagents[0].tools[0]").value("read"))
+        .andExpect(jsonPath("$.data.subagents[0].skills[0].packageName").value("pkg"))
+        .andExpect(jsonPath("$.data.subagents[0].subagents[0]").value("nested"))
+        .andExpect(
+            jsonPath("$.data.subagents[0].configurationJson").value("{\"tools\":[\"read\"]}"))
         .andExpect(jsonPath("$.data.cacheControl.retention").value("NONE"))
         .andExpect(jsonPath("$.data.cacheControl.key").value(nullValue()))
         .andExpect(jsonPath("$.data.cacheControl.affinityKey").doesNotExist())
@@ -305,17 +320,77 @@ class StudioHarnessThreadControllerTest {
     frozenInvocation.setKind("FROZEN_INVOCATION");
     frozenInvocation.setRequestJson("{\"model\":\"wire-model\"}");
     frozen.setFrozenInvocation(frozenInvocation);
-    when(modelRequestDebugService.getModelRequestDebug(id(1))).thenReturn(frozen);
+    when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, "env-c"))
+        .thenReturn(frozen);
 
     mockMvc
-        .perform(get("/api/harness/threads/" + idText(1) + "/model-request-debug"))
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"draft-provider\",\"modelName\":\"draft-model\","
+                        + "\"variant\":\"draft-variant\"},\"environmentName\":\"env-c\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.frozenInvocation.kind").value("FROZEN_INVOCATION"))
         .andExpect(
             jsonPath("$.data.frozenInvocation.requestJson").value("{\"model\":\"wire-model\"}"));
 
-    verify(modelRequestDebugService, times(2)).getModelRequestDebug(id(1));
+    verify(modelRequestDebugService, times(2)).getModelRequestDebug(id(1), draftModel, "env-c");
     // Debug 是纯查询：Controller 不得调用任何 Runtime 控制面方法。
+    verifyNoInteractions(runtime);
+  }
+
+  /** 意图：缺省 environmentName 表示未选择 Environment，服务收到显式 null；模型选择仍走 canonical 校验。 */
+  @Test
+  void modelRequestDebugForwardsMissingEnvironmentAsNull() throws Exception {
+    ModelSelection draftModel = new ModelSelection("provider", "model", "default");
+    when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, null))
+        .thenReturn(sampleDebug());
+
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
+                        + "\"variant\":\"default\"}}"))
+        .andExpect(status().isOk());
+
+    verify(modelRequestDebugService).getModelRequestDebug(id(1), draftModel, null);
+    verifyNoInteractions(runtime);
+  }
+
+  /** 意图：非法 model（空白字段）/非法 environment（含 '/'）与未知字段都在到达 Debug 服务前以 400 拒绝。 */
+  @Test
+  void modelRequestDebugRejectsInvalidBodyBeforeReachingTheService() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"\",\"modelName\":\"model\","
+                        + "\"variant\":\"default\"}}"))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
+                        + "\"variant\":\"default\"},\"environmentName\":\"bad/name\"}"))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
+                        + "\"variant\":\"default\"},\"bogus\":1}"))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(modelRequestDebugService);
     verifyNoInteractions(runtime);
   }
 
@@ -323,8 +398,24 @@ class StudioHarnessThreadControllerTest {
   @Test
   void modelRequestDebugRejectsNonCanonicalThreadId() throws Exception {
     mockMvc
-        .perform(get("/api/harness/threads/not-a-uuid/model-request-debug"))
+        .perform(
+            post("/api/harness/threads/not-a-uuid/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
+                        + "\"variant\":\"default\"}}"))
         .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(modelRequestDebugService);
+    verifyNoInteractions(runtime);
+  }
+
+  /** 意图：旧的 GET 入口已彻底移除，不再作为兼容别名存在。 */
+  @Test
+  void modelRequestDebugGetIsNoLongerAvailable() throws Exception {
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(1) + "/model-request-debug"))
+        .andExpect(status().isMethodNotAllowed());
 
     verifyNoInteractions(modelRequestDebugService);
     verifyNoInteractions(runtime);
@@ -333,11 +424,17 @@ class StudioHarnessThreadControllerTest {
   /** 意图：缺失 Thread 的 typed 异常保持 404 翻译，Debug 服务不额外发明错误语义。 */
   @Test
   void modelRequestDebugMapsMissingThreadToNotFound() throws Exception {
-    when(modelRequestDebugService.getModelRequestDebug(id(1)))
+    ModelSelection draftModel = new ModelSelection("provider", "model", "default");
+    when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, null))
         .thenThrow(new HarnessRuntimeNotFoundException("thread is missing"));
 
     mockMvc
-        .perform(get("/api/harness/threads/" + idText(1) + "/model-request-debug"))
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/model-request-debug")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
+                        + "\"variant\":\"default\"}}"))
         .andExpect(status().isNotFound());
 
     verifyNoInteractions(runtime);
@@ -380,6 +477,13 @@ class StudioHarnessThreadControllerTest {
         new HarnessModelRequestDebugDTO.SubagentDTO();
     subagent.setName("coder");
     subagent.setDescription("Codes solutions.");
+    subagent.setTools(List.of("read"));
+    AgentSkillReferenceDTO skillReference = new AgentSkillReferenceDTO();
+    skillReference.setPackageName("pkg");
+    skillReference.setName("sk");
+    subagent.setSkills(List.of(skillReference));
+    subagent.setSubagents(List.of("nested"));
+    subagent.setConfigurationJson("{\"tools\":[\"read\"]}");
 
     HarnessModelRequestDebugDTO.CacheControlDTO cacheControl =
         new HarnessModelRequestDebugDTO.CacheControlDTO();

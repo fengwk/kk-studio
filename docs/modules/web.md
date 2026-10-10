@@ -84,7 +84,7 @@ Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread
 
 `GET /api/harness/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`providerName` / `modelName` / `variant`）、`status`、`processing`、`turnCount`、`toolCallCount` 和显式可空的 `outcome`。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
-GET model-request-debug 返回下一次结构化预览与可空的活动冻结请求，排除 credential 和 Base64。
+`POST /api/harness/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 必填、`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 
 请求预览有三个只读入口：`POST /api/harness/threads/{threadId}/provider-request-preview`（owner-free 续写面，
 带精确 head/sequence）、`POST /api/harness/sessions/{sessionId}/provider-request-preview`（本地分支草稿，

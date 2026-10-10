@@ -592,6 +592,52 @@ class DatabaseTurnResolverTest {
     assertNull(clearedSpec.toolBindings().getFirst().environmentId());
   }
 
+  /**
+   * 测试意图：显式 draft settings 与正式入口共用同一 planner——只替换 model / environment，Agent 与 path 本身不变；未选 / 已选 /
+   * 清除 环境会立即改变候选 Tool 的 SENT / FILTERED 状态，且规划绝不写回 path。
+   */
+  @Test
+  void explicitDraftSettingsReuseTheSharedPlannerWithoutTouchingThePath() {
+    Fixture fixture = new Fixture(List.of("bash", "read"), List.of("dev"), List.of());
+    fixture.readyEnvironment(ENV_A, List.of("dev"));
+    EntryPath path = fixture.path(unboundSettings("default"));
+
+    // draft 未选环境：REQUIRED bash 只被过滤，OPTIONAL read 与 Agent skill 照常来自 Agent 配置。
+    LiveTurnPlan.Planned unbound = fixture.plannedWithSettings(path, unboundSettings("default"));
+    assertEquals(
+        List.of("read", "bash"),
+        unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
+    assertEquals(
+        List.of(LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.FILTERED),
+        unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::state).toList());
+    assertTrue(
+        unbound.spec().toolBindings().stream()
+            .allMatch(binding -> binding.environmentId() == null));
+    assertEquals(
+        List.of("dev"), unbound.skills().stream().map(LiveTurnPlan.PlannedSkill::name).toList());
+
+    // draft 选择环境：同一次 planner 立即把 bash 送入模型工具面并绑定解析出的路由身份。
+    LiveTurnPlan.Planned bound = fixture.plannedWithSettings(path, settings("default"));
+    assertEquals(
+        List.of("bash", "read"),
+        bound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
+    assertEquals(
+        List.of(LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT),
+        bound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::state).toList());
+    assertEquals(ENV_A, bound.spec().toolBindings().getFirst().environmentId());
+
+    // draft 换 model variant：同一 planner 按 draft 现算冻结 spec。
+    LiveTurnPlan.Planned custom =
+        fixture.plannedWithSettings(
+            path,
+            new BranchSettings(
+                "assistant", new ModelSelection("provider", "model", "custom"), ENV_A_NAME));
+    assertEquals("custom", custom.spec().variant().id());
+
+    // 规划只读：path 的 base settings 与最初完全一致，Draft 绝不写回 EntryPath。
+    assertEquals(unboundSettings("default"), path.baseSettings());
+  }
+
   @Test
   void skillsRequireTheSelectedBranchEnvironmentNameToExist() {
     // name 无法解析时 skills 与工具同样确定性拒绝规划。
@@ -3272,6 +3318,11 @@ class DatabaseTurnResolverTest {
 
     private LiveTurnPlan planLive(EntryPath path) {
       return resolver.planLive(THREAD_ID, path);
+    }
+
+    private LiveTurnPlan.Planned plannedWithSettings(EntryPath path, BranchSettings settings) {
+      return assertInstanceOf(
+          LiveTurnPlan.Planned.class, resolver.planLiveWithSettings(THREAD_ID, path, settings));
     }
 
     private LiveTurnPlan.Planned planned(EntryPath path) {

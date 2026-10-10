@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugServic
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
@@ -130,18 +131,25 @@ public class StudioHarnessThreadController {
   }
 
   /**
-   * 现算结构化 Model Request Debug 投影（read-only）：不检查 branch HEAD、不发布 Package、不触发 sync、不产生写入。
+   * 按 UI 当前草稿 model / environment 现算结构化 Model Request Debug 投影（read-only）：与正式 Turn 共用同一 planner，
+   * 不检查 branch HEAD、不发布 Package、不触发 sync、不产生写入，也不改动任何持久事实。
    *
-   * <p>请求体与 UUID 形状由 {@link HarnessRuntimeRequestMapper#parseUuid} 严格校验（非 canonical UUID -&gt;
-   * 400），缺失 Thread 由 {@link HarnessRuntime} 的 typed 异常翻译为 404。
+   * <p>请求体与 UUID 形状由 {@link HarnessRuntimeRequestMapper} 严格校验（model 必填、environmentName 可空
+   * canonical、未知字段 -&gt; 400），缺失 Thread 由 {@link HarnessRuntime} 的 typed 异常翻译为 404。
    */
-  @GetMapping("/{threadId}/model-request-debug")
-  public Result<HarnessModelRequestDebugDTO> getModelRequestDebug(@PathVariable String threadId) {
+  @PostMapping("/{threadId}/model-request-debug")
+  public Result<HarnessModelRequestDebugDTO> previewModelRequest(
+      @PathVariable String threadId, @RequestBody HarnessModelRequestDebugRequestDTO request) {
     return Results.ok(
         withRuntimeTranslation(
-            () ->
-                modelRequestDebugService.getModelRequestDebug(
-                    HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId"))));
+            () -> {
+              HarnessRuntimeRequestMapper.ModelRequestDebugSelection selection =
+                  HarnessRuntimeRequestMapper.toModelRequestDebugSelection(request);
+              return modelRequestDebugService.getModelRequestDebug(
+                  HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId"),
+                  selection.model(),
+                  selection.environmentName());
+            }));
   }
 
   /**

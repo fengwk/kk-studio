@@ -12,9 +12,10 @@ import java.util.List;
  * Thread Debug 的结构化模型请求投影。
  *
  * <p>顶层是现算的下一次请求预览（{@code kind = NEXT_REQUEST_PREVIEW}）：它与正式 Turn 复用同一套
- * Agent/Environment/Tool/Skill 解析纯函数，不检查 branch HEAD、不发布 Package、不触发 Daemon sync，也绝不冒充历史请求。活动
- * ModelInvocation 的冻结 canonical ProviderRequest 只出现在可空的 {@link FrozenInvocationDTO} 中；已结束 Turn 的
- * Invocation 行已被删除，因此那里不会有残留。
+ * Agent/Environment/Tool/Skill 解析纯函数，不检查 branch HEAD、不发布 Package、不触发 Daemon sync，也绝不冒充历史请求。顶层
+ * {@code model}/{@code environmentName} 来自本次请求的草稿选择，Agent 引用与 Goal 仍取自 branch settings；规划结果只按草稿选择
+ * 现算，不写回任何持久事实。活动 ModelInvocation 的冻结 canonical ProviderRequest 只出现在可空的 {@link FrozenInvocationDTO}
+ * 中，且始终按原始 snapshot 与原路径物化，与草稿选择无关；已结束 Turn 的 Invocation 行已被删除，因此那里 不会有残留。
  *
  * <p>完整 schema 与请求 JSON 按字符串原样展示；credential、Authorization header、对象存储内部地址与 Base64 正文一律不进入本 DTO。
  */
@@ -123,7 +124,12 @@ public class HarnessModelRequestDebugDTO {
     private String promptXml;
   }
 
-  /** subagent allowlist 元素。 */
+  /**
+   * subagent allowlist 元素：binding 事实（name/description）与目标 Agent 当前配置声明（tools/skills/subagents）。
+   *
+   * <p>配置来自目标 Agent definition 的 canonical config，只陈述该 Agent 自己声明的能力，不递归展开其 {@code subagents}
+   * 指向的下一层 Agent，也不承载任何 credential。它描述的是配置声明，而不是尚未发生的一次子调用请求体。
+   */
   @Data
   public static class SubagentDTO {
 
@@ -132,6 +138,18 @@ public class HarnessModelRequestDebugDTO {
 
     /** 被委派 Agent 的展示描述。 */
     private String description;
+
+    /** 目标 Agent 配置声明的模型可见 tool name，按声明顺序。 */
+    private List<String> tools;
+
+    /** 目标 Agent 配置声明的 Skill 引用，按声明顺序；只含 {@code (packageName, name)} 身份。 */
+    private List<AgentSkillReferenceDTO> skills;
+
+    /** 目标 Agent 配置声明的 subagent 短名，按声明顺序；不递归展开。 */
+    private List<String> subagents;
+
+    /** 目标 Agent 配置声明的 canonical config JSON（AgentDefinitionConfigCodec 编码），不含任何凭据。 */
+    private String configurationJson;
   }
 
   /** Provider cache control 事实，与冻结的 {@code ProviderCacheControl} 一一对应。 */
