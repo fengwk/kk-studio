@@ -141,6 +141,35 @@ class HmacClusterInternalAuthenticationTest {
   }
 
   @Test
+  void rejectsExtremeTimestampWithoutOverflowBypass() {
+    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, routeTo(NODE_B)));
+    headers.put(HmacClusterInternalAuthentication.HEADER_TIMESTAMP, Long.toString(Long.MIN_VALUE));
+
+    assertThrows(
+        ClusterInternalAuthenticationException.class,
+        () -> authentication.verify("POST", PATH, headers));
+  }
+
+  @Test
+  void rejectsNonCanonicalNonceWithAuthenticationFailure() {
+    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, routeTo(NODE_B)));
+    headers.put(HmacClusterInternalAuthentication.HEADER_NONCE, "not-a-uuid");
+
+    assertThrows(
+        ClusterInternalAuthenticationException.class,
+        () -> authentication.verify("POST", PATH, headers));
+  }
+
+  @Test
+  void rejectsMalformedCanonicalPathWithAuthenticationFailureNot500() {
+    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_B));
+
+    assertThrows(
+        ClusterInternalAuthenticationException.class,
+        () -> authentication.verify("POST", "/" + "a".repeat(9000), headers));
+  }
+
+  @Test
   void rejectsWhenBoundedNonceCapacityIsExceeded() {
     HmacClusterInternalAuthentication bounded =
         new HmacClusterInternalAuthentication(SECRET, NODE_B, clock, WINDOW, 2);

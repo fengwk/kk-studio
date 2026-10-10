@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -24,14 +25,16 @@ import java.util.Objects;
 /**
  * 跨节点 IDE 元数据命令的简洁 HTTP 客户端：只承载小 metadata JSON（view 命令与 ViewDTO 回执），绝不传输环境字节。
  *
- * <p>每次调用最多一次认证 HTTP 请求，失败即上抛，绝不自动重放；响应体以有界缓冲读取，超界即 fail-closed。大字节数据面（HTTP/WS 逐 exchange）由 gateway
- * 宿主复用 {@link #signHeaders} 与既有流式客户端实现，不经过本类。
+ * <p>每次调用最多一次认证 HTTP 请求，失败即上抛，绝不自动重放；请求体与响应体都按严格的总字节上限读取（响应用 {@code readNBytes(max+1)} 超出即
+ * fail-closed 并关闭连接），既不信任 {@code Content-Length} 也不做整包读取。大字节数据面（HTTP/WS 逐 exchange）由 gateway 宿主复用
+ * {@link #signHeaders} 与既有流式客户端实现，不经过本类。
  */
 public class ClusterInternalClient {
 
   public static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
   private static final int DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
+
   private static final int MAX_ERROR_MESSAGE_LENGTH = 500;
 
   private final HttpClient httpClient;
@@ -120,25 +123,17 @@ public class ClusterInternalClient {
     Map<String, String> authHeaders = authentication.sign(method, path, owner);
     HttpRequest.Builder builder =
         HttpRequest.newBuilder(uri).timeout(requestTimeout).header("Accept", "application/json");
+    HttpRequest.BodyPublisher publisher = HttpRequest.BodyPublishers.noBody();
     if (body != null) {
+      byte[] payload = writeRequestJson(body);
       builder.header("Content-Type", "application/json");
+      publisher = HttpRequest.BodyPublishers.ofByteArray(payload);
     }
     authHeaders.forEach(builder::header);
-    HttpRequest request =
-        body == null
-            ? builder.method(method, HttpRequest.BodyPublishers.noBody()).build()
-            : builder
-                .method(
-                    method,
-                    HttpRequest.BodyPublishers.ofString(writeJson(body), StandardCharsets.UTF_8))
-                .build();
-    HttpResponse<String> response;
+    HttpRequest request = builder.method(method, publisher).build();
+    HttpResponse<InputStream> response;
     try {
-      response =
-          httpClient.send(
-              request,
-              HttpResponse.BodyHandlers.buffering(
-                  HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8), maxResponseBytes));
+      response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException error) {
       throw new AiEnvironmentIdeUnavailableException("cluster IDE owner is unreachable", error);
     } catch (InterruptedException error) {
@@ -146,25 +141,48 @@ public class ClusterInternalClient {
       throw new AiEnvironmentIdeUnavailableException("cluster IDE request was interrupted", error);
     }
     int status = response.statusCode();
+    String responseBody = readBoundedBody(response.body());
     if (status == 200) {
-      return type == null ? null : readJson(response.body(), type);
+      return type == null ? null : readJson(responseBody, type);
     }
     if (status == 204) {
       return null;
     }
-    String message = errorMessage(response.body());
+    String message = errorMessage(responseBody);
     if (status == 400) {
       throw new AiValidationException("environment", message);
     }
     throw new AiEnvironmentIdeUnavailableException(message);
   }
 
-  private String writeJson(Object body) {
+  /** 严格按总字节上限读取响应体；超过上限立即 fail-closed 并关闭流。 */
+  private String readBoundedBody(InputStream stream) {
+    int readLimit = maxResponseBytes < Integer.MAX_VALUE ? maxResponseBytes + 1 : Integer.MAX_VALUE;
+    try (InputStream body = stream) {
+      byte[] data = body.readNBytes(readLimit);
+      if (data.length > maxResponseBytes) {
+        throw new AiEnvironmentIdeUnavailableException(
+            "cluster IDE owner response exceeds the metadata limit");
+      }
+      return new String(data, StandardCharsets.UTF_8);
+    } catch (IOException error) {
+      throw new AiEnvironmentIdeUnavailableException(
+          "cannot read cluster IDE owner response", error);
+    }
+  }
+
+  private byte[] writeRequestJson(Object body) {
+    byte[] payload;
     try {
-      return objectMapper.writeValueAsString(body);
+      payload = objectMapper.writeValueAsBytes(body);
     } catch (JsonProcessingException error) {
       throw new IllegalStateException("cannot encode cluster IDE metadata request", error);
     }
+    if (payload.length > ClusterInternalPaths.MAX_METADATA_BODY_BYTES) {
+      throw new AiValidationException(
+          "environment", "cluster IDE metadata request body is too large");
+    }
+    return payload;
   }
 
   private <T> T readJson(String body, Class<T> type) {
