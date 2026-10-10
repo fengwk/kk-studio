@@ -208,14 +208,19 @@ test('case rejects duplicate events delivered before create HTTP returns and sti
   }
 })
 
-test('DB recovery closes the resynced connection and waits for LISTEN before creating a new baseline', async () => {
+test('DB recovery closes the resynced connection and waits for LISTEN and fresh READY before the new baseline', async () => {
   const original = globalThis.WebSocket
   const sockets = []
   let healthCalls = 0
+  let environmentCalls = 0
+  const freshNodes = new Set()
   globalThis.WebSocket = class extends Socket {
     constructor() {
       super()
-      if (sockets.length >= 2) assert.ok(healthCalls >= 2, 'new baseline must follow healthy LISTEN')
+      if (sockets.length >= 2) {
+        assert.ok(healthCalls >= 2, 'new baseline must follow healthy LISTEN')
+        assert.deepEqual([...freshNodes], ['a', 'b'], 'new baseline must follow fresh READY on both nodes')
+      }
       sockets.push(this)
     }
   }
@@ -239,6 +244,11 @@ test('DB recovery closes the resynced connection and waits for LISTEN before cre
       if (requestPath === '/actuator/health') {
         return { json: { status: ++healthCalls === 1 ? 'DOWN' : 'UP' } }
       }
+      if (requestPath.startsWith('/api/harness/environments/')) {
+        const lastSeen = ++environmentCalls <= 2 ? 100 : 101
+        if (lastSeen > 100) freshNodes.add(node)
+        return { json: { data: { ready: true, status: 'READY', lastSeen } } }
+      }
       if (method === 'POST' || method === 'PUT') {
         fixture = { id, version: method === 'POST' ? '0' : String(Number(fixture.version) + 1), title: body.title }
         for (const socket of sockets) {
@@ -253,6 +263,7 @@ test('DB recovery closes the resynced connection and waits for LISTEN before cre
     await ALL_CASES.find((entry) => entry.id === 'distributed.notification_db_recovery').run(ctx)
     assert.equal(sockets.length, 3)
     assert.equal(healthCalls, 2)
+    assert.equal(environmentCalls, 4, 'stale READY must not satisfy the recovery barrier')
     assert.equal(deleted, true)
     assert.ok(sockets.every((socket) => socket.readyState === 3 && socket.registered.size === 0))
   } finally { globalThis.WebSocket = original }
@@ -275,7 +286,10 @@ test('DB-fault case restores network, closes sockets and deletes fixture even if
       commands.push(command)
       if (command === 'reconnect-db-a') throw restoreError
     },
-    async callNode(node, method) {
+    async callNode(node, method, requestPath) {
+      if (requestPath.startsWith('/api/harness/environments/')) {
+        return { json: { data: { ready: true, status: 'READY', lastSeen: 100 } } }
+      }
       if (method === 'POST') for (const socket of sockets) socket.deliver(changed)
       if (method === 'PUT') throw primary
       if (method === 'DELETE') deleted = true
