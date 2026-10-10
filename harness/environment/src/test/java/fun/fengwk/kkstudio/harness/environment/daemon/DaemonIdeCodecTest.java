@@ -74,7 +74,7 @@ class DaemonIdeCodecTest {
             "wss://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
             IdeStreamMode.WS,
             null,
-            null,
+            "/ws/echo",
             List.of());
     assertEquals(command, codec.decodeCommand(codec.encodeCommand(command)));
   }
@@ -244,7 +244,8 @@ class DaemonIdeCodecTest {
   }
 
   @Test
-  void wsOpenStreamRejectsMethodAndPath() {
+  void wsOpenStreamRequiresPath() {
+    // 与 Node peer 一致：WS 模式必须携带上游请求 path（method 可缺省为 GET）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -253,10 +254,10 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "wss://x.example/s",
+                "wss://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
                 IdeStreamMode.WS,
-                "GET",
-                "/",
+                null,
+                null,
                 List.of()));
   }
 }

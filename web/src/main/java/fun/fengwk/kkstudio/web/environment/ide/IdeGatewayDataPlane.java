@@ -263,7 +263,7 @@ public final class IdeGatewayDataPlane {
   }
 
   /** 状态变更请求必须来自同源：{@code Sec-Fetch-Site}/{@code Origin} 都不能指示跨站。 */
-  private static boolean csrfAllowed(HttpServletRequest request) {
+  static boolean csrfAllowed(HttpServletRequest request) {
     String method = request.getMethod();
     if ("GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method)) {
       return true;
@@ -298,7 +298,7 @@ public final class IdeGatewayDataPlane {
     }
   }
 
-  private static List<IdeHeader> forwardRequestHeaders(HttpServletRequest request) {
+  static List<IdeHeader> forwardRequestHeaders(HttpServletRequest request) {
     List<IdeHeader> headers = new ArrayList<>();
     Enumeration<String> names = request.getHeaderNames();
     if (names == null) {

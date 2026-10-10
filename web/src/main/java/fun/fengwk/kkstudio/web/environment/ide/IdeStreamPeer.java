@@ -14,8 +14,11 @@ public interface IdeStreamPeer extends AutoCloseable {
 
   void sendBinary(byte[] frame);
 
-  /** 阻塞直到有入站帧、连接关闭或超时；返回 {@code null} 表示连接已关闭。 */
+  /** 阻塞直到有入站帧或超时；返回 {@code null} 表示本次没有入站帧（需结合 {@link #closed()} 判断连接是否已关闭）。 */
   Inbound poll(Duration timeout) throws InterruptedException;
+
+  /** 连接是否已关闭（对端断开、发送失败或本端关闭）。 */
+  boolean closed();
 
   @Override
   void close();

@@ -87,7 +87,10 @@ class IdeGatewayComponentsTest {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
     IdeOriginRequestFilter filter =
         new IdeOriginRequestFilter(
-            new IdeHostResolver(originProperties()), originProperties(), dataPlane);
+            new IdeHostResolver(originProperties()),
+            originProperties(),
+            dataPlane,
+            mock(IdeBrowserWebSocketGateway.class));
 
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/vscode/workbench.js");
     request.addHeader("Host", ENV + ".ide.test");
@@ -106,7 +109,10 @@ class IdeGatewayComponentsTest {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
     IdeOriginRequestFilter filter =
         new IdeOriginRequestFilter(
-            new IdeHostResolver(originProperties()), originProperties(), dataPlane);
+            new IdeHostResolver(originProperties()),
+            originProperties(),
+            dataPlane,
+            mock(IdeBrowserWebSocketGateway.class));
 
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/__ide/bootstrap");
     request.addHeader("Host", ENV + ".ide.test");
@@ -123,7 +129,10 @@ class IdeGatewayComponentsTest {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
     IdeOriginRequestFilter filter =
         new IdeOriginRequestFilter(
-            new IdeHostResolver(originProperties()), originProperties(), dataPlane);
+            new IdeHostResolver(originProperties()),
+            originProperties(),
+            dataPlane,
+            mock(IdeBrowserWebSocketGateway.class));
 
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/harness/environments");
     request.addHeader("Host", "studio.test");

@@ -71,8 +71,12 @@ public record IdeCommand(
         if (mode == IdeStreamMode.HTTP) {
           method = validateMethod(method);
           path = validatePath(path);
-        } else if (method != null || path != null) {
-          throw new IllegalArgumentException("WS OPEN_STREAM must not declare method or path");
+        } else {
+          // WS 与 Node peer 一致：path 必填（上游 WS 请求路径），method 可缺省为 GET。
+          if (method != null) {
+            method = validateMethod(method);
+          }
+          path = validatePath(path);
         }
       }
     }
