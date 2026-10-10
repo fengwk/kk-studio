@@ -106,6 +106,7 @@ export class TerminalProbe {
     this.history = 0
     this.alternate = false
     this.inputModeRevision = 0
+    this.inputModes = null
     this.lastAppliedVersion = 0
     this.ackedVersion = 0
     /** Rstrip-ed screen rows (no history); scoped to the current stream and compacted in place. */
@@ -398,6 +399,7 @@ export class TerminalProbe {
     this.writer = payload.writer
     this.grant = null
     this.inputModeRevision = payload.inputModeRevision
+    this.inputModes = null
     // A new ATTACHED always starts a fresh observer stream: drop the old baseline mirror.
     this.cols = 0
     this.rows = 0
@@ -542,6 +544,7 @@ export class TerminalProbe {
     const rows = update.rows
     assert(Number.isInteger(cols) && Number.isInteger(rows), 'VIEW_UPDATE must declare integer cols/rows')
     assert(Array.isArray(update.screenRows), 'VIEW_UPDATE must declare screenRows')
+    assert(update.inputModes && typeof update.inputModes.bracketedPaste === 'boolean', 'VIEW_UPDATE must declare input modes')
     if (update.type === 'RESET') {
       assert(update.baseVersion === null, 'RESET must not declare a baseVersion')
       // RESET replaces the whole active screen and history: no trim and exactly `history` appended lines.
@@ -561,6 +564,7 @@ export class TerminalProbe {
       this.history = update.history
       this.alternate = update.alternate
       this.inputModeRevision = update.inputModeRevision
+      this.inputModes = { ...update.inputModes }
       this.lastAppliedVersion = update.version
       this.counters.resets += 1
       return
@@ -581,6 +585,7 @@ export class TerminalProbe {
     this.screen = nextScreen
     this.history = update.history
     this.inputModeRevision = update.inputModeRevision
+    this.inputModes = { ...update.inputModes }
     this.lastAppliedVersion = update.version
     this.counters.patches += 1
   }

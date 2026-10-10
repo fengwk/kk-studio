@@ -101,9 +101,15 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
             environ_file = Path(temporary) / "environ.txt"
             probe = probe_dir / "java"
             probe.write_text(
-                "#!/bin/bash\n"
-                'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n'
-                'env >"$PROBE_ENVIRON"\n'
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                'Path(os.environ["PROBE_ARGV"]).write_text("\\n".join(sys.argv[1:]))\n'
+                'Path(os.environ["PROBE_ENVIRON"]).write_text(json.dumps({\n'
+                '    "prompt": os.environ.get("PS1"),\n'
+                '    "tokenPresent": "DAEMON_REGISTRATION_TOKEN" in os.environ,\n'
+                '    "legacyTokenPresent": "KK_STUDIO_DAEMON_REGISTRATION_TOKEN" in os.environ,\n'
+                "}))\n"
             )
             probe.chmod(0o755)
 
@@ -140,7 +146,10 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
             self.assertTrue(config_path.is_absolute())
             self.assertEqual(root / "daemon.json", config_path)
             self.assertNotIn(secret, argv)
-            self.assertNotIn(secret, environ_file.read_text())
+            recorded_environment = json.loads(environ_file.read_text())
+            self.assertFalse(recorded_environment["tokenPresent"])
+            self.assertFalse(recorded_environment["legacyTokenPresent"])
+            self.assertEqual("KKS_E2E_READY", recorded_environment["prompt"])
             self.assertNotIn(secret, result.stdout + result.stderr)
             self.assertNotIn(secret, config_path.read_text())
 

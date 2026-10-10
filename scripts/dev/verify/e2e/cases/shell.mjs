@@ -16,6 +16,14 @@ function sentinel(prefix) {
   return `KKS_${prefix}_${randomUUID().replaceAll('-', '').slice(0, 12)}`
 }
 
+/** Readline has rendered the prompt and completed its input-mode setup, not merely written output. */
+async function waitBashPrompt(probe, prompt, timeoutMs) {
+  await probe.waitUntil(
+    () => probe.inputModes?.bracketedPaste === true && probe.screenRowCount(prompt) > 0,
+    timeoutMs,
+  )
+}
+
 /** Resolves the named fixture environment and requires the READY projection. */
 async function requireReadyEnvironment(ctx, name) {
   const list = envelopeData((await ctx.call('GET', '/api/harness/environments')).json)
@@ -57,6 +65,7 @@ registerCase({
 
       probe.ack()
       probe.setAutoApplied(true)
+      await waitBashPrompt(probe, 'KKS_E2E_READY', 30_000)
       const claim = await probe.claimGranted({ timeoutMs: 25_000 })
       assert(claim.granted && probe.grant, 'acknowledged stream must grant a real writer token')
       const epoch = probe.grant.epoch
@@ -81,6 +90,7 @@ registerCase({
       )
       await probe.waitUntil(() => probe.cols === 100 && probe.rows === 30 && probe.lastAppliedVersion >= 2, 25_000)
       assert(probe.cols === 100 && probe.rows === 30, 'RESET after RESIZE must carry the new dimensions')
+      await waitBashPrompt(probe, 'KKS_E2E_READY', 25_000)
 
       // Lifecycle: an interruptible foreground command proves Ctrl-C interrupts the *running* job.
       // The start marker only appears once the foreground subshell is actually executing, so the
@@ -100,7 +110,7 @@ registerCase({
       )
       const ctrlCAt = Date.now()
       // WRITTEN is not a shell-readiness ACK; the fresh exact prompt proves the foreground job ended.
-      await probe.waitScreenRow(resumedPrompt, 5_000)
+      await waitBashPrompt(probe, resumedPrompt, 5_000)
       const lifecycleSentinel = sentinel('LIFE')
       const lifecycleOp = probe.sendInput(`printf '%s\\n' ${lifecycleSentinel}\r`, 5)
       const lifecycleAck = await probe.waitOperation(lifecycleOp, 25_000)
