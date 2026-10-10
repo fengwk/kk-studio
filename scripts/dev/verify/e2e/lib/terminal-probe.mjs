@@ -369,6 +369,8 @@ export class TerminalProbe {
       if (pending.identity && !sameIdentity(pending.identity, identity)) return false
       return true
     }
+    // DETACH invalidates display immediately; already queued frames cannot revive or ACK the stream.
+    if (event.type === 'VIEW_UPDATE' && this.streamId === null) return false
     if (identity != null) {
       return this.identity != null && sameIdentity(this.identity, identity)
     }

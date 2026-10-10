@@ -407,6 +407,32 @@ test('with autoApplied disabled the ack is explicit', () => {
   probe.close()
 })
 
+test('DETACH fences queued views without applying or ACKing them before a fresh attachment', () => {
+  const { probe, socket } = openProbe()
+  sendAttached(probe, socket)
+  socket.deliver(viewEvent(reset(['OLD', '', ''])))
+  const acknowledgements = () => socket.logical.filter((frame) => frame.command?.type === 'VIEW_APPLIED').length
+  const before = acknowledgements()
+  const previousScreen = [...probe.screen]
+  probe.detach()
+  socket.deliver(viewEvent(patch({ 0: 'STALE' })))
+  probe.check()
+  assert.deepEqual(probe.screen, previousScreen)
+  assert.equal(probe.lastAppliedVersion, 1)
+  assert.equal(acknowledgements(), before, 'detached in-flight views must never be ACKed')
+
+  const requestId = probe.open()
+  socket.deliver(viewEvent(patch({ 0: 'STALE' })))
+  const newStream = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  socket.deliver(attached({ payload: { ...attached().event.payload, streamId: newStream } }, requestId))
+  socket.deliver(viewEvent({ ...reset(['NEW', '', '']), streamId: newStream }))
+  probe.check()
+  assert.equal(probe.screen[0], 'NEW')
+  assert.equal(lastCommand(socket, 'VIEW_APPLIED').payload.streamId, newStream)
+  assert.equal(acknowledgements(), before + 1)
+  probe.close()
+})
+
 test('ignores an ATTACHED that does not answer a pending OPEN/ATTACH', () => {
   // Test intent: a stale or foreign ATTACHED must never bind identity or a stream.
   const { probe, socket } = openProbe()
