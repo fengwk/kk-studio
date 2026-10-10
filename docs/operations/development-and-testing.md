@@ -260,6 +260,24 @@ Chat 卡片和 Session/Thread 选择器的时间回归可在 `frontend/` 定向�
 有时区 ISO 字符串及 epoch 秒/毫秒按浏览器本地时区显示为 `YYYY-MM-DD HH:mm`，
 包括跨日转换；无时区字符串和数组保留本地墙上时钟含义，空值及非法输入显示 `-`。
 
+Chat 默认设置、首发焦点、主题控件与 Debug 布局沿用同一离线 layout 入口：
+
+```bash
+npm --prefix frontend run build:layout
+(
+  cd frontend
+  npx playwright test --config playwright.layout.config.ts \
+    browser-tests/chat-defaults.pw.ts browser-tests/composer-focus.pw.ts \
+    browser-tests/debug-responsive-layout.pw.ts browser-tests/debug-preview-title.pw.ts \
+    browser-tests/loading-skeleton.pw.ts browser-tests/retry-controls.pw.ts \
+    browser-tests/canvas-library.pw.ts browser-tests/interactions.pw.ts
+)
+```
+
+这些用例验证新建/编辑默认值与显式清空、首次接受后的编辑器重挂载与临时禁用恢复、
+模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情，以及骨架屏、按钮忙碌状态和窄屏布局。
+API 规划与代理切换由后端定向测试验证，不以静态浏览器基座替代真实服务契约。
+
 Thread 控制与消息展示有独立的离线 Chromium 入口，可按改动范围选择：
 
 ```bash
