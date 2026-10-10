@@ -197,10 +197,10 @@ class GeminiRequestEncoderTest {
     assertFalse(gen.has("stopSequences"));
   }
 
-  /** 验证厂商定义的 reasoning effort 原样映射到 thinkingLevel。 */
+  /** 验证厂商定义的 reasoning effort 原样映射到 thinkingLevel，包括大写与混合大小写（不做大小写归一化）。 */
   @Test
   void encodesProviderDefinedThinkingLevels() throws Exception {
-    for (String effort : List.of("low", "medium", "high", "max", "xhigh")) {
+    for (String effort : List.of("low", "medium", "high", "max", "xhigh", "HIGH", "xHigh")) {
       ModelVariant variant = new ModelVariant("v-" + effort, effort);
       ProviderRequest request =
           new ProviderRequest(

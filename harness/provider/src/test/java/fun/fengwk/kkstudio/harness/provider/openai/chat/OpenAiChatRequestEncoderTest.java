@@ -166,6 +166,25 @@ class OpenAiChatRequestEncoderTest {
             encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     assertEquals("high", root1.path("reasoning_effort").asText());
 
+    // 手工配置的大小写是厂商原生值，编码时原样下发（如 HIGH 不被小写化）
+    for (String effort : List.of("HIGH", "HiGh")) {
+      ProviderRequest casedReq =
+          new ProviderRequest(
+              reasoningModel,
+              new ModelVariant("v-cased", effort),
+              1024,
+              "Test system instruction.",
+              List.of(userMsg),
+              List.of(),
+              ProviderCacheControl.none());
+      JsonNode casedRoot =
+          MAPPER.readTree(
+              encoder
+                  .encode(casedReq, descriptor, OpenAiChatConfiguration.defaults())
+                  .bodyUtf8Bytes());
+      assertEquals(effort, casedRoot.path("reasoning_effort").asText());
+    }
+
     ModelVariant variantOff = new ModelVariant("v2", "off");
     ProviderRequest req2 =
         new ProviderRequest(
