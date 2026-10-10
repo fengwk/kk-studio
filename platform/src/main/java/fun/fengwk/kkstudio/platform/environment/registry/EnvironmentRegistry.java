@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalRoute;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalRouteSource;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 
 import java.sql.ResultSet;
@@ -45,7 +47,7 @@ import java.util.function.Supplier;
  * 绝不出现「租约已提交、通知未发出」的窗口。自然到期没有数据库写事件，仍由读取时判定与重连单次对账处理。
  */
 @Component
-public class EnvironmentRegistry implements DaemonLeaseStore {
+public class EnvironmentRegistry implements DaemonLeaseStore, EnvironmentTerminalRouteSource {
 
   private static final String TRY_ACQUIRE_SQL =
       """
@@ -183,6 +185,21 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
             and status = 'READY'
             and lease_until > statement_timestamp()
       )
+      """;
+
+  /**
+   * 读取某个 Environment 当前未过期 READY 路由的 owner 与 lease。
+   *
+   * <p>活动性完全由数据库现在时判定；不读 JVM 时钟、不读进程缓存，也不写任何表或租约。{@code environment_connection} 以 {@code
+   * environment_id} 为唯一键，因此至多一行。
+   */
+  private static final String READY_ROUTE_SQL =
+      """
+      select owner_node_id, lease_token
+      from environment_connection
+      where environment_id = ?
+        and status = 'READY'
+        and lease_until > statement_timestamp()
       """;
 
   private static final String HAS_ACTIVE_LEASE_TOKEN_SQL =
@@ -566,6 +583,26 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     Boolean exists =
         jdbcTemplate.queryForObject(HAS_READY_LEASE_SQL, Boolean.class, environmentId.value());
     return Boolean.TRUE.equals(exists);
+  }
+
+  /**
+   * 读取 Environment 当前未过期 READY owner/lease，作为 ShellGateway 的唯一权威路由事实。
+   *
+   * <p>只按数据库现在时读取，绝不使用 JVM 时间或本地缓存授权；没有 READY 行返回空。该读取不修改任何表或租约写 SQL。
+   */
+  @Override
+  public Optional<EnvironmentTerminalRoute> resolveReadyRoute(UUID environmentId) {
+    if (environmentId == null) {
+      return Optional.empty();
+    }
+    List<EnvironmentTerminalRoute> routes =
+        jdbcTemplate.query(
+            READY_ROUTE_SQL,
+            (rs, rowNum) ->
+                new EnvironmentTerminalRoute(
+                    (UUID) rs.getObject("owner_node_id"), (UUID) rs.getObject("lease_token")),
+            environmentId);
+    return routes.isEmpty() ? Optional.empty() : Optional.of(routes.get(0));
   }
 
   /** 数据库现在时判定当前节点是否持有有效的 READY 路由租约（用于本地 capability INVOKE 准入）。 */

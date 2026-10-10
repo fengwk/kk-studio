@@ -133,6 +133,12 @@ final class SystemSettingsValidation {
     }
   }
 
+  static void requireAtLeast(long value, long minimum, String field) {
+    if (value < minimum) {
+      throw new IllegalArgumentException(field + " must be at least " + minimum);
+    }
+  }
+
   static void requirePositiveBounded(long value, long maximum, String field) {
     if (value <= 0 || value > maximum) {
       throw new IllegalArgumentException(field + " must be positive and at most " + maximum);

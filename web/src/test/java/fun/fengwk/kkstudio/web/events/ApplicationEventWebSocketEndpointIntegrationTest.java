@@ -2,20 +2,33 @@ package fun.fengwk.kkstudio.web.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
+import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+
+import javax.sql.DataSource;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
+import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -24,25 +37,28 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@code /api/events/v1} 的真实端到端覆盖（RANDOM_PORT + testcontainers PG）：真实握手、严格帧解码、 非法帧关闭、资源错误保活与合法订阅
- * ack。
+ * {@code /api/events/v1} 的真实端到端覆盖（RANDOM_PORT + testcontainers PG）：真实握手、唯一 carrier 载体上的 v2 严格帧解码、
+ * 非法帧关闭、资源错误保活与合法订阅 ack。
  */
 class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSupport {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final UUID CLIENT = UUID.fromString("00000000-0000-0000-0000-00000000c11e");
 
   @LocalServerPort private int port;
+
+  @Autowired private DataSource dataSource;
 
   @Test
   void handshakeDecodesStrictlyAndClosesOnInvalidFrame() throws Exception {
     FrameCollector collector = new FrameCollector();
     WebSocket socket = connect(collector);
 
-    socket.sendText("{\"op\":\"subscribe\"}", true).get(10, TimeUnit.SECONDS);
+    socket.sendText(carrier("{\"op\":\"subscribe\"}"), true).get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame must contain exactly [version, type, resource] fields\"}",
-        collector.nextText());
+        "{\"version\":2,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame.version must be the integer 2\"}",
+        body(collector.nextText()));
     assertEquals(1002, collector.nextCloseCode(), "invalid protocol frame must close with 1002");
   }
 
@@ -54,32 +70,34 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     String unknown = "00000000-0000-0000-0000-000000000999";
     socket
         .sendText(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-                + unknown
-                + "\"}}",
+            carrier(
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+                    + unknown
+                    + "\"}}"),
             true)
         .get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + unknown
             + "\"}}",
-        collector.nextText());
+        body(collector.nextText()));
 
     // 连接保持：第二个未知资源仍走资源级 error，而不是被关闭。
     String another = "00000000-0000-0000-0000-000000000998";
     socket
         .sendText(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-                + another
-                + "\"}}",
+            carrier(
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+                    + another
+                    + "\"}}"),
             true)
         .get(10, TimeUnit.SECONDS);
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + another
             + "\"}}",
-        collector.nextText());
+        body(collector.nextText()));
 
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
   }
@@ -148,24 +166,110 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     WebSocket socket = connect(collector);
     socket
         .sendText(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-                + threadId
-                + "\"}}",
+            carrier(
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+                    + threadId
+                    + "\"}}"),
             true)
         .get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + threadId
             + "\"},\"cursor\":\""
             + version
             + "\"}",
-        collector.nextText());
+        body(collector.nextText()));
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
+  }
+
+  /**
+   * 真实 PG 触发的 NotificationBus resync：断开唯一 LISTEN 连接后，打开的浏览器连接必须以 1012 SERVICE_RESTART 关闭， 而不是被静默保留为
+   * open；browser 随后自行重连并显式 ATTACH。
+   */
+  @Test
+  void busResyncClosesOpenConnectionWithServiceRestart() throws Exception {
+    FrameCollector collector = new FrameCollector();
+    WebSocket socket = connect(collector);
+    // 探针：完成一次资源错误往返，确保服务端连接已登记到 ShellGateway。
+    socket
+        .sendText(
+            carrier(
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\"00000000-0000-0000-0000-000000000999\"}}"),
+            true)
+        .get(10, TimeUnit.SECONDS);
+    assertTrue(body(collector.nextText()).contains("RESOURCE_NOT_FOUND"));
+
+    assertTrue(terminateBusListenBackends() > 0, "expected a live bus LISTEN backend");
+
+    assertEquals(1012, collector.nextCloseCode(), "bus resync must close with SERVICE_RESTART");
+  }
+
+  /** 终止所有应用 NotificationBus 的 LISTEN 后端连接，触发真实传输重连与 resync。 */
+  private int terminateBusListenBackends() throws SQLException, InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (System.nanoTime() < deadline) {
+      int terminated = terminateListenBackendsOnce();
+      if (terminated > 0) {
+        return terminated;
+      }
+      Thread.sleep(100);
+    }
+    return 0;
+  }
+
+  private int terminateListenBackendsOnce() throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement()) {
+      List<Integer> pids = new ArrayList<>();
+      try (ResultSet rs =
+          statement.executeQuery(
+              "select pid from pg_stat_activity"
+                  + " where datname = current_database()"
+                  + " and query like 'LISTEN %'"
+                  + " and pid <> pg_backend_pid()")) {
+        while (rs.next()) {
+          pids.add(rs.getInt(1));
+        }
+      }
+      int terminated = 0;
+      for (int pid : pids) {
+        try (ResultSet rs = statement.executeQuery("select pg_terminate_backend(" + pid + ")")) {
+          if (rs.next() && rs.getBoolean(1)) {
+            terminated++;
+          }
+        }
+      }
+      return terminated;
+    }
   }
 
   private URI uri(String path) {
     return URI.create("http://localhost:" + port + path);
+  }
+
+  /** 把逻辑正文包成唯一物理 carrier：publisher=浏览器、target=广播、固定 topic {@code app.events.v2}。 */
+  private static String carrier(String logicalBody) {
+    byte[] bytes = logicalBody.getBytes(StandardCharsets.UTF_8);
+    return new NotificationCarrier(
+            CLIENT,
+            null,
+            ApplicationEventWebSocketHandler.CARRIER_TOPIC,
+            UUID.randomUUID(),
+            0,
+            NotificationCarrier.count(bytes.length),
+            bytes.length,
+            bytes)
+        .encode();
+  }
+
+  /** 解出服务端 carrier 的逻辑正文（用浏览器身份解码，避免 own-echo 丢弃）。 */
+  private static String body(String rawFrame) {
+    NotificationCarrier carrier =
+        NotificationCarrier.decode(rawFrame, NotificationLimits.defaults(), CLIENT);
+    assertNotNull(carrier, "expected a carrier frame from the server");
+    assertEquals(1, carrier.count(), "small test bodies must be a single fragment");
+    return new String(carrier.bytes(), StandardCharsets.UTF_8);
   }
 
   private WebSocket connect(FrameCollector collector) throws Exception {

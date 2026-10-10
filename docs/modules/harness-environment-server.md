@@ -67,6 +67,10 @@ close(connectionId)
 
 codec 拒绝未知字段、重复键、尾随 token 与非 canonical UUID；内层只复用 `TerminalControlCodec`。元数据与 payload 不在 `toString` 或解码异常中回显。
 
+跨节点的 App 侧入口是 [`ShellGateway`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ShellGateway.java)：它订阅上述两个 topic，先经窄端口 [`EnvironmentTerminalRouteSource`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/terminal/EnvironmentTerminalRouteSource.java) 读取当前 READY owner/lease，再发布 `TerminalDispatch` 并复用 `EnvironmentDaemonServer.sendShell`。该端口只暴露 `resolveReadyRoute(environmentId)`：按数据库现在时（`status='READY'` 且 `lease_until > statement_timestamp()`）返回 owner 节点与冻结 lease，不构成准入授权，也不写表。
+
+`shell.event` 的 `daemonInstanceId` 是四个根字段中唯一允许显式 `null` 的字段，且只在 owner 于真正递交 Daemon 之前确定「未执行」时为 `null`（ERROR 且无终端 identity），表示本节点当前没有已认证 Daemon；字段绝不省略，其余事件必须携带真实 UUID。
+
 ## 资源上传控制面
 
 每个 `ActiveInvocation` 至多维护 `MAX_TRANSFERS_PER_INVOCATION = 16` 个以 `transferId` 唯一标识的 `TransferBinding`，上限的存在意义是阻止失控 Daemon 无界创建上传行。控制流程：

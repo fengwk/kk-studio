@@ -87,6 +87,15 @@ final class ShellTopicJson {
     return parsed;
   }
 
+  /** 可选 canonical UUID：JSON null 映射为 {@code null}，其余必须是非 canonical 拒绝的规范 UUID 字符串。 */
+  static UUID optionalCanonicalUuid(ObjectNode root, String field, String context) {
+    JsonNode value = root.get(field);
+    if (value != null && value.isNull()) {
+      return null;
+    }
+    return canonicalUuid(root, field, context);
+  }
+
   static String write(JsonNode node) {
     try {
       return MAPPER.writeValueAsString(node);

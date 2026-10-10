@@ -471,6 +471,9 @@ public record SystemSettings(
       long notificationPollMillis,
       long notificationReconnectBackoffMillis) {
 
+    /** 事件通道 pending 字节预算下界：必须容纳单条 8 MiB 逻辑消息，不得再低。 */
+    public static final long MIN_APPLICATION_EVENT_MAX_BYTES = 8L * 1024 * 1024;
+
     public static final Advanced DEFAULT =
         new Advanced(
             16L * 1024 * 1024,
@@ -481,7 +484,7 @@ public record SystemSettings(
             1_000L,
             1_000L,
             512,
-            2L * 1024 * 1024,
+            16L * 1024 * 1024,
             10_000L,
             20_000L,
             5_000L,
@@ -508,8 +511,10 @@ public record SystemSettings(
           toolDispatchBusyFallbackDelayMillis, "advanced.toolDispatchBusyFallbackDelayMillis");
       SystemSettingsValidation.requireAtLeast(
           applicationEventQueueCapacity, 1, "advanced.applicationEventQueueCapacity");
-      SystemSettingsValidation.requirePositiveMillis(
-          applicationEventMaxBytes, "advanced.applicationEventMaxBytes");
+      SystemSettingsValidation.requireAtLeast(
+          applicationEventMaxBytes,
+          MIN_APPLICATION_EVENT_MAX_BYTES,
+          "advanced.applicationEventMaxBytes");
       SystemSettingsValidation.requirePositiveMillis(
           applicationEventSendTimeoutMillis, "advanced.applicationEventSendTimeoutMillis");
       SystemSettingsValidation.requirePositiveMillis(

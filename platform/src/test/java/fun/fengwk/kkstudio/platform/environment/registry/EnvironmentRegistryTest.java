@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
+import fun.fengwk.kkstudio.harness.environment.server.terminal.EnvironmentTerminalRoute;
 import fun.fengwk.kkstudio.notification.DefaultNotificationBus;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
@@ -178,6 +179,49 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertEquals(LiveEnvironmentStatus.READY, ready.status());
     assertNotNull(ready.daemonCapabilities());
     assertTrue(ready.isReady(Instant.now(), LEASE_DURATION));
+  }
+
+  /**
+   * 测试意图：验证 ShellGateway 依赖的唯一权威 READY 路由读取（真实 PostgreSQL {@code statement_timestamp()}，非 JVM 时间）：
+   * 只返回未过期 READY 行的 owner/lease，无行或未过期判定失败一律返回空，且被接管后返回新 owner/lease。
+   */
+  @Test
+  void resolveReadyRouteReadsOnlyUnexpiredReadyRow() {
+    // 无任何行：空。
+    assertTrue(registry1.resolveReadyRoute(DEV.value()).isEmpty());
+    // null environmentId：确定性空，不查库。
+    assertTrue(registry1.resolveReadyRoute(null).isEmpty());
+
+    // CONNECTING（已认领但未 READY）：仍为空。
+    UUID token1 =
+        ((LeaseBindResult.Acquired) registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION))
+            .leaseToken();
+    assertTrue(registry1.resolveReadyRoute(DEV.value()).isEmpty());
+
+    // READY 且租约未过期：返回当前 owner/lease。
+    assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
+    EnvironmentTerminalRoute ready = registry1.resolveReadyRoute(DEV.value()).orElseThrow();
+    assertEquals(node1, ready.ownerNodeId());
+    assertEquals(token1, ready.leaseToken());
+
+    // READY 但租约过期：数据库现在时判定为过期 → 空。
+    jdbcTemplate.update(
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds',"
+            + " lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
+        DEV.value());
+    assertTrue(registry1.resolveReadyRoute(DEV.value()).isEmpty());
+
+    // 接管后再次 READY：返回新 owner/lease。
+    UUID token2 =
+        ((LeaseBindResult.Acquired) registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION))
+            .leaseToken();
+    assertTrue(registry2.markReady(DEV, token2, CAPABILITIES, LEASE_DURATION));
+    EnvironmentTerminalRoute taken = registry1.resolveReadyRoute(DEV.value()).orElseThrow();
+    assertEquals(node2, taken.ownerNodeId());
+    assertEquals(token2, taken.leaseToken());
+
+    // 只读取路由事实，不修改任何行。
+    assertEquals(LiveEnvironmentStatus.READY, registry1.find(DEV).orElseThrow().status());
   }
 
   /**
