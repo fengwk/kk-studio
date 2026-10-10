@@ -463,9 +463,12 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   子执行与 Join 订阅，从新分支向旧子执行添加 Join 因直接父不匹配原子拒绝。
 - `shell.interactive_pty`（`requires=tools`，L3）：在 READY tool 环境经同一条 `/api/events/v1`
   承载 `{version:2,type:"shell.command",command:<TerminalCommand>}`，驱动真实 PTY 的
-  OPEN/CLAIM/INPUT/RESIZE/VIEW_APPLIED/CLOSE。首个结构化 RESET 未 `VIEW_APPLIED` 前
+  OPEN/CLAIM/INPUT/RESIZE/VIEW_APPLIED/CLOSE。隔离 bootstrap 将终端配置为不读取 profile/rc 的
+  Bash，工作目录为该测试 Daemon 的私有目录，不继承宿主 `$SHELL` 或个人提示符配置。
+  首个结构化 RESET 未 `VIEW_APPLIED` 前
   `CLAIM` 必须 `VIEW_NOT_APPLIED`；`INPUT` 以随机哨兵整行比对（绝不做子串，避免命令行回显假阳性）；
-  `RESIZE` 的 `OP_ACK` 后必须收到新尺寸 RESET；`Ctrl-C` 后 shell 仍可继续输出；
+  `RESIZE` 的 `OP_ACK` 后必须收到新尺寸 RESET；`Ctrl-C` 后观察本次前台任务结束才会出现的独立
+  提示符，再验证 shell 在原 5 秒界限内继续输出（`WRITTEN` 本身不是 shell 已恢复的证明）；
   `CLOSE` 产生 `EXITED` 终态事件且末屏可再次 `ATTACH` 读回（强制终止不伪造自然退出码）；`OPEN.expectedExited` 旧身份只重建新
   `terminalId`。探针只从数值 UTF-16 槽提取整行文本、不解释 VT，报告只含行为布尔、计数与尺寸。
 

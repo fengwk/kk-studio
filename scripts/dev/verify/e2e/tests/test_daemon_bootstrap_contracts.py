@@ -122,6 +122,7 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
                     "DAEMON_NOTE": note,
                     "DAEMON_JAR": str(jar),
                     "DAEMON_REGISTRATION_TOKEN": secret,
+                    "SHELL": "/unavailable/user-custom-shell",
                 }
             )
             result = subprocess.run(
@@ -144,9 +145,13 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
             self.assertNotIn(secret, config_path.read_text())
 
             config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual({"studioUrl", "note"}, set(config))
+            self.assertEqual({"studioUrl", "note", "terminal"}, set(config))
             self.assertEqual("http://127.0.0.1:18081", config["studioUrl"])
             self.assertEqual(note, config["note"])
+            self.assertTrue(Path(config["terminal"]["executable"]).is_absolute())
+            self.assertEqual("bash", Path(config["terminal"]["executable"]).name)
+            self.assertEqual(["--noprofile", "--norc", "-i"], config["terminal"]["args"])
+            self.assertEqual(str(root), config["terminal"]["workdir"])
             self.assertEqual(0o700, root.stat().st_mode & 0o777)
             self.assertEqual(0o600, config_path.stat().st_mode & 0o777)
             token_path = root / "daemon.token"

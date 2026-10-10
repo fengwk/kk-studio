@@ -42,10 +42,19 @@ token_file="$root/daemon.token"
 chmod 600 "$token_file"
 unset token
 
+# The disposable fixture must not load the host user's shell or startup profiles.
 (umask 077 && DAEMON_CONFIG_STUDIO_URL="$studio_url" DAEMON_CONFIG_NOTE="$note" \
+  DAEMON_CONFIG_SHELL="$BASH" DAEMON_CONFIG_ROOT="$root" \
   node -e 'const fs = require("fs");
 const target = process.argv[1];
-const config = { studioUrl: process.env.DAEMON_CONFIG_STUDIO_URL };
+const config = {
+  studioUrl: process.env.DAEMON_CONFIG_STUDIO_URL,
+  terminal: {
+    executable: process.env.DAEMON_CONFIG_SHELL,
+    args: ["--noprofile", "--norc", "-i"],
+    workdir: process.env.DAEMON_CONFIG_ROOT,
+  },
+};
 const note = process.env.DAEMON_CONFIG_NOTE;
 if (note) {
   config.note = note;

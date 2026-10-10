@@ -89,16 +89,22 @@ registerCase({
       const ctrlEnd = sentinel('CE')
       const resumedPrompt = sentinel('PROMPT')
       const fgOp = probe.sendInput(`PS1='${resumedPrompt}'; (printf '%s\\n' ${ctrlStart}; sleep 60; printf '%s\\n' ${ctrlEnd})\r`, 3)
-      await probe.waitOperation(fgOp, 25_000)
+      const fgAck = await probe.waitOperation(fgOp, 25_000)
+      assert(fgAck.kind === 'CONFIRMED' && fgAck.outcome === 'WRITTEN', 'foreground INPUT must be written')
       await probe.waitScreenRow(ctrlStart, 25_000)
       const ctrlCOp = probe.sendInput(Buffer.from([0x03]), 4)
-      await probe.waitOperation(ctrlCOp, 25_000)
+      const ctrlCAck = await probe.waitOperation(ctrlCOp, 25_000)
+      assert(
+        ctrlCAck.kind === 'CONFIRMED' && ctrlCAck.outcome === 'WRITTEN',
+        `Ctrl-C must be written, got ${ctrlCAck.kind}/${ctrlCAck.outcome}`,
+      )
       const ctrlCAt = Date.now()
       // WRITTEN is not a shell-readiness ACK; the fresh exact prompt proves the foreground job ended.
       await probe.waitScreenRow(resumedPrompt, 5_000)
       const lifecycleSentinel = sentinel('LIFE')
       const lifecycleOp = probe.sendInput(`printf '%s\\n' ${lifecycleSentinel}\r`, 5)
-      await probe.waitOperation(lifecycleOp, 25_000)
+      const lifecycleAck = await probe.waitOperation(lifecycleOp, 25_000)
+      assert(lifecycleAck.kind === 'CONFIRMED' && lifecycleAck.outcome === 'WRITTEN', 'resumed INPUT must be written')
       await probe.waitScreenRow(lifecycleSentinel, 8_000)
       assert(Date.now() - ctrlCAt < 5_000, 'shell must resume within 5s of Ctrl-C')
       assert(probe.screenRowCount(ctrlEnd) === 0, 'Ctrl-C must interrupt the sleep before the end marker')
