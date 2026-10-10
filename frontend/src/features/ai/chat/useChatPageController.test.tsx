@@ -73,6 +73,8 @@ describe('useChatPageController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: '新的 Chat',
         agentName: 'default-assistant',
+        yoloEnabled: false,
+        environmentName: null,
       }),
     )
   })

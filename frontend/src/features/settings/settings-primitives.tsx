@@ -5,8 +5,8 @@ import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 
-/** 配置生效时机：下次调用、下次 HTTP 请求、新建对话或进程重启。 */
-export type ApplyTiming = 'nextInvocation' | 'nextHttpRequest' | 'nextChat' | 'restart'
+/** 配置生效时机：下次调用、下次 HTTP 请求或进程重启。 */
+export type ApplyTiming = 'nextInvocation' | 'nextHttpRequest' | 'restart'
 
 export function ApplyTimingBadge({ timing }: { timing: ApplyTiming }) {
   const { t } = useI18n()
@@ -15,7 +15,6 @@ export function ApplyTimingBadge({ timing }: { timing: ApplyTiming }) {
       {t({
         nextInvocation: 'settings.applyTiming.nextInvocation',
         nextHttpRequest: 'settings.applyTiming.nextHttpRequest',
-        nextChat: 'settings.applyTiming.nextChat',
         restart: 'settings.applyTiming.restart',
       }[timing])}
     </span>

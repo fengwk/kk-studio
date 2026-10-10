@@ -102,7 +102,6 @@ describe('system settings server editor', () => {
   // 通过真实编辑器与完整 CAS mock 验证单一全局代理：两个字段、新请求生效提示、保存与清空不丢其他段。
   it('edits and clears the global proxy while preserving every other section', async () => {
     const initial = makeSettingsDto()
-    initial.tool.defaultYolo = true
     initial.integrations.comfyui.baseUrl = 'http://comfy.internal:8188'
     const backend = createBackend(initial)
     mocks.get.mockImplementation(backend.get)
@@ -175,13 +174,12 @@ describe('system settings server editor', () => {
     expect(screen.getByLabelText('保留最近 token')).toHaveValue('20000')
   })
 
-  it('labels permission as next-invocation and default YOLO as new-chat timing', async () => {
+  it('labels permission and gateway as next-invocation timing', async () => {
     mocks.get.mockResolvedValue(makeSettingsDto())
     renderSettings()
 
     await userEvent.click(await serverTab('工具与权限'))
     expect(await screen.findAllByText('下次调用生效')).toHaveLength(2)
-    expect(screen.getByText('新建对话生效')).toBeInTheDocument()
     expect(screen.queryByText('重启后生效')).not.toBeInTheDocument()
   })
 
@@ -287,10 +285,11 @@ describe('system settings server editor', () => {
     renderSettings(reloadPage)
 
     await userEvent.click(await serverTab('工具与权限'))
-    const yolo = screen.getByRole('switch', { name: '默认 YOLO' })
-    expect(yolo).toHaveAttribute('aria-checked', 'false')
-    await userEvent.click(yolo)
-    expect(yolo).toHaveAttribute('aria-checked', 'true')
+    const retryInput = screen.getByLabelText('模型网关繁忙重试（毫秒）')
+    expect(retryInput).toHaveValue('5000')
+    await userEvent.clear(retryInput)
+    await userEvent.type(retryInput, '8000')
+    expect(retryInput).toHaveValue('8000')
 
     // 页面仍持有 version=0 时，另一个写入者把权威聚合推进到 version=1。
     backend.setState(makeSettingsDto({ version: '1' }))
@@ -303,13 +302,13 @@ describe('system settings server editor', () => {
     // 用户确认前不 refetch、不刷新、不覆盖 draft。
     expect(mocks.get).toHaveBeenCalledTimes(1)
     expect(reloadPage).not.toHaveBeenCalled()
-    expect(yolo).toHaveAttribute('aria-checked', 'true')
+    expect(retryInput).toHaveValue('8000')
     expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
 
     // 取消只关闭说明，保留本地草稿；再次保存仍会得到冲突弹窗。
     await userEvent.click(within(dialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(yolo).toHaveAttribute('aria-checked', 'true')
+    expect(retryInput).toHaveValue('8000')
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     const reopened = await screen.findByRole('alertdialog')
     expect(reopened).toHaveTextContent('原因：VERSION_CONFLICT')

@@ -126,6 +126,7 @@ export interface AgentPaneCapabilities {
 export interface AgentPaneDefaults {
   agentName?: string
   yoloEnabled?: boolean
+  environmentName?: string | null
 }
 
 /** 新建分支请求：命名与目标 pane 由 Chat workspace 统一持有。 */
@@ -323,6 +324,7 @@ export function useRootThreadControl({
           agent,
           defaults.yoloEnabled ?? false,
           models,
+          defaults.environmentName,
         ) != null,
       )
     const materialized = preferred == null
@@ -331,11 +333,12 @@ export function useRootThreadControl({
         preferred,
         defaults.yoloEnabled ?? false,
         models,
+        defaults.environmentName,
       )
     if (materialized != null) {
       setLocalDraft(materialized)
     }
-  }, [agents, defaults.agentName, defaults.yoloEnabled, localDraft, models, target])
+  }, [agents, defaults.agentName, defaults.environmentName, defaults.yoloEnabled, localDraft, models, target])
 
   /**
    * Retain at most one inactive running Thread projection. The active Thread
@@ -1403,6 +1406,7 @@ export function useRootThreadControl({
         models,
         localDraft,
         defaults.yoloEnabled ?? false,
+        defaults.environmentName,
       )
       if (nextDraft == null) {
         setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))

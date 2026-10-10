@@ -842,7 +842,31 @@ export const aiCatalog = {
   },
   'ai.chat.environment': {
     'en-US': 'Environment',
-    'zh-CN': 'Environment',
+    'zh-CN': '环境',
+  },
+  'ai.chat.defaultEnvironment': {
+    'en-US': 'Default Environment',
+    'zh-CN': '默认环境',
+  },
+  'ai.chat.noEnvironment': {
+    'en-US': 'No environment',
+    'zh-CN': '不选择环境',
+  },
+  'ai.chat.selectEnvironment': {
+    'en-US': 'Select default environment',
+    'zh-CN': '选择默认环境',
+  },
+  'ai.chat.environmentUnavailable': {
+    'en-US': '(Unavailable)',
+    'zh-CN': '（不可用）',
+  },
+  'ai.chat.environmentLoadFailed': {
+    'en-US': 'Failed to load environments; current selection kept',
+    'zh-CN': '环境列表加载失败，已保留当前选择',
+  },
+  'ai.chat.yoloDescription': {
+    'en-US': 'Automatically approve tool calls without manual confirmation',
+    'zh-CN': '自动批准工具调用，跳过人工确认',
   },
   'ai.chat.updated': {
     'en-US': 'Updated',
