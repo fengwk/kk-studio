@@ -8,7 +8,10 @@ import type { DaemonConfig } from '../src/contracts.js'
 import {
   HANDOFF_FILE,
   MANAGED_ENTRY,
+  PERMIT_FILE,
+  RESULT_FILE,
   RUNTIME_MANIFEST,
+  STREAM_LIMIT_BYTES,
   UNIX_UPDATE_SCRIPT_NAME,
   WINDOWS_UPDATE_SCRIPT_NAME,
   artifactFileName,
@@ -17,10 +20,13 @@ import {
   createUpdateHandler,
   detachedLaunchCommand,
   productionDependencies,
+  releaseArchFor,
+  releaseOsFor,
   type ReleaseArch,
   type ReleaseOs,
   type UpdateDependencies,
 } from '../src/update.js'
+import { createNativeSupervisorFixture } from './support/native-supervisor.js'
 
 const VERSION = '1.0.12'
 const OPERATION_ID = '11111111-1111-4111-8111-111111111111'
@@ -36,7 +42,7 @@ interface Harness {
 }
 
 function harness(
-  options: { os?: ReleaseOs; arch?: ReleaseArch; checksum?: string; entry?: boolean; manifestVersion?: string; launchExit?: number } = {},
+  options: { os?: ReleaseOs; arch?: ReleaseArch; checksum?: string; entry?: boolean; manifestVersion?: string; manifestPlatform?: boolean; launchExit?: number } = {},
 ): Harness {
   const os = options.os ?? 'linux'
   const arch = options.arch ?? 'amd64'
@@ -53,20 +59,24 @@ function harness(
       downloaded.push(url)
       if (url.endsWith('.sha256')) {
         const digest = options.checksum ?? ARCHIVE_SHA
-        await writeFile(destination, `${digest}  ${artifactFileName(VERSION, os, arch)}\n`)
+        await writeFile(destination, `${digest}  ${artifactFileName(VERSION, os, arch)}\n`, { mode: 0o600 })
         return
       }
-      await writeFile(destination, ARCHIVE)
+      await writeFile(destination, ARCHIVE, { mode: 0o600 })
     },
     async extractArchive(_archive, destination) {
       await mkdir(path.join(destination, 'runtime', 'code-server', 'lib'), { recursive: true })
       if (options.entry !== false) {
         await writeFile(path.join(destination, MANAGED_ENTRY), '// staged entry')
       }
-      await writeFile(
-        path.join(destination, RUNTIME_MANIFEST),
-        JSON.stringify({ schemaVersion: 1, daemonVersion: options.manifestVersion ?? VERSION }),
-      )
+      const manifest: Record<string, unknown> = {
+        schemaVersion: 1,
+        daemonVersion: options.manifestVersion ?? VERSION,
+      }
+      if (options.manifestPlatform !== false) {
+        manifest.codeServer = { [`${os}-${arch}`]: { version: '4.141.0' } }
+      }
+      await writeFile(path.join(destination, RUNTIME_MANIFEST), JSON.stringify(manifest))
       await writeFile(
         path.join(destination, 'runtime', 'code-server', 'lib', os === 'windows' ? 'node.exe' : 'node'),
         '',
@@ -123,6 +133,10 @@ function command(
   }
 }
 
+async function readHandoff(dir: string): Promise<Record<string, unknown>> {
+  return JSON.parse(await readFile(path.join(dir, 'updates', OPERATION_ID, HANDOFF_FILE), 'utf8')) as Record<string, unknown>
+}
+
 describe('update handler', () => {
   let dataDir: string
   let handler: ReturnType<typeof createUpdateHandler>
@@ -145,14 +159,16 @@ describe('update handler', () => {
     expect(h.fetchCount()).toBe(2)
     expect(h.downloaded()[0]).toBe(artifactUrl(VERSION, 'linux', 'amd64'))
     expect(h.downloaded()[1]).toBe(`${artifactUrl(VERSION, 'linux', 'amd64')}.sha256`)
-    const handoff = path.join(dataDir, 'updates', OPERATION_ID, HANDOFF_FILE)
-    expect(JSON.parse(await readFile(handoff, 'utf8'))).toMatchObject({
+    expect(await readHandoff(dataDir)).toMatchObject({
+      state: 'ACCEPTED',
       operationId: OPERATION_ID,
       targetVersion: VERSION,
       artifactSha256: ARCHIVE_SHA,
     })
-    const script = path.join(dataDir, 'updates', OPERATION_ID, UNIX_UPDATE_SCRIPT_NAME)
-    expect((await stat(script)).mode & 0o777).toBe(0o700)
+    const operationDir = path.join(dataDir, 'updates', OPERATION_ID)
+    const script = path.join(operationDir, UNIX_UPDATE_SCRIPT_NAME)
+    expect((await stat(script)).mode & 0o777).toBe(0o600)
+    expect((await stat(path.join(operationDir, PERMIT_FILE))).isFile()).toBe(true)
     expect(h.runCalls().some(call => call.command === 'systemd-run')).toBe(true)
   })
 
@@ -220,6 +236,40 @@ describe('update handler', () => {
     expect(outcome.phase).toBe('PREPARED')
     expect((await stat(path.join(dataDir, 'updates', OPERATION_ID, WINDOWS_UPDATE_SCRIPT_NAME))).isFile()).toBe(true)
     expect(h.runCalls().some(call => call.command === 'powershell')).toBe(true)
+  })
+
+  it('records a failed launch as FAILED and never replays it as prepared', async () => {
+    const h = harness({ launchExit: 1 })
+    handler = createUpdateHandler(h.deps)
+    const outcome = await handler(command(), config(dataDir), new AbortController().signal)
+    expect(outcome.phase).toBe('FAILED')
+    expect(await readHandoff(dataDir)).toMatchObject({ state: 'FAILED' })
+    const retry = await handler(command(), config(dataDir), new AbortController().signal)
+    expect(retry.phase).toBe('FAILED')
+    expect(h.fetchCount()).toBe(2)
+  })
+
+  it('rejects a staged manifest without this platform runtime', async () => {
+    const h = harness({ manifestPlatform: false })
+    const outcome = await createUpdateHandler(h.deps)(command(), config(dataDir), new AbortController().signal)
+    expect(outcome.phase).toBe('FAILED')
+  })
+
+  it('rejects a staged manifest without an explicit daemon version', async () => {
+    const h = harness({ manifestVersion: undefined })
+    const deps = h.deps
+    const handlerWithoutFallback = createUpdateHandler({
+      ...deps,
+      async extractArchive(archive, destination, signal) {
+        await deps.extractArchive(archive, destination, signal)
+        await writeFile(
+          path.join(destination, RUNTIME_MANIFEST),
+          JSON.stringify({ schemaVersion: 1, version: VERSION, codeServer: { 'linux-amd64': {} } }),
+        )
+      },
+    })
+    const outcome = await handlerWithoutFallback(command(), config(dataDir), new AbortController().signal)
+    expect(outcome.phase).toBe('FAILED')
   })
 })
 
@@ -306,15 +356,6 @@ describe('staged distribution failures', () => {
     })
   })
 
-  it('does not leave a reusable handoff when the detached launcher fails', async () => {
-    await withLayout(async dir => {
-      const h = harness({ launchExit: 1 })
-      const outcome = await createUpdateHandler(h.deps)(command(), config(dir), new AbortController().signal)
-      expect(outcome.phase).toBe('FAILED')
-      await expect(stat(path.join(dir, 'updates', OPERATION_ID, HANDOFF_FILE))).rejects.toThrow()
-    })
-  })
-
   it('ignores a corrupt handoff and re-downloads', async () => {
     await withLayout(async dir => {
       const updates = path.join(dir, 'updates', OPERATION_ID)
@@ -326,53 +367,155 @@ describe('staged distribution failures', () => {
       expect(h.fetchCount()).toBe(2)
     })
   })
+
+  it('rejects a handoff recorded for a different operation', async () => {
+    await withLayout(async dir => {
+      const updates = path.join(dir, 'updates', OPERATION_ID)
+      await mkdir(updates, { recursive: true })
+      await writeFile(
+        path.join(updates, HANDOFF_FILE),
+        JSON.stringify({ state: 'ACCEPTED', operationId: '22222222-2222-4222-8222-222222222222' }),
+      )
+      const h = harness()
+      const outcome = await createUpdateHandler(h.deps)(command(), config(dir), new AbortController().signal)
+      expect(outcome.phase).toBe('FAILED')
+      expect(h.fetchCount()).toBe(0)
+    })
+  })
 })
 
 describe('detached launch command', () => {
-  it('uses a transient systemd user unit on Linux', () => {
-    const line = detachedLaunchCommand('linux', OPERATION_ID, '/u/script.sh', '/u/extract', '/u/lib')
+  it('uses a transient systemd user unit on Linux and passes all three directories', () => {
+    const line = detachedLaunchCommand('linux', OPERATION_ID, '/u/script.sh', '/u/op/extract', '/u/lib')
     expect(line[0]).toBe('systemd-run')
     expect(line).toContain('--user')
     expect(line).toContain(`--unit=kk-studio-daemon-update-${OPERATION_ID}`)
-    expect(line).toContain('/u/script.sh')
+    expect(line.slice(-4)).toEqual(['/u/script.sh', '/u/op', '/u/op/extract', '/u/lib'])
   })
 
-  it('submits a transient launchd job on macOS', () => {
-    const line = detachedLaunchCommand('macos', OPERATION_ID, '/u/script.sh', '/u/extract', '/u/lib')
+  it('submits a transient launchd job on macOS and passes all three directories', () => {
+    const line = detachedLaunchCommand('macos', OPERATION_ID, '/u/script.sh', '/u/op/extract', '/u/lib')
     expect(line.slice(0, 4)).toEqual(['launchctl', 'submit', '-l', `kk-studio-daemon-update-${OPERATION_ID}`])
+    expect(line.slice(-4)).toEqual(['/u/script.sh', '/u/op', '/u/op/extract', '/u/lib'])
   })
 
-  it('registers a one-shot scheduled task on Windows', () => {
-    const line = detachedLaunchCommand('windows', OPERATION_ID, 'C:/u/script.ps1', 'C:/u/extract', 'C:/u/lib')
-    expect(line[0]).toBe('powershell')
-    expect(line[line.length - 1]).toContain(OPERATION_ID)
-    expect(line[line.length - 1]).toContain('-InstalledDir')
+  it('registers a one-shot scheduled task on Windows through an encoded command', () => {
+    const line = detachedLaunchCommand('windows', OPERATION_ID, 'C:/u/script.ps1', 'C:/u/op/extract', 'C:/u/lib')
+    expect(line.slice(0, 4)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand'])
+    const script = Buffer.from(line[4] ?? '', 'base64').toString('utf16le')
+    expect(script).toContain(`kk-studio-daemon-update-${OPERATION_ID}`)
+    expect(script).toContain('-InstalledDir')
+    expect(script).toContain('Register-ScheduledTask')
+    expect(script).toContain('Start-ScheduledTask')
+  })
+
+  it('escapes single quotes in Windows paths without breaking the encoded command', () => {
+    const line = detachedLaunchCommand('windows', OPERATION_ID, "C:/u/it's/script.ps1", "C:/u/it's/extract", 'C:/u/lib')
+    const script = Buffer.from(line[4] ?? '', 'base64').toString('utf16le')
+    expect(script).toContain("''")
+  })
+})
+
+describe('release platform mapping', () => {
+  it('maps only covered operating systems and architectures', () => {
+    expect(releaseOsFor('linux')).toBe('linux')
+    expect(releaseOsFor('darwin')).toBe('macos')
+    expect(releaseOsFor('win32')).toBe('windows')
+    expect(() => releaseOsFor('freebsd')).toThrow()
+    expect(releaseArchFor('x64')).toBe('amd64')
+    expect(releaseArchFor('arm64')).toBe('arm64')
+    expect(() => releaseArchFor('ia32')).toThrow()
+  })
+
+  it('fails closed when the same operation id is prepared for another platform', async () => {
+    await withLayout(async dir => {
+      const updates = path.join(dir, 'updates', OPERATION_ID)
+      await mkdir(updates, { recursive: true })
+      await writeFile(
+        path.join(updates, HANDOFF_FILE),
+        JSON.stringify({ state: 'ACCEPTED', operationId: OPERATION_ID, targetVersion: VERSION }),
+      )
+      const h = harness()
+      const outcome = await createUpdateHandler(h.deps)(command(), config(dir), new AbortController().signal)
+      expect(outcome.phase).toBe('FAILED')
+      expect(h.fetchCount()).toBe(0)
+    })
   })
 })
 
 describe('production dependencies', () => {
   it('runs a child process and captures its streams', async () => {
-    const deps = productionDependencies()
-    const result = await deps.run(process.execPath, ['-e', 'process.stdout.write("hi")'], {})
-    expect(result.code).toBe(0)
-    expect(result.stdout).toBe('hi')
+    const processes = createNativeSupervisorFixture()
+    try {
+      const deps = productionDependencies(processes)
+      const result = await deps.run(process.execPath, ['-e', 'process.stdout.write("hi")'], {})
+      expect(result.code).toBe(0)
+      expect(result.stdout).toBe('hi')
+    } finally {
+      await processes.close()
+    }
   })
 
   it('reports a non-zero child exit code', async () => {
-    const deps = productionDependencies()
-    const result = await deps.run(process.execPath, ['-e', 'process.exit(3)'], {})
-    expect(result.code).toBe(3)
+    const processes = createNativeSupervisorFixture()
+    try {
+      const deps = productionDependencies(processes)
+      const result = await deps.run(process.execPath, ['-e', 'process.exit(3)'], {})
+      expect(result.code).toBe(3)
+    } finally {
+      await processes.close()
+    }
   })
 
   it('rejects when the command cannot be spawned', async () => {
-    const deps = productionDependencies()
-    await expect(deps.run('kk-studio-nonexistent-binary', [], {})).rejects.toThrow()
+    const processes = createNativeSupervisorFixture()
+    try {
+      const deps = productionDependencies(processes)
+      await expect(deps.run('kk-studio-nonexistent-binary', [], {})).rejects.toThrow()
+    } finally {
+      await processes.close()
+    }
   })
 
-  it('kills a child that exceeds its timeout', async () => {
-    const deps = productionDependencies()
-    const result = await deps.run(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { timeoutMillis: 50 })
-    expect(result.code).toBeNull()
+  it('terminates a child that exceeds its timeout and awaits convergence', async () => {
+    const processes = createNativeSupervisorFixture()
+    try {
+      const deps = productionDependencies(processes)
+      const result = await deps.run(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { timeoutMillis: 50 })
+      expect(result.code).toBeNull()
+    } finally {
+      await processes.close()
+    }
+  })
+
+  it('terminates a child when the caller cancels', async () => {
+    const processes = createNativeSupervisorFixture()
+    try {
+      const deps = productionDependencies(processes)
+      const controller = new AbortController()
+      const running = deps.run(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { signal: controller.signal })
+      controller.abort()
+      const result = await running
+      expect(result.code).toBeNull()
+    } finally {
+      await processes.close()
+    }
+  })
+
+  it('keeps each stream bounded while still draining it', async () => {
+    const processes = createNativeSupervisorFixture()
+    try {
+      const deps = productionDependencies(processes)
+      const result = await deps.run(
+        process.execPath,
+        ['-e', 'process.stdout.write("x".repeat(200000))'],
+        {},
+      )
+      expect(result.code).toBe(0)
+      expect(result.stdout.length).toBe(STREAM_LIMIT_BYTES)
+    } finally {
+      await processes.close()
+    }
   })
 
   it('extracts a real tar.gz archive into the destination', async () => {
@@ -381,13 +524,40 @@ describe('production dependencies', () => {
       await mkdir(source, { recursive: true })
       await writeFile(path.join(source, MANAGED_ENTRY), '// entry')
       const archive = path.join(dir, 'payload.tar.gz')
-      const deps = productionDependencies()
-      const tar = await deps.run('tar', ['-czf', archive, '-C', source, MANAGED_ENTRY], {})
-      expect(tar.code).toBe(0)
-      const destination = path.join(dir, 'out')
-      await mkdir(destination, { recursive: true })
-      await deps.extractArchive(archive, destination, new AbortController().signal)
-      expect(await readFile(path.join(destination, MANAGED_ENTRY), 'utf8')).toBe('// entry')
+      const processes = createNativeSupervisorFixture()
+      try {
+        const deps = productionDependencies(processes)
+        const tar = await deps.run('tar', ['-czf', archive, '-C', source, MANAGED_ENTRY], {})
+        expect(tar.code).toBe(0)
+        const destination = path.join(dir, 'out')
+        await mkdir(destination, { recursive: true })
+        await deps.extractArchive(archive, destination, new AbortController().signal)
+        expect(await readFile(path.join(destination, MANAGED_ENTRY), 'utf8')).toBe('// entry')
+      } finally {
+        await processes.close()
+      }
+    })
+  })
+
+  it('rejects a real archive with an escaping entry', async () => {
+    await withLayout(async dir => {
+      const source = path.join(dir, 'source')
+      await mkdir(source, { recursive: true })
+      await writeFile(path.join(source, 'main.js'), '// entry')
+      const archive = path.join(dir, 'payload.tar.gz')
+      const processes = createNativeSupervisorFixture()
+      try {
+        const deps = productionDependencies(processes)
+        const tar = await deps.run('tar', ['-czf', archive, '-P', '-C', source, '/etc/hosts'], {})
+        expect(tar.code).toBe(0)
+        const destination = path.join(dir, 'out')
+        await mkdir(destination, { recursive: true })
+        await expect(
+          deps.extractArchive(archive, destination, new AbortController().signal),
+        ).rejects.toThrow()
+      } finally {
+        await processes.close()
+      }
     })
   })
 
@@ -397,6 +567,9 @@ describe('production dependencies', () => {
         if (request.url === '/ok') {
           response.writeHead(200)
           response.end('payload')
+        } else if (request.url === '/big') {
+          response.writeHead(200)
+          response.end('x'.repeat(4096))
         } else {
           response.writeHead(404)
           response.end()
@@ -405,16 +578,22 @@ describe('production dependencies', () => {
       await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
       const address = server.address()
       const port = typeof address === 'object' && address !== null ? address.port : 0
-      const deps = productionDependencies()
+      const processes = createNativeSupervisorFixture()
       try {
+        const deps = productionDependencies(processes)
         const destination = path.join(dir, 'download')
-        await deps.fetchTo(`http://127.0.0.1:${port}/ok`, destination, new AbortController().signal)
+        await deps.fetchTo(`http://127.0.0.1:${port}/ok`, destination, new AbortController().signal, 1024)
         expect(await readFile(destination, 'utf8')).toBe('payload')
         expect((await stat(destination)).mode & 0o777).toBe(0o600)
         await expect(
-          deps.fetchTo(`http://127.0.0.1:${port}/missing`, path.join(dir, 'nope'), new AbortController().signal),
+          deps.fetchTo(`http://127.0.0.1:${port}/missing`, path.join(dir, 'nope'), new AbortController().signal, 1024),
         ).rejects.toThrow()
+        await expect(
+          deps.fetchTo(`http://127.0.0.1:${port}/big`, path.join(dir, 'oversize'), new AbortController().signal, 128),
+        ).rejects.toThrow()
+        await expect(stat(path.join(dir, 'oversize'))).rejects.toThrow()
       } finally {
+        await processes.close()
         await new Promise<void>(resolve => server.close(() => resolve()))
       }
     })
@@ -424,5 +603,11 @@ describe('production dependencies', () => {
     const url = artifactUrl(VERSION, 'macos', 'arm64')
     expect(url).toBe(`${'https://github.com/fengwk/kk-studio/releases/download'}/v${VERSION}/${artifactFileName(VERSION, 'macos', 'arm64')}`)
     expect(checksumUrl(VERSION, 'macos', 'arm64')).toBe(`${url}.sha256`)
+  })
+})
+
+describe('result file contract', () => {
+  it('names the update result file used by the detached updater', () => {
+    expect(RESULT_FILE).toBe('update-result.json')
   })
 })
