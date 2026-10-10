@@ -195,8 +195,9 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
 })
 
 test('chat default environment case executes the create/retain/clear wire with omit-null semantics', async () => {
-  // 测试意图：真实执行 crud.chat.default_environment（只 fake HTTP），证明它按契约发送默认环境、
-  // 省略 environmentName 的 PUT 不携带该键、显式清空携带 environmentName:null，且非法值确实被发出并拒绝。
+  // 测试意图：真实执行 crud.chat.default_environment（只 fake HTTP），证明它创建的 POST 请求体确实省略
+  // yoloEnabled（由服务端默认 false）并携带默认环境、省略 environmentName 的 PUT 不携带该键、显式清空携带
+  // environmentName:null，且非法值确实被发出并拒绝。
   const fake = chatDefaultEnvironmentFixture()
   await getCase('crud.chat.default_environment').run(fake.ctx)
 
@@ -206,7 +207,8 @@ test('chat default environment case executes the create/retain/clear wire with o
   const environmentCreate = fake.requests.find(
     (request) => request.method === 'POST' && request.path === '/api/harness/environments',
   )
-  assert.equal(create.body.yoloEnabled, false)
+  // 创建请求必须真的省略 yoloEnabled：只有服务端默认才产生响应里的 false。
+  assert.equal(Object.hasOwn(create.body, 'yoloEnabled'), false)
   assert.equal(create.body.environmentName, environmentCreate.body.name)
 
   const chatPuts = fake.requests.filter(
