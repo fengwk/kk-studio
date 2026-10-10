@@ -209,3 +209,146 @@ test.describe('Shared resource card foundation', () => {
     expect(disabledStyle.color).toBe(dangerProbe)
   })
 })
+
+const PANELS_HARNESS_URL = '/browser-tests/resource-card-harness.html?panels=1'
+
+test.describe('Real Models and Providers panels layout and CreateCard contract', () => {
+  // 1280px 宽屏：空态新建卡片保持至少 280px 最小高度，不再矮扁坍塌
+  test('ensures empty state CreateCard respects min-height 280px on 1280px desktop', async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto(PANELS_HARNESS_URL)
+
+    const modelEmptyCard = page.locator('#section-models-empty .create-card')
+    const providerEmptyCard = page.locator('#section-providers-empty .create-card')
+
+    await expect(modelEmptyCard).toBeVisible()
+    await expect(providerEmptyCard).toBeVisible()
+
+    const modelBox = (await modelEmptyCard.boundingBox())!
+    const providerBox = (await providerEmptyCard.boundingBox())!
+
+    const modelComputedMinHeight = await modelEmptyCard.evaluate(
+      (el) => getComputedStyle(el).minHeight,
+    )
+    const providerComputedMinHeight = await providerEmptyCard.evaluate(
+      (el) => getComputedStyle(el).minHeight,
+    )
+
+    expect(modelComputedMinHeight).toBe('280px')
+    expect(providerComputedMinHeight).toBe('280px')
+
+    // 实际渲染高度必须 >= 280px（在空态下约为 280px）
+    expect(modelBox.height).toBeGreaterThanOrEqual(280)
+    expect(providerBox.height).toBeGreaterThanOrEqual(280)
+
+    console.log(
+      `[Measure] 1280px empty state: Model CreateCard=${modelBox.height}px, Provider CreateCard=${providerBox.height}px`,
+    )
+
+    await page.screenshot({ path: testInfo.outputPath('desktop-empty-create-cards.png') })
+  })
+
+  // 1280px 宽屏：同行卡片自然等高 (grid stretch)，内容丰富时卡片高度自然增长
+  test('stretches to same height in same row and grows naturally with content on 1280px desktop', async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto(PANELS_HARNESS_URL)
+
+    // 模型列表网格：包含 1 个 CreateCard 与 2 个真实模型卡片
+    const populatedSection = page.locator('#section-models-populated')
+    const createCard = populatedSection.locator('.create-card')
+    const resourceCards = populatedSection.locator('.resource-card')
+
+    await expect(createCard).toBeVisible()
+    await expect(resourceCards.first()).toBeVisible()
+
+    const createBox = (await createCard.boundingBox())!
+    const firstResourceBox = (await resourceCards.first().boundingBox())!
+
+    // 1280px 容器下，前两张卡片落在同一行（y 坐标相同），CSS grid stretch 保证它们等高
+    if (Math.abs(createBox.y - firstResourceBox.y) < 4) {
+      expect(Math.abs(createBox.height - firstResourceBox.height)).toBeLessThanOrEqual(1.5)
+    }
+
+    // 含有更多变体和长描述的卡片（或随内容生长的典型卡片）高度 >= 280px
+    for (let i = 0; i < (await resourceCards.count()); i += 1) {
+      const box = (await resourceCards.nth(i).boundingBox())!
+      expect(box.height).toBeGreaterThanOrEqual(280)
+      console.log(`[Measure] 1280px populated state: Model card [${i}]=${box.height}px`)
+    }
+    console.log(`[Measure] 1280px populated state: CreateCard=${createBox.height}px`)
+
+    const providerCard = page.locator('#section-providers-populated .resource-card').first()
+    const providerBox = (await providerCard.boundingBox())!
+    console.log(`[Measure] 1280px populated state: Provider card=${providerBox.height}px`)
+
+    await page.screenshot({ path: testInfo.outputPath('desktop-populated-cards.png') })
+  })
+
+  // 390px 窄屏移动视口：单列自适应、无横向溢出，空态保持最小高度
+  test('adapts to 390px mobile viewport without horizontal overflow and retains min-height', async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(PANELS_HARNESS_URL)
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }))
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+
+    // 空态 CreateCard 在窄屏依然保持 280px 最小高度
+    const modelEmptyCard = page.locator('#section-models-empty .create-card')
+    const providerEmptyCard = page.locator('#section-providers-empty .create-card')
+
+    const modelBox = (await modelEmptyCard.boundingBox())!
+    const providerBox = (await providerEmptyCard.boundingBox())!
+
+    expect(modelBox.height).toBeGreaterThanOrEqual(280)
+    expect(providerBox.height).toBeGreaterThanOrEqual(280)
+
+    console.log(
+      `[Measure] 390px mobile empty state: Model CreateCard=${modelBox.height}px, Provider CreateCard=${providerBox.height}px`,
+    )
+
+    // 窄屏下每个栅格皆单列排布（每个卡片的 x 相同）
+    const modelGridItems = page.locator('#section-models-populated .resource-grid > *')
+    const xs = await modelGridItems.evaluateAll((items) =>
+      items.map((item) => Math.round(item.getBoundingClientRect().x)),
+    )
+    expect(new Set(xs).size).toBe(1)
+
+    await page.screenshot({ path: testInfo.outputPath('mobile-panels-layout.png') })
+  })
+
+  // 创建按钮点击可操作：无论是空态还是有卡片列表，点击 CreateCard 均能触发操作回调
+  test('handles click interaction on CreateCard in both empty and populated states', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto(PANELS_HARNESS_URL)
+
+    const actionLog = page.locator('#action-log')
+    await expect(actionLog).toHaveText('idle')
+
+    // 1. 点击模型空态新建卡片
+    await page.locator('#section-models-empty .create-card').click()
+    await expect(actionLog).toHaveText('create-model-empty')
+
+    // 2. 点击供应商空态新建卡片
+    await page.locator('#section-providers-empty .create-card').click()
+    await expect(actionLog).toHaveText('create-provider-empty')
+
+    // 3. 点击有卡片场景下的模型新建卡片
+    await page.locator('#section-models-populated .create-card').click()
+    await expect(actionLog).toHaveText('create-model-populated')
+
+    // 4. 点击有卡片场景下的供应商新建卡片
+    await page.locator('#section-providers-populated .create-card').click()
+    await expect(actionLog).toHaveText('create-provider-populated')
+  })
+})

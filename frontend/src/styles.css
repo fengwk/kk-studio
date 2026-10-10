@@ -500,6 +500,7 @@ textarea::placeholder {
 /* 新建入口卡：与资源卡同一尺寸语言的虚线边框卡片，整卡即创建动作。
    内部元素各自控制间距，不依赖父级 gap。 */
 .create-card {
+  min-height: 280px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
