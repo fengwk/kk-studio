@@ -197,3 +197,32 @@ function renderWorkbench(host: ExtensionHost, entry: string) {
     </QueryClientProvider>,
   )
 }
+
+describe('WorkbenchShell bottom panel slot', () => {
+  it('forwards the bottom panel slot to AppShell after the stage', () => {
+    const host = new ExtensionHost()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const sockets = new FakeWebSocketHarness()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          <ExtensionHostProvider host={host}>
+            <MemoryRouter initialEntries={['/interactions']}>
+              <WorkbenchShell
+                navItems={FIXTURE_NAV_ITEMS}
+                bottomPanel={<div data-testid="shell-bottom-panel">Terminal</div>}
+              >
+                <div data-testid="explicit-children">Page</div>
+              </WorkbenchShell>
+            </MemoryRouter>
+          </ExtensionHostProvider>
+        </ApplicationEventProvider>
+      </QueryClientProvider>,
+    )
+
+    const stage = document.querySelector('main.stage')!
+    const panel = screen.getByTestId('shell-bottom-panel')
+    expect(stage.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(panel.parentElement).toBe(stage.parentElement)
+  })
+})

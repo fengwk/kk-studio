@@ -112,6 +112,7 @@ export function AppShell({
   children,
   pages: explicitPages,
   navItems,
+  bottomPanel,
 }: AppShellProps) {
   const location = useLocation()
   const host = useOptionalExtensionHostSnapshot()
@@ -246,6 +247,7 @@ export function AppShell({
         </header>
       ) : null}
       <main className="stage">{children}</main>
+      {bottomPanel}
     </div>
   )
 }

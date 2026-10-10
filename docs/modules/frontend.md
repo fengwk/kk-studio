@@ -302,6 +302,42 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 新增认证形态须同步静态组件、Share/TypeScript contract、i18n 与测试；
 后端 authKind:null 的管理形态需要先定义对应前端状态。
 
+## 全局终端面板
+
+终端是唯一的全局底部面板，不新增 `/shell` 页面：应用组合根在 `AppRouter` 里以
+`bottomPanel={<TerminalPanel />}` 注入，[`AppShell`](../../frontend/src/platform/shell/AppShell.tsx)
+与 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx) 只把它渲染在
+`main.stage` 之后的同一 flex 列，platform 不导入 feature。两者共享可用高度，因此 stage 保持
+`min-height: 0` 内部滚动，面板固定 `min(48vh, 520px)` 且不会把整页撑出视口；topbar 隐藏的
+沉浸工作区同样只用同一个面板。
+
+[`TerminalProvider`](../../frontend/src/app/providers.tsx) 在应用事件层之下建立单一
+[`TerminalController`](../../frontend/src/features/shell/terminal-controller.ts)，复用唯一浏览器
+WebSocket 按环境维护会话状态机；公开快照只含 executable/status/notice/控制态与只读镜像，
+绝不暴露 writer token、grant 或待发字节。面板呈现环境页签、真实 executable/status 和控制动作。
+控制资格要求环境 READY、连接 open 且环境回读未失败；资格不足只把会话控制权降为只读并保留已有末屏，
+不销毁 viewport、不丢焦点，标题也不再显示“控制中”。加载/失败给出固定本地文案（不回显 `Error.message`），
+已有末屏时以旁提示呈现而不是替换屏幕，没有末屏才用 `StateBlock`。终止确认冻结
+environment/daemon/terminal/writer 完整目标，点击时按控制器当前快照复验活动环境、可见性、连接、
+环境 READY 与运行态，任一变化即取消并提示，绝不误伤切换后的新目标。
+
+[`TerminalViewport`](../../frontend/src/features/shell/TerminalViewport.tsx) 只读绘制数值镜像，
+输入层是覆盖其上的透明 textarea，使用 `readOnly` 而非 `disabled`，普通输出重绘不丢焦点。
+viewport 以 environmentId 为 key：切换环境必然重新挂载，绝不复用上一环境的网格。
+文字与 IME 走 `onInput` / `compositionend`（忽略 Chromium 在 compositionend 之后补发的最终
+input），特殊键、控件键与粘贴走既有 encoder；Ctrl/Cmd+C 在有本地槽选择时把镜像文本写入
+textarea 选择并走唯一原生复制路径（不依赖仅安全上下文可用的 `navigator.clipboard`），
+否则发送 `0x03`；Ctrl/Cmd+V 保留浏览器默认粘贴。Shift 覆盖 VT 鼠标上报用于本地槽选择，
+鼠标坐标只映射活动屏行（减去 history）。视口默认跟随底部，用户上滚历史后按行身份锚定；
+绘制串行化并限制在 30Hz，只对当前 stream/version 发送一次 `applied`，滚动重绘不重复 ACK，
+代际不符的旧帧直接丢弃。`ResizeObserver` 与握权时显式 fit 只在持有控制权且运行中提出合法尺寸
+（列 5..300、行 2..100）并对同尺寸去重。所有用户提示只描述结果（如“输入未被终端接收，请稍后重试”），
+中英文语义一致。
+
+Vitest 用例与实现就近组织；离线 Chromium harness
+[`terminal-harness.html`](../../frontend/browser-tests/terminal-harness.html) 复用真实组件与生产几何，
+覆盖高度共享与 prompt 可见、fit/ACK、Ctrl+C 原生复制、Ctrl+V 粘贴、IME 去重与滚轮/鼠标上报。
+
 ## 共享 UI 与测试
 
 全局 token 在 [`styles.css`](../../frontend/src/styles.css)，Canvas 样式由 feature 拥有。

@@ -5896,10 +5896,12 @@ select.settings-input option {
   font-weight: 500;
 }
 
-/* 工作区通用沉浸壳：隐藏全局顶栏后让 stage 占满可见区。
+/* 工作区通用沉浸壳：隐藏全局顶栏后让 stage 占据 flex 剩余高度。
+   stage 与底部面板共享可用高度，因此这里必须是 min-height:0，而不是 min-height:100%
+   （后者会把面板挤出可视区或造成整页溢出）。
    对话/画布的业务几何各自在 feature 局部样式里表达，不在这里叠加皮肤。 */
 .workspace-immersive .stage {
-  min-height: 100%;
+  min-height: 0;
 }
 
 .form-grid-2 {

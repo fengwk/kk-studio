@@ -230,7 +230,7 @@ npm --prefix frontend run coverage
 | 命令 | 行为 | 结果 |
 | --- | --- | --- |
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
-| `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、共享资源卡/控件、Chat 1–9 pane 布局、Agent 执行树与回执、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 创建确认/生成布局/耐用性、Catalog i18n、Project 工作流与 Agent、Settings 同步与 Environment 安装；不依赖 Backend，产物在 `reports/layout/` |
+| `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、共享资源卡/控件、Chat 1–9 pane 布局、Agent 执行树与回执、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 创建确认/生成布局/耐用性、Catalog i18n、Project 工作流与 Agent、Settings 同步、Environment 安装与全局终端面板（高度共享、fit、复制/粘贴、IME、滚轮/鼠标）；不依赖 Backend，产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
 | `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
 | `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |

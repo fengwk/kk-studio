@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Global Terminal Panel Harness</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: #101412;
+        color: #edf2ed;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      #root { height: 100%; }
+      /* 复现真实 stage 的“内容可滚动、不撑高自身”语义，用来验证与底部面板共享高度。 */
+      .harness-stage-fill { min-height: 1600px; padding: 16px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./terminal-harness.tsx"></script>
+  </body>
+</html>

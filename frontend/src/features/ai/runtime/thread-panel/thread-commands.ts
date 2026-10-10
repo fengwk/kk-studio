@@ -25,6 +25,7 @@ export type ThreadCommandId =
   | 'rename-session'
   | 'rename-thread'
   | 'goal'
+  | 'shell'
 
 export interface ThreadCommand {
   id: ThreadCommandId
@@ -58,6 +59,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('rename-session', ['session', 'name']),
   command('rename-thread', ['thread', 'name']),
   command('goal', ['objective', 'target', 'task', 'goal']),
+  command('shell', ['terminal', 'bash', 'console', 'pty', 'sh']),
 ]
 
 function command(id: ThreadCommandId, keywords: string[]): ThreadCommand {
@@ -72,7 +74,7 @@ function command(id: ThreadCommandId, keywords: string[]): ThreadCommand {
 }
 
 const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
-  NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts'],
+  NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts', 'shell'],
   NEW_THREAD_DRAFT: [
     'thread',
     'agent',
@@ -86,6 +88,7 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'rename-session',
     'rename-thread',
     'goal',
+    'shell',
   ],
   // 会话 fork 草稿：新 Session/Thread 尚未创建，也没有用户可见名称，因此不提供任何重命名；
   // 其余草稿能力（设置、历史、预览、Goal）与新建 Thread 分支保持一致。
@@ -150,6 +153,7 @@ export function threadCommandsForTarget(
       && item.id !== 'history'
       && item.id !== 'debug'
       && item.id !== 'subagent'
+      && item.id !== 'shell'
 
     const newDisabled =
       item.id === 'new'

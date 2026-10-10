@@ -63,14 +63,17 @@ function StudioRoutes() {
 export interface WorkbenchShellProps {
   navItems: readonly PrimaryNavItem[]
   children?: ReactNode
+  /** 由 app 组合根提供的底部面板槽（全局终端面板）；platform 不 import features。 */
+  bottomPanel?: ReactNode
 }
 
 export function WorkbenchShell({
   navItems,
   children,
+  bottomPanel,
 }: WorkbenchShellProps) {
   return (
-    <AppShell navItems={navItems}>
+    <AppShell navItems={navItems} bottomPanel={bottomPanel}>
       {children ?? <StudioRoutes />}
       {children ? <OverlayHost /> : null}
     </AppShell>
