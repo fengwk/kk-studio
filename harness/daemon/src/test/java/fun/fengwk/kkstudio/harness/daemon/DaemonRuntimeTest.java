@@ -322,6 +322,57 @@ class DaemonRuntimeTest {
     assertEquals(UPDATE_OP, launched.get().handoffDirectory().getFileName().toString());
   }
 
+  /** 意图：READY 完成信号被延迟期间受理的本代际新 UPDATE 是合法新命令，不是握手前历史事实；READY 完成回调不得把它当历史回执重复重放 ACCEPTED。 */
+  @Test
+  void newUpdateAdmittedBeforeReadyCompletionIsNotReplayed() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    CompletableFuture<Void> ready = transport.deferNextReady();
+    CountDownLatch preparing = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicInteger launches = new AtomicInteger();
+    runtime.setManagedUpdater(
+        command -> {
+          preparing.countDown();
+          try {
+            release.await();
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("blocking updater interrupted", error);
+          }
+          return preparedUpdate(command.operationId());
+        });
+    runtime.setUpdateLauncher(
+        prepared -> {
+          launches.incrementAndGet();
+          return true;
+        });
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+
+    // READY 已入传输队列但完成信号未到：此刻受理的 UPDATE 是合法新命令，不是握手前历史事实。
+    transport.receive(updateCommand(UPDATE_OP));
+    assertTrue(preparing.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    DaemonUpdateResultCodec updateCodec = new DaemonUpdateResultCodec();
+    List<DaemonEnvelope> accepted = transport.takeMessages(1);
+    assertMessageTypes(accepted, DaemonMessageType.UPDATE_RESULT);
+    assertEquals(
+        DaemonUpdatePhase.ACCEPTED, updateCodec.decode(accepted.get(0).payloadJson()).phase());
+
+    // READY 完成只重放握手前已冻结的 operation：新受理 operation 的 ACCEPTED 不得被二次重放。
+    ready.complete(null);
+    assertFalse(transport.awaitMessage(Duration.ofMillis(200)));
+
+    release.countDown();
+    List<DaemonEnvelope> prepared = transport.takeMessages(1);
+    assertEquals(
+        DaemonUpdatePhase.PREPARED, updateCodec.decode(prepared.get(0).payloadJson()).phase());
+    assertEquals(1, launches.get());
+  }
+
   /** 意图：同一 operation 的重发只重放冻结回执，不产生第二次准备（幂等）。 */
   @Test
   void duplicateUpdateReplaysResultWithoutRepreparing() throws InterruptedException {
@@ -430,6 +481,51 @@ class DaemonRuntimeTest {
     assertEquals(
         DaemonUpdatePhase.PREPARED,
         new DaemonUpdateResultCodec().decode(reconnected.get(2).payloadJson()).phase());
+  }
+
+  /** 意图：重连时握手前已有 operation 仍在途，READY 后按其现有事实重发 ACCEPTED，让 Platform 重新收敛而不是判定失败。 */
+  @Test
+  void reconnectResendsAcceptedWhileUpdateInFlight() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+    CountDownLatch preparing = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    runtime.setManagedUpdater(
+        command -> {
+          preparing.countDown();
+          try {
+            release.await();
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("blocking updater interrupted", error);
+          }
+          return preparedUpdate(command.operationId());
+        });
+    runtime.setUpdateLauncher(prepared -> true);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(updateCommand(UPDATE_OP));
+    assertTrue(preparing.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    transport.takeMessages(1);
+
+    // 更新仍在途时断线重连：握手前冻结的 operation 即该在途 operation，READY 后按其当前事实重发 ACCEPTED。
+    transport.disconnect();
+    transport.awaitConnections(1);
+    completeHandshake();
+    List<DaemonEnvelope> reconnected = transport.takeMessages(3);
+    assertMessageTypes(reconnected, HELLO, READY, DaemonMessageType.UPDATE_RESULT);
+    DaemonUpdateResultCodec updateCodec = new DaemonUpdateResultCodec();
+    assertEquals(
+        DaemonUpdatePhase.ACCEPTED, updateCodec.decode(reconnected.get(2).payloadJson()).phase());
+
+    release.countDown();
+    assertEquals(
+        DaemonUpdatePhase.PREPARED,
+        updateCodec.decode(transport.takeMessages(1).get(0).payloadJson()).phase());
   }
 
   private static final String UPDATE_OP = "11111111-1111-1111-1111-111111111111";
