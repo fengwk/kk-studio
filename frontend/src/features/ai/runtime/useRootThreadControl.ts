@@ -32,6 +32,7 @@ import {
   restoreComposerDraft,
   storeComposerDraft,
 } from '@/features/ai/composer/composer-draft'
+import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
 import { harnessService } from '@/shared/api/harness-service'
 import { chatService } from '@/shared/api/chat-service'
 import {
@@ -973,6 +974,7 @@ export function useRootThreadControl({
       seedAcceptedThreadSnapshot(queryClient, response)
       targetRef.current = bound
       setTarget(bound)
+      setFocusIntent(bound)
       if (partsRef.current.length === 0) {
         clearStoredComposerDraft(composerScope)
         setPartsState([])
@@ -1784,7 +1786,9 @@ export function useRootThreadControl({
       return
     }
     if (!composerDisabled && !covered && interaction == null && boundViews.mode === 'conversation') {
-      composerRef.current?.focus()
+      if (!hasBlockingModal()) {
+        composerRef.current?.focus()
+      }
       setFocusIntent(null)
     }
   }, [focusIntent, focused, target, composerDisabled, covered, interaction, boundViews.mode, setFocusIntent])
