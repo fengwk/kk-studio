@@ -20,9 +20,11 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Authenticator;
 import java.net.CookieHandler;
@@ -30,6 +32,7 @@ import java.net.InetSocketAddress;
 import java.net.ProxySelector;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Redirect;
@@ -168,48 +171,9 @@ class JdkHttpSseTransportTest {
    */
   @Test
   void cancel_streaming_silently_aborts_without_terminal_callback() throws Exception {
-    CountDownLatch firstSent = new CountDownLatch(1);
-    CountDownLatch clientCancelled = new CountDownLatch(1);
-    CountDownLatch serverDetectedClose = new CountDownLatch(1);
-
-    httpServer.createContext(
-        "/it-stream-cancel",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: 1\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            firstSent.countDown();
-            assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
-            // 客户端取消后继续写，应当触发连接关闭或异常
-            while (true) {
-              os.write("data: subsequent-data\n\n".getBytes(StandardCharsets.UTF_8));
-              os.flush();
-            }
-          } catch (Exception e) {
-            serverDetectedClose.countDown();
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-stream-cancel"))
-            .GET()
-            .build();
-    ProviderStream stream =
-        transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(firstSent.await(5, TimeUnit.SECONDS));
-    stream.cancel();
-    clientCancelled.countDown();
-
-    assertTrue(
-        serverDetectedClose.await(5, TimeUnit.SECONDS),
-        "server must detect write failure/closed pipe after client cancel");
-    assertTrue(stream.isCancelled());
-    assertFalse(callback.completed, "no completed callback on explicit cancel");
-    assertNull(callback.error, "no failure callback on explicit cancel");
+    for (int i = 0; i < 20; i++) {
+      assertCancellationClosesConnection(true);
+    }
   }
 
   /** 对应上游 should_stream_response_with_double_newline：验证事件 data 中保留字面 double newline 内容。 */
@@ -503,45 +467,85 @@ class JdkHttpSseTransportTest {
   /** 对应上游 cancelling_the_future_aborts_the_request_and_closes_the_connection：验证取消流立即关闭底层连接。 */
   @Test
   void cancelling_the_future_aborts_the_request_and_closes_the_connection() throws Exception {
-    CountDownLatch firstChunk = new CountDownLatch(1);
+    for (int i = 0; i < 20; i++) {
+      assertCancellationClosesConnection(false);
+    }
+  }
+
+  /** 直接观测 TCP EOF/reset，分别覆盖响应刚发出和首个事件已接收时的取消，不依赖写缓冲耗尽。 */
+  private void assertCancellationClosesConnection(boolean waitForFirstEvent) throws Exception {
+    CountDownLatch firstSent = new CountDownLatch(1);
+    CountDownLatch firstReceived = new CountDownLatch(1);
     CountDownLatch clientCancelled = new CountDownLatch(1);
-    CountDownLatch serverDetectedClose = new CountDownLatch(1);
-
-    httpServer.createContext(
-        "/it-cancel-close",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: chunk1\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            firstChunk.countDown();
-            assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
-            while (true) {
-              os.write("data: subsequent-data\n\n".getBytes(StandardCharsets.UTF_8));
-              os.flush();
-            }
-          } catch (Exception e) {
-            serverDetectedClose.countDown();
+    RecordingCallback callback =
+        new RecordingCallback() {
+          @Override
+          public void onEvent(ServerSentEvent event) {
+            super.onEvent(event);
+            firstReceived.countDown();
           }
-        });
+        };
 
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-cancel-close"))
-            .GET()
-            .build();
-    ProviderStream stream =
-        transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(firstChunk.await(5, TimeUnit.SECONDS));
-    stream.cancel();
-    clientCancelled.countDown();
-
-    assertTrue(
-        serverDetectedClose.await(5, TimeUnit.SECONDS), "server must detect closed connection");
-    assertTrue(stream.isCancelled());
-    assertNull(callback.error);
+    try (ServerSocket server = new ServerSocket()) {
+      server.bind(new InetSocketAddress("127.0.0.1", 0));
+      server.setSoTimeout(5000);
+      Future<Integer> peerClosed =
+          workerExecutor.submit(
+              () -> {
+                try (Socket peer = server.accept()) {
+                  peer.setSoTimeout(5000);
+                  BufferedReader input =
+                      new BufferedReader(
+                          new InputStreamReader(peer.getInputStream(), StandardCharsets.UTF_8));
+                  assertEquals("GET /it-cancel-close HTTP/1.1", input.readLine());
+                  String header;
+                  do {
+                    header = input.readLine();
+                    assertNotNull(header, "request headers must be complete");
+                  } while (!header.isEmpty());
+                  byte[] event = "data: chunk1\n\n".getBytes(StandardCharsets.UTF_8);
+                  OutputStream output = peer.getOutputStream();
+                  output.write(
+                      ("HTTP/1.1 200 OK\r\n"
+                              + "Content-Type: text/event-stream\r\n"
+                              + "Transfer-Encoding: chunked\r\n\r\n"
+                              + Integer.toHexString(event.length)
+                              + "\r\n")
+                          .getBytes(StandardCharsets.UTF_8));
+                  output.write(event);
+                  output.write("\r\n".getBytes(StandardCharsets.UTF_8));
+                  output.flush();
+                  firstSent.countDown();
+                  assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
+                  try {
+                    return input.read();
+                  } catch (SocketException e) {
+                    // 未读完的响应被取消时，对端也可能以 TCP reset 关闭连接。
+                    return -1;
+                  }
+                }
+              });
+      try {
+        HttpRequest request =
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + server.getLocalPort() + "/it-cancel-close"))
+                .GET()
+                .build();
+        ProviderStream stream =
+            transport.stream(
+                request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
+        assertTrue((waitForFirstEvent ? firstReceived : firstSent).await(5, TimeUnit.SECONDS));
+        stream.cancel();
+        clientCancelled.countDown();
+        assertEquals(
+            -1, peerClosed.get(5, TimeUnit.SECONDS), "server must detect closed connection");
+        assertTrue(stream.isCancelled());
+        assertFalse(callback.completed, "no completed callback on explicit cancel");
+        assertNull(callback.error, "no failure callback on explicit cancel");
+      } finally {
+        peerClosed.cancel(true);
+      }
+    }
   }
 
   /** 对应上游 should_timeout_on_read_async：验证在接收响应头前发生超时，生命周期仅触发一次 onError(TIMEOUT)。 */
