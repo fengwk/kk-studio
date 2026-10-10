@@ -8,6 +8,7 @@ import {
   assertThreadYoloPolicy,
   canonicalUuid,
   chatOwner,
+  createChat,
   listEnvironments,
   listSessionThreads,
   newSessionTarget,
@@ -284,6 +285,64 @@ test('the Project session route and its helper are gone from the lib surface', a
   assert.doesNotMatch(source, /listProjectSessions/)
   assert.doesNotMatch(source, /projects\/\$\{[^}]*\}\/sessions/)
 })
+test('createChat sends a nullable environmentName and requires the projected field', async () => {
+  // 测试意图：Chat 默认环境是 required-nullable 投影（DTO 用 ALWAYS 显式发 null）；helper 必须把
+  // 省略/null 变成显式 environmentName:null 发送，并拒绝缺失该投影字段或非 canonical 的输入。
+  const calls = []
+  const ctx = {
+    call: async (method, path, body) => {
+      calls.push({ method, path, body })
+      return {
+        status: 201,
+        json: {
+          data: {
+            id: cid(),
+            agentName: body.agentName,
+            environmentName: body.environmentName,
+            yoloEnabled: body.yoloEnabled,
+            version: '0',
+          },
+        },
+      }
+    },
+  }
+  const chat = await createChat(ctx, { title: 't', agentName: 'agent' })
+  assert.equal(chat.environmentName, null)
+  assert.equal(calls[0].method, 'POST')
+  assert.equal(calls[0].path, '/api/ai/chats')
+  assert.equal(Object.hasOwn(calls[0].body, 'environmentName'), true)
+  assert.equal(calls[0].body.environmentName, null)
+  assert.equal(calls[0].body.yoloEnabled, false)
+
+  const named = await createChat(ctx, {
+    title: 't',
+    agentName: 'agent',
+    environmentName: 'dev-node',
+  })
+  assert.equal(named.environmentName, 'dev-node')
+  assert.equal(calls[1].body.environmentName, 'dev-node')
+
+  await assert.rejects(
+    createChat(
+      {
+        call: async () => ({
+          status: 201,
+          json: { data: { id: cid(), agentName: 'agent', yoloEnabled: false, version: '0' } },
+        }),
+      },
+      { title: 't', agentName: 'agent' },
+    ),
+    /required-nullable environmentName/,
+  )
+  await assert.rejects(
+    createChat(
+      { call: async () => { throw new Error('unexpected HTTP call') } },
+      { title: 't', agentName: 'agent', environmentName: 'bad/name' },
+    ),
+    /must not contain/,
+  )
+})
+
 test('environment status deadline is required and explicitly null while offline', async () => {
   // 截止时间是唯一状态时间投影：无连接不能省略字段，也不能携带有效截止时间。
   const environment = {

@@ -39,7 +39,16 @@ interface PreviewRequest {
   }
 }
 
-type RecordedRequest = SnapshotRequest | PreviewRequest
+/** 只读 Model Request Debug POST 的草稿选择，用于断言 POST 与界面当前选择严格同源。 */
+interface DebugRequest {
+  kind: 'debug'
+  body: {
+    model: { providerName: string; modelName: string; variant: string }
+    environmentName: string | null
+  }
+}
+
+type RecordedRequest = SnapshotRequest | PreviewRequest | DebugRequest
 
 function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
   return {
@@ -78,14 +87,14 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
   }
 }
 
-function modelRequestDebug() {
+function modelRequestDebug(draft?: DebugRequest['body']) {
   return {
     status: 200,
     data: {
       kind: 'NEXT_REQUEST_PREVIEW',
       generatedAt: '2026-10-02T00:00:00.000Z',
-      model: { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
-      environmentName: 'dev-node',
+      model: draft?.model ?? { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
+      environmentName: draft ? draft.environmentName : 'dev-node',
       systemInstruction:
         'You are a precise coding assistant. Keep instructions deterministic and inspect before editing.',
       tools: [
@@ -210,7 +219,17 @@ async function installPreviewApiMock(
         return
       }
       if (path === `/api/harness/threads/${THREAD_ID}/model-request-debug`) {
-        await route.fulfill({ json: modelRequestDebug() })
+        // 只读调试预览是 POST-only：GET 等其它方法必须被拒绝，且每次 POST 的草稿选择都要录制。
+        if (method !== 'POST') {
+          await route.fulfill({
+            status: 405,
+            json: { status: 405, message: 'Method Not Allowed' },
+          })
+          return
+        }
+        const body = route.request().postDataJSON() as DebugRequest['body']
+        recorded.push({ kind: 'debug', body })
+        await route.fulfill({ json: modelRequestDebug(body) })
         return
       }
       if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
@@ -399,10 +418,23 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
 
 test.describe('Debug Inspect Actions Real React Browser Regression', () => {
   test('agent selection follows its model in preview and rejects invalid configuration without losing draft', async ({ page }) => {
-    // 真实 /agent 入口必须联动模型；拒绝无效配置后仍可用原选择。
-    await installPreviewApiMock(page, {
+    // 真实 /agent 入口必须联动模型；拒绝无效配置后仍可用原选择。进入 Debug 后断言只读
+    // Model Request Debug POST 的草稿选择与界面当前 model/environment 严格同源，且不提交任何命令批次。
+    const recorded = await installPreviewApiMock(page, {
       cursor: () => INITIAL_CURSOR,
       agentSelection: true,
+    })
+    // 只读 debug POST 是查询语义，不能计入 command writes；这里只追踪真正的命令批次写。
+    const commandWrites: string[] = []
+    page.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname
+      if (
+        request.method() !== 'GET'
+        && pathname.startsWith('/api/')
+        && pathname.endsWith('/command-batches')
+      ) {
+        commandWrites.push(`${request.method()} ${pathname}`)
+      }
     })
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/browser-tests/debug-preview-harness.html')
@@ -425,6 +457,16 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await expect(page.getByText('检查操作', { exact: true })).toHaveCount(0)
     await expect(editor).toHaveText(DRAFT)
 
+    // Debug 的只读 POST 必须与界面选择严格同源：选中的 coder 模型进入请求，草稿环境原样保留。
+    await expect.poll(() => recorded.filter((request) => request.kind === 'debug').length).toBeGreaterThan(0)
+    const debugRequest = recorded.find((request): request is DebugRequest => request.kind === 'debug')
+    expect(debugRequest?.body).toEqual({
+      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      environmentName: 'dev-node',
+    })
+    // 选择 Agent / 进入 Debug 都不提交命令批次。
+    expect(commandWrites).toEqual([])
+
     // 3. 退出 Debug 才能重选 Agent；退出只切视图，草稿与既有选择原地保留。
     await exitDebugView(page)
     await expect(editor).toHaveText(DRAFT)
@@ -436,6 +478,7 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await page.getByRole('region', { name: '选择 Agent', exact: true }).getByRole('button', { name: '关闭' }).click()
     await expect(editor).toBeVisible()
     await expect(editor).toHaveText(DRAFT)
+    expect(commandWrites).toEqual([])
     await page.screenshot({ path: resolve(reportsDir, 'agent-model-follow.png') })
   })
 

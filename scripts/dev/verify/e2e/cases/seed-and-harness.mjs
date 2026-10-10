@@ -638,6 +638,88 @@ registerCase({
 })
 
 registerCase({
+  id: 'thread.model_request_debug_draft_settings',
+  level: 'L1',
+  title: 'Model Request Debug 草稿设置只读投影',
+  docs: 'POST /api/harness/threads/{threadId}/model-request-debug 以 UI 草稿 {model, environmentName}（environmentName 可空，null 表示未选 Environment）在真实 snapshot 上只读现算；本 case 以缺失 Agent 的既有 Thread 让规划确定性 PLANNING_FAILED（不调用真实 Provider）：响应回显草稿 model/env，planningError 只回显稳定 error code 且不泄漏缺失 Agent 名，tools/skills/subagents 安全为空；frozenInvocation 与草稿选择相互独立（本 Thread 无活动 Invocation 时显式 null）；缺 model 或非 canonical environmentName => 400，GET => 405；查询不改变 head/version/nextCommandSequence、不入队命令、不启动 Invocation',
+  async run(ctx) {
+    const target = await resolveAnyCatalogTarget(ctx)
+    const missingAgentName = `missing-debug-agent-${cid().slice(0, 8)}`
+    const chat = await createChat(ctx, {
+      title: `e2e-model-debug-${cid().slice(0, 8)}`,
+      agentName: target.agent.name,
+      yoloEnabled: false,
+    })
+    const threadId = cid()
+    try {
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId,
+        // 缺失 Agent 让 bootstrap turn 在解析 Provider 之前确定性 PLANNING_FAILED，不产生真实模型用量。
+        rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
+        yoloEnabled: false,
+        commands: [userMessageCommand('model request debug', cid())],
+      })
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+      const before = await getThreadSnapshot(ctx, threadId)
+      const endpoint = `/api/harness/threads/${encodeURIComponent(threadId)}/model-request-debug`
+
+      const { status, json } = await ctx.call('POST', endpoint, {
+        model: target.model,
+        environmentName: null,
+      })
+      assert(status === 200, `model-request-debug status ${status}: ${JSON.stringify(json)}`)
+      const debug = envelopeData(json)
+      assert(debug?.kind === 'NEXT_REQUEST_PREVIEW', JSON.stringify(debug))
+      // 草稿选择原样回显：model 是本次请求的草稿，environmentName 显式为 null（required-nullable）。
+      assert(isDeepStrictEqual(debug.model, target.model), JSON.stringify(debug.model))
+      assert(debug.environmentName === null, JSON.stringify(debug))
+      // 缺失 Agent 的确定性拒绝只回显稳定 error code，安全空投影，绝不外泄自由文本（缺失 Agent 名）。
+      assert(debug.planningError === 'PLANNING_FAILED', JSON.stringify(debug.planningError))
+      assert(
+        Array.isArray(debug.tools) && debug.tools.length === 0
+          && Array.isArray(debug.skills) && debug.skills.length === 0
+          && Array.isArray(debug.subagents) && debug.subagents.length === 0
+          && debug.systemInstruction === ''
+          && debug.cacheControl === null,
+        `rejected planning must project a safe empty view: ${JSON.stringify(debug)}`,
+      )
+      assert(
+        !JSON.stringify(debug).includes(missingAgentName),
+        `debug projection must not leak the missing Agent name: ${JSON.stringify(debug)}`,
+      )
+      // 冻结事实与草稿选择相互独立：本 Thread 无活动 Invocation，因此显式缺席。
+      assert(debug.frozenInvocation === null, JSON.stringify(debug.frozenInvocation))
+
+      // 请求形状边界：缺 model 与非法 canonical environmentName 都在写入前 400；该端点是只读 POST，GET 405。
+      await expectHttpError(() => ctx.call('POST', endpoint, { environmentName: null }), { status: 400 })
+      await expectHttpError(
+        () => ctx.call('POST', endpoint, { model: target.model, environmentName: 'bad/name' }),
+        { status: 400 },
+      )
+      await expectHttpError(() => ctx.call('GET', endpoint), { status: 405 })
+
+      // 只读：head/version/nextCommandSequence 不变，不入队命令，也不启动 Invocation。
+      const after = await getThreadSnapshot(ctx, threadId)
+      assert(
+        String(after.thread.headEntryId) === String(before.thread.headEntryId)
+          && String(after.thread.version) === String(before.thread.version)
+          && String(after.thread.nextCommandSequence) === String(before.thread.nextCommandSequence)
+          && after.queuedCommands.length === 0
+          && after.modelInvocation === null,
+        JSON.stringify({ before: before.thread, after: after.thread }),
+      )
+    } finally {
+      await ctx.call(
+        'DELETE',
+        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
+  },
+})
+
+registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',

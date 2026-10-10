@@ -41,6 +41,7 @@ function Harness() {
               <ChatCard
                 chat={{
                   id, title: id, agentName: 'agent', yoloEnabled: false,
+                  environmentName: null,
                   version: '1', createTime: value, updateTime: value,
                 }}
                 agents={[]}

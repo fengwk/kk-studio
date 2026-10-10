@@ -170,23 +170,39 @@ const THREAD_RUNTIME_STATUSES = new Set([
   'TOOL_READY',
 ])
 
-/** 创建 Chat（name-based Agent 引用；环境由 Agent 拥有，Chat 不携带任何 workspace/environment 状态）。 */
+/**
+ * 创建 Chat（name-based Agent 引用；可选默认 Environment name，Chat 不携带任何 workspace 状态）。
+ *
+ * <p>{@code environmentName} 是可空默认环境：省略/null 表示无默认环境，提供时必须是已存在的 canonical Environment
+ * 名。Chat 投影的 {@code environmentName} 是 required-nullable 字段（DTO 用 ALWAYS 显式发 null），helper 断言它
+ * 存在且等于请求值；已删除的 workspace 字段（workspacePath/environment/environmentId）绝不出现。
+ */
 export async function createChat(
   ctx,
-  { title, agentName, yoloEnabled = false },
+  { title, agentName, yoloEnabled = false, environmentName = null },
 ) {
+  canonicalEnvironmentName(environmentName, 'environmentName')
   const { status, json } = await ctx.call('POST', '/api/ai/chats', {
     title,
     agentName,
     yoloEnabled,
+    environmentName,
   })
   assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
   const chat = envelopeData(json)
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
   assert(!Object.hasOwn(chat, 'workspacePath'), `Chat leaked workspacePath: ${JSON.stringify(chat)}`)
   assert(!Object.hasOwn(chat, 'environment'), `Chat leaked environment: ${JSON.stringify(chat)}`)
-  assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
   assert(!Object.hasOwn(chat, 'environmentId'), `Chat leaked environmentId: ${JSON.stringify(chat)}`)
+  assert(
+    Object.hasOwn(chat, 'environmentName'),
+    `Chat must project required-nullable environmentName: ${JSON.stringify(chat)}`,
+  )
+  canonicalEnvironmentName(chat.environmentName, 'Chat.environmentName')
+  assert(
+    chat.environmentName === environmentName,
+    `Chat environmentName ${JSON.stringify(chat.environmentName)} != requested ${JSON.stringify(environmentName)}: ${JSON.stringify(chat)}`,
+  )
   return chat
 }
 
