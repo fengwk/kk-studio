@@ -15,7 +15,7 @@ class SchemaInventoryTest(unittest.TestCase):
     def test_inventory_matches_the_authoritative_baseline(self):
         baseline = CHECK.repository_root() / CHECK.MIGRATION_DIRECTORY / CHECK.BASELINE_FILE
         actual = re.findall(r"create\s+table\s+([a-z_]+)\s*\(", baseline.read_text(), re.I)
-        self.assertEqual(len(actual), 40)
+        self.assertEqual(len(actual), 41)
         self.assertEqual(set(actual), set(CHECK.BUSINESS_TABLES))
         self.assertEqual(len(CHECK.BUSINESS_TABLES), len(set(CHECK.BUSINESS_TABLES)))
         self.assertIn("harness_thread_stop_receipt", CHECK.BUSINESS_TABLES)

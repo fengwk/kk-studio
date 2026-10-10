@@ -5,7 +5,7 @@ The runner loads exactly one versioned migration, `schema/src/main/resources/db/
 which is the single authoritative definition of the product schema: there is no second design DDL to keep
 in sync. It then proves three kinds of target facts:
 
-* the 40 business and infrastructure tables of that baseline are present and nothing else was added;
+* the 41 business and infrastructure tables of that baseline are present and nothing else was added;
 * the 16 Canvas / Project / Chat-Session target tables expose exactly their declared columns, foreign-key
   relations and indexes;
 * the shared contract probes (`fresh-install-probes.sql`, also executed by the schema module's Java
@@ -38,7 +38,7 @@ PROBE_FILE = "schema/src/test/resources/fun/fengwk/kkstudio/schema/fresh-install
 MINIMUM_PROBE_ASSERTIONS = 135
 IMAGE = "postgres:17.10"
 
-# The 40 business and infrastructure tables of the sole production baseline. Flyway adds its own
+# The 41 business and infrastructure tables of the sole production baseline. Flyway adds its own
 # history table on top, so the accepted table set is exactly this list.
 BUSINESS_TABLES = (
     "agent_definition",
@@ -55,6 +55,7 @@ BUSINESS_TABLES = (
     "chat_session",
     "environment",
     "environment_connection",
+    "environment_update_operation",
     "harness_entry",
     "harness_model_invocation",
     "harness_session",
@@ -520,8 +521,8 @@ def main():
     probes = root / PROBE_FILE
     if not probes.is_file():
         raise RuntimeError(f"missing shared contract probes: {PROBE_FILE}")
-    if len(BUSINESS_TABLES) != 40 or len(TARGET_TABLES) != 16:
-        raise RuntimeError("the declared inventory must stay at 40 business and 16 target tables")
+    if len(BUSINESS_TABLES) != 41 or len(TARGET_TABLES) != 16:
+        raise RuntimeError("the declared inventory must stay at 41 business and 16 target tables")
 
     # Force the local Unix socket; never inherit a deployment Docker context or PG URL.
     socket = Path("/var/run/docker.sock")
