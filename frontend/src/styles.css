@@ -3598,7 +3598,7 @@ div.is-error {
 }
 
 .settings-apply-timing[data-timing='nextInvocation'],
-.settings-apply-timing[data-timing='nextChat'] {
+.settings-apply-timing[data-timing='nextHttpRequest'] {
   color: var(--green-primary);
   background: var(--green-soft);
   border: 1px solid var(--green-border);

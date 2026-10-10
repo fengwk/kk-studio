@@ -31,10 +31,9 @@ describe('settings backend field contract', () => {
       const source = backendSource(
         `share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettings${type}DTO.java`,
       )
-      // 当前 DTO 顶层字段声明以两个空格缩进；排除嵌套 PermissionRuleDTO 等内部类型，以及已从 schema 移除的 defaultYolo。
+      // 顶层字段声明以两个空格缩进；嵌套 PermissionRuleDTO 等内部类型不属于 section 字段。
       const fields = [...source.matchAll(/^ {2}private [^\n;]+ (\w+);$/gm)]
         .map((match) => match[1])
-        .filter((name) => name !== 'defaultYolo')
         .sort()
       expect(fields.length).toBeGreaterThan(0)
       expect(Object.keys(dto[section]).sort(), section).toEqual(fields)
@@ -49,7 +48,6 @@ describe('settings backend field contract', () => {
     )
     const paths = [...source.matchAll(/\bfield\(\s*"([^"]+)"/g)]
       .map((match) => match[1])
-      .filter((path) => path !== 'tool.defaultYolo')
       .sort()
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
