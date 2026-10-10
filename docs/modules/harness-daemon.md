@@ -25,7 +25,7 @@ Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原�
   skill-work/backup/         # 替换备份
 ```
 
-POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File` 的 owner-only 设置，不等同于安装器对 token 的显式 Windows DACL 校验。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫承担（见下）；技能安装器负责恢复或清理 staging/backup；已发布全文由定时清扫按保留期回收，已发布技能包不随服务卸载自动删除。
+POSIX 目录为 0700、文件为 0600；受控临时产物在支持 ACL 的文件系统（Windows）上以当前进程用户为唯一主体建立 owner-only ACL，并在每次收敛后读回校验不存在其他主体的授权，无法收敛即失败关闭。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫承担（见下）；技能安装器负责恢复或清理 staging/backup；已发布全文由定时清扫按保留期回收，已发布技能包不随服务卸载自动删除。
 
 ## 能力注册与调度
 

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.FileAlreadyExistsException;
@@ -9,16 +8,31 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryFlag;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 /**
- * 受控临时产物共享的 owner-only 文件系统原语：目录 0700、文件 0600，并拒绝受控可信根之下的符号链接路径分量。
+ * 受控临时产物共享的 owner-only 文件系统原语：POSIX 目录 0700、文件 0600；支持 ACL 的文件系统（Windows）以当前进程用户为唯一主体建立 owner-only
+ * ACL。两种平台都拒绝受控可信根之下的符号链接路径分量。
  *
- * <p>POSIX 上把 0700/0600 作为创建属性一起提交，因此不存在“先建后改权限”的可见窗口。非 POSIX 文件系统只能退回创建后的 {@link File} owner-only
- * 收紧；此类收紧调用一旦报告失败就以 {@link IOException} fail-closed，绝不静默宣称已达成 owner-only。
+ * <p>POSIX 上把 0700/0600 作为创建属性一起提交，因此不存在“先建后改权限”的可见窗口。Windows 上同样把单条 owner-only ACL 作为 {@code
+ * acl:acl} 创建属性提交，并在创建后立即用 {@link AclFileAttributeView#setAcl} 收敛并读回校验：只要读回结果里出现非当前
+ * 进程用户的授权，或以任何方式无法完成设置、读取，就以 {@link IOException} fail-closed，绝不静默宣称已达成 owner-only。平台既不支持 posix 也不支持
+ * acl 时同样失败关闭，不再退回创建后的布尔权限设置（{@code File#setReadable} 等在 Windows 上是静默 no-op）。
+ *
+ * <p>ACL 平台上每一条新创建的目录分量都会在创建下一条之前完成 owner-only 收敛与读回校验，因此可信根之下不会留下未校验的中间目录。
  *
  * <p>符号链接防护只在<b>已 canonical 的可信根之下</b>做组件检查：调用方传入的可信根必须已经解析过 OS 前缀 alias（例如 macOS 的 {@code
  * /var}、{@code /tmp}），本类只从可信根的下一个分量起逐级拒绝符号链接/reparse，因此不会把操作系统标准 alias 误判为逃逸；本类也绝不对受控子路径调用 {@code
@@ -36,6 +50,9 @@ final class OwnerOnlyFiles {
   /** 受控文件的 owner-only 权限：0600。 */
   private static final Set<PosixFilePermission> OWNER_ONLY_FILE_PERMISSIONS =
       Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+
+  /** ACL 视图的初始创建属性名，Windows provider 用它把 DACL 与创建合并成一次系统调用。 */
+  private static final String ACL_ATTRIBUTE_NAME = "acl:acl";
 
   private OwnerOnlyFiles() {}
 
@@ -66,16 +83,42 @@ final class OwnerOnlyFiles {
   }
 
   /**
-   * 创建缺失的目录链：POSIX 上把 0700 作为创建属性提交给每个新目录，父级新目录与末级同样安全，不存在“先建后改权限”的可见窗口。
-   *
-   * <p>非 POSIX 只能先创建再收紧（{@link #applyOwnerOnlyDirectoryPermissions}），失败即失败关闭。
+   * 创建缺失的目录链：POSIX 上把 0700 作为创建属性提交给每个新目录；ACL 平台逐级收起，见 {@link
+   * #createAndTightenAclDirectories(Path)}。
    */
   private static void createOwnerOnlyDirectories(Path directory) throws IOException {
     if (isPosix()) {
       Files.createDirectories(directory, ownerOnlyDirectoryAttribute());
       return;
     }
-    Files.createDirectories(directory);
+    if (isAcl()) {
+      createAndTightenAclDirectories(directory);
+      return;
+    }
+    throw unsupportedFileSystem(directory);
+  }
+
+  /**
+   * ACL 平台逐级创建缺失目录：每一条新分量都用 {@code acl:acl} 创建属性原子给出 owner-only ACL，并在创建下一条之前完成收敛与读回校验，
+   * 因此可信根之下不会留下未校验的中间目录。
+   */
+  private static void createAndTightenAclDirectories(Path directory) throws IOException {
+    Deque<Path> missing = new ArrayDeque<>();
+    Path existing = directory.toAbsolutePath().normalize();
+    while (!Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+      missing.push(existing);
+      existing = existing.getParent();
+      if (existing == null) {
+        throw new IOException("no existing ancestor directory for: " + directory);
+      }
+    }
+    if (!Files.isDirectory(existing, LinkOption.NOFOLLOW_LINKS)) {
+      throw new IOException("path component must be a directory: " + existing);
+    }
+    for (Path component : missing) {
+      Files.createDirectory(component, ownerOnlyAclAttribute(true));
+      applyOwnerOnlyAcl(component, true);
+    }
   }
 
   /**
@@ -89,8 +132,12 @@ final class OwnerOnlyFiles {
       Files.createDirectory(directory, ownerOnlyDirectoryAttribute());
       return;
     }
-    Files.createDirectory(directory);
-    applyOwnerOnlyDirectoryPermissions(directory);
+    if (isAcl()) {
+      Files.createDirectory(directory, ownerOnlyAclAttribute(true));
+      applyOwnerOnlyAcl(directory, true);
+      return;
+    }
+    throw unsupportedFileSystem(directory);
   }
 
   /** 以 owner-only 语义创建新文件；已存在时抛出 {@link FileAlreadyExistsException}；可信根之下是符号链接时失败关闭。 */
@@ -106,55 +153,125 @@ final class OwnerOnlyFiles {
       }
       return;
     }
-    try (FileChannel channel =
-        FileChannel.open(
-            candidate,
-            StandardOpenOption.CREATE_NEW,
-            StandardOpenOption.WRITE,
-            LinkOption.NOFOLLOW_LINKS)) {
-      // 只创建。
+    if (isAcl()) {
+      try (FileChannel channel =
+          FileChannel.open(
+              candidate,
+              Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
+              ownerOnlyAclAttribute(false))) {
+        // 只创建。
+      }
+      applyOwnerOnlyAcl(candidate, false);
+      return;
     }
-    applyOwnerOnlyFilePermissions(candidate);
+    throw unsupportedFileSystem(candidate);
   }
 
-  /** 收敛目录权限：支持 POSIX 时显式 0700；否则退回 {@link File} 的 owner-only 视图，失败即抛出。 */
+  /** 收敛目录权限：POSIX 显式 0700，ACL 平台收敛并读回校验，平台不支持时失败关闭。 */
   static void applyOwnerOnlyDirectoryPermissions(Path directory) throws IOException {
     if (isPosix()) {
       Files.setPosixFilePermissions(directory, OWNER_ONLY_DIRECTORY_PERMISSIONS);
       return;
     }
-    applyOwnerOnly(directory, true);
-  }
-
-  private static void applyOwnerOnlyFilePermissions(Path file) throws IOException {
-    if (isPosix()) {
-      Files.setPosixFilePermissions(file, OWNER_ONLY_FILE_PERMISSIONS);
+    if (isAcl()) {
+      applyOwnerOnlyAcl(directory, true);
       return;
     }
-    applyOwnerOnly(file, false);
+    throw unsupportedFileSystem(directory);
   }
 
-  private static void applyOwnerOnly(Path target, boolean directory) throws IOException {
-    File file = target.toFile();
-    requireApplied(file.setReadable(false, false), "setReadable(false, false)", target);
-    requireApplied(file.setReadable(true, true), "setReadable(true, true)", target);
-    requireApplied(file.setWritable(false, false), "setWritable(false, false)", target);
-    requireApplied(file.setWritable(true, true), "setWritable(true, true)", target);
+  /**
+   * 用单条当前进程用户 ALLOW 条目替换 ACL，并读回校验只剩当前用户的授权。
+   *
+   * <p>创建时的 owner-only 创建属性可能被平台按父目录继承规则追加其他主体的 ACE；这里在收敛后读回，只要出现非当前用户的授权就以 {@link IOException}
+   * fail-closed，因此无论平台的继承语义如何都不会静默留下更宽的权限。
+   */
+  private static void applyOwnerOnlyAcl(Path target, boolean directory) throws IOException {
+    AclFileAttributeView view =
+        Files.getFileAttributeView(target, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+    if (view == null) {
+      throw new IOException("ACL file attribute view is unavailable: " + target);
+    }
+    UserPrincipal owner = currentUserPrincipal();
+    view.setAcl(List.of(ownerOnlyAclEntry(owner, directory)));
+    for (AclEntry entry : view.getAcl()) {
+      if (entry.type() != AclEntryType.ALLOW || !owner.equals(entry.principal())) {
+        throw new IOException(
+            "cannot enforce owner-only ACL; unexpected grant " + entry + " on " + target);
+      }
+    }
+  }
+
+  private static AclEntry ownerOnlyAclEntry(UserPrincipal owner, boolean directory) {
+    AclEntry.Builder builder =
+        AclEntry.newBuilder()
+            .setType(AclEntryType.ALLOW)
+            .setPrincipal(owner)
+            .setPermissions(ownerOnlyAclPermissions(directory));
     if (directory) {
-      requireApplied(file.setExecutable(false, false), "setExecutable(false, false)", target);
-      requireApplied(file.setExecutable(true, true), "setExecutable(true, true)", target);
+      builder.setFlags(EnumSet.of(AclEntryFlag.FILE_INHERIT, AclEntryFlag.DIRECTORY_INHERIT));
     }
+    return builder.build();
   }
 
-  private static void requireApplied(boolean applied, String operation, Path target)
-      throws IOException {
-    if (!applied) {
-      throw new IOException("cannot enforce owner-only permissions (" + operation + "): " + target);
+  private static Set<AclEntryPermission> ownerOnlyAclPermissions(boolean directory) {
+    EnumSet<AclEntryPermission> permissions =
+        EnumSet.of(
+            AclEntryPermission.READ_DATA,
+            AclEntryPermission.WRITE_DATA,
+            AclEntryPermission.APPEND_DATA,
+            AclEntryPermission.READ_NAMED_ATTRS,
+            AclEntryPermission.WRITE_NAMED_ATTRS,
+            AclEntryPermission.EXECUTE,
+            AclEntryPermission.READ_ATTRIBUTES,
+            AclEntryPermission.WRITE_ATTRIBUTES,
+            AclEntryPermission.DELETE,
+            AclEntryPermission.READ_ACL,
+            AclEntryPermission.WRITE_ACL,
+            AclEntryPermission.SYNCHRONIZE);
+    if (directory) {
+      permissions.add(AclEntryPermission.DELETE_CHILD);
     }
+    return permissions;
+  }
+
+  /** ACL 创建属性：单条当前进程用户 ALLOW，目录带 FILE_INHERIT/DIRECTORY_INHERIT 让其下的新子项同样 owner-only。 */
+  private static FileAttribute<List<AclEntry>> ownerOnlyAclAttribute(boolean directory)
+      throws IOException {
+    List<AclEntry> acl = List.of(ownerOnlyAclEntry(currentUserPrincipal(), directory));
+    return new FileAttribute<>() {
+      @Override
+      public String name() {
+        return ACL_ATTRIBUTE_NAME;
+      }
+
+      @Override
+      public List<AclEntry> value() {
+        return acl;
+      }
+    };
+  }
+
+  /** 当前进程用户主体；由用户主体服务解析当前登录名，绝不使用可能是 Administrators 组的对象所有者。 */
+  private static UserPrincipal currentUserPrincipal() throws IOException {
+    String userName = System.getProperty("user.name");
+    if (userName == null || userName.isBlank()) {
+      throw new IOException("cannot determine the current process user name");
+    }
+    return FileSystems.getDefault().getUserPrincipalLookupService().lookupPrincipalByName(userName);
   }
 
   private static boolean isPosix() {
     return FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+  }
+
+  private static boolean isAcl() {
+    return FileSystems.getDefault().supportedFileAttributeViews().contains("acl");
+  }
+
+  private static IOException unsupportedFileSystem(Path target) {
+    return new IOException(
+        "owner-only permissions require posix or acl support on the filesystem: " + target);
   }
 
   /**
