@@ -1,0 +1,31 @@
+{
+  "name": "@kk-studio/daemon",
+  "version": "1.0.12",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ignore": "7.0.12",
+    "isomorphic-git": "1.43.3",
+    "jsonc-parser": "3.3.1",
+    "koffi": "3.3.3",
+    "picomatch": "4.0.7",
+    "re2-wasm": "1.0.2",
+    "vscode-jsonrpc": "9.0.3",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/ws": "8.18.2",
+    "@vitest/coverage-v8": "5.0.3",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

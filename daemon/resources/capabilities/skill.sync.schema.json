@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "description": "Internal, non-model-visible capability that installs an exact skill package commit.",
+  "properties": {
+    "packageName": {
+      "type": "string",
+      "description": "Skill package name."
+    },
+    "repositoryUrl": {
+      "type": "string",
+      "description": "Remote Git repository URL to fetch the skill package from."
+    },
+    "branch": {
+      "type": "string",
+      "description": "Remote Git branch name associated with the target commit."
+    },
+    "targetCommit": {
+      "type": "string",
+      "description": "Target Git commit hash to install."
+    },
+    "credential": {
+      "type": "string",
+      "description": "Optional private-repository access token; never model-visible."
+    }
+  },
+  "required": [
+    "packageName",
+    "repositoryUrl",
+    "branch",
+    "targetCommit"
+  ],
+  "additionalProperties": false
+}
