@@ -1,6 +1,6 @@
-import type { ReactElement } from 'react'
+import type { ComponentProps, ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
@@ -16,12 +16,16 @@ vi.mock('@/shared/api/environment-service', () => ({
 
 const agentWithEnv: AgentDefinitionDTO = {
   name: 'assistant',
-  description: null,
-  systemPrompt: null,
-  model: 'minimax/MiniMax',
-  variant: 'default',
-  environmentId: 'env-dev-1',
-  config: {
+  model: {
+    providerName: 'minimax',
+    modelName: 'MiniMax',
+    variant: 'default',
+  },
+  tools: [],
+  skills: [],
+  instruction: '',
+  executionConfig: {
+    environment: 'macos',
     inheritParentEnvironment: true,
     tools: [],
     skills: [],
@@ -30,6 +34,30 @@ const agentWithEnv: AgentDefinitionDTO = {
   version: '1',
   createTime: null,
   updateTime: null,
+}
+
+function createModalProps(
+  overrides: Partial<ComponentProps<typeof CreateChatModal>> = {},
+): ComponentProps<typeof CreateChatModal> {
+  return {
+    open: true,
+    mode: 'create',
+    agents: [agentWithEnv],
+    selectedAgentName: '',
+    title: '',
+    yoloEnabled: false,
+    selectedEnvironmentName: null,
+    pending: false,
+    formError: '',
+    nameError: '',
+    onClose: vi.fn(),
+    onSelectAgent: vi.fn(),
+    onTitleChange: vi.fn(),
+    onYoloChange: vi.fn(),
+    onSelectEnvironment: vi.fn(),
+    onSubmit: vi.fn((event) => event.preventDefault()),
+    ...overrides,
+  }
 }
 
 function renderModal(ui: ReactElement, queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
@@ -52,15 +80,10 @@ describe('CreateChatModal', () => {
   it('renders nothing when closed', () => {
     const { container } = renderModal(
       <CreateChatModal
-        open={false}
-        agents={[]}
-        selectedAgentName=""
-        title=""
-        pending={false}
-        onClose={() => undefined}
-        onSelectAgent={() => undefined}
-        onTitleChange={() => undefined}
-        onSubmit={() => undefined}
+        {...createModalProps({
+          open: false,
+          agents: [],
+        })}
       />,
     )
     expect(container).toBeEmptyDOMElement()
@@ -73,17 +96,13 @@ describe('CreateChatModal', () => {
     const onTitleChange = vi.fn()
     renderModal(
       <CreateChatModal
-        open
-        agents={[agentWithEnv]}
-        selectedAgentName=""
-        title=""
-        pending={false}
-        formError="请填写 Chat 名称"
-        nameError="请填写名称"
-        onClose={() => undefined}
-        onSelectAgent={onSelectAgent}
-        onTitleChange={onTitleChange}
-        onSubmit={onSubmit}
+        {...createModalProps({
+          formError: '请填写 Chat 名称',
+          nameError: '请填写名称',
+          onSelectAgent,
+          onTitleChange,
+          onSubmit,
+        })}
       />,
     )
 
@@ -112,20 +131,18 @@ describe('CreateChatModal', () => {
 
     renderModal(
       <CreateChatModal
-        open
-        mode="edit"
-        agents={[agentWithEnv]}
-        selectedAgentName="assistant"
-        title="Existing Chat"
-        yoloEnabled={true}
-        selectedEnvironmentName="ubuntu"
-        pending={false}
-        onClose={onClose}
-        onSelectAgent={() => undefined}
-        onTitleChange={onTitleChange}
-        onYoloChange={onYoloChange}
-        onSelectEnvironment={onSelectEnvironment}
-        onSubmit={onSubmit}
+        {...createModalProps({
+          mode: 'edit',
+          selectedAgentName: 'assistant',
+          title: 'Existing Chat',
+          yoloEnabled: true,
+          selectedEnvironmentName: 'ubuntu',
+          onClose,
+          onTitleChange,
+          onYoloChange,
+          onSelectEnvironment,
+          onSubmit,
+        })}
       />,
     )
 
@@ -158,18 +175,12 @@ describe('CreateChatModal', () => {
   it('preserves unavailable environment as an option in edit mode', async () => {
     renderModal(
       <CreateChatModal
-        open
-        mode="edit"
-        agents={[agentWithEnv]}
-        selectedAgentName="assistant"
-        title="Existing Chat"
-        yoloEnabled={false}
-        selectedEnvironmentName="deleted-env"
-        pending={false}
-        onClose={() => undefined}
-        onSelectAgent={() => undefined}
-        onTitleChange={() => undefined}
-        onSubmit={() => undefined}
+        {...createModalProps({
+          mode: 'edit',
+          selectedAgentName: 'assistant',
+          title: 'Existing Chat',
+          selectedEnvironmentName: 'deleted-env',
+        })}
       />,
     )
 
@@ -178,28 +189,57 @@ describe('CreateChatModal', () => {
     })
   })
 
-  // 验证环境列表加载失败时显式提示错误，同时保留当前选中的环境
-  it('displays explicit error message when environment list fails to load and retains selection', async () => {
+  // 验证环境列表加载失败时显式提示错误，保留当前选中的环境，且不错误标记为不可用
+  it('displays explicit error message when environment list fails to load and retains selection without claiming unavailable', async () => {
     vi.mocked(environmentService.listEnvironments).mockRejectedValueOnce(new Error('network error'))
 
     renderModal(
       <CreateChatModal
-        open
-        agents={[agentWithEnv]}
-        selectedAgentName="assistant"
-        title="Chat"
-        selectedEnvironmentName="my-custom-env"
-        pending={false}
-        onClose={() => undefined}
-        onSelectAgent={() => undefined}
-        onTitleChange={() => undefined}
-        onSubmit={() => undefined}
+        {...createModalProps({
+          selectedAgentName: 'assistant',
+          title: 'Chat',
+          selectedEnvironmentName: 'my-custom-env',
+        })}
       />,
     )
 
     await waitFor(() => {
       expect(screen.getByText('环境列表加载失败，已保留当前选择')).toBeInTheDocument()
     })
-    expect(screen.getByText('my-custom-env （不可用）')).toBeInTheDocument()
+    expect(screen.getByText('my-custom-env')).toBeInTheDocument()
+    expect(screen.queryByText('my-custom-env （不可用）')).not.toBeInTheDocument()
+  })
+
+  // 验证环境列表初始加载中不提前宣称不可用，仅在确认成功且不含该项时才标记为不可用
+  it('does not claim unavailable while environment list is initially loading and only labels unavailable after confirmed success', async () => {
+    let resolvePromise: (envs: Array<{ name: string }>) => void
+    const pendingPromise = new Promise<Array<{ name: string }>>((resolve) => {
+      resolvePromise = resolve
+    })
+    vi.mocked(environmentService.listEnvironments).mockReturnValueOnce(pendingPromise as never)
+
+    renderModal(
+      <CreateChatModal
+        {...createModalProps({
+          selectedAgentName: 'assistant',
+          title: 'Chat',
+          selectedEnvironmentName: 'pending-env',
+        })}
+      />,
+    )
+
+    // 初始加载中：保留环境名称，不宣称不可用，展示加载指示
+    expect(screen.getByText('pending-env')).toBeInTheDocument()
+    expect(screen.queryByText('pending-env （不可用）')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载 Environment')
+
+    // 列表成功返回且不含 pending-env：确认为不可用，方才标记 （不可用）
+    await act(async () => {
+      resolvePromise!([{ name: 'ubuntu' }])
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('pending-env （不可用）')).toBeInTheDocument()
+    })
   })
 })
