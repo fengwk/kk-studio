@@ -19,9 +19,8 @@ import java.util.Set;
 /**
  * Daemon 私有本地数据目录：owner-only 目录布局加进程级独占锁。
  *
- * <p>目录布局固定为 {@code <data-dir>/{daemon.lock,tmp,skills,skill-work/{cache,staging,backup}}}。锁文件
- * {@code daemon.lock} 由本进程在打开期间以 {@link FileChannel#tryLock()} 持有；同一目录上的第二个 Daemon
- * 立即以明确错误失败，而不是并发写同一份数据。
+ * <p>目录布局固定为 {@code <data-dir>/{daemon.lock,tmp,skills,skill-work/{staging,backup}}}。锁文件 {@code
+ * daemon.lock} 由本进程在打开期间以 {@link FileChannel#tryLock()} 持有；同一目录上的第二个 Daemon 立即以明确错误失败，而不是并发写同一份数据。
  *
  * <p>{@code tmp} 是受控临时产物根：工具外化的受控临时 workspace 位于 {@code tmp/workspaces}，其不可变创建登记、保留期与 清扫由 {@link
  * fun.fengwk.kkstudio.harness.daemon.coding.TextOutputStore} 承担，本类只负责创建受控根并收敛 owner-only 权限。
@@ -40,14 +39,12 @@ public final class DaemonDataDirectory implements AutoCloseable {
   private static final String SKILLS = "skills";
   private static final String SKILL_WORK = "skill-work";
   private static final String STAGING = "staging";
-  private static final String CACHE = "cache";
   private static final String BACKUP = "backup";
 
   private final Path root;
   private final Path tmp;
   private final Path skills;
   private final Path skillWork;
-  private final Path skillCache;
   private final Path skillStaging;
   private final Path skillBackup;
   private final FileChannel lockChannel;
@@ -58,7 +55,6 @@ public final class DaemonDataDirectory implements AutoCloseable {
       Path tmp,
       Path skills,
       Path skillWork,
-      Path skillCache,
       Path skillStaging,
       Path skillBackup,
       FileChannel lockChannel,
@@ -67,7 +63,6 @@ public final class DaemonDataDirectory implements AutoCloseable {
     this.tmp = tmp;
     this.skills = skills;
     this.skillWork = skillWork;
-    this.skillCache = skillCache;
     this.skillStaging = skillStaging;
     this.skillBackup = skillBackup;
     this.lockChannel = lockChannel;
@@ -91,7 +86,6 @@ public final class DaemonDataDirectory implements AutoCloseable {
       Path tmp = createOwnerOnlyDirectory(root.resolve(TMP));
       Path skills = createOwnerOnlyDirectory(root.resolve(SKILLS));
       Path skillWork = createOwnerOnlyDirectory(root.resolve(SKILL_WORK));
-      Path skillCache = createOwnerOnlyDirectory(skillWork.resolve(CACHE));
       Path skillStaging = createOwnerOnlyDirectory(skillWork.resolve(STAGING));
       Path skillBackup = createOwnerOnlyDirectory(skillWork.resolve(BACKUP));
       FileChannel channel = openOwnerOnlyLock(root.resolve(LOCK_FILE_NAME));
@@ -107,7 +101,7 @@ public final class DaemonDataDirectory implements AutoCloseable {
             "data directory is already in use by another daemon process: " + root);
       }
       return new DaemonDataDirectory(
-          root, tmp, skills, skillWork, skillCache, skillStaging, skillBackup, channel, lock);
+          root, tmp, skills, skillWork, skillStaging, skillBackup, channel, lock);
     } catch (IOException error) {
       throw new UncheckedIOException("cannot open daemon data directory: " + configured, error);
     }
@@ -159,14 +153,9 @@ public final class DaemonDataDirectory implements AutoCloseable {
     return skills;
   }
 
-  /** 技能工作根目录（缓存、暂存与备份的父目录）。 */
+  /** 技能工作根目录（暂存与备份的父目录）。 */
   public Path skillWork() {
     return skillWork;
-  }
-
-  /** 技能裸 Git 缓存目录。 */
-  public Path skillCache() {
-    return skillCache;
   }
 
   /** 技能安装暂存目录。 */

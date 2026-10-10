@@ -43,8 +43,8 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的 `path`
-（`lsp.java-decompile` 还包括 `target`）必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`；
+`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的本地 `path`
+必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI；
 `skill.sync` 不接受 `workdir`。`process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 

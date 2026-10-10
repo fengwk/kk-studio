@@ -22,9 +22,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * 针对 {@link DaemonDataDirectory} 的行为断言测试。
  *
- * <p>覆盖目录结构创建、POSIX 0700 权限收敛、进程内与跨 JVM 进程排他锁、重启后锁释放、启动期孤儿 .part 文件清理与已发布持久化数据保留、以及 defaultRoot
- * 纯路径计算等语义。暂存文件的 owner-only 创建语义由 {@code TextOutputStoreTest} 覆盖（生产路径只经 {@code TextOutputStore}
- * 落盘）。
+ * <p>覆盖目录结构创建、POSIX 0700 权限收敛、进程内与跨 JVM 进程排他锁、重启后锁释放、非受控已有数据保留、以及 defaultRoot 纯路径计算等语义。暂存文件的
+ * owner-only 创建语义由 {@code TextOutputStoreTest} 覆盖（生产路径只经 {@code TextOutputStore} 落盘）。
  */
 class DaemonDataDirectoryTest {
 
@@ -39,7 +38,6 @@ class DaemonDataDirectoryTest {
       Path tmpDir = canonicalRoot.resolve("tmp");
       Path skillsDir = canonicalRoot.resolve("skills");
       Path skillWorkDir = canonicalRoot.resolve("skill-work");
-      Path skillCacheDir = skillWorkDir.resolve("cache");
       Path skillStagingDir = skillWorkDir.resolve("staging");
       Path skillBackupDir = skillWorkDir.resolve("backup");
 
@@ -47,7 +45,6 @@ class DaemonDataDirectoryTest {
       assertEquals(tmpDir, dir.tmp());
       assertEquals(skillsDir, dir.skills());
       assertEquals(skillWorkDir, dir.skillWork());
-      assertEquals(skillCacheDir, dir.skillCache());
       assertEquals(skillStagingDir, dir.skillStaging());
       assertEquals(skillBackupDir, dir.skillBackup());
 
@@ -56,8 +53,7 @@ class DaemonDataDirectoryTest {
       assertTrue(Files.isDirectory(dir.tmp(), LinkOption.NOFOLLOW_LINKS), "tmp 必须为目录");
       assertTrue(Files.isDirectory(dir.skills(), LinkOption.NOFOLLOW_LINKS), "skills 必须为目录");
       assertTrue(Files.isDirectory(dir.skillWork(), LinkOption.NOFOLLOW_LINKS), "skillWork 必须为目录");
-      assertTrue(
-          Files.isDirectory(dir.skillCache(), LinkOption.NOFOLLOW_LINKS), "skillCache 必须为目录");
+      assertFalse(Files.exists(skillWorkDir.resolve("cache")), "安装路径不创建无用途的 Git 缓存");
       assertTrue(
           Files.isDirectory(dir.skillStaging(), LinkOption.NOFOLLOW_LINKS), "skillStaging 必须为目录");
       assertTrue(
@@ -75,11 +71,22 @@ class DaemonDataDirectoryTest {
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.tmp()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skills()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillWork()));
-        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillCache()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillStaging()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillBackup()));
         assertEquals(ownerOnlyFilePerms, Files.getPosixFilePermissions(lockFile));
       }
+    }
+  }
+
+  /** 安装器不使用的已有目录不能由启动布局初始化擅自清理。 */
+  @Test
+  void openPreservesUnmanagedSkillCache() throws IOException {
+    Path existing = dataDir.resolve("skill-work/cache/objects");
+    Files.createDirectories(existing.getParent());
+    Files.writeString(existing, "existing data");
+
+    try (DaemonDataDirectory ignored = DaemonDataDirectory.open(dataDir)) {
+      assertEquals("existing data", Files.readString(existing));
     }
   }
 

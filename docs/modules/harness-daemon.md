@@ -21,12 +21,11 @@ Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原�
   daemon.lock
   tmp/workspaces/<uuid>/     # 受控临时 workspace（*.part 中转 → 原子发布 *.log）
   skills/<package>/          # 已安装技能包
-  skill-work/cache/          # bare Git 缓存
   skill-work/staging/        # 安装暂存
   skill-work/backup/         # 替换备份
 ```
 
-POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File` 的 owner-only 设置，不等同于安装器对 token 的显式 Windows DACL 校验。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫承担（见下）；技能安装器负责恢复或清理 staging/backup；已发布全文由定时清扫按保留期回收，已发布技能包与 Git 缓存由安装器保留、不随服务卸载自动删除。
+POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File` 的 owner-only 设置，不等同于安装器对 token 的显式 Windows DACL 校验。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫承担（见下）；技能安装器负责恢复或清理 staging/backup；已发布全文由定时清扫按保留期回收，已发布技能包不随服务卸载自动删除。
 
 ## 能力注册与调度
 
@@ -68,7 +67,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 自然退出、非零退出、超时、取消都先保留可发布输出。收尾说明不写入全文、不计入全文统计；只有自然退出报告 exitCode。`detailsJson.process.outcome` 区分 EXITED / TIMED_OUT / CANCELLED，运行时强制失败或取消的 wire 正文通过前述收尾窗口携带文本。
 
-[`SkillPackageInstaller`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPackageInstaller.java) 以请求指定的 exact commit 安装，不以 branch HEAD 替代。先拉取 bare cache、物化 staging、检查整棵 tree，只有新包完整物化并校验通过后才原子替换 `skills/<package>`，因此替换期间始终保留已发布技能包，失败则保留旧包或从 backup 恢复；拒绝符号链接、submodule、路径穿越与非普通文件。包内 `.kkstudio-commit` 记录 commit，模型路径稳定为 `<data-dir>/skills/<package>/<skill>/SKILL.md`。origin URL 变化时重建缓存；marker 相同也重新校验物化结果。
+[`SkillPackageInstaller`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPackageInstaller.java) 在独立 staging 目录 clone 并 checkout 请求指定的 exact commit，不以 branch HEAD 替代。检查整棵 tree 后物化到发布暂存目录，只有新包完整物化并校验通过后才原子替换 `skills/<package>`，失败则保留旧包或从 backup 恢复；拒绝符号链接、submodule、路径穿越与非普通文件。包内 `.kkstudio-commit` 记录 commit，模型路径稳定为 `<data-dir>/skills/<package>/<skill>/SKILL.md`；marker 相同也重新校验物化结果。
 
 ## 编码能力
 
