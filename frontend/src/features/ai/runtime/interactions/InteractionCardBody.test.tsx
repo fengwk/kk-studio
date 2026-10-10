@@ -82,7 +82,9 @@ it('renders and submits a long questionnaire without truncating questions, optio
     expect(input).toHaveValue(LONG_ANSWER)
   }
 
-  const submitBtn = screen.getByRole('button', { name: '提交回答' })
+  // 先定位提交按钮，再校验其可访问名称，避免为全部长文本选项计算可访问树。
+  const submitBtn = screen.getByText('提交回答', { selector: 'button' })
+  expect(submitBtn).toHaveAccessibleName('提交回答')
   expect(submitBtn).not.toBeDisabled()
   fireEvent.click(submitBtn)
 
