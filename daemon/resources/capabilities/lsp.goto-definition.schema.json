@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Absolute path on the target daemon's file system of an existing source file supported by an LSP server. This path is also used to infer the workspace root. Relative paths are rejected."
+    },
+    "line": {
+      "type": "integer",
+      "description": "1-based line number for the target position."
+    },
+    "character": {
+      "type": "integer",
+      "description": "0-based character offset at the target position. Defaults to 0."
+    }
+  },
+  "required": [
+    "path",
+    "line"
+  ],
+  "additionalProperties": false
+}
