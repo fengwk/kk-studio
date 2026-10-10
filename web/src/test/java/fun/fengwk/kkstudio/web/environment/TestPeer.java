@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Test-side peer endpoint built on the production {@link NotificationPeerLink}. It never defines a
@@ -18,13 +20,22 @@ import java.util.UUID;
  */
 final class TestPeer {
 
+  /** Shared daemon expiry timer; the link requires a non-null timer and never fires it here. */
+  private static final ScheduledExecutorService TIMER =
+      Executors.newSingleThreadScheduledExecutor(
+          runnable -> {
+            Thread thread = new Thread(runnable, "test-peer-expire-timer");
+            thread.setDaemon(true);
+            return thread;
+          });
+
   private final UUID self;
   private final NotificationPeerLink link;
   private final List<String> inbox = new ArrayList<>();
 
   TestPeer(UUID self, String topic, NotificationLimits limits) {
     this.self = self;
-    this.link = new NotificationPeerLink(self, topic, limits, null, inbox::add, () -> {});
+    this.link = new NotificationPeerLink(self, topic, limits, TIMER, inbox::add, () -> {});
   }
 
   TestPeer(UUID self) {

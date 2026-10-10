@@ -31,11 +31,13 @@ import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** OkHttp transport 适配器必须保留握手协商门禁、共享 carrier 成帧与 close/disconnect 所有权。 */
 class OkHttpWebSocketTransportTest {
@@ -49,7 +51,18 @@ class OkHttpWebSocketTransportTest {
       Executors.newSingleThreadExecutor(r -> new Thread(r, SENDER_NAME));
 
   /** 借用给 transport 的到期 timer：断言缺片在无后续输入时也会到期关闭。 */
-  private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
+  private final ScheduledThreadPoolExecutor timer =
+      new ScheduledThreadPoolExecutor(
+          1,
+          runnable -> {
+            Thread thread = new Thread(runnable, "test-timer");
+            thread.setDaemon(true);
+            return thread;
+          });
+
+  {
+    timer.setRemoveOnCancelPolicy(true);
+  }
 
   @AfterEach
   void shutdownBorrowedResources() {
@@ -347,6 +360,66 @@ class OkHttpWebSocketTransportTest {
     assertThrows(CompletionException.class, () -> late.toCompletableFuture().join());
   }
 
+  /** 未 open 前 close：未交付握手的 future 必须确定性失败，迟到 onOpen 真实关 socket 且不复活 future。 */
+  @Test
+  void closeBeforeOpenFinishesPendingHandshakeAndRejectsLateOpen() throws Exception {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletionStage<DaemonConnection> stage = transport.connect(listener);
+
+    transport.close();
+
+    assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
+    assertEquals(1, listener.disconnections.get());
+
+    FakeWebSocket lateSocket = new FakeWebSocket();
+    dialer.listener.onOpen(lateSocket, response(DEFLATE));
+
+    assertEquals(1, lateSocket.closeCalls.get());
+    assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
+    // 握手与 link 已释放：借用的 timer 不应残留该连接的到期任务。
+    await(() -> timer.getQueue().isEmpty());
+  }
+
+  /** close 之后的新 connect 立即失败，且不发起任何 dial。 */
+  @Test
+  void connectAfterCloseFailsWithoutDialing() {
+    FakeDialer dialer = new FakeDialer();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    transport.close();
+
+    CompletionStage<DaemonConnection> stage = transport.connect(new RecordingListener());
+
+    assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
+    assertTrue(dialer.requests.isEmpty());
+  }
+
+  /** close 与在途握手注册竞争：future 必须终止，迟到 onOpen 仍真实关 socket，不靠 sleep。 */
+  @Test
+  void closeRacingPendingDialTerminatesFutureAndLateOpenClosesSocket() throws Exception {
+    LatchDialer dialer = new LatchDialer();
+    OkHttpWebSocketTransport transport = transport(dialer, NotificationLimits.defaults());
+    RecordingListener listener = new RecordingListener();
+    AtomicReference<CompletionStage<DaemonConnection>> reference = new AtomicReference<>();
+    Thread connector = Thread.ofVirtual().start(() -> reference.set(transport.connect(listener)));
+
+    assertTrue(dialer.dialed.await(5, TimeUnit.SECONDS));
+    transport.close();
+    dialer.release.countDown();
+    connector.join();
+
+    CompletionStage<DaemonConnection> stage = reference.get();
+    assertNotNull(stage);
+    assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
+    assertEquals(1, listener.disconnections.get());
+
+    FakeWebSocket lateSocket = new FakeWebSocket();
+    dialer.listener.onOpen(lateSocket, response(DEFLATE));
+    assertEquals(1, lateSocket.closeCalls.get());
+    assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
+  }
+
   /** transport.close 之后迟到的 onOpen 必须真实关闭该 socket 且不交付连接。 */
   @Test
   void closesLateSocketAfterTransportClose() {
@@ -403,6 +476,11 @@ class OkHttpWebSocketTransportTest {
   }
 
   private OkHttpWebSocketTransport transport(FakeDialer dialer, NotificationLimits limits) {
+    return new OkHttpWebSocketTransport(dialer, GATEWAY, sender, timer, limits);
+  }
+
+  private OkHttpWebSocketTransport transport(
+      OkHttpWebSocketTransport.WebSocketDialer dialer, NotificationLimits limits) {
     return new OkHttpWebSocketTransport(dialer, GATEWAY, sender, timer, limits);
   }
 
@@ -468,6 +546,25 @@ class OkHttpWebSocketTransportTest {
     public void dial(Request request, WebSocketListener listener) {
       requests.add(request);
       this.listener = listener;
+    }
+  }
+
+  /** 暂停在 dial 内的 dialer：让测试用 latch 精确制造 close 与在途握手注册的竞争。 */
+  private static final class LatchDialer implements OkHttpWebSocketTransport.WebSocketDialer {
+
+    private final CountDownLatch dialed = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+    private volatile WebSocketListener listener;
+
+    @Override
+    public void dial(Request request, WebSocketListener listener) {
+      this.listener = listener;
+      dialed.countDown();
+      try {
+        release.await();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
     }
   }
 

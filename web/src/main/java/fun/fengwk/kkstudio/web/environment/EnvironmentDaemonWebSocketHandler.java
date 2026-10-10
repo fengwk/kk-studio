@@ -202,8 +202,8 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
 
     @Override
     public void close() {
+      // link 只由 sender 的正常/失败/drained 路径释放，避免 drain-close 的已接受 ERROR 被外部清队列打断。
       sender.close();
-      link.close();
     }
 
     private boolean matches(WebSocketSession candidate) {

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,6 +33,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -42,6 +45,15 @@ import java.util.concurrent.atomic.AtomicReference;
 class DaemonOutboundSenderTest {
 
   private static final UUID DECODE_SELF = UUID.randomUUID();
+
+  /** 共享 link 到期 timer；与被测 deadline timer 分离，避免污染 deadline 队列断言。 */
+  private static final ScheduledExecutorService LINK_TIMER =
+      Executors.newSingleThreadScheduledExecutor(
+          runnable -> {
+            Thread thread = new Thread(runnable, "sender-link-expire-timer");
+            thread.setDaemon(true);
+            return thread;
+          });
 
   private final ScheduledThreadPoolExecutor timer =
       EnvironmentDaemonWebSocketConfiguration.environmentDaemonSendDeadlineTimer();
@@ -274,6 +286,46 @@ class DaemonOutboundSenderTest {
     }
   }
 
+  /** 空队列 drain-close 必须立即释放共享 link（含到期任务），不能只关 transport 而遗留 expiry。 */
+  @Test
+  void closeAfterFlushOnEmptyQueueReleasesLinkAndExpiry() throws Exception {
+    ScheduledThreadPoolExecutor linkTimer =
+        new ScheduledThreadPoolExecutor(
+            1,
+            runnable -> {
+              Thread thread = new Thread(runnable, "empty-flush-link-timer");
+              thread.setDaemon(true);
+              return thread;
+            });
+    linkTimer.setRemoveOnCancelPolicy(true);
+    NotificationPeerLink link =
+        new NotificationPeerLink(
+            UUID.randomUUID(),
+            NotificationPeerLink.DAEMON_TOPIC,
+            NotificationLimits.defaults(),
+            linkTimer,
+            body -> {},
+            () -> {});
+    WebSocketSession session = session(message -> {});
+    DaemonOutboundSender sender =
+        new DaemonOutboundSender(session, link, 10_000, timer, error -> {});
+    try {
+      assertFalse(linkTimer.getQueue().isEmpty());
+
+      sender.closeAfterFlush();
+
+      await(() -> link.isClosed());
+      assertTrue(link.isClosed());
+      assertNull(link.peer());
+      assertEquals(0, link.pendingBytes());
+      await(() -> linkTimer.getQueue().isEmpty());
+      verify(session, timeout(5_000)).close(any());
+    } finally {
+      sender.close();
+      linkTimer.shutdownNow();
+    }
+  }
+
   /** 多连接共享 timer：阻塞的失败回调不占用 timer，另一连接仍能裁决超时。 */
   @Test
   void blockedFailureCallbackDoesNotBlockSharedDeadlineTimer() throws Exception {
@@ -485,7 +537,12 @@ class DaemonOutboundSenderTest {
 
   private static NotificationPeerLink newLink(NotificationLimits limits) {
     return new NotificationPeerLink(
-        UUID.randomUUID(), NotificationPeerLink.DAEMON_TOPIC, limits, null, body -> {}, () -> {});
+        UUID.randomUUID(),
+        NotificationPeerLink.DAEMON_TOPIC,
+        limits,
+        LINK_TIMER,
+        body -> {},
+        () -> {});
   }
 
   private static List<String> decode(List<String> frames) {

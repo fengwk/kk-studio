@@ -132,13 +132,15 @@ final class DaemonOutboundSender implements AutoCloseable {
         return;
       }
       closeAfterFlush = true;
-      closeNow = link.pendingBytes() == 0;
+      closeNow = !link.hasPending();
       if (closeNow) {
         closed = true;
       }
       lock.notifyAll();
     }
     if (closeNow) {
+      // 空队列 drain-close：必须立即释放共享 link（取消 expiry、清空预算），不能只关 transport。
+      link.close();
       requestTransportClose(CloseStatus.NORMAL);
     }
   }

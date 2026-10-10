@@ -13,7 +13,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,10 +40,36 @@ class NotificationPeerLinkTest {
   private static final class Recorder {
     final List<String> messages = new ArrayList<>();
     final AtomicInteger closeRequests = new AtomicInteger();
+    private final ManualScheduler timer = new ManualScheduler();
 
     NotificationPeerLink link(UUID self, NotificationLimits limits) {
       return new NotificationPeerLink(
-          self, TOPIC, limits, null, messages::add, closeRequests::incrementAndGet);
+          self, TOPIC, limits, timer, messages::add, closeRequests::incrementAndGet);
+    }
+  }
+
+  /**
+   * Deterministic scheduler: never fires periodic work on its own, so expiry is driven explicitly
+   * by the test; cancelled tasks leave the queue immediately.
+   */
+  private static final class ManualScheduler extends ScheduledThreadPoolExecutor {
+
+    ManualScheduler() {
+      super(
+          1,
+          runnable -> {
+            Thread thread = new Thread(runnable, "manual-expire-timer");
+            thread.setDaemon(true);
+            return thread;
+          });
+      setRemoveOnCancelPolicy(true);
+    }
+
+    @Override
+    public ScheduledFuture<?> scheduleWithFixedDelay(
+        Runnable command, long initialDelay, long delay, TimeUnit unit) {
+      // 只登记周期任务，不真正排期：测试显式调用 expire() 或依赖 close() 取消。
+      return super.schedule(() -> {}, 1, TimeUnit.DAYS);
     }
   }
 
@@ -295,7 +323,7 @@ class NotificationPeerLinkTest {
             serverId,
             TOPIC,
             limits(16000, 32),
-            null,
+            new ManualScheduler(),
             body -> ref.get().offer(UUID.randomUUID(), "reply:" + body),
             () -> {});
     ref.set(down);

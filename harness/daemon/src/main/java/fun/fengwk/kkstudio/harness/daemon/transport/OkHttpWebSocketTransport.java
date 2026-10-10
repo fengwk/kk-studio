@@ -77,7 +77,8 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
   private final UUID publisher;
   private final NotificationLimits limits;
   private final Set<Handshake> handshakes = ConcurrentHashMap.newKeySet();
-  private final AtomicBoolean closed = new AtomicBoolean();
+  private final Object lifecycle = new Object();
+  private boolean closing;
 
   public OkHttpWebSocketTransport(
       URI gatewayUri, ExecutorService senderExecutor, ScheduledExecutorService timer) {
@@ -111,24 +112,38 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
 
   @Override
   public CompletionStage<DaemonConnection> connect(DaemonTransportListener listener) {
-    if (closed.get()) {
-      return CompletableFuture.failedFuture(new IllegalStateException("transport is closed"));
-    }
     Handshake handshake = new Handshake(listener);
-    handshakes.add(handshake);
+    // 检查围栏与登记握手在同一 lifecycle gate 内原子完成，close 不会漏掉并发注册的握手。
+    synchronized (lifecycle) {
+      if (closing) {
+        return CompletableFuture.failedFuture(new IllegalStateException("transport is closed"));
+      }
+      handshakes.add(handshake);
+    }
     return handshake.start();
   }
 
-  /** 围栏新连接并终止所有已创建/在途握手连接；不关闭借用的执行器。 */
+  /** 在 lifecycle gate 内取快照并围栏，随后在锁外终止每一条握手；不关闭借用的执行器。 */
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) {
-      return;
+    List<Handshake> snapshot;
+    synchronized (lifecycle) {
+      if (closing) {
+        return;
+      }
+      closing = true;
+      snapshot = new ArrayList<>(handshakes);
+      handshakes.clear();
     }
-    for (Handshake handshake : handshakes) {
+    for (Handshake handshake : snapshot) {
       handshake.shutdown();
     }
-    handshakes.clear();
+  }
+
+  private boolean isClosing() {
+    synchronized (lifecycle) {
+      return closing;
+    }
   }
 
   /** 建立单条 WebSocket 连接，供测试替换真实 OkHttp 客户端。 */
@@ -166,6 +181,11 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
     }
 
     private CompletionStage<DaemonConnection> start() {
+      // 注册后 gate 可能已关闭：不再发起无意义 dial，并明确结束未交付握手。
+      if (isClosing()) {
+        notifyDisconnected(new IllegalStateException("transport is closed"));
+        return result;
+      }
       Request request = new Request.Builder().url(gatewayUri.toASCIIString()).build();
       try {
         dialer.dial(request, this);
@@ -177,9 +197,11 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
 
     @Override
     public void onOpen(WebSocket webSocket, Response response) {
-      if (disconnected.get() || rejected.get() || closed.get()) {
-        // transport 已关闭或本连接已被裁定失败：迟到的 socket 必须实际释放，绝不交付。
+      if (disconnected.get() || rejected.get() || isClosing()) {
+        // transport 已关闭或本连接已被裁定失败：迟到 socket 必须实际释放，并明确结束未交付握手，
+        // 绝不允许裸 return 让 connect future 永久 pending。
         webSocket.close(NORMAL_CLOSURE, null);
+        notifyDisconnected(new IllegalStateException("transport closed before open"));
         return;
       }
       connection.attach(webSocket);

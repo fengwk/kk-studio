@@ -65,8 +65,8 @@ public final class NotificationPeerLink implements AutoCloseable {
   /**
    * Creates one link. {@code delivery} receives a fully reassembled UTF-8 body and {@code
    * closeRequest} is invoked at most once per fatal condition; both are called outside every
-   * internal monitor and may re-enter the link. A non-null {@code expireTimer} drives the periodic
-   * reassembly sweep at the reassembly timeout interval.
+   * internal monitor and may re-enter the link. The required {@code expireTimer} drives the
+   * periodic reassembly sweep at the reassembly timeout interval; there is no disabled-expiry mode.
    */
   public NotificationPeerLink(
       UUID self,
@@ -88,13 +88,10 @@ public final class NotificationPeerLink implements AutoCloseable {
             packet -> completed = packet,
             ignoredTopic -> resync = true);
     this.outbox = new NotificationOutbox(limits);
-    if (expireTimer == null) {
-      this.expireTask = null;
-    } else {
-      long period = Math.max(1L, limits.reassemblyTimeout().toMillis());
-      this.expireTask =
-          expireTimer.scheduleWithFixedDelay(this::expire, period, period, TimeUnit.MILLISECONDS);
-    }
+    long period = Math.max(1L, limits.reassemblyTimeout().toMillis());
+    this.expireTask =
+        Objects.requireNonNull(expireTimer, "expireTimer")
+            .scheduleWithFixedDelay(this::expire, period, period, TimeUnit.MILLISECONDS);
   }
 
   /** Frozen peer publisher; null until the first valid inbound fragment. */
@@ -276,9 +273,7 @@ public final class NotificationPeerLink implements AutoCloseable {
   private void tearDownLocked() {
     closed = true;
     peer = null;
-    if (expireTask != null) {
-      expireTask.cancel(false);
-    }
+    expireTask.cancel(false);
     outbox.close();
     reassembler.clear();
   }

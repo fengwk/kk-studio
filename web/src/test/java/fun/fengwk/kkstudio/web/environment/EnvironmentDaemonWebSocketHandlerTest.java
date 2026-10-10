@@ -26,11 +26,15 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonEndpoint;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
+import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -143,6 +147,57 @@ class EnvironmentDaemonWebSocketHandlerTest {
     assertEquals(DaemonOfferResult.CLOSED, connection.offerText("after-fence"));
   }
 
+  /** drain-close 排已接受的 ERROR：随后 channel.close 不得清 link 打断，必须收完整 packet 再关闭。 */
+  @Test
+  void drainCloseKeepsAcceptedPacketAcrossChannelClose() throws Exception {
+    DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
+    EnvironmentDaemonWebSocketHandler handler = handler(endpoint, properties());
+    WebSocketSession session = deflateSession("connection-id");
+    CountDownLatch sendEntered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    List<String> sent = new CopyOnWriteArrayList<>();
+    doAnswer(
+            invocation -> {
+              sendEntered.countDown();
+              release.await();
+              sent.add(((TextMessage) invocation.getArgument(0)).getPayload());
+              return null;
+            })
+        .when(session)
+        .sendMessage(any());
+    handler.afterConnectionEstablished(session);
+    ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
+    verify(endpoint).open(connectionCaptor.capture());
+    DaemonChannel connection = connectionCaptor.getValue();
+
+    assertEquals(DaemonOfferResult.ACCEPTED, connection.offerText("protocol-error"));
+    assertTrue(sendEntered.await(5, TimeUnit.SECONDS));
+    connection.closeAfterFlush();
+    connection.close();
+    assertEquals(DaemonOfferResult.CLOSED, connection.offerText("after-fence"));
+    release.countDown();
+
+    await(() -> sent.size() == 1);
+    verify(session, timeout(5_000)).close(any(CloseStatus.class));
+    assertEquals(List.of("protocol-error"), decode(sent));
+  }
+
+  /** 空队列 drain-close：必须立即释放 link，让共享 deadline timer 的到期任务回到零。 */
+  @Test
+  void emptyFlushReleasesLinkAndEmptiesDeadlineTimer() throws Exception {
+    DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
+    EnvironmentDaemonWebSocketHandler handler = handler(endpoint, properties());
+    WebSocketSession session = deflateSession("connection-id");
+    handler.afterConnectionEstablished(session);
+    ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
+    verify(endpoint).open(connectionCaptor.capture());
+
+    connectionCaptor.getValue().closeAfterFlush();
+
+    await(() -> timer.getQueue().isEmpty());
+    verify(session, timeout(5_000)).close(any(CloseStatus.class));
+  }
+
   /** 出站队列满时返回 BUSY 且不关闭连接。 */
   @Test
   void mapsFullQueueToBusy() throws Exception {
@@ -237,6 +292,18 @@ class EnvironmentDaemonWebSocketHandlerTest {
     } finally {
       releaseClose.countDown();
     }
+  }
+
+  private static List<String> decode(List<String> frames) {
+    List<String> bodies = new ArrayList<>(frames.size());
+    for (String frame : frames) {
+      bodies.add(
+          new String(
+              NotificationCarrier.decode(frame, NotificationLimits.defaults(), UUID.randomUUID())
+                  .bytes(),
+              StandardCharsets.UTF_8));
+    }
+    return bodies;
   }
 
   private static void await(Check check) throws Exception {
