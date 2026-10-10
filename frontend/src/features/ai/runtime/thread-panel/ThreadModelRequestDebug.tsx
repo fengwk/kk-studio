@@ -1,12 +1,11 @@
-import { useMemo, useState } from 'react'
-import { AlertCircle, Eye, LoaderCircle } from 'lucide-react'
+import { useMemo } from 'react'
+import { AlertCircle, Eye } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
   ThreadModelRequestDebugTool,
 } from '@/features/ai/runtime/thread-timeline-types'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import { useI18n } from '@/shared/i18n'
-import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { Button } from '@/shared/ui/controls/Button'
 
 function envBadge(support: 'NONE' | 'OPTIONAL' | 'REQUIRED'): string {
@@ -70,22 +69,13 @@ function formatCacheRetention(
 export function ThreadModelRequestDebug({
   debug,
   onSelectInspector,
-  onPreview,
-  previewLoading = false,
-  previewDisabled = false,
-  previewDisabledReason = null,
   previewError = null,
 }: {
   debug: ThreadModelRequestDebugData
   onSelectInspector: (selection: DebugInspectorSelection | null) => void
-  onPreview?: () => void
-  previewLoading?: boolean
-  previewDisabled?: boolean
-  previewDisabledReason?: string | null
   previewError?: string | null
 }) {
   const { t } = useI18n()
-  const [copyFailed, setCopyFailed] = useState(false)
 
   const { sentTools, filteredTools } = useMemo(() => {
     const sent: ThreadModelRequestDebugTool[] = []
@@ -111,57 +101,21 @@ export function ThreadModelRequestDebug({
     return retentionText
   }, [debug.cacheControl, t])
 
-  const previewTitle = t('ai.runtime.debug.previewTitle')
-  const planningTitle = t('ai.runtime.debug.currentPlanningTitle')
-
   return (
-    <section className="thread-system-prompt thread-model-request-debug" aria-label={planningTitle}>
-      <header className="thread-debug-preview-header">
-        <h3 className="thread-debug-preview-title">{planningTitle}</h3>
-      </header>
-      <div className="thread-debug-section">
-        <div className="thread-debug-section-header">
-          <span>{t('ai.runtime.debug.inspectActions')}</span>
-        </div>
+    <div className="thread-system-prompt thread-model-request-debug">
+      {debug.frozenInvocation ? (
         <div className="thread-debug-preview-actions">
           <Button
             variant="inline"
-            className="thread-debug-preview-action"
-            disabled={previewDisabled || previewLoading || onPreview == null}
-            aria-label={
-              previewLoading
-                ? t('ai.runtime.composer.previewLoading')
-                : previewDisabledReason
-                  ? `${previewTitle} (${previewDisabledReason})`
-                  : previewTitle
-            }
-            title={
-              previewLoading
-                ? t('ai.runtime.composer.previewLoading')
-                : previewDisabledReason
-                  ? `${previewTitle} (${previewDisabledReason})`
-                  : previewTitle
-            }
-            onClick={onPreview}
+            title={t('ai.runtime.debug.requestSnapshotTitle')}
+            aria-label={t('ai.runtime.debug.requestSnapshotTitle')}
+            onClick={() => onSelectInspector({ type: 'request' })}
           >
-            {previewLoading ? (
-              <LoaderCircle size={12} className="preview-icon spin" aria-hidden="true" />
-            ) : null}
-            {previewTitle}
+            <Eye size={12} aria-hidden="true" />
+            {t('ai.runtime.debug.requestSnapshot')}
           </Button>
-          {debug.frozenInvocation ? (
-            <Button
-              variant="inline"
-              title={t('ai.runtime.debug.requestSnapshotTitle')}
-              aria-label={t('ai.runtime.debug.requestSnapshotTitle')}
-              onClick={() => onSelectInspector({ type: 'request' })}
-            >
-              <Eye size={12} aria-hidden="true" />
-              {t('ai.runtime.debug.requestSnapshot')}
-            </Button>
-          ) : null}
         </div>
-      </div>
+      ) : null}
 
       {/* PREVIEW ERROR */}
       {previewError ? (
@@ -182,22 +136,12 @@ export function ThreadModelRequestDebug({
       <div className="thread-debug-section">
         <div className="thread-debug-section-header">
           <span>{t('ai.runtime.debug.systemPromptTitle')}</span>
-          <div className="thread-debug-section-actions" onClickCapture={() => setCopyFailed(false)}>
-            {copyFailed ? (
-              <span role="alert" className="thread-debug-copy-feedback is-error">
-                {t('ai.runtime.debug.copyFailed')}
-              </span>
-            ) : null}
-            <CopyButton
-              source={debug.systemInstruction || ''}
-              className="thread-debug-prompt-copy"
-              label={t('ai.runtime.debug.copyPromptTitle')}
-              disabled={!debug.systemInstruction}
-              onError={() => setCopyFailed(true)}
-            />
-          </div>
         </div>
-        <pre className="thread-system-prompt-body" tabIndex={0}>
+        <pre
+          className="thread-system-prompt-body"
+          tabIndex={0}
+          aria-label={t('ai.runtime.debug.systemPromptTitle')}
+        >
           {debug.systemInstruction || t('ai.runtime.debug.emptyPrompt')}
         </pre>
       </div>
@@ -325,6 +269,6 @@ export function ThreadModelRequestDebug({
           {debug.environmentName || t('ai.runtime.debug.noEnvironmentSelected')}
         </span>
       </footer>
-    </section>
+    </div>
   )
 }

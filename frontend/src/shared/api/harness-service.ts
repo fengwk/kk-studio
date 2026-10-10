@@ -7,6 +7,7 @@ import type {
   HarnessSessionDTO,
   HarnessSessionRenameDTO,
   HarnessModelRequestDebugDTO,
+  HarnessModelRequestDebugRequestDTO,
   HarnessThreadDTO,
   HarnessThreadRenameDTO,
   HarnessThreadSnapshotDTO,
@@ -86,8 +87,11 @@ export function createHarnessService(client: HttpClient = apiClient) {
     ): Promise<ManualCompactionResponseDTO> =>
       client.post(`/harness/threads/${encodeURIComponent(threadId)}/compact`, data),
 
-    getModelRequestDebug: (threadId: string): Promise<HarnessModelRequestDebugDTO> =>
-      client.get(`/harness/threads/${encodeURIComponent(threadId)}/model-request-debug`),
+    getModelRequestDebug: (
+      threadId: string,
+      data: HarnessModelRequestDebugRequestDTO,
+    ): Promise<HarnessModelRequestDebugDTO> =>
+      client.post(`/harness/threads/${encodeURIComponent(threadId)}/model-request-debug`, data),
 
     previewProviderRequest: (
       threadId: string,

@@ -124,11 +124,70 @@ it('renders on-demand preview, inspector and history actions and clears history 
   fireEvent.click(screen.getByRole('button', { name: '关闭检查器' }))
   expect(screen.queryByTestId('preview-request-body')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '关闭事件详情' }))
-  fireEvent.click(screen.getByRole('button', { name: '预览当前草稿' }))
-  expect(screen.getByTestId('preview-request-body')).toHaveTextContent('{}')
-  expect(screen.getByText(/点击时的设置与草稿输入只读物化/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '关闭 Debug' }))
   expect(screen.queryByTestId('preview-request-body')).toBeNull()
+})
+
+it('passes composer draft model and environment to debug and ignores stale responses from previous draft selections', async () => {
+  let finishWithoutEnv!: (data: HarnessModelRequestDebugDTO) => void
+  let finishWithEnv!: (data: HarnessModelRequestDebugDTO) => void
+  vi.mocked(harnessService.getModelRequestDebug)
+    .mockReset()
+    .mockImplementationOnce(() => new Promise((resolve) => { finishWithoutEnv = resolve }))
+    .mockImplementationOnce(() => new Promise((resolve) => { finishWithEnv = resolve }))
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const controller = boundController()
+  const draftModelA = { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' }
+  const draftModelB = { providerName: 'anthropic', modelName: 'claude-sonnet', variant: 'thinking' }
+
+  const { result, rerender } = renderHook(
+    ({ debugSettings }) => useBoundThreadPanelViews('thread', controller, { debugSettings }),
+    {
+      initialProps: {
+        debugSettings: { model: draftModelA, environmentName: null as string | null },
+      },
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    },
+  )
+
+  act(() => result.current.switchMode('debug'))
+  expect(harnessService.getModelRequestDebug).toHaveBeenNthCalledWith(1, 'thread', {
+    model: draftModelA,
+    environmentName: null,
+  })
+
+  // 用户在 Composer 中切换草稿模型与环境（未持久化到 branchSettings）：立即按新草稿发 POST
+  rerender({
+    debugSettings: { model: draftModelB, environmentName: 'dev-box' },
+  })
+  expect(harnessService.getModelRequestDebug).toHaveBeenNthCalledWith(2, 'thread', {
+    model: draftModelB,
+    environmentName: 'dev-box',
+  })
+
+  await act(async () => {
+    finishWithEnv({
+      ...DEBUG,
+      model: draftModelB,
+      environmentName: 'dev-box',
+      systemInstruction: 'planned with dev-box',
+    })
+  })
+  await waitFor(() => expect(result.current.debug?.environmentName).toBe('dev-box'))
+  expect(result.current.debug?.model).toEqual(draftModelB)
+
+  // 前一次无环境草稿的慢响应迟到，不得覆盖当前 dev-box 的规划结果
+  await act(async () => {
+    finishWithoutEnv({
+      ...DEBUG,
+      model: draftModelA,
+      environmentName: null,
+      systemInstruction: 'stale without env',
+    })
+  })
+  expect(result.current.debug?.environmentName).toBe('dev-box')
+  expect(result.current.debug?.systemInstruction).toBe('planned with dev-box')
 })
 
 const READY_ENVIRONMENT: EnvironmentCardDTO = {

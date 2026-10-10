@@ -58,10 +58,6 @@ export interface ThreadEventViewProps {
   debugError?: string | null
   debugSelection?: DebugInspectorSelection | null
   onSelectInspector?: (selection: DebugInspectorSelection | null) => void
-  onPreview?: () => void
-  previewLoading?: boolean
-  previewDisabled?: boolean
-  previewDisabledReason?: string | null
   previewError?: string | null
   /** 选中历史 ASSISTANT Entry 后按需读取到的调用前请求预览（只读）。 */
   historicalPreview?: ThreadProviderRequestPreviewData | null
@@ -93,10 +89,6 @@ export function ThreadEventView({
   debugError = null,
   debugSelection = null,
   onSelectInspector,
-  onPreview,
-  previewLoading = false,
-  previewDisabled = false,
-  previewDisabledReason = null,
   previewError = null,
   historicalPreview = null,
   historicalPreviewLoading = false,
@@ -415,14 +407,6 @@ export function ThreadEventView({
                 const activeEl = document.activeElement as HTMLElement | null
                 handleSelectInspector(selection, activeEl)
               }}
-              onPreview={onPreview ? () => {
-                lastDetailSourceRef.current = 'preview'
-                lastFocusedTriggerRef.current = document.activeElement as HTMLElement | null
-                onPreview()
-              } : undefined}
-              previewLoading={previewLoading}
-              previewDisabled={previewDisabled}
-              previewDisabledReason={previewDisabledReason}
               previewError={previewError}
             />
           ) : debugLoading ? (

@@ -1394,14 +1394,14 @@ div.is-error {
   display: flex;
 }
 
-/* 宽面板：规划与历史列有界，详情占据剩余空间。 */
+/* 宽面板：三列等宽并排，各列独立纵向滚动。 */
 .thread-events-shell[data-layout="wide"] .thread-debug-tabs {
   display: none;
 }
 
 .thread-events-shell[data-layout="wide"] .thread-debug-grid {
   display: grid;
-  grid-template-columns: clamp(280px, 26%, 360px) clamp(280px, 28%, 420px) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   column-gap: 0;
 }
 
@@ -1427,32 +1427,6 @@ div.is-error {
   flex-direction: column;
   gap: 12px;
   width: 100%;
-}
-
-.thread-debug-preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-
-.thread-debug-preview-title {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: var(--accent);
-}
-
-.thread-debug-preview-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.thread-debug-preview-action .preview-icon.spin {
-  animation: thread-preview-spin 700ms linear infinite;
 }
 
 .thread-debug-preview-error {
@@ -1564,6 +1538,17 @@ div.is-error {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.thread-debug-tag {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
 }
 
 .thread-debug-chip code {

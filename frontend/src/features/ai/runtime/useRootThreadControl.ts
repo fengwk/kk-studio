@@ -1556,8 +1556,6 @@ export function useRootThreadControl({
   // Workspace keeps busy hidden panes mounted until settlement. Unmount must
   // never erase their last reported gate or uncommitted target identity.
 
-  const canExposePreview = isBoundTarget(target) || isDraftHistoryTarget(target)
-
   const { previewDisabled, previewDisabledReason } = useMemo(() => {
     if (!isBoundTarget(target) && !isDraftHistoryTarget(target)) {
       return {
@@ -1678,14 +1676,14 @@ export function useRootThreadControl({
   } : controller, {
     // 本地草稿没有 threadId：视图状态按目标身份隔离，API 预览仍按真实 threadId/会话。
     viewKey: previewScope,
+    debugSettings: activeDraft == null ? undefined : {
+      model: activeDraft.model,
+      environmentName: activeDraft.environmentName,
+    },
     historyLoading: isDraftHistoryTarget(target) ? treeEntriesQuery.isLoading : controller.messagesLoading,
     historyError: (isDraftHistoryTarget(target) ? treeEntriesQuery.error ?? draftHistory.error : controller.messagesError)
       ? t('ai.chat.history.loadFailed') : null,
     onRetryHistory: () => { void (isDraftHistoryTarget(target) ? treeEntriesQuery.refetch() : controller.snapshotQuery.refetch()) },
-    onPreview: canExposePreview ? () => void handlePreview() : undefined,
-    previewLoading,
-    previewDisabled,
-    previewDisabledReason,
     previewError,
   })
   const boundViewsRef = useRef(boundViews)

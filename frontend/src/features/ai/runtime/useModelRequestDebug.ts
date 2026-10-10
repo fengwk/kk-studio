@@ -4,23 +4,25 @@ import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   HarnessModelRequestDebugDTO,
+  HarnessModelRequestDebugRequestDTO,
   ProviderRequestPreviewDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
 
 /**
  * 仅在 Debug 视图启用。进入 `/debug` 拉取一次，并跟随当前 Thread 快照的调用身份 / phase /
- * requestHead、head 与规划 settings / 目录事实刷新。
+ * requestHead、head、界面当前草稿 model/environment 与目录事实刷新。
  *
  * <p>它绝不依赖 `working` 的一次 true/false：连续 model -> tool -> 下一 model 期间 `working`
  * 一直为 true，但活动 invocation 的身份已经改变，旧冻结输入必须随新的调用身份换成新的读取，
- * 不能残留。`revision` 就是这些事实的稳定摘要，作为查询身份的一部分：身份变化即更换读取，
- * 加载 / 读取错误独立呈现，不被吞成空态。
+ * 不能残留。`revision` 与 `request`（model + environmentName）共同构成查询身份：身份变化即更换读取，
+ * 迟到的旧请求响应只会落在旧身份上，绝不覆盖当前查看；加载 / 读取错误独立呈现，不被吞成空态。
  */
 export function useModelRequestDebug(
   threadId: string,
   enabled: boolean,
   revision: string,
+  request: HarnessModelRequestDebugRequestDTO | null,
 ) {
   const client = useQueryClient()
   const [catalogRevision, setCatalogRevision] = useState(0)
@@ -37,19 +39,35 @@ export function useModelRequestDebug(
       }
     })
   }, [client, enabled, threadId])
+  const normalizedRequest: HarnessModelRequestDebugRequestDTO | null = request == null
+    ? null
+    : {
+        model: {
+          providerName: request.model.providerName,
+          modelName: request.model.modelName,
+          variant: request.model.variant,
+        },
+        environmentName: request.environmentName ?? null,
+      }
+  const active = Boolean(threadId) && enabled && normalizedRequest != null
   const query = useQuery<HarnessModelRequestDebugDTO>({
-    // revision 是查询身份而非缓存提示：换调用/换设置就换一次读取，绝不沿用上一身份的冻结输入。
-    queryKey: [...queryKeys.threads.modelRequestDebug(threadId), revision, catalogRevision],
-    queryFn: () => harnessService.getModelRequestDebug(threadId),
-    enabled: Boolean(threadId) && enabled,
+    // revision 与草稿 model/environment 是查询身份而非缓存提示：换调用/换设置就换一次读取，绝不沿用上一身份的数据或冻结输入。
+    queryKey: [
+      ...queryKeys.threads.modelRequestDebug(threadId),
+      revision,
+      normalizedRequest,
+      catalogRevision,
+    ],
+    queryFn: () => harnessService.getModelRequestDebug(threadId, normalizedRequest!),
+    enabled: active,
     staleTime: 0,
     gcTime: 0,
   })
 
-  const debug: ThreadModelRequestDebugData | null = enabled ? query.data ?? null : null
+  const debug: ThreadModelRequestDebugData | null = active ? query.data ?? null : null
   return {
     debug,
-    loading: Boolean(threadId) && enabled && query.isLoading,
+    loading: active && query.isLoading,
     error: query.error,
     refetch: query.refetch,
   }
