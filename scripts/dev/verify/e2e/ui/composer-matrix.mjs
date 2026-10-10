@@ -957,59 +957,67 @@ export async function runComposerMatrix(ui) {
     'ui.chat.debug.keyboard_nav',
     'Debug 列表点击选中、上下切换与 Esc 取消选中',
     async (caseArt) => {
-      const historicalMessage = `debug keyboard ${stamp}`
-      await withUiFixture(
-        page,
-        () => createDurableHistoryFixture(apiCtx, {
-          title: `e2e-ui-debug-keyboard-${stamp}`,
-          messages: [historicalMessage],
-        }),
-        async (fixture) => {
-          const composer = await bindThreadComposer(page, goto, fixture)
-          await composer.pressSequentially('/debug')
-          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
-          await composer.press('Enter')
-          const listbox = page.getByRole('listbox', { name: '事件' })
-          await listbox.waitFor({ state: 'visible', timeout: 15_000 })
-          const optionCount = await listbox.getByRole('option').count()
-          assert(optionCount > 1, `too few debug events: ${optionCount}`)
-          await listbox.focus()
+      const originalViewport = page.viewportSize()
+      try {
+        // This case exercises simultaneous event/detail columns; narrow tabs have their own browser tests.
+        await page.setViewportSize({ width: 1920, height: 1080 })
+        const historicalMessage = `debug keyboard ${stamp}`
+        await withUiFixture(
+          page,
+          () => createDurableHistoryFixture(apiCtx, {
+            title: `e2e-ui-debug-keyboard-${stamp}`,
+            messages: [historicalMessage],
+          }),
+          async (fixture) => {
+            const composer = await bindThreadComposer(page, goto, fixture)
+            await composer.pressSequentially('/debug')
+            await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
+            await composer.press('Enter')
+            await page.locator('.thread-events-shell[data-layout="wide"]')
+              .waitFor({ state: 'visible', timeout: 15_000 })
+            const listbox = page.getByRole('listbox', { name: '事件' })
+            await listbox.waitFor({ state: 'visible', timeout: 15_000 })
+            const optionCount = await listbox.getByRole('option').count()
+            assert(optionCount > 1, `too few debug events: ${optionCount}`)
+            await listbox.focus()
 
-          const selectedOption = () =>
-            listbox.locator('[role="option"][aria-selected="true"]')
-          const selectedText = async () => (await selectedOption().innerText()).trim()
+            const selectedOption = () =>
+              listbox.locator('[role="option"][aria-selected="true"]')
+            const selectedText = async () => (await selectedOption().innerText()).trim()
+            // The pane hook chooses historical input after its async projection, not at first paint.
+            await selectedOption().waitFor({ state: 'visible', timeout: 10_000 })
+            assert((await selectedOption().count()) === 1, 'Debug must select exactly one historical event')
 
-          assert((await selectedOption().count()) === 0, 'Debug must initially have no selected event')
-          await listbox.press('ArrowDown')
-          assert((await selectedOption().count()) === 0, 'ArrowDown must not select an event before a row click')
+            const firstOption = listbox.getByRole('option').nth(0)
+            const secondOption = listbox.getByRole('option').nth(1)
+            await firstOption.click()
+            const firstText = await selectedText()
+            const detail = page.getByLabel('事件详情', { exact: true })
+            await detail.waitFor({ state: 'visible', timeout: 10_000 })
 
-          const firstOption = listbox.getByRole('option').nth(0)
-          const secondOption = listbox.getByRole('option').nth(1)
-          await firstOption.click()
-          const firstText = await selectedText()
-          const detail = page.getByLabel('事件详情', { exact: true })
-          await detail.waitFor({ state: 'visible', timeout: 10_000 })
+            await secondOption.hover()
+            assert((await selectedText()) === firstText, 'hover changed the selected event')
 
-          await secondOption.hover()
-          assert((await selectedText()) === firstText, 'hover changed the selected event')
+            await listbox.focus()
+            await listbox.press('ArrowDown')
+            const afterDown = await selectedText()
+            assert(afterDown !== firstText, 'ArrowDown did not move the selected event')
 
-          await listbox.focus()
-          await listbox.press('ArrowDown')
-          const afterDown = await selectedText()
-          assert(afterDown !== firstText, 'ArrowDown did not move the selected event')
+            await listbox.press('Escape')
+            await detail.waitFor({ state: 'hidden', timeout: 10_000 })
+            assert((await selectedOption().count()) === 0, 'Escape did not clear the selection')
+            assert(await page.getByRole('button', { name: '关闭 Debug', exact: true }).isVisible(), 'inner Escape also exited Debug')
+            await listbox.press('Escape')
+            await composer.waitFor({ state: 'visible', timeout: 10_000 })
+            await page.waitForFunction(() => document.activeElement?.classList.contains('composer-editor'))
 
-          await listbox.press('Escape')
-          await detail.waitFor({ state: 'hidden', timeout: 10_000 })
-          assert((await selectedOption().count()) === 0, 'Escape did not clear the selection')
-          assert(await page.getByRole('button', { name: '关闭 Debug', exact: true }).isVisible(), 'inner Escape also exited Debug')
-          await listbox.press('Escape')
-          await composer.waitFor({ state: 'visible', timeout: 10_000 })
-          await page.waitForFunction(() => document.activeElement?.classList.contains('composer-editor'))
-
-          await shot(caseArt, 'debug-keyboard-nav')
-          expectNoFatal(pageErrors, consoleErrors)
-        },
-      )
+            await shot(caseArt, 'debug-keyboard-nav')
+            expectNoFatal(pageErrors, consoleErrors)
+          },
+        )
+      } finally {
+        if (originalViewport) await page.setViewportSize(originalViewport)
+      }
     },
   )
 

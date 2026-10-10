@@ -30,8 +30,10 @@ test('conversation switch keeps the mounted root composer hidden as inert withou
 
 test('keyboard case consumes inner Escape before exiting Debug and restoring editable focus', () => {
   const section = caseSource('ui.chat.debug.keyboard_nav')
-  assert.match(section, /Debug must initially have no selected event/)
-  assert.match(section, /ArrowDown must not select an event before a row click/)
+  assert.match(section, /thread-events-shell\[data-layout="wide"\]/)
+  assert.match(section, /await selectedOption\(\)\.waitFor/)
+  assert.match(section, /Debug must select exactly one historical event/)
+  assert.match(section, /finally \{\s*if \(originalViewport\) await page\.setViewportSize\(originalViewport\)/)
   assert.equal((section.match(/listbox\.press\('Escape'\)/g) ?? []).length, 2)
   assert.match(section, /inner Escape also exited Debug/)
   assert.match(section, /document\.activeElement.*composer-editor/)
