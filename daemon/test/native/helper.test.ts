@@ -14,8 +14,8 @@ describe('native scope helper failures', () => {
       const child = spawn(process.execPath, ['--no-warnings', resolveHelperPath(), stateDir], { stdio: 'ignore' })
       const code = await new Promise<number | null>((resolve) => child.on('close', (value) => resolve(value)))
       expect(code).toBe(1)
-      // 失败原因发布给自己私有的状态目录；内容只说明阶段，不携带启动参数。
-      expect(readFileSync(join(stateDir, ERROR_FILE), 'utf8')).toMatch(/launch spec is missing/)
+      // 对外失败说明是固定阶段代码：不含命令路径、参数或环境片段。
+      expect(readFileSync(join(stateDir, ERROR_FILE), 'utf8')).toBe('helper-launch-failure')
     } finally {
       rmSync(stateDir, { recursive: true, force: true })
     }

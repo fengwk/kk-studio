@@ -1,6 +1,7 @@
 import { closeSync, existsSync, fsyncSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * 父进程与 scope helper 之间唯一的握手面：调用私有状态目录里的这几个文件。
@@ -21,7 +22,7 @@ export const PERMIT_FILE = 'permit'
 /** helper 发布的用户命令自然退出事实（JSON：{exitCode, signal}）。 */
 export const EXIT_FILE = 'exit'
 
-/** helper 发布的失败原因。 */
+/** helper 发布的失败**代码**：固定阶段标识（如 `helper-launch-failure`），绝不携带命令路径或环境片段。 */
 export const ERROR_FILE = 'error'
 
 /** helper 发布的收敛事实：范围已确认没有活动成员。 */
@@ -48,9 +49,41 @@ export interface ExitReport {
   signal: string | null
 }
 
-/** 独占创建一个调用私有状态目录：mkdtemp 在 POSIX 上以 0700 创建。 */
-export function createStateDir(): string {
-  return mkdtempSync(join(tmpdir(), STATE_DIR_PREFIX))
+/**
+ * 独占创建一个**属主独占**的调用私有状态目录，并返回其路径。
+ *
+ * <p>仅 `mkdtemp` 只能在 POSIX 上得到 0700；Windows 的 `%TEMP%` 目录会带上继承来的宽松 DACL，所以这里创建之后立即用原生
+ * `ensurePrivateDirectory` 收紧并读回验证。调用方（父进程）在写入任何启动规格之前已经拿到一个有证据的私有根，随后发布的
+ * 状态文件都继承这个根的 owner-only 语义。
+ *
+ * <p>这是异步的：收紧与读回验证必须真的完成，不能因为「目录已经建好」就跳过。
+ */
+export async function createStateDir(): Promise<string> {
+  const directory = mkdtempSync(join(tmpdir(), STATE_DIR_PREFIX))
+  const privateFs = await loadPrivateFs()
+  return privateFs.ensurePrivateDirectory(directory)
+}
+
+interface PrivateFsModule {
+  ensurePrivateDirectory(path: string): Promise<string>
+}
+
+let privateFsModule: Promise<PrivateFsModule> | null = null
+
+/** 探测同目录的 private-fs：编译产物是 `.js`，源码开发态是 `.ts`。 */
+function loadPrivateFs(): Promise<PrivateFsModule> {
+  if (privateFsModule === null) {
+    privateFsModule = (async () => {
+      for (const extension of ['js', 'ts']) {
+        const url = new URL(`./private-fs.${extension}`, import.meta.url)
+        if (existsSync(fileURLToPath(url))) {
+          return import(url.href) as Promise<PrivateFsModule>
+        }
+      }
+      throw new Error('the native private filesystem module is missing')
+    })()
+  }
+  return privateFsModule
 }
 
 /** 原子发布状态文件；失败必须让调用方显式失败，绝不留下半个文件。 */

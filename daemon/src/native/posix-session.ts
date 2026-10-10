@@ -74,9 +74,11 @@ interface LibC {
   getsid(pid: number): number
   getpgrp(): number
   kill(pid: number, signal: number): number
-  prctl(option: number, arg2: number, arg3: number, arg4: number, arg5: number): number
   waitpid(pid: number, status: unknown, options: number): number
 }
+
+/** Linux 专有的 `prctl(2)` 签名。 */
+type PrctlFunction = (option: number, arg2: number, arg3: number, arg4: number, arg5: number) => number
 
 interface Libproc {
   proc_listpids(type: number, typeinfo: number, buffer: Buffer | null, buffersize: number): number
@@ -85,6 +87,7 @@ interface Libproc {
 
 let libcInstance: LibC | null = null
 let libprocInstance: Libproc | null = null
+let prctlInstance: PrctlFunction | null = null
 
 function libc(): LibC {
   if (libcInstance === null) {
@@ -94,11 +97,26 @@ function libc(): LibC {
       getsid: library.func('int getsid(int)'),
       getpgrp: library.func('int getpgrp()'),
       kill: library.func('int kill(int, int)'),
-      prctl: library.func('int prctl(int, unsigned long, unsigned long, unsigned long, unsigned long)'),
       waitpid: library.func('int waitpid(int, void *, int)'),
     }
   }
   return libcInstance
+}
+
+/**
+ * Linux 专有：`prctl` 在 Darwin 的 libc 里不存在，因此**只**在 Linux 上解析该符号。
+ *
+ * <p>把它与 `libc()` 分开是必须的：若在 Darwin 上无条件绑定 `prctl`，符号解析会直接失败并连带拖垮同一批绑定的
+ * `setsid`/`getsid`，让整套 POSIX 会话机制在 macOS 上完全不可用。
+ */
+function prctl(): PrctlFunction {
+  if (process.platform !== 'linux') {
+    throw new Error(`prctl is only available on Linux, not ${process.platform}`)
+  }
+  if (prctlInstance === null) {
+    prctlInstance = koffi.load(null).func('int prctl(int, unsigned long, unsigned long, unsigned long, unsigned long)') as PrctlFunction
+  }
+  return prctlInstance
 }
 
 /** macOS libproc 绑定只在 darwin 上解析：Linux 的 libc 里没有这些符号。 */
@@ -237,12 +255,20 @@ export async function convergeSession(session: number, excludedPid: number, grac
   return sessionGone(session, excludedPid, graceMillis)
 }
 
-/** 让本进程成为子进程收养者（Linux `PR_SET_CHILD_SUBREAPER`）；非 Linux 平台返回 `false`。 */
+/**
+ * 让本进程成为子进程收养者（Linux `PR_SET_CHILD_SUBREAPER`）。
+ *
+ * <p>Linux 上这是收尾完整性的前提：`prctl` 失败会让「未登记且故意 `setsid` 的后代也能被核实」的承诺失真，因此**失败即
+ * 抛出**，绝不返回「没有收养者」继续跑。没有收养机制的平台（macOS）返回 `false`：这里的限制由调用方如实声明为未验收。
+ */
 export function becomeChildSubreaper(): boolean {
   if (process.platform !== 'linux') {
     return false
   }
-  return libc().prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) === 0
+  if (prctl()(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) !== 0) {
+    throw new Error(`cannot become a child subreaper: prctl failed with errno ${koffi.errno()}`)
+  }
+  return true
 }
 
 /**

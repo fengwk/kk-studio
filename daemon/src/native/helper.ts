@@ -87,17 +87,32 @@ async function main(): Promise<void> {
   }
   const state = (await loadSibling('state')) as unknown as StateModule
   installDiagnostics(stateDir, state)
+  let phase = 'launch'
   try {
     const spec = state.readLaunch(stateDir)
     if (spec === null) {
       throw new Error('the process scope helper launch spec is missing')
     }
+    phase = process.platform === 'win32' ? 'windows' : 'posix'
     const code = process.platform === 'win32' ? await runWindows(stateDir, spec, state) : await runPosix(stateDir, spec, state)
     process.exit(code)
   } catch (error) {
-    state.publishQuietly(stateDir, state.ERROR_FILE, describe(error))
+    // 对外只发布**固定阶段代码**：命令路径、参数与环境一律不进入父进程可见的失败说明。
+    state.publishQuietly(stateDir, state.ERROR_FILE, `helper-${phase}-failure`)
+    recordDiagnostics(stateDir, state, `${phase}: ${describe(error)}`)
     process.exit(1)
   }
+}
+
+/**
+ * 父进程消失（IPC 通道 `disconnect`）时的收尾钩子。
+ *
+ * <p>专用 IPC 通道（与用户命令的 stdin/stdout/stderr 分离）由父进程持有；父进程被强杀时内核关闭该通道，helper 因此收到
+ * `disconnect`——这是真实的内核 EOF，不是心跳或猜父 pid。helper 必须在**放行用户命令之前**注册它，这样即使父进程在许可之前
+ * 就消失，也不会有任何用户命令产生副作用。
+ */
+function installParentGoneHook(onParentGone: () => void): void {
+  process.on('disconnect', onParentGone)
 }
 
 /** POSIX：先建立 session/进程组并公开范围，等父进程确认，然后启动用户命令。 */
@@ -135,6 +150,11 @@ async function runPosix(stateDir: string, spec: LaunchSpec, state: StateModule):
     stopping = true
     void shutdown().then((code) => process.exit(code))
   })
+  // 父进程消失也是收尾信号：必须在范围发布之前注册，保证「许可之前没有副作用」的前提不被父进程崩溃打破。
+  installParentGoneHook(() => {
+    stopping = true
+    void shutdown().then((code) => process.exit(code))
+  })
 
   // hook 必须在范围发布之前注册：发布之后父进程随时可能对会话广播温和信号。
   state.publish(stateDir, state.SCOPE_FILE, String(sessionId))
@@ -148,7 +168,7 @@ async function runPosix(stateDir: string, spec: LaunchSpec, state: StateModule):
   }
   const child = spawn(command, spec.args.slice(1), {
     cwd: spec.cwd,
-    env: process.env,
+    env: commandEnvironment(),
     stdio: 'inherit',
   })
   const exit = await waitForExit(child)
@@ -165,19 +185,54 @@ async function runPosix(stateDir: string, spec: LaunchSpec, state: StateModule):
 /** Windows：建立命名 Job 并让首个进程保持挂起，等父进程持有同一个 Job 的句柄之后再恢复执行。 */
 async function runWindows(stateDir: string, spec: LaunchSpec, state: StateModule): Promise<number> {
   const win = (await loadSibling('win32')) as unknown as Win32Module
-  const job = await win.createSuspendedJob(win.jobNameFor(stateDir), spec, process.env)
+  const job = await win.createSuspendedJob(win.jobNameFor(stateDir), spec, commandEnvironment())
+  let stopping = false
+  let shutdownPromise: Promise<number> | null = null
+  // 父进程消失：Job 由 helper 持有，KILL_ON_JOB_CLOSE 只在 helper 自己的句柄关闭时生效，因此这里必须显式清空整个 Job。
+  const shutdown = (): Promise<number> => {
+    if (shutdownPromise === null) {
+      shutdownPromise = (async () => {
+        const drained = await job.terminateAndDrain(JOB_DRAIN_BUDGET_MILLIS)
+        state.publishQuietly(stateDir, state.CLEANUP_FILE, String(drained))
+        return drained ? 0 : 1
+      })()
+    }
+    return shutdownPromise
+  }
+  installParentGoneHook(() => {
+    stopping = true
+    void shutdown().then((code) => process.exit(code))
+  })
   try {
     state.publish(stateDir, state.SCOPE_FILE, String(job.processId))
     await awaitPermit(stateDir, state)
+    if (stopping) {
+      return shutdown()
+    }
     job.resume()
     const exit = await job.awaitExit()
     state.publish(stateDir, state.EXIT_FILE, JSON.stringify(exit))
+    if (stopping) {
+      return shutdown()
+    }
     const drained = await job.terminateAndDrain(JOB_DRAIN_BUDGET_MILLIS)
     state.publish(stateDir, state.CLEANUP_FILE, String(drained))
     return drained ? 0 : 1
   } finally {
     job.close()
   }
+}
+
+/**
+ * 用户命令的环境：复制 helper 自身环境，但剔除 Node 专用 IPC 变量。
+ *
+ * <p>helper 与父进程之间用一条专用 IPC 通道（`disconnect` 收尾的依据），通道会向 helper 注入 `NODE_CHANNEL_FD`。若原样传给
+ * 用户命令，命令里的 Node 进程会误用 helper 的通道。因此命令环境里必须移除它。
+ */
+function commandEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  delete env.NODE_CHANNEL_FD
+  return env
 }
 
 /**
@@ -202,37 +257,41 @@ function waitForExit(child: ChildProcess): Promise<ExitReport> {
   })
 }
 
-/** helper 自身诊断的单行长度上限：只保留足以定位阶段的信息，绝不整段外泄。 */
-const DIAGNOSTICS_LIMIT = 200
-
 /**
  * helper 自己的报错写调用私有的诊断文件，绝不进入用户命令的输出流。
  *
  * <p>标准输出与标准错误属于用户命令（helper 以 `stdio: 'inherit'` 让命令继承它们）：helper 侧因此只注册兜底处理器，不做任何
- * 常规输出；父进程启动 helper 时关闭 Node 的警告输出。诊断只作为**单行**短记录落进 0700/0600 的状态目录，既不回显启动参数，
- * 也不被父进程拼进对外抛出的错误。
+ * 常规输出；父进程启动 helper 时关闭 Node 的警告输出。
+ *
+ * <p>诊断文件以 **0600** 创建（`appendFileSync` 的默认 0666 会把内容暴露给同机其它用户）。记录内容只保留阶段与错误**类型名**，
+ * 不写原始消息：截断无法去掉消息里的令牌或路径，因此这里从源头就不落敏感原文。
  */
 function installDiagnostics(stateDir: string, state: StateModule): void {
-  const record = (value: string): void => {
-    try {
-      appendFileSync(join(stateDir, state.DIAGNOSTICS_FILE), `${value}\n`)
-    } catch {
-      // 诊断文件不可写只影响 helper 报错的可见性；父进程仍会以退出码与状态文件收敛为失败。
-    }
-  }
   process.on('uncaughtException', (error) => {
-    record(describe(error))
+    recordDiagnostics(stateDir, state, `uncaught: ${describe(error)}`)
     process.exit(1)
   })
   process.on('unhandledRejection', (reason) => {
-    record(describe(reason))
+    recordDiagnostics(stateDir, state, `rejection: ${describe(reason)}`)
     process.exit(1)
   })
 }
 
+/** 追加一行严格私有诊断；失败只影响可见性，不改变退出码与状态文件结论。 */
+function recordDiagnostics(stateDir: string, state: StateModule, value: string): void {
+  try {
+    appendFileSync(join(stateDir, state.DIAGNOSTICS_FILE), `${value}\n`, { mode: 0o600 })
+  } catch {
+    // 诊断文件不可写只影响 helper 报错的可见性；父进程仍会以退出码与状态文件收敛为失败。
+  }
+}
+
+/** 只保留错误**类型名**（或非 Error 的类型），绝不带原始消息。 */
 function describe(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  return message.replace(/\s+/g, ' ').slice(0, DIAGNOSTICS_LIMIT)
+  if (error instanceof Error) {
+    return error.name === '' ? 'Error' : error.name
+  }
+  return typeof error
 }
 
 function delay(millis: number): Promise<void> {
