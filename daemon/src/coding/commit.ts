@@ -49,7 +49,8 @@ export async function commitTextFile(target: string, bytes: Uint8Array): Promise
   try {
     const handle = await open(staging, 'r+')
     try {
-      await handle.write(bytes)
+      // 真正写满：FileHandle.writeFile 内部循环补齐短写，避免 durable 正文尾部丢失。
+      await handle.writeFile(bytes)
       await handle.sync()
     } finally {
       await handle.close()

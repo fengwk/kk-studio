@@ -1,7 +1,6 @@
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import type { CapabilityCall, CapabilityContext, CapabilityExecutor, CapabilityResult, DaemonConfig } from '../../src/contracts.js'
-import { TextOutputStore, type PrivateFs } from '../../src/coding/output.js'
+import { TextOutputStore } from '../../src/coding/output.js'
 import { configureSearchWorker } from '../../src/coding/search.js'
 
 // 源码/测试态：让搜索能力在 Worker 线程加载 .ts 入口（真实并发，非假后端），钩子把相对 ./x.js 重写为 ./x.ts。
@@ -32,31 +31,14 @@ export function makeConfig(dataDir: string): DaemonConfig {
 }
 
 /**
- * 测试用私有文件端口替身：行为等价于 native 的 owner-only 创建（0700/0600）。
- *
- * <p>生产默认端口惰性加载 native 切片，测试态不引入 native 依赖；替身只用于本片测试，不进入生产路径。
+ * 打开输出存储；默认私有文件端口即生产 native 端口（测试同样走真实 main 安全边界，无 fallback）。
  */
-export const testPrivateFs: PrivateFs = {
-  async ensurePrivateDirectory(path: string): Promise<string> {
-    await mkdir(path, { recursive: true, mode: 0o700 })
-    await chmod(path, 0o700)
-    return path
-  },
-  async writePrivateFile(path: string, data: string | Uint8Array): Promise<void> {
-    await writeFile(path, typeof data === 'string' ? Buffer.from(data, 'utf8') : data, {
-      mode: 0o600,
-    })
-    await chmod(path, 0o600)
-  },
-}
-
-/** 打开注入了测试私有文件端口的输出存储。 */
 export function openTestStore(
   dir: string,
   captureBudgetBytes?: number,
   now?: () => number,
 ): Promise<TextOutputStore> {
-  return TextOutputStore.open(dir, captureBudgetBytes, now, testPrivateFs)
+  return TextOutputStore.open(dir, captureBudgetBytes, now)
 }
 
 export interface ContextOverrides {

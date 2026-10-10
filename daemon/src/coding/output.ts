@@ -2,6 +2,7 @@ import { lstat, open, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CapabilityResult, ResultContent } from '../contracts.js'
+import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 
 /**
  * 有界输出捕获与受控临时产物：内联小输出，本地落盘大文本，从不因为输出体积终止进程。
@@ -139,6 +140,27 @@ function incompleteSuffixLength(bytes: Uint8Array, length: number): number {
   return available < expected ? available : 0
 }
 
+/** 允许短写的写入端口：Node 的 `FileHandle.write` 可能只写入一部分。 */
+interface PartialWriter {
+  write(buffer: Uint8Array, offset: number, length: number): Promise<{ bytesWritten: number }>
+}
+
+/**
+ * 真正写满整个缓冲区：短写会让 durable 全文丢失尾部，而调用方仍可能声称全部捕获。
+ *
+ * <p>循环补齐前绝不认为已经写完；`bytesWritten <= 0` 视为无法推进并显式失败。
+ */
+export async function writeAll(writer: PartialWriter, bytes: Uint8Array): Promise<void> {
+  let offset = 0
+  while (offset < bytes.length) {
+    const { bytesWritten } = await writer.write(bytes, offset, bytes.length - offset)
+    if (bytesWritten <= 0) {
+      throw new Error('file write made no progress')
+    }
+    offset += bytesWritten
+  }
+}
+
 /** 简易异步互斥：串行化临时产物创建登记、in-use 获取与清扫的关键段。 */
 class Mutex {
   private tail: Promise<void> = Promise.resolve()
@@ -168,32 +190,17 @@ const NONE_LEASE: Lease = { close() {} }
 /**
  * 私有目录/文件端口：owner-only 语义由 native 切片承载（POSIX 0700/0600，Windows DACL），本片只消费不复制。
  *
- * <p>默认实现惰性加载 native 边界（{@code src/native/index.ts} 的 {@code ensurePrivateDirectory}/{@code writePrivateFile}）；注入点供测试
- * 提供行为等价的双替身，生产路径绝不退化为 POSIX chmod。
+ * <p>默认实现直接调用 native 边界的 {@code ensurePrivateDirectory}/{@code writePrivateFile}（静态 import，由编译器校验签名）；
+ * 注入点仅用于以确定性方式测试失败路径，生产路径绝不退化为 POSIX chmod。
  */
 export interface PrivateFs {
   ensurePrivateDirectory(path: string): Promise<string>
   writePrivateFile(path: string, data: string | Uint8Array): Promise<void>
 }
 
-// 保持 non-literal 类型，动态导入不触发本片对 native 切片的编译期依赖。
-// TODO(main 集成)：native 切片合并后改为静态 `import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'`，
-// 由编译器校验签名（native index 实际导出：ensurePrivateDirectory(path):Promise<string>、writePrivateFile(path,data):Promise<void>、verifyPrivateFile、createProcessSupervisor、acquireDirectoryLock）。
-const NATIVE_MODULE: string = '../native/index.js'
-
 const nativePrivateFs: PrivateFs = {
-  async ensurePrivateDirectory(path: string): Promise<string> {
-    const native = (await import(NATIVE_MODULE)) as {
-      ensurePrivateDirectory(candidate: string): Promise<string>
-    }
-    return native.ensurePrivateDirectory(path)
-  },
-  async writePrivateFile(path: string, data: string | Uint8Array): Promise<void> {
-    const native = (await import(NATIVE_MODULE)) as {
-      writePrivateFile(candidate: string, content: string | Uint8Array): Promise<void>
-    }
-    await native.writePrivateFile(path, data)
-  },
+  ensurePrivateDirectory: (path) => ensurePrivateDirectory(path),
+  writePrivateFile: (path, data) => writePrivateFile(path, data),
 }
 
 const defaultNow = (): number => Math.floor(Date.now() / 1000)
@@ -319,6 +326,11 @@ export class TemporaryResourceStore {
     return this.leases.has(id)
   }
 
+  /** 是否仍有任何在途租约（读取/写入中的 workspace）。 */
+  hasActiveLeases(): boolean {
+    return this.leases.size > 0
+  }
+
   private release(id: string): void {
     const count = (this.leases.get(id) ?? 0) - 1
     if (count <= 0) {
@@ -352,8 +364,10 @@ export class TemporaryResourceStore {
   }
 }
 
-/** 活动 workspace 句柄：持有 in-use lease，{@link Workspace.close()} 释放且保证恰好一次。 */
+/** 活动 workspace 句柄：持有 in-use lease，{@link Workspace.close()} 幂等释放且保证恰好一次。 */
 export class Workspace {
+  private closed = false
+
   constructor(
     readonly id: string,
     readonly directory: string,
@@ -361,6 +375,10 @@ export class Workspace {
   ) {}
 
   close(): void {
+    if (this.closed) {
+      return
+    }
+    this.closed = true
     this.releaseLease()
   }
 }
@@ -455,6 +473,11 @@ export class TextOutputStore {
 
   acquire(candidate: string): Promise<Lease> {
     return this.temporaryResources.acquire(candidate)
+  }
+
+  /** 是否仍有任何在途租约（读取/写入中的 workspace）。 */
+  hasActiveLeases(): boolean {
+    return this.temporaryResources.hasActiveLeases()
   }
 
   /** 登记新 workspace 并在其中创建 owner-only 中转文件。 */
@@ -837,7 +860,8 @@ export class OutputSpool {
       if (this.fileHandle === null) {
         throw new Error('missing file handle')
       }
-      await this.fileHandle.write(bytes.subarray(0, accepted))
+      // 必须真正写满：短写会让 durable 全文丢失尾部而 details 仍声称全部捕获。
+      await writeAll(this.fileHandle, bytes.subarray(0, accepted))
       this.capturedByteCount += accepted
       if (accepted < bytes.length) {
         this.captureTruncated = true
@@ -850,10 +874,27 @@ export class OutputSpool {
   }
 
   private async closeFile(): Promise<void> {
-    if (this.fileHandle !== null) {
-      await this.fileHandle.sync()
-      await this.fileHandle.close()
-      this.fileHandle = null
+    const handle = this.fileHandle
+    if (handle === null) {
+      return
+    }
+    this.fileHandle = null
+    let failure: unknown = null
+    try {
+      await handle.sync()
+    } catch (error) {
+      failure = error
+    } finally {
+      // 无论 sync 是否失败都必须释放 FD；否则句柄泄漏且发布流程会假装成功。
+      try {
+        await handle.close()
+      } catch (error) {
+        failure ??= error
+      }
+    }
+    if (failure !== null) {
+      this.captureFailed = true
+      throw failure instanceof Error ? failure : new Error('failed to finalize the output file')
     }
   }
 
@@ -908,19 +949,6 @@ export async function spoolLargeTextResult(
 
 const storesByDataDir = new Map<string, Promise<TextOutputStore>>()
 
-/** Runtime 装配时可覆盖的存储选项：私有文件端口（默认惰性加载 native）与默认捕获预算。 */
-export interface TextOutputStoreOptions {
-  privateFs?: PrivateFs
-  captureBudgetBytes?: number
-}
-
-let storeOptions: TextOutputStoreOptions = {}
-
-/** 覆盖能力层惰性打开的存储选项；不影响已打开的实例。 */
-export function configureTextOutputStores(options: TextOutputStoreOptions): void {
-  storeOptions = options
-}
-
 /**
  * 按数据目录惰性获取受控临时输出存储。
  *
@@ -930,12 +958,7 @@ export function configureTextOutputStores(options: TextOutputStoreOptions): void
 export function textOutputStoreFor(dataDir: string): Promise<TextOutputStore> {
   let store = storesByDataDir.get(dataDir)
   if (store === undefined) {
-    store = TextOutputStore.open(
-      join(dataDir, 'tmp'),
-      storeOptions.captureBudgetBytes,
-      undefined,
-      storeOptions.privateFs,
-    )
+    store = TextOutputStore.open(join(dataDir, 'tmp'))
     storesByDataDir.set(dataDir, store)
   }
   return store
@@ -951,10 +974,20 @@ export async function sweepTextOutputStores(ttlSeconds: number): Promise<number[
 }
 
 /**
- * 热更/关闭时释放内存中的存储缓存，但不删除任何 durable 全文或中转文件。
+ * 释放内存中的存储缓存（不删除任何 durable 全文或中转文件），返回是否真的释放。
  *
- * <p>活跃续租由持有旧实例的调用方维持；重新获取会基于磁盘上的 {@code created-at} 重建 lease，不会删除在途输出。
+ * <p>只有当该数据目录当前没有任何在途租约时才会从缓存移除；否则保持原实例，避免新实例 lease 为空而把旧实例在途的 workspace 当作可清扫对象。
+ * 调用时机应为「该 dataDir 的所有能力调用都已结束后」（main 在 closers 之前调用）；同一 daemon 内该缓存本身是纯元数据，通常无需热更删除。
  */
-export function releaseTextOutputStore(dataDir: string): void {
+export async function releaseTextOutputStore(dataDir: string): Promise<boolean> {
+  const pending = storesByDataDir.get(dataDir)
+  if (pending === undefined) {
+    return false
+  }
+  const store = await pending
+  if (store.hasActiveLeases()) {
+    return false
+  }
   storesByDataDir.delete(dataDir)
+  return true
 }
