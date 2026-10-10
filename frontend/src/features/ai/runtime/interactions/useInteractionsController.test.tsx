@@ -592,7 +592,7 @@ describe('useInteractionsController', () => {
     expect(listSpy).toHaveBeenCalledTimes(1)
     const socket = sockets.openLatest()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'interactions' } },
+      { version: 2, type: 'subscribe', resource: { kind: 'interactions' } },
     ])
 
     act(() => {

@@ -2,15 +2,37 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ApplicationEventConnection,
   createApplicationEventUrl,
+  type ApplicationEventConnectionStatus,
 } from '@/shared/app-events/connection'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import {
+  FakeWebSocketHarness,
+  SERVER_PUBLISHER,
+  type FakeWebSocket,
+} from '@/shared/app-events/__tests__/fake-websocket'
 import type { ApplicationEventServerMessage } from '@/shared/app-events/protocol'
+import {
+  NotificationPacket,
+  carrierChunk,
+  carrierCount,
+  decodeNotificationCarrier,
+  defaultNotificationLimits,
+} from '@/shared/notification/notification.mjs'
 
 const URL = 'ws://test/api/events/v1'
+const TOPIC = 'app.events.v2'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
+const OTHER_PUBLISHER = '99999999-9999-4999-8999-999999999999'
+const encoder = new TextEncoder()
+const LIMITS = defaultNotificationLimits()
 
-function openConnection(harness = new FakeWebSocketHarness()) {
+/** 追踪本文件创建的全部连接，afterEach 统一 disconnect，避免 expire interval 泄漏。 */
+const created: ApplicationEventConnection[] = []
+
+function openConnection(
+  harness = new FakeWebSocketHarness(),
+  onStatusChange?: (status: ApplicationEventConnectionStatus) => void,
+) {
   const onOpen = vi.fn()
   const onMessage = vi.fn<(message: ApplicationEventServerMessage) => void>()
   const connection = new ApplicationEventConnection({
@@ -18,8 +40,41 @@ function openConnection(harness = new FakeWebSocketHarness()) {
     socketFactory: harness.factory,
     onOpen,
     onMessage,
+    onStatusChange,
   })
+  created.push(connection)
   return { connection, harness, onOpen, onMessage }
+}
+
+let messageSeq = 0
+function nextMessageId(): string {
+  messageSeq += 1
+  return `00000000-0000-4000-8000-${String(messageSeq).padStart(12, '0')}`
+}
+
+/** 以真实共享 carrier 把逻辑 server 消息编码为全部物理分片。 */
+function frameServer(
+  message: ApplicationEventServerMessage,
+  { publisher = SERVER_PUBLISHER, target = null, topic = TOPIC } = {},
+): string[] {
+  const packet = new NotificationPacket(
+    publisher,
+    target,
+    topic,
+    nextMessageId(),
+    encoder.encode(JSON.stringify({ version: 2, ...message })),
+  )
+  const count = carrierCount(packet.byteLength())
+  return Array.from({ length: count }, (_, index) => carrierChunk(packet, index).encode())
+}
+
+/** 读取 fake 收到的首个物理分片的 publisher（即本连接的随机 endpoint publisher）。 */
+function sentPublisher(socket: FakeWebSocket): string {
+  const carrier = decodeNotificationCarrier(socket.sent[0] as string, LIMITS, null)
+  if (carrier == null) {
+    throw new Error('expected an outbound carrier')
+  }
+  return carrier.publisher()
 }
 
 describe('ApplicationEventConnection', () => {
@@ -28,6 +83,9 @@ describe('ApplicationEventConnection', () => {
   })
 
   afterEach(() => {
+    for (const connection of created.splice(0)) {
+      connection.disconnect()
+    }
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
@@ -46,7 +104,25 @@ describe('ApplicationEventConnection', () => {
     expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
-  it('decodes server frames strictly; a protocol violation terminates the connection', () => {
+  it('notifies onStatusChange once per actual status transition', () => {
+    vi.useFakeTimers()
+    const statuses: ApplicationEventConnectionStatus[] = []
+    const { connection, harness } = openConnection(new FakeWebSocketHarness(), (status) =>
+      statuses.push(status),
+    )
+
+    connection.connect()
+    connection.connect() // 幂等：不重复通知 connecting。
+    harness.openLatest()
+    harness.latest?.fail()
+    vi.advanceTimersByTime(250)
+    harness.openLatest()
+    connection.disconnect()
+
+    expect(statuses).toEqual(['connecting', 'open', 'backoff', 'connecting', 'open', 'closed'])
+  })
+
+  it('decodes framed server frames strictly; a protocol violation terminates the connection', () => {
     vi.useFakeTimers()
     const { connection, harness, onMessage } = openConnection()
     connection.connect()
@@ -63,8 +139,8 @@ describe('ApplicationEventConnection', () => {
       cursor: '3',
     })
 
-    // decoder 返回 null = 服务端协议违规：本连接 terminal stop（无 code 安全关闭）。
-    socket.onmessage?.({ data: 'not json' })
+    // 逻辑协议违规（重组后不是合法 v2 帧）：本连接 terminal stop（无 code 安全关闭）。
+    socket.emitRaw(frameServer({ type: 'nope' } as unknown as ApplicationEventServerMessage)[0])
     expect(socket.closed).toBe(true)
     expect(connection.getStatus()).toBe('closed')
 
@@ -81,19 +157,92 @@ describe('ApplicationEventConnection', () => {
     expect(harness.sockets).toHaveLength(1)
   })
 
+  it('reassembles a multi-fragment logical frame and rejects a raw (non-carrier) frame', () => {
+    vi.useFakeTimers()
+    const { connection, harness, onMessage } = openConnection()
+    connection.connect()
+    const socket = harness.openLatest()
+
+    // 大 realtime 事件：逻辑体远超单个分片，必须经共享 reassembler 重组后一次交付。
+    const bigData = { blob: 'x'.repeat(20_000) }
+    const frames = frameServer({
+      type: 'event',
+      resource: { kind: 'thread', id: THREAD_ID },
+      name: 'realtime',
+      data: bigData,
+    })
+    expect(frames.length).toBeGreaterThan(1)
+    for (const frame of frames) {
+      socket.emitRaw(frame)
+    }
+    expect(onMessage).toHaveBeenCalledTimes(1)
+    expect(onMessage).toHaveBeenCalledWith({
+      type: 'event',
+      resource: { kind: 'thread', id: THREAD_ID },
+      name: 'realtime',
+      data: bigData,
+    })
+
+    // raw JSON（非 carrier）是物理协议违规：terminal。
+    socket.emitRaw(JSON.stringify({ version: 2, type: 'heartbeat' }))
+    expect(connection.getStatus()).toBe('closed')
+  })
+
+  it('drops own echoes, freezes the peer and rejects wrong topic/target/binary frames', () => {
+    vi.useFakeTimers()
+    const { connection, harness, onMessage } = openConnection()
+    connection.connect()
+    const socket = harness.openLatest()
+    expect(connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } })).toBe(true)
+    const self = sentPublisher(socket)
+
+    // 自身回声：publisher === 本连接 endpoint publisher，Base64 解码前丢弃，连接保持 open。
+    const echo = frameServer({ type: 'heartbeat' }, { publisher: self })
+    socket.emitRaw(echo[0])
+    expect(onMessage).not.toHaveBeenCalled()
+    expect(connection.getStatus()).toBe('open')
+
+    // 冻结 peer = SERVER_PUBLISHER 后，来自其它 publisher 的帧是致命违规。
+    socket.emitServer({ type: 'heartbeat' })
+    expect(connection.getStatus()).toBe('open')
+    socket.emitRaw(frameServer({ type: 'heartbeat' }, { publisher: OTHER_PUBLISHER })[0])
+    expect(connection.getStatus()).toBe('closed')
+  })
+
+  it('terminates on wrong topic, foreign target and binary frames', () => {
+    vi.useFakeTimers()
+    const wrongTopic = openConnection()
+    wrongTopic.connection.connect()
+    const topicSocket = wrongTopic.harness.openLatest()
+    topicSocket.emitRaw(frameServer({ type: 'heartbeat' }, { topic: 'other.topic' })[0])
+    expect(wrongTopic.connection.getStatus()).toBe('closed')
+
+    const wrongTarget = openConnection()
+    wrongTarget.connection.connect()
+    const targetSocket = wrongTarget.harness.openLatest()
+    targetSocket.emitRaw(frameServer({ type: 'heartbeat' }, { target: OTHER_PUBLISHER })[0])
+    expect(wrongTarget.connection.getStatus()).toBe('closed')
+
+    const binary = openConnection()
+    binary.connection.connect()
+    const binarySocket = binary.harness.openLatest()
+    binarySocket.emitRaw(new Uint8Array([1, 2, 3]).buffer)
+    expect(binary.connection.getStatus()).toBe('closed')
+  })
+
   it('sends encoded client messages only while open', () => {
     const { connection, harness } = openConnection()
     connection.connect()
     expect(
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+      connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
     ).toBe(false)
 
     const socket = harness.openLatest()
     expect(
-      connection.send({ version: 1, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } }),
+      connection.send({ version: 2, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } }),
     ).toBe(true)
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
+      { version: 2, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
     ])
   })
 
@@ -106,10 +255,10 @@ describe('ApplicationEventConnection', () => {
 
     // 异常绝不逃逸到调用方（React effect）。
     expect(() =>
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+      connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
     ).not.toThrow()
     expect(
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+      connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
     ).toBe(false)
     // close 是权威清理点：触发统一重连路径。
     expect(socket.closed).toBe(true)
@@ -117,6 +266,26 @@ describe('ApplicationEventConnection', () => {
     expect(vi.getTimerCount()).toBe(1)
     vi.advanceTimersByTime(250)
     expect(harness.sockets).toHaveLength(2)
+  })
+
+  it('defers the drain while bufferedAmount is at the bound and resumes on the retry tick', () => {
+    vi.useFakeTimers()
+    const { connection, harness } = openConnection()
+    connection.connect()
+    const socket = harness.openLatest()
+
+    socket.bufferedAmount = 8 * 1024 * 1024
+    expect(
+      connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+    ).toBe(true)
+    // 未同步发送，但已排入 outbox 并调度下一次 drain。
+    expect(socket.sent).toHaveLength(0)
+
+    socket.bufferedAmount = 0
+    vi.advanceTimersByTime(16)
+    expect(socket.sentMessages()).toEqual([
+      { version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } },
+    ])
   })
 
   it('reconnects with backoff 250/500/1000/2000/5000/10000 capped at 10s', () => {
@@ -261,6 +430,7 @@ describe('ApplicationEventConnection', () => {
         return harness.factory(url)
       },
     })
+    created.push(connection)
     // 同步抛错绝不逃逸到调用方（Provider effect）：进入 backoff。
     expect(() => connection.connect()).not.toThrow()
     expect(connection.getStatus()).toBe('backoff')
@@ -295,7 +465,7 @@ describe('ApplicationEventConnection', () => {
     let sent: boolean | undefined
     expect(() => {
       sent = connection.send({
-        version: 1,
+        version: 2,
         type: 'subscribe',
         resource: { kind: 'thread', id: THREAD_ID },
       })

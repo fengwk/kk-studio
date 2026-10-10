@@ -35,7 +35,11 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.ts'],
     coverage: {
       reporter: ['text', 'html'],
-      include: ['src/**/*.{ts,tsx}', 'src/shared/notification/**/*.mjs'],
+      include: [
+        'src/**/*.{ts,tsx}',
+        'src/shared/notification/**/*.mjs',
+        'src/shared/app-events/**/*.mjs',
+      ],
       exclude: ['src/main.tsx', 'src/test-setup.ts'],
       thresholds: {
         lines: 80,

@@ -5,6 +5,7 @@ import {
   HttpError,
   sleep,
 } from './http.mjs'
+import { FramedEventSocket, eventUrl } from './framed-event-socket.mjs'
 
 /**
  * Harness Runtime 单轨契约 helper（创建型 owner-aware batch + owner-free Thread 续写 + Session/Thread 查询）。
@@ -1145,21 +1146,18 @@ async function waitForModelDeltaAfterEventSubscribed(
 
   const deadline = Date.now() + timeoutMs
   const controller = new AbortController()
-  const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+  const framed = new FramedEventSocket(eventUrl(ctx.baseUrl))
+  const socket = framed.socket
   try {
     await waitForSocketOpen(socket, deadline, controller.signal)
-    socket.send(JSON.stringify({
-      version: 1,
-      type: 'subscribe',
-      resource: { kind: 'thread', id: expectedThreadId },
-    }))
-    await waitForApplicationEvent(
-      socket,
+    framed.subscribe({ kind: 'thread', id: expectedThreadId })
+    await waitForApplicationFrame(
+      framed,
       deadline,
       controller.signal,
       (frame) => {
         if (
-          frame?.version === 1
+          frame?.version === 2
           && frame.type === 'subscribed'
           && sameThreadResource(frame.resource, expectedThreadId)
           && /^(0|[1-9]\d*)$/.test(String(frame.cursor ?? ''))
@@ -1171,13 +1169,13 @@ async function waitForModelDeltaAfterEventSubscribed(
       `subscribed ack for thread ${expectedThreadId}`,
     )
 
-    const deltaWait = waitForApplicationEvent(
-      socket,
+    const deltaWait = waitForApplicationFrame(
+      framed,
       deadline,
       controller.signal,
       (frame) => {
         if (
-          frame?.version === 1
+          frame?.version === 2
           && frame.type === 'event'
           && frame.name === 'realtime'
           && sameThreadResource(frame.resource, expectedThreadId)
@@ -1203,6 +1201,7 @@ async function waitForModelDeltaAfterEventSubscribed(
     return { signal, startResult }
   } finally {
     controller.abort()
+    framed.close()
     try {
       socket.close()
     } catch {
@@ -1212,15 +1211,6 @@ async function waitForModelDeltaAfterEventSubscribed(
 }
 
 // ---------- 应用事件 WebSocket 辅助 ----------
-
-function applicationEventUrl(baseUrl) {
-  const url = new URL(baseUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = '/api/events/v1'
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
 
 function waitForSocketOpen(socket, deadline, signal) {
   return new Promise((resolve, reject) => {
@@ -1253,32 +1243,25 @@ function waitForSocketOpen(socket, deadline, signal) {
   })
 }
 
-function waitForApplicationEvent(socket, deadline, signal, matcher, description) {
+function waitForApplicationFrame(framed, deadline, signal, matcher, description) {
   return new Promise((resolve, reject) => {
+    let settled = false
     const cleanup = () => {
-      socket.removeEventListener('message', onMessage)
-      socket.removeEventListener('error', onError)
-      socket.removeEventListener('close', onClose)
+      framed.hooks.delete(onFrame)
+      framed.socket.removeEventListener('error', onError)
+      framed.socket.removeEventListener('close', onClose)
       signal.removeEventListener('abort', onAbort)
       clearTimeout(timer)
     }
     const finish = (callback, value) => {
+      if (settled) return
+      settled = true
       cleanup()
       callback(value)
     }
-    const onMessage = (event) => {
-      let frame
-      try {
-        frame = JSON.parse(String(event.data))
-      } catch {
-        finish(reject, new Error(`malformed application event frame: ${String(event.data)}`))
-        return
-      }
-      if (frame?.version === 1 && frame.type === 'error') {
-        finish(
-          reject,
-          new Error(`application event error ${frame.code}: ${frame.message}`),
-        )
+    const inspect = (frame) => {
+      if (frame?.version === 2 && frame.type === 'error') {
+        finish(reject, new Error(`application event error ${frame.code}: ${frame.message}`))
         return
       }
       const result = matcher(frame)
@@ -1286,6 +1269,7 @@ function waitForApplicationEvent(socket, deadline, signal, matcher, description)
         finish(resolve, result.value)
       }
     }
+    const onFrame = (frame) => inspect(frame)
     const onError = () => finish(reject, new Error(`application event WebSocket error before ${description}`))
     const onClose = (event) => finish(
       reject,
@@ -1296,10 +1280,12 @@ function waitForApplicationEvent(socket, deadline, signal, matcher, description)
       () => finish(reject, new Error(`timed out waiting for ${description}`)),
       remainingMillis(deadline),
     )
-    socket.addEventListener('message', onMessage)
-    socket.addEventListener('error', onError)
-    socket.addEventListener('close', onClose)
+    // 先注册同步 hook 与监听，再回放已到达帧（订阅 ack 可能先于本次等待到达）。
+    framed.hooks.add(onFrame)
+    framed.socket.addEventListener('error', onError)
+    framed.socket.addEventListener('close', onClose)
     signal.addEventListener('abort', onAbort, { once: true })
+    for (const frame of framed.frames) inspect(frame)
   })
 }
 

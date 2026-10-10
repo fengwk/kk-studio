@@ -1,19 +1,13 @@
 import { assert, assertDecimalVersion, assertExactFields, sleep } from './http.mjs'
+import { FramedEventSocket, eventUrl } from './framed-event-socket.mjs'
+
+export { eventUrl }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-export function eventUrl(baseUrl) {
-  const url = new URL(baseUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = '/api/events/v1'
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
 /** Strict subset used by distributed notification cases; unexpected frames fail, never disappear. */
 export function validateFrame(frame) {
-  assert(frame?.version === 1, 'event frame version must be 1')
+  assert(frame?.version === 2, 'event frame version must be 2')
   if (frame.type === 'heartbeat') {
     assertExactFields(frame, ['version', 'type'])
     return
@@ -42,35 +36,40 @@ export function validateFrame(frame) {
   }
 }
 
-/** Append-only capture begins before open/HTTP. Hooks initiate authoritative reads inside message dispatch. */
+/**
+ * Append-only capture over the shared framed transport. Every physical carrier fragment is
+ * reassembled by `FramedEventSocket`; hooks initiate authoritative reads inside message dispatch.
+ */
 export class EventProbe {
   constructor(baseUrl, Socket = WebSocket) {
-    this.socket = new Socket(eventUrl(baseUrl))
-    this.frames = []
-    this.hooks = new Set()
-    this.failure = null
-    this.closed = false
-    this.listeners = {
-      message: (event) => {
-        try {
-          const frame = JSON.parse(String(event.data))
-          validateFrame(frame)
-          this.frames.push(frame)
-          for (const hook of this.hooks) hook(frame)
-        } catch {
-          this.failure ||= new Error('invalid application event frame or observation hook')
-        }
-      },
-      error: () => { this.failure ||= new Error('application event socket error') },
-      close: () => { this.closed = true },
+    this.framed = new FramedEventSocket(eventUrl(baseUrl), { Socket })
+    this.socket = this.framed.socket
+    this.hooks = this.framed.hooks
+    const observe = (frame) => {
+      try {
+        validateFrame(frame)
+      } catch {
+        this.framed.failure ||= new Error('invalid application event frame')
+      }
     }
-    for (const [type, listener] of Object.entries(this.listeners)) {
-      this.socket.addEventListener(type, listener)
-    }
+    this.observe = observe
+    this.framed.hooks.add(observe)
+  }
+
+  get frames() {
+    return this.framed.frames
+  }
+
+  get failure() {
+    return this.framed.failure
+  }
+
+  get closed() {
+    return this.framed.closed
   }
 
   check() {
-    if (this.failure) throw this.failure
+    this.framed.check()
   }
 
   async until(predicate, timeoutMs = 10_000, allowClosed = false) {
@@ -87,7 +86,7 @@ export class EventProbe {
   async subscribe(resource, cursor = '0') {
     await this.until(() => this.socket.readyState === 1)
     const start = this.frames.length
-    this.socket.send(JSON.stringify({ version: 1, type: 'subscribe', resource }))
+    this.framed.subscribe(resource)
     await this.until(() => this.frames.slice(start).some((frame) =>
       frame.type === 'subscribed' && JSON.stringify(frame.resource) === JSON.stringify(resource)))
     const ack = this.frames.slice(start).find((frame) =>
@@ -97,7 +96,7 @@ export class EventProbe {
   }
 
   unsubscribe(resource) {
-    this.socket.send(JSON.stringify({ version: 1, type: 'unsubscribe', resource }))
+    this.framed.unsubscribe(resource)
   }
 
   count(predicate, start = 0) {
@@ -123,10 +122,8 @@ export class EventProbe {
       assert(this.closed, 'timed out closing application event socket')
       this.check()
     } finally {
-      for (const [type, listener] of Object.entries(this.listeners)) {
-        this.socket.removeEventListener(type, listener)
-      }
-      this.hooks.clear()
+      this.framed.hooks.delete(this.observe)
+      this.framed.close()
     }
   }
 }

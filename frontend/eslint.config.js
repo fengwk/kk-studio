@@ -27,7 +27,7 @@ export default tseslint.config(
   },
   {
     // 浏览器与 Node E2E 共用的 transport 实现是原生 ESM，使用标准 Web API，无 TS 语法。
-    files: ['src/shared/notification/**/*.mjs'],
+    files: ['src/shared/notification/**/*.mjs', 'src/shared/app-events/**/*.mjs'],
     extends: [js.configs.recommended],
     languageOptions: {
       ecmaVersion: 'latest',
@@ -44,6 +44,25 @@ export default tseslint.config(
           patterns: [
             {
               group: ['@/features', '@/features/*'],
+              message:
+                'Shared layers must not depend on feature code; move reusable logic into shared/lib or test-support.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The app-events protocol is mandated to reuse the shell TerminalControlCodec; that single
+    // pure protocol module is the only allowed feature dependency for the app-events layer.
+    files: ['src/shared/app-events/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^@/features/(?!shell/terminal-control-codec$)',
               message:
                 'Shared layers must not depend on feature code; move reusable logic into shared/lib or test-support.',
             },

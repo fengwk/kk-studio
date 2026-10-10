@@ -1,15 +1,21 @@
 /**
- * 应用事件 WebSocket 协议（/api/events/v1）。
+ * 应用事件 WebSocket 协议（/api/events/v1，逻辑 version=2）。
  *
- * client -> server（JSON 文本，所有帧带 version=1）：
- * - {"version":1,"type":"subscribe","resource":{"kind":"thread"|"canvas"|"tree","id":"<UUID>"}}
- * - {"version":1,"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
- * - {"version":1,"type":"unsubscribe","resource":{...}}
+ * 物理层：每个逻辑帧都作为 app.events.v2 topic 的 NotificationCarrier 分片承载，
+ * 由共享 notification.mjs 的 packet/reassembler/outbox 编解码与重组；不存在 raw JSON
+ * 或小包旁路。本文件只负责重组后的逻辑 JSON 严格编解码。
  *
- * server -> client（JSON 文本，所有帧带 version=1）：
- * - {"version":1,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
+ * client -> server（逻辑 JSON，所有帧带 version=2）：
+ * - {"version":2,"type":"subscribe","resource":{"kind":"thread"|"canvas"|"tree","id":"<UUID>"}}
+ * - {"version":2,"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
+ * - {"version":2,"type":"unsubscribe","resource":{...}}
+ * - {"version":2,"type":"shell.command","command":<TerminalCommand>}
+ *   精确 wrapper：只嵌套 TerminalControlCodec 编码后的命令，bytes 以 canonical Base64 承载。
+ *
+ * server -> client（逻辑 JSON，所有帧带 version=2）：
+ * - {"version":2,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
  *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
- * - {"version":1,"type":"event","resource":{...},"name":"version"|"realtime"|"changed","data":{...},"cursor":"<canonical>"}
+ * - {"version":2,"type":"event","resource":{...},"name":"version"|"realtime"|"changed","data":{...},"cursor":"<canonical>"}
  *   - thread version：data {"version":"N"}，cursor 必带且与 data.version 完全相等；服务端通过
  *     PostgreSQL notification 感知持久化变更，浏览器只依赖此 version/cursor 契约。
  *   - thread realtime：data 为 lossy realtime delta envelope 的 JSON 对象（如 MODEL_DELTA），
@@ -19,20 +25,32 @@
  *   - tree changed：resource 带真实执行根 id，data 恒为 {}，只提示回读该根的执行树，不带 cursor。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
- * - {"version":1,"type":"resync","resource":{...}}：需要整体替换为全量快照。
- * - {"version":1,"type":"heartbeat"}：连接级保活；客户端严格解码后静默消费。
- * - {"version":1,"type":"error","resource"?:{...},"code":"<string>","message":"<string>"}
+ * - {"version":2,"type":"shell.event","event":<TerminalEvent>}
+ *   精确 wrapper：只嵌套 TerminalControlCodec 解码后的终端事件。
+ * - {"version":2,"type":"resync","resource":{...}}：需要整体替换为全量快照。
+ * - {"version":2,"type":"heartbeat"}：连接级保活；客户端严格解码后静默消费。
+ * - {"version":2,"type":"error","resource"?:{...},"code":"<string>","message":"<string>"}
  *
- * 解码是真正严格的：version 必须为 1、每种 type/name 只接受精确字段集、
- * 多余/未知字段一律拒绝；resource 精确只有 kind+id 且 id 必须是 canonical
- * UUID（小写十六进制）；全局 projects/interactions/environments resource 不带 id；
- * resource/name 组合必须合法（thread 仅 version|realtime，canvas 仅 revision，
- * projects|interactions|environments 仅 changed，tree 仅 changed）；cursor 与
- * version data 必须是 canonical 非负十进制字符串，durable 事件的 cursor 必须
- * 存在且与 data 值完全相等，提示型资源（projects/tree/interactions/environments）
- * 的 ack cursor 恒为 '0' 且事件绝不携带 cursor；realtime data 必须是非数组 JSON
- * 对象且不得携带 cursor。畸形消息永远不会到达 listeners。
+ * 解码是真正严格的：version 必须为 2（旧版本一律拒绝，无兼容 decoder）、每种
+ * type/name 只接受精确字段集、多余/未知字段一律拒绝；resource 精确只有 kind+id
+ * 且 id 必须是 canonical UUID（小写十六进制）；全局 projects/interactions/
+ * environments resource 不带 id；resource/name 组合必须合法（thread 仅
+ * version|realtime，canvas 仅 revision，projects|interactions|environments 仅
+ * changed，tree 仅 changed）；cursor 与 version data 必须是 canonical 非负十进制
+ * 字符串，durable 事件的 cursor 必须存在且与 data 值完全相等，提示型资源
+ * （projects/tree/interactions/environments）的 ack cursor 恒为 '0' 且事件绝不携带
+ * cursor；realtime data 必须是非数组 JSON 对象且不得携带 cursor；shell.event 必须
+ * 通过 TerminalControlCodec 的严格事件解码。畸形消息永远不会到达 listeners。
  */
+
+import {
+  decodeTerminalEvent,
+  encodeTerminalCommand,
+  type TerminalCommand,
+  type TerminalEvent,
+} from '@/features/shell/terminal-control-codec'
+
+export type { TerminalCommand, TerminalEvent } from '@/features/shell/terminal-control-codec'
 
 export type ApplicationEventResourceKind =
   | 'thread'
@@ -56,8 +74,9 @@ export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revisio
 export type ApplicationEventCursor = string
 
 export type ApplicationEventClientMessage =
-  | { version: 1; type: 'subscribe'; resource: ApplicationEventResource }
-  | { version: 1; type: 'unsubscribe'; resource: ApplicationEventResource }
+  | { version: 2; type: 'subscribe'; resource: ApplicationEventResource }
+  | { version: 2; type: 'unsubscribe'; resource: ApplicationEventResource }
+  | { version: 2; type: 'shell.command'; command: TerminalCommand }
 
 /** thread 的持久 version 事件：cursor 必带且与 data.version 完全相等。 */
 type ApplicationEventThreadVersionEvent = {
@@ -143,6 +162,7 @@ export type ApplicationEventServerMessage =
   | ApplicationEventInteractionsChangedEvent
   | ApplicationEventEnvironmentsChangedEvent
   | { type: 'resync'; resource: ApplicationEventResource }
+  | { type: 'shell.event'; event: TerminalEvent }
   | { type: 'error'; resource?: ApplicationEventResource; code: string; message: string }
 
 const CANONICAL_DECIMAL = /^(0|[1-9][0-9]*)$/
@@ -150,6 +170,15 @@ const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const EVENT_FIELDS = ['version', 'type', 'resource', 'name', 'data', 'cursor'] as const
 
 export function encodeClientMessage(message: ApplicationEventClientMessage): string {
+  if (message.type === 'shell.command') {
+    // 复用 TerminalControlCodec 的 canonical 命令编码（INPUT bytes → Base64），
+    // 绝不 JSON.stringify(Uint8Array)；编码非法时抛 TerminalControlError，由上层收敛。
+    return JSON.stringify({
+      version: 2,
+      type: 'shell.command',
+      command: JSON.parse(encodeTerminalCommand(message.command)),
+    })
+  }
   return JSON.stringify(message)
 }
 
@@ -160,8 +189,18 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
   } catch {
     return null
   }
-  if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.type !== 'string') {
+  if (!isRecord(parsed) || parsed.version !== 2 || typeof parsed.type !== 'string') {
     return null
+  }
+  if (parsed.type === 'shell.event') {
+    if (!hasOnlyFields(parsed, ['version', 'type', 'event'])) {
+      return null
+    }
+    try {
+      return { type: 'shell.event', event: decodeTerminalEvent(parsed.event) }
+    } catch {
+      return null
+    }
   }
   switch (parsed.type) {
     case 'heartbeat': {

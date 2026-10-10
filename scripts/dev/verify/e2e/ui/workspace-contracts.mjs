@@ -28,6 +28,7 @@ import {
 } from '../lib/http.mjs'
 import { expectThreadDraft, readThreadDraft } from '../lib/browser-state.mjs'
 import { collectTaskToolResults } from '../cases/real.mjs'
+import { FramedEventObserver } from '../lib/framed-event-observer.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
 
@@ -2168,7 +2169,7 @@ function chunkText(text, size) {
 
 function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
-    const sockets = new Set()
+    const observers = new Set()
     let settled = false
     let timer = null
     const finish = (error) => {
@@ -2176,32 +2177,38 @@ function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
       settled = true
       if (timer != null) clearTimeout(timer)
       page.off('websocket', onWebSocket)
-      for (const socket of sockets) socket.off('framereceived', onFrame)
+      for (const observer of observers) observer.close()
+      observers.clear()
       if (error) {
         reject(error)
       } else {
         resolve()
       }
     }
-    const onFrame = (event) => {
-      let message
-      try {
-        message = JSON.parse(String(event.payload))
-      } catch {
-        return
-      }
-      if (
-        message?.type === 'subscribed'
-        && message.resource?.kind === 'thread'
-        && message.resource?.id === threadId
-      ) {
-        finish()
-      }
-    }
     const onWebSocket = (socket) => {
       if (!socket.url().endsWith('/api/events/v1')) return
-      sockets.add(socket)
-      socket.on('framereceived', onFrame)
+      // 每个真实 socket 独立共享 FramedEventLink：从 framesent 恢复 browser publisher，
+      // 再由共享重组器严格还原 server 逻辑帧（含 count=1），绝不 raw JSON 或复制分片算法。
+      const observer = new FramedEventObserver({
+        onFrame: (message) => {
+          if (
+            message?.version === 2
+            && message.type === 'subscribed'
+            && message.resource?.kind === 'thread'
+            && message.resource?.id === threadId
+          ) {
+            finish()
+          }
+        },
+        onFailure: (recover) => {
+          // 重组丢失由浏览器连接重连恢复：继续等待新 socket；协议错误则明确 reject。
+          if (!recover) {
+            finish(new Error(`thread realtime subscription frame was invalid: ${threadId}`))
+          }
+        },
+      })
+      observers.add(observer)
+      observer.observe(socket)
     }
     page.on('websocket', onWebSocket)
     timer = setTimeout(() => {

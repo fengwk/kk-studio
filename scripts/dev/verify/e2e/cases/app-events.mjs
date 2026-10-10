@@ -1,36 +1,28 @@
-import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
+import { assert, cid, envelopeData } from '../lib/http.mjs'
+import { EventProbe } from '../lib/event-probe.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
   id: 'events.heartbeat_keepalive',
   level: 'L1',
   title: '应用事件 WebSocket 周期 heartbeat 保活',
-  docs: '原生 WebSocket 直连 /api/events/v1，不建立资源订阅；等待连接级 heartbeat，严格断言 {version:1,type:"heartbeat"} 且连接保持打开',
+  docs: '原生 WebSocket 直连 /api/events/v1，不建立资源订阅；共享 carrier 重组后等待连接级 heartbeat，严格断言 {version:2,type:"heartbeat"} 且连接保持打开',
   async run(ctx) {
-    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+    const probe = new EventProbe(ctx.baseUrl)
     const startedAt = Date.now()
     try {
-      const frame = await waitForHeartbeat(socket, 25_000)
+      await probe.until(() => probe.frames.some((frame) => frame.type === 'heartbeat'), 25_000)
       const elapsedMs = Date.now() - startedAt
+      const frame = probe.frames.find((candidate) => candidate.type === 'heartbeat')
       assert(
-        socket.readyState === WebSocket.OPEN,
-        `event socket closed before heartbeat validation: ${socket.readyState}`,
+        probe.socket.readyState === WebSocket.OPEN,
+        `event socket closed before heartbeat validation: ${probe.socket.readyState}`,
       )
-      assert(
-        frame
-        && typeof frame === 'object'
-        && !Array.isArray(frame)
-        && Object.keys(frame).sort().join(',') === 'type,version'
-        && frame.version === 1
-        && frame.type === 'heartbeat',
-        `invalid heartbeat frame: ${JSON.stringify(frame)}`,
-      )
-      ctx.writeArtifact(
-        'heartbeat.json',
-        `${JSON.stringify({ elapsedMs, frame }, null, 2)}\n`,
-      )
+      assertExactKeys(frame, ['version', 'type'], 'heartbeat frame')
+      assert(frame.version === 2 && frame.type === 'heartbeat', `invalid heartbeat frame: ${JSON.stringify(frame)}`)
+      ctx.writeArtifact('heartbeat.json', `${JSON.stringify({ elapsedMs, frame }, null, 2)}\n`)
     } finally {
-      socket.close(1000, 'E2E complete')
+      await probe.close()
     }
   },
 })
@@ -41,28 +33,10 @@ registerCase({
   title: 'Project 全局失效事件',
   docs: '订阅无 synthetic id 的 projects 全局资源；数据库提交后的 Project 创建发 changed(projectId)',
   async run(ctx) {
-    const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
-    const frames = []
+    const probe = new EventProbe(ctx.baseUrl)
     let project
-    const collect = (event) => {
-      try {
-        frames.push(JSON.parse(String(event.data)))
-      } catch {
-        // Ignore non-JSON frames; expected protocol frames are asserted below.
-      }
-    }
-    socket.addEventListener('message', collect)
     try {
-      await waitForSocketOpen(socket, 5_000)
-
-      socket.send(
-        JSON.stringify({ version: 1, type: 'subscribe', resource: { kind: 'projects' } }),
-      )
-      const projectsAck = await takeFrame(
-        frames,
-        (frame) => frame?.type === 'subscribed' && frame?.resource?.kind === 'projects',
-        5_000,
-      )
+      const projectsAck = await probe.subscribe({ kind: 'projects' })
       assertGlobalSubscriptionAck(projectsAck, 'projects')
 
       project = envelopeData(
@@ -73,27 +47,35 @@ registerCase({
           })
         ).json,
       )
-      const projectEvent = await takeFrame(
-        frames,
-        (frame) =>
-          frame?.type === 'event'
-          && frame?.resource?.kind === 'projects'
-          && frame?.name === 'changed'
-          && frame?.data?.projectId === project.id,
+      await probe.until(
+        () =>
+          probe.count(
+            (frame) =>
+              frame.type === 'event'
+              && frame.resource?.kind === 'projects'
+              && frame.name === 'changed'
+              && frame.data?.projectId === project.id,
+          ) >= 1,
         10_000,
+      )
+      const projectEvent = probe.frames.find(
+        (frame) =>
+          frame.type === 'event'
+          && frame.resource?.kind === 'projects'
+          && frame.name === 'changed'
+          && frame.data?.projectId === project.id,
       )
       assertExactKeys(projectEvent, ['version', 'type', 'resource', 'name', 'data'], 'project event')
       assertExactKeys(projectEvent.resource, ['kind'], 'project event resource')
       assertExactKeys(projectEvent.data, ['projectId'], 'project event data')
-      assert(projectEvent.version === 1, JSON.stringify(projectEvent))
+      assert(projectEvent.version === 2, JSON.stringify(projectEvent))
 
       ctx.writeArtifact(
         'global-invalidation.json',
         `${JSON.stringify({ projectsAck, projectEvent }, null, 2)}\n`,
       )
     } finally {
-      socket.removeEventListener('message', collect)
-      socket.close(1000, 'E2E complete')
+      await probe.close()
       if (project?.id) {
         const current = envelopeData(
           (await ctx.call('GET', `/api/projects/${project.id}`)).json,
@@ -107,59 +89,11 @@ registerCase({
   },
 })
 
-function applicationEventUrl(baseUrl) {
-  const url = new URL(baseUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = '/api/events/v1'
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
-async function waitForSocketOpen(socket, timeoutMs) {
-  if (socket.readyState === WebSocket.OPEN) {
-    return
-  }
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup()
-      reject(new Error(`timed out waiting ${timeoutMs}ms for application event WebSocket open`))
-    }, timeoutMs)
-    const handleOpen = () => {
-      cleanup()
-      resolve()
-    }
-    const handleError = () => {
-      cleanup()
-      reject(new Error('application event WebSocket failed before open'))
-    }
-    function cleanup() {
-      clearTimeout(timer)
-      socket.removeEventListener('open', handleOpen)
-      socket.removeEventListener('error', handleError)
-    }
-    socket.addEventListener('open', handleOpen)
-    socket.addEventListener('error', handleError)
-  })
-}
-
-async function takeFrame(frames, predicate, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const index = frames.findIndex(predicate)
-    if (index >= 0) {
-      return frames.splice(index, 1)[0]
-    }
-    await sleep(25)
-  }
-  throw new Error(`timed out waiting ${timeoutMs}ms for application event frame`)
-}
-
 function assertGlobalSubscriptionAck(frame, kind) {
   assertExactKeys(frame, ['version', 'type', 'resource', 'cursor'], `${kind} subscribed frame`)
   assertExactKeys(frame.resource, ['kind'], `${kind} subscribed resource`)
   assert(
-    frame.version === 1
+    frame.version === 2
       && frame.type === 'subscribed'
       && frame.resource.kind === kind
       && frame.cursor === '0',
@@ -176,47 +110,4 @@ function assertExactKeys(value, expected, label) {
       && actual.every((field, index) => field === sortedExpected[index]),
     `${label} fields must be ${sortedExpected.join(',')}, got ${actual.join(',')}`,
   )
-}
-
-async function waitForHeartbeat(socket, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup()
-      reject(new Error(`timed out waiting ${timeoutMs}ms for application heartbeat`))
-    }, timeoutMs)
-    const handleMessage = (event) => {
-      let frame
-      try {
-        frame = JSON.parse(String(event.data))
-      } catch {
-        return
-      }
-      if (frame?.type !== 'heartbeat') {
-        return
-      }
-      cleanup()
-      resolve(frame)
-    }
-    const handleError = () => {
-      cleanup()
-      reject(new Error('application event WebSocket failed before heartbeat'))
-    }
-    const handleClose = (event) => {
-      cleanup()
-      reject(
-        new Error(
-          `application event WebSocket closed before heartbeat: ${event.code} ${event.reason}`,
-        ),
-      )
-    }
-    function cleanup() {
-      clearTimeout(timer)
-      socket.removeEventListener('message', handleMessage)
-      socket.removeEventListener('error', handleError)
-      socket.removeEventListener('close', handleClose)
-    }
-    socket.addEventListener('message', handleMessage)
-    socket.addEventListener('error', handleError)
-    socket.addEventListener('close', handleClose)
-  })
 }

@@ -2,12 +2,41 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EventProbe, eventUrl, validateFrame, withCleanup } from '../lib/event-probe.mjs'
 import { ALL_CASES } from '../lib/registry.mjs'
+import {
+  NotificationPacket,
+  carrierChunk,
+  decodeNotificationCarrier,
+  defaultNotificationLimits,
+} from '../../../../../frontend/src/shared/notification/notification.mjs'
 import '../cases/distributed-events.mjs'
 
 const id = '11111111-1111-4111-8111-111111111111'
-const changed = { version: 1, type: 'event', resource: { kind: 'projects' }, name: 'changed', data: { projectId: id } }
+const changed = { version: 2, type: 'event', resource: { kind: 'projects' }, name: 'changed', data: { projectId: id } }
 
-/** Only a helper unit fake: no simulated transport is used as real E2E evidence. */
+const LIMITS = defaultNotificationLimits()
+const SERVER_PUBLISHER = 'ffffffff-ffff-4fff-8fff-000000000001'
+const encoder = new TextEncoder()
+const decoder = new TextDecoder('utf-8', { fatal: true })
+let carrierSeq = 0
+
+/** 真实共享 carrier 编码：物理帧是 canonical 分片，绝非 raw JSON。 */
+function encodeLogical(logical) {
+  carrierSeq += 1
+  const packet = new NotificationPacket(
+    SERVER_PUBLISHER,
+    null,
+    'app.events.v2',
+    `ffffffff-ffff-4fff-8fff-${String(carrierSeq).padStart(12, '0')}`,
+    encoder.encode(JSON.stringify(logical)),
+  )
+  const count = Math.max(1, Math.ceil(packet.byteLength() / 5400))
+  return Array.from({ length: count }, (_, index) => carrierChunk(packet, index).encode())
+}
+
+/**
+ * Helper unit fake: the transport is a fake, but every physical frame is a real shared carrier
+ * fragment, so the probe exercises the same decoder/reassembler the browser uses.
+ */
 class Socket extends EventTarget {
   readyState = 1
   registered = new Set()
@@ -19,14 +48,21 @@ class Socket extends EventTarget {
     this.registered.delete(listener)
     super.removeEventListener(type, listener)
   }
-  message(value) {
-    this.dispatchEvent(new MessageEvent('message', { data: value }))
+  /** Dispatches one raw physical frame. */
+  message(raw) {
+    this.dispatchEvent(new MessageEvent('message', { data: raw }))
   }
-  send(text) {
-    const frame = JSON.parse(text)
-    if (frame.type === 'subscribe') this.message(JSON.stringify({
-      version: 1, type: 'subscribed', resource: frame.resource, cursor: '0',
-    }))
+  /** Encodes one logical server frame as real carrier fragments and dispatches them. */
+  deliver(logical) {
+    for (const raw of encodeLogical(logical)) this.message(raw)
+  }
+  send(physical) {
+    const carrier = decodeNotificationCarrier(physical, LIMITS, null)
+    if (carrier == null) return
+    const frame = JSON.parse(decoder.decode(carrier.bytes()))
+    if (frame.type === 'subscribe') {
+      this.deliver({ version: 2, type: 'subscribed', resource: frame.resource, cursor: '0' })
+    }
   }
   close() {
     this.readyState = 3
@@ -39,29 +75,29 @@ test('event URL normalizes both schemes and removes query/hash', () => {
   assert.equal(eventUrl('http://a.test/'), 'ws://a.test/api/events/v1')
 })
 
-test('strict v1 frames reject malformed coordinates, extra fields and wrong resource shapes', () => {
-  const canvas = { version: 1, type: 'event', resource: { kind: 'canvas', id }, name: 'revision', cursor: '1', data: { revision: '1' } }
-  const environment = { version: 1, type: 'event', resource: { kind: 'environments' }, name: 'changed', data: {} }
-  for (const frame of [changed, canvas, environment, { version: 1, type: 'heartbeat' },
-    { version: 1, type: 'resync', resource: { kind: 'projects' } }]) assert.doesNotThrow(() => validateFrame(frame))
+test('strict v2 frames reject legacy v1, malformed coordinates, extra fields and wrong resource shapes', () => {
+  const canvas = { version: 2, type: 'event', resource: { kind: 'canvas', id }, name: 'revision', cursor: '1', data: { revision: '1' } }
+  const environment = { version: 2, type: 'event', resource: { kind: 'environments' }, name: 'changed', data: {} }
+  for (const frame of [changed, canvas, environment, { version: 2, type: 'heartbeat' },
+    { version: 2, type: 'resync', resource: { kind: 'projects' } }]) assert.doesNotThrow(() => validateFrame(frame))
   for (const frame of [
-    null, [], { ...changed, version: 2 }, { ...changed, cursor: '0' },
+    null, [], { ...changed, version: 1 }, { ...changed, cursor: '0' },
     { ...changed, data: { projectId: 'bad' } }, { ...changed, resource: { kind: 'projects', id } },
     { ...canvas, cursor: '01' }, { ...canvas, data: { revision: '2' } },
     { ...environment, data: { environmentId: id } },
-    { version: 1, type: 'subscribed', resource: { kind: 'projects' }, cursor: '1' },
-    { version: 1, type: 'error', code: 'SEND_FAILED', message: 'failed' },
+    { version: 2, type: 'subscribed', resource: { kind: 'projects' }, cursor: '1' },
+    { version: 2, type: 'error', code: 'SEND_FAILED', message: 'failed' },
   ]) assert.throws(() => validateFrame(frame))
 })
 
-test('capture is append-only, synchronous hooks see pre-HTTP arrivals and duplicates remain countable', async () => {
+test('probe decodes real carrier fragments, keeps capture append-only and counts duplicates', async () => {
   const probe = new EventProbe('http://a.test', Socket)
   await probe.subscribe({ kind: 'projects' })
   const start = probe.frames.length
   const seen = []
   probe.hooks.add((frame) => seen.push(frame))
-  probe.socket.message(JSON.stringify(changed))
-  probe.socket.message(JSON.stringify(changed))
+  probe.socket.deliver(changed)
+  probe.socket.deliver(changed)
   assert.equal(seen.length, 2)
   assert.equal(probe.count((f) => f.type === 'event', start), 2)
   assert.equal(probe.frames.length, 3)
@@ -70,7 +106,7 @@ test('capture is append-only, synchronous hooks see pre-HTTP arrivals and duplic
   assert.equal(probe.socket.registered.size, 0)
 })
 
-test('invalid JSON is fatal and failure cleanup releases listeners and hooks', async () => {
+test('invalid physical frame is fatal and failure cleanup releases listeners and hooks', async () => {
   const probe = new EventProbe('http://a.test', Socket)
   probe.hooks.add(() => {})
   probe.socket.message('not json')
@@ -141,8 +177,8 @@ test('case rejects duplicate events delivered before create HTTP returns and sti
       if (method === 'POST') {
         fixture = { id, version: '0', title: body.title }
         for (const socket of sockets) {
-          socket.message(JSON.stringify(changed))
-          socket.message(JSON.stringify(changed))
+          socket.deliver(changed)
+          socket.deliver(changed)
         }
         assert.equal(immediateReads, 4, 'reads must start during message dispatch, before create resolves')
       }
@@ -182,7 +218,7 @@ test('DB-fault case restores network, closes sockets and deletes fixture even if
       if (command === 'reconnect-db-a') throw restoreError
     },
     async callNode(node, method) {
-      if (method === 'POST') for (const socket of sockets) socket.message(JSON.stringify(changed))
+      if (method === 'POST') for (const socket of sockets) socket.deliver(changed)
       if (method === 'PUT') throw primary
       if (method === 'DELETE') deleted = true
       return { json: { data: { id, version: '0' } } }
