@@ -31,6 +31,7 @@ SELECTED_CLASSES = (
     "CodingCapabilitiesEdgeTest",
     "WindowsCommandLineTest",
     "WindowsJobScopeTest",
+    "OwnerOnlyFilesTest",
 )
 WINDOWS_INAPPLICABLE = (
     "CodingCapabilitiesTest",
@@ -39,6 +40,16 @@ WINDOWS_INAPPLICABLE = (
 WINDOWS_REQUIRED_BASH_CASES = (
     "closesStdinSoCommandsWaitingForEofFinishNaturally",
     "unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout",
+)
+POSIX_OWNER_ONLY_CASES = (
+    "ensureOwnerOnlyDirectoryCreatesAndConvergesToOwnerOnly",
+    "createOwnerOnlyFileIsOwnerOnly",
+)
+ACL_OWNER_ONLY_CASES = (
+    "ensureOwnerOnlyDirectoryAppliesOwnerOnlyAcl",
+    "createOwnerOnlyFileAppliesOwnerOnlyAcl",
+    "aclDirectoryKeepsDescendantsOwnerOnly",
+    "ensureOwnerOnlyDirectoryStripsBroadAcl",
 )
 CORE_CLASSES = (
     "ProcessScope",
@@ -104,6 +115,8 @@ def write_complete_reports(
         elif class_name == "BashCapabilityTest":
             # Windows 上点名必跑的那两条在这里出现；其余用例按平台前置条件可能被跳过。
             cases = tuple(bash_cases) + ("posixOnlyCase",)
+        elif class_name == "OwnerOnlyFilesTest":
+            cases = POSIX_OWNER_ONLY_CASES + ACL_OWNER_ONLY_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -261,6 +274,41 @@ class AssertSurefireReportsTest(unittest.TestCase):
             result = run_script("assert-surefire-reports.py", reports, "test-os")
             self.assertEqual(1, result.returncode)
             self.assertIn("missing surefire report", result.stdout)
+
+    def test_owner_only_cases_are_required_by_platform(self):
+        """权限门禁拒绝漏跑与跳过本平台用例，但允许另一平台的前置条件跳过。"""
+        for os_label, required, inapplicable in (
+            ("ubuntu-latest", POSIX_OWNER_ONLY_CASES, ACL_OWNER_ONLY_CASES),
+            ("macos-latest", POSIX_OWNER_ONLY_CASES, ACL_OWNER_ONLY_CASES),
+            ("windows-latest", ACL_OWNER_ONLY_CASES, POSIX_OWNER_ONLY_CASES),
+        ):
+            for outcome in ("complete", "missing", "skipped", "failed"):
+                with self.subTest(os_label=os_label, outcome=outcome):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        cases = required + inapplicable
+                        skipped_cases = inapplicable
+                        if outcome == "missing":
+                            cases = required[1:] + inapplicable
+                        elif outcome == "skipped":
+                            skipped_cases += (required[0],)
+                        write_surefire_report(
+                            reports,
+                            "OwnerOnlyFilesTest",
+                            cases,
+                            failures=int(outcome == "failed"),
+                            skipped=len(skipped_cases),
+                            skipped_cases=skipped_cases,
+                        )
+                        result = run_script("assert-surefire-reports.py", reports, os_label)
+                        self.assertEqual(
+                            int(outcome != "complete"),
+                            result.returncode,
+                            result.stdout + result.stderr,
+                        )
+                        if outcome in ("missing", "skipped"):
+                            self.assertIn(required[0], result.stdout)
 
 
 class CollectCoverageInputsTest(unittest.TestCase):
