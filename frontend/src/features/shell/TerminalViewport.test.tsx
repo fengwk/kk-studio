@@ -145,6 +145,8 @@ function setViewport(width: number, height: number): void {
 const bytesOf = (call: unknown): string =>
   String.fromCharCode(...(call as Uint8Array))
 
+const textOf = (call: unknown): string => new TextDecoder().decode(call as Uint8Array)
+
 describe('TerminalViewport', () => {
   beforeEach(() => {
     installImmediateRaf()
@@ -286,6 +288,121 @@ describe('TerminalViewport', () => {
     fireEvent.input(input)
     expect(controller.sendInput).toHaveBeenCalledTimes(1)
     expect(input.value).toBe('')
+  })
+
+  it('commits consecutive identical compositions as separate inputs', () => {
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror(), hasControl: true, status: 'RUNNING' })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    for (let round = 0; round < 2; round += 1) {
+      fireEvent.compositionStart(input)
+      input.value = '中'
+      fireEvent.input(input)
+      fireEvent.compositionEnd(input)
+      // 每一次组合都要跟一次「Chromium 补发的最终 input」。
+      input.value = '中'
+      fireEvent.input(input)
+    }
+
+    expect(controller.sendInput).toHaveBeenCalledTimes(2)
+    expect(textOf(controller.sendInput.mock.calls[0]![0])).toBe('中')
+    expect(textOf(controller.sendInput.mock.calls[1]![0])).toBe('中')
+  })
+
+  it('does not commit a cancelled composition and keeps the next identical input', () => {
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror(), hasControl: true, status: 'RUNNING' })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.compositionStart(input)
+    input.value = '中'
+    fireEvent.input(input)
+    // 组合被取消：compositionend 携带空字符串。
+    input.value = ''
+    fireEvent.compositionEnd(input)
+    expect(controller.sendInput).not.toHaveBeenCalled()
+
+    // 随后真实输入的同一文本绝不能被当成补发 input 吞掉。
+    input.value = '中'
+    fireEvent.input(input)
+    expect(controller.sendInput).toHaveBeenCalledTimes(1)
+    expect(textOf(controller.sendInput.mock.calls[0]![0])).toBe('中')
+  })
+
+  it('does not suppress a paste that follows a composition commit', () => {
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror(), hasControl: true, status: 'RUNNING' })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.compositionStart(input)
+    input.value = '中'
+    fireEvent.input(input)
+    fireEvent.compositionEnd(input)
+    expect(controller.sendInput).toHaveBeenCalledTimes(1)
+
+    fireEvent.paste(input, { clipboardData: { getData: () => '中' } })
+    expect(controller.sendInput).toHaveBeenCalledTimes(2)
+    expect(textOf(controller.sendInput.mock.calls[1]![0])).toBe('中')
+  })
+
+  it('shows a local status instead of leaking an encoder rejection from keydown', () => {
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror(), hasControl: true, status: 'RUNNING' })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    // alt + lone surrogate 触发 encoder 的 TerminalInputError：必须本地提示，不抛给调用方。
+    expect(() => fireEvent.keyDown(textarea(), { key: '\uD800', altKey: true })).not.toThrow()
+    expect(controller.sendInput).not.toHaveBeenCalled()
+    expect(screen.getByRole('status').textContent).toContain('未发送')
+  })
+
+  it('leaves default printable behaviour to the browser for unencoded keys', () => {
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror(), hasControl: true, status: 'RUNNING' })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    // 未编码的字符键不得被 preventDefault，随后由 onInput 编码。
+    expect(fireEvent.keyDown(input, { key: 'a' })).toBe(true)
+    expect(controller.sendInput).not.toHaveBeenCalled()
+
+    input.value = 'a'
+    fireEvent.input(input)
+    expect(controller.sendInput).toHaveBeenCalledTimes(1)
+    expect(bytesOf(controller.sendInput.mock.calls[0]![0])).toBe('a')
+  })
+
+  it('ACKs a new stream only after its own view arrives', async () => {
+    const controller = fakeController()
+    const base = snapshot({
+      streamId: STREAM_A,
+      view: mirror({ streamId: STREAM_A, version: 1 }),
+      hasControl: true,
+      status: 'RUNNING',
+    })
+    const { rerender } = render(<TerminalViewport session={base} controller={asController(controller)} />)
+    await nextTick()
+    expect(controller.applied.mock.calls[0]).toEqual([STREAM_A, 1])
+
+    // 同环境换 stream 但还没有新 RESET：旧屏可只读保留，但绝不能把它 ACK 成新 stream。
+    rerender(<TerminalViewport session={{ ...base, streamId: STREAM_B }} controller={asController(controller)} />)
+    await nextTick()
+    expect(controller.applied).toHaveBeenCalledTimes(1)
+
+    // 新 RESET 到达：只 ACK 新 stream/version。
+    rerender(
+      <TerminalViewport
+        session={{ ...base, streamId: STREAM_B, view: mirror({ streamId: STREAM_B, version: 1 }) }}
+        controller={asController(controller)}
+      />,
+    )
+    await nextTick()
+    expect(controller.applied).toHaveBeenCalledTimes(2)
+    expect(controller.applied.mock.calls[1]).toEqual([STREAM_B, 1])
   })
 
   it('routes special keys through the encoder without app-level side effects', () => {
@@ -535,5 +652,153 @@ describe('TerminalViewport', () => {
 
     expect(document.querySelector('.terminal-viewport')?.getAttribute('data-readonly')).toBe('true')
     expect(textarea().readOnly).toBe(true)
+  })
+
+  it('selects locally with the mouse when VT reporting is off and draws the highlight', async () => {
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror({ cols: 4, texts: ['ABC', 'DEF'] }) })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.mouseDown(input, { clientX: 0, clientY: 0, button: 0 })
+    fireEvent.mouseMove(input, { clientX: 16, clientY: 0, buttons: 1 })
+    await nextTick()
+
+    // 本地选择只画高亮，不向 PTY 发送任何字节。
+    expect(document.querySelector('.terminal-grid__selection')).not.toBeNull()
+    expect(controller.sendInput).not.toHaveBeenCalled()
+
+    fireEvent.mouseUp(input, { clientX: 16, clientY: 0, button: 0 })
+    expect(controller.sendInput).not.toHaveBeenCalled()
+  })
+
+  it('encodes focus and blur when the terminal requests focus reporting', () => {
+    const controller = fakeController()
+    const session = snapshot({
+      streamId: STREAM_A,
+      view: mirror({ modes: { ...BASE_MODES, mouseMode: 'FOCUS' } }),
+      hasControl: true,
+      status: 'RUNNING',
+    })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.focusIn(input)
+    fireEvent.focusOut(input)
+
+    expect(controller.sendInput).toHaveBeenCalledTimes(2)
+    expect(bytesOf(controller.sendInput.mock.calls[0]![0])).toBe('\x1b[I')
+    expect(bytesOf(controller.sendInput.mock.calls[1]![0])).toBe('\x1b[O')
+  })
+
+  it('encodes pointer press/release/move for every button', () => {
+    const controller = fakeController()
+    const session = snapshot({
+      streamId: STREAM_A,
+      view: mirror({ modes: { ...BASE_MODES, mouseMode: 'BUTTON_MOTION', mouseFormat: 'SGR' } }),
+      hasControl: true,
+      status: 'RUNNING',
+    })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.mouseDown(input, { clientX: 0, clientY: 0, button: 1 })
+    fireEvent.mouseDown(input, { clientX: 0, clientY: 0, button: 2 })
+    fireEvent.mouseDown(input, { clientX: 0, clientY: 0, button: 0 })
+    fireEvent.mouseUp(input, { clientX: 0, clientY: 0, button: 0 })
+    fireEvent.mouseMove(input, { clientX: 0, clientY: 0, buttons: 4 })
+    fireEvent.mouseMove(input, { clientX: 0, clientY: 0, buttons: 1 })
+
+    // 中键/右键/左键按下 + 释放 + 不同 buttons 掩码的移动，全部走 VT 上报。
+    expect(controller.sendInput).toHaveBeenCalledTimes(6)
+    expect(bytesOf(controller.sendInput.mock.calls[0]![0])).toContain('\x1b[<1;')
+    expect(bytesOf(controller.sendInput.mock.calls[1]![0])).toContain('\x1b[<2;')
+    // move 掩码 buttons=4 映射中键，SGR 移动态为 1+32=33。
+    expect(bytesOf(controller.sendInput.mock.calls[4]![0])).toContain('\x1b[<33;')
+  })
+
+  it('clears a pending native copy buffer on the next real keydown', () => {
+    const controller = fakeController()
+    const session = snapshot({
+      streamId: STREAM_A,
+      view: mirror({ cols: 4, texts: ['ABC', 'DEF'] }),
+      hasControl: true,
+      status: 'RUNNING',
+    })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.mouseDown(input, { clientX: 0, clientY: 0, button: 0 })
+    fireEvent.mouseMove(input, { clientX: 16, clientY: 0, buttons: 1 })
+    fireEvent.keyDown(input, { key: 'c', ctrlKey: true })
+    // 本地复制把镜像文本放进 textarea，等待原生 copy 事件。
+    expect(input.value).toBe('AB')
+
+    // 浏览器没有派发 copy：下一次真实按键必须清掉缓冲区，且不得混入输入。
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(input.value).toBe('')
+    expect(controller.sendInput).toHaveBeenCalledTimes(1)
+    expect(bytesOf(controller.sendInput.mock.calls[0]![0])).toBe('\r')
+  })
+
+  it('ignores keydown while composing and empty or viewless paste', () => {
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror(), hasControl: true, status: 'RUNNING' })
+    const { rerender } = render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.keyDown(input, { key: 'a', keyCode: 229 })
+    fireEvent.paste(input, { clipboardData: { getData: () => '' } })
+    expect(controller.sendInput).not.toHaveBeenCalled()
+
+    // 无权威 view 时粘贴也不编码、不发送。
+    rerender(<TerminalViewport session={snapshot()} controller={asController(controller)} />)
+    fireEvent.paste(textarea(), { clipboardData: { getData: () => 'hi' } })
+    expect(controller.sendInput).not.toHaveBeenCalled()
+  })
+
+  it('keeps the mirrored size when it already matches the measured layout', () => {
+    setViewport(80, 90)
+    const controller = fakeController()
+    const session = snapshot({
+      streamId: STREAM_A,
+      view: mirror({ cols: 10, rows: 5, texts: ['a', 'b', 'c', 'd', 'e'] }),
+      hasControl: true,
+      status: 'RUNNING',
+      identity: { daemonInstanceId: 'd', terminalId: 't' },
+    })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    // 80/8=10 列、90/18=5 行，与镜像一致：记录尺寸但不重复提出。
+    expect(controller.resize).not.toHaveBeenCalled()
+  })
+
+  it('skips fitting when ResizeObserver is unavailable', () => {
+    vi.stubGlobal('ResizeObserver', undefined)
+    const controller = fakeController()
+    const session = snapshot({ streamId: STREAM_A, view: mirror(), hasControl: true, status: 'RUNNING' })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    expect(document.querySelector('.terminal-viewport')).not.toBeNull()
+  })
+
+  it('falls back to Ctrl+C 0x03 when the local selection copies to empty text', () => {
+    const controller = fakeController()
+    const session = snapshot({
+      streamId: STREAM_A,
+      view: mirror({ cols: 4, texts: ['', ''] }),
+      hasControl: true,
+      status: 'RUNNING',
+    })
+    render(<TerminalViewport session={session} controller={asController(controller)} />)
+
+    const input = textarea()
+    fireEvent.mouseDown(input, { clientX: 0, clientY: 0, button: 0 })
+    fireEvent.mouseMove(input, { clientX: 16, clientY: 0, buttons: 1 })
+    fireEvent.keyDown(input, { key: 'c', ctrlKey: true })
+
+    // 选中内容为空：不产生本地复制，仍按终端语义发送 0x03。
+    expect(controller.sendInput).toHaveBeenCalledTimes(1)
+    expect(bytesOf(controller.sendInput.mock.calls[0]![0])).toBe('\x03')
   })
 })

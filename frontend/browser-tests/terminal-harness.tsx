@@ -134,6 +134,9 @@ export interface TerminalHarnessApi {
   readonly sendInput: string[]
   readonly resize: { cols: number; rows: number }[]
   readonly applied: { streamId: string; version: number }[]
+  /** 最近一次原生 copy 事件携带的 text/plain；用于验证不依赖异步剪贴板 API。 */
+  lastCopy: string | null
+  watchCopy(): void
   clearLog(): void
   focusInput(): void
   typeText(text: string): void
@@ -164,6 +167,19 @@ window.__terminalHarness = {
   sendInput,
   resize,
   applied,
+  lastCopy: null,
+  watchCopy() {
+    window.__terminalHarness.lastCopy = null
+    // 挂在 document 冒泡阶段：晚于 React 在 root 容器上的 onCopy，能读到已 setData 的 clipboardData。
+    document.addEventListener(
+      'copy',
+      (event) => {
+        window.__terminalHarness.lastCopy =
+          (event as ClipboardEvent).clipboardData?.getData('text/plain') ?? ''
+      },
+      { once: true },
+    )
+  },
   clearLog() {
     sendInput.length = 0
     resize.length = 0

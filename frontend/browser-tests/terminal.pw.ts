@@ -32,6 +32,23 @@ const scrollState = (page: Page) =>
     }
   })
 
+/** Shift 覆盖 VT 上报，选中 COPY_ME 行（data-line 98）的前 7 列。 */
+const selectCopyLine = async (page: Page) => {
+  const line = page.locator('.terminal-grid__line[data-line="98"]')
+  await expect(line).toBeVisible()
+  const box = await line.boundingBox()
+  if (box === null) {
+    throw new Error('copy line box is missing')
+  }
+  await page.keyboard.down('Shift')
+  await page.mouse.move(box.x + 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 7 * 8 + 4, box.y + box.height / 2, { steps: 4 })
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
+  await expect(page.locator('.terminal-grid__selection').first()).toBeVisible()
+}
+
 test.describe('Global terminal panel (offline harness)', () => {
   test('shares height with the stage, keeps the page bounded and shows the prompt', async ({ page }) => {
     await page.goto(HARNESS)
@@ -130,27 +147,30 @@ test.describe('Global terminal panel (offline harness)', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto(HARNESS)
 
-    const line = page.locator('.terminal-grid__line[data-line="98"]')
-    await expect(line).toBeVisible()
-    const box = await line.boundingBox()
-    if (box === null) {
-      throw new Error('copy line box is missing')
-    }
-
-    // Shift 覆盖 VT 鼠标上报，改为本地槽选择；选中该行前 7 列（COPY_ME）。
-    await page.keyboard.down('Shift')
-    await page.mouse.move(box.x + 2, box.y + box.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(box.x + 7 * 8 + 4, box.y + box.height / 2, { steps: 4 })
-    await page.mouse.up()
-    await page.keyboard.up('Shift')
-    await expect(page.locator('.terminal-grid__selection').first()).toBeVisible()
-
+    await selectCopyLine(page)
     await page.locator('.terminal-viewport__input').focus()
     await page.keyboard.press('Control+c')
 
     const copied = await page.evaluate(() => navigator.clipboard.readText())
     expect(copied).toContain('COPY_ME')
+  })
+
+  test('copies via the copy event only, without the async clipboard API', async ({ page }) => {
+    // 移除 navigator.clipboard，证明复制只用原生 copy 事件，不依赖仅安全上下文可用的异步 API。
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, get: () => undefined })
+    })
+    await page.goto(HARNESS)
+    expect(await page.evaluate(() => navigator.clipboard === undefined)).toBe(true)
+
+    await page.evaluate(() => window.__terminalHarness.watchCopy())
+    await selectCopyLine(page)
+    await page.locator('.terminal-viewport__input').focus()
+    await page.keyboard.press('Control+c')
+
+    await expect
+      .poll(() => page.evaluate(() => window.__terminalHarness.lastCopy))
+      .toContain('COPY_ME')
   })
 
   test('keeps the browser paste path and encodes clipboard text', async ({ page, context }) => {

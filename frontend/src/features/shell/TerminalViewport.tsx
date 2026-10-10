@@ -139,7 +139,7 @@ export function TerminalViewport({ session, controller }: TerminalViewportProps)
   const selectionRef = useRef<StoredSelection | null>(null)
   const draggingRef = useRef(false)
   const composingRef = useRef(false)
-  const suppressNextInputRef = useRef(false)
+  const suppressNextInputRef = useRef<string | null>(null)
   const copyBufferRef = useRef(false)
   const pendingDrawRef = useRef(false)
   const frameRef = useRef<number | null>(null)
@@ -400,15 +400,16 @@ export function TerminalViewport({ session, controller }: TerminalViewportProps)
 
   const handleInput = (event: FormEvent<HTMLTextAreaElement>) => {
     const target = event.currentTarget
-    if (suppressNextInputRef.current) {
-      // 抑制 Chromium 在 compositionend 之后补发的最终 input（同一次提交）。
-      suppressNextInputRef.current = false
-      target.value = ''
-      return
-    }
     const value = target.value
     const native = event.nativeEvent as InputEvent
     if (value.length === 0 || native.isComposing || composingRef.current) {
+      return
+    }
+    // 只去重与刚提交组合完全一致的那一次最终 input；其余真实输入一律照常编码。
+    const suppressed = suppressNextInputRef.current
+    suppressNextInputRef.current = null
+    if (suppressed !== null && suppressed === value) {
+      target.value = ''
       return
     }
     target.value = ''
@@ -417,19 +418,24 @@ export function TerminalViewport({ session, controller }: TerminalViewportProps)
 
   const handleCompositionStart = () => {
     composingRef.current = true
+    // 新组合开始：丢弃上一轮可能残留的待去重提交。
+    suppressNextInputRef.current = null
   }
 
   const handleCompositionEnd = (event: CompositionEvent<HTMLTextAreaElement>) => {
     composingRef.current = false
     const target = event.currentTarget
-    const value = target.value
-    if (value.length === 0) {
+    // 优先 event.data：DOM 可能已被清空，但提交文本仍在事件里。
+    const committed = event.data != null && event.data.length > 0 ? event.data : target.value
+    if (committed.length === 0) {
+      // 组合被取消：不提交，也不保留待去重标记。
+      suppressNextInputRef.current = null
       return
     }
     target.value = ''
-    encodeAndDispatch(() => encodeTerminalText(value))
-    // Chromium 随后可能再发一次 value 相同的最终 input（isComposing:false）：抑制它。
-    suppressNextInputRef.current = true
+    encodeAndDispatch(() => encodeTerminalText(committed))
+    // 记录本次提交文本；仅当后续最终 input 与之完全一致时才忽略。
+    suppressNextInputRef.current = committed
   }
 
   const copySelectionToNative = (): boolean => {
@@ -461,13 +467,14 @@ export function TerminalViewport({ session, controller }: TerminalViewportProps)
       copyBufferRef.current = false
       input.value = ''
     }
-    suppressNextInputRef.current = false
 
     const native = event.nativeEvent
     if (native.isComposing || event.keyCode === 229) {
       // IME 组合期间保留候选行为（Esc/Tab/方向键交给输入法）。
       return
     }
+    // 真实按键：清除上一轮组合留下的待去重提交。
+    suppressNextInputRef.current = null
 
     const ctrl = event.ctrlKey
     const alt = event.altKey
@@ -492,24 +499,35 @@ export function TerminalViewport({ session, controller }: TerminalViewportProps)
       return
     }
     const altGraph = typeof event.getModifierState === 'function' ? event.getModifierState('AltGraph') : false
-    const bytes = encodeTerminalKey(
-      {
-        key,
-        code: event.code,
-        shift: event.shiftKey,
-        alt,
-        ctrl,
-        meta,
-        isComposing: native.isComposing,
-        altGraph,
-      },
-      currentModes,
-    )
+    let bytes: Uint8Array | null
+    try {
+      bytes = encodeTerminalKey(
+        {
+          key,
+          code: event.code,
+          shift: event.shiftKey,
+          alt,
+          ctrl,
+          meta,
+          isComposing: native.isComposing,
+          altGraph,
+        },
+        currentModes,
+      )
+    } catch (error) {
+      // 与文字/粘贴一致：本地协议拒绝只提示本次未发送，不把它升级为未捕获异常。
+      if (error instanceof TerminalInputError) {
+        setInputRejected(true)
+        return
+      }
+      throw error
+    }
     if (bytes !== null) {
       event.preventDefault()
-      encodeAndDispatch(() => bytes)
+      dispatch(bytes)
       return
     }
+    // 未编码的键保留浏览器默认行为（可打印字符走 onInput）；只有真实浏览器默认键才拦截。
     if (BROWSER_DEFAULT_KEYS.has(key)) {
       event.preventDefault()
     }
@@ -528,6 +546,8 @@ export function TerminalViewport({ session, controller }: TerminalViewportProps)
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    // 粘贴是独立提交：清掉上一轮组合的待去重标记。
+    suppressNextInputRef.current = null
     const text = event.clipboardData?.getData('text/plain') ?? ''
     if (text.length === 0) {
       return

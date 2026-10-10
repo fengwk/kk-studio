@@ -307,12 +307,16 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 [`TerminalProvider`](../../frontend/src/app/providers.tsx) 在应用事件层之下建立单一
 [`TerminalController`](../../frontend/src/features/shell/terminal-controller.ts)，复用唯一浏览器
 WebSocket 按环境维护会话状态机；公开快照只含 executable/status/notice/控制态与只读镜像，
-绝不暴露 writer token、grant 或待发字节。面板呈现环境页签、真实 executable/status 和控制动作，
-查询加载/失败使用 `StateBlock` 而不是“无环境”空态，离线或未就绪环境禁用 claim/takeover/terminate
-等控制动作，终止确认在打开时冻结目标，弹窗期间目标漂移则取消本次终止并提示。
+绝不暴露 writer token、grant 或待发字节。面板呈现环境页签、真实 executable/status 和控制动作。
+控制资格要求环境 READY、连接 open 且环境回读未失败；资格不足只把会话控制权降为只读并保留已有末屏，
+不销毁 viewport、不丢焦点，标题也不再显示“控制中”。加载/失败给出固定本地文案（不回显 `Error.message`），
+已有末屏时以旁提示呈现而不是替换屏幕，没有末屏才用 `StateBlock`。终止确认冻结
+environment/daemon/terminal/writer 完整目标，点击时按控制器当前快照复验活动环境、可见性、连接、
+环境 READY 与运行态，任一变化即取消并提示，绝不误伤切换后的新目标。
 
 [`TerminalViewport`](../../frontend/src/features/shell/TerminalViewport.tsx) 只读绘制数值镜像，
 输入层是覆盖其上的透明 textarea，使用 `readOnly` 而非 `disabled`，普通输出重绘不丢焦点。
+viewport 以 environmentId 为 key：切换环境必然重新挂载，绝不复用上一环境的网格。
 文字与 IME 走 `onInput` / `compositionend`（忽略 Chromium 在 compositionend 之后补发的最终
 input），特殊键、控件键与粘贴走既有 encoder；Ctrl/Cmd+C 在有本地槽选择时把镜像文本写入
 textarea 选择并走唯一原生复制路径（不依赖仅安全上下文可用的 `navigator.clipboard`），
