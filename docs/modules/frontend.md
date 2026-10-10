@@ -89,10 +89,13 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 其他原可见 pane 保持稳定挂载且置为 hidden 与 inert，输入控制区挂起，上传注册表保持挂载；
 单顶栏左上角提供“关闭 Debug”，不导航 `/chats`，不渲染会话返回行并隐藏布局选择器；
 退出时完整恢复原 layout、可见 pane、阅读滚动与焦点。主区域包含下一次请求预览、事件与详情：
-宽 Pane 三列，窄 Pane 页签切换，选择/关闭详情保留焦点返回路径；Escape 优先由内部检查器或
+宽 Pane 三列等宽，窄 Pane 页签切换，选择/关闭详情保留焦点返回路径；Escape 优先由内部检查器或
 弹层消费，未消费时才触发外层退出 Debug。Tool、Skill、Subagent 和 Cache 检查器展示结构化事实。
-诊断 GET 区分 NEXT_REQUEST_PREVIEW 与活动 FROZEN_INVOCATION，
-包含发送/过滤工具、稳定 Skill 路径与冻结请求，排除 credential、认证 header 和 Base64 正文。
+诊断 POST 携带当前界面选中的 model 与可空 environmentName，复用服务端只读规划；
+模型、环境与调用身份共同隔离查询，迟到响应不能覆盖当前选择，也不写回历史或触发执行。
+响应区分 NEXT_REQUEST_PREVIEW 与活动 FROZEN_INVOCATION，包含发送/过滤工具、稳定 Skill 路径
+与冻结请求，排除 credential、认证 header 和 Base64 正文。Subagent 详情展示自己的能力声明与
+配置 JSON，不递归展开下级；缓存 NONE 表示无显式缓存控制，不排除 Provider 自动缓存。
 
 下一次请求预览冻结草稿与附件身份，先读取最新 Snapshot，复验设置基线、空闲、队列与活动 Invocation，
 再用精确 cursor 请求 provider-request-preview。等待期间草稿或目标变更、组件卸载使迟到结果失效；
@@ -107,6 +110,8 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 ## Chat 提交与控制
 
 Chat 局部组件树以 `chat.id` 为 key，切换 Chat 时重建局部状态。
+Chat 新建/编辑设置默认 YOLO 与 Environment；新建默认为非 YOLO、未选择环境。
+仅新空白 pane 继承这些默认值；已有 Thread、分支草稿与 fork 沿各自历史恢复设置，不被改写。
 Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A，旧绑定的迟到结果
 也不能改写当前 UI 或清除新 pending 记录，原 Thread 的草稿持久化仍按自身身份处理。
 
