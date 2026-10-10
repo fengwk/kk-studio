@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -62,7 +63,8 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
               "dev",
               "/home/dev",
               "notify test daemon.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              DaemonArchitecture.AMD64));
 
   @Autowired private EnvironmentRegistry environmentRegistry;
 

@@ -41,11 +41,9 @@ APP_A_URL="http://127.0.0.1:$DISTRIBUTED_APP_A_PORT"
 APP_B_URL="http://127.0.0.1:$DISTRIBUTED_APP_B_PORT"
 DISTRIBUTED_ENV_A_NAME=${DISTRIBUTED_ENV_A_NAME:-distributed-a}
 DISTRIBUTED_ENV_B_NAME=${DISTRIBUTED_ENV_B_NAME:-distributed-b}
-DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}
-DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}
-export DISTRIBUTED_APP_A_PORT DISTRIBUTED_APP_B_PORT DISTRIBUTED_ENV_A_NAME DISTRIBUTED_ENV_B_NAME DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
+export DISTRIBUTED_APP_A_PORT DISTRIBUTED_APP_B_PORT DISTRIBUTED_ENV_A_NAME DISTRIBUTED_ENV_B_NAME
 
-SERVICES=(postgres minio minio-init http-mock app-a app-b workspace-init daemon-a daemon-b)
+SERVICES=(postgres minio minio-init http-mock app-a app-b)
 NODE_A_DB_NETWORK=kk-studio-distributed_node-a-db
 APP_A_CONTAINER=kk-studio-distributed-app-a-1
 
@@ -97,11 +95,6 @@ build_images() {
     --build-arg "KK_STUDIO_BUILD_HTTPS_PROXY=${KK_STUDIO_BUILD_HTTPS_PROXY:-}" \
     --build-arg "KK_STUDIO_BUILD_NO_PROXY=${KK_STUDIO_BUILD_NO_PROXY:-}" \
     --build-arg "KK_STUDIO_MAVEN_BUILD_OPTS=${KK_STUDIO_MAVEN_BUILD_OPTS:-}" \
-    "$REPO_ROOT"
-  step "Building daemon image"
-  docker build \
-    --file "$REPO_ROOT/deploy/reliability/daemon.Dockerfile" \
-    --tag "${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}" \
     "$REPO_ROOT"
 }
 
@@ -174,8 +167,6 @@ cmd_up() {
   "${COMPOSE[@]}" up -d --wait --no-build
   wait_http "$APP_A_URL/actuator/health" "app-a health"
   wait_http "$APP_B_URL/actuator/health" "app-b health"
-  wait_environment_ready "$APP_A_URL" "$DISTRIBUTED_ENV_A_NAME" a
-  wait_environment_ready "$APP_B_URL" "$DISTRIBUTED_ENV_B_NAME" b
   step "Distributed stack is up"
   step "app-a: $APP_A_URL  app-b: $APP_B_URL"
 }

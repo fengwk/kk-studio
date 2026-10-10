@@ -26,7 +26,7 @@ function fail(field: string): never {
 // eslint-disable-next-line no-control-regex
 const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
 const operatingSystems = ['linux', 'macos', 'windows'] as const
-const topLevelFields = ['operatingSystem', 'javaHome', 'daemon']
+const topLevelFields = ['operatingSystem', 'daemon']
 const daemonFields = ['studioUrl', 'note', 'bashExecutable', 'lsp']
 const serverFields = ['command', 'extensions', 'rootMarkers', 'firstMatchMarkers']
 const serverIdPattern = /^[A-Za-z0-9_.-]+$/
@@ -91,23 +91,6 @@ function bashExecutable(value: unknown): string | null {
   if (raw === null) return null
   if (raw.trim().length === 0 || controls.test(raw)) fail('daemon.bashExecutable')
   return raw
-}
-
-/** 与后端 `EnvironmentInstallConfigs.validate` 相同的绝对路径与占位符规则。 */
-function javaHome(value: unknown, os: InstallOperatingSystem): string | null {
-  const home = stringOrNull(value, 'installConfig.javaHome')
-  if (home === null) return null
-  const windows = os === 'windows'
-  const absolute = windows
-    ? /^[A-Za-z]:[\\/]/.test(home) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(home)
-    : home.startsWith('/')
-  const pathPart = /^[A-Za-z]:/.test(home) ? home.slice(2) : home
-  const invalidWindowsCharacters = windows && [...pathPart].some(char => '<>:"|?*'.includes(char))
-  if (!absolute || invalidWindowsCharacters || home.trim().length === 0 || controls.test(home)
-    || home.includes('$') || home.includes('%') || home.includes('~') || home !== home.trim()) {
-    fail('installConfig.javaHome')
-  }
-  return home
 }
 
 function stringList(
@@ -187,11 +170,9 @@ export function validateInstallConfig(
   if (typeof os !== 'string' || !(operatingSystems as readonly string[]).includes(os)) {
     fail('installConfig.operatingSystem')
   }
-  const home = javaHome(config.javaHome, os as InstallOperatingSystem)
   if (!isPlainObject(config.daemon) || hasUnknownField(config.daemon, daemonFields)) fail('daemon')
   return {
     operatingSystem: os as InstallOperatingSystem,
-    javaHome: home,
     daemon: {
       studioUrl: origin(config.daemon.studioUrl),
       note: note(config.daemon.note),
