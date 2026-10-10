@@ -81,7 +81,7 @@ export function CreateChatModal({
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             {t('shared.cancel')}
           </Button>
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" loading={pending}>
             {submitLabel}
           </Button>
         </div>

@@ -123,8 +123,8 @@ export function CreateProjectModal({
             <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
               {t('projects.cancel')}
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? t('projects.create.submitting') : t('projects.create.submit')}
+            <Button type="submit" loading={isSubmitting}>
+              {t('projects.create.submit')}
             </Button>
           </div>
         </form>

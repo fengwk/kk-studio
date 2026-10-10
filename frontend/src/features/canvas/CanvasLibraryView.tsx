@@ -6,6 +6,7 @@ import { createCanvas, listCanvases } from '@/shared/api/studio-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
+import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -100,9 +101,7 @@ export function CanvasLibraryView() {
         </header>
 
         {canvasesQuery.isLoading ? (
-          <div role="status">
-            <StateBlock title={t('canvas.library.loading')} />
-          </div>
+          <ResourceCardSkeleton label={t('canvas.library.loading')} />
         ) : null}
         {canvasesQuery.isError ? (
           <div className="library-load-error" role="alert">
@@ -118,33 +117,35 @@ export function CanvasLibraryView() {
           </div>
         ) : null}
 
-        <ResourceGrid>
-          <CreateCard
-            title={t('canvas.library.createTitle')}
-            subtitle={t('canvas.library.createSubtitle')}
-            onClick={openCreateDialog}
-          />
-          {canvases.map((canvas) => (
-            <ResourceCard
-              key={canvas.id}
-              icon={<Grid2X2 aria-hidden="true" />}
-              title={canvas.title}
-              meta={[
-                [t('canvas.library.updatedAt'), formatUpdatedAt(canvas.updatedAt, locale)],
-              ]}
-              actions={
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  aria-label={t('canvas.library.openAria', { title: canvas.title })}
-                  onClick={() => navigate(`/canvas/${canvas.id}`)}
-                >
-                  {t('canvas.library.open')}
-                </Button>
-              }
+        {!canvasesQuery.isLoading && (
+          <ResourceGrid>
+            <CreateCard
+              title={t('canvas.library.createTitle')}
+              subtitle={t('canvas.library.createSubtitle')}
+              onClick={openCreateDialog}
             />
-          ))}
-        </ResourceGrid>
+            {canvases.map((canvas) => (
+              <ResourceCard
+                key={canvas.id}
+                icon={<Grid2X2 aria-hidden="true" />}
+                title={canvas.title}
+                meta={[
+                  [t('canvas.library.updatedAt'), formatUpdatedAt(canvas.updatedAt, locale)],
+                ]}
+                actions={
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    aria-label={t('canvas.library.openAria', { title: canvas.title })}
+                    onClick={() => navigate(`/canvas/${canvas.id}`)}
+                  >
+                    {t('canvas.library.open')}
+                  </Button>
+                }
+              />
+            ))}
+          </ResourceGrid>
+        )}
       </div>
 
       {createOpen ? (
@@ -182,7 +183,7 @@ export function CanvasLibraryView() {
               >
                 {t('shared.cancel')}
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
+              <Button type="submit" loading={createMutation.isPending}>
                 {t('canvas.library.createConfirm')}
               </Button>
             </div>

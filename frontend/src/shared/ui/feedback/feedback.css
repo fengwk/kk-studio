@@ -95,3 +95,48 @@
     animation: none;
   }
 }
+
+/* 主题加载指示器与旋转器 */
+.ui-loading-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  line-height: 1;
+}
+
+.ui-loading-spinner-icon {
+  animation: ui-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.ui-loading-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  min-height: 64px;
+}
+
+.ui-loading-indicator-label {
+  user-select: none;
+}
+
+@keyframes ui-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-loading-spinner-icon {
+    animation: none;
+  }
+}
+

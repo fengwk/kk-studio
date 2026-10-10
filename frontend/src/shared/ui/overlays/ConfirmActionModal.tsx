@@ -1,4 +1,5 @@
 import { RefreshCw, Trash2 } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import { useI18n } from '@/shared/i18n'
@@ -44,23 +45,22 @@ export function ConfirmActionModal({
         ) : null}
       </div>
       <div className="modal-footer">
-        <button
-          type="button"
-          className="ghost-btn"
+        <Button
+          variant="ghost"
           data-autofocus
           onClick={onClose}
           disabled={pending}
         >
           {t('shared.cancel')}
-        </button>
-        <button
-          type="button"
-          className={`btn-primary ${modal.tone === 'danger' ? 'danger' : ''}`}
+        </Button>
+        <Button
+          variant="primary"
+          danger={modal.tone === 'danger'}
           onClick={modal.onConfirm}
-          disabled={pending}
+          loading={pending}
         >
           {modal.confirmLabel ?? t('shared.confirm')}
-        </button>
+        </Button>
       </div>
     </Dialog>
   )
