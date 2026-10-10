@@ -112,6 +112,11 @@ kk-studio:
       max-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES:16777216}
       # 单帧发送超时；慢连接按传输失败关闭，不阻塞 Gateway。
       send-timeout: ${KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT:10s}
+    ide:
+      # IDE 独立 Origin 模板，必须含 {environmentId} 占位符；留空表示本部署不提供 IDE 视图能力，不回退 Studio 同源。
+      origin-template: ${KK_STUDIO_IDE_ORIGIN_TEMPLATE:}
+      # IDE bootstrap 入口路径（受控 endpoint，不接受浏览器提供的任意 proxy 地址）。
+      bootstrap-path: ${KK_STUDIO_IDE_BOOTSTRAP_PATH:/__ide/bootstrap}
   canvas:
     function:
       runtime:
