@@ -96,6 +96,33 @@ describe('ChatCard', () => {
     expect(screen.queryByLabelText('assistant （已删除/缺失）')).not.toBeInTheDocument()
   })
 
+  it('renders YOLO tag and environment name in metadata when configured', () => {
+    const { rerender } = render(
+      <MemoryRouter>
+        <ChatCard
+          chat={{ ...chat(), yoloEnabled: true, environmentName: 'docker-node' }}
+          agents={[{ ...agent(), name: 'missing' }]}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('YOLO 模式')).toBeInTheDocument()
+    expect(screen.getByText('开启')).toBeInTheDocument()
+    expect(screen.getByText('docker-node')).toBeInTheDocument()
+
+    rerender(
+      <MemoryRouter>
+        <ChatCard
+          chat={{ ...chat(), yoloEnabled: false, environmentName: null }}
+          agents={[{ ...agent(), name: 'missing' }]}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('关闭')).toBeInTheDocument()
+    expect(screen.getByText('不选择环境')).toBeInTheDocument()
+  })
+
   // 验证 ChatCard 符合共享 ResourceCard 规范：非交互外壳、包含标题属性与动作槽按钮
   it('conforms to shared ResourceCard contract with non-interactive shell and explicit action buttons', () => {
     const { container } = render(
@@ -187,6 +214,7 @@ function chat() {
     title: 'Draft',
     agentName: 'missing',
     yoloEnabled: false,
+    environmentName: null,
     version: '1',
     createTime: null,
     updateTime: null,

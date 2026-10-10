@@ -133,6 +133,46 @@ describe('BranchDraft materialization failures', () => {
     const missingVariantAgent = { ...withUnknownVariant, variant: 'missing' }
     expect(materializeBlankBranchDraft(missingVariantAgent, false, [model])).toBeNull()
   })
+
+  it('materializes blank draft with optional default environment and defaults to null', () => {
+    const custom = materializeBlankBranchDraft(agent([], [], []), true, [model], 'ubuntu')
+    expect(custom?.environmentName).toBe('ubuntu')
+    expect(custom?.yoloEnabled).toBe(true)
+
+    const defaultNull = materializeBlankBranchDraft(agent([], [], []), false, [model])
+    expect(defaultNull?.environmentName).toBeNull()
+    expect(defaultNull?.yoloEnabled).toBe(false)
+  })
+
+  it('preserves existing draft environment when switching Agent and does not overwrite with Chat fallback', () => {
+    const existing: BranchDraft = {
+      agentName: 'assistant',
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      environmentName: 'existing-env',
+      yoloEnabled: false,
+    }
+    const switched = materializeAgentBranchDraft(
+      agent([], [], []),
+      [model],
+      existing,
+      true,
+      'chat-fallback-env',
+    )
+    expect(switched?.environmentName).toBe('existing-env')
+    expect(switched?.yoloEnabled).toBe(false)
+  })
+
+  it('uses fallback environment when switching Agent with null existing draft', () => {
+    const fresh = materializeAgentBranchDraft(
+      agent([], [], []),
+      [model],
+      null,
+      true,
+      'chat-fallback-env',
+    )
+    expect(fresh?.environmentName).toBe('chat-fallback-env')
+    expect(fresh?.yoloEnabled).toBe(true)
+  })
 })
 
 describe('BranchDraft conversion and diff semantics', () => {

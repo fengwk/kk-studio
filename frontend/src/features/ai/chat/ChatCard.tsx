@@ -48,6 +48,14 @@ export function ChatCard({
       subtitle={t('ai.chat.chatLabel')}
       meta={[
         [t('ai.chat.agent'), agentLabel],
+        [
+          t('projects.yolo'),
+          chat.yoloEnabled ? t('projects.yoloEnabled') : t('projects.yoloDisabled'),
+        ],
+        [
+          t('ai.chat.defaultEnvironment'),
+          chat.environmentName || t('ai.chat.noEnvironment'),
+        ],
         [t('ai.chat.updated'), formatBackendDate(chat.updateTime)],
       ]}
       actions={

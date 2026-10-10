@@ -225,10 +225,6 @@ export const settingsCatalog = {
     'en-US': 'Takes effect on next invocation',
     'zh-CN': '下次调用生效',
   },
-  'settings.applyTiming.nextChat': {
-    'en-US': 'Applies to newly created chats',
-    'zh-CN': '新建对话生效',
-  },
   'settings.applyTiming.restart': {
     'en-US': 'Restart required',
     'zh-CN': '重启后生效',
@@ -500,14 +496,6 @@ export const settingsCatalog = {
     'en-US': 'Access control rules for tool execution. Rules are evaluated top-to-bottom in order; the first matching rule determines whether to allow, ask, or deny.',
     'zh-CN': '工具执行的访问控制规则列表。按顺序自上而下匹配，首条匹配的规则决定该工具是直接允许、弹出审批还是直接拒绝。',
   },
-  'settings.section.tool.yolo.title': {
-    'en-US': 'Default YOLO',
-    'zh-CN': '默认 YOLO',
-  },
-  'settings.section.tool.yolo.description': {
-    'en-US': 'Whether tools run without approval by default. Applies to the next invocation.',
-    'zh-CN': '是否默认在无审批下运行工具；对下一次调用立即生效。',
-  },
   'settings.section.tool.gateway.title': {
     'en-US': 'Tool gateway & skill loading',
     'zh-CN': '工具网关与技能加载',
@@ -515,14 +503,6 @@ export const settingsCatalog = {
   'settings.section.tool.gateway.description': {
     'en-US': 'Retry and skill-load budgets. Applies to the next invocation.',
     'zh-CN': '重试与技能加载预算；对下一次调用立即生效。',
-  },
-  'settings.field.tool.defaultYolo': {
-    'en-US': 'Default YOLO',
-    'zh-CN': '默认 YOLO',
-  },
-  'settings.field.tool.defaultYolo.hint': {
-    'en-US': 'Whether YOLO mode is enabled by default for new conversations. When enabled, tool executions bypass manual approval.',
-    'zh-CN': '新建对话时是否默认开启 YOLO 模式。开启后执行工具将跳过人工审批直接运行。',
   },
   'settings.field.tool.modelGatewayBusyRetryMillis': {
     'en-US': 'Model gateway busy retry (ms)',

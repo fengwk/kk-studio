@@ -25,7 +25,7 @@ function chat() {
     id: CHAT_ID,
     title: 'Branch Chat',
     agentName: 'assistant',
-    environment: null,
+    environmentName: null,
     yoloEnabled: false,
     version: '1',
     createTime: null,

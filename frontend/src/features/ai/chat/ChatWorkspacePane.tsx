@@ -47,6 +47,7 @@ export function ChatWorkspacePane({
       defaults={{
         agentName: chat.agentName,
         yoloEnabled: chat.yoloEnabled,
+        environmentName: chat.environmentName,
       }}
       focused={focused}
       hidden={hidden}

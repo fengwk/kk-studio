@@ -6,6 +6,7 @@ export interface ChatDTO {
   title: string | null
   agentName: string
   yoloEnabled: boolean
+  environmentName: string | null
   version: CatalogVersion
   createTime: InstantTimestamp
   updateTime: InstantTimestamp
@@ -15,11 +16,13 @@ export interface ChatCreateDTO {
   title?: string
   agentName: string
   yoloEnabled?: boolean
+  environmentName?: string | null
 }
 
 export interface ChatUpdateDTO {
   title?: string | null
   agentName?: string | null
   yoloEnabled?: boolean | null
+  environmentName?: string | null
   expectedVersion: CatalogVersion
 }

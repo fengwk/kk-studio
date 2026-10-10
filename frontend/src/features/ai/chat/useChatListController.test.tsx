@@ -107,11 +107,13 @@ describe('useChatListController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: 'Hello',
         agentName: 'assistant',
+        yoloEnabled: false,
+        environmentName: null,
       }),
     )
   })
 
-  // 验证切换 Agent 后提交：Chat 只持久化 title/agentName，不再有任何目录状态
+  // 验证切换 Agent 后提交：Chat 只持久化 title/agentName/yolo/environment，不再有任何目录状态
   it('creates a Chat after switching Agent without any workspace state', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) => (
@@ -134,6 +136,8 @@ describe('useChatListController', () => {
       expect(lastCall[0]).toEqual({
         title: 'Chat',
         agentName: 'coder',
+        yoloEnabled: false,
+        environmentName: null,
       })
     })
   })
@@ -154,6 +158,7 @@ describe('useChatListController', () => {
       title: 'Original Title',
       agentName: 'assistant',
       yoloEnabled: false,
+      environmentName: null,
       version: '5',
       createTime: null,
       updateTime: null,
@@ -164,6 +169,8 @@ describe('useChatListController', () => {
     expect(result.current.createChatModal.mode).toBe('edit')
     expect(result.current.createChatModal.title).toBe('Original Title')
     expect(result.current.createChatModal.selectedAgentName).toBe('assistant')
+    expect(result.current.createChatModal.yoloEnabled).toBe(false)
+    expect(result.current.createChatModal.selectedEnvironmentName).toBeNull()
 
     act(() => {
       result.current.createChatModal.onTitleChange('Renamed Chat')
@@ -178,9 +185,83 @@ describe('useChatListController', () => {
       expect(chatService.updateChat).toHaveBeenCalledWith('chat-42', {
         title: 'Renamed Chat',
         agentName: 'coder',
+        yoloEnabled: false,
+        environmentName: null,
         expectedVersion: '5',
       })
       expect(result.current.createChatModal.open).toBe(false)
+    })
+  })
+
+  it('creates a Chat with custom YOLO and environment selection', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
+    act(() => result.current.openCreateChat('assistant'))
+    act(() => {
+      result.current.createChatModal.onTitleChange('YOLO Chat')
+      result.current.createChatModal.onYoloChange(true)
+      result.current.createChatModal.onSelectEnvironment('ubuntu')
+    })
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+    await waitFor(() => {
+      expect(chatService.createChat).toHaveBeenCalledWith({
+        title: 'YOLO Chat',
+        agentName: 'assistant',
+        yoloEnabled: true,
+        environmentName: 'ubuntu',
+      })
+    })
+  })
+
+  it('edits a Chat clearing environment to explicit null and toggling YOLO', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
+
+    const existingChat = {
+      id: 'chat-99',
+      title: 'Server Chat',
+      agentName: 'coder',
+      yoloEnabled: false,
+      environmentName: 'production',
+      version: '2',
+      createTime: null,
+      updateTime: null,
+    }
+
+    act(() => result.current.openEditChat(existingChat))
+    expect(result.current.createChatModal.selectedEnvironmentName).toBe('production')
+
+    act(() => {
+      result.current.createChatModal.onYoloChange(true)
+      result.current.createChatModal.onSelectEnvironment(null)
+    })
+
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+
+    await waitFor(() => {
+      expect(chatService.updateChat).toHaveBeenCalledWith('chat-99', {
+        title: 'Server Chat',
+        agentName: 'coder',
+        yoloEnabled: true,
+        environmentName: null,
+        expectedVersion: '2',
+      })
     })
   })
 
