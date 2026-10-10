@@ -317,7 +317,9 @@ beforeEach(() => {
   })
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
   // Debug 结构化投影默认不可用：只有显式声明的用例才渲染 Debug 区。
-  vi.mocked(harnessService.getModelRequestDebug).mockReset()
+  vi.mocked(harnessService.getModelRequestDebug)
+    .mockReset()
+    .mockRejectedValue(new Error('Debug fixture unavailable'))
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   // 无活跃后代仍返回真实根；空数组不符合执行树读取契约。
   vi.mocked(harnessService.getThreadTree).mockImplementation(async (threadId) => [

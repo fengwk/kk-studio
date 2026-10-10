@@ -30,7 +30,7 @@ const selectorDates = [
   { id: 'array', value: [2026, 10, 8, 13, 15] },
 ]
 
-function Harness() {
+export function Harness() {
   return (
     <MemoryRouter>
       <main style={{ padding: 16, maxWidth: 700, margin: '0 auto' }}>
