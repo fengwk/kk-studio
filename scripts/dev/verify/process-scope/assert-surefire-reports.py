@@ -10,8 +10,18 @@ import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 CODING_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.coding."
+DAEMON_PACKAGE = "fun.fengwk.kkstudio.harness.daemon."
 PROCESS_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.process."
 TERMINAL_PACKAGE = "fun.fengwk.kkstudio.harness.daemon.terminal."
+
+# Daemon 运行时协议/生命周期与真实 server 桥接集成测试位于 daemon 根包；它们不属于 coding 子包。
+DAEMON_PACKAGE_CLASSES = frozenset(
+    {
+        "DaemonRuntimeTest",
+        "DaemonRuntimeShellTest",
+        "DaemonTerminalServerIntegrationTest",
+    }
+)
 
 # 进程基座类已经整体迁到 daemon.process；终端内核与 launch 规格在 daemon.terminal；其余被选中的类仍在 daemon.coding。
 PROCESS_PACKAGE_CLASSES = frozenset(
@@ -47,6 +57,8 @@ TERMINAL_PACKAGE_CLASSES = frozenset(
 
 
 def package_of(class_name: str) -> str:
+    if class_name in DAEMON_PACKAGE_CLASSES:
+        return DAEMON_PACKAGE
     if class_name in PROCESS_PACKAGE_CLASSES:
         return PROCESS_PACKAGE
     if class_name in TERMINAL_PACKAGE_CLASSES:
@@ -171,6 +183,22 @@ TERMINAL_COORDINATOR_REQUIRED_CASES = {
     "snapshotFailureEmitsFixedErrorAndRejectsLaterAttach",
 }
 
+# Daemon 运行时生命周期（绑定闸门、迟到 WELCOME、READY 递交失败、mailbox 满 NOT_EXECUTED、shutdown 失败面、
+# 并发关闭）与真实 EnvironmentDaemonServer 协议桥接的完整 PTY 生命周期都没有平台前置条件，三平台都必须真跑且不得跳过。
+DAEMON_RUNTIME_SHELL_REQUIRED_CASES = {
+    "bindGateHoldsReadyUntilBindCompletes",
+    "bindBackpressureClosesHandshakeAndRecovers",
+    "staleWelcomeDoesNotOverwriteNewBinding",
+    "readySendFailureClosesHandshakeAndReconnects",
+    "mailboxOverflowEmitsBackpressureNotExecuted",
+    "shutdownFailureIsExplicitAndConvergesResources",
+    "concurrentCloseIsIdempotent",
+}
+
+DAEMON_SERVER_INTEGRATION_REQUIRED_CASES = {
+    "fullShellLifecycleOverRealServerAndPty",
+}
+
 # 核心验收：只用 JDK 夹具造真实进程层级，任何平台都没有跳过它们的理由。
 REQUIRED_CASES = {
     "fun.fengwk.kkstudio.harness.daemon.process.ProcessScopeCrossPlatformTest": {
@@ -192,6 +220,9 @@ REQUIRED_CASES = {
     TERMINAL_PACKAGE + "TerminalRuntimeRealPtyTest": TERMINAL_RUNTIME_PTY_REQUIRED_CASES,
     TERMINAL_PACKAGE + "TerminalWriterTest": TERMINAL_WRITER_REQUIRED_CASES,
     TERMINAL_PACKAGE + "TerminalCoordinatorTest": TERMINAL_COORDINATOR_REQUIRED_CASES,
+    DAEMON_PACKAGE + "DaemonRuntimeShellTest": DAEMON_RUNTIME_SHELL_REQUIRED_CASES,
+    DAEMON_PACKAGE
+    + "DaemonTerminalServerIntegrationTest": DAEMON_SERVER_INTEGRATION_REQUIRED_CASES,
 }
 
 # Windows 腿仍然要有「用真正的 Git Bash 跑通命令执行」的实证：BashCapabilityTest 自己显式定位 Git Bash（runner 上就是
@@ -281,6 +312,9 @@ SELECTED_CLASSES = (
     "TerminalRuntimeRealPtyTest",
     "TerminalWriterTest",
     "TerminalCoordinatorTest",
+    "DaemonRuntimeTest",
+    "DaemonRuntimeShellTest",
+    "DaemonTerminalServerIntegrationTest",
 )
 
 

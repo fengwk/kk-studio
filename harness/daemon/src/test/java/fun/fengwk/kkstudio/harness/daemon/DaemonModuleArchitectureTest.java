@@ -162,6 +162,36 @@ class DaemonModuleArchitectureTest {
     assertTrue(shareDependency, "daemon must directly declare the shared configuration dependency");
   }
 
+  @Test
+  void daemonPomKeepsEnvironmentServerDependencyTestScoped() throws IOException {
+    // 生产 main 绝不能依赖 environment-server：它只以 test scope 出现在协议桥接集成测试里。
+    // 这里按 scope 精确过滤，而不是把 server 包平铺进允许清单放宽生产边界。
+    Path moduleRoot = locateDaemonMainJava().getParent().getParent().getParent();
+    Path pom = moduleRoot.resolve("pom.xml");
+    String text = Files.readString(pom, StandardCharsets.UTF_8);
+    Matcher matcher =
+        Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(text);
+    boolean testScoped = false;
+    List<String> violations = new ArrayList<>();
+    while (matcher.find()) {
+      String dependency = matcher.group(1);
+      String artifactId = requiredTag(dependency, "artifactId");
+      if (!"kk-studio-harness-environment-server".equals(artifactId)) {
+        continue;
+      }
+      if (!"fun.fengwk.kk-studio".equals(requiredTag(dependency, "groupId"))) {
+        violations.add("environment-server dependency must use the project groupId");
+      }
+      if ("test".equals(optionalTag(dependency, "scope"))) {
+        testScoped = true;
+      } else {
+        violations.add("environment-server dependency must be test scoped");
+      }
+    }
+    assertTrue(testScoped, "daemon must declare the environment-server dependency for tests");
+    assertTrue(violations.isEmpty(), () -> "environment-server scope violations: " + violations);
+  }
+
   private static List<String> scanViolations(Path main) throws IOException {
     List<String> violations = new ArrayList<>();
     try (Stream<Path> stream = Files.walk(main)) {

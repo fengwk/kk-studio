@@ -117,6 +117,12 @@
             <artifactId>kk-studio-harness-environment</artifactId>
         </dependency>
         <dependency>
+            <!-- 仅测试作用域：daemon 与真实 EnvironmentDaemonServer 的协议桥接集成测试；生产 main 绝不依赖 server 包。 -->
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-environment-server</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>

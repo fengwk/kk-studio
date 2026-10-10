@@ -33,7 +33,7 @@ POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File`
 
 [`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java) 在运行时构造结束前冻结，生产装配必须与共享 catalog 完全一致：9 项编码能力，以及内部 `skill.sync`。LSP 没配置时仍注册对应能力，但查询返回明确的不可用错误。MCP 由 Platform 在 Backend 内承载，不进入 Daemon。
 
-[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 独占三类执行资源：
+[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 拥有两类彼此分离的执行资源。能力（capability）侧：
 
 | 资源 | 用途 |
 | --- | --- |
@@ -41,7 +41,15 @@ POSIX 目录为 0700、文件为 0600；非 POSIX 文件系统退回 Java `File`
 | virtual-thread-per-task executor | 编码能力的阻塞任务 |
 | 平台线程缓存池 | LSP stdio 阻塞 I/O |
 
+人工 shell 侧另有一组由唯一 `TerminalCoordinator` 独占的资源：串行 owner、VT executor、可并发阻塞的 I/O executor 与专用 scheduler，再加一个预启动 worker 的生命周期 executor 承担整体 shutdown 的阻塞汇合。这些资源与能力侧分离，避免有限资源阻塞终端生命周期、reader 或 writer；生命周期 executor 保证唯一一次 shutdown 入队不会被拒绝，且任何回调线程都不内联阻塞。
+
 构造失败释放已创建资源。`start()` 幂等；断开后指数退避，上限由配置决定，连接成功后重置。每次连接有新代际，旧连接回调不再推进当前状态。注册被拒进入 FAILED、停止重连并使进程非零退出；`RETRY_LATER` 则退避重连。
+
+### 握手闸门与 READY
+
+HELLO 只声明协议版本、注册凭证、能力目录版本与 `daemonInstanceId`，不带 Environment scope。收到 WELCOME 后先在生命周期锁内复核仍是当前连接、代际未过期且运行时未停止/关闭，才提交 Environment 绑定与资源字节预算；绑定在协调器 owner 上串行完成，完成前绝不 READY。只有 READY 成功进入传输且连接仍是当前代际时才放行上传控制帧；READY 同步或异步递交失败都关闭该握手并由既有重连恢复，不悬挂也不保留假 READY。迟到的旧连接 WELCOME 不能覆盖新连接的绑定。断线只重置绑定、预算与等待票据，`disconnect(generation)` 清观察 route 但保留 shell 与 writer 租期；同 instance 重连后 ATTACH 保持 `terminalId`。
+
+入站 `SHELL_COMMAND` 要求连接已 READY 且 envelope scope 与内层 `command.environmentId` 一致，再按当前代际递交协调器；只有 mailbox 满与协调器已关闭这两类「确定未受理」失败映射为固定 NOT_EXECUTED 回执，受理后异常走明确生命周期失败。协调器事件按连接的认证绑定编码为 `SHELL_EVENT` 回传，作用域取自事件本身而非可并发变更的全局绑定。画面事件只承载结构化单元格，不传输原始 PTY 字节。
 
 INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已有条目直接重放；新调用检查能力标识、版本和 arguments schema，使用 wire 的有效超时，不回落 descriptor 默认值。运行时预检通过才发送 STARTED，然后进入能力执行。STARTED 不保证宿主命令已经启动，能力自己的路径或进程启动预检仍可能失败。
 
@@ -51,7 +59,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 能力可通过 `terminationGrace()` 声明有界收尾预算。运行时先开启窗口和兜底定时器，再请求收尾；预算内返回的能力文本追加到裁决正文，保留终态类型，便于失败时带回已捕获输出。超大文本不注入；兜底到期或调度器不可用则直接提交裁决。journal 的 RUNNING → terminal 原子跃迁只允许一次终态。
 
-关闭运行时时先关闭连接与传输，取消在途调用并尝试写入 CANCELLED，清空运行集合，再关闭 LSP 等能力资源，最后依次关闭任务、LSP、调度执行器（各最多等待 5 秒）。**不会清空 journal 的已有条目**，但 journal 是内存数据，进程结束后丢失。
+关闭运行时先关闭连接与传输，逐项取消在途调用并尝试写入 CANCELLED（单项失败隔离，不跳过其余项），清空运行集合，再汇合唯一终端协调器（有界等待），随后关闭 LSP 等能力资源，最后停止全部执行资源（各最多等待 5 秒）。整个清理在专用生命周期 executor 上执行，owner/VT/IO/scheduler 与 capability 回调线程都不内联阻塞。任一能力项收尾失败、终端协调器未收敛，或终端执行资源未在预算内停止，都以固定去敏失败显式收敛为 FAILED：`failureReason()` 给出该事实，`close()` 在异常边界抛出，`awaitTermination()` 返回 FAILED，绝不假装干净关闭。**不会清空 journal 的已有条目**，但 journal 是内存数据，进程结束后丢失。
 
 ### 实例身份与重连恢复
 
@@ -170,6 +178,6 @@ COMPLETED(uploadId 与权威元数据)
 | `daemon.skill` | exact commit 的技能包拉取、校验、替换与启动恢复 |
 | `daemon.transport` | WebSocket 文本传输、压缩协商与帧边界 |
 
-包名前缀为 `fun.fengwk.kkstudio.harness`。依赖、import 与执行器所有权由 [`DaemonModuleArchitectureTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)守卫。启动与凭证测试见 [`DaemonConfigTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonTokenFileTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFileTest.java)；重连、journal、收尾窗口与上传恢复见 [`DaemonRuntimeTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)；目录锁与启动清理见 [`DaemonDataDirectoryTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectoryTest.java)。
+包名前缀为 `fun.fengwk.kkstudio.harness`。依赖、import 与执行器所有权由 [`DaemonModuleArchitectureTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)守卫（含 environment-server 只允许 test scope 的精确检查）。启动与凭证测试见 [`DaemonConfigTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonTokenFileTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFileTest.java)；重连、journal、收尾窗口与上传恢复见 [`DaemonRuntimeTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)；v3 绑定闸门、迟到 WELCOME、READY 递交失败、mailbox 满 NOT_EXECUTED、关闭失败面与并发关闭见 [`DaemonRuntimeShellTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeShellTest.java)；Daemon 与真实 [`EnvironmentDaemonServer`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 的协议桥接加真实 PTY 端到端见 [`DaemonTerminalServerIntegrationTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonTerminalServerIntegrationTest.java)；目录锁与启动清理见 [`DaemonDataDirectoryTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectoryTest.java)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Harness Environment Server](harness-environment-server.md)、[Harness MCP](harness-mcp.md)、[Environment Daemon 安装与运行](../operations/environment-daemon.md)。

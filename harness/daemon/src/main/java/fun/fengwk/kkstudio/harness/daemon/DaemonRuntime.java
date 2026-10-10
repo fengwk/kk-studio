@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.skill.SkillPackageInstaller;
+import fun.fengwk.kkstudio.harness.daemon.terminal.TerminalCoordinator;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
@@ -44,6 +45,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader;
+import fun.fengwk.kkstudio.harness.environment.terminal.ErrorCode;
+import fun.fengwk.kkstudio.harness.environment.terminal.ErrorDisposition;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalControlCodec;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalEvent;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalRequest;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalResponse;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -54,15 +61,22 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -83,13 +97,20 @@ import java.util.function.UnaryOperator;
  *
  * <p>每次连接尝试由独立的 {@code connectionGeneration} 标识，隔离跨连接事件干扰；wire 协议没有序号，入站消息不做跨消息顺序校验。
  *
- * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
- * virtual-thread-per-task executor 处理 Coding/目录浏览等阻塞调用与 Git 网络取消观察。transport/JDK 内部线程不在该生命周期内。
+ * <p>Capability 侧执行资源由单线程 scheduler（heartbeat、reconnect 与 timeout）与共享的 virtual-thread-per-task
+ * executor （Coding/目录浏览等阻塞调用与 Git 网络取消观察）组成。transport/JDK 内部线程不在该生命周期内。
+ *
+ * <p>人工 shell 由构造期创建的唯一 {@link TerminalCoordinator} 承载，使用独立的串行 owner/VT、可并发阻塞的 I/O executor 与专用
+ * scheduler；这些资源与上述 capability 执行资源分离，避免有限资源阻塞终端生命周期、reader 或 writer。整体 shutdown 的阻塞汇合只在专用生命周期
+ * executor 上执行，绝不内联阻塞 owner/VT/IO/scheduler 回调。
  */
 public final class DaemonRuntime implements AutoCloseable {
 
   private static final Duration EXECUTOR_TERMINATION_TIMEOUT = Duration.ofSeconds(5);
   private static final String FALLBACK_FAILURE_MESSAGE = "capability execution failed";
+  private static final String TERMINAL_FAILURE_MESSAGE = "terminal coordinator failed";
+  private static final String SHUTDOWN_FAILURE_MESSAGE = "daemon shutdown did not converge";
+  private static final Duration TERMINAL_CONVERGENCE_TIMEOUT = Duration.ofSeconds(120);
 
   private final DaemonConfig config;
 
@@ -119,7 +140,20 @@ public final class DaemonRuntime implements AutoCloseable {
   private final AtomicLong maxResourceBytes = new AtomicLong();
 
   /** 本 Daemon 进程的生命周期身份：构造期随机生成一次，所有重连复用，用于区分同实例恢复与换进程接管。 */
-  private final String daemonInstanceId = UUID.randomUUID().toString();
+  private final UUID daemonInstanceId = UUID.randomUUID();
+
+  /** 唯一终端协调器：构造期创建一次，与本运行时同生命周期；承载人工 shell 的绑定、命令与事件。 */
+  private final TerminalCoordinator terminalCoordinator;
+
+  private final ExecutorService terminalOwnerExecutor;
+  private final ExecutorService terminalVtExecutor;
+  private final ExecutorService terminalIoExecutor;
+  private final ScheduledExecutorService terminalScheduler;
+
+  /** 终端阻塞汇合与整体 shutdown 编排的专用生命周期执行资源，绝不与 owner/VT/IO/scheduler 共用。 */
+  private final ExecutorService lifecycleExecutor;
+
+  private final TerminalControlCodec terminalControlCodec = new TerminalControlCodec();
 
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
@@ -130,6 +164,9 @@ public final class DaemonRuntime implements AutoCloseable {
   private final ConcurrentHashMap<String, RunningInvocation> running = new ConcurrentHashMap<>();
   private final Object lifecycleLock = new Object();
   private final Object reconnectLock = new Object();
+
+  /** 清理失败标志：整体 shutdown 未收敛（终端协调器或执行资源）时置位，用于 close 的异常边界与 FAILED 状态。 */
+  private final AtomicBoolean shutdownFailed = new AtomicBoolean();
 
   private volatile DaemonRuntimeState state = DaemonRuntimeState.STOPPED;
   private final CountDownLatch termination = new CountDownLatch(1);
@@ -183,7 +220,8 @@ public final class DaemonRuntime implements AutoCloseable {
               taskExecutor,
               lspExecutor,
               capabilityResources,
-              true);
+              true,
+              null);
       completed = true;
       return runtime;
     } finally {
@@ -204,7 +242,38 @@ public final class DaemonRuntime implements AutoCloseable {
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor) {
     this(
-        config, transport, capabilityRegistry, journal, scheduler, taskExecutor, null, null, false);
+        config,
+        transport,
+        capabilityRegistry,
+        journal,
+        scheduler,
+        taskExecutor,
+        null,
+        null,
+        false,
+        null);
+  }
+
+  /** 包内测试入口：允许注入终端 owner executor（阻塞或已停止），用于确定性地验证绑定/准入/关闭边界。 */
+  DaemonRuntime(
+      DaemonConfig config,
+      DaemonTransport transport,
+      DaemonCapabilityRegistry capabilityRegistry,
+      DaemonInvocationJournal journal,
+      ScheduledExecutorService scheduler,
+      ExecutorService taskExecutor,
+      ExecutorService terminalOwnerOverride) {
+    this(
+        config,
+        transport,
+        capabilityRegistry,
+        journal,
+        scheduler,
+        taskExecutor,
+        null,
+        null,
+        false,
+        terminalOwnerOverride);
   }
 
   private DaemonRuntime(
@@ -216,7 +285,8 @@ public final class DaemonRuntime implements AutoCloseable {
       ExecutorService taskExecutor,
       ExecutorService lspExecutor,
       AutoCloseable capabilityResources,
-      boolean requireFixedCapabilityCatalog) {
+      boolean requireFixedCapabilityCatalog,
+      ExecutorService terminalOwnerOverride) {
     this.config = Objects.requireNonNull(config, "config");
     this.boundEnvironmentId = new AtomicReference<>();
     this.transport = Objects.requireNonNull(transport, "transport");
@@ -243,6 +313,54 @@ public final class DaemonRuntime implements AutoCloseable {
           "daemon capability registry does not match EnvironmentCapabilityCatalog");
     }
     capabilityRegistry.freeze();
+    ExecutorService ownerExecutor = null;
+    ExecutorService vtExecutor = null;
+    ExecutorService ioExecutor = null;
+    ScheduledExecutorService terminalScheduler = null;
+    ExecutorService lifecycle = null;
+    boolean terminalReady = false;
+    try {
+      ownerExecutor =
+          terminalOwnerOverride != null ? terminalOwnerOverride : newTerminalOwnerExecutor();
+      vtExecutor = newTerminalVtExecutor();
+      ioExecutor = newTerminalIoExecutor();
+      terminalScheduler = newTerminalScheduler();
+      lifecycle = newLifecycleExecutor();
+      TerminalCoordinator coordinator =
+          new TerminalCoordinator(
+              daemonInstanceId,
+              config.terminal(),
+              System.getenv(),
+              ownerExecutor,
+              vtExecutor,
+              ioExecutor,
+              terminalScheduler,
+              this::emitTerminalResponse);
+      this.terminalCoordinator = coordinator;
+      this.terminalOwnerExecutor = ownerExecutor;
+      this.terminalVtExecutor = vtExecutor;
+      this.terminalIoExecutor = ioExecutor;
+      this.terminalScheduler = terminalScheduler;
+      this.lifecycleExecutor = lifecycle;
+      terminalReady = true;
+      // 协调器自身失败（非本次 shutdown 触发）也必须收敛运行时；正常 close 的终止不会二次触发 shutdown。
+      coordinator
+          .termination()
+          .whenComplete(
+              (ignored, error) -> {
+                if (error != null) {
+                  failTerminal(TERMINAL_FAILURE_MESSAGE);
+                }
+              });
+    } finally {
+      if (!terminalReady) {
+        shutdownExecutor(ioExecutor);
+        shutdownExecutor(vtExecutor);
+        shutdownExecutor(ownerExecutor);
+        shutdownExecutor(terminalScheduler);
+        shutdownExecutor(lifecycle);
+      }
+    }
   }
 
   /** 生产装配注册的 capability descriptor 全集。 */
@@ -308,6 +426,73 @@ public final class DaemonRuntime implements AutoCloseable {
         });
   }
 
+  /** 终端协调器状态的唯一串行 owner executor。 */
+  private static ExecutorService newTerminalOwnerExecutor() {
+    return Executors.newSingleThreadExecutor(
+        runnable -> {
+          Thread thread = new Thread(runnable, "daemon-terminal-owner");
+          thread.setDaemon(true);
+          return thread;
+        });
+  }
+
+  /** 终端 VT 内核的唯一串行 owner executor。 */
+  private static ExecutorService newTerminalVtExecutor() {
+    return Executors.newSingleThreadExecutor(
+        runnable -> {
+          Thread thread = new Thread(runnable, "daemon-terminal-vt");
+          thread.setDaemon(true);
+          return thread;
+        });
+  }
+
+  /**
+   * PTY 启动、阻塞读写与生命周期收敛使用的 I/O executor。
+   *
+   * <p>PTY 读写与生命周期任务都会阻塞，因此必须是可并发运行这些任务的平台线程缓存池；不能复用虚拟线程的通用 taskExecutor，也不能是单线程。
+   */
+  private static ExecutorService newTerminalIoExecutor() {
+    AtomicInteger counter = new AtomicInteger();
+    return Executors.newCachedThreadPool(
+        runnable -> {
+          Thread thread = new Thread(runnable, "daemon-terminal-io-" + counter.incrementAndGet());
+          thread.setDaemon(true);
+          return thread;
+        });
+  }
+
+  /** 终端 native 截止时间与 tick 使用的专用 scheduler，不与注入的 daemon scheduler 共用。 */
+  private static ScheduledThreadPoolExecutor newTerminalScheduler() {
+    ScheduledThreadPoolExecutor scheduler =
+        new ScheduledThreadPoolExecutor(
+            1,
+            runnable -> {
+              Thread thread = new Thread(runnable, "daemon-terminal-scheduler");
+              thread.setDaemon(true);
+              return thread;
+            });
+    scheduler.setRemoveOnCancelPolicy(true);
+    return scheduler;
+  }
+
+  /** 整体 shutdown 编排与终端阻塞汇合的专用执行资源；预启动 worker，保证唯一一次入队不会被拒绝。 */
+  private static ExecutorService newLifecycleExecutor() {
+    ThreadPoolExecutor executor =
+        new ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(),
+            runnable -> {
+              Thread thread = new Thread(runnable, "daemon-lifecycle");
+              thread.setDaemon(true);
+              return thread;
+            });
+    executor.prestartCoreThread();
+    return executor;
+  }
+
   /** 启动连接生命周期并立即尝试建立 WebSocket。重复调用无副作用。 */
   public void start() {
     synchronized (lifecycleLock) {
@@ -334,7 +519,12 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  /** 阻塞等待 daemon 终止（由 close 或终态冲突触发）；返回终态。 */
+  /**
+   * 阻塞等待 daemon 终止（由 close 或终态冲突触发）；返回终态。
+   *
+   * <p>清理未收敛（终端协调器、能力项或执行资源）时返回 {@link DaemonRuntimeState#FAILED}，{@link #failureReason()}
+   * 给出固定去敏失败； {@link #close()} 会在此基础上抛出异常。本方法本身不抛清理失败，只可能抛 {@link InterruptedException}。
+   */
   public DaemonRuntimeState awaitTermination() throws InterruptedException {
     termination.await();
     return state;
@@ -403,19 +593,30 @@ public final class DaemonRuntime implements AutoCloseable {
                   handleDisconnected(generation);
                   return;
                 }
-                // 若运行时已关闭或代际已过时，安全释放新连接。
-                if (!started.get() || generation != connectionGeneration.get()) {
-                  try {
-                    connection.close();
-                  } catch (RuntimeException ignored) {
-                  }
-                  return;
-                }
                 ActiveConnection active = new ActiveConnection(generation, connection);
-                synchronized (active) {
+                // 活跃连接替换与 WELCOME 绑定提交共用生命周期锁：迟到的旧 WELCOME 不可能在替换之后覆盖新绑定。
+                synchronized (lifecycleLock) {
+                  if (!started.get() || generation != connectionGeneration.get() || closed.get()) {
+                    // 运行时已关闭或代际已过时：安全释放新连接。
+                    try {
+                      connection.close();
+                    } catch (RuntimeException ignored) {
+                    }
+                    return;
+                  }
                   activeConnection.set(active);
                   nextReconnectDelay = config.initialReconnectDelay();
-                  if (sendHello(active)) {
+                }
+                // 握手仍在连接监视器内串行：WELCOME 必须等到 HELLO 已递交并标记。
+                synchronized (active) {
+                  boolean hello;
+                  try {
+                    hello = sendHello(active);
+                  } catch (RuntimeException sendFailure) {
+                    // 同步发送异常不得让运行时停在 CONNECTING 挡住后续重连。
+                    hello = false;
+                  }
+                  if (hello) {
                     active.markHelloSent();
                   } else {
                     // HELLO 未进入传输：停留在 CONNECTING 会挡住后续重连，必须关闭这条连接。
@@ -449,24 +650,28 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void handleDisconnected(long generation) {
-    ActiveConnection connection = activeConnection.get();
-    // 仅当断开事件与当前活跃连接代际一致时执行清理。
-    if (connection != null) {
-      if (connection.generation() != generation
-          || !activeConnection.compareAndSet(connection, null)) {
+    synchronized (lifecycleLock) {
+      ActiveConnection connection = activeConnection.get();
+      // 仅当断开事件与当前活跃连接代际一致时执行清理。
+      if (connection != null) {
+        if (connection.generation() != generation
+            || !activeConnection.compareAndSet(connection, null)) {
+          return;
+        }
+      } else if (state != DaemonRuntimeState.CONNECTING) {
         return;
       }
-    } else if (state != DaemonRuntimeState.CONNECTING) {
-      return;
+      if (!started.get() || generation != connectionGeneration.get()) {
+        return;
+      }
+      // 只对真正当前代际清观察 route、不杀 shell；过期代际的断开在协调器内同样是 no-op。
+      terminalCoordinator.disconnect(generation);
+      // 连接失效不影响 Invocation journal；重置绑定与资源字节预算并清空等待中的上传票据。
+      resourceTransferClient.onConnectionLost();
+      maxResourceBytes.set(0L);
+      this.boundEnvironmentId.set(null);
+      state = DaemonRuntimeState.DISCONNECTED;
     }
-    if (!started.get() || generation != connectionGeneration.get()) {
-      return;
-    }
-    // 连接失效不影响 Invocation journal；重置绑定与资源字节预算并清空等待中的上传票据。
-    resourceTransferClient.onConnectionLost();
-    maxResourceBytes.set(0L);
-    this.boundEnvironmentId.set(null);
-    state = DaemonRuntimeState.DISCONNECTED;
     Duration delay;
     synchronized (reconnectLock) {
       delay = nextReconnectDelay;
@@ -489,19 +694,42 @@ public final class DaemonRuntime implements AutoCloseable {
     payload.put("protocolVersion", DaemonProtocol.VERSION);
     payload.put("registrationToken", config.registrationToken());
     payload.put("capabilityCatalogVersion", EnvironmentCapabilityCatalog.version());
-    payload.put("daemonInstanceId", daemonInstanceId);
+    payload.put("daemonInstanceId", daemonInstanceId.toString());
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
 
-  private boolean sendReady(ActiveConnection connection) {
+  /**
+   * 递交 READY：以本连接在 WELCOME 中认证的 binding 为 scope 直接构造 envelope，并返回原生 {@code sendText} 的完成信号。
+   *
+   * <p>返回的 stage 表示整包已被传输接受；调用方只有在该 stage 成功且连接仍为当前时才能放行上传与心跳。scope 取自连接自身绑定而非可并发变更的全局
+   * binding，绝不把旧连接的 READY 发到新连接认证的 Environment。
+   */
+  private CompletionStage<Void> sendReady(ActiveConnection connection) {
+    EnvironmentId environmentId = connection.boundEnvironment();
+    if (activeConnection.get() != connection
+        || !connection.connection().isOpen()
+        || environmentId == null) {
+      return CompletableFuture.failedFuture(
+          new IllegalStateException("READY connection is not available"));
+    }
     DaemonCapabilities capabilities =
         new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo);
-    return sendOn(
-        connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
+    DaemonEnvelope ready =
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION,
+            DaemonMessageType.READY,
+            environmentId,
+            null,
+            capabilitiesCodec.encode(capabilities));
+    return connection.connection().sendText(envelopeCodec.encode(ready));
   }
 
   private void sendHeartbeat() {
-    if (state == DaemonRuntimeState.READY) {
+    ActiveConnection connection = activeConnection.get();
+    // 只有 READY 报文整包进入传输后才有资格心跳：绑定放行的 state=READY 早于 READY 递交完成，不能据此抢发。
+    if (state == DaemonRuntimeState.READY
+        && connection != null
+        && connection.isReadyTransmitted()) {
       send(DaemonMessageType.HEARTBEAT, null, "{}");
     }
   }
@@ -526,6 +754,7 @@ public final class DaemonRuntime implements AutoCloseable {
         }
         case WELCOME -> handleWelcome(connection, envelope);
         case ERROR -> handleError(connection, envelope);
+        case SHELL_COMMAND -> handleShellCommand(connection, envelope);
           // 上传票据是调用作用域的控制平面响应，绝不进入通用协议处理。
         case RESOURCE_UPLOAD_TICKET -> requireInvocationIdAndDeliverTicket(envelope);
         case READY,
@@ -536,7 +765,8 @@ public final class DaemonRuntime implements AutoCloseable {
             FAILED,
             CANCELLED,
             RESOURCE_UPLOAD_REQUEST,
-            RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
+            RESOURCE_UPLOAD_COMMIT,
+            SHELL_EVENT -> throw new DaemonProtocolException(
             "daemon must not receive " + envelope.messageType() + " from server");
         default -> throw new DaemonProtocolException(
             "unexpected inbound messageType: " + envelope.messageType());
@@ -554,6 +784,7 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void handleWelcome(ActiveConnection connection, DaemonEnvelope envelope) {
+    EnvironmentId environmentId;
     synchronized (connection) {
       if (!connection.helloSent()) {
         throw new DaemonProtocolException("WELCOME requires a preceding HELLO");
@@ -561,24 +792,117 @@ public final class DaemonRuntime implements AutoCloseable {
       if (!connection.markWelcomed()) {
         throw new DaemonProtocolException("WELCOME may only be received once per connection");
       }
-      this.boundEnvironmentId.set(
-          Objects.requireNonNull(envelope.environmentId(), "WELCOME environmentId"));
-      // 资源字节预算由服务端在 WELCOME 中通告；缺失或非正数时不接受任何 resource/binary 结果。
-      maxResourceBytes.set(
-          requiredPositiveLong(envelopeCodec.readPayload(envelope), "maxResourceBytes"));
-      if (!sendReady(connection)) {
-        // WELCOME 已接受但 READY 未进入传输：不得停在 CONNECTING，关闭后由既有重连恢复。
-        if (activeConnection.get() == connection) {
-          closeFailedHandshake(connection);
-        }
+      // 迟到 WELCOME 复核与绑定提交必须在同一生命周期锁内完成：旧连接不得覆盖新连接的全局绑定/预算。
+      if (!commitWelcome(connection, envelope)) {
         return;
       }
-      if (activeConnection.get() == connection) {
+      environmentId = connection.boundEnvironment();
+    }
+    long generation = connection.generation();
+    // 绑定在协调器 owner 上串行完成；绑定完成前绝不 READY，且完成时复核连接与代际。
+    terminalCoordinator
+        .bind(environmentId.value(), generation)
+        .whenComplete(
+            (ignored, error) -> {
+              if (error != null) {
+                handleBindFailure(connection, error);
+                return;
+              }
+              completeReady(connection);
+            });
+  }
+
+  /**
+   * 在生命周期锁内提交一次 WELCOME 绑定：只有仍是当前活跃连接、代际未过期且运行时未停止/关闭时才写入全局绑定与资源预算。
+   *
+   * @return {@code true} 表示已提交绑定；{@code false} 表示这是被替换连接的迟到 WELCOME，调用方不得覆盖绑定或放行 READY
+   */
+  private boolean commitWelcome(ActiveConnection connection, DaemonEnvelope envelope) {
+    synchronized (lifecycleLock) {
+      if (!isCurrentConnection(connection)) {
+        return false;
+      }
+      // 预算先解析：协议错误时不留下半写入的绑定。
+      long maxBytes = requiredPositiveLong(envelopeCodec.readPayload(envelope), "maxResourceBytes");
+      EnvironmentId environmentId =
+          Objects.requireNonNull(envelope.environmentId(), "WELCOME environmentId");
+      this.boundEnvironmentId.set(environmentId);
+      connection.bindEnvironment(environmentId);
+      // 资源字节预算由服务端在 WELCOME 中通告；缺失或非正数时不接受任何 resource/binary 结果。
+      maxResourceBytes.set(maxBytes);
+      return true;
+    }
+  }
+
+  /** 连接是否仍是当前活跃连接、代际未过期且运行时未停止/关闭。 */
+  private boolean isCurrentConnection(ActiveConnection connection) {
+    return activeConnection.get() == connection
+        && connection.generation() == connectionGeneration.get()
+        && started.get()
+        && !closed.get();
+  }
+
+  /** 绑定失败的收敛：协调器关闭由本次 shutdown 承担；其余失败关闭连接并由既有重连恢复。 */
+  private void handleBindFailure(ActiveConnection connection, Throwable error) {
+    if (unwrap(error) instanceof TerminalCoordinator.CoordinatorClosedException) {
+      return;
+    }
+    if (!started.get() || closed.get()) {
+      return;
+    }
+    closeFailedHandshake(connection);
+  }
+
+  /**
+   * 绑定完成后在连接临界区内复核并放行 READY，并只在 READY 整包递交完成后放行上传与心跳。
+   *
+   * <p>只有仍是当前活跃连接、代际未过期且运行时未停止/关闭时才 READY：旧绑定的异步完成绝不会令新连接 READY，也不会覆盖新绑定。绑定放行（{@code markReady} +
+   * {@code state=READY}）刻意早于 READY 递交完成，以覆盖合法 peer 在极速回执后立即补发命令的 callback 竞态；但上传与心跳的资格必须等到 READY
+   * 的传输完成信号。
+   */
+  private void completeReady(ActiveConnection connection) {
+    CompletionStage<Void> ready;
+    synchronized (connection) {
+      synchronized (lifecycleLock) {
+        if (!isCurrentConnection(connection)) {
+          return;
+        }
         connection.markReady();
         state = DaemonRuntimeState.READY;
-        // 只有 READY 连接才能递交上传控制帧；放行在断连期间等待重连的上传继续重放同一 transfer。
-        resourceTransferClient.onConnectionReady();
+        try {
+          ready = sendReady(connection);
+        } catch (RuntimeException error) {
+          ready = null;
+        }
       }
+      if (ready == null) {
+        // READY 同步抛错：关闭旧握手，由既有重连恢复，绝不悬挂或保留假 READY。
+        closeFailedHandshake(connection);
+        return;
+      }
+    }
+    // 不在锁内等待/汇合 stage，也不在 sendOn 的通用语义里另注册一次断开：READY 这条自己唯一回调。
+    ready.whenComplete((ignored, error) -> onReadyTransmitted(connection, error));
+  }
+
+  /**
+   * READY 传输完成后的唯一收敛点：失败即关闭该代际握手重连；成功且仍为当前连接才放行上传与心跳。
+   *
+   * <p>当前代际复核与上传门控放行和断开复位共用生命周期锁，旧代际的迟到成功不影响当前连接。
+   */
+  private void onReadyTransmitted(ActiveConnection connection, Throwable error) {
+    if (error != null) {
+      closeFailedHandshake(connection);
+      return;
+    }
+    synchronized (lifecycleLock) {
+      if (!isCurrentConnection(connection)) {
+        // 旧代际 READY 迟到完成：不得恢复当前连接的上传/心跳资格，也不得覆盖新代际状态。
+        return;
+      }
+      connection.markReadyTransmitted();
+      // 与断开复位共用生命周期锁，旧成功回调不能在新连接复位后重新放行上传。
+      resourceTransferClient.onConnectionReady();
     }
   }
 
@@ -590,6 +914,139 @@ public final class DaemonRuntime implements AutoCloseable {
       // 关闭失败仍要走代际断开，避免停在 CONNECTING。
     }
     handleDisconnected(connection.generation());
+  }
+
+  /**
+   * 处理一条 SHELL_COMMAND：要求当前连接已 READY、envelope scope 与内层 command.environmentId 一致，然后按当前代际递交协调器。
+   *
+   * <p>只有确定未被受理的 mailbox 满/关闭两类失败才映射为固定的 NOT_EXECUTED 回执；受理后异常表示协调器状态失败，走明确生命周期失败，绝不伪装成未执行。
+   */
+  private void handleShellCommand(ActiveConnection connection, DaemonEnvelope envelope) {
+    if (state != DaemonRuntimeState.READY || !connection.isReady()) {
+      throw new DaemonProtocolException("SHELL_COMMAND requires a READY connection");
+    }
+    TerminalRequest request;
+    try {
+      request = terminalControlCodec.decodeRequest(envelope.payloadJson());
+    } catch (RuntimeException error) {
+      throw new DaemonProtocolException("SHELL_COMMAND payload is invalid", error);
+    }
+    if (!request.command().environmentId().equals(envelope.environmentId().value())) {
+      throw new DaemonProtocolException(
+          "SHELL_COMMAND environmentId does not match envelope scope");
+    }
+    long generation = connection.generation();
+    terminalCoordinator
+        .receive(generation, request)
+        .whenComplete(
+            (ignored, error) -> {
+              if (error == null) {
+                return;
+              }
+              ErrorCode notExecuted = notExecutedCodeFor(error);
+              if (notExecuted != null) {
+                emitShellAdmissionFailure(connection, request, notExecuted);
+              } else {
+                // 受理后异常表示协调器状态失败：走明确生命周期失败，绝不伪装成未执行。
+                failTerminal("terminal coordinator failed to process a shell command");
+              }
+            });
+  }
+
+  /**
+   * 把协调器 {@code receive} 的失败映射为「确定未受理」的固定回执码。
+   *
+   * <p>只有 mailbox 满与协调器已关闭两类是确定未被受理；其余失败一律返回 {@code null}，由调用方走明确生命周期失败，绝不伪装成 NOT_EXECUTED。
+   */
+  static ErrorCode notExecutedCodeFor(Throwable error) {
+    Throwable cause = unwrap(error);
+    if (cause instanceof TerminalCoordinator.MailboxOverflowException) {
+      return ErrorCode.BACKPRESSURE;
+    }
+    if (cause instanceof TerminalCoordinator.CoordinatorClosedException) {
+      return ErrorCode.ROUTE_UNAVAILABLE;
+    }
+    return null;
+  }
+
+  /** 递交一条确定未执行的 shell 准入失败回执；发送失败按既有断开收敛该代际，绝不静默丢弃。 */
+  private void emitShellAdmissionFailure(
+      ActiveConnection connection, TerminalRequest request, ErrorCode code) {
+    TerminalEvent event =
+        new TerminalEvent(
+            request.command().requestId(),
+            request.command().environmentId(),
+            request.command().viewerId(),
+            null,
+            new TerminalEvent.ErrorPayload(code, ErrorDisposition.NOT_EXECUTED));
+    try {
+      emitTerminalResponse(connection, new TerminalResponse(request.route(), event));
+    } catch (RuntimeException error) {
+      // 不记录/回显 payload；同步发送异常也走既有断开路径，避免连接悬挂。
+      closeFailedHandshake(connection);
+    }
+  }
+
+  /**
+   * 协调器出站回调：非阻塞编码后按当前 READY 连接发送 SHELL_EVENT。
+   *
+   * <p>environment scope 取自事件本身并与该连接的认证绑定核对，绝不使用可并发变更的全局绑定；连接不可用、代际过期或发送失败都抛出让协调器撤流，由既有断开路径恢复。
+   */
+  private void emitTerminalResponse(TerminalResponse response) {
+    ActiveConnection connection = activeConnection.get();
+    if (connection == null) {
+      throw new IllegalStateException("no active connection for terminal response");
+    }
+    emitTerminalResponse(connection, response);
+  }
+
+  private void emitTerminalResponse(ActiveConnection connection, TerminalResponse response) {
+    TerminalEvent event = response.event();
+    EnvironmentId bound = connection.boundEnvironment();
+    if (!connection.isReady()
+        || activeConnection.get() != connection
+        || bound == null
+        || !bound.value().equals(event.environmentId())) {
+      throw new IllegalStateException("terminal response has no ready binding");
+    }
+    String payloadJson = terminalControlCodec.encodeResponse(response);
+    if (!sendShellEvent(connection, bound, payloadJson)) {
+      throw new IllegalStateException("terminal response could not be sent");
+    }
+  }
+
+  /** 在指定连接上发送 SHELL_EVENT；环境 scope 来自已核对的认证绑定，不带 invocationId。 */
+  private boolean sendShellEvent(
+      ActiveConnection connection, EnvironmentId environmentId, String payloadJson) {
+    if (activeConnection.get() != connection
+        || !connection.isReady()
+        || !connection.connection().isOpen()) {
+      return false;
+    }
+    DaemonEnvelope envelope =
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION,
+            DaemonMessageType.SHELL_EVENT,
+            environmentId,
+            null,
+            payloadJson);
+    connection
+        .connection()
+        .sendText(envelopeCodec.encode(envelope))
+        .whenComplete(
+            (ignored, error) -> {
+              if (error != null) {
+                handleDisconnected(connection.generation());
+              }
+            });
+    return true;
+  }
+
+  /** 解开 CompletableFuture 回调可能携带的包装异常。 */
+  private static Throwable unwrap(Throwable error) {
+    return error instanceof CompletionException && error.getCause() != null
+        ? error.getCause()
+        : error;
   }
 
   /** 严格读取一个正 long 字段：缺失、非整数或非正都是协议错误。 */
@@ -919,7 +1376,12 @@ public final class DaemonRuntime implements AutoCloseable {
     if (activeConnection.get() != connection || !connection.connection().isOpen()) {
       return false;
     }
-    DaemonEnvelope envelope = envelope(messageType, invocationId, payloadJson);
+    if (messageType != DaemonMessageType.HELLO
+        && messageType != DaemonMessageType.ERROR
+        && connection.boundEnvironment() == null) {
+      return false;
+    }
+    DaemonEnvelope envelope = envelope(connection, messageType, invocationId, payloadJson);
     connection
         .connection()
         .sendText(envelopeCodec.encode(envelope))
@@ -937,12 +1399,15 @@ public final class DaemonRuntime implements AutoCloseable {
    * EnvironmentId}）。
    */
   private DaemonEnvelope envelope(
-      DaemonMessageType messageType, String invocationId, String payloadJson) {
+      ActiveConnection connection,
+      DaemonMessageType messageType,
+      String invocationId,
+      String payloadJson) {
     boolean hello = messageType == DaemonMessageType.HELLO;
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         messageType,
-        hello ? null : boundEnvironmentId.get(),
+        hello ? null : connection.boundEnvironment(),
         invocationId,
         payloadJson);
   }
@@ -990,6 +1455,12 @@ public final class DaemonRuntime implements AutoCloseable {
     shutdown(DaemonRuntimeState.FAILED, reason);
   }
 
+  /**
+   * 唯一的 shutdown 入口：同步围栏状态后，把全部阻塞汇合交给专用生命周期 executor。
+   *
+   * <p>本方法绝不在调用线程（可能是 capability/scheduler/owner/VT/native I/O 回调）上内联阻塞；外部 close/awaitTermination
+   * 在完整清理后完成。
+   */
   private void shutdown(DaemonRuntimeState terminalState, String reason) {
     ActiveConnection connection;
     synchronized (lifecycleLock) {
@@ -1001,7 +1472,28 @@ public final class DaemonRuntime implements AutoCloseable {
       failureReason = reason;
       connection = activeConnection.getAndSet(null);
     }
-    // shutdown 必须收敛：先停止 transport 接入，再取消任务并停止两个执行资源；单步失败不得跳过后续清理或悬挂 shutdown。
+    try {
+      lifecycleExecutor.execute(() -> runShutdown(connection));
+    } catch (RejectedExecutionException rejected) {
+      // 预启动 worker 与「单一 CAS 胜者入队一次」使此路径不可达；若仍发生，明确失败并释放终止闩，绝不悬挂。
+      shutdownFailed.set(true);
+      synchronized (lifecycleLock) {
+        state = DaemonRuntimeState.FAILED;
+        failureReason = SHUTDOWN_FAILURE_MESSAGE;
+      }
+      termination.countDown();
+    }
+  }
+
+  /**
+   * 完整清理：先停止 transport 接入与 capability 任务，再汇合唯一终端协调器，最后停止全部执行资源。
+   *
+   * <p>每项收尾失败都不得跳过后续 Terminal 汇合或资源释放：能力项逐项隔离，终端汇合与执行资源始终执行；任一失败或执行资源未收敛都以固定去敏失败显式收敛为 FAILED，并在
+   * close 的异常边界暴露，终止信号一定释放。
+   */
+  private void runShutdown(ActiveConnection connection) {
+    Throwable cleanupFailure = null;
+    boolean executorsConverged = true;
     try {
       if (connection != null) {
         try {
@@ -1011,28 +1503,105 @@ public final class DaemonRuntime implements AutoCloseable {
         }
       }
       closeQuietly(transport);
-      running
-          .values()
-          .forEach(
-              invocation -> {
-                invocation.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
-                journal.complete(
-                    invocation.invocationId(),
-                    new DaemonTerminalMessage(
-                        DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
-              });
+      for (RunningInvocation invocation : running.values()) {
+        try {
+          invocation.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+          journal.complete(
+              invocation.invocationId(),
+              new DaemonTerminalMessage(
+                  DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
+        } catch (RuntimeException error) {
+          // 单项收尾失败不跳过其余项，也不跳过终端汇合与资源释放。
+          if (cleanupFailure == null) {
+            cleanupFailure = error;
+          }
+        }
+      }
       running.clear();
+      // 先汇合协调器（阻塞），再停止其执行资源；协调器收敛失败是显式的固定去敏失败。
+      Throwable terminalFailure = convergeTerminal();
+      if (terminalFailure != null && cleanupFailure == null) {
+        cleanupFailure = terminalFailure;
+      }
       // LSP 等 capability 资源在 transport 与任务收敛之后、执行资源关闭之前收尾。
       closeQuietly(capabilityResources);
-      shutdownExecutors(scheduler, taskExecutor, lspExecutor);
+      executorsConverged &= shutdownExecutor(taskExecutor);
+      executorsConverged &= shutdownExecutor(lspExecutor);
+      executorsConverged &= shutdownExecutor(scheduler);
+      executorsConverged &= shutdownExecutor(terminalScheduler);
+      executorsConverged &= shutdownExecutor(terminalOwnerExecutor);
+      executorsConverged &= shutdownExecutor(terminalVtExecutor);
+      executorsConverged &= shutdownExecutor(terminalIoExecutor);
     } finally {
+      if (cleanupFailure != null || !executorsConverged) {
+        shutdownFailed.set(true);
+        synchronized (lifecycleLock) {
+          state = DaemonRuntimeState.FAILED;
+          failureReason = SHUTDOWN_FAILURE_MESSAGE;
+        }
+      }
       termination.countDown();
+      // 生命周期 executor 只由自身任务收尾：不等待自己，当前任务结束后自然终止。
+      lifecycleExecutor.shutdown();
+    }
+  }
+
+  /**
+   * 汇合唯一终端协调器；正常终止返回 {@code null}，失败、超时或中断返回固定去敏失败并保留中断事实。
+   *
+   * <p>协调器 {@code shutdown()} 或终止信号本身的同步异常同样记为汇合失败：调用方继续释放其余资源并显式收敛为 FAILED，绝不跳过后续清理。
+   */
+  private Throwable convergeTerminal() {
+    try {
+      terminalCoordinator.shutdown();
+      terminalCoordinator
+          .termination()
+          .get(TERMINAL_CONVERGENCE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      return null;
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      return new IllegalStateException(SHUTDOWN_FAILURE_MESSAGE, error);
+    } catch (ExecutionException | TimeoutException error) {
+      return new IllegalStateException(SHUTDOWN_FAILURE_MESSAGE, error);
+    } catch (RuntimeException error) {
+      return new IllegalStateException(SHUTDOWN_FAILURE_MESSAGE, error);
     }
   }
 
   @Override
   public void close() {
     shutdown(DaemonRuntimeState.STOPPED, null);
+    try {
+      termination.await();
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("daemon shutdown was interrupted");
+    }
+    if (shutdownFailed.get()) {
+      throw new IllegalStateException(SHUTDOWN_FAILURE_MESSAGE);
+    }
+  }
+
+  /**
+   * 停止并等待一个执行资源；返回是否在预算内收敛。
+   *
+   * <p>{@code shutdownNow} 自身抛错或等待被中断/超时都明确返回 {@code false}（释放边界上的真实失败），由调用方继续后续资源清理并显式收敛为 FAILED，
+   * 绝不因为单个资源异常而跳过其余释放或假装干净关闭。
+   */
+  private static boolean shutdownExecutor(ExecutorService executor) {
+    if (executor == null) {
+      return true;
+    }
+    try {
+      executor.shutdownNow();
+      return executor.awaitTermination(
+          EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      return false;
+    } catch (RuntimeException error) {
+      return false;
+    }
   }
 
   private static void shutdownExecutors(
@@ -1100,6 +1669,12 @@ public final class DaemonRuntime implements AutoCloseable {
     private final AtomicBoolean welcomed = new AtomicBoolean();
     private final AtomicBoolean ready = new AtomicBoolean();
 
+    /** READY 是否已整包进入传输（原生 sendText 成功完成）；只有它为真才允许心跳与上传控制帧。 */
+    private final AtomicBoolean readyTransmitted = new AtomicBoolean();
+
+    /** 本连接在 WELCOME 中认证的 Environment 绑定；READY 事件的 scope 必须与它一致。 */
+    private volatile EnvironmentId boundEnvironment;
+
     private ActiveConnection(long generation, DaemonConnection connection) {
       this.generation = generation;
       this.connection = connection;
@@ -1125,8 +1700,28 @@ public final class DaemonRuntime implements AutoCloseable {
       return welcomed.compareAndSet(false, true);
     }
 
+    void bindEnvironment(EnvironmentId environmentId) {
+      this.boundEnvironment = environmentId;
+    }
+
+    EnvironmentId boundEnvironment() {
+      return boundEnvironment;
+    }
+
     void markReady() {
       ready.set(true);
+    }
+
+    boolean isReady() {
+      return ready.get();
+    }
+
+    void markReadyTransmitted() {
+      readyTransmitted.set(true);
+    }
+
+    boolean isReadyTransmitted() {
+      return readyTransmitted.get();
     }
   }
 

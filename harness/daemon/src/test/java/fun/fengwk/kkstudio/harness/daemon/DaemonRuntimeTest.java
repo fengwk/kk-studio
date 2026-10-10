@@ -438,8 +438,9 @@ class DaemonRuntimeTest {
     runtime.start();
     transport.awaitConnections(2);
     completeHandshake();
-    assertEquals(DaemonRuntimeState.READY, runtime.state());
+    // READY 现在由协调器绑定异步放行：先取到真实 READY 报文（此时状态已置位），再断言状态。
     assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
   /** 意图：WELCOME 已到达但随后的 READY 未进入传输时，同样必须离开 CONNECTING 并重连，不能把半握手连接留在运行时里。 */
@@ -450,12 +451,14 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.awaitNextMessageType(DaemonMessageType.HELLO);
+    // 消费首个连接的 HELLO，避免它与重连后的报文混淆。
+    assertMessageTypes(transport.takeMessages(1), HELLO);
     transport.closeNextSend();
     transport.receive(platformMessage(DaemonMessageType.WELCOME));
 
     transport.awaitConnections(1);
     completeHandshake();
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
@@ -2202,6 +2205,186 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
+  /** 通用执行器关闭失败不能跳过终端资源清理，也不能将整体关闭报告为成功。 */
+  @Test
+  void executorCleanupFailureStillClosesTerminalOwner() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(new TestCapability());
+    ExecutorService owner = Executors.newSingleThreadExecutor();
+    ExecutorService tasks = Executors.newVirtualThreadPerTaskExecutor();
+    ScheduledExecutorService scheduler = new ShutdownFailingScheduler();
+    runtime =
+        new DaemonRuntime(
+            new DaemonConfig(
+                URI.create("ws://localhost/gateway"),
+                registrationTokenFile(),
+                Duration.ofMinutes(1),
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                null,
+                dataDir(),
+                TERMINAL),
+            transport,
+            registry,
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            tasks,
+            owner);
+    assertEquals(
+        "daemon shutdown did not converge",
+        assertThrows(IllegalStateException.class, runtime::close).getMessage());
+    assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+    assertTrue(owner.isTerminated());
+    assertTrue(tasks.isTerminated());
+    assertTrue(scheduler.isShutdown());
+    runtime = null;
+  }
+
+  /** 新连接尚未认证时不发送旧调用的 scoped partial，且不能误把调用收敛为失败。 */
+  @Test
+  void partialDuringUnauthenticatedReconnectDoesNotFailInvocation() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("reconnect-partial", "test", "1.0.0", 5_000));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    transport.disconnect();
+    transport.awaitConnections(1);
+    assertMessageTypes(transport.takeMessages(1), HELLO);
+    tool.partial(EnvironmentCapabilityResult.text("reconnect-partial", "output"));
+    assertFalse(transport.hasMessages());
+    assertEquals(
+        DaemonInvocationState.RUNNING, journal.find("reconnect-partial").orElseThrow().state());
+    transport.receive(platformMessage(DaemonMessageType.WELCOME));
+    assertMessageTypes(transport.takeMessages(1), READY);
+    tool.partial(EnvironmentCapabilityResult.text("reconnect-partial", "new output"));
+    DaemonEnvelope partial = transport.takeNextMessage();
+    assertEquals(PROGRESS, partial.messageType());
+    assertEquals(ENVIRONMENT_ID, partial.environmentId());
+  }
+
+  /** READY 整包尚未递交时，真实上传任务与周期心跳都不得越过握手；成功后才恢复。 */
+  @Test
+  void deferredReadyGatesUploadAndHeartbeatUntilTransmissionCompletes() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    runtime = runtime(transport, tool, Duration.ofMillis(20));
+    CompletableFuture<Void> ready = transport.deferNextReady();
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+    Thread completion = startDeferredReadyUpload(transport, tool, "ready-pending");
+    try {
+      assertFalse(transport.awaitMessage(Duration.ofMillis(200)));
+      ready.complete(null);
+      assertEquals(
+          "ready-pending",
+          transport.takeMessageOfType(DaemonMessageType.RESOURCE_UPLOAD_REQUEST).invocationId());
+    } finally {
+      runtime.close();
+      awaitCompletion(completion);
+    }
+  }
+
+  /** READY 异步失败不放行上传，重连的新 READY 完整递交后才允许同一任务继续。 */
+  @Test
+  void failedReadyDoesNotReleaseUploadGate() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    runtime = runtime(transport, tool, Duration.ofMillis(20));
+    CompletableFuture<Void> ready = transport.deferNextReady();
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+    Thread completion = startDeferredReadyUpload(transport, tool, "ready-failed");
+    try {
+      ready.completeExceptionally(new IllegalStateException("ready rejected"));
+      transport.awaitConnections(1);
+      CompletableFuture<Void> currentReady = transport.deferNextReady();
+      completeHandshake();
+      assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+      assertFalse(transport.awaitMessage(Duration.ofMillis(200)));
+      currentReady.complete(null);
+      assertEquals(
+          "ready-failed",
+          transport.takeMessageOfType(DaemonMessageType.RESOURCE_UPLOAD_REQUEST).invocationId());
+      assertEquals(1, tool.executions.get());
+    } finally {
+      runtime.close();
+      awaitCompletion(completion);
+    }
+  }
+
+  /** 旧连接 READY 的迟到成功不能恢复新连接的上传或心跳资格。 */
+  @Test
+  void staleReadyCompletionDoesNotReleaseCurrentGeneration() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    runtime = runtime(transport, tool, Duration.ofMillis(20));
+    CompletableFuture<Void> oldReady = transport.deferNextReady();
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+    Thread completion = startDeferredReadyUpload(transport, tool, "ready-stale");
+    try {
+      transport.disconnect();
+      transport.awaitConnections(1);
+      CompletableFuture<Void> currentReady = transport.deferNextReady();
+      completeHandshake();
+      assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+      oldReady.complete(null);
+      assertFalse(transport.awaitMessage(Duration.ofMillis(200)));
+      currentReady.complete(null);
+      assertEquals(
+          "ready-stale",
+          transport.takeMessageOfType(DaemonMessageType.RESOURCE_UPLOAD_REQUEST).invocationId());
+    } finally {
+      runtime.close();
+      awaitCompletion(completion);
+    }
+  }
+
+  private Thread startDeferredReadyUpload(
+      FakeTransport transport, TestCapability tool, String invocationId) throws Exception {
+    transport.receive(invoke(invocationId, "test", "1.0.0", 5_000));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TEST_TIMEOUT_SECONDS);
+    while (tool.listener == null && System.nanoTime() < deadline) {
+      TimeUnit.MILLISECONDS.sleep(1);
+    }
+    assertTrue(tool.listener != null);
+    Thread completion =
+        completeAsync(
+            tool,
+            new EnvironmentCapabilityResult(
+                invocationId,
+                List.of(new BinaryResultContent("application/octet-stream", new byte[] {1})),
+                false,
+                "{}"));
+    // 先确认任务已进入真实连接门控，再切换连接，避免把预检尚未开始误当成门控行为。
+    while (completion.isAlive() && System.nanoTime() < deadline) {
+      for (StackTraceElement frame : completion.getStackTrace()) {
+        if (frame.getClassName().equals(DaemonResourceTransferClient.class.getName())
+            && frame.getMethodName().equals("awaitConnection")) {
+          return completion;
+        }
+      }
+      TimeUnit.MILLISECONDS.sleep(1);
+    }
+    runtime.close();
+    awaitCompletion(completion);
+    throw new AssertionError("upload did not reach the connection gate");
+  }
+
   private DaemonRuntime runtime(FakeTransport transport, EnvironmentCapability capability) {
     return runtime(transport, capability, Duration.ofMinutes(1));
   }
@@ -2503,6 +2686,7 @@ class DaemonRuntimeTest {
     private final AtomicBoolean delayNextConnection = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean closeThrows = new AtomicBoolean();
+    private final AtomicReference<CompletableFuture<Void>> nextReady = new AtomicReference<>();
     private final List<DaemonTransportListener> listeners = new CopyOnWriteArrayList<>();
     private volatile DaemonTransportListener listener;
     private volatile FakeConnection connection;
@@ -2536,6 +2720,12 @@ class DaemonRuntimeTest {
 
     private void failNextSend() {
       failNextSend.set(true);
+    }
+
+    private CompletableFuture<Void> deferNextReady() {
+      CompletableFuture<Void> result = new CompletableFuture<>();
+      assertTrue(nextReady.compareAndSet(null, result));
+      return result;
     }
 
     private void refuseNextOpen() {
@@ -2626,6 +2816,23 @@ class DaemonRuntimeTest {
       return codec.decode(message);
     }
 
+    private DaemonEnvelope takeMessageOfType(DaemonMessageType expected)
+        throws InterruptedException {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TEST_TIMEOUT_SECONDS);
+      while (System.nanoTime() < deadline) {
+        String message = sent.poll(20, TimeUnit.MILLISECONDS);
+        if (message == null) {
+          continue;
+        }
+        DaemonEnvelope envelope = codec.decode(message);
+        if (envelope.messageType() == expected) {
+          return envelope;
+        }
+        assertEquals(DaemonMessageType.HEARTBEAT, envelope.messageType());
+      }
+      throw new AssertionError("expected daemon message " + expected);
+    }
+
     private boolean hasMessages() {
       return !sent.isEmpty();
     }
@@ -2654,6 +2861,12 @@ class DaemonRuntimeTest {
           return CompletableFuture.failedFuture(new IllegalStateException("send failed"));
         }
         sent.add(message);
+        if (codec.decode(message).messageType() == READY) {
+          CompletableFuture<Void> deferred = nextReady.getAndSet(null);
+          if (deferred != null) {
+            return deferred;
+          }
+        }
         return CompletableFuture.completedFuture(null);
       }
 
@@ -2791,6 +3004,19 @@ class DaemonRuntimeTest {
         throw new IllegalStateException("blocking tool interrupted", error);
       }
       return handle;
+    }
+  }
+
+  private static final class ShutdownFailingScheduler extends ScheduledThreadPoolExecutor {
+
+    private ShutdownFailingScheduler() {
+      super(1);
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      super.shutdownNow();
+      throw new IllegalStateException("executor cleanup failed");
     }
   }
 
