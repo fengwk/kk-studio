@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { InteractionCardBody } from './InteractionCardBody'
 import { interactionDraftStore } from './interaction-draft-store'
 import {
   LONG_ANSWER,
+  LONG_OPTION_COUNT,
   LONG_QUESTION_COUNT,
   LONG_QUESTIONNAIRE,
   LONG_QUESTIONNAIRE_JSON,
@@ -64,11 +65,21 @@ it('renders and submits a long questionnaire without truncating questions, optio
 
   // 超过旧业务上限的题数与文本都完整渲染：每题一个自定义输入，问题原文逐字保留。
   const longQuestion = LONG_QUESTIONNAIRE.questions[0].question
+  const inputs = screen.getAllByPlaceholderText('输入自定义回答')
   expect(screen.getAllByText(longQuestion)).toHaveLength(LONG_QUESTION_COUNT)
-  expect(screen.getAllByPlaceholderText('输入自定义回答')).toHaveLength(LONG_QUESTION_COUNT)
+  expect(inputs).toHaveLength(LONG_QUESTION_COUNT)
+  const options = LONG_QUESTIONNAIRE.questions[0].options
+  expect(screen.getAllByText(options[LONG_OPTION_COUNT - 1].label)).toHaveLength(LONG_QUESTION_COUNT)
+  expect(screen.getAllByText(options[0].description)).toHaveLength(LONG_QUESTION_COUNT * LONG_OPTION_COUNT)
 
-  for (const input of screen.getAllByPlaceholderText('输入自定义回答')) {
-    fireEvent.change(input, { target: { value: LONG_ANSWER } })
+  // 每题仍派发真实 change 事件，批量提交渲染，避免每次输入都重复遍历整张长问卷。
+  act(() => {
+    for (const input of inputs) {
+      fireEvent.change(input, { target: { value: LONG_ANSWER } })
+    }
+  })
+  for (const input of inputs) {
+    expect(input).toHaveValue(LONG_ANSWER)
   }
 
   const submitBtn = screen.getByRole('button', { name: '提交回答' })
@@ -81,6 +92,5 @@ it('renders and submits a long questionnaire without truncating questions, optio
   // 长答案原样提交、不截断、不静默降级。
   const body = submit.mock.calls[0][1]
   expect(body.answers).toHaveLength(LONG_QUESTION_COUNT)
-  expect(body.answers?.[0]).toEqual([LONG_ANSWER])
-  expect(body.answers?.[LONG_QUESTION_COUNT - 1]).toEqual([LONG_ANSWER])
+  expect(body.answers).toEqual(Array.from({ length: LONG_QUESTION_COUNT }, () => [LONG_ANSWER]))
 })
