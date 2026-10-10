@@ -461,6 +461,13 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `branch.same_session_new_thread`（L3，`real,branch`）与前端 fork 用例：同 Session 新建 Thread 从历史边界 fork，
   `FORK` Entry 只记录 `mode`/切点，会话 fork 把切点上下文复制到新 Session；分支不继承源 Thread 的待处理命令、
   子执行与 Join 订阅，从新分支向旧子执行添加 Join 因直接父不匹配原子拒绝。
+- `shell.interactive_pty`（`requires=tools`，L3）：在 READY tool 环境经同一条 `/api/events/v1`
+  承载 `{version:2,type:"shell.command",command:<TerminalCommand>}`，驱动真实 PTY 的
+  OPEN/CLAIM/INPUT/RESIZE/VIEW_APPLIED/CLOSE。首个结构化 RESET 未 `VIEW_APPLIED` 前
+  `CLAIM` 必须 `VIEW_NOT_APPLIED`；`INPUT` 以随机哨兵整行比对（绝不做子串，避免命令行回显假阳性）；
+  `RESIZE` 的 `OP_ACK` 后必须收到新尺寸 RESET；`Ctrl-C` 后 shell 仍可继续输出；
+  `CLOSE` 收敛为 `EXITED` 且末屏可再次 `ATTACH` 读回；`OPEN.expectedExited` 旧身份只重建新
+  `terminalId`。探针只从数值 UTF-16 槽提取整行文本、不解释 VT，报告只含行为布尔、计数与尺寸。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `thread.provider_request_preview_readonly`、`model.attempt_failure_visibility` 依赖 case 内自建的宿主
@@ -578,6 +585,17 @@ DB 网络断开后的 fail-closed 和权威 resync。先等待 `subscribed`，�
 立即读取权威 API；去重与静默断言使用 400ms 有界稳定窗。Environment v1 全局事件不携带实体 ID，
 因此只按 topic 验证独占变更窗口，不宣称实体级过滤；重连不宣称旧事件回放。仅 `--distributed`
 启用这些 case，精确 case ID 和描述由 `--list` / `--docs` 输出。
+
+L5 还包含远程终端协议 case，同样复用唯一 carrier 与浏览器 `TerminalCommand`/`TerminalEvent` wire：
+`distributed.shell_remote_control` 让一个 browserPeer 连 app-b、另一个连 app-a，经
+B→PG→A→DaemonA→A→PG→B 真路由对同一 terminal identity 建立两个独立 stream；第二个 `CLAIM`
+不得夺取控制权，`TAKEOVER` 以观察到的 writer epoch 轮换，旧 owner 用陈旧 grant 的 `INPUT` 被
+`NOT_OWNER` 拒绝且哨兵绝不落屏，同 seq+digest 重发幂等、`DETACH` 不杀终端、`CLOSE` 后
+`expectedExited` 重建新 `terminalId`。`distributed.shell_ack_recovery` 用 test-only 钩子丢弃一次
+OP_ACK（不改服务端），在新连接以 `CLAIM.recovery {previous,seq,digest}` 原子核对去重水位，明确
+得到 `WRITTEN`、且不自动重放 INPUT。`distributed.shell_db_fault` 用白名单 `disconnect-db-a`
+验证 owner DB 断网时命令一律 `NOT_EXECUTED`/不确定而绝不假 `WRITTEN` 或本地 fallback，
+`reconnect-db-a` 后重新 ATTACH 建立新 stream/baseline 并再次写入哨兵。
 
 ## 可靠性
 
