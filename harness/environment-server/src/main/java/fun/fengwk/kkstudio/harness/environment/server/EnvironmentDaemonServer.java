@@ -51,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -87,7 +88,7 @@ import java.util.function.Supplier;
  * <p>本类只依赖 JDK、Jackson、harness.common 与 harness.environment 契约，不含 Spring/JDBC/产品 DTO。
  */
 public final class EnvironmentDaemonServer
-    implements EnvironmentCapabilityTransport, DaemonEndpoint {
+    implements EnvironmentCapabilityTransport, DaemonEndpoint, IdeCommandTransport {
 
   private static final int MAX_INVOCATION_TOMBSTONES = 1024;
 
@@ -396,6 +397,28 @@ public final class EnvironmentDaemonServer
   }
 
   /**
+   * 返回该 Environment 当前 READY 连接的代际快照（Daemon 实例身份 + 路由租约）。
+   *
+   * <p>供 IDE 入口/反向流在建立凭据前冻结代际；无本地连接、未 READY 或身份未知时返回 empty。读取只持目录锁，不做外部 I/O。
+   */
+  public Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    synchronized (inventory) {
+      EnvironmentState environment = environments.get(environmentId);
+      ConnectionState state = environment == null ? null : environment.connection;
+      if (state == null || !state.isReady() || environment.daemonInstanceId == null) {
+        return Optional.empty();
+      }
+      UUID leaseToken = state.leaseToken;
+      if (leaseToken == null) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          new IdeSessionIdentity(environmentId, environment.daemonInstanceId, leaseToken));
+    }
+  }
+
+  /**
    * 在专用管理通道上向目标 Environment 下发一次受管更新命令。
    *
    * <p>只允许在该 Environment 正进行同一 operationId 的更新时发送；命令未进入传输时按 BUSY/UNAVAILABLE 收敛，绝不在断言未发送后重试。
@@ -451,15 +474,18 @@ public final class EnvironmentDaemonServer
     Objects.requireNonNull(command, "command");
     ConnectionState state;
     UUID leaseToken;
+    String daemonInstanceId;
     synchronized (inventory) {
-      state = connectionOf(environmentId);
+      EnvironmentState environment = environments.get(environmentId);
+      state = environment == null ? null : environment.connection;
       leaseToken = state == null ? null : state.leaseToken;
-      if (state != null && updatingOperationIdOf(environmentId) != null) {
+      daemonInstanceId = environment == null ? null : environment.daemonInstanceId;
+      if (state != null && environment.updatingOperationId != null) {
         throw new EnvironmentCapabilityBusyException(
             "environment " + environmentId + " is being updated");
       }
     }
-    if (state == null || leaseToken == null || !state.isReady()) {
+    if (state == null || leaseToken == null || daemonInstanceId == null || !state.isReady()) {
       throw unavailable(environmentId, "ide");
     }
     boolean holdsReady;
@@ -502,7 +528,10 @@ public final class EnvironmentDaemonServer
           "IDE command delivery outcome is uncertain for environment " + environmentId);
     }
     if (outcome == DaemonOfferResult.ACCEPTED) {
-      return new IdeRequest(environmentId, invocationId, pending.reply);
+      return new IdeRequest(
+          new IdeSessionIdentity(environmentId, daemonInstanceId, leaseToken),
+          invocationId,
+          pending.reply);
     }
     abandonIdeCall(invocationId);
     if (outcome == DaemonOfferResult.BUSY) {
