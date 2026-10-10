@@ -49,7 +49,10 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
         return response({ name: body.name, version: '0' }, 201)
       }
       if (method === 'POST' && url === '/api/ai/chats') {
-        return response({ id: chatId, agentName: body.agentName, version: '0' }, 201)
+        return response(
+          { id: chatId, agentName: body.agentName, environmentName: body.environmentName ?? null, version: '0' },
+          201,
+        )
       }
       if (
         method === 'POST'

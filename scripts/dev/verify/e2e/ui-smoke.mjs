@@ -1281,7 +1281,7 @@ async function main(argv) {
 
   await run(
     'ui.chat.create_agent_no_implicit_environment',
-    'Create Chat 选择 Agent 不隐式绑定 Environment，Agent 与 Chat 不持有环境字段',
+    'Create Chat 选择 Agent 不自动分配默认 Environment，Chat 显式投影 required-nullable environmentName',
     async (caseArt) => {
       const title = `e2e-ui-create-env-${stamp}`
       const tempAgentName = `e2e-ui-agent-${stamp}`
@@ -1308,7 +1308,7 @@ async function main(argv) {
       try {
         await goto('/chats')
         await page.getByText('新建 Chat', { exact: true }).click()
-        // Create Chat 只允许选择 Name 与 Agent；不存在 Workspace 路径选择器。
+        // Create Chat 只允许选择 Name、Agent 与默认 Environment；不存在 Workspace 路径选择器。
         await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
         const workspaceShell = page.locator(
           'button[aria-label="工作区路径"], button[aria-label="Workspace Path"], button.environment-binding-trigger',
@@ -1317,11 +1317,17 @@ async function main(argv) {
           await workspaceShell.count() === 0,
           'Create Chat still rendered a workspace path selector',
         )
+        // 默认 Environment 选择器是当前契约的一部分，必须真实渲染。
+        await page.getByRole('button', { name: '默认环境', exact: true }).waitFor({
+          state: 'visible',
+          timeout: 15_000,
+        })
         await selectCustomOption(
           page,
           page.getByRole('button', { name: 'Agent' }),
           tempAgentName,
         )
+        // 选择 Agent 不会隐式绑定默认 Environment：不选环境即保持“不选择环境”。
         await page.getByRole('button', { name: '确认创建' }).click()
         // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
         await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
@@ -1338,7 +1344,8 @@ async function main(argv) {
           `Footer inferred an implicit Environment: ${environmentText}`,
         )
 
-        // 4. Chat 持久化不得携带任何 workspace / environment 字段。
+        // Chat 持久化显式投影 required-nullable environmentName（未选择时为 null），
+        // 且绝不携带已删除的 workspace/environment 字段。
         const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chats')
         const created = (json?.data || []).find((chat) => chat.title === title)
         assert(created != null, `Create Chat did not persist the chat: ${JSON.stringify(json)}`)
@@ -1348,6 +1355,10 @@ async function main(argv) {
             `Chat leaked removed workspace/environment field '${field}': ${JSON.stringify(created)}`,
           )
         }
+        assert(
+          Object.hasOwn(created, 'environmentName') && created.environmentName === null,
+          `Chat must project required-nullable environmentName:null when no default Environment: ${JSON.stringify(created)}`,
+        )
         assert(created.agentName === tempAgentName, JSON.stringify(created))
         await shot(caseArt, 'create-chat-agent-no-implicit-environment')
         expectNoFatal(pageErrors, consoleErrors)

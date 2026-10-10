@@ -521,7 +521,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled；NEW_SESSION rootSettings 携带 agentName/model/environmentName branch draft，Thread 快照额外显式投影 goal；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 保存 agentName/yoloEnabled 与 required-nullable 默认 environmentName（无默认环境时显式 null）；NEW_SESSION rootSettings 携带 agentName/model/environmentName branch draft，Thread 快照额外显式投影 goal；更新 Chat 默认值（YOLO 或默认环境）不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -531,13 +531,15 @@ registerCase({
       yoloEnabled: false,
     })
     let cleanupChat = chat
+    let environment = null
     try {
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
+          && chat.environmentName === null
           && !Object.hasOwn(chat, 'workspacePath')
           && !Object.hasOwn(chat, 'environment')
-          && !Object.hasOwn(chat, 'environmentName'),
+          && !Object.hasOwn(chat, 'environmentId'),
         JSON.stringify(chat),
       )
       // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
@@ -569,10 +571,13 @@ registerCase({
         JSON.stringify(thread.branchSettings) === JSON.stringify(expectedSettings),
         JSON.stringify({ expected: expectedSettings, actual: thread.branchSettings }),
       )
+      // 同时改 YOLO 与 Chat 默认环境：既有 Thread 的 branchSettings 必须逐字段不变。
+      environment = await createEnvironment(ctx, `e2e-chat-independent-env-${suffix}`)
       const updated = envelopeData(
         (
           await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
             yoloEnabled: true,
+            environmentName: environment.name,
             expectedVersion: chat.version,
           })
         ).json,
@@ -581,9 +586,10 @@ registerCase({
       assert(
         updated.agentName === agent.name
           && updated.yoloEnabled === true
+          && updated.environmentName === environment.name
           && !Object.hasOwn(updated, 'workspacePath')
           && !Object.hasOwn(updated, 'environment')
-          && !Object.hasOwn(updated, 'environmentName'),
+          && !Object.hasOwn(updated, 'environmentId'),
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。
@@ -605,6 +611,83 @@ registerCase({
       )
     } finally {
       await deleteChat(ctx, cleanupChat)
+      if (environment) await deleteEnvironment(ctx, environment)
+    }
+  },
+})
+
+registerCase({
+  id: 'crud.chat.default_environment',
+  level: 'L1',
+  title: 'Chat 默认 Environment 的创建/保留/清空与拒绝',
+  docs: 'POST /api/ai/chats 省略 yoloEnabled 默认 false，携带已存在 Environment name 作为默认环境；PUT 省略 environmentName 保留当前默认环境，显式 null 清空；未知或非 canonical Environment name => 400 且当前值/version 不变',
+  async run(ctx) {
+    const agent = await firstAgent(ctx)
+    const suffix = cid().slice(0, 8)
+    let environment = null
+    let chat = null
+    try {
+      environment = await createEnvironment(ctx, `e2e-chat-default-env-${suffix}`)
+      // 创建：省略 yoloEnabled（默认 false），携带已存在 Environment 作为默认环境。
+      chat = await createChat(ctx, {
+        title: `e2e-chat-default-${suffix}`,
+        agentName: agent.name,
+        environmentName: environment.name,
+      })
+      assert(
+        chat.agentName === agent.name
+          && chat.yoloEnabled === false
+          && chat.environmentName === environment.name,
+        JSON.stringify(chat),
+      )
+      // PUT 省略 environmentName（只改 title）：保留当前默认环境。
+      chat = envelopeData(
+        (
+          await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+            title: `e2e-chat-default-upd-${suffix}`,
+            expectedVersion: chat.version,
+          })
+        ).json,
+      )
+      assert(chat.environmentName === environment.name, JSON.stringify(chat))
+      // 未知 Environment name => 400，且不写回：当前值/version 不变。
+      const beforeRejected = chat
+      await expectHttpError(
+        () =>
+          ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+            environmentName: `missing-env-${suffix}`,
+            expectedVersion: chat.version,
+          }),
+        { status: 400, messageIncludes: /environment/i },
+      )
+      // 非 canonical（含 '/'）=> 400。
+      await expectHttpError(
+        () =>
+          ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+            environmentName: 'bad/name',
+            expectedVersion: chat.version,
+          }),
+        { status: 400, messageIncludes: /environmentName/i },
+      )
+      const still = envelopeData((await ctx.call('GET', `/api/ai/chats/${chat.id}`)).json)
+      assert(
+        still.environmentName === beforeRejected.environmentName
+          && String(still.version) === String(beforeRejected.version),
+        JSON.stringify({ before: beforeRejected, after: still }),
+      )
+      // 显式 null 清空默认环境。
+      chat = envelopeData(
+        (
+          await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+            environmentName: null,
+            expectedVersion: still.version,
+          })
+        ).json,
+      )
+      assert(chat.environmentName === null, JSON.stringify(chat))
+    } finally {
+      if (chat) await deleteChat(ctx, chat)
+      if (environment) await deleteEnvironment(ctx, environment)
     }
   },
 })
@@ -1021,5 +1104,34 @@ async function deleteChat(ctx, chat) {
   await ctx.call(
     'DELETE',
     `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+  )
+}
+
+/** 创建一次性 Environment Card（dedicated 资源，随 case 清理），返回权威 Card。 */
+async function createEnvironment(ctx, name) {
+  const environment = envelopeData(
+    (await ctx.call('POST', '/api/harness/environments', { name })).json,
+  )
+  assert(
+    environment?.id && environment?.name === name && environment?.version != null,
+    `invalid Environment Card: ${JSON.stringify(environment)}`,
+  )
+  return environment
+}
+
+/** 删除一次性 Environment Card：先读回权威版本，避免陈旧 version 导致 CAS 删除失败。 */
+async function deleteEnvironment(ctx, environment) {
+  let version = String(environment.version)
+  try {
+    const card = envelopeData(
+      (await ctx.call('GET', `/api/harness/environments/${encodeURIComponent(environment.id)}`)).json,
+    )
+    if (card?.version != null) version = String(card.version)
+  } catch {
+    // 读不到权威版本时退回创建版本。
+  }
+  await ctx.call(
+    'DELETE',
+    `/api/harness/environments/${encodeURIComponent(environment.id)}?expectedVersion=${encodeURIComponent(version)}`,
   )
 }

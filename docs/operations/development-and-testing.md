@@ -464,6 +464,13 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `settings.system_contract_cas`：系统设置按固定七段（aiRuntime、…、storageMedia、advanced）严格聚合，
   未知字段与非法值拒绝，整体 CAS 保存与恢复；`storageMedia` 持有临时资源保留期与扫描间隔
   （默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）以及上传有效期与下载签名默认值。
+- `crud.chat.default_environment`：Chat 默认 Environment 是 required-nullable（未选择时显式 null），创建省略
+  `yoloEnabled` 时为 `false`；携带已存在 Environment 作为默认环境，PUT 省略 `environmentName` 保留当前默认环境、
+  显式 null 清空，未知或非 canonical Environment 名 400 且当前值/version 不变。
+- `thread.model_request_debug_draft_settings`：`POST /api/harness/threads/{threadId}/model-request-debug` 以 UI 草稿
+  `{model, environmentName}`（可空）在真实 snapshot 上只读现算；缺失 Agent 的既有 Thread 让规划确定性 `PLANNING_FAILED`
+  （不调用真实 Provider），响应回显草稿 model/env、`planningError` 只回显稳定 code、tools/skills/subagents 安全为空、
+  `frozenInvocation` 与草稿选择独立；缺 model 或非 canonical environmentName 400、GET 405，查询不改变 head/version/sequence。
 - `branch.same_session_new_thread`（L3，`real,branch`）与前端 fork 用例：同 Session 新建 Thread 从历史边界 fork，
   `FORK` Entry 只记录 `mode`/切点，会话 fork 把切点上下文复制到新 Session；分支不继承源 Thread 的待处理命令、
   子执行与 Join 订阅，从新分支向旧子执行添加 Join 因直接父不匹配原子拒绝。

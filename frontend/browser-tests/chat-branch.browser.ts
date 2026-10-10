@@ -121,6 +121,7 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
 interface Recorded {
   commandBatches: unknown[]
   branchPreviews: Array<{ startEntryId: string; commands: Array<Record<string, unknown>> }>
+  modelRequestDebug: Array<{ model: unknown; environmentName: string | null }>
   treeReads: number
   completeGrandchild: () => void
 }
@@ -152,7 +153,7 @@ async function installChatApi(
   let grandCompleted = false
   const sockets: WebSocketRoute[] = []
   const recorded: Recorded = {
-    commandBatches: [], branchPreviews: [], treeReads: 0,
+    commandBatches: [], branchPreviews: [], modelRequestDebug: [], treeReads: 0,
     completeGrandchild: () => {
       grandCompleted = true
       for (const socket of sockets) {
@@ -440,15 +441,22 @@ async function installChatApi(
       await route.fulfill({ json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } } })
       return
     }
-    if (path === '/api/harness/threads/model-request-debug' || path.endsWith('/model-request-debug')) {
+    if (path.endsWith('/model-request-debug')) {
+      // 只读调试预览是 POST-only：非 POST 一律 405，POST 记录草稿选择（model/environmentName）。
+      if (method !== 'POST') {
+        await route.fulfill({ status: 405, json: { status: 405, message: 'Method Not Allowed' } })
+        return
+      }
+      const body = request.postDataJSON() as { model: unknown; environmentName: string | null }
+      recorded.modelRequestDebug.push(body)
       await route.fulfill({
         json: {
           status: 200,
           data: {
             kind: 'NEXT_REQUEST_PREVIEW',
             generatedAt: '2026-10-01T00:00:00Z',
-            model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-            environmentName: null,
+            model: body.model,
+            environmentName: body.environmentName ?? null,
             systemInstruction: 'system prompt',
             tools: [],
             skills: [],
