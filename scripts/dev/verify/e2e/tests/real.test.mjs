@@ -12,6 +12,7 @@ import {
   assertProviderUsageAlgebra,
   DEFAULT_BUILTIN_MODEL_ID,
   collectTaskToolResults,
+  taskAcceptedThreadId,
   delegatedChildFacts,
   resolveBuiltinModelDef,
   sanitizeArtifact,
@@ -928,7 +929,10 @@ test('task 即时回执与诊断摘要只读真实 entry payload，错误码可�
               toolName: 'task',
               rendererKey: 'task',
               error: false,
-              contents: [{ type: 'text', text: '{"thread_id":"t1","status":"accepted"}' }],
+              contents: [{
+                type: 'text',
+                text: 'Task accepted. thread_id: 12345678-1234-1234-1234-123456789abc.\nThe subagent runs asynchronously.',
+              }],
             },
           ],
         },
@@ -940,6 +944,17 @@ test('task 即时回执与诊断摘要只读真实 entry payload，错误码可�
   const results = collectTaskToolResults(entries)
   assert.equal(results.length, 1)
   assert.equal(results[0].rendererKey, 'task')
+  assert.equal(
+    taskAcceptedThreadId(results[0].contents[0].text),
+    '12345678-1234-1234-1234-123456789abc',
+  )
+  for (const invalid of [
+    '{"thread_id":"12345678-1234-1234-1234-123456789abc","status":"accepted"}',
+    'Task accepted. thread_id: not-a-uuid.\n',
+    'Task accepted. thread_id: 12345678123412341234123456789abc.\n',
+  ]) {
+    assert.throws(() => taskAcceptedThreadId(invalid), /canonical/)
+  }
 
   const summary = summarizeThreadHistory(entries)
   assert.deepEqual(

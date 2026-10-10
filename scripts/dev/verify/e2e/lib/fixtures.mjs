@@ -443,14 +443,18 @@ export function providerCreateBody(suffix) {
   }
 }
 
-export function providerUpdateBody(name) {
+/**
+ * Provider PUT 可编辑字段（不含 `name`：资源路由身份在 path，请求体携带 `name` 会被严格反序列化拒绝）。
+ * `overrides` 用于表达 `modelHttpRetryStatusCodes` 的省略（不传键）/ 显式 null / 数组三态。
+ */
+export function providerUpdateBody(overrides = {}) {
   return {
-    name,
     description: 'e2e provider updated',
     providerType: 'openai',
     baseUrl: 'https://example.com/v1',
     credential: '', // 保留密钥
     modelCallTimeoutMillis: 1_800_000,
     modelCallIdleTimeoutMillis: 120_000,
+    ...overrides,
   }
 }
