@@ -15,8 +15,8 @@ export function CreateChatModal({
   agents,
   selectedAgentName,
   title,
-  yoloEnabled = false,
-  selectedEnvironmentName = null,
+  yoloEnabled,
+  selectedEnvironmentName,
   pending,
   formError = '',
   nameError = '',
@@ -32,16 +32,16 @@ export function CreateChatModal({
   agents: AgentDefinitionDTO[]
   selectedAgentName: string
   title: string
-  yoloEnabled?: boolean
-  selectedEnvironmentName?: string | null
+  yoloEnabled: boolean
+  selectedEnvironmentName: string | null
   pending: boolean
   formError?: string
   nameError?: string
   onClose: () => void
   onSelectAgent: (agentName: string) => void
   onTitleChange: (title: string) => void
-  onYoloChange?: (yolo: boolean) => void
-  onSelectEnvironment?: (environmentName: string | null) => void
+  onYoloChange: (yolo: boolean) => void
+  onSelectEnvironment: (environmentName: string | null) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
   const { t } = useI18n()
@@ -63,11 +63,13 @@ export function CreateChatModal({
     if (selectedEnvironmentName && !envs.some((e) => e.name === selectedEnvironmentName)) {
       list.push({
         value: selectedEnvironmentName,
-        label: `${selectedEnvironmentName} ${t('ai.chat.environmentUnavailable')}`,
+        label: environmentsQuery.isSuccess
+          ? `${selectedEnvironmentName} ${t('ai.chat.environmentUnavailable')}`
+          : selectedEnvironmentName,
       })
     }
     return list
-  }, [environmentsQuery.data, selectedEnvironmentName, t])
+  }, [environmentsQuery.data, environmentsQuery.isSuccess, selectedEnvironmentName, t])
 
   if (!open) {
     return null
@@ -127,24 +129,30 @@ export function CreateChatModal({
                 aria-checked={yoloEnabled}
                 aria-label={t('projects.yolo')}
                 disabled={pending}
-                onClick={() => onYoloChange?.(!yoloEnabled)}
+                onClick={() => onYoloChange(!yoloEnabled)}
               >
                 <span className="settings-switch-thumb" aria-hidden="true" />
               </button>
             </div>
           </div>
-          <label className="form-group">
+          <label className={`form-group${environmentsQuery.isError ? ' is-error' : ''}`}>
             <FieldLabel>{t('ai.chat.defaultEnvironment')}</FieldLabel>
             <Select
               aria-label={t('ai.chat.defaultEnvironment')}
               value={selectedEnvironmentName ?? ''}
               placeholder={t('ai.chat.selectEnvironment')}
               options={environmentOptions}
-              onChange={(value) => onSelectEnvironment?.(value ? value : null)}
+              onChange={(value) => onSelectEnvironment(value ? value : null)}
               disabled={pending}
+              aria-invalid={environmentsQuery.isError}
             />
+            {environmentsQuery.isLoading ? (
+              <span className="field-hint" role="status" aria-live="polite">
+                {t('ai.common.loadingEnvironment')}
+              </span>
+            ) : null}
             {environmentsQuery.isError ? (
-              <span className="field-error" role="status">
+              <span className="field-error" role="status" aria-live="assertive">
                 {t('ai.chat.environmentLoadFailed')}
               </span>
             ) : null}

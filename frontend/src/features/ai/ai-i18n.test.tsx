@@ -148,10 +148,14 @@ describe('AI i18n live-switch contracts', () => {
           agents={[agent]}
           selectedAgentName=""
           title=""
+          yoloEnabled={false}
+          selectedEnvironmentName={null}
           pending={false}
           onClose={() => undefined}
           onSelectAgent={() => undefined}
           onTitleChange={() => undefined}
+          onYoloChange={() => undefined}
+          onSelectEnvironment={() => undefined}
           onSubmit={(event) => event.preventDefault()}
         />
       </QueryClientProvider>,
