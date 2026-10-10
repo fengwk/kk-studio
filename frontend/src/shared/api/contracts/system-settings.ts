@@ -169,7 +169,11 @@ export type SystemSettingsSchemaFieldType =
   | 'PERMISSION'
   | 'INTEGER_LIST'
 
-export type SystemSettingsSchemaApplyTiming = 'NEXT_INVOCATION' | 'NEXT_CHAT' | 'RESTART'
+export type SystemSettingsSchemaApplyTiming =
+  | 'NEXT_INVOCATION'
+  | 'NEXT_HTTP_REQUEST'
+  | 'NEXT_CHAT'
+  | 'RESTART'
 
 export interface SystemSettingsSchemaOption {
   value: string

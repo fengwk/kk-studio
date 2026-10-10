@@ -14,8 +14,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * 权威回读。带版本替换使用 CAS 门控，较旧的并发回读不能覆盖较新的快照。回滚绝不更新内存。 {@link #get()} 每次返回当前值。
  *
  * <p>live 决策点（aiRuntime compaction/retry/subagent、tool.gateway、environment.runtime、
- * storageMedia.upload 上传 TTL/预签名、storageMedia.canvasMedia，以及 permission）每次现读。其余 restart-required 配置
- * bean 仍在装配期读取 {@link #get()}。本类是唯一装配期 DB 读取点，不允许各配置各自再注入 {@code SystemSettingsProvider} 现读现解。
+ * storageMedia.upload 上传 TTL/预签名、storageMedia.canvasMedia、network 全局 HTTP 代理，以及 permission）每次现读。
+ * 其余 restart-required 配置 bean 仍在装配期读取 {@link #get()}。本类是唯一装配期 DB 读取点，不允许各配置各自再注入
+ * {@code SystemSettingsProvider} 现读现解。
  */
 @Component
 public class SystemSettingsSnapshot {

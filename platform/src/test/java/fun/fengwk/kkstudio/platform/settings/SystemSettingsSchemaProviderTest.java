@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -59,21 +60,21 @@ class SystemSettingsSchemaProviderTest {
   }
 
   @Test
-  void networkDescribesOnlyGlobalProxyWithRestartTimingAndTextBounds() {
+  void networkDescribesOnlyGlobalProxyWithNextHttpRequestTimingAndTextBounds() {
     // 精确 schema 契约阻止运行期开关、模块覆盖或 nullable/长度边界漂移。
     SystemSettingsSchemaDTO.SectionDTO section =
         new SystemSettingsSchemaProvider().get().getSections().get(3);
     assertEquals("network", section.getKey());
     assertEquals("settings.tabs.network", section.getLabelKey());
     assertEquals("settings.section.network.description", section.getDescriptionKey());
-    assertTrue(section.isRestartRequired());
+    assertFalse(section.isRestartRequired());
     assertEquals(1, section.getGroups().size());
     SystemSettingsSchemaDTO.GroupDTO group = section.getGroups().get(0);
     assertEquals("network.proxy", group.getKey());
     assertEquals("settings.section.network.proxy.title", group.getLabelKey());
     assertEquals("settings.section.network.proxy.description", group.getDescriptionKey());
-    assertTrue(group.isRestartRequired());
-    assertEquals(SystemSettingsSchemaDTO.ApplyTiming.RESTART, group.getApplyTiming());
+    assertFalse(group.isRestartRequired());
+    assertEquals(SystemSettingsSchemaDTO.ApplyTiming.NEXT_HTTP_REQUEST, group.getApplyTiming());
     assertEquals(2, group.getFields().size());
     for (SystemSettingsSchemaDTO.FieldDTO field : group.getFields()) {
       assertEquals(SystemSettingsSchemaDTO.FieldType.TEXT, field.getType());

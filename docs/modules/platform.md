@@ -32,7 +32,7 @@ executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `
 | [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
 | [plugin](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin) | 安装目录、安全管理面、凭据加密与资源端口 |
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | Function 输出物化、Blob 访问与媒体处理适配 |
-| [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与启动期全局代理装配 |
+| [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 七类配置的 YAML 读写、依赖闭包与原子导入 |
 
 ## 待处理交互
@@ -297,9 +297,10 @@ network 提供唯一的 Backend 全局 HTTP 代理：`proxyUrl` 为无认证的 
 null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`，
 支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR（CIDR 只按目标 URL 中的数值 IP
 逐位匹配，不为域名解析 DNS）。
-设置在启动时冻结，保存后重启各 Backend 节点生效；模型、Git、MCP、集成、媒体与 S3
-统一使用该策略，无模块覆盖，也不回退宿主代理环境。媒体 CONNECT 仍固定到已校验的公网 IP，
-Host/SNI 与证书校验保留原域名。Daemon 与浏览器的网络策略独立。
+代理选择在每次请求时现读内存快照：保存后新发起的 HTTP 请求立即使用新路由，正在执行的请求
+由其自身连接与响应流继续完成，不受影响；模型、Git、MCP、集成、媒体与 S3 统一使用该策略，
+无模块覆盖，也不回退宿主代理环境。媒体 CONNECT 仍固定到已校验的公网 IP，Host/SNI 与证书
+校验保留原域名。Daemon 与浏览器的网络策略独立。
 
 部署级设置由各 `@ConfigurationProperties` 定义，进程启动时装配：
 
