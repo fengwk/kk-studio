@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.chat;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -19,6 +20,7 @@ public class ChatDTO {
   private String agentName;
 
   /** 默认 Environment name（nullable）；Environment 删除后该值可能过期，发送时按正常 planner fail closed。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentName;
 
   /** 可见的发送权限模式。 */

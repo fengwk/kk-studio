@@ -14,8 +14,8 @@ import java.util.UUID;
 /**
  * 规范化 Chat 可变字段并分配 Chat id。
  *
- * <p>更新语义：{@code null} 字段保留当前值。提供时 Chat title 必填；提供的 {@code agentName} 必须非空白。 catalog 存在性由 {@link
- * ChatGuard} 校验。创建省略 YOLO 时为 {@code false}；创建省略 Environment 时无默认环境。
+ * <p>title/agentName 非 null 时更新并校验；Environment 省略保留、显式 null 清空，YOLO 省略保留、显式 null 拒绝。catalog 存在性由
+ * {@link ChatGuard} 校验。创建省略 YOLO 时为 {@code false}；创建省略 Environment 时无默认环境。
  */
 @Component
 public class ChatMutationFactory {
