@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
-import fun.fengwk.kkstudio.notification.NotificationBus;
+import fun.fengwk.kkstudio.share.notification.NotificationBus;
 import fun.fengwk.kkstudio.share.notification.NotificationCarrier;
 import fun.fengwk.kkstudio.share.notification.NotificationLimits;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
