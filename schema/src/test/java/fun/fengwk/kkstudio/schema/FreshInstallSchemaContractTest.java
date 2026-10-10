@@ -61,7 +61,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 195;
+  private static final int PROBE_ASSERTION_COUNT = 197;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -76,6 +76,7 @@ class FreshInstallSchemaContractTest {
           "agent_model",
           "agent_provider",
           "chat",
+          "cluster_node",
           "environment",
           "environment_connection",
           "environment_update_operation",
