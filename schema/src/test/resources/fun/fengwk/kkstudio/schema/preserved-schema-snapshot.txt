@@ -42,6 +42,10 @@ column	chat	title	type=character varying(256) notnull=f default=<null> generated
 column	chat	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	chat	version	type=bigint notnull=t default=0 generated= collation=-
 column	chat	yolo_enabled	type=boolean notnull=t default=false generated= collation=-
+column	cluster_node	instance_id	type=uuid notnull=t default=<null> generated= collation=-
+column	cluster_node	internal_url	type=character varying(512) notnull=t default=<null> generated= collation="default"
+column	cluster_node	last_seen	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	cluster_node	lease_until	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	environment	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	environment	id	type=uuid notnull=t default=<null> generated= collation=-
 column	environment	install_config	type=jsonb notnull=f default=<null> generated= collation=-
@@ -252,6 +256,8 @@ constraint	chat	chat_pkey	PRIMARY KEY (id)
 constraint	chat	ck_chat_agent_name	CHECK ((((agent_name)::text !~ '^[[:space:]]'::text) AND ((agent_name)::text !~ '[[:space:]]$'::text) AND (char_length((agent_name)::text) > 0) AND (POSITION(('/'::text) IN (agent_name)) = 0)))
 constraint	chat	ck_chat_environment_name	CHECK (((environment_name IS NULL) OR (((environment_name)::text !~ '^[[:space:]]'::text) AND ((environment_name)::text !~ '[[:space:]]$'::text) AND (char_length((environment_name)::text) > 0) AND (POSITION(('/'::text) IN (environment_name)) = 0))))
 constraint	chat	ck_chat_version_nonneg	CHECK ((version >= 0))
+constraint	cluster_node	ck_cluster_node_lease	CHECK ((lease_until > last_seen))
+constraint	cluster_node	cluster_node_pkey	PRIMARY KEY (instance_id)
 constraint	environment	ck_environment_install_config_object	CHECK (((install_config IS NULL) OR (jsonb_typeof(install_config) = 'object'::text)))
 constraint	environment	ck_environment_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
 constraint	environment	ck_environment_registration_token	CHECK (((btrim((registration_token)::text) <> ''::text) AND (char_length((registration_token)::text) <= 128) AND ((registration_token)::text = btrim((registration_token)::text))))
@@ -449,6 +455,7 @@ index	agent_provider	agent_provider_pkey	CREATE UNIQUE INDEX agent_provider_pkey
 index	chat	chat_pkey	CREATE UNIQUE INDEX chat_pkey ON public.chat USING btree (id)
 index	chat	idx_chat_archived	CREATE INDEX idx_chat_archived ON public.chat USING btree (archived_at, updated_at, id)
 index	chat	idx_chat_modified	CREATE INDEX idx_chat_modified ON public.chat USING btree (updated_at, created_at)
+index	cluster_node	cluster_node_pkey	CREATE UNIQUE INDEX cluster_node_pkey ON public.cluster_node USING btree (instance_id)
 index	environment	environment_pkey	CREATE UNIQUE INDEX environment_pkey ON public.environment USING btree (id)
 index	environment	idx_environment_updated	CREATE INDEX idx_environment_updated ON public.environment USING btree (updated_at, id)
 index	environment	uk_environment_name	CREATE UNIQUE INDEX uk_environment_name ON public.environment USING btree (name)
@@ -508,6 +515,7 @@ table	agent_definition		preserved
 table	agent_model		preserved
 table	agent_provider		preserved
 table	chat		preserved
+table	cluster_node		preserved
 table	environment		preserved
 table	environment_connection		preserved
 table	environment_update_operation		preserved

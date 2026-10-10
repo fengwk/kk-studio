@@ -62,6 +62,18 @@ select pg_temp.rejects('environment install settings reject array',
     $$update environment set install_config = '[]'::jsonb where id = pg_temp.uid(9000)$$,
     '23514', 'ck_environment_install_config_object');
 
+-- cluster_node: node registry carries only reachability origin + lease metadata, not liveness bytes.
+insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+    values (pg_temp.uid(9200), 'https://node-a.internal:8443',
+        now() + interval '1 minute', now());
+select pg_temp.assert_true('cluster node registry accepts a fresh node lease',
+    (select lease_until > last_seen from cluster_node where instance_id = pg_temp.uid(9200)));
+select pg_temp.rejects('cluster node lease must be after last_seen',
+    $$insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+        values (pg_temp.uid(9201), 'https://node-b.internal:8443',
+            now(), now() + interval '1 minute')$$,
+    '23514', 'ck_cluster_node_lease');
+
 insert into agent_provider (name, provider_type, base_url, config, connection_generation_id)
     values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
 insert into agent_model (provider_name, name, model_id, config)

@@ -18,9 +18,9 @@ public class EnvironmentIdeConfiguration {
     return new InMemoryIdeBootstrapTicketService();
   }
 
-  @Bean
-  @ConditionalOnMissingBean
-  public EnvironmentIdeService environmentIdeService(
+  @Bean(name = "localEnvironmentIdeService")
+  @ConditionalOnMissingBean(name = "localEnvironmentIdeService")
+  public EnvironmentIdeServiceImpl localEnvironmentIdeService(
       IdeCommandTransport ideCommandTransport,
       IdeOriginProperties originProperties,
       IdeBootstrapTicketService bootstrapTickets) {
