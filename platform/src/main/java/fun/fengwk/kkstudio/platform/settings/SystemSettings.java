@@ -56,10 +56,9 @@ public record SystemSettings(
     advanced = Objects.requireNonNull(advanced, "advanced");
   }
 
-  /** tool section：权限规则（保序数组）+ 默认 YOLO + 模型/工具 Gateway 重试预算。 */
+  /** tool section：权限规则（保序数组）+ 模型/工具 Gateway 重试预算。 */
   public record Tool(
       Map<String, List<PermissionRule>> permission,
-      boolean defaultYolo,
       long modelGatewayBusyRetryMillis,
       long toolGatewayBusyRetryMillis,
       long toolGatewayOverloadRetryMillis) {
@@ -71,7 +70,6 @@ public record SystemSettings(
                 "write", List.of(new PermissionRule("*", PermissionAction.ASK)),
                 "edit", List.of(new PermissionRule("*", PermissionAction.ASK)),
                 "bash", List.of(new PermissionRule("*", PermissionAction.ASK))),
-            false,
             5_000L,
             1_000L,
             5_000L);

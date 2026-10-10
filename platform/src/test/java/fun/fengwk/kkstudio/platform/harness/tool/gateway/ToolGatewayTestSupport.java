@@ -354,7 +354,7 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolSettings settings(PermissionAction action) {
-    return new ToolSettings(Map.of("*", List.of(new PermissionRule("*", action))), false);
+    return new ToolSettings(Map.of("*", List.of(new PermissionRule("*", action))));
   }
 
   static ToolResult result(String callId, String text) {

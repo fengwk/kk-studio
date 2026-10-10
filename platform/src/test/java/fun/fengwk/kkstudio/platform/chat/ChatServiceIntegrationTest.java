@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.platform.chat;
 
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyDevDatabase;
+import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -37,6 +39,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
 import java.sql.Connection;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -221,6 +224,62 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     } finally {
       chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
       assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
+    }
+  }
+
+  /** Chat 默认环境按名称保存：null 合法，非 null 必须存在且 canonical；更新区分省略与显式清空，CAS 失败不写入。 */
+  @Test
+  void persistsDefaultEnvironmentAndRejectsUnknownOrMalformedNames() throws Exception {
+    try (Connection conn = newConnection();
+        Statement statement = conn.createStatement()) {
+      statement.execute(
+          "insert into environment (id, name, registration_token) values "
+              + "('00000000-0000-0000-0000-0000000000aa', 'env-a', 'env-a-token')");
+    }
+
+    ChatCreateDTO create = new ChatCreateDTO();
+    create.setTitle("env-chat");
+    create.setAgentName("default-assistant");
+    create.setEnvironmentName("env-a");
+    ChatDTO created = chatService.createChat(create);
+    assertEquals("env-a", created.getEnvironmentName());
+    assertEquals("env-a", chatService.getChat(created.getId()).getEnvironmentName());
+
+    try {
+      ChatCreateDTO unknown = new ChatCreateDTO();
+      unknown.setTitle("unknown-env");
+      unknown.setAgentName("default-assistant");
+      unknown.setEnvironmentName("missing-env");
+      assertThrows(AiValidationException.class, () -> chatService.createChat(unknown));
+
+      ChatCreateDTO malformed = new ChatCreateDTO();
+      malformed.setTitle("bad-env");
+      malformed.setAgentName("default-assistant");
+      malformed.setEnvironmentName("bad/env");
+      assertThrows(AiValidationException.class, () -> chatService.createChat(malformed));
+
+      // 更新省略保留当前环境。
+      ChatUpdateDTO omit = new ChatUpdateDTO();
+      omit.setTitle("renamed");
+      omit.setExpectedVersion(created.getVersion());
+      assertEquals("env-a", chatService.updateChat(created.getId(), omit).getEnvironmentName());
+
+      // 显式 null 清空默认环境。
+      ChatUpdateDTO clear = new ChatUpdateDTO();
+      clear.setEnvironmentName(null);
+      clear.setExpectedVersion(chatService.getChat(created.getId()).getVersion());
+      assertNull(chatService.updateChat(created.getId(), clear).getEnvironmentName());
+
+      // CAS 失败不得写入。
+      ChatUpdateDTO stale = new ChatUpdateDTO();
+      stale.setEnvironmentName("env-a");
+      stale.setExpectedVersion("0");
+      assertThrows(
+          AiVersionConflictException.class, () -> chatService.updateChat(created.getId(), stale));
+      assertNull(chatService.getChat(created.getId()).getEnvironmentName());
+    } finally {
+      chatService.deleteChat(created.getId(), chatService.getChat(created.getId()).getVersion());
+      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(created.getId()));
     }
   }
 

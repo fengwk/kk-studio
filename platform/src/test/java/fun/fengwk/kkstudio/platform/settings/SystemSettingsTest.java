@@ -36,7 +36,7 @@ class SystemSettingsTest {
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
         defaults.tool().permission().get("bash"));
-    assertEquals(false, defaults.tool().defaultYolo());
+    assertEquals(false, defaults.tool().permission().containsKey("read"));
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
     assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
     assertEquals(5_000L, defaults.tool().toolGatewayOverloadRetryMillis());
@@ -515,7 +515,6 @@ class SystemSettingsTest {
     SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
     return new SystemSettings.Tool(
         permission,
-        base.defaultYolo(),
         base.modelGatewayBusyRetryMillis(),
         base.toolGatewayBusyRetryMillis(),
         base.toolGatewayOverloadRetryMillis());

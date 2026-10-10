@@ -6,10 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** 以精确 {@code *} 或模型可见 tool name 为 key 的 ordered permission rules 与默认 YOLO。 */
-public record ToolSettings(Map<String, List<PermissionRule>> permission, boolean defaultYolo) {
+/** 以精确 {@code *} 或模型可见 tool name 为 key 的 ordered permission rules。 */
+public record ToolSettings(Map<String, List<PermissionRule>> permission) {
 
-  public static final ToolSettings DEFAULT = new ToolSettings(Map.of(), false);
+  public static final ToolSettings DEFAULT = new ToolSettings(Map.of());
 
   public ToolSettings {
     Objects.requireNonNull(permission, "permission");

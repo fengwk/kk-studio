@@ -10,8 +10,8 @@ import java.util.Objects;
 /**
  * 基于数据库 {@link SystemSettings} 的 {@link ToolSettingsProvider}。
  *
- * <p>每次 {@link #get()} 都读取当前数据库权威配置并转换为 {@link ToolSettings}：permission 对下一次 preflight 生效，
- * defaultYolo 在下一次未显式指定模式的 Chat 创建时被捕获；两者都无需重启。ToolSettings 构造器会做不可变副本，转换本身不会引入额外权限源。
+ * <p>每次 {@link #get()} 都读取当前数据库权威配置并转换为 {@link ToolSettings}：permission 对下一次 preflight 生效，无需重启。
+ * ToolSettings 构造器会做不可变副本，转换本身不会引入额外权限源。
  */
 public final class SystemSettingsToolSettingsProvider implements ToolSettingsProvider {
 
@@ -25,6 +25,6 @@ public final class SystemSettingsToolSettingsProvider implements ToolSettingsPro
   @Override
   public ToolSettings get() {
     SystemSettings.Tool tool = systemSettingsProvider.get().tool();
-    return new ToolSettings(tool.permission(), tool.defaultYolo());
+    return new ToolSettings(tool.permission());
   }
 }

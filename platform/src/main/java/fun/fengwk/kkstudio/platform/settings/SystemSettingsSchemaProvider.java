@@ -162,20 +162,6 @@ public class SystemSettingsSchemaProvider {
                         option("ask", "settings.permission.action.ask"),
                         option("deny", "settings.permission.action.deny"))),
                 group(
-                    "tool.yolo",
-                    "settings.section.tool.yolo.title",
-                    "settings.section.tool.yolo.description",
-                    false,
-                    ApplyTiming.NEXT_CHAT,
-                    field(
-                        "tool.defaultYolo",
-                        "settings.field.tool.defaultYolo",
-                        null,
-                        FieldType.BOOLEAN,
-                        false,
-                        null,
-                        null)),
-                group(
                     "tool.gateway",
                     "settings.section.tool.gateway.title",
                     "settings.section.tool.gateway.description",

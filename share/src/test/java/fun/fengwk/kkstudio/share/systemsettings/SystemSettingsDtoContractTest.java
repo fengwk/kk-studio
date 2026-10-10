@@ -201,7 +201,6 @@ class SystemSettingsDtoContractTest {
     rule.setPattern("*");
     rule.setAction("ask");
     tool.setPermission(Map.of("write", List.of(rule)));
-    tool.setDefaultYolo(false);
     tool.setModelGatewayBusyRetryMillis(5000L);
     tool.setToolGatewayBusyRetryMillis(1000L);
     tool.setToolGatewayOverloadRetryMillis(5000L);
