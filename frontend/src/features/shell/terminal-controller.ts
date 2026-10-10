@@ -91,7 +91,7 @@ export const TERMINAL_REQUEST_DEADLINE_MS = 10000
 /** writer/observer 心跳间隔。 */
 export const TERMINAL_KEEPALIVE_INTERVAL_MS = 5000
 
-type ControlRequestKind = 'OPEN' | 'ATTACH' | 'CLAIM' | 'TAKEOVER' | 'RELEASE'
+type ControlRequestKind = 'OPEN' | 'ATTACH' | 'CLAIM' | 'TAKEOVER' | 'RELEASE' | 'CLOSE'
 
 interface PendingRequest {
   kind: ControlRequestKind
@@ -101,8 +101,12 @@ interface PendingRequest {
 
 interface InflightOperation {
   kind: 'INPUT' | 'RESIZE'
+  /** 发出该操作的请求 id，用于精确关联 gateway pre-native NOT_EXECUTED 错误。 */
+  requestId: string
   seq: number
   digest: string
+  /** 发出该操作时绑定的 grant（不可变）；绝不用新授权核对旧操作。 */
+  grant: WriterGrant
   /** INPUT 的原始字节数（不保留字节本身），用于总预算。 */
   inputBytes: number
   timer: ReturnType<typeof setTimeout> | null
@@ -138,7 +142,10 @@ interface SessionRuntime {
   pendingInput: Uint8Array
   queuedResize: { cols: number; rows: number } | null
   keepaliveTimer: ReturnType<typeof setInterval> | null
-  terminateTimer: ReturnType<typeof setTimeout> | null
+  /** applied 发送重入守卫：正在发送的版本；防止同步回执导致重复 ACK。 */
+  applyingVersion: number | null
+  /** 曾有一个操作结果无法核对，需持续向用户提示直到显式重新同步。 */
+  unverified: boolean
   /** 每个恢复事件只允许一次自动 re-ATTACH。 */
   recoveryAttachIssued: boolean
   /** 每个恢复事件只允许一次自动 CLAIM.recovery。 */
@@ -170,7 +177,8 @@ function createSession(environmentId: string): SessionRuntime {
     pendingInput: new Uint8Array(0),
     queuedResize: null,
     keepaliveTimer: null,
-    terminateTimer: null,
+    applyingVersion: null,
+    unverified: false,
     recoveryAttachIssued: false,
     recoveryClaimIssued: false,
     recoverOnBaseline: false,
@@ -237,7 +245,6 @@ export class TerminalController {
     const active = this.activeSession()
     for (const session of this.sessions.values()) {
       this.clearKeepalive(session)
-      this.clearTerminateTimer(session)
       if (session.pendingRequest !== null && session.pendingRequest.timer !== null) {
         clearTimeout(session.pendingRequest.timer)
         session.pendingRequest.timer = null
@@ -306,6 +313,7 @@ export class TerminalController {
       return
     }
     session.notice = null
+    session.unverified = false
     session.recoveryAttachIssued = false
     session.recoveryClaimIssued = false
     if (session.identity === null) {
@@ -321,6 +329,10 @@ export class TerminalController {
     const identity = session?.identity ?? null
     const streamId = session?.streamId ?? null
     if (session === null || identity === null || streamId === null) {
+      return
+    }
+    if (session.pendingRequest !== null) {
+      // 已有在途控制请求（例如 ATTACH）：不得被界面操作覆盖。
       return
     }
     if (session.appliedVersion === null) {
@@ -347,6 +359,9 @@ export class TerminalController {
     if (session === null || identity === null || streamId === null) {
       return
     }
+    if (session.pendingRequest !== null) {
+      return
+    }
     if (session.appliedVersion === null) {
       return
     }
@@ -364,7 +379,7 @@ export class TerminalController {
     })
   }
 
-  /** 显式释放控制权。 */
+  /** 显式释放控制权：发出后立即禁止新输入并丢弃未发送缓冲。 */
   release(): void {
     const session = this.activeSession()
     const identity = session?.identity ?? null
@@ -373,6 +388,10 @@ export class TerminalController {
     if (session === null || identity === null || streamId === null || grant === null) {
       return
     }
+    if (session.pendingRequest !== null) {
+      return
+    }
+    this.discardUnsent(session)
     this.dispatchControl(session, 'RELEASE', {
       version: 1,
       requestId: createUuid(),
@@ -402,6 +421,8 @@ export class TerminalController {
     session.nextSeq = 0
     session.recoverOnBaseline = false
     session.recoveryClaimIssued = false
+    session.unverified = false
+    session.applyingVersion = null
     session.notice = null
     this.dispatchControl(session, 'OPEN', {
       version: 1,
@@ -420,10 +441,13 @@ export class TerminalController {
     if (session === null || identity === null) {
       return
     }
+    if (session.pendingRequest !== null) {
+      // 已有在途控制请求：不覆盖。
+      return
+    }
     this.discardUnsent(session)
     session.frozen = true
     session.notice = null
-    this.clearTerminateTimer(session)
     const command: TerminalCommand = {
       version: 1,
       requestId: createUuid(),
@@ -440,16 +464,12 @@ export class TerminalController {
       this.notify()
       return
     }
+    // send 前登记 CLOSE pending，复用统一截止（不新增第二个 timer）。
+    this.setPendingRequest(session, 'CLOSE', command.requestId)
     const sent = this.events.sendTerminal(command)
     if (!sent) {
-      session.notice = 'unavailable'
-    } else {
-      session.terminateTimer = setTimeout(() => {
-        if (session.status === 'RUNNING') {
-          session.notice = 'outcome-unknown'
-          this.notify()
-        }
-      }, TERMINAL_REQUEST_DEADLINE_MS)
+      // native false：命令未确认送达，结果未知；保留 pending 供迟到错误关联。
+      session.notice = 'outcome-unknown'
     }
     this.notify()
   }
@@ -521,18 +541,33 @@ export class TerminalController {
       // 重复 applied 不发送重复 ACK。
       return
     }
-    session.appliedVersion = version
-    if (this.canAttemptVisible()) {
-      this.events.sendTerminal({
-        version: 1,
-        requestId: createUuid(),
-        environmentId: session.environmentId,
-        viewerId: this.viewerId,
-        type: 'VIEW_APPLIED',
-        payload: { identity, streamId, version },
-      })
+    if (session.applyingVersion === version) {
+      // 同步回执重入守卫：正在发送同一版本，不重复 ACK。
+      return
     }
-    this.maybeRecoverOnBaseline(session)
+    if (!this.canAttemptVisible()) {
+      return
+    }
+    session.applyingVersion = version
+    const sent = this.events.sendTerminal({
+      version: 1,
+      requestId: createUuid(),
+      environmentId: session.environmentId,
+      viewerId: this.viewerId,
+      type: 'VIEW_APPLIED',
+      payload: { identity, streamId, version },
+    })
+    session.applyingVersion = null
+    if (sent) {
+      // 基线资格只能在真实 ACK 被本地 channel 接受后建立。
+      session.appliedVersion = version
+      this.maybeRecoverOnBaseline(session)
+    } else {
+      // ACK 未能发出：不得放开 control/recovery，冻结并走一次 ATTACH。
+      session.frozen = true
+      session.notice = 'outcome-unknown'
+      this.requestRecoveryAttach(session)
+    }
     this.notify()
   }
 
@@ -553,11 +588,12 @@ export class TerminalController {
     return session.pendingInput.length + (session.inflight?.inputBytes ?? 0)
   }
 
-  /** 可用控制资格：持有匹配 epoch 的 grant，且基线就绪、运行中、未冻结、在线。 */
+  /** 可用控制资格：无在途控制请求，持有匹配 epoch 的 grant，且基线就绪、运行中、未冻结、在线。 */
   private controlUsable(session: SessionRuntime): boolean {
     return (
       this.started &&
       this.connectionStatus === 'open' &&
+      session.pendingRequest === null &&
       session.grant !== null &&
       session.streamId !== null &&
       session.appliedVersion !== null &&
@@ -568,18 +604,22 @@ export class TerminalController {
     )
   }
 
+  /**
+   * 构造旧操作核对证据。未决证据必须绑定原始 epoch/grant：只有当前授权仍属于
+   * 同一 epoch 时才能用它核对旧操作，绝不拿新授权为旧操作假确认。
+   */
   private buildRecovery(session: SessionRuntime): RecoveryProof | null {
-    if (session.grant === null) {
-      return null
+    const inflight = session.inflight
+    if (inflight !== null) {
+      if (session.grant === null || session.grant.epoch !== inflight.grant.epoch) {
+        return null
+      }
+      return { previous: session.grant, seq: inflight.seq, digest: inflight.digest }
     }
-    if (session.inflight === null && !session.recoverOnBaseline) {
-      return null
+    if (session.recoverOnBaseline && session.grant !== null) {
+      return { previous: session.grant, seq: 0, digest: null }
     }
-    return {
-      previous: session.grant,
-      seq: session.inflight?.seq ?? 0,
-      digest: session.inflight?.digest ?? null,
-    }
+    return null
   }
 
   private select(id: string): void {
@@ -629,12 +669,12 @@ export class TerminalController {
   private teardownActive(session: SessionRuntime, clearPending: boolean): void {
     this.discardUnsent(session)
     this.clearKeepalive(session)
-    this.clearTerminateTimer(session)
     const identity = session.identity
     const streamId = session.streamId
     if (session.inflight !== null) {
       // 未知结果：保留唯一 grant+seq+digest，绝不当成已完成。
       session.frozen = true
+      session.unverified = true
       if (session.notice === null) {
         session.notice = 'outcome-unknown'
       }
@@ -687,11 +727,14 @@ export class TerminalController {
     }
   }
 
-  /** 使当前 stream/基线失效，保留 identity/grant/inflight 证据。 */
+  /**
+   * 使当前 stream/基线失效，保留 identity/grant/inflight 证据与末屏 view。
+   * 只作废 stream 与基线；view 仍可作为离线只读快照展示，且不会用于 ACK/输入。
+   */
   private invalidateStream(session: SessionRuntime): void {
+    this.clearKeepalive(session)
     session.streamId = null
     session.appliedVersion = null
-    session.view = null
     if (session.inflight !== null) {
       session.frozen = true
     }
@@ -753,9 +796,6 @@ export class TerminalController {
     if (kind === 'OPEN') {
       session.openAttempted = true
     }
-    if (kind === 'RELEASE') {
-      // 释放成功前不改本地 grant；保留直到 RELEASED。
-    }
     this.setPendingRequest(session, kind, command.requestId)
     const sent = this.events.sendTerminal(command)
     if (!sent) {
@@ -796,7 +836,15 @@ export class TerminalController {
     if (session.pendingRequest === null || session.pendingRequest.requestId !== requestId) {
       return
     }
+    const kind = session.pendingRequest.kind
     session.pendingRequest = null
+    if (kind === 'CLOSE') {
+      // 未确认的终止：结果未知，绝不当作正常完成。
+      session.frozen = true
+      session.notice = 'outcome-unknown'
+      this.notify()
+      return
+    }
     session.notice = session.identity === null ? 'unavailable' : 'control-rejected'
     this.requestRecoveryAttach(session)
     this.notify()
@@ -818,11 +866,18 @@ export class TerminalController {
     if (!session.recoverOnBaseline) {
       return
     }
-    if (session.grant === null) {
-      session.recoverOnBaseline = false
+    if (session.recoveryClaimIssued) {
       return
     }
-    if (session.recoveryClaimIssued) {
+    const recovery = this.buildRecovery(session)
+    if (recovery === null) {
+      // 无可用旧授权证据：不得用新授权假确认；保留 unknown。
+      session.recoverOnBaseline = false
+      if (session.inflight !== null || session.unverified) {
+        session.frozen = true
+        session.unverified = true
+        session.notice = 'outcome-unknown'
+      }
       return
     }
     session.recoveryClaimIssued = true
@@ -835,11 +890,7 @@ export class TerminalController {
       payload: {
         identity: session.identity!,
         streamId: session.streamId!,
-        recovery: this.buildRecovery(session) ?? {
-          previous: session.grant,
-          seq: 0,
-          digest: null,
-        },
+        recovery,
       },
     })
   }
@@ -878,18 +929,21 @@ export class TerminalController {
     const { cols, rows } = resize
     const seq = session.nextSeq + 1
     const digest = resizeOperationDigest(cols, rows)
+    const requestId = createUuid()
     session.queuedResize = null
     session.nextSeq = seq
     session.inflight = {
       kind: 'RESIZE',
+      requestId,
       seq,
       digest,
+      grant,
       inputBytes: 0,
       timer: this.armDeadline(() => this.handleOperationDeadline(session, seq)),
     }
     const sent = this.events.sendTerminal({
       version: 1,
-      requestId: createUuid(),
+      requestId,
       environmentId: session.environmentId,
       viewerId: this.viewerId,
       type: 'RESIZE',
@@ -912,18 +966,21 @@ export class TerminalController {
     const chunk = session.pendingInput.subarray(0, MAX_INPUT_PACKET_BYTES)
     const seq = session.nextSeq + 1
     const digest = inputOperationDigest(chunk, session.inputModeRevision)
+    const requestId = createUuid()
     session.pendingInput = session.pendingInput.subarray(chunk.length)
     session.nextSeq = seq
     session.inflight = {
       kind: 'INPUT',
+      requestId,
       seq,
       digest,
+      grant,
       inputBytes: chunk.length,
       timer: this.armDeadline(() => this.handleOperationDeadline(session, seq)),
     }
     const sent = this.events.sendTerminal({
       version: 1,
-      requestId: createUuid(),
+      requestId,
       environmentId: session.environmentId,
       viewerId: this.viewerId,
       type: 'INPUT',
@@ -1000,13 +1057,6 @@ export class TerminalController {
     }
   }
 
-  private clearTerminateTimer(session: SessionRuntime): void {
-    if (session.terminateTimer !== null) {
-      clearTimeout(session.terminateTimer)
-      session.terminateTimer = null
-    }
-  }
-
   // ---------------------------------------------------------------- 事件处理
 
   private handleStatusChange(status: ApplicationEventConnectionStatus): void {
@@ -1038,7 +1088,6 @@ export class TerminalController {
     }
     this.discardUnsent(session)
     this.clearKeepalive(session)
-    this.clearTerminateTimer(session)
     if (session.grant !== null) {
       // 保留唯一旧 grant proof 供新连接核对。
       session.recoverOnBaseline = true
@@ -1046,6 +1095,11 @@ export class TerminalController {
     }
     if (session.inflight !== null) {
       session.frozen = true
+    }
+    if (session.pendingRequest !== null && session.pendingRequest.kind === 'CLOSE') {
+      // 断线时终止结果未知，绝不当作正常完成。
+      session.frozen = true
+      session.notice = 'outcome-unknown'
     }
     if (session.identity === null) {
       // 无 identity 的不确定 OPEN：只提示，等用户明确操作。
@@ -1111,12 +1165,13 @@ export class TerminalController {
     }
     session.pendingRequest = null
     if (session.identity !== null && !sameIdentity(identity, session.identity)) {
-      // OPEN 带来新 terminal：旧操作/旧控制绝不重放。
+      // OPEN 带来新 terminal：旧操作/旧控制/旧未核对提示绝不重放。
       this.clearInflight(session)
       session.grant = null
       session.nextSeq = 0
       session.recoverOnBaseline = false
       session.frozen = false
+      session.unverified = false
       session.notice = 'failed'
     }
     session.identity = identity
@@ -1155,10 +1210,21 @@ export class TerminalController {
     if (result === null) {
       const epoch = event.payload.writer.writerEpoch
       if (session.grant !== null && epoch !== session.grant.epoch) {
+        // 当前授权已被新 epoch 取代。
         session.grant = null
-        session.frozen = false
         session.recoverOnBaseline = false
-        session.notice = 'control-rejected'
+        if (session.inflight !== null) {
+          // 旧操作结果不可核对：明确 unknown、丢旧未发字节；绝不用新授权谎报未写。
+          session.frozen = true
+          session.unverified = true
+          session.notice = 'outcome-unknown'
+          session.nextSeq = 0
+          this.clearInflight(session)
+          this.discardUnsent(session)
+        } else {
+          session.frozen = false
+          session.notice = 'control-rejected'
+        }
       }
       if (event.payload.writer.frozen) {
         session.frozen = true
@@ -1183,11 +1249,15 @@ export class TerminalController {
       }
       session.grant = result.grant
       session.frozen = false
-      session.notice = null
       session.recoverOnBaseline = false
       session.recoveryClaimIssued = true
       if (result.recovered !== null) {
         this.applyRecovered(session, result.recovered)
+      } else if (session.unverified) {
+        // 旧操作结果仍未知：保留提示，不以新授权+旧 seq 假确认。
+        session.notice = 'outcome-unknown'
+      } else {
+        session.notice = null
       }
       this.pump(session)
     } else if (result.status === 'RELEASED') {
@@ -1195,6 +1265,9 @@ export class TerminalController {
       session.frozen = false
       session.recoverOnBaseline = false
       session.recoveryClaimIssued = false
+      session.unverified = false
+      this.discardUnsent(session)
+      session.notice = null
     } else if (result.status === 'BUSY') {
       session.notice = 'control-rejected'
     } else {
@@ -1213,11 +1286,14 @@ export class TerminalController {
   ): void {
     this.clearInflight(session)
     if (outcome === 'WRITTEN') {
+      session.unverified = false
       session.notice = null
     } else if (outcome === 'NOT_WRITTEN') {
+      session.unverified = false
       session.notice = 'not-written'
     } else {
       session.frozen = true
+      session.unverified = true
       session.notice = 'outcome-unknown'
     }
   }
@@ -1257,11 +1333,17 @@ export class TerminalController {
         session.notice = 'stale-mode'
         this.discardUnsent(session)
       } else if (result.outcome === 'WRITTEN') {
-        session.notice = null
+        // 曾有一个旧操作结果未知：保留提示，直到显式重新同步。
+        session.notice = session.unverified ? 'outcome-unknown' : null
       } else if (result.outcome === 'NOT_WRITTEN') {
-        session.notice = event.payload.code === 'RUNTIME_FAILED' ? 'failed' : 'not-written'
+        session.notice = session.unverified
+          ? 'outcome-unknown'
+          : event.payload.code === 'RUNTIME_FAILED'
+            ? 'failed'
+            : 'not-written'
       } else {
         session.frozen = true
+        session.unverified = true
         session.notice = 'outcome-unknown'
       }
       this.notify()
@@ -1354,11 +1436,17 @@ export class TerminalController {
     session.status = event.payload.status
     session.exitCode = event.payload.exitCode
     this.clearKeepalive(session)
-    this.clearTerminateTimer(session)
+    if (session.pendingRequest !== null) {
+      if (session.pendingRequest.timer !== null) {
+        clearTimeout(session.pendingRequest.timer)
+      }
+      session.pendingRequest = null
+    }
     session.grant = null
     session.frozen = false
     session.recoverOnBaseline = false
     session.recoveryClaimIssued = false
+    session.unverified = false
     session.nextSeq = 0
     this.clearInflight(session)
     this.discardUnsent(session)
@@ -1371,24 +1459,53 @@ export class TerminalController {
     if (session === null || !this.fence(event, session)) {
       return
     }
-    if (event.identity !== null) {
+    const pending = session.pendingRequest
+    const inflight = session.inflight
+    if (event.requestId !== null) {
+      const matchesPending = pending !== null && event.requestId === pending.requestId
+      const matchesInflight = inflight !== null && event.requestId === inflight.requestId
+      if (!matchesPending && !matchesInflight) {
+        // 非当前请求关联的迟到错误：丢弃。
+        return
+      }
+    } else if (event.identity !== null) {
+      // 无请求关联的广播错误仍需 identity 围栏，避免串到其他实例。
       if (session.identity === null || !sameIdentity(event.identity, session.identity)) {
         return
       }
     }
-    const pending = session.pendingRequest
-    if (event.requestId !== null && (pending === null || event.requestId !== pending.requestId)) {
-      // 非当前请求关联的迟到错误：丢弃。
-      return
-    }
-    if (event.requestId !== null && pending !== null) {
+    // 关联错误允许在 identity 不同（例如 DAEMON_MISMATCH 返回新 daemon identity）时展示，
+    // 但绝不据此建立/改写 session.identity。
+    const matchedClose = event.requestId !== null && pending !== null && pending.kind === 'CLOSE'
+    if (event.requestId !== null && pending !== null && event.requestId === pending.requestId) {
       if (pending.timer !== null) {
         clearTimeout(pending.timer)
       }
       session.pendingRequest = null
     }
     const code = event.payload.code
-    if (event.payload.disposition === 'OUTCOME_UNKNOWN' || code === 'OUTCOME_UNKNOWN') {
+    const disposition = event.payload.disposition
+    if (event.requestId !== null && inflight !== null && event.requestId === inflight.requestId) {
+      if (disposition === 'NOT_EXECUTED' && code !== 'OUTCOME_UNKNOWN') {
+        // gateway pre-native：确定未执行，完成本地 pending，绝不谎报已写。
+        this.resolveInflightNotExecuted(session)
+        this.notify()
+        if (!session.frozen) {
+          this.pump(session)
+        }
+        return
+      }
+    }
+    if (matchedClose) {
+      if (disposition === 'NOT_EXECUTED' && code !== 'OUTCOME_UNKNOWN') {
+        // 明确拒绝终止：解除本次冻结，提示控制被拒。
+        session.frozen = false
+        session.notice = 'control-rejected'
+        this.notify()
+        return
+      }
+    }
+    if (disposition === 'OUTCOME_UNKNOWN' || code === 'OUTCOME_UNKNOWN') {
       session.frozen = true
       session.notice = 'outcome-unknown'
     } else if (code === 'STALE_MODE') {
@@ -1417,6 +1534,21 @@ export class TerminalController {
     this.notify()
   }
 
+  /** 确定未执行的 INPUT/RESIZE：完成本地在途、回退 seq，绝不当作已写。 */
+  private resolveInflightNotExecuted(session: SessionRuntime): void {
+    const inflight = session.inflight
+    if (inflight === null) {
+      return
+    }
+    if (inflight.timer !== null) {
+      clearTimeout(inflight.timer)
+    }
+    session.inflight = null
+    session.frozen = false
+    session.nextSeq = inflight.seq - 1
+    session.notice = 'not-written'
+  }
+
   // ---------------------------------------------------------------- 快照
 
   private buildSnapshot(): TerminalWorkspaceSnapshot {
@@ -1433,7 +1565,7 @@ export class TerminalController {
         viewApplied: session.view !== null && session.appliedVersion === session.view.version,
         writer: session.writer,
         hasControl: this.controlUsable(session),
-        pending: session.inflight !== null,
+        pending: session.inflight !== null || session.pendingRequest !== null,
         notice: session.notice,
       })
     }

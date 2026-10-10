@@ -64,6 +64,8 @@ const GRANT: WriterGrant = { epoch: EPOCH_1, token: TOKEN_1 }
 class FakeEvents {
   status: ApplicationEventConnectionStatus = 'open'
   accept = true
+  /** 按命令类型定向拒绝（模拟 native send 返回 false）。 */
+  readonly rejectTypes = new Set<TerminalCommand['type']>()
   /** 允许测试在 send 内同步回执（重入）或观察命令。 */
   onSend: ((command: TerminalCommand) => void) | null = null
   readonly sent: TerminalCommand[] = []
@@ -74,7 +76,7 @@ class FakeEvents {
   sendTerminal = (command: TerminalCommand): boolean => {
     this.sent.push(command)
     this.onSend?.(command)
-    return this.accept
+    return this.accept && !this.rejectTypes.has(command.type)
   }
 
   subscribeTerminal = (
@@ -529,7 +531,9 @@ describe('TerminalController', () => {
       establish(controller, events)
       events.emit(writerChangedEvent(null, null, writerState(EPOCH_1)))
       controller.takeover()
-      expect(findCommand(events, 'TAKEOVER')!.payload.expectedWriterEpoch).toBe(EPOCH_1)
+      const takeover = findCommand(events, 'TAKEOVER')!
+      expect(takeover.payload.expectedWriterEpoch).toBe(EPOCH_1)
+      events.emit(writerChangedEvent(takeover.requestId, granted()))
       grantControl(controller, events)
       controller.release()
       const release = findCommand(events, 'RELEASE')!
@@ -1048,14 +1052,14 @@ describe('TerminalController', () => {
       expect(session(controller).notice).toBe('outcome-unknown')
     })
 
-    it('terminate send false 提示 unavailable', () => {
+    it('terminate send false 提示 outcome-unknown', () => {
       const controller = createController(events)
       controller.start()
       establish(controller, events)
       grantControl(controller, events)
       events.accept = false
       controller.terminate()
-      expect(session(controller).notice).toBe('unavailable')
+      expect(session(controller).notice).toBe('outcome-unknown')
     })
 
     it('restart 仅在 EXITED/FAILED 时可用', () => {
@@ -1530,6 +1534,203 @@ describe('TerminalController', () => {
       const sent = events.sent.length
       vi.advanceTimersByTime(20000)
       expect(events.sent.length).toBe(sent)
+    })
+  })
+
+  describe('复核修正：基线 ACK、epoch 证据、CLOSE、末屏与互斥', () => {
+    it('VIEW_APPLIED 发送失败：不建基线、不发 CLAIM/INPUT、走一次 ATTACH', () => {
+      const controller = createController(events)
+      controller.start()
+      attach(controller, events)
+      events.emit(viewUpdateEvent(makeReset()))
+      expect(session(controller).view?.version).toBe(1)
+      events.rejectTypes.add('VIEW_APPLIED')
+      controller.applied(STREAM_1, 1)
+      const failed = session(controller)
+      expect(failed.viewApplied).toBe(false)
+      expect(failed.notice).toBe('outcome-unknown')
+      expect(countType(events, 'CLAIM')).toBe(0)
+      expect(controller.sendInput(new Uint8Array([0x61]))).toBe(false)
+      expect(countType(events, 'ATTACH')).toBe(1)
+      // 基线仍未建立：再次 applied 不会重复 ACK，也不会无限恢复。
+      controller.applied(STREAM_1, 1)
+      expect(countType(events, 'VIEW_APPLIED')).toBe(1)
+      expect(countType(events, 'ATTACH')).toBe(1)
+    })
+
+    it('当前请求的 DAEMON_MISMATCH（新 daemon identity）可见且不建立 identity', () => {
+      const controller = createController(events)
+      controller.start()
+      controller.show(ENV_A)
+      const open = findCommand(events, 'OPEN')!
+      const newDaemonIdentity: TerminalIdentity = {
+        daemonInstanceId: 'cccccccc-0000-4000-8000-000000000099',
+        terminalId: TERMINAL,
+      }
+      events.emit(
+        errorEvent('DAEMON_MISMATCH', 'NOT_EXECUTED', open.requestId, ENV_A, newDaemonIdentity),
+      )
+      const s = session(controller)
+      expect(s.notice).toBe('failed')
+      expect(s.identity).toBeNull()
+    })
+
+    it('在途 INPUT 的 gateway pre-native NOT_EXECUTED 错误精确关联并回退 seq', () => {
+      const controller = createController(events)
+      controller.start()
+      establish(controller, events)
+      grantControl(controller, events)
+      controller.sendInput(new Uint8Array([0x61]))
+      const input = findCommand(events, 'INPUT')!
+      // 错请求关联的错误被丢弃，不误伤在途操作。
+      events.emit(
+        errorEvent('ROUTE_UNAVAILABLE', 'NOT_EXECUTED', '00000000-0000-4000-8000-0000000000ff'),
+      )
+      expect(session(controller).pending).toBe(true)
+      events.emit(errorEvent('ROUTE_UNAVAILABLE', 'NOT_EXECUTED', input.requestId))
+      const s = session(controller)
+      expect(s.pending).toBe(false)
+      expect(s.notice).toBe('not-written')
+      expect(controller.sendInput(new Uint8Array([0x62]))).toBe(true)
+      expect(findCommand(events, 'INPUT')!.payload.seq).toBe(1)
+    })
+
+    it('epoch 被取代后接管：不伪造 recovery/旧 seq，保留 unknown 且新输入用新 epoch', () => {
+      const controller = createController(events)
+      controller.start()
+      establish(controller, events)
+      grantControl(controller, events)
+      controller.sendInput(new Uint8Array([0x61]))
+      events.emit(writerChangedEvent(null, null, writerState(EPOCH_2)))
+      const replaced = session(controller)
+      expect(replaced.pending).toBe(false)
+      expect(replaced.notice).toBe('outcome-unknown')
+      controller.takeover()
+      const takeover = findCommand(events, 'TAKEOVER')!
+      expect(takeover.payload.expectedWriterEpoch).toBe(EPOCH_2)
+      events.emit(
+        writerChangedEvent(
+          takeover.requestId,
+          granted(null, { epoch: EPOCH_2, token: TOKEN_2 }),
+          writerState(EPOCH_2),
+        ),
+      )
+      const afterTakeover = session(controller)
+      expect(afterTakeover.hasControl).toBe(true)
+      expect(afterTakeover.notice).toBe('outcome-unknown')
+      controller.sendInput(new Uint8Array([0x62]))
+      const input = findCommand(events, 'INPUT')!
+      expect(input.payload.seq).toBe(1)
+      expect(input.payload.grant.epoch).toBe(EPOCH_2)
+      // 新 epoch 的新输入写入成功后仍保留旧操作的 unknown 提示。
+      events.emit(
+        opAckEvent(
+          EPOCH_2,
+          confirmed(1, inputOperationDigest(new Uint8Array([0x62]), 1), 'WRITTEN'),
+        ),
+      )
+      expect(session(controller).notice).toBe('outcome-unknown')
+      // 显式重新同步是清晰的解锁路径。
+      controller.refresh()
+      expect(session(controller).notice).toBeNull()
+      // 全程没有用新授权+旧 seq 伪造 recovery。
+      for (const command of events.sent) {
+        if (command.type === 'CLAIM') {
+          expect(command.payload.recovery).toBeNull()
+        }
+      }
+    })
+
+    it('terminate 保存 CLOSE requestId 并只处理匹配的 NOT_EXECUTED 错误', () => {
+      const controller = createController(events)
+      controller.start()
+      establish(controller, events)
+      grantControl(controller, events)
+      controller.terminate()
+      const close = findCommand(events, 'CLOSE')!
+      events.emit(
+        errorEvent('REQUEST_CONFLICT', 'NOT_EXECUTED', '00000000-0000-4000-8000-0000000000ff'),
+      )
+      expect(session(controller).pending).toBe(true)
+      events.emit(errorEvent('REQUEST_CONFLICT', 'NOT_EXECUTED', close.requestId))
+      const s = session(controller)
+      expect(s.pending).toBe(false)
+      expect(s.notice).toBe('control-rejected')
+      expect(s.hasControl).toBe(true)
+    })
+
+    it('release 发出后禁止新输入、丢弃未发送缓冲且不继续 pump', () => {
+      const controller = createController(events)
+      controller.start()
+      establish(controller, events)
+      grantControl(controller, events)
+      controller.sendInput(new Uint8Array([0x61]))
+      controller.sendInput(new Uint8Array([0x62]))
+      controller.release()
+      expect(countType(events, 'RELEASE')).toBe(1)
+      expect(controller.sendInput(new Uint8Array([0x63]))).toBe(false)
+      expect(countType(events, 'INPUT')).toBe(1)
+      const release = findCommand(events, 'RELEASE')!
+      events.emit(
+        writerChangedEvent(release.requestId, {
+          status: 'RELEASED',
+          grant: null,
+          recovered: null,
+          reason: null,
+        }),
+      )
+      expect(session(controller).hasControl).toBe(false)
+      expect(countType(events, 'INPUT')).toBe(1)
+    })
+
+    it('重建流时释放旧心跳，只保留单个 active heartbeat', () => {
+      const controller = createController(events)
+      controller.start()
+      establish(controller, events)
+      controller.refresh()
+      const sent = events.sent.length
+      vi.advanceTimersByTime(5000)
+      expect(events.sent.length).toBe(sent)
+      const attachCmd = findCommand(events, 'ATTACH')!
+      events.emit(attachedEvent(attachCmd.requestId, IDENTITY, STREAM_2))
+      vi.advanceTimersByTime(5000)
+      expect(findCommand(events, 'KEEPALIVE')!.payload.streamId).toBe(STREAM_2)
+    })
+
+    it('hide 保留末屏供离线只读，新流 ATTACHED 才清旧镜像', () => {
+      const controller = createController(events)
+      controller.start()
+      establish(controller, events)
+      expect(session(controller).view?.version).toBe(1)
+      controller.hide()
+      const hidden = session(controller)
+      expect(hidden.streamId).toBeNull()
+      expect(hidden.view?.version).toBe(1)
+      expect(hidden.viewApplied).toBe(false)
+      controller.show(ENV_A)
+      const attachCmd = findCommand(events, 'ATTACH')!
+      events.emit(attachedEvent(attachCmd.requestId, IDENTITY, STREAM_2))
+      expect(session(controller).view).toBeNull()
+    })
+
+    it('快照 pending 覆盖待控制请求，且界面 claim/takeover/release 不覆盖在途 ATTACH', () => {
+      const controller = createController(events)
+      controller.start()
+      establish(controller, events)
+      controller.claim()
+      expect(session(controller).pending).toBe(true)
+      // 解决 CLAIM，进入 ATTACH 在途后再验证互斥。
+      const claim = findCommand(events, 'CLAIM')!
+      events.emit(writerChangedEvent(claim.requestId, granted()))
+      controller.refresh()
+      const attachCount = countType(events, 'ATTACH')
+      controller.claim()
+      controller.takeover()
+      controller.release()
+      expect(countType(events, 'CLAIM')).toBe(1)
+      expect(countType(events, 'TAKEOVER')).toBe(0)
+      expect(countType(events, 'RELEASE')).toBe(0)
+      expect(countType(events, 'ATTACH')).toBe(attachCount)
     })
   })
 })
