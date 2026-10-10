@@ -3,7 +3,6 @@ import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/Threa
 import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadErrorPanel'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
 import type {
-  ComposerPreviewReadiness,
   ThreadComposerHandle,
 } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
@@ -74,7 +73,6 @@ export interface ThreadPanelComposerInput {
   settings?: ThreadComposerSettingsInput
   scope?: string
   composerRef?: Ref<ThreadComposerHandle>
-  onPreviewReadinessChange?: (readiness: ComposerPreviewReadiness) => void
 }
 
 /**

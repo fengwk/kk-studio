@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+const port = Number(process.env.KK_PANE_PORT ?? process.env.KK_BROWSER_PORT ?? 5184)
+
 /** Pane 控制面真实浏览器回归：只构建该切片自己的基座，独立端口 5184。 */
 const config: UserConfig = {
   appType: 'mpa',
@@ -26,7 +28,7 @@ const config: UserConfig = {
   },
   preview: {
     host: '127.0.0.1',
-    port: 5184,
+    port,
     strictPort: true,
   },
 }

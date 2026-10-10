@@ -130,23 +130,6 @@ describe('owner-free HTTP wire', () => {
     expect(body).not.toHaveProperty('target')
   })
 
-  it('serializes a provider request preview without owner or target', async () => {
-    // 测试意图：预览走 per-thread 端点，wire body 同样不携带 owner/target。
-    const plan = buildMessageBatchPlan({
-      thread,
-      effectiveBase: draft,
-      draft,
-      parts: [createTextPart('preview')],
-      createCommandId: () => 'cmd-2',
-    })
-    await harnessService.previewProviderRequest('thread-1', plan.request)
-    const { url, data } = wireAt(0)
-    expect(url).toBe('/harness/threads/thread-1/provider-request-preview')
-    const body = JSON.parse(data) as Record<string, unknown>
-    expect(body).not.toHaveProperty('owner')
-    expect(body).not.toHaveProperty('target')
-  })
-
   it('fails closed for bound-thread acceptance while ISSUE_AGENT stays a container owner', async () => {
     // 测试意图：既有 Thread 不能走创建型构建器（失败前无网络副作用），而 ISSUE_AGENT
     // 仅作为容器 owner 被接受：创建请求携带它，既有 Thread 请求完全不发送它。

@@ -809,18 +809,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.queryByRole('button', { name: /预览当前草稿/ })).not.toBeInTheDocument()
     })
 
-    it('renders the localized preview error when provided', () => {
-      render(
-        <ThreadModelRequestDebug
-          debug={sampleDebug()}
-          onSelectInspector={vi.fn()}
-          previewError="会话游标已过期，请刷新状态后重试"
-        />,
-      )
-      expect(screen.getByRole('alert')).toHaveTextContent('会话游标已过期，请刷新状态后重试')
-      expect(screen.getByText('System prompt content with instructions')).toBeInTheDocument()
-    })
-
     it('renders frozen invocation entry when frozenInvocation is present and hides it when null', async () => {
       const user = userEvent.setup()
       const onSelectInspector = vi.fn()

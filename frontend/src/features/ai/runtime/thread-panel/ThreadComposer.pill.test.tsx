@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createRef, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ThreadComposer, type ThreadComposerHandle } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import {
   createAttachmentPart,
   partsToMessageContents,
@@ -905,64 +905,5 @@ describe('ThreadComposer attachment pills', () => {
       { type: 'ATTACHMENT', uploadId: expect.any(String), imageTier: '1080P' },
       { type: 'ATTACHMENT', uploadId: expect.any(String) },
     ])
-  })
-
-  it('previews interleaved parts with ready uploads without consuming draft or clearing uploads', async () => {
-    // 测试意图：预览 ref 保持交错 parts 顺序，只解析就绪上传，不提交或消费草稿。
-    const { service } = fakeStorage()
-    const handleRef = createRef<ThreadComposerHandle>()
-    const onSubmit = vi.fn()
-
-    function Controlled() {
-      const [parts, setParts] = useState<ComposerPart[]>([])
-      return (
-        <div>
-          <ThreadComposer
-            ref={handleRef}
-            parts={parts}
-            pending={false}
-            disabled={false}
-            onPartsChange={setParts}
-            onSubmit={onSubmit}
-            onCommand={vi.fn()}
-            storageService={service}
-            hashFile={hashFile}
-          />
-          <pre data-testid="parts">{JSON.stringify(parts)}</pre>
-        </div>
-      )
-    }
-
-    render(<Controlled />)
-    const editor = screen.getByLabelText('给 AI 发送消息')
-    await typeInEditor(editor, 'first part ')
-    await pasteFiles(editor, fileOf('interleaved.png', 'image/png'))
-    await waitForIdleUploads()
-    await typeInEditor(editor, ' second part')
-
-    const prepared = handleRef.current?.preparePreview()
-    expect(prepared).not.toBeNull()
-    const previewedPayload = prepared!.payload
-    const localDraft = prepared!.localDraft
-    expect(onSubmit).not.toHaveBeenCalled()
-    // Server upload handle is resolved in previewed payload
-    expect(previewedPayload).toHaveLength(3)
-    expect(previewedPayload[0]).toMatchObject({ type: 'text', text: 'first part ' })
-    expect(previewedPayload[1]).toMatchObject({
-      type: 'attachment',
-      filename: 'interleaved.png',
-      uploadId: 'up-1',
-    })
-    expect(previewedPayload[2]).toMatchObject({ type: 'text', text: ' second part' })
-    expect(localDraft[1]).toMatchObject({ type: 'attachment', filename: 'interleaved.png' })
-    expect((localDraft[1] as Extract<ComposerPart, { type: 'attachment' }>).uploadId)
-      .not.toBe('up-1')
-
-    // Editor still retains the draft parts and upload pills
-    const remainingParts = JSON.parse(screen.getByTestId('parts').textContent ?? '[]')
-    expect(remainingParts).toHaveLength(3)
-    expect(remainingParts[0].text).toBe('first part ')
-    expect(remainingParts[1].filename).toBe('interleaved.png')
-    expect(remainingParts[2].text).toBe(' second part')
   })
 })

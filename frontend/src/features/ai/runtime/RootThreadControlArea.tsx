@@ -59,7 +59,6 @@ export function RootThreadControlArea({
     suspended,
     settings,
     scope,
-    onPreviewReadinessChange,
     interactionPanel,
   } = composer
   const interactionOpen = interactionPanel != null
@@ -101,7 +100,6 @@ export function RootThreadControlArea({
         queuedUserMessages={queuedUserMessages}
         settings={settings}
         scope={scope}
-        onPreviewReadinessChange={onPreviewReadinessChange}
       />
       {interactionPanel}
     </div>

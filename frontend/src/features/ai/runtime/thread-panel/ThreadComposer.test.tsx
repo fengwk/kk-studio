@@ -1,12 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createRef, useState, type RefObject } from 'react'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ThreadComposer,
-  type ComposerPreviewReadiness,
-  type ThreadComposerHandle,
-  type ThreadComposerProps,
 } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import {
   createAttachmentPart,
@@ -21,75 +18,7 @@ import {
 } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { firstEnabledCommandIndex } from '@/features/ai/runtime/thread-panel/thread-command-navigation'
 import { storeUnknownUploads } from '@/features/ai/composer/composer-draft'
-import type { HashFile, StorageService } from '@/features/ai/composer'
-
-type StorageUploadDTO = Awaited<ReturnType<StorageService['reserveUpload']>>
-
-/** 预览用例的 storage fake：reserve 分配 up-1，complete 原样返回同一服务端句柄。 */
-function fakePreviewStorage() {
-  let counter = 0
-  const reserveUpload = vi.fn(async (): Promise<StorageUploadDTO> => {
-    counter += 1
-    const id = `up-${counter}`
-    return {
-      id,
-      state: 'PENDING' as const,
-      blobId: null,
-      presignedPut: { method: 'PUT' as const, url: `https://s3.test/${id}`, headers: {} },
-      expiresAt: null,
-    }
-  })
-  const completeUpload = vi.fn(async (uploadId: string): Promise<StorageUploadDTO> => ({
-    id: uploadId,
-    state: 'READY',
-    blobId: `blob-${uploadId}`,
-    presignedPut: null,
-    expiresAt: null,
-  }))
-  const deleteUpload = vi.fn(async () => undefined)
-  const service = {
-    reserveUpload,
-    completeUpload,
-    deleteUpload,
-    getBlobDownloadUrl: vi.fn(async () => ({ url: 'https://s3.test/orig', expiresAt: null })),
-    getBlobPreviewUrl: vi.fn(async () => ({ url: 'https://s3.test/prev', expiresAt: null })),
-    uploadFile: vi.fn(async () => undefined),
-  } as unknown as StorageService
-  return { service, deleteUpload }
-}
-
-const previewHashFile: HashFile = vi.fn(async () => 'a'.repeat(64))
-
-/** 预览就绪 Harness：受控草稿 + 暴露 composer ref，便于直接调用 preparePreview。 */
-function PreviewHarness({
-  handleRef,
-  initialParts = [],
-  onSubmit = vi.fn(),
-  onPreviewReadinessChange,
-  service,
-}: {
-  handleRef: RefObject<ThreadComposerHandle | null>
-  initialParts?: ComposerPart[]
-  onSubmit?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
-  onPreviewReadinessChange?: (readiness: ComposerPreviewReadiness) => void
-  service?: StorageService
-}) {
-  const [parts, setParts] = useState<ComposerPart[]>(initialParts)
-  return (
-    <ThreadComposer
-      ref={handleRef}
-      parts={parts}
-      pending={false}
-      disabled={false}
-      onPartsChange={setParts}
-      onSubmit={onSubmit}
-      onCommand={vi.fn()}
-      onPreviewReadinessChange={onPreviewReadinessChange}
-      storageService={service}
-      hashFile={previewHashFile}
-    />
-  )
-}
+import type { StorageService } from '@/features/ai/composer'
 
 function ControlledComposer() {
   const [parts, setParts] = useState<ComposerPart[]>([])
@@ -485,154 +414,6 @@ describe('ThreadComposer and commands', () => {
     await user.click(screen.getByRole('option', { name: /^models/ }))
     expect(screen.getByRole('searchbox', { name: '搜索模型' })).toHaveFocus()
     expect(screen.getByRole('listbox', { name: 'Model 选项' })).toBeInTheDocument()
-  })
-
-  describe('ThreadComposer preview readiness', () => {
-    it('reports a not-ready reason for empty, slash, goal, read-only and pending-upload drafts', () => {
-      // 测试意图：预览入口已上移到 Debug 标题，Composer 只上报 readiness；
-      // 空草稿/slash/goal/只读/上传未就绪各自上报唯一 reason，且 not-ready 时 preparePreview 一律返回 null。
-      const scope = 'preview-reason-scope'
-      const localId = 'loc-pending-preview'
-      storeUnknownUploads(scope, [
-        {
-          localId,
-          uploadId: 'up-pending-preview',
-          filename: 'pending.png',
-          mediaType: 'image/png',
-          sizeBytes: 1024,
-          sha256: 'sha-pending',
-        },
-      ])
-      const handleRef = createRef<ThreadComposerHandle>()
-      const onPreviewReadinessChange = vi.fn()
-      const lastReadiness = () => onPreviewReadinessChange.mock.calls.at(-1)?.[0]
-      const composer = (props: Partial<ThreadComposerProps>) => (
-        <ThreadComposer
-          ref={handleRef}
-          parts={[]}
-          pending={false}
-          disabled={false}
-          onPartsChange={vi.fn()}
-          onSubmit={vi.fn()}
-          onCommand={vi.fn()}
-          onPreviewReadinessChange={onPreviewReadinessChange}
-          {...props}
-        />
-      )
-
-      const { rerender } = render(composer({}))
-      expect(lastReadiness()).toEqual({ canPreview: false, reason: 'EMPTY_DRAFT' })
-      expect(handleRef.current?.preparePreview()).toBeNull()
-
-      rerender(composer({ parts: [createTextPart('/models')] }))
-      expect(lastReadiness()).toEqual({ canPreview: false, reason: 'SLASH_COMMAND' })
-      expect(handleRef.current?.preparePreview()).toBeNull()
-
-      rerender(composer({ parts: [createTextPart('/goal Ship feature')] }))
-      expect(lastReadiness()).toEqual({ canPreview: false, reason: 'GOAL_COMMAND' })
-      expect(handleRef.current?.preparePreview()).toBeNull()
-
-      // 只读交互作用域：disabled 优先级最高，即便草稿有内容也不可预览。
-      rerender(composer({ parts: [createTextPart('read only draft')], disabled: true }))
-      expect(lastReadiness()).toEqual({ canPreview: false, reason: 'COMPOSER_DISABLED' })
-      expect(handleRef.current?.preparePreview()).toBeNull()
-
-      // complete_unknown 上传不算 ready，附件草稿必须等待上传完成。
-      rerender(composer({
-        parts: [createTextPart('draft with file'), createAttachmentPart(localId, 'pending.png')],
-        scope,
-      }))
-      expect(lastReadiness()).toEqual({ canPreview: false, reason: 'UPLOADS_PENDING' })
-      expect(handleRef.current?.preparePreview()).toBeNull()
-      // 预览入口已移出 Composer：组件内不再渲染任何预览按钮。
-      expect(screen.queryByRole('button', { name: '预览请求' })).not.toBeInTheDocument()
-    })
-
-    it('fails closed when the DOM draft has not reached the controlled parts yet', () => {
-      // 测试意图：不能把旧受控载荷与新 DOM 草稿拼成一次预览；同步后等待下一次 render。
-      const handleRef = createRef<ThreadComposerHandle>()
-      const onPartsChange = vi.fn()
-      const onSubmit = vi.fn()
-      render(
-        <ThreadComposer
-          ref={handleRef}
-          parts={[createTextPart('old draft')]}
-          pending={false}
-          disabled={false}
-          onPartsChange={onPartsChange}
-          onSubmit={onSubmit}
-          onCommand={vi.fn()}
-        />,
-      )
-      const editor = screen.getByLabelText('给 AI 发送消息')
-      editor.textContent = 'new unsynchronized draft'
-      expect(handleRef.current?.preparePreview()).toBeNull()
-      expect(onPartsChange).toHaveBeenCalledWith([
-        expect.objectContaining({ type: 'text', text: 'new unsynchronized draft' }),
-      ])
-      expect(onSubmit).not.toHaveBeenCalled()
-    })
-
-    it('previews a ready draft with server upload handles without clearing, committing or consuming it', async () => {
-      // 测试意图：ready 时 preparePreview 返回 payload（localId 解析为服务端 uploadId）与 localDraft（保留 localId）；
-      // 预览只读不清空草稿、不触发提交 commit，重复调用也不会消费或释放上传句柄。
-      const handleRef = createRef<ThreadComposerHandle>()
-      const onSubmit = vi.fn()
-      const onPreviewReadinessChange = vi.fn()
-      const { service, deleteUpload } = fakePreviewStorage()
-      render(
-        <PreviewHarness
-          handleRef={handleRef}
-          initialParts={[createTextPart('preview me')]}
-          onSubmit={onSubmit}
-          onPreviewReadinessChange={onPreviewReadinessChange}
-          service={service}
-        />,
-      )
-
-      const editor = screen.getByLabelText('给 AI 发送消息')
-      // 编辑器内附件 pill：与附件 strip 里的同名展示区分开，只断言草稿本体。
-      const pillOf = () => editor.querySelector('span.composer-pill[data-filename="note.txt"]')
-      fireEvent.paste(editor, {
-        clipboardData: {
-          files: [new File([new Uint8Array(64)], 'note.txt', { type: 'text/plain' })],
-          getData: () => '',
-        },
-      })
-      await waitFor(() => expect(pillOf()).not.toBeNull())
-      await waitFor(() =>
-        expect(onPreviewReadinessChange.mock.calls.at(-1)?.[0]).toEqual({ canPreview: true, reason: null }),
-      )
-
-      const localId = editor
-        .querySelector<HTMLElement>('span[data-part-type="attachment"]')
-        ?.dataset.uploadId
-      expect(localId).toBeTruthy()
-
-      const prepared = handleRef.current?.preparePreview()
-      expect(prepared).not.toBeNull()
-      expect(prepared?.payload).toEqual([
-        expect.objectContaining({ type: 'text', text: 'preview me' }),
-        expect.objectContaining({ type: 'attachment', uploadId: 'up-1', filename: 'note.txt' }),
-      ])
-      expect(prepared?.localDraft).toEqual([
-        expect.objectContaining({ type: 'text', text: 'preview me' }),
-        expect.objectContaining({ type: 'attachment', uploadId: localId, filename: 'note.txt' }),
-      ])
-
-      // 预览不改变草稿：文本与 pill 仍在，提交通道未被触发。
-      expect(onSubmit).not.toHaveBeenCalled()
-      expect(editor.textContent).toContain('preview me')
-      expect(pillOf()).not.toBeNull()
-
-      // 重复 prepare 幂等：不 commit、不消费/释放句柄，readiness 依旧 ready。
-      const preparedAgain = handleRef.current?.preparePreview()
-      expect(preparedAgain?.payload).toEqual(prepared?.payload)
-      expect(deleteUpload).not.toHaveBeenCalled()
-      expect(onSubmit).not.toHaveBeenCalled()
-      expect(onPreviewReadinessChange.mock.calls.at(-1)?.[0]).toEqual({ canPreview: true, reason: null })
-      expect(pillOf()).not.toBeNull()
-    })
   })
 
   describe('ThreadComposer attachment draft recovery', () => {
