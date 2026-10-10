@@ -8,16 +8,11 @@ import { useBoundThreadPanelViews } from '@/features/ai/runtime/useBoundThreadPa
 import type { ThreadPanelComposerInput } from '@/features/ai/runtime/thread-panel/ThreadPanel'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
-  branchDraftFromThread,
-  branchDraftsEqual,
   materializeAgentBranchDraft,
   materializeBlankBranchDraft,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
-import { buildMessageBatchPlan } from '@/features/ai/chat/command-batch-plan'
-import { formatPreviewErrorMessage } from '@/features/ai/runtime/preview-reasons'
 import type {
-  ComposerPreviewReadiness,
   ThreadComposerHandle,
 } from '@/features/ai/runtime/thread-panel'
 import {
@@ -256,31 +251,17 @@ export function useRootThreadControl({
     }
   }, [])
 
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [previewError, setPreviewError] = useState<string | null>(null)
   const composerRef = useRef<ThreadComposerHandle | null>(null)
   const setFocusIntent = useCallback((next: PaneTarget | null) => {
     onFocusTargetChange?.(next)
   }, [onFocusTargetChange])
-  const [composerReadiness, setComposerReadiness] = useState<ComposerPreviewReadiness>({
-    canPreview: false,
-    reason: 'EMPTY_DRAFT',
-  })
-  const previewRequestIdRef = useRef(0)
-  const previewInFlightRef = useRef(false)
 
   const boundThreadId = isBoundTarget(target) ? target.threadId : ''
 
-  // 视图身份与预览作用域同源：绑定 Thread 用 threadId，本地分支草稿用
+  // 视图身份：绑定 Thread 用 threadId，本地分支草稿用
   // sessionId:startEntryId:name（新建 Session 草稿没有身份可言，固定为空串）。
-  // 身份变化即作废在途预览，并重置该 Pane 的本地视图状态（Debug 模式/滚动/检查器选中）。
-  const previewScope = paneTargetViewKey(target)
-  useEffect(() => {
-    previewRequestIdRef.current += 1
-    previewInFlightRef.current = false
-    setPreviewLoading(false)
-    setPreviewError(null)
-  }, [previewScope])
+  // 身份变化即重置该 Pane 的本地视图状态（Debug 模式/滚动/检查器选中）。
+  const targetViewKey = paneTargetViewKey(target)
   const branchPanel = useBoundBranchPanel({
     threadId: boundThreadId,
     projection,
@@ -1083,197 +1064,6 @@ export function useRootThreadControl({
     }
   }
 
-  /**
-   * 本地新建分支草稿的预检：只调用会话级预览端点，绝不为了预览先创建 Thread。
-   * 命令批次与真正的首次提交完全一致（settings diff + USER_MESSAGE）。
-   */
-  async function previewLocalBranchDraft(
-    frozenPayload: ComposerPart[],
-    frozenLocalDraft: ComposerPart[],
-  ) {
-    if (!owner || !isDraftHistoryTarget(target)) {
-      return
-    }
-    const frozenTarget = target
-    const frozenBranchDraft = activeDraft ? cloneDraft(activeDraft) : null
-    const frozenBase = entryBaseDraft ? cloneDraft(entryBaseDraft) : null
-    if (!frozenBranchDraft || !frozenBase || !draftHistoryReady) {
-      return
-    }
-    const requestId = ++previewRequestIdRef.current
-    const requestPartsKey = partsKey(frozenLocalDraft)
-    previewInFlightRef.current = true
-    setPreviewLoading(true)
-    setPreviewError(null)
-    setActionError(null)
-    const isCurrentDraftPreview = () => isMountedRef.current
-      && previewRequestIdRef.current === requestId
-      && samePaneTarget(targetRef.current, frozenTarget)
-      && partsKey(trimMessageParts(partsRef.current)) === requestPartsKey
-      && localDraftRef.current != null
-      && branchDraftsEqual(localDraftRef.current, frozenBranchDraft)
-    try {
-      const frozen = buildAcceptanceRequest({
-        owner,
-        target: frozenTarget,
-        draft: frozenBranchDraft,
-        base: frozenBase,
-        parts: frozenPayload,
-        localParts: frozenLocalDraft,
-      })
-      const response = await harnessService.previewBranchRequest(frozenTarget.sessionId, {
-        startEntryId: frozenTarget.startEntryId,
-        commands: frozen.request.commands,
-      })
-      if (!isCurrentDraftPreview()) {
-        return
-      }
-      if (response.kind !== 'DRAFT_REQUEST_PREVIEW') {
-        throw new Error(t('ai.runtime.debug.previewFailed'))
-      }
-      boundViewsRef.current?.selectDebugInspector({ type: 'preview', preview: response })
-    } catch (error) {
-      if (!isCurrentDraftPreview()) {
-        return
-      }
-      const msg = formatPreviewErrorMessage(error, t)
-      setPreviewError(msg)
-      setActionError(msg)
-    } finally {
-      if (isMountedRef.current && previewRequestIdRef.current === requestId) {
-        previewInFlightRef.current = false
-        setPreviewLoading(false)
-      }
-    }
-  }
-
-  async function handlePreview() {
-    if (capabilities?.readOnly) {
-      return
-    }
-    if (!isBoundTarget(target) && !isDraftHistoryTarget(target)) {
-      return
-    }
-    if (previewInFlightRef.current || previewDisabled) {
-      return
-    }
-
-    const prepared = composerRef.current?.preparePreview()
-    if (!prepared) {
-      return
-    }
-    const frozenPayload = trimMessageParts(prepared.payload)
-    const frozenLocalDraft = trimMessageParts(prepared.localDraft)
-
-    if (!hasMessageContent(frozenPayload)) {
-      return
-    }
-    if (slashQueryOf(frozenPayload) != null) {
-      return
-    }
-
-    if (isDraftHistoryTarget(target)) {
-      await previewLocalBranchDraft(frozenPayload, frozenLocalDraft)
-      return
-    }
-    if (!isBoundTarget(target)) {
-      return
-    }
-
-    const currentThreadId = target.threadId
-    const frozenBranchDraft = branchPanel.draft ? cloneDraft(branchPanel.draft) : null
-    const frozenEffectiveBase = branchPanel.effectiveBase ? cloneDraft(branchPanel.effectiveBase) : null
-    if (!frozenBranchDraft || !frozenEffectiveBase) {
-      return
-    }
-
-    const requestId = ++previewRequestIdRef.current
-    const requestPartsKey = partsKey(frozenLocalDraft)
-
-    previewInFlightRef.current = true
-    setPreviewLoading(true)
-    setPreviewError(null)
-    setActionError(null)
-
-    const isCurrentPreview = () => {
-      if (!isMountedRef.current || previewRequestIdRef.current !== requestId) {
-        return false
-      }
-      const latestTarget = targetRef.current
-      if (!isBoundTarget(latestTarget) || latestTarget.threadId !== currentThreadId) {
-        return false
-      }
-      const latestPayload = trimMessageParts(controllerRef.current.draft)
-      const latestDraft = branchPanelRef.current.draft
-      return partsKey(latestPayload) === requestPartsKey
-        && latestDraft != null
-        && branchDraftsEqual(latestDraft, frozenBranchDraft)
-    }
-
-    try {
-      const freshSnapshot = await harnessService.getThreadSnapshot(currentThreadId)
-      if (!isCurrentPreview()) {
-        return
-      }
-
-      // 检查服务端 branch settings 与冻结 effectiveBase 是否变化
-      const freshServerDraft = branchDraftFromThread(freshSnapshot.thread)
-      if (!branchDraftsEqual(freshServerDraft, frozenEffectiveBase)) {
-        const msg = t('ai.runtime.debug.settingsChanged')
-        setPreviewError(msg)
-        setActionError(msg)
-        queryClient.setQueryData(queryKeys.threads.snapshot(currentThreadId), freshSnapshot)
-        return
-      }
-
-      // fresh busy/queued/active 不能预览直接本地明确原因
-      if (freshSnapshot.thread.processing || freshSnapshot.thread.status !== 'IDLE'
-        || freshSnapshot.modelInvocation != null || freshSnapshot.toolInvocations.length > 0) {
-        const msg = t('ai.runtime.debug.previewError.PREVIEW_THREAD_BUSY')
-        setPreviewError(msg)
-        setActionError(msg)
-        return
-      }
-      if (freshSnapshot.queuedCommands.length > 0) {
-        const msg = t('ai.runtime.debug.previewError.PREVIEW_QUEUED_COMMANDS')
-        setPreviewError(msg)
-        setActionError(msg)
-        return
-      }
-
-      // 用 fresh thread.headEntryId 和 nextCommandSequence 重建 plan.request target
-      const plan = buildMessageBatchPlan({
-        thread: freshSnapshot.thread,
-        effectiveBase: frozenEffectiveBase,
-        draft: frozenBranchDraft,
-        parts: frozenPayload,
-      })
-
-      const response = await harnessService.previewProviderRequest(currentThreadId, plan.request)
-      if (!isCurrentPreview()) {
-        return
-      }
-
-      if (!response || response.kind !== 'DRAFT_REQUEST_PREVIEW') {
-        throw new Error(t('ai.runtime.debug.previewFailed'))
-      }
-
-      boundViewsRef.current?.selectDebugInspector({ type: 'preview', preview: response })
-    } catch (error) {
-      if (!isCurrentPreview()) {
-        return
-      }
-      const msg = formatPreviewErrorMessage(error, t)
-      setPreviewError(msg)
-      setActionError(msg)
-    } finally {
-      if (isMountedRef.current && previewRequestIdRef.current === requestId) {
-        previewInFlightRef.current = false
-        setPreviewLoading(false)
-      }
-    }
-  }
-
   function handleCommand(command: ThreadCommand): void {
     onFocus?.()
     if (command.disabled) {
@@ -1351,7 +1141,7 @@ export function useRootThreadControl({
         return
       case 'debug':
         // 已绑定 Thread 与本地分支/会话 fork 草稿都从各自的 Debug 视图退出/进入：草稿没有绑定
-        // Thread，但 Debug 预览走会话级 branch preview（绝不为此创建 Thread）。
+        // Thread，Debug 视图以只读覆盖方式展示（绝不为此创建 Thread）。
         if (isBoundTarget(target) || isDraftHistoryTarget(target)) {
           boundViews.switchMode(boundViews.mode === 'debug' ? 'conversation' : 'debug')
         }
@@ -1556,126 +1346,11 @@ export function useRootThreadControl({
   // Workspace keeps busy hidden panes mounted until settlement. Unmount must
   // never erase their last reported gate or uncommitted target identity.
 
-  const { previewDisabled, previewDisabledReason } = useMemo(() => {
-    if (!isBoundTarget(target) && !isDraftHistoryTarget(target)) {
-      return {
-        previewDisabled: true,
-        previewDisabledReason: t('ai.runtime.debug.previewDisabled.unsupported'),
-      }
-    }
-    if (isDraftHistoryTarget(target)) {
-      if (capabilities?.readOnly) {
-        return {
-          previewDisabled: true,
-          previewDisabledReason: t('ai.runtime.debug.previewDisabled.readOnly'),
-        }
-      }
-      if (pending) {
-        return {
-          previewDisabled: true,
-          previewDisabledReason: t('ai.runtime.debug.previewDisabled.busy'),
-        }
-      }
-      if (!draftHistoryReady || activeDraft == null || entryBaseDraft == null) {
-        return {
-          previewDisabled: true,
-          previewDisabledReason: t('ai.runtime.debug.previewDisabled.unsupported'),
-        }
-      }
-      if (previewLoading) {
-        return {
-          previewDisabled: true,
-          previewDisabledReason: t('ai.runtime.composer.previewLoading'),
-        }
-      }
-      if (!composerReadiness.canPreview) {
-        let draftReasonText: string = t('ai.runtime.debug.previewDisabled.emptyDraft')
-        if (composerReadiness.reason === 'SLASH_COMMAND') {
-          draftReasonText = t('ai.runtime.debug.previewDisabled.slashCommand')
-        } else if (composerReadiness.reason === 'GOAL_COMMAND') {
-          draftReasonText = t('ai.runtime.debug.previewDisabled.goalCommand')
-        } else if (composerReadiness.reason === 'UPLOADS_PENDING') {
-          draftReasonText = t('ai.runtime.debug.previewDisabled.uploading')
-        }
-        return {
-          previewDisabled: true,
-          previewDisabledReason: draftReasonText,
-        }
-      }
-      return { previewDisabled: false, previewDisabledReason: null }
-    }
-    if (capabilities?.readOnly) {
-      return {
-        previewDisabled: true,
-        previewDisabledReason: t('ai.runtime.debug.previewDisabled.readOnly'),
-      }
-    }
-    if (controller.working || pending) {
-      return {
-        previewDisabled: true,
-        previewDisabledReason: t('ai.runtime.debug.previewDisabled.busy'),
-      }
-    }
-    if (controller.queuedCommands.length > 0) {
-      return {
-        previewDisabled: true,
-        previewDisabledReason: t('ai.runtime.debug.previewDisabled.queued'),
-      }
-    }
-    if (previewLoading) {
-      return {
-        previewDisabled: true,
-        previewDisabledReason: t('ai.runtime.composer.previewLoading'),
-      }
-    }
-    if (controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null) {
-      return {
-        previewDisabled: true,
-        previewDisabledReason: t('ai.runtime.debug.previewDisabled.unsupported'),
-      }
-    }
-    if (!composerReadiness.canPreview) {
-      let reasonText: string = t('ai.runtime.debug.previewDisabled.emptyDraft')
-      if (composerReadiness.reason === 'SLASH_COMMAND') {
-        reasonText = t('ai.runtime.debug.previewDisabled.slashCommand')
-      } else if (composerReadiness.reason === 'GOAL_COMMAND') {
-        reasonText = t('ai.runtime.debug.previewDisabled.goalCommand')
-      } else if (composerReadiness.reason === 'UPLOADS_PENDING') {
-        reasonText = t('ai.runtime.debug.previewDisabled.uploading')
-      } else if (composerReadiness.reason === 'EMPTY_DRAFT') {
-        reasonText = t('ai.runtime.debug.previewDisabled.emptyDraft')
-      }
-      return {
-        previewDisabled: true,
-        previewDisabledReason: reasonText,
-      }
-    }
-    return {
-      previewDisabled: false,
-      previewDisabledReason: null,
-    }
-  }, [
-    capabilities?.readOnly,
-    composerReadiness,
-    controller.disabled,
-    controller.queuedCommands.length,
-    controller.working,
-    pending,
-    previewLoading,
-    t,
-    target,
-    activeDraft,
-    entryBaseDraft,
-    draftHistoryReady,
-    branchPanel.branchState,
-    branchPanel.effectiveBase,
-  ])
-
   const boundViews = useBoundThreadPanelViews(boundThreadId, isDraftHistoryTarget(target) ? {
     ...controller, events: draftEvents, sessionId: target.sessionId,
   } : controller, {
-    // 本地草稿没有 threadId：视图状态按目标身份隔离，API 预览仍按真实 threadId/会话。
-    viewKey: previewScope,
+    // 本地草稿没有 threadId：视图状态按目标身份隔离，API 规划仍按真实 threadId/会话。
+    viewKey: targetViewKey,
     debugSettings: activeDraft == null ? undefined : {
       model: activeDraft.model,
       environmentName: activeDraft.environmentName,
@@ -1684,7 +1359,6 @@ export function useRootThreadControl({
     historyError: (isDraftHistoryTarget(target) ? treeEntriesQuery.error ?? draftHistory.error : controller.messagesError)
       ? t('ai.chat.history.loadFailed') : null,
     onRetryHistory: () => { void (isDraftHistoryTarget(target) ? treeEntriesQuery.refetch() : controller.snapshotQuery.refetch()) },
-    previewError,
   })
   const boundViewsRef = useRef(boundViews)
   useEffect(() => {
@@ -1743,7 +1417,6 @@ export function useRootThreadControl({
     commands,
     focusOnEscape: focused,
     composerRef,
-    onPreviewReadinessChange: setComposerReadiness,
     settings: activeDraft == null ? undefined : {
       model: activeDraft.model,
       models,
@@ -1880,14 +1553,8 @@ export function useRootThreadControl({
     },
     pending,
     error,
-    previewDisabled,
-    previewDisabledReason,
-    previewLoading,
-    previewError,
-    handlePreview,
     dismissActionError: () => {
       setActionError(null)
-      setPreviewError(null)
       branchPanel.dismissSettingsError()
       branchPanel.dismissYoloError()
     },

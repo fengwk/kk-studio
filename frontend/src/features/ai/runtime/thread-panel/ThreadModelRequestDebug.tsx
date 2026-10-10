@@ -69,11 +69,9 @@ function formatCacheRetention(
 export function ThreadModelRequestDebug({
   debug,
   onSelectInspector,
-  previewError = null,
 }: {
   debug: ThreadModelRequestDebugData
   onSelectInspector: (selection: DebugInspectorSelection | null) => void
-  previewError?: string | null
 }) {
   const { t } = useI18n()
 
@@ -114,14 +112,6 @@ export function ThreadModelRequestDebug({
             <Eye size={12} aria-hidden="true" />
             {t('ai.runtime.debug.requestSnapshot')}
           </Button>
-        </div>
-      ) : null}
-
-      {/* PREVIEW ERROR */}
-      {previewError ? (
-        <div role="alert" className="thread-debug-planning-error thread-debug-preview-error">
-          <AlertCircle size={14} aria-hidden="true" />
-          <span>{previewError}</span>
         </div>
       ) : null}
 

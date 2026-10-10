@@ -58,7 +58,6 @@ export interface ThreadEventViewProps {
   debugError?: string | null
   debugSelection?: DebugInspectorSelection | null
   onSelectInspector?: (selection: DebugInspectorSelection | null) => void
-  previewError?: string | null
   /** 选中历史 ASSISTANT Entry 后按需读取到的调用前请求预览（只读）。 */
   historicalPreview?: ThreadProviderRequestPreviewData | null
   historicalPreviewLoading?: boolean
@@ -89,7 +88,6 @@ export function ThreadEventView({
   debugError = null,
   debugSelection = null,
   onSelectInspector,
-  previewError = null,
   historicalPreview = null,
   historicalPreviewLoading = false,
   historicalPreviewError = null,
@@ -399,7 +397,6 @@ export function ThreadEventView({
           aria-label={isWide ? t('ai.runtime.debug.tabPreview') : undefined}
           className="thread-debug-col thread-debug-col-preview"
         >
-          {previewError && !debug ? <div role="alert" className="thread-debug-placeholder">{previewError}</div> : null}
           {debug ? (
             <ThreadModelRequestDebug
               debug={debug}
@@ -407,7 +404,6 @@ export function ThreadEventView({
                 const activeEl = document.activeElement as HTMLElement | null
                 handleSelectInspector(selection, activeEl)
               }}
-              previewError={previewError}
             />
           ) : debugLoading ? (
             <div className="thread-debug-placeholder" data-testid="thread-debug-preview-loading">

@@ -80,37 +80,6 @@ describe('harnessService', () => {
   })
 
   /**
-   * 测试意图：既有 Thread 的 Provider 请求预览走 per-thread 端点，threadId 被转义，
-   * 请求体同样不带 owner/target。
-   */
-  it('previews existing-thread provider requests via POST /harness/threads/{threadId}/provider-request-preview', async () => {
-    const http = createClient()
-    const service = createHarnessService(http)
-    const request = {
-      expectedHeadEntryId: 'head-1',
-      expectedNextCommandSequence: '3',
-      commands: [{
-        type: 'USER_MESSAGE' as const,
-        idempotencyKey: 'msg-1',
-        contents: [{ type: 'TEXT' as const, text: 'hello' }],
-      }],
-    }
-
-    await service.previewProviderRequest('thread /1', request)
-
-    expect(http.post).toHaveBeenCalledWith(
-      '/harness/threads/thread%20%2F1/provider-request-preview',
-      request,
-    )
-    const [, body] = http.post.mock.calls[0]!
-    expect(Object.keys(body as object).sort()).toEqual([
-      'commands',
-      'expectedHeadEntryId',
-      'expectedNextCommandSequence',
-    ])
-  })
-
-  /**
    * 测试意图：验证 Session 级线程与条目列表查询路由迁移至 /harness/sessions/{id}/{threads|entries}，
    * 确保参数被安全转义且路径符合新契约。
    */
