@@ -89,6 +89,28 @@ class ShellTopicsCodecTest {
         CONTROL_CODEC.encodeResponse(response()));
   }
 
+  private static String deliveryWithNullDaemonJson(String responseJson) {
+    return "{\"ownerNodeId\":\""
+        + APP_NODE
+        + "\",\"leaseToken\":\""
+        + LEASE
+        + "\",\"daemonInstanceId\":null,\"response\":"
+        + responseJson
+        + "}";
+  }
+
+  private static TerminalResponse unauthenticatedNotExecutedResponse() {
+    return new TerminalResponse(
+        new TerminalRoute(APP_NODE, "conn-1"),
+        new TerminalEvent(
+            REQUEST,
+            ENVIRONMENT,
+            VIEWER,
+            null,
+            new TerminalEvent.ErrorPayload(
+                ErrorCode.ROUTE_UNAVAILABLE, ErrorDisposition.NOT_EXECUTED)));
+  }
+
   @Test
   void commandTopicIsFixedAndNotHint() {
     assertEquals("shell.command", ShellTopics.COMMAND.name());
@@ -119,6 +141,60 @@ class ShellTopicsCodecTest {
 
     TerminalDelivery decoded = ShellTopics.EVENT.codec().decode(encoded);
     assertEquals(delivery, decoded);
+  }
+
+  @Test
+  void deliveryAllowsNullDaemonInstanceOnlyForUnauthenticatedNotExecuted() {
+    TerminalResponse unauthenticated = unauthenticatedNotExecutedResponse();
+    TerminalDelivery delivery = new TerminalDelivery(APP_NODE, LEASE, null, unauthenticated);
+    assertTrue(delivery.unauthenticatedNotExecuted());
+
+    // daemonInstanceId 字段必须显式写出且为 JSON null，绝不省略。
+    byte[] encoded = ShellTopics.EVENT.codec().encode(delivery);
+    String json = new String(encoded, StandardCharsets.UTF_8);
+    assertEquals(deliveryWithNullDaemonJson(CONTROL_CODEC.encodeResponse(unauthenticated)), json);
+    assertEquals(delivery, ShellTopics.EVENT.codec().decode(encoded));
+  }
+
+  @Test
+  void deliveryRejectsNullDaemonInstanceOutsideTheSingleAllowedCase() {
+    TerminalResponse attached = response();
+    TerminalResponse errorUnknown =
+        new TerminalResponse(
+            new TerminalRoute(APP_NODE, "conn-1"),
+            new TerminalEvent(
+                REQUEST,
+                ENVIRONMENT,
+                VIEWER,
+                null,
+                new TerminalEvent.ErrorPayload(
+                    ErrorCode.RUNTIME_FAILED, ErrorDisposition.OUTCOME_UNKNOWN)));
+    TerminalResponse notExecutedWithIdentity =
+        new TerminalResponse(
+            new TerminalRoute(APP_NODE, "conn-1"),
+            new TerminalEvent(
+                REQUEST,
+                ENVIRONMENT,
+                VIEWER,
+                IDENTITY,
+                new TerminalEvent.ErrorPayload(
+                    ErrorCode.ROUTE_UNAVAILABLE, ErrorDisposition.NOT_EXECUTED)));
+
+    // 模型层：非「NOT_EXECUTED 且无 identity 的 ERROR」一律拒绝。
+    for (TerminalResponse response :
+        new TerminalResponse[] {attached, errorUnknown, notExecutedWithIdentity}) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new TerminalDelivery(APP_NODE, LEASE, null, response));
+    }
+
+    // codec 层：JSON null 经解码后落到同一个构造判据，同样拒绝。
+    for (TerminalResponse response :
+        new TerminalResponse[] {attached, errorUnknown, notExecutedWithIdentity}) {
+      String json = deliveryWithNullDaemonJson(CONTROL_CODEC.encodeResponse(response));
+      assertThrows(
+          IllegalArgumentException.class, () -> ShellTopics.EVENT.codec().decode(utf8(json)), json);
+    }
   }
 
   @Test

@@ -125,7 +125,9 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 [`NotificationSubscriptions`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/NotificationSubscriptions.java) 是该组合根唯一的静态订阅绑定处（12 条），集中分发调度器唤醒（Harness Work / Issue Work / Canvas Function）、Thread/Canvas version、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。总线装配期需读取启动快照节奏，而快照依赖 settings 仓库、仓库依赖 `SystemSettingsChangeNotifier`，因此该 notifier 对总线的注入使用 `@Lazy` 打破装配环；该惰性注入只是装配期 provider，不产生初始通知读写。健康状态由 [`NotificationBusHealthIndicator`](../../web/src/main/java/fun/fengwk/kkstudio/web/health/NotificationBusHealthIndicator.java) 暴露。
 `start()` 先完成 LISTEN 再安排对账，且每次 `subscribe` 自身异步排入一次权威恢复标记，因此订阅早于或晚于建连都被覆盖；建立/重连或总线请求对账同样触发各订阅者 resync。关闭该绑定会逐一尝试关闭每一条已建立的订阅，首个失败不跳过其余资源，并上报第一个失败（其余作为 suppressed）。单订阅失败进入终态并使总线健康检查置为 DOWN，durable 恢复仍由权威回读与 poll/lease 完成。
 
-`/api/events/v1` 是唯一的浏览器事件通道，采用严格 version 1 帧。
+`/api/events/v1` 是唯一的浏览器事件通道，采用严格 version 2 帧（拒绝 version 1）。
+每条连接由一个固定 topic `app.events.v2` 的 `NotificationPeerLink` 物理承载，
+全部逻辑帧（含 `count=1`）都经共享 carrier 分片，不存在 raw JSON 旁路。
 资源为 `{kind:thread|canvas|tree,id}` 或全局 `{kind:projects|interactions|environments}`；
 Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` 是唯一的真负载事件，
 `projects` / `tree` / `interactions` / `environments` 只发失效提示，由客户端回读权威事实。
@@ -133,10 +135,25 @@ Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` �
 过滤陈旧版本；缓冲溢出折叠为 resync。
 Environment 的连接状态不做推送：Card 的 `status` / `statusExpiresAt` 在读取时由
 `min(leaseUntil, lastSeen + heartbeatTimeout)` 派生，浏览器只按 `environments` 失效提示回读。
-非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。
+浏览器 shell 控制以 `shell.command` 帧（嵌套 `TerminalCommand`）交给 `ShellGateway`：
+网关只经 `NotificationBus` 的 `shell.command` / `shell.event` 两个固定 topic 收发，
+先按窄 `EnvironmentTerminalRouteSource` 读取当前权威 READY owner/lease，再把 `TerminalDispatch`
+投递到 owner 节点；owner 侧消费调用唯一的 `EnvironmentDaemonServer.sendShell`。
+每条真实连接按 `connectionId + environment + viewer` 有界保存观察 scope：回执必须同时匹配权威 owner 与 lease，
+只有匹配本次 OPEN/ATTACH 请求（ATTACH 还须匹配声明 identity）的 ATTACHED 才建立显示流；
+发起新请求、断线或总线 resync 都递增代次并作废旧绑定，旧 owner/lease/daemon/terminal/stream 回执一律丢弃。
+READY 路由读取失败或容量拒绝只在同 topic 回确定未执行的固定错误，命令一旦 publish 后的未知失败
+绝不伪报未执行；关闭连接只对仍持有绑定的 scope 发 best-effort DETACH，绝不关闭 PTY。
+非法 carrier（peer/topic/target/UTF-8/缺片/超时）、binary、超限与非法协议帧一律清理并关闭，
+绝不回显原 payload。
 
-AsyncTextSender 每连接一个 in-flight frame，frame 数和 UTF-8 字节预算包含在途帧，
-完成回调驱动下一帧。锁内转移队列，网络发送在锁外；失败关闭入队围栏并清理订阅。
+`AsyncTextSender` 不再自管队列：每连接借用组合根 executor 驱动共享
+`NotificationPeerLink` / `NotificationOutbox` 的有界公平批次（逻辑包数与 pending 字节双预算），
+每连接同时只有一个物理帧在途，只有成功的 native 回调才推进下一帧、批内最后一帧成功才释放整包预算，
+native 调用在锁外。失败或过载不丢弃已排队逻辑包：把 error 作为最后一包排在同一预算之后，
+出队并完成回调后按稳定 close code 关闭；error 帧本身无法入队时直接放弃关闭。
+总线 resync 以 1012 `SERVICE_RESTART` 关闭真实连接并清理观察/订阅，浏览器唯一连接重连后显式重新 ATTACH，
+绝不自动重放 OPEN/INPUT 等副作用。
 
 ## Daemon WebSocket
 

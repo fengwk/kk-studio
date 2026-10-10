@@ -710,7 +710,7 @@ public class SystemSettingsSchemaProvider {
                         null,
                         FieldType.LONG,
                         false,
-                        1,
+                        8 * 1024 * 1024,
                         null),
                     field(
                         "advanced.applicationEventSendTimeoutMillis",

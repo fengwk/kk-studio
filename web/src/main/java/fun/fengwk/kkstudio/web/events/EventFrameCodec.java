@@ -8,6 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalCommand;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalControlCodec;
+import fun.fengwk.kkstudio.harness.environment.terminal.TerminalEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
@@ -21,14 +24,18 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 事件通道帧的严格 JSON codec：所有帧（客户端与服务端）都带 {@code version:1}；客户端帧手工字段校验（duplicate/trailing/unknown/
- * missing/wrong-type 全部拒绝），服务端帧确定性编码。
+ * 事件通道帧的严格 JSON codec：所有帧（客户端与服务端）都带 {@code version:2}；客户端帧手工字段校验（duplicate/trailing/unknown/
+ * missing/wrong-type 全部拒绝），服务端帧确定性编码。不再接受逻辑 {@code version:1}，也不保留兼容 decoder。
  *
- * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource}} 字段集精确；Thread/Canvas/Tree
- * resource 带 canonical UUID id，Projects/Interactions/Environments 是无 id 的全局 resource。服务端帧 {@code
- * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
- * {@code heartbeat} / {@code error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code
- * 0|[1-9][0-9]*}，不超 bigint）；提示型 resource（Projects/Tree/Interactions/Environments）无持久游标，ack 恒为 0。
+ * <p>客户端帧是两种明确变体：resource 帧 {@code {version:2, type:'subscribe'|'unsubscribe',
+ * resource}}，字段集精确；shell 帧 {@code {version:2, type:'shell.command',
+ * command:<TerminalCommand>}}，嵌套命令直接复用 {@link TerminalControlCodec}。浏览器绝不填写 route/owner/lease。
+ *
+ * <p>服务端 resource 帧 {@code subscribed{resource,cursor}} / {@code event{resource,name,data}} /
+ * {@code resync{resource}} 语义不变；shell 帧为 {@code {version:2, type:'shell.event',
+ * event:<TerminalEvent>}}，同样复用 {@link TerminalControlCodec}。连接级 {@code heartbeat} 与 {@code
+ * error{code,message[,resource]}} 字段与旧版一致，仅版本升为 2。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超
+ * bigint）；提示型 resource（Projects/Tree/Interactions/Environments）无持久游标，ack 恒为 0。
  */
 final class EventFrameCodec {
 
@@ -37,10 +44,15 @@ final class EventFrameCodec {
   static final String BACKPRESSURE = "BACKPRESSURE";
   static final String SEND_FAILED = "SEND_FAILED";
 
+  static final int VERSION = 2;
+
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final Set<String> CLIENT_FRAME_FIELDS = orderedSet("version", "type", "resource");
+  private static final Set<String> RESOURCE_CLIENT_FRAME_FIELDS =
+      orderedSet("version", "type", "resource");
+  private static final Set<String> SHELL_CLIENT_FRAME_FIELDS =
+      orderedSet("version", "type", "command");
   private static final Set<String> RESOURCE_FIELDS = orderedSet("kind", "id");
   private static final Set<String> GLOBAL_RESOURCE_FIELDS = orderedSet("kind");
 
@@ -57,16 +69,27 @@ final class EventFrameCodec {
   }
 
   private final RealtimeEventJsonCodec realtimeCodec;
+  private final TerminalControlCodec terminalCodec = new TerminalControlCodec();
 
   EventFrameCodec(RealtimeEventJsonCodec realtimeCodec) {
     this.realtimeCodec = Objects.requireNonNull(realtimeCodec, "realtimeCodec");
   }
 
-  /** 客户端帧。 */
-  record ClientFrame(Type type, ResourceKey resource) {
+  /** 客户端帧；resource 与 shell 两种明确变体，不存在其它形态。 */
+  sealed interface ClientFrame permits ResourceFrame, ShellCommand {}
+
+  /** resource 订阅/退订帧。 */
+  record ResourceFrame(Type type, ResourceKey resource) implements ClientFrame {
     enum Type {
       SUBSCRIBE,
       UNSUBSCRIBE
+    }
+  }
+
+  /** shell 控制帧；命令已由共享控制 codec 严格解码。 */
+  record ShellCommand(TerminalCommand command) implements ClientFrame {
+    ShellCommand {
+      Objects.requireNonNull(command, "command");
     }
   }
 
@@ -80,19 +103,31 @@ final class EventFrameCodec {
       throw new IllegalArgumentException("malformed client frame JSON");
     }
     ObjectNode node = requireObject(root, "frame");
-    requireExactFields(node, CLIENT_FRAME_FIELDS, "frame");
-    requireVersionOne(node, "frame");
+    requireVersionTwo(node, "frame");
     String typeName = requiredText(node, "type", "frame");
-    ClientFrame.Type type;
-    if ("subscribe".equals(typeName)) {
-      type = ClientFrame.Type.SUBSCRIBE;
-    } else if ("unsubscribe".equals(typeName)) {
-      type = ClientFrame.Type.UNSUBSCRIBE;
-    } else {
-      // 只接受精确小写；toUpperCase 归一化会放行 SUBSCRIBE/Subscribe 等非 canonical 值。
-      throw new IllegalArgumentException("frame.type must be subscribe or unsubscribe");
+    if ("subscribe".equals(typeName) || "unsubscribe".equals(typeName)) {
+      requireExactFields(node, RESOURCE_CLIENT_FRAME_FIELDS, "frame");
+      ResourceFrame.Type type =
+          "subscribe".equals(typeName)
+              ? ResourceFrame.Type.SUBSCRIBE
+              : ResourceFrame.Type.UNSUBSCRIBE;
+      return new ResourceFrame(type, parseResource(node.get("resource")));
     }
-    return new ClientFrame(type, parseResource(node.get("resource")));
+    if ("shell.command".equals(typeName)) {
+      requireExactFields(node, SHELL_CLIENT_FRAME_FIELDS, "frame");
+      ObjectNode commandNode = requireObject(node.get("command"), "frame.command");
+      TerminalCommand command;
+      try {
+        command = terminalCodec.decodeCommand(write(commandNode));
+      } catch (IllegalArgumentException error) {
+        // 不保留 cause：控制 codec 异常可能回显非法值/原 payload。
+        throw new IllegalArgumentException("frame.command must be a valid TerminalCommand");
+      }
+      return new ShellCommand(command);
+    }
+    // 只接受精确小写；toUpperCase 归一化会放行 SUBSCRIBE/Subscribe 等非 canonical 值。
+    throw new IllegalArgumentException(
+        "frame.type must be subscribe, unsubscribe or shell.command");
   }
 
   /** 编码 {@code subscribed} ack 帧（{@code cursor} 为 canonical 非负十进制）。 */
@@ -104,9 +139,7 @@ final class EventFrameCodec {
     if (cursor != 0 && isHintResource(resource.kind())) {
       throw new IllegalArgumentException("hint resource cursor must be zero");
     }
-    ObjectNode node = NODES.objectNode();
-    node.put("version", 1);
-    node.put("type", "subscribed");
+    ObjectNode node = base("subscribed");
     node.set("resource", resourceNode(resource));
     node.put("cursor", Long.toString(cursor));
     return write(node);
@@ -121,9 +154,7 @@ final class EventFrameCodec {
    */
   String event(ResourceKey resource, Signal signal) {
     Objects.requireNonNull(signal, "signal");
-    ObjectNode node = NODES.objectNode();
-    node.put("version", 1);
-    node.put("type", "event");
+    ObjectNode node = base("event");
     node.set("resource", resourceNode(resource));
     if (signal instanceof Signal.Version version) {
       String coordinate = coordinateName(resource);
@@ -175,6 +206,14 @@ final class EventFrameCodec {
     return write(node);
   }
 
+  /** 编码 {@code shell.event} 帧：嵌套事件直接复用共享控制 codec。 */
+  String shellEvent(TerminalEvent event) {
+    Objects.requireNonNull(event, "event");
+    ObjectNode node = base("shell.event");
+    node.set("event", parseNode(terminalCodec.encodeEvent(event), "event"));
+    return write(node);
+  }
+
   /** 前进事件在 wire 上的坐标名：Thread 用 {@code version}，Canvas 用 {@code revision}。 */
   private static String coordinateName(ResourceKey resource) {
     return switch (resource.kind()) {
@@ -186,26 +225,19 @@ final class EventFrameCodec {
 
   /** 编码 {@code resync} 帧。 */
   String resync(ResourceKey resource) {
-    ObjectNode node = NODES.objectNode();
-    node.put("version", 1);
-    node.put("type", "resync");
+    ObjectNode node = base("resync");
     node.set("resource", resourceNode(resource));
     return write(node);
   }
 
   /** 编码连接级 {@code heartbeat} 帧；不绑定资源、不携带游标。 */
   String heartbeat() {
-    ObjectNode node = NODES.objectNode();
-    node.put("version", 1);
-    node.put("type", "heartbeat");
-    return write(node);
+    return write(base("heartbeat"));
   }
 
   /** 编码 {@code error} 帧（连接级，不含 resource）。 */
   String error(String code, String message) {
-    ObjectNode node = NODES.objectNode();
-    node.put("version", 1);
-    node.put("type", "error");
+    ObjectNode node = base("error");
     node.put("code", code);
     node.put("message", message);
     return write(node);
@@ -213,13 +245,18 @@ final class EventFrameCodec {
 
   /** 编码 {@code error} 帧（资源级，附带 resource 供客户端定位）。 */
   String error(String code, String message, ResourceKey resource) {
-    ObjectNode node = NODES.objectNode();
-    node.put("version", 1);
-    node.put("type", "error");
+    ObjectNode node = base("error");
     node.put("code", code);
     node.put("message", message);
     node.set("resource", resourceNode(resource));
     return write(node);
+  }
+
+  private static ObjectNode base(String type) {
+    ObjectNode node = NODES.objectNode();
+    node.put("version", VERSION);
+    node.put("type", type);
+    return node;
   }
 
   private static ObjectNode dataNode(String field, String canonicalValue) {
@@ -246,11 +283,11 @@ final class EventFrameCodec {
     return parsed;
   }
 
-  private static void requireVersionOne(ObjectNode node, String context) {
+  private static void requireVersionTwo(ObjectNode node, String context) {
     JsonNode version = node.get("version");
-    // 数值必须精确等于 integer 1；asLong() 会接受溢出整数的截断结果（如 2^64），isInt() 限定 int 范围。
-    if (version == null || !version.isInt() || version.asInt() != 1) {
-      throw new IllegalArgumentException(context + ".version must be the integer 1");
+    // 数值必须精确等于 integer 2；asLong() 会接受溢出整数的截断结果（如 2^64），isInt() 限定 int 范围。
+    if (version == null || !version.isInt() || version.asInt() != VERSION) {
+      throw new IllegalArgumentException(context + ".version must be the integer " + VERSION);
     }
   }
 
@@ -311,6 +348,14 @@ final class EventFrameCodec {
         || kind == ResourceKind.ENVIRONMENTS;
   }
 
+  private static ObjectNode parseNode(String json, String field) {
+    try {
+      return requireObject(MAPPER.readTree(json), field);
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException(field + " must be a JSON object");
+    }
+  }
+
   private static ObjectNode requireObject(JsonNode value, String field) {
     if (value == null || !value.isObject()) {
       throw new IllegalArgumentException(field + " must be a JSON object");
@@ -339,7 +384,7 @@ final class EventFrameCodec {
             });
   }
 
-  private static String write(ObjectNode node) {
+  private static String write(JsonNode node) {
     try {
       return MAPPER.writeValueAsString(node);
     } catch (JsonProcessingException error) {

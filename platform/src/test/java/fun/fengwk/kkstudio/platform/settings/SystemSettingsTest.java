@@ -103,7 +103,7 @@ class SystemSettingsTest {
     assertEquals(30_000L, advanced.processorLeaseDurationMillis());
     assertEquals(10_000L, advanced.processorHeartbeatIntervalMillis());
     assertEquals(512, advanced.applicationEventQueueCapacity());
-    assertEquals(2L * 1024 * 1024, advanced.applicationEventMaxBytes());
+    assertEquals(16L * 1024 * 1024, advanced.applicationEventMaxBytes());
     assertEquals(10_000L, advanced.applicationEventSendTimeoutMillis());
     assertEquals(20_000L, advanced.applicationEventHeartbeatIntervalMillis());
     assertEquals(5_000L, advanced.notificationPollMillis());

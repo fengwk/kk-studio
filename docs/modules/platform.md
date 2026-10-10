@@ -190,6 +190,9 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 [Harness Environment Server](harness-environment-server.md) 拥有。
 同实例重连依赖 Gateway 在途记录和 Daemon 进程内 journal；新实例接管使旧调用进入
 结果不确定，恢复保证止于这两个进程内记录的生命周期。
+[`EnvironmentRegistry.resolveReadyRoute`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistry.java)
+按数据库现在时读取当前未过期 READY 行的 owner/lease，作为 ShellGateway 的唯一权威路由事实；
+它只读取、不缓存、不授权、不写表。
 
 ## 构建期 Plugin
 
@@ -289,6 +292,8 @@ integrations、storageMedia、advanced 七个 section。strict codec 与 record 
 `expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
 `SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
 aiRuntime 包含重试策略、压缩保留量、可空 `compactionFallbackModel` 和 subagent 限额。
+advanced 的 `applicationEventMaxBytes` 是每个浏览器连接 pending 逻辑包的 UTF-8 字节预算
+（默认 16MiB，下界 8MiB，即一个共享 carrier 整包），`applicationEventQueueCapacity` 是待发逻辑包数上限。
 
 network 提供唯一的 Backend 全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
 null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`，

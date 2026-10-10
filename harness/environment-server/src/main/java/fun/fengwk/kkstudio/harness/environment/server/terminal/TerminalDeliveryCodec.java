@@ -16,6 +16,10 @@ import java.util.UUID;
  *
  * <p>解码拒绝 duplicate/trailing/unknown 字段与非 canonical UUID，嵌套 response 直接复用 {@link
  * TerminalControlCodec}，不定义第二层 控制 DTO。
+ *
+ * <p>{@code daemonInstanceId} 是四个字段中唯一允许显式 {@code null} 的字段，且只允许「NOT_EXECUTED 错误且无终端
+ * identity」这一联合场景；字段本身绝不省略， 也不接受非 canonical 或零 UUID。{@link TerminalDelivery} 的构造约束是最终判据，codec 只负责把
+ * JSON null 如实映射进去。
  */
 final class TerminalDeliveryCodec implements NotificationCodec<TerminalDelivery> {
 
@@ -42,7 +46,7 @@ final class TerminalDeliveryCodec implements NotificationCodec<TerminalDelivery>
     UUID ownerNodeId = ShellTopicJson.canonicalUuid(root, "ownerNodeId", "terminal delivery");
     UUID leaseToken = ShellTopicJson.canonicalUuid(root, "leaseToken", "terminal delivery");
     UUID daemonInstanceId =
-        ShellTopicJson.canonicalUuid(root, "daemonInstanceId", "terminal delivery");
+        ShellTopicJson.optionalCanonicalUuid(root, "daemonInstanceId", "terminal delivery");
     ObjectNode responseNode =
         ShellTopicJson.requireObject(root.get("response"), "terminal delivery.response");
     TerminalResponse response = CONTROL_CODEC.decodeResponse(ShellTopicJson.write(responseNode));
@@ -53,7 +57,11 @@ final class TerminalDeliveryCodec implements NotificationCodec<TerminalDelivery>
     ObjectNode root = ShellTopicJson.newObject();
     root.put("ownerNodeId", delivery.ownerNodeId().toString());
     root.put("leaseToken", delivery.leaseToken().toString());
-    root.put("daemonInstanceId", delivery.daemonInstanceId().toString());
+    if (delivery.daemonInstanceId() == null) {
+      root.putNull("daemonInstanceId");
+    } else {
+      root.put("daemonInstanceId", delivery.daemonInstanceId().toString());
+    }
     root.set(
         "response",
         ShellTopicJson.parse(CONTROL_CODEC.encodeResponse(delivery.response()), "response"));
