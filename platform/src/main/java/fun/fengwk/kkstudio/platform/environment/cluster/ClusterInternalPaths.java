@@ -13,6 +13,9 @@ public final class ClusterInternalPaths {
   /** 内部 IDE 元数据前缀。 */
   public static final String INTERNAL_IDE_PREFIX = "/internal/environment-ide";
 
+  /** 内部 IDE 元数据请求/回执体的硬上限（字节）；请求与响应都必须严格按此上限读取，超出即 fail-closed。 */
+  public static final int MAX_METADATA_BODY_BYTES = 16 * 1024;
+
   private ClusterInternalPaths() {}
 
   public static String environmentPrefix(EnvironmentId environmentId) {

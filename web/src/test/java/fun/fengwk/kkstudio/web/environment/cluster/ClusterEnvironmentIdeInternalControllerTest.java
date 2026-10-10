@@ -135,6 +135,80 @@ class ClusterEnvironmentIdeInternalControllerTest {
     verify(localEnvironmentIdeService).openView(eq(ENV), any());
   }
 
+  @Test
+  void unauthenticatedOversizedBodyIsRejectedWithoutParsingOrSideEffects() throws Exception {
+    mockMvc
+        .perform(
+            post(ClusterInternalPaths.viewsPath(ENV))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
+        .andExpect(status().isUnauthorized());
+    verifyNoInteractions(localEnvironmentIdeService);
+    verifyNoInteractions(clusterNodeRegistry);
+  }
+
+  @Test
+  void duplicateAuthenticationHeaderIsRejected() throws Exception {
+    HttpHeaders headers = mockHeaders(validHeaders());
+    headers.add(
+        HmacClusterInternalAuthentication.HEADER_SIGNATURE,
+        headers.getFirst(HmacClusterInternalAuthentication.HEADER_SIGNATURE));
+
+    mockMvc
+        .perform(
+            post(ClusterInternalPaths.viewsPath(ENV))
+                .headers(headers)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(openViewBody()))
+        .andExpect(status().isUnauthorized());
+    verifyNoInteractions(localEnvironmentIdeService);
+  }
+
+  @Test
+  void authenticatedOversizedBodyIsRejectedWithPayloadTooLarge() throws Exception {
+    when(clusterNodeRegistry.route(ENV))
+        .thenReturn(Optional.of(ClusterIdeOwnerRoute.local(NODE_B)));
+
+    mockMvc
+        .perform(
+            post(ClusterInternalPaths.viewsPath(ENV))
+                .headers(mockHeaders(validHeaders()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
+        .andExpect(status().isPayloadTooLarge());
+    verifyNoInteractions(localEnvironmentIdeService);
+  }
+
+  @Test
+  void authenticatedMalformedBodyIsRejectedWithBadRequest() throws Exception {
+    when(clusterNodeRegistry.route(ENV))
+        .thenReturn(Optional.of(ClusterIdeOwnerRoute.local(NODE_B)));
+
+    mockMvc
+        .perform(
+            post(ClusterInternalPaths.viewsPath(ENV))
+                .headers(mockHeaders(validHeaders()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{not-json"))
+        .andExpect(status().isBadRequest());
+    verifyNoInteractions(localEnvironmentIdeService);
+  }
+
+  @Test
+  void authenticatedUnknownFieldBodyIsRejectedWithBadRequest() throws Exception {
+    when(clusterNodeRegistry.route(ENV))
+        .thenReturn(Optional.of(ClusterIdeOwnerRoute.local(NODE_B)));
+
+    mockMvc
+        .perform(
+            post(ClusterInternalPaths.viewsPath(ENV))
+                .headers(mockHeaders(validHeaders()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"viewId\":\"" + VIEW + "\",\"directory\":\"/d\",\"extra\":1}"))
+        .andExpect(status().isBadRequest());
+    verifyNoInteractions(localEnvironmentIdeService);
+  }
+
   private Map<String, String> validHeaders() {
     return authentication.sign(
         "POST",
