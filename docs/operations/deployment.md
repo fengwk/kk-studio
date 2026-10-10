@@ -359,7 +359,8 @@ loopback proxy。这些 build 参数不会自动进入 App/Daemon runtime。
 
 Backend 的运行代理在 **系统设置 → 网络** 保存，全局只配置一个无认证 HTTP 代理地址
 `http://host:port`；HTTPS 请求通过 CONNECT。地址留空即强制直连，不继承宿主环境变量。
-保存后重启各 Backend 节点生效，无模型、Git 或插件单独覆盖。绕过规则用逗号分隔，
+保存后新发起的 Backend HTTP 请求使用新代理，无需重启；在途请求和响应流继续完成，
+无模型、Git 或插件单独覆盖。绕过规则用逗号分隔，
 支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR，例如
 `localhost,127.*,::1,192.168.0.0/16,minio,*.internal`；CIDR 只按目标 URL 中的数值 IP 逐位匹配，
 不为域名解析 DNS，按域名访问的内网服务仍应写域名规则。不支持 SOCKS、代理认证或 TLS 到代理。
