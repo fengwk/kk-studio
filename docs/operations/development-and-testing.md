@@ -131,33 +131,31 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 
 ### Daemon 安装脚本回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与发布脚本契约。
-Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与暂存输入校验，验证 latest
-解析与 JAR 版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
-以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
-运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实 shaded JAR 由 Maven
-独立构建。测试不注册真实 systemd/launchd 服务。
-Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
+在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与打包脚本契约。
+Unix fixtures 用 shim 替代 curl/npm/uname/systemctl/launchctl，真实执行 SHA256 校验、release
+`--check-config` 预检、受管身份判定、程序目录整体替换与备份，以及卸载只移除受管服务与程序；
+`prepare-release.sh` fixtures 还验证按目标平台 `npm ci --os/--cpu` 只装入对应的 koffi 预编译产物
+（拒绝把 Linux node_modules 当作“假跨平台”），并核对归档内容、SHA 与元数据。安装器没有交互提示、
+from-source 与单独 upgrade 入口；从 checkout 运行安装脚本只是开发/CI fixture，不是用户安装路径，
+安装器自身从不构建。测试不注册真实 systemd/launchd 服务，也不下载真实 240MB 运行时。
+Windows 原生验收需要 host 上真实的 `node.exe`（fixture 用它构造归档），并分别运行两个 host：
 
 ```powershell
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
 pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
 ```
 
-该套件检查真实 ScheduledTasks 定义、ACL、Java argv 和进程捕获，但不注册任务。
-Windows 计划任务直接执行 Java，只以 UTF-8 Base64 传输唯一的 `--config` 参数；
-应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
-验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
+该套件用 stub 替代网络与 ScheduledTasks，真实校验 ACL、SHA256、`--check-config` 预检、受管任务
+身份、程序目录发布与卸载，但不注册真实任务、也不触碰真实用户目录。
+Windows 计划任务直接执行归档内冻结的 `node.exe`，只以 ASCII UTF-8 Base64 传输应用参数
+（`--base64-args`），验证中文、emoji、空参数、引号和尾随反斜杠保真。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
 验证实际生成脚本的 owner-only 暂存、凭据字节与失败清理。夹具不注册任务或访问网络。
 
-只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
-`pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
-Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植
-进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
-保留两个 Windows host 的完整门禁。
+Windows 原生验收只能在 Windows host 上运行；镜像与 Daemon 发布 CI 都在
+PowerShell 5.1 与 PowerShell 7 两个 host 上完整执行该套件，失败不跳过。
 
 ## Java 质量检查
 
