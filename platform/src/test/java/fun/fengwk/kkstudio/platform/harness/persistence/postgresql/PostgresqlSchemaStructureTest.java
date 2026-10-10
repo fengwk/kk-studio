@@ -232,6 +232,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "id",
         "title",
         "agent_name",
+        "environment_name",
         "yolo_enabled",
         "created_at",
         "updated_at",
