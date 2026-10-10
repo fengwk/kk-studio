@@ -83,14 +83,30 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
                         "integrations",
                         "storageMedia",
                         "advanced")))
-        // custom atomic leaf 与自动压缩组字段的顺序与路径。
+        // custom atomic leaf、HTTP 名单和自动压缩组的顺序与路径。
         .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].path").value("tool.permission"))
         .andExpect(
+            jsonPath("$.data.sections[0].groups[*].key")
+                .value(
+                    contains(
+                        "aiRuntime.retry",
+                        "aiRuntime.httpErrors",
+                        "aiRuntime.compaction",
+                        "aiRuntime.subagent")))
+        .andExpect(
             jsonPath("$.data.sections[0].groups[1].fields[0].path")
+                .value("aiRuntime.modelHttpRetryStatusCodes"))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields.length()").value(1))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].type").value("INTEGER_LIST"))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].nullable").value(false))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(400))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].max").value(599))
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[2].fields[0].path")
                 .value("aiRuntime.compactionKeepRecentTokens"))
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].type").value("INTEGER"))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(1))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].type").value("INTEGER"))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].min").value(1))
         .andExpect(jsonPath("$.data.sections[4].groups[1].fields[3].max").value(1800000))
         // 领域上界映射：promptAgentName 受 MAX_LENGTH=64 约束。
         .andExpect(jsonPath("$.data.sections[4].groups[4].fields[1].max").value(64))
@@ -111,13 +127,15 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[1].groups[0].key").value("tool.permission"))
         .andExpect(jsonPath("$.data.sections[1].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[1].groups[0].applyTiming").value("NEXT_INVOCATION"))
-        // aiRuntime 三组 live 生效：restartRequired=false 且 applyTiming=NEXT_INVOCATION。
+        // aiRuntime 四组 live 生效：restartRequired=false 且 applyTiming=NEXT_INVOCATION。
         .andExpect(jsonPath("$.data.sections[0].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[0].groups[0].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.data.sections[0].groups[1].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[0].groups[1].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.data.sections[0].groups[2].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[0].groups[2].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[0].groups[3].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[0].groups[3].applyTiming").value("NEXT_INVOCATION"))
         // restartRequired section 标记：aiRuntime live，tool 不需要重启。
         .andExpect(jsonPath("$.data.sections[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false))
