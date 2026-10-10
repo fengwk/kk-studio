@@ -27,7 +27,6 @@ class EnvironmentServerModuleArchitectureTest {
       List.of(
           "fun.fengwk.kkstudio.harness.tool.",
           "fun.fengwk.kkstudio.harness.runtime.",
-          "fun.fengwk.kkstudio.harness.daemon.",
           "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",

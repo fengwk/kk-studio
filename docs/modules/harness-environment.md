@@ -1,6 +1,6 @@
 # Harness Environment
 
-`harness-environment` 定义环境执行的共享契约：路由身份、原子能力目录、调用侧发送语义，以及 Gateway 与 Daemon 的 wire 消息。修改调用参数或协议时，以本模块的值对象、schema 与 codec 为准；连接和执行状态分别由 [Harness Environment Server](harness-environment-server.md) 与 [Harness Daemon](harness-daemon.md)维护。
+`harness-environment` 定义环境执行的共享契约：路由身份、原子能力目录、调用侧发送语义，以及 Gateway 与 Daemon 的 wire 消息。修改调用参数或协议时，以本模块的值对象、schema 与 codec 为准；连接和执行状态分别由 [Harness Environment Server](harness-environment-server.md) 与宿主侧 Node Daemon 维护。
 
 ## Environment 身份
 
@@ -91,7 +91,7 @@ default void terminate(EnvironmentCapabilityTerminationCause cause) { cancel(); 
 default Duration terminationGrace() { return Duration.ZERO; }
 ```
 
-`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。`terminationGrace()` 默认 `ZERO`（收尾立即由调用方裁决）；返回正数的能力承诺在该预算内自行提交终态，使 Daemon 能把终态提交让给它以携带失败日志，预算到期仍由调用方兜底收敛，见 [Harness Daemon 的超时与取消收尾](harness-daemon.md#超时与取消收尾)。
+`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。`terminationGrace()` 默认 `ZERO`（收尾立即由调用方裁决）；返回正数的能力承诺在该预算内自行提交终态，使 Daemon 能把终态提交让给它以携带失败日志，预算到期仍由调用方兜底收敛。
 
 能力结果 [`EnvironmentCapabilityResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResult.java) 是 `callId` 加 `contents`（至多 64 项）、`error` 与 `detailsJson`（至多 1 MiB UTF-8）。错误结果可以只带文本，也可以带稳定错误码：[`EnvironmentCapabilityResultCodes`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResultCodes.java) 只冻结码的语法 `[A-Z][A-Z0-9_]*`（至多 64 字符），当前没有预置码常量。
 
@@ -251,4 +251,4 @@ harness-environment
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Tool](harness-tool.md)、[Harness Environment Server](harness-environment-server.md)、[Harness Daemon](harness-daemon.md)、[Harness Runtime](harness-runtime.md)、[Platform](platform.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Tool](harness-tool.md)、[Harness Environment Server](harness-environment-server.md)、[Harness Runtime](harness-runtime.md)、[Platform](platform.md)。

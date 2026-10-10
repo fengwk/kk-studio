@@ -37,7 +37,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.11.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.12.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -101,9 +101,8 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 免费只表示不调用付费模型，不表示无副作用：E2E 会写测试数据，离线 smoke/性能入口会建镜像、
 启停容器并删除同名测试栈卷；供应链除离线 `test` 子命令外还可能下载依赖、漏洞库或镜像。
 
-内置工具的定向测试、平台条件与报告判断分别见
-[Read](builtin-read-tests.md)、[文件变更](builtin-mutation-tests.md)、[检索](builtin-search-tests.md)、
-[Bash](builtin-bash-tests.md)、[LSP](builtin-lsp-tests.md) 和 [Task/Thread Join](builtin-task-tests.md)。
+内置工具的定向测试、平台条件与报告判断见
+[Task/Thread Join](builtin-task-tests.md)。
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -605,20 +604,17 @@ XML 检查不是通用语法验证器，不能把这道门禁称为任意畸形 
 ### 隔离栈与真实 Agent 矩阵
 
 栈的 `up`/`status`/`logs`/`inspect`/`down` 生命周期与端口见
-[部署与运行](deployment.md#deployreliabilityapp--environment-daemon)。`up` 在有宿主
-`TEST_MINIMAX_*` 时同步该 credential pair；工具隔离由 `inspect` 断言。矩阵专用的准备命令是：
+[部署与运行](deployment.md#deployreliabilityapp)。`up` 在有宿主
+`TEST_MINIMAX_*` 时同步该 credential pair。矩阵专用的准备命令是：
 
 ```bash
 ./scripts/dev/verify/reliability/stack.sh snapshot
 ./scripts/dev/verify/reliability/stack.sh case-reset '<case-id>' pi
 ./scripts/dev/verify/reliability/stack.sh case-deps '<case-id>'
-./scripts/dev/verify/reliability/stack.sh tool-smoke
 ```
 
 先把 `<case-id>` 替换为 inventory 中的实际值；`case-reset` 最后一项可选 `pi` 或 `pi-base`。
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
-`tool-smoke` 把 [`NativeToolSmoke.java`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java) 经 stdin 送入
-Daemon 容器编译并运行 find/grep/bash assertions，不经过 Agent、Provider 或 App command batch。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 
@@ -736,39 +732,8 @@ Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声�
 | 镜像 | Dockerfile | 默认 tag | 覆盖变量 |
 | --- | --- | --- | --- |
 | App | [`deploy/local/Dockerfile`](../../deploy/local/Dockerfile) | `kk-studio-app:supply-chain` | `SUPPLY_CHAIN_APP_IMAGE` |
-| Daemon | [`deploy/reliability/daemon.Dockerfile`](../../deploy/reliability/daemon.Dockerfile) | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
 
-App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`；Daemon 额外检查 Node
-`v22.23.3`、npm `11.21.0`、bash、git，并用一次 `npm install --package-lock-only` 验证 npm 工具链。
-Daemon 使用 Java 21 / Jammy，并将 npm bundle 的 `brace-expansion`、`ip-address`、`undici`
-分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm 自带的 `7.5.22`。
-`http-cache-semantics<=4.2.0` 的 HIGH `CVE-2026-93748` 当前尚无上游补丁，保持原包并报告未解决风险，
-不能据此宣称镜像扫描通过。
-
-Daemon 原有 smoke 成功后，通过 stdin 注入
-[`npm-cache-probe.mjs`](../../scripts/dev/verify/supply-chain/npm-cache-probe.mjs)，无需重建镜像。
-它使用默认 UID `10001`、真实 npm bundle、loopback HTTP 与 synthetic marker，不挂载宿主目录、
-不传用户环境/代理/密钥；请求有界且无 retry，完整消费 body 后关闭 server、删除本次临时 cache：
-
-```bash
-docker run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node \
-  "$DAEMON_IMAGE" --input-type=module \
-  < scripts/dev/verify/supply-chain/npm-cache-probe.mjs
-```
-
-供应链报告保留 `image/npm-cache-probe.json` 与独立 stderr `logs/npm-cache-probe.log`。
-JSON 记录 runtime/shared、origin hits、第二次 body 来源、cache status 和 Set-Cookie 回放。7 个 case 分为：
-
-- 同认证 fresh cache 正对照；两个认证/Cookie 变更的 Vary case 与响应 no-store 必须回源。
-  这四项及 `shared=false` 断言失败均非零退出。
-- 无 Vary 的认证变更、响应 `no-cache` + `Age: 120` 后请求 `max-stale` 只记录
-  `OBSERVED` / `NOT_OBSERVED`；无 public 的 Set-Cookie case 观察头剥离，不证明 body 隔离。
-
-实测 `shared=false` 下无 Vary 仍复用 A body，`no-cache` 回源保护仍被 `max-stale` 绕过。
-`ASSERTIONS_SATISFIED` 不证明安全、漏洞修复或不受影响；同 OS 用户 cache 不是跨租户隔离，
-**不要跨互不信任主体共享 npm cache**，认证响应需正确配置 Vary，禁止存储用响应 no-store。
-退出非零、JSON 空/非法或预期报告缺失使 Daemon smoke 失败，随后仍运行 Trivy；
-观测不改变漏洞 gate、不提供 suppression，不能将 `shared=false` 视为修复。
+App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`。
 
 ## 本机 preview 与 NAS 自迭代
 

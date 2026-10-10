@@ -98,40 +98,6 @@ services:
       - reliability
       - app-ingress
 
-  workspace-init:
-    build:
-      context: ../..
-      dockerfile: deploy/reliability/daemon.Dockerfile
-    image: kk-studio-daemon:reliability
-    user: "0:0"
-    entrypoint: ["/bin/bash", "-c"]
-    command: ["chown 10001:10001 /workspace"]
-    volumes:
-      - daemon-workspace:/workspace
-    networks:
-      - reliability
-
-  daemon:
-    build:
-      context: ../..
-      dockerfile: deploy/reliability/daemon.Dockerfile
-    image: kk-studio-daemon:reliability
-    init: true
-    depends_on:
-      app:
-        condition: service_healthy
-      workspace-init:
-        condition: service_completed_successfully
-    environment:
-      KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
-      # 非机密安装配置：入口据此物化共享 daemon.json，daemon 只接收 --config。
-      KK_STUDIO_DAEMON_STUDIO_URL: http://app:8080
-      KK_STUDIO_DAEMON_NOTE: Isolated Docker reliability environment.
-    volumes:
-      - daemon-workspace:/workspace
-    networks:
-      - reliability
-
 networks:
   reliability:
     internal: true
@@ -140,4 +106,3 @@ networks:
 volumes:
   postgres-data:
   minio-data:
-  daemon-workspace:

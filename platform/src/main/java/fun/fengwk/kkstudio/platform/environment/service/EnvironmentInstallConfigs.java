@@ -26,11 +26,10 @@ public final class EnvironmentInstallConfigs {
   }
 
   public static EnvironmentInstallConfigDTO parse(JsonNode node) {
-    fields(node, Set.of("operatingSystem", "javaHome", "daemon"), "installConfig");
+    fields(node, Set.of("operatingSystem", "daemon"), "installConfig");
     EnvironmentInstallConfigDTO result = new EnvironmentInstallConfigDTO();
     result.setOperatingSystem(
         text(node.get("operatingSystem"), "installConfig.operatingSystem", true));
-    result.setJavaHome(text(node.get("javaHome"), "installConfig.javaHome", false));
     try {
       result.setDaemon(DaemonConfigurationCodec.parse(node.get("daemon")));
     } catch (IllegalArgumentException error) {
@@ -48,31 +47,8 @@ public final class EnvironmentInstallConfigs {
     if (!Set.of("linux", "macos", "windows").contains(os == null ? "" : os)) {
       throw invalid("installConfig.operatingSystem must be linux, macos or windows");
     }
-    String home = value.getJavaHome();
-    if (home != null) {
-      boolean windows = os.equals("windows");
-      boolean absolute =
-          windows
-              ? home.matches("^[A-Za-z]:[\\\\/].*")
-                  || home.matches("^\\\\\\\\[^\\\\/]+[\\\\/][^\\\\/]+.*")
-              : home.startsWith("/");
-      String pathPart = home.matches("^[A-Za-z]:.*") ? home.substring(2) : home;
-      boolean invalidWindowsCharacters =
-          windows && pathPart.chars().anyMatch(c -> "<>:\"|?*".indexOf(c) >= 0);
-      if (!absolute
-          || invalidWindowsCharacters
-          || home.isBlank()
-          || home.codePoints().anyMatch(Character::isISOControl)
-          || home.contains("$")
-          || home.contains("%")
-          || home.contains("~")
-          || !home.equals(home.strip())) {
-        throw invalid("installConfig.javaHome must be an absolute path without placeholders");
-      }
-    }
     EnvironmentInstallConfigDTO result = new EnvironmentInstallConfigDTO();
     result.setOperatingSystem(os);
-    result.setJavaHome(home);
     try {
       result.setDaemon(DaemonConfigurationCodec.validate(value.getDaemon()));
     } catch (IllegalArgumentException error) {
