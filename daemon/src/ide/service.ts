@@ -54,16 +54,46 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
     return view
   }
 
+  // Serializes commands per view so an older write can never clobber a newer directory change.
+  const viewLocks = new Map<string, Promise<unknown>>()
+  const withViewLock = <T>(viewId: string, task: () => Promise<T>): Promise<T> => {
+    const previous = viewLocks.get(viewId) ?? Promise.resolve()
+    const next = previous.then(task, task)
+    viewLocks.set(
+      viewId,
+      next.catch(() => undefined),
+    )
+    return next
+  }
+
   const openView = async (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
     const viewId = command.viewId === undefined ? newViewId() : validateViewId(command.viewId)
-    const directory = await canonicalDirectory(command.directory ?? hostHome())
-    await ensurePrivateDirectory(paths.viewsDir)
-    const workspacePath = join(paths.viewsDir, `${viewId}.code-workspace`)
-    await writePrivateFile(workspacePath, workspaceFileContent(directory))
-    views.set(viewId, { viewId, directory, workspacePath })
-    bridge.assign(viewId, workspacePath)
-    await manager.ensureStarted(signal)
-    return { ok: true, viewId, directory, workspacePath }
+    return withViewLock(viewId, async () => {
+      const existing = views.get(viewId)
+      if (existing) {
+        // Re-opening a view is idempotent: only an explicit conflicting directory is refused,
+        // and an omitted directory must never reset it to the default home.
+        if (command.directory !== undefined && (await canonicalDirectory(command.directory)) !== existing.directory) {
+          return {
+            ok: false,
+            viewId,
+            directory: existing.directory,
+            workspacePath: existing.workspacePath,
+            message: 'view is already open with a different directory',
+          }
+        }
+        await manager.ensureStarted(signal)
+        return { ok: true, viewId, directory: existing.directory, workspacePath: existing.workspacePath }
+      }
+      const directory = await canonicalDirectory(command.directory ?? hostHome())
+      await ensurePrivateDirectory(paths.viewsDir)
+      const workspacePath = join(paths.viewsDir, `${viewId}.code-workspace`)
+      await writePrivateFile(workspacePath, workspaceFileContent(directory))
+      views.set(viewId, { viewId, directory, workspacePath })
+      bridge.assign(viewId, workspacePath)
+      await manager.ensureStarted(signal)
+      return { ok: true, viewId, directory, workspacePath }
+    })
   }
 
   const changeDirectory = async (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
@@ -71,29 +101,40 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
     if (command.directory === undefined) {
       throw new IdeError('directory is required')
     }
-    const directory = await canonicalDirectory(command.directory)
-    const result = await bridge.request(view.viewId, { op: 'changeDirectory', directory }, signal)
-    if (!result.ok) {
-      return {
-        ok: false,
-        viewId: view.viewId,
-        directory: view.directory,
-        workspacePath: view.workspacePath,
-        message: result.message ?? 'directory change was rejected',
+    return withViewLock(view.viewId, async () => {
+      const directory = await canonicalDirectory(command.directory as string)
+      // Success requires the window to actually report the expected directory, either in its
+      // reply or on reconnect; a dropped connection is never treated as a successful change.
+      const result = await bridge.request(view.viewId, { op: 'changeDirectory', directory }, signal, {
+        expectedDirectory: directory,
+      })
+      if (!result.ok) {
+        return {
+          ok: false,
+          viewId: view.viewId,
+          directory: view.directory,
+          workspacePath: view.workspacePath,
+          message: result.message ?? 'directory change was rejected',
+        }
       }
-    }
-    // The managed workspace file is the durable source of truth. The extension switches
-    // the live window through the public API; a folder change may restart its host, which
-    // the bridge reports as a delivered command rather than a failure.
-    await writePrivateFile(view.workspacePath, workspaceFileContent(directory))
-    view.directory = directory
-    return { ok: true, viewId: view.viewId, directory, workspacePath: view.workspacePath }
+      // The managed workspace file is the durable record; keep it in step with the live window.
+      await writePrivateFile(view.workspacePath, workspaceFileContent(directory))
+      view.directory = directory
+      return { ok: true, viewId: view.viewId, directory, workspacePath: view.workspacePath }
+    })
   }
 
   const focusTerminal = async (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
     const view = requireView(command.viewId)
     if (!processes.trackDescendant) {
       throw new IdeError('terminal supervision is unavailable')
+    }
+    // The window is opened as an iframe and can ask for a terminal before its extension host
+    // has connected the bridge. Wait for the connection under the caller's own signal rather
+    // than rejecting outright or retrying blindly.
+    if (!bridge.isConnected(view.viewId)) {
+      await manager.ensureStarted(signal)
+      await bridge.waitForConnection(view.viewId, signal)
     }
     const result = await bridge.request(view.viewId, { op: 'focusTerminal' }, signal)
     if (!result.ok) {
@@ -102,18 +143,28 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
     return { ok: true, viewId: view.viewId, directory: view.directory, workspacePath: view.workspacePath }
   }
 
-  const closeView = async (command: IdeCommand): Promise<IdeReply> => {
+  const closeView = async (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
     if (command.viewId === undefined) {
       throw new IdeError('viewId is required')
     }
     const viewId = validateViewId(command.viewId)
-    const view = views.get(viewId)
-    bridge.revoke(viewId)
-    views.delete(viewId)
-    if (view) {
-      await rm(view.workspacePath, { force: true })
-    }
-    return { ok: true, viewId }
+    return withViewLock(viewId, async () => {
+      // A connected window must dispose its terminals and confirm no unsaved work remains
+      // before the workspace is torn down; a hidden dirty window must never be closed blindly.
+      if (bridge.isConnected(viewId)) {
+        const result = await bridge.request(viewId, { op: 'closeView' }, signal)
+        if (!result.ok) {
+          return { ok: false, viewId, message: result.message ?? 'view could not be closed' }
+        }
+      }
+      const view = views.get(viewId)
+      bridge.revoke(viewId)
+      views.delete(viewId)
+      if (view) {
+        await rm(view.workspacePath, { force: true })
+      }
+      return { ok: true, viewId }
+    })
   }
 
   const openStream = async (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
@@ -158,7 +209,7 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
           case 'FOCUS_TERMINAL':
             return await focusTerminal(command, signal)
           case 'CLOSE_VIEW':
-            return await closeView(command)
+            return await closeView(command, signal)
           case 'OPEN_STREAM':
             return await openStream(command, signal)
           default:
@@ -169,8 +220,21 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
       }
     },
     async close() {
-      await manager.close()
-      await bridge.close()
+      // Both resources are released even if one shutdown fails; failures are reported together.
+      const errors: unknown[] = []
+      try {
+        await manager.close()
+      } catch (error) {
+        errors.push(error)
+      }
+      try {
+        await bridge.close()
+      } catch (error) {
+        errors.push(error)
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, 'ide service shutdown failed')
+      }
     },
   }
 }
