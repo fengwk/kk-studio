@@ -2921,8 +2921,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
 
     it('defaults to a bound thread target without an owner and becomes fully interactive', async () => {
       // 测试意图：owner 未传时不访问 owner.type 也不崩溃，目标默认绑定 paneId 的 Thread；
-      // 既有 Thread 的 owner-free 契约下，快照就绪后 composer、settings 与预览都开放，
-      // 预览只被草稿就绪度限制，而不是被 owner 拒绝。
+      // 快照就绪后 composer 与 settings 可用，不依赖 owner。
       const { result } = renderOwnerlessController()
       expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
 
