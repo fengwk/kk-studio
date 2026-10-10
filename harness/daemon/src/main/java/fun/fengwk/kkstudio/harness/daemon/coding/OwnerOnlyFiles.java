@@ -192,13 +192,10 @@ final class OwnerOnlyFiles {
     if (view == null) {
       throw new IOException("ACL file attribute view is unavailable: " + target);
     }
-    UserPrincipal owner = currentUserPrincipal();
-    view.setAcl(List.of(ownerOnlyAclEntry(owner, directory)));
-    for (AclEntry entry : view.getAcl()) {
-      if (entry.type() != AclEntryType.ALLOW || !owner.equals(entry.principal())) {
-        throw new IOException(
-            "cannot enforce owner-only ACL; unexpected grant " + entry + " on " + target);
-      }
+    List<AclEntry> expected = List.of(ownerOnlyAclEntry(currentUserPrincipal(), directory));
+    view.setAcl(expected);
+    if (!expected.equals(view.getAcl())) {
+      throw new IOException("cannot enforce owner-only ACL: " + target);
     }
   }
 
