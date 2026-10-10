@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { assert, envelopeData, instantEpochMillis, sleep } from '../lib/http.mjs'
-import { assertDistributedContext, waitForNodeHealth } from '../lib/distributed.mjs'
+import { assertDistributedContext, waitForEnvironmentReady, waitForNodeHealth } from '../lib/distributed.mjs'
 import { withCleanup } from '../lib/event-probe.mjs'
 import { TerminalProbe, openRunningTerminal } from '../lib/terminal-probe.mjs'
 import { registerCase } from '../lib/registry.mjs'
@@ -19,21 +19,6 @@ const ENV_A_ID = '33333333-3333-3333-3333-333333333333'
 
 function sentinel(prefix) {
   return `KKS_${prefix}_${randomUUID().replaceAll('-', '').slice(0, 12)}`
-}
-
-async function waitEnvReady(callNode, node, envId, maxAttempts = 30, afterLastSeen = null) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const card = envelopeData((await callNode(node, 'GET', `/api/harness/environments/${encodeURIComponent(envId)}`)).json)
-      const fresh = afterLastSeen === null
-        || instantEpochMillis(card.lastSeen) > instantEpochMillis(afterLastSeen)
-      if (card?.ready === true && card?.status === 'READY' && fresh) return card
-    } catch {
-      // transient startup / reconnecting
-    }
-    await sleep(500)
-  }
-  throw new Error(`environment '${envId}' on node '${node}' did not reach READY within timeout`)
 }
 
 /** Waits until the owner node can no longer read its DB-authoritative Environment projection. */
@@ -57,8 +42,8 @@ registerCase({
   docs: 'fixture env 3333…（daemon-a 连 app-a）在两节点都 READY：一个 browserPeer 连 app-b 经 B→PG→A→DaemonA→A→PG→B 真路由 OPEN，另一个 peer 连 app-a 以同一 terminal identity 建立独立 stream 并读到同一输出；第二个 CLAIM 不得夺取控制权，TAKEOVER 以观察到的 writer epoch 轮换，旧 owner 用陈旧 grant 的 INPUT 被 NOT_OWNER 拒绝且哨兵绝不落屏；同 seq+digest 重发幂等只写一次；DETACH 不杀终端；CLOSE 后 expectedExited 旧身份重建新 terminalId。只断言行为与计数。',
   async run(ctx) {
     assertDistributedContext(ctx)
-    await waitEnvReady(ctx.callNode, 'a', ENV_A_ID)
-    await waitEnvReady(ctx.callNode, 'b', ENV_A_ID)
+    await waitForEnvironmentReady(ctx, 'a', ENV_A_ID)
+    await waitForEnvironmentReady(ctx, 'b', ENV_A_ID)
 
     const peerB = new TerminalProbe(ctx.baseUrls.b, { environmentId: ENV_A_ID, autoApplied: false })
     const peerA = new TerminalProbe(ctx.baseUrls.a, { environmentId: ENV_A_ID, autoApplied: false })
@@ -188,8 +173,8 @@ registerCase({
   docs: '在 fixture env 3333… 上真实执行一次 INPUT（test-only 钩子丢弃该 OP_ACK，不改服务端），等整屏出现精确哨兵后关闭旧 peer；同 viewerId 新连接 ATTACH 同身份拿到新 stream 与 RESET 后，以 CLAIM.recovery {previous 旧 grant, seq, digest} 原子核对，明确得到 WRITTEN（绝不当成 NOT_WRITTEN/OUTCOME_UNKNOWN），且不自动重放 INPUT、哨兵只出现一次。digest 按公开算法（tag 0x01 + big-endian int64 inputModeRevision + 原始字节）由测试用 node crypto 独立计算。',
   async run(ctx) {
     assertDistributedContext(ctx)
-    await waitEnvReady(ctx.callNode, 'a', ENV_A_ID)
-    await waitEnvReady(ctx.callNode, 'b', ENV_A_ID)
+    await waitForEnvironmentReady(ctx, 'a', ENV_A_ID)
+    await waitForEnvironmentReady(ctx, 'b', ENV_A_ID)
 
     // The terminal is owned by daemon-a via app-a; the recovering viewer reconnects through app-b so
     // the whole recovery path crosses the App boundary over PG.
@@ -274,11 +259,11 @@ registerCase({
   level: 'L5',
   title: 'owner DB 断网期间终端命令 fail-closed',
   requires: ['distributed'],
-  docs: '在 fixture env 3333… 经 app-b 建立真实终端并写入哨兵；disconnect-db-a 后对 app-a 的新观察尝试必须 fail-closed（ROUTE_UNAVAILABLE/NOT_EXECUTED 或连接被拒/关闭），经 app-b 的命令在 owner DB 不可用时绝不假报 WRITTEN、也不本地 fallback（有界 10s 捕获 requestError/close，静默不当作证据）；finally reconnect-db-a，等两节点恢复 READY 后重新 ATTACH 建立新 stream，以权威 full RESET 断言故障窗口哨兵从未落屏。',
+  docs: '在 fixture env 3333… 经 app-b 建立真实终端并写入哨兵；disconnect-db-a 后对 app-a 的新观察尝试必须 fail-closed（ROUTE_UNAVAILABLE/NOT_EXECUTED 或连接被拒/关闭），经 app-b 的命令在 owner DB 不可用时绝不假报 WRITTEN、也不本地 fallback（有界 10s 捕获 requestError/close，静默不当作证据）；finally reconnect-db-a，等通知健康与两节点严格更新的新 READY 心跳后重新 ATTACH 建立新 stream，以权威 full RESET 断言故障窗口哨兵从未落屏。',
   async run(ctx) {
     assertDistributedContext(ctx)
-    await waitEnvReady(ctx.callNode, 'a', ENV_A_ID)
-    await waitEnvReady(ctx.callNode, 'b', ENV_A_ID)
+    await waitForEnvironmentReady(ctx, 'a', ENV_A_ID)
+    await waitForEnvironmentReady(ctx, 'b', ENV_A_ID)
 
     const peerB = new TerminalProbe(ctx.baseUrls.b, { environmentId: ENV_A_ID, autoApplied: false })
     // The owner-node observer is created only after the DB is isolated, so it never rides a socket
@@ -353,8 +338,8 @@ registerCase({
       ctx.runDistributedCommand('reconnect-db-a')
       restoreDb = false
       await waitForNodeHealth(ctx, 'a')
-      await waitEnvReady(ctx.callNode, 'a', ENV_A_ID, 60, outageCard.lastSeen)
-      await waitEnvReady(ctx.callNode, 'b', ENV_A_ID, 60, outageCard.lastSeen)
+      await waitForEnvironmentReady(ctx, 'a', ENV_A_ID, outageCard.lastSeen)
+      await waitForEnvironmentReady(ctx, 'b', ENV_A_ID, outageCard.lastSeen)
 
       const attachId = peerB.attach({ daemonInstanceId: attachedB.daemonInstanceId, terminalId: attachedB.terminalId })
       const reattached = await peerB.waitAttached(attachId, 40_000)

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { assert, envelopeData, expectHttpError, HttpError, sleep } from '../lib/http.mjs'
-import { assertDistributedContext, waitForNodeHealth } from '../lib/distributed.mjs'
+import { assertDistributedContext, waitForEnvironmentReady, waitForNodeHealth } from '../lib/distributed.mjs'
 import { EventProbe, withCleanup } from '../lib/event-probe.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
+/** Fixture Environment connected to app-a / daemon-a. */
+const ENV_A_ID = '33333333-3333-3333-3333-333333333333'
 const projects = { kind: 'projects' }
 const environments = { kind: 'environments' }
 const projectEvent = (id) => (f) => f.type === 'event' && f.resource.kind === 'projects' && f.data.projectId === id
@@ -234,7 +236,7 @@ register('notification_subscription_lifecycle', '通知 unsubscribe/close/reconn
   })
 
 register('notification_db_recovery', 'DB 网络故障通知 fail-closed 与权威 resync',
-  '白名单断开 A DB 网络；B 持久提交，A 必须在 15s 内 resync 或关闭，恢复后重新 LISTEN 的 resync/新连接 subscribed 与权威 GET 重建基线，再验证新提交双节点恰好一次；finally 恢复网络和删除 fixture，不声称断网事件回放。',
+  '白名单断开 A DB 网络；B 持久提交，A 必须在 15s 内 resync 或关闭；恢复后等通知健康与两节点严格更新的新 READY 心跳，再以 resync/新连接 subscribed 与权威 GET 重建基线，然后验证新提交双节点恰好一次；finally 恢复网络和删除 fixture，不声称断网事件回放。',
   async (ctx) => {
     let pair = await probes(ctx, [[projects, '0']])
     const all = [...pair]
@@ -247,6 +249,8 @@ register('notification_db_recovery', 'DB 网络故障通知 fail-closed 与权�
       await Promise.all(pair.map((probe) => probe.stable()))
       for (const probe of pair) assert(probe.count(projectEvent(id)) === 1, 'duplicate fixture creation event')
       const mark = pair[0].frames.length
+      // 断网前记录 env A 的 READY lastSeen，恢复后必须等到更晚的新心跳才允许下一个 case。
+      const heartbeatBaseline = (await waitForEnvironmentReady(ctx, 'a', ENV_A_ID)).lastSeen
       restore = true
       ctx.runDistributedCommand('disconnect-db-a')
       const updated = await commit([pair[1]], projectEvent(id),
@@ -261,6 +265,9 @@ register('notification_db_recovery', 'DB 网络故障通知 fail-closed 与权�
       ctx.runDistributedCommand('reconnect-db-a')
       restore = false
       await waitForNodeHealth(ctx, 'a')
+      // 旧 READY 行在租约到期前仍可读，必须等到严格更新的新心跳才认为路由真正恢复。
+      await waitForEnvironmentReady(ctx, 'a', ENV_A_ID, heartbeatBaseline)
+      await waitForEnvironmentReady(ctx, 'b', ENV_A_ID, heartbeatBaseline)
       const fresh = new EventProbe(ctx.baseUrls.a)
       all.push(fresh)
       await fresh.subscribe(projects)

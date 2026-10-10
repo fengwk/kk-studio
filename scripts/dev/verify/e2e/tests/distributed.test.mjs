@@ -10,6 +10,7 @@ import {
   createNodeCall,
   copyDistributedAppLogs,
   runDistributedCommand,
+  waitForEnvironmentReady,
   waitForNodeHealth,
 } from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
@@ -90,6 +91,65 @@ test('recovery health barrier waits for LISTEN health, not only a successful DB 
   await assert.rejects(() => waitForNodeHealth({
     async callNode() { return { json: { status: 'DOWN' } } },
   }, 'a', 1), /health did not recover/)
+})
+
+test('environment freshness barrier accepts a strictly newer READY projection', async () => {
+  // Intent: recovery may only proceed on a READY card whose lastSeen advanced past the baseline,
+  // and it must poll a single side-effect-free GET with a bounded request timeout.
+  const calls = []
+  const card = await waitForEnvironmentReady({
+    async callNode(node, method, requestPath, body, timeoutMs) {
+      calls.push({ node, method, requestPath, timeoutMs })
+      return { json: { data: { ready: true, status: 'READY', lastSeen: 101 } } }
+    },
+  }, 'a', 'env-1', 100)
+  assert.equal(card.status, 'READY')
+  assert.equal(card.lastSeen, 101)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].node, 'a')
+  assert.equal(calls[0].method, 'GET')
+  assert.equal(calls[0].requestPath, '/api/harness/environments/env-1')
+  assert.ok(calls[0].timeoutMs > 0 && calls[0].timeoutMs <= 2_000)
+})
+
+test('environment freshness barrier rejects a stale READY projection', async () => {
+  // Intent: an unexpired old READY row (lastSeen not strictly newer) must never satisfy recovery.
+  await assert.rejects(
+    () => waitForEnvironmentReady({
+      async callNode() { return { json: { data: { ready: true, status: 'READY', lastSeen: 100 } } } },
+    }, 'a', 'env-1', 100, 120),
+    /did not reach a fresh READY/,
+  )
+})
+
+test('environment freshness barrier rejects CONNECTING despite a fresh lastSeen', async () => {
+  // Intent: freshness alone is insufficient; the projection must be ready===true && status==='READY'.
+  await assert.rejects(
+    () => waitForEnvironmentReady({
+      async callNode() { return { json: { data: { ready: false, status: 'CONNECTING', lastSeen: 101 } } } },
+    }, 'a', 'env-1', 100, 120),
+    /did not reach a fresh READY/,
+  )
+})
+
+test('environment freshness barrier keeps polling across a transient read error', async () => {
+  // Intent: a transient read error must neither fail hard nor be treated as success; only a later
+  // valid fresh READY ends the barrier, and an error-only projection times out explicitly.
+  let calls = 0
+  const card = await waitForEnvironmentReady({
+    async callNode() {
+      if (++calls === 1) throw new HttpError(503, 'reconnecting', '/api/harness/environments/env-1')
+      return { json: { data: { ready: true, status: 'READY', lastSeen: 101 } } }
+    },
+  }, 'a', 'env-1', 100)
+  assert.equal(card.lastSeen, 101)
+  assert.equal(calls, 2)
+  await assert.rejects(
+    () => waitForEnvironmentReady({
+      async callNode() { throw new HttpError(503, 'reconnecting', '/api/harness/environments/env-1') },
+    }, 'a', 'env-1', 100, 120),
+    /did not reach a fresh READY/,
+  )
 })
 
 test('host-mock cases stay in the single-instance matrix and leave distributed', async () => {
@@ -210,6 +270,7 @@ test('DB loss case keeps one 10s fault request and restores both READY projectio
     const recoveredNodes = []
     let disconnected = false
     let faultRequests = 0
+    let lastSeen = 0
     let summary
     const ctx = {
       baseUrls: { a: 'http://a', b: 'http://b' },
@@ -225,8 +286,11 @@ test('DB loss case keeps one 10s fault request and restores both READY projectio
           if (transportTimeout) throw new Error('timeout GET')
           throw new HttpError(500, 'database disconnected', requestPath)
         }
+        // 恢复屏障的 health 探测不参与 READY 恢复节点记录，只返回 UP。
+        if (requestPath === '/actuator/health') return { json: { status: 'UP' } }
         if (commands.length) recoveredNodes.push(node)
-        return { json: { data: { ready: true, status: 'READY', homeDirectory: '/home/test' } } }
+        // 每次读取推进 lastSeen：恢复后的投影必须严格晚于断网前基线才算新鲜。
+        return { json: { data: { ready: true, status: 'READY', homeDirectory: '/home/test', lastSeen: ++lastSeen } } }
       },
       writeArtifact(name, data) {
         assert.equal(name, 'recovery-summary.json')
