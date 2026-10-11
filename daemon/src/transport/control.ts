@@ -60,14 +60,40 @@ export function createWebSocketTransport(
   if (!Number.isSafeInteger(maxInboundTextBytes) || maxInboundTextBytes <= 0) {
     throw new Error('maxInboundTextBytes must be positive')
   }
+  const pending = new Set<AbortController>()
+  let closed = false
   return {
     connect(listener: ControlTransportListener): Promise<ControlConnection> {
-      return new WebSocketHandshake(gatewayUri, listener, maxInboundTextBytes, connectTimeoutMillis).start()
+      if (closed) {
+        return Promise.reject(new Error('control transport is closed'))
+      }
+      // handshake 期间由 transport 持有取消信号；close 立即中止仍在 lookup/握手中的连接。
+      const cancel = new AbortController()
+      pending.add(cancel)
+      return new WebSocketHandshake(gatewayUri, listener, maxInboundTextBytes, connectTimeoutMillis, cancel)
+        .start()
+        .finally(() => {
+          pending.delete(cancel)
+        })
     },
     close(): void {
-      // 单连接由调用方持有；transport 本身无共享资源。
+      if (closed) {
+        return
+      }
+      closed = true
+      for (const controller of pending) {
+        controller.abort()
+      }
+      pending.clear()
     },
   }
+}
+
+/** 取消/超时统一的 AbortError；调用方据此判定操作被中止。 */
+function abortError(): Error {
+  const error = new Error('Operation cancelled')
+  error.name = 'AbortError'
+  return error
 }
 
 /** 单次握手的仲裁点：最多交付一次连接、最多通知一次断开。 */
@@ -82,19 +108,34 @@ class WebSocketHandshake {
     private readonly delegate: ControlTransportListener,
     private readonly maxInboundTextBytes: number,
     private readonly connectTimeoutMillis: number,
+    private readonly cancel: AbortController,
   ) {}
 
   async start(): Promise<ControlConnection> {
-    // 系统 lookup 与握手共享同一连接 deadline；socket close/error 必定释放独占 Agent。
-    const signal = AbortSignal.timeout(this.connectTimeoutMillis)
-    const plan = await getOutboundNetwork().createWebSocketAgent(this.gatewayUri, signal)
+    // lookup 与握手共享同一绝对 deadline；transport.close 通过 cancel 立即中止。
+    const startedAt = Date.now()
+    const deadline = AbortSignal.any([this.cancel.signal, AbortSignal.timeout(this.connectTimeoutMillis)])
+    const plan = await getOutboundNetwork().createWebSocketAgent(this.gatewayUri, deadline)
+    if (deadline.aborted) {
+      plan.destroy()
+      throw abortError()
+    }
+    // 握手沿用剩余时间，绝不重新计时为满额，避免总超时翻倍。
+    const handshakeTimeout = this.remainingMillis(startedAt)
     return new Promise<ControlConnection>((resolve, reject) => {
-      const socket = new WebSocket(this.gatewayUri, {
-        perMessageDeflate: true,
-        handshakeTimeout: this.connectTimeoutMillis,
-        maxPayload: this.maxInboundTextBytes,
-        agent: plan.agent,
-      })
+      let socket: WebSocket
+      try {
+        socket = new WebSocket(this.gatewayUri, {
+          perMessageDeflate: true,
+          handshakeTimeout,
+          maxPayload: this.maxInboundTextBytes,
+          agent: plan.agent,
+        })
+      } catch (error) {
+        plan.destroy()
+        reject(error)
+        return
+      }
       const releaseAgent = (): void => plan.destroy()
       socket.once('close', releaseAgent)
       socket.once('error', releaseAgent)
@@ -137,6 +178,11 @@ class WebSocketHandshake {
         }
       })
     })
+  }
+
+  /** 与 lookup 共享同一绝对 deadline 的剩余毫秒数；至少 1ms，绝不重新计时。 */
+  private remainingMillis(startedAt: number): number {
+    return Math.max(1, this.connectTimeoutMillis - (Date.now() - startedAt))
   }
 
   /** 确定性拒绝：恰好一次 close 帧、恰好一次断开通知，且不再消费后续帧。 */

@@ -6,7 +6,7 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocketServer } from 'ws'
 
 import type { SystemProxyResolver } from '../src/contracts.js'
@@ -18,6 +18,7 @@ import {
 } from '../src/network.js'
 import { createHttpPutObject } from '../src/transport/resources.js'
 import { createWebSocketTransport } from '../src/transport/control.js'
+import { openStreamExchange } from '../src/transport/stream.js'
 
 /** 测试用系统回退：明确直连。 */
 const systemDirect: SystemProxyResolver = {
@@ -125,19 +126,24 @@ interface Origin {
   url: string
   hits: string[]
   connections: number
+  closes: number
   close(): Promise<void>
 }
 
 async function startOrigin(body = 'origin-body'): Promise<Origin> {
   const hits: string[] = []
   let connections = 0
+  let closes = 0
   const server = http.createServer((request, response) => {
     hits.push(request.url ?? '')
     response.writeHead(200, { 'content-type': 'text/plain' })
     response.end(body)
   })
-  server.on('connection', () => {
+  server.on('connection', (socket) => {
     connections += 1
+    socket.on('close', () => {
+      closes += 1
+    })
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
   const port = (server.address() as net.AddressInfo).port
@@ -146,6 +152,9 @@ async function startOrigin(body = 'origin-body'): Promise<Origin> {
     hits,
     get connections() {
       return connections
+    },
+    get closes() {
+      return closes
     },
     close: () =>
       new Promise<void>((resolve) => {
@@ -462,6 +471,155 @@ describe('outbound network integration', () => {
       expect(message.length).toBeGreaterThan(0)
       expect(message).not.toContain(marker)
     })
+  })
+})
+
+describe('outbound network lifecycle and connect deadlines', () => {
+  it('shares one in-flight close across concurrent callers', async () => {
+    let systemCloses = 0
+    let release: () => void = () => undefined
+    const system: SystemProxyResolver = {
+      async resolve(): Promise<string | null> {
+        return null
+      },
+      close(): Promise<void> {
+        systemCloses += 1
+        return new Promise<void>((resolve) => {
+          release = resolve
+        })
+      },
+    }
+    const installed = await installOutboundNetwork({}, system)
+    const first = installed.close()
+    const second = installed.close()
+    let secondSettled = false
+    void second.then(() => {
+      secondSettled = true
+    })
+    await Promise.resolve()
+    expect(systemCloses).toBe(1)
+    expect(secondSettled).toBe(false)
+    release()
+    await Promise.all([first, second])
+    expect(systemCloses).toBe(1)
+  })
+
+  it('refuses new resources through a closed network handle', async () => {
+    const origin = await startOrigin()
+    cleanups.push(origin.close)
+    const installed = await installOutboundNetwork({}, systemDirect)
+    await installed.close()
+    await expect(
+      installed.network.openResponse(origin.url, {}, new AbortController().signal),
+    ).rejects.toThrow(/closed/)
+    await expect(
+      installed.network.createWebSocketAgent(origin.url, new AbortController().signal),
+    ).rejects.toThrow(/closed/)
+    expect(origin.hits).toHaveLength(0)
+  })
+
+  it('converges on close with an unconsumed response body', async () => {
+    const origin = await startOrigin('unconsumed-body')
+    cleanups.push(origin.close)
+    const installed = await installOutboundNetwork({}, systemDirect)
+    const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
+    expect(response.statusCode).toBe(200)
+    await installed.close()
+    await waitFor(() => origin.closes >= 1)
+  })
+
+  it('aborts a pending handshake lookup when the transport closes', async () => {
+    let aborted = false
+    const system: SystemProxyResolver = {
+      resolve(_uri: string, signal: AbortSignal): Promise<string | null> {
+        return new Promise<string | null>((resolve) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              aborted = true
+              resolve(null)
+            },
+            { once: true },
+          )
+        })
+      },
+      async close(): Promise<void> {},
+    }
+    const installed = await installOutboundNetwork({}, system)
+    try {
+      const transport = createWebSocketTransport('ws://127.0.0.1:1', { connectTimeoutMillis: 5000 })
+      const connected = transport.connect({ onMessage() {}, onDisconnected() {} })
+      await Promise.resolve()
+      transport.close()
+      await expect(connected).rejects.toThrow(/cancelled|aborted/i)
+      expect(aborted).toBe(true)
+    } finally {
+      await installed.close()
+    }
+  })
+
+  it('does not reset the connect deadline after the system lookup', async () => {
+    const blackhole = net.createServer(() => undefined)
+    await new Promise<void>((resolve) => blackhole.listen(0, '127.0.0.1', () => resolve()))
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve) => {
+          blackhole.closeAllConnections?.()
+          blackhole.close(() => resolve())
+        }),
+    )
+    const port = (blackhole.address() as net.AddressInfo).port
+    const system: SystemProxyResolver = {
+      resolve(): Promise<string | null> {
+        return new Promise<string | null>((resolve) => {
+          setTimeout(() => resolve(null), 400)
+        })
+      },
+      async close(): Promise<void> {},
+    }
+    const installed = await installOutboundNetwork({}, system)
+    try {
+      const transport = createWebSocketTransport(`ws://127.0.0.1:${port}`, { connectTimeoutMillis: 400 })
+      const startedAt = Date.now()
+      await expect(transport.connect({ onMessage() {}, onDisconnected() {} })).rejects.toThrow()
+      // 共享 deadline：总耗时接近 400ms，而不是 lookup 400ms + 握手再 400ms。
+      expect(Date.now() - startedAt).toBeLessThan(650)
+    } finally {
+      await installed.close()
+    }
+  })
+
+  it('destroys the WebSocket agent when the control socket constructor throws', async () => {
+    const network = getOutboundNetwork()
+    const destroy = vi.fn()
+    const spy = vi.spyOn(network, 'createWebSocketAgent').mockResolvedValue({ agent: new http.Agent(), destroy })
+    try {
+      // ftp:// 协议被 ws 构造期拒绝，必须销毁已建 Agent。
+      const transport = createWebSocketTransport('ftp://127.0.0.1:1')
+      await expect(transport.connect({ onMessage() {}, onDisconnected() {} })).rejects.toThrow()
+      expect(destroy).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('destroys the WebSocket agent when the stream socket constructor throws', async () => {
+    const network = getOutboundNetwork()
+    const destroy = vi.fn()
+    const spy = vi.spyOn(network, 'createWebSocketAgent').mockResolvedValue({ agent: new http.Agent(), destroy })
+    try {
+      await expect(
+        openStreamExchange({
+          streamUrl: 'ftp://127.0.0.1:1/stream',
+          request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
+          upstream: { host: '127.0.0.1', port: 1 },
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow()
+      expect(destroy).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 
