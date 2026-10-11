@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -34,6 +34,33 @@ describe.runIf(process.platform === 'win32')('windows native primitives', () => 
     writeFileSync(file, 'x')
     // 未设置 owner-only DACL 的新文件继承默认（包含其它主体的 allow ACE），读回必须失败。
     await expect(verifyPrivateFile(file)).rejects.toThrow()
+  })
+
+  test('writePrivateFile fails closed instead of overwriting a loosely permissioned file', async () => {
+    const file = join(workdir, 'loose')
+    writeFileSync(file, 'original')
+    // 既有目标 DACL 宽松：必须在写入前失败关闭，绝不先截断改写再收紧。
+    await expect(writePrivateFile(file, 'attacker')).rejects.toThrow()
+    expect(readFileSync(file, 'utf8')).toBe('original')
+  })
+
+  test('writePrivateFile atomically replaces an existing private file and leaves no temp file', async () => {
+    const file = join(workdir, 'secret')
+    await writePrivateFile(file, 'first')
+    await writePrivateFile(file, 'second')
+    expect(readFileSync(file, 'utf8')).toBe('second')
+    await expect(verifyPrivateFile(file)).resolves.toBeUndefined()
+    expect(readdirSync(workdir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  test('a reparse-point lock path fails closed', async () => {
+    const data = join(workdir, 'data')
+    const elsewhere = join(workdir, 'elsewhere')
+    mkdirSync(data, { recursive: true })
+    mkdirSync(elsewhere, { recursive: true })
+    // junction 也是 reparse 点：只查 isSymbolicLink 会漏掉，必须由 GetFileAttributesW 一并拒绝。
+    symlinkSync(elsewhere, join(data, 'daemon.lock'), 'junction')
+    await expect(acquireDirectoryLock(data)).rejects.toThrow(/must not be a (symbolic link|reparse point)/)
   })
 
   test('a second acquisition of the same directory fails until released', async () => {

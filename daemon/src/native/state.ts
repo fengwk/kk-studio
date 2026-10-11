@@ -70,7 +70,7 @@ interface PrivateFsModule {
 
 let privateFsModule: Promise<PrivateFsModule> | null = null
 
-/** 探测同目录的 private-fs：编译产物是 `.js`，源码开发态是 `.ts`。 */
+/** 探测同目录的 private-fs：编译产物是 `.js`，源码开发态是 `.ts`；它自己再按平台分发到 POSIX chmod 或 Windows DACL。 */
 function loadPrivateFs(): Promise<PrivateFsModule> {
   if (privateFsModule === null) {
     privateFsModule = (async () => {
