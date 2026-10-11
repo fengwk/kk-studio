@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
+import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from './ChatWorkspacePage'
 import type { ChatWorkspacePane } from './ChatWorkspacePane'
 import { agentService } from '@/shared/api/agent-service'
@@ -62,13 +63,23 @@ function openWorkspace(search = '') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/chats/:chatId',
+        element: (
+          <IdeLifecycleProvider>
+            <NavigationControls />
+            <ChatWorkspacePage />
+          </IdeLifecycleProvider>
+        ),
+      },
+    ],
+    { initialEntries: [`/chats/${CHAT_ID}${search}`] },
+  )
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[`/chats/${CHAT_ID}${search}`]}>
-        <Routes>
-          <Route path="/chats/:chatId" element={<><NavigationControls /><ChatWorkspacePage /></>} />
-        </Routes>
-      </MemoryRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   )
 }

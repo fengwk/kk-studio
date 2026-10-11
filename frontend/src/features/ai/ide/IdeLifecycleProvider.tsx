@@ -164,7 +164,7 @@ export function IdeLifecycleProvider({ children }: PropsWithChildren) {
                 {t('ai.ide.cancel')}
               </Button>
               <Button
-                variant="danger"
+                danger
                 size="compact"
                 onClick={handleConfirmLeave}
                 loading={isClosingViews}
