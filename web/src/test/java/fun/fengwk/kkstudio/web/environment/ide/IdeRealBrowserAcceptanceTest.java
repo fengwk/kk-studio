@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.environment.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -63,9 +65,11 @@ import java.util.stream.Stream;
  * PostgreSQL 容器 之前即被跳过。
  *
  * <p>链路全部真实、无 mock：Daemon 以真实 {@code node dist/main.js --config <private>} 子进程连接真实 Daemon WebSocket
- * 端点 （HELLO/WELCOME/READY）；视图由真实 {@code EnvironmentIdeService.OPEN_VIEW} 铸造一次性 bootstrap 入口；浏览器经
- * {@code *.browser.localhost} host-resolver 规则访问独立 IDE Origin，再经真实数据面到达 code-server。真实终端由 {@code
- * FOCUS_TERMINAL} 建立，并由浏览器 shell 回写真实 OS pid 供收敛断言。
+ * 端点 （HELLO/WELCOME/READY）；视图由真实 {@code EnvironmentIdeService.OPEN_VIEW} 铸造一次性 bootstrap 入口；每个视图由一个
+ * Studio 父页面（{@code studio.browser.localhost}，与 IDE host 同 site 但不同 Origin）按生产 {@code
+ * IdeOverlayPanel} 的 sandbox/allow 契约嵌入 iframe，浏览器经 {@code *.browser.localhost} host-resolver
+ * 规则访问独立 IDE Origin，再经真实数据面到达 code-server；驱动走真实子 Frame，键盘发往所属父 Page。真实终端由 {@code FOCUS_TERMINAL}
+ * 建立，并由浏览器 shell 回写真实 OS pid 供收敛断言。
  *
  * <p>真实 random port 只有运行期可知：Origin 模板、gateway 反向流模板与 Daemon {@code studioUrl} 必须使用同一真实端口， 否则
  * bootstrap 的 Location、host-only cookie 与 WS Origin 会与入参 URL 不一致。本机仅验证 Linux + POSIX 权限模型；其它平台显式跳过。
@@ -224,6 +228,10 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     for (String required : REQUIRED_STEPS) {
       assertStep(reportJson, required);
     }
+    // 两个 workbench 必须真的是跨 Origin iframe 内加载的真实 workbench；父 Origin 与 IDE Origin 不同可防止驱动退回顶层
+    // page.goto 的等价假通过。
+    assertEmbeddedView(reportJson, "workbenchA");
+    assertEmbeddedView(reportJson, "workbenchB");
     assertTrue(
         reportJson.path("ok").asBoolean(false), "browser run must complete all required steps");
 
@@ -368,6 +376,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
             configPath.toString());
     // 让 Node os.tmpdir() 落在本用例私有目录：Daemon 的 native scope 只会在 process-tmp 下创建。
     builder.environment().put("TMPDIR", processTmp.toString());
+    configureLoopbackNetwork(builder);
     builder.redirectErrorStream(true);
     builder.redirectOutput(daemonLog.toFile());
     daemon = builder.start();
@@ -443,6 +452,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
         .environment()
         .put("KK_STUDIO_PLAYWRIGHT_MODULE_DIR", requireEnv("KK_STUDIO_PLAYWRIGHT_MODULE_DIR"));
     builder.environment().put("TMPDIR", processTmp.toString());
+    configureLoopbackNetwork(builder);
     builder.redirectErrorStream(true);
     builder.redirectOutput(log.toFile());
     Process process = builder.start();
@@ -485,9 +495,50 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     throw new IllegalStateException(failure);
   }
 
+  /** 真实整链只使用本用例 loopback 服务，不依赖执行者的环境或桌面代理配置。 */
+  private static void configureLoopbackNetwork(ProcessBuilder builder) {
+    builder.environment().put("http_proxy", "");
+    builder.environment().put("HTTP_PROXY", "");
+    builder.environment().put("https_proxy", "");
+    builder.environment().put("HTTPS_PROXY", "");
+    builder.environment().put("no_proxy", "");
+    builder.environment().put("NO_PROXY", "");
+  }
+
   private static void assertStep(JsonNode report, String step) {
     JsonNode node = report.path("steps").path(step);
     assertTrue(node.path("ok").asBoolean(false), "browser step '" + step + "' failed: " + node);
+  }
+
+  /**
+   * 断言某个 workbench 步骤确实驱动于跨 Origin iframe 内：报告值须明确 {@code embedded=true}、父 harness 由真实 HTTP （非
+   * route 构造）提供，且 IDE Origin 精确等于真实后端端口拼出的 Origin。退回顶层 {@code page.goto} 的驱动无法满足。
+   */
+  private void assertEmbeddedView(JsonNode report, String step) {
+    JsonNode value = report.path("steps").path(step).path("value");
+    assertTrue(
+        value.path("embedded").asBoolean(false),
+        step + " must prove the workbench was driven inside a real iframe: " + value);
+    assertEquals(
+        "http",
+        value.path("parentTransport").asText(""),
+        step + " parent harness must be served over real HTTP, not a route: " + value);
+    String parentOrigin = value.path("parentOrigin").asText("");
+    URI parent = URI.create(parentOrigin);
+    assertEquals("http", parent.getScheme(), step + " parent scheme must be http: " + value);
+    assertEquals(
+        "studio.browser.localhost",
+        parent.getHost(),
+        step + " parent host must be the Studio host: " + value);
+    assertTrue(
+        parent.getPort() > 0, step + " parent must expose a real bound positive port: " + value);
+    String ideOrigin = value.path("ideOrigin").asText("");
+    assertEquals(
+        "http://" + ENVIRONMENT + BROWSER_SUFFIX + ":" + port,
+        ideOrigin,
+        step + " IDE Origin must be the exact real backend Origin: " + value);
+    assertNotEquals(
+        parentOrigin, ideOrigin, step + " must be cross-Origin (parent != IDE): " + value);
   }
 
   private long readTerminalPid(String name, String expectedViewId) throws IOException {
