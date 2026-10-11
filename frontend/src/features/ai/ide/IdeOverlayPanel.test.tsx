@@ -84,6 +84,13 @@ describe('IdeOverlayPanel', () => {
     homeDirectory: '/home/user',
   }
 
+  const secondReadyEnv: ResolvedEnvironmentInfo = {
+    id: 'a1000000-0000-4000-8000-000000000003',
+    name: 'remote-ready',
+    ready: true,
+    homeDirectory: '/srv/app',
+  }
+
   const offlineEnv: ResolvedEnvironmentInfo = {
     id: 'a1000000-0000-4000-8000-000000000002',
     name: 'remote-offline',
@@ -115,6 +122,19 @@ describe('IdeOverlayPanel', () => {
       capabilities: [],
       statusExpiresAt: null,
       lastSeen: null,
+    },
+    {
+      id: 'a1000000-0000-4000-8000-000000000003',
+      name: 'remote-ready',
+      ready: true,
+      status: 'READY',
+      version: '1',
+      createTime: '2026-10-01T00:00:00Z',
+      updateTime: '2026-10-01T00:00:00Z',
+      capabilities: [],
+      statusExpiresAt: null,
+      lastSeen: null,
+      homeDirectory: '/srv/app',
     },
   ]
 
@@ -163,28 +183,104 @@ describe('IdeOverlayPanel', () => {
     expect(environmentService.closeIdeView).not.toHaveBeenCalled()
   })
 
-  it('keeps the tooltip bound to the open view when the thread environment changes', async () => {
-    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
-      viewId: 'v-env-label',
-      environmentId: readyEnv.id,
-      directory: '/home/user/project',
-      entryUrl: 'https://ide.example.com/?workspace=env-label',
-    })
+  it('keeps the open view bound to its environment when prop changes, and only switches after explicit close and reopen', async () => {
+    // 测试意图：已打开的 view 必须绑定初始环境，Thread/environment prop 变化或再次收到命令不自动销毁或跨环境重开；
+    // 真正切换环境必须先显式关闭当前 view 再重新打开。
+    const user = userEvent.setup()
+    vi.mocked(environmentService.createIdeView)
+      .mockResolvedValueOnce({
+        viewId: 'v-env-label',
+        environmentId: readyEnv.id,
+        directory: '/home/user/project',
+        entryUrl: 'https://ide.example.com/?workspace=env-label',
+      })
+      .mockResolvedValueOnce({
+        viewId: 'v-env-label',
+        environmentId: secondReadyEnv.id,
+        directory: '/srv/app',
+        entryUrl: 'https://ide.example.com/?workspace=env-second',
+      })
+    vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
+
+    const onClose = vi.fn()
     const props = {
       isOpen: true,
       viewId: 'v-env-label',
       availableEnvironments,
-      action: { id: 1, mode: 'files' } as const,
       onCollapse: vi.fn(),
-      onClose: vi.fn(),
+      onClose,
     }
-    const { rerender } = render(<IdeOverlayPanel {...props} environment={readyEnv} />)
+    const { rerender } = render(
+      <IdeOverlayPanel {...props} environment={readyEnv} action={{ id: 1, mode: 'files' }} />,
+    )
     const iframe = await screen.findByTestId('ide-iframe')
-    rerender(<IdeOverlayPanel {...props} environment={offlineEnv} />)
+    fireEvent.load(iframe)
+
+    // Prop changes to offlineEnv or secondReadyEnv, and a new /shell action arrives while view is open
+    rerender(<IdeOverlayPanel {...props} environment={offlineEnv} action={{ id: 1, mode: 'files' }} />)
+    rerender(<IdeOverlayPanel {...props} environment={secondReadyEnv} action={{ id: 2, mode: 'shell' }} />)
+
     expect(screen.getByTestId('ide-open-directory-btn'))
       .toHaveAttribute('title', 'local-node · /home/user/project')
     expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+    expect(screen.queryByTestId('ide-select-environment-state')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ide-confirm-switch-btn')).not.toBeInTheDocument()
     expect(environmentService.createIdeView).toHaveBeenCalledOnce()
+    expect(environmentService.closeIdeView).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(environmentService.openIdeViewTerminal).toHaveBeenCalledWith(readyEnv.id, 'v-env-label')
+    })
+
+    // Explicitly close the view, then reopen under secondReadyEnv
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(screen.getByTestId('ide-confirm-close-btn'))
+    await waitFor(() => {
+      expect(environmentService.closeIdeView).toHaveBeenCalledWith(readyEnv.id, 'v-env-label')
+    })
+    expect(onClose).toHaveBeenCalledOnce()
+
+    rerender(<IdeOverlayPanel {...props} environment={secondReadyEnv} action={{ id: 3, mode: 'files' }} />)
+    const reopenedIframe = await screen.findByTestId('ide-iframe')
+    expect(reopenedIframe).toHaveAttribute('src', 'https://ide.example.com/?workspace=env-second')
+    expect(screen.getByTestId('ide-open-directory-btn'))
+      .toHaveAttribute('title', 'remote-ready · /srv/app')
+    expect(environmentService.createIdeView).toHaveBeenNthCalledWith(2, secondReadyEnv.id, {
+      viewId: 'v-env-label',
+    })
+  })
+
+  it('allows manual environment selection only when status is select-environment and no view is open', async () => {
+    // 测试意图：当未绑定环境且 view == null 时展示环境选择器，确认后按所选环境打开并在建视图后隐藏选择器。
+    const user = userEvent.setup()
+    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+      viewId: 'v-manual-env',
+      environmentId: readyEnv.id,
+      directory: '/home/user',
+      entryUrl: 'https://ide.example.com/?workspace=manual-env',
+    })
+
+    render(
+      <IdeOverlayPanel
+        isOpen={true}
+        viewId="v-manual-env"
+        environment={null}
+        availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
+        onCollapse={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const selectState = await screen.findByTestId('ide-select-environment-state')
+    expect(selectState).toBeInTheDocument()
+    expect(environmentService.createIdeView).not.toHaveBeenCalled()
+
+    await user.click(within(selectState).getByRole('button', { name: '确认' }))
+
+    const iframe = await screen.findByTestId('ide-iframe')
+    expect(iframe).toHaveAttribute('src', 'https://ide.example.com/?workspace=manual-env')
+    expect(environmentService.createIdeView).toHaveBeenCalledWith(readyEnv.id, { viewId: 'v-manual-env' })
+    expect(screen.queryByTestId('ide-select-environment-state')).not.toBeInTheDocument()
   })
 
   it('handles React StrictMode double effect without duplicate requests and becomes ready', async () => {
@@ -261,6 +357,48 @@ describe('IdeOverlayPanel', () => {
       // Must call closeIdeView to clean up the leaked server view
       expect(environmentService.closeIdeView).toHaveBeenCalledWith(readyEnv.id, 'v-unmount')
     })
+  })
+
+  it('logs fixed safe console.error without leaking sensitive details when unmount cleanup closeIdeView fails', async () => {
+    // 测试意图：unmount cleanup 失败时必须输出固定安全日志，严禁空 catch 吞错或泄露异常原文/URL/token。
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+        viewId: 'v-unmount-err',
+        environmentId: readyEnv.id,
+        directory: '/home/user',
+        entryUrl: 'https://ide.example.com/?workspace=unmount-err',
+      })
+      vi.mocked(environmentService.closeIdeView).mockRejectedValueOnce(
+        new Error('DELETE https://node.internal:8443/ide?token=secret-token-999 failed in /home/user/secret'),
+      )
+
+      const { unmount } = render(
+        <IdeOverlayPanel
+          isOpen={true}
+          viewId="v-unmount-err"
+          environment={readyEnv}
+          availableEnvironments={availableEnvironments}
+          action={{ id: 1, mode: 'files' }}
+          onCollapse={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      )
+
+      await screen.findByTestId('ide-iframe')
+      unmount()
+
+      await waitFor(() => {
+        expect(environmentService.closeIdeView).toHaveBeenCalledWith(readyEnv.id, 'v-unmount-err')
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to close IDE view during unmount cleanup')
+      })
+      const serializedLogs = JSON.stringify(consoleErrorSpy.mock.calls)
+      expect(serializedLogs).not.toContain('secret-token-999')
+      expect(serializedLogs).not.toContain('node.internal')
+      expect(serializedLogs).not.toContain('/home/user/secret')
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 
   it('cleans up newly created server view if URL validation fails', async () => {
@@ -432,6 +570,7 @@ describe('IdeOverlayPanel', () => {
   })
 
   it('prevents late directory change from resurrecting closed view', async () => {
+    // 测试意图：关闭视图与目录 PUT 竞争时，晚到达的 PUT 响应（即使携带新 entryUrl）不得复活已关闭的视图或弹窗。
     const user = userEvent.setup()
     let resolveChangeDir: (value: unknown) => void = () => {}
     const changeDirPromise = new Promise((resolve) => {
@@ -447,7 +586,7 @@ describe('IdeOverlayPanel', () => {
     vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
 
     const onClose = vi.fn()
-    render(
+    const { rerender } = render(
       <IdeOverlayPanel
         isOpen={true}
         viewId="v-race"
@@ -475,17 +614,29 @@ describe('IdeOverlayPanel', () => {
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled()
     })
+    rerender(
+      <IdeOverlayPanel
+        isOpen={false}
+        viewId="v-race"
+        environment={readyEnv}
+        availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
+        onCollapse={vi.fn()}
+        onClose={onClose}
+      />,
+    )
 
-    // Now directory change resolves late
+    // Now directory change resolves late (even with a non-null entryUrl)
     resolveChangeDir({
       viewId: 'v-race',
       environmentId: readyEnv.id,
       directory: '/home/user/new-dir',
-      entryUrl: null,
+      entryUrl: 'https://ide.example.com/?bootstrap=late-resurrect',
     })
 
     // Closed view must NOT be resurrected!
     expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ide-overlay-panel')).not.toBeInTheDocument()
   })
 
   it('displays terminal creation error in UI when terminal request fails', async () => {
@@ -517,7 +668,8 @@ describe('IdeOverlayPanel', () => {
     expect(err).toHaveTextContent('PTY spawn failed')
   })
 
-  it('changes directory via PUT, displays error on failure, and retains entryUrl', async () => {
+  it('changes directory via PUT, updates only directory metadata, and retains original entryUrl, iframe DOM, and environment binding even if PUT returns a new bootstrap URL', async () => {
+    // 测试意图：CHANGE_DIRECTORY 只更新同一 view 的目录元数据，保留已验证的原始 entryUrl、原 iframe DOM 节点及环境绑定，绝不使用 PUT 返回的新 URL 重载 iframe。
     const user = userEvent.setup()
     vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
       viewId: 'v-dir',
@@ -526,7 +678,7 @@ describe('IdeOverlayPanel', () => {
       entryUrl: 'https://ide.example.com/?workspace=dir',
     })
 
-    render(
+    const { rerender } = render(
       <IdeOverlayPanel
         isOpen={true}
         viewId="v-dir"
@@ -538,7 +690,20 @@ describe('IdeOverlayPanel', () => {
       />,
     )
 
-    await screen.findByTestId('ide-iframe')
+    const iframe = await screen.findByTestId('ide-iframe')
+    // Simulate thread environment prop changing while view is open
+    rerender(
+      <IdeOverlayPanel
+        isOpen={true}
+        viewId="v-dir"
+        environment={secondReadyEnv}
+        availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
+        onCollapse={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
     await user.click(screen.getByTestId('ide-open-directory-btn'))
 
     const input = screen.getByTestId('ide-directory-input')
@@ -553,19 +718,25 @@ describe('IdeOverlayPanel', () => {
     const error = await screen.findByTestId('ide-directory-error')
     expect(error).toHaveTextContent('Path does not exist')
 
-    // Successful PUT returns entryUrl: null; iframe src is preserved
+    // Even if PUT returns a new bootstrap entryUrl, iframe src and DOM node must NOT change
     vi.mocked(environmentService.changeIdeViewDirectory).mockResolvedValueOnce({
       viewId: 'v-dir',
       environmentId: readyEnv.id,
       directory: '/home/user/project',
-      entryUrl: null,
+      entryUrl: 'https://ide.example.com/?bootstrap=new-token-do-not-reload',
     })
     await user.click(screen.getByTestId('ide-directory-confirm'))
 
     await waitFor(() => {
       expect(screen.queryByTestId('ide-directory-input')).not.toBeInTheDocument()
     })
+    expect(environmentService.changeIdeViewDirectory).toHaveBeenLastCalledWith(readyEnv.id, 'v-dir', {
+      directory: '/home/user/project',
+    })
     expect(screen.getByTestId('ide-directory-badge')).toHaveTextContent('/home/user/project')
+    expect(screen.getByTestId('ide-open-directory-btn'))
+      .toHaveAttribute('title', 'local-node · /home/user/project')
+    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
     expect(screen.getByTestId('ide-iframe')).toHaveAttribute('src', 'https://ide.example.com/?workspace=dir')
   })
 

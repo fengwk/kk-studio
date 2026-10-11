@@ -4600,7 +4600,8 @@ describe('AgentPane root control mounting', () => {
     await waitFor(() => expect(restored).toHaveTextContent('root draft stays'))
   })
 
-  it('opens IDE overlay on /files command, uses canonical UUID, and notifies onIdeMounted', async () => {
+  it('opens IDE overlay via typed /files slash command in composer, uses canonical UUID, renders compact toolbar, and notifies onIdeMounted', async () => {
+    // 测试意图：验证真实 AgentPane 输入框键入 /files 回车触发 IDE，消费斜杠草稿且不发消息，渲染紧凑工具栏与环境目录 tooltip。
     const user = userEvent.setup()
     const envCard: EnvironmentCardDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
@@ -4641,12 +4642,13 @@ describe('AgentPane root control mounting', () => {
       </QueryClientProvider>,
     )
 
-    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
-    await user.click(plusBtn)
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/files{Enter}')
 
-    // Select files command
-    const filesCmd = await screen.findByText('files')
-    await user.click(filesCmd)
+    expect(composer).toHaveTextContent(/^$/)
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
 
     // IDE overlay opens and creates view with environment UUID
     await waitFor(() => {
@@ -4657,18 +4659,22 @@ describe('AgentPane root control mounting', () => {
     })
     expect(onIdeMounted).toHaveBeenCalledWith(true)
 
-    // Overlay is rendered inside chat-pane
+    // Overlay is rendered inside chat-pane with compact toolbar and bound tooltip
     const overlay = await screen.findByTestId('ide-overlay-panel')
     expect(overlay).toBeInTheDocument()
     expect(overlay).not.toHaveAttribute('hidden')
+    await screen.findByTestId('ide-iframe')
+    expect(screen.getByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'local-node · /home/user')
 
-    // Escape collapses overlay
+    // Escape collapses overlay while keeping iframe mounted
     overlay.focus()
     await user.keyboard('{Escape}')
     expect(overlay).toHaveAttribute('hidden')
+    expect(environmentService.closeIdeView).not.toHaveBeenCalled()
   })
 
-  it('opens IDE overlay on /shell command and calls openIdeViewTerminal', async () => {
+  it('opens IDE overlay via typed /shell slash command and via composer + menu, preserving view environment binding until explicit close', async () => {
+    // 测试意图：验证真实 AgentPane 的 /shell 斜杠入口与 composer + 命令表入口；已开视图保持环境绑定，显式关闭后重开才切换环境。
     const user = userEvent.setup()
     const envCard: EnvironmentCardDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
@@ -4683,38 +4689,60 @@ describe('AgentPane root control mounting', () => {
       lastSeen: null,
       homeDirectory: '/home/user',
     }
+    const secondEnvCard: EnvironmentCardDTO = {
+      id: 'a1000000-0000-4000-8000-000000000088',
+      name: 'second-node',
+      ready: true,
+      status: 'READY',
+      version: '1',
+      createTime: '2026-10-01T00:00:00Z',
+      updateTime: '2026-10-01T00:00:00Z',
+      capabilities: [],
+      statusExpiresAt: null,
+      lastSeen: null,
+      homeDirectory: '/srv/second',
+    }
 
-    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
-      viewId: 'v-shell',
-      environmentId: envCard.id,
-      directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=shell',
-    })
+    vi.mocked(environmentService.createIdeView)
+      .mockResolvedValueOnce({
+        viewId: 'v-shell',
+        environmentId: envCard.id,
+        directory: '/home/user',
+        entryUrl: 'https://ide.test/?workspace=shell',
+      })
+      .mockResolvedValueOnce({
+        viewId: 'v-shell',
+        environmentId: secondEnvCard.id,
+        directory: '/srv/second',
+        entryUrl: 'https://ide.test/?workspace=second',
+      })
+    vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
 
+    const onIdeMounted = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
+    const { rerender } = render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <AgentPane
             owner={{ type: 'CHAT', chatId: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
-            environments={[envCard]}
+            environments={[envCard, secondEnvCard]}
             defaults={{ environmentName: 'local-node' }}
             focused
+            onIdeMounted={onIdeMounted}
           />
         </MemoryRouter>
       </QueryClientProvider>,
     )
 
-    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
-    await user.click(plusBtn)
+    // 1. Type /shell{Enter} in composer editor
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/shell{Enter}')
+    expect(composer).toHaveTextContent(/^$/)
 
-    // Select shell command
-    const shellCmd = await screen.findByText('shell')
-    await user.click(shellCmd)
-
-    // Wait for iframe and trigger load
+    // Wait for iframe and trigger load -> terminal opens on envCard.id
     const iframe = await screen.findByTestId('ide-iframe')
     fireEvent.load(iframe)
 
@@ -4724,6 +4752,48 @@ describe('AgentPane root control mounting', () => {
         expect.any(String),
       )
     })
+
+    // 2. Change AgentPane defaults environmentName while view is open; view stays bound to local-node
+    rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[envCard, secondEnvCard]}
+            defaults={{ environmentName: 'second-node' }}
+            focused
+            onIdeMounted={onIdeMounted}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(screen.getByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'local-node · /home/user')
+    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+    expect(environmentService.createIdeView).toHaveBeenCalledTimes(1)
+
+    // 3. Explicitly close the view, then open via composer + ("打开命令表") -> files
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(screen.getByTestId('ide-confirm-close-btn'))
+    await waitFor(() => {
+      expect(environmentService.closeIdeView).toHaveBeenCalledWith(envCard.id, expect.any(String))
+    })
+    expect(onIdeMounted).toHaveBeenLastCalledWith(false)
+
+    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
+    await user.click(plusBtn)
+    const filesCmd = await screen.findByText('files')
+    await user.click(filesCmd)
+
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenNthCalledWith(
+        2,
+        secondEnvCard.id,
+        expect.objectContaining({ viewId: expect.any(String) }),
+      )
+    })
+    expect(await screen.findByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'second-node · /srv/second')
   })
 
   it('does not treat unknown environment name as UUID and shows selection state instead', async () => {

@@ -1500,10 +1500,6 @@ export const aiCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
-  'ai.ide.dirtyError': {
-    'en-US': 'Cannot switch directory with unsaved changes. Please save or discard your changes first.',
-    'zh-CN': '当前有未保存的修改，无法切换目录。请先保存或放弃修改后再试。',
-  },
   'ai.ide.dirtyCloseWarning': {
     'en-US': 'Cannot close IDE view with unsaved changes. Please save or discard your changes first.',
     'zh-CN': '当前有未保存的修改，无法关闭视图。请先保存或放弃修改后再试。',
@@ -1524,18 +1520,6 @@ export const aiCatalog = {
     'en-US': 'Leaving will close the file panel. Please save any unsaved changes before leaving. Leave anyway?',
     'zh-CN': '离开将关闭文件面板，未保存内容需先保存。确认离开？',
   },
-  'ai.ide.dirtyNotice': {
-    'en-US': 'Workspace has unsaved changes. Please save or discard changes before proceeding.',
-    'zh-CN': '工作区存在未保存修改，请先保存或放弃修改。',
-  },
-  'ai.ide.unavailable': {
-    'en-US': 'IDE service is currently unavailable for this environment.',
-    'zh-CN': '当前环境 IDE 不可用。',
-  },
-  'ai.ide.invalidOrigin': {
-    'en-US': 'IDE entry URL origin is invalid or untrusted.',
-    'zh-CN': 'IDE 入口地址 Origin 不合法或不安全。',
-  },
   'ai.ide.loading': {
     'en-US': 'Connecting to workspace IDE...',
     'zh-CN': '正在连接工作区 IDE...',
@@ -1547,10 +1531,6 @@ export const aiCatalog = {
   'ai.ide.offline': {
     'en-US': 'Environment is currently offline',
     'zh-CN': '环境当前处于离线状态',
-  },
-  'ai.ide.selectEnvironment': {
-    'en-US': 'Select Environment',
-    'zh-CN': '选择环境',
   },
   'ai.ide.noEnvironments': {
     'en-US': 'No available environments',
