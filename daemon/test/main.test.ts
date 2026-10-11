@@ -37,10 +37,24 @@ import {
  */
 
 const cleans: Array<() => void | Promise<void>> = []
+beforeEach(() => {
+  // 装配测试使用显式直连，不依赖开发机或 CI 用户的桌面代理设置。
+  vi.stubEnv('http_proxy', '')
+  vi.stubEnv('https_proxy', '')
+  vi.stubEnv('no_proxy', '')
+  if (process.platform === 'darwin') {
+    vi.spyOn(native, 'createSystemProxyResolver').mockReturnValue({
+      async resolve() { return null },
+      async close() {},
+    })
+  }
+})
 afterEach(async () => {
   for (const clean of cleans.splice(0).reverse()) {
     await clean()
   }
+  vi.unstubAllEnvs()
+  vi.restoreAllMocks()
 })
 
 type Listener = (...args: unknown[]) => void
@@ -177,6 +191,22 @@ async function readFileText(file: string): Promise<string> {
 }
 
 describe('daemon main information commands', () => {
+  it('does not initialize network or parse proxy settings for information commands', async () => {
+    vi.stubEnv('http_proxy', 'invalid-proxy-credential-marker')
+    const factory = vi.spyOn(native, 'createSystemProxyResolver').mockImplementation(() => {
+      throw new Error('network factory must not run for information commands')
+    })
+    const captured = capture()
+    try {
+      expect(await main(['--version'])).toBe(0)
+      expect(await main(['--help'])).toBe(0)
+    } finally {
+      captured.restore()
+    }
+    expect(factory).not.toHaveBeenCalled()
+    expect(captured.err).toEqual([])
+  })
+
   it('prints usage and version and exits zero', async () => {
     const help = capture()
     try {
@@ -264,6 +294,29 @@ describe('daemon main real assembly', () => {
   })
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('rejects invalid proxies before connecting and closes the resolver and data lock', async () => {
+    const fixture = await createControlServer()
+    cleans.push(() => fixture.dispose())
+    await writeConfig(fixture)
+    const resolver = {
+      resolve: vi.fn(async () => null),
+      close: vi.fn(async () => undefined),
+    }
+    vi.spyOn(native, 'createSystemProxyResolver').mockReturnValue(resolver)
+    const marker = 'proxy-credential-marker'
+    vi.stubEnv('http_proxy', `http://user:${marker}@proxy.invalid:8080`)
+    const harness = startMain(fixture.configPath)
+    expect(await harness.run).toBe(1)
+    expect(fixture.received).toEqual([])
+    expect(resolver.resolve).not.toHaveBeenCalled()
+    expect(resolver.close).toHaveBeenCalledTimes(1)
+    expect(harness.stderr.join('')).toContain('Invalid HTTP proxy or bypass configuration')
+    expect(harness.stderr.join('')).not.toContain(marker)
+    const lock = await native.acquireDirectoryLock(fixture.dataDir)
+    await lock.close()
+    harness.assertSignalListenersRestored()
   })
 
   it(
