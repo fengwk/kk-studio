@@ -522,7 +522,7 @@ describe('daemon main cleanup fault injection', () => {
 
 /**
  * macOS 严格收敛围栏：工厂拒绝 darwin 时，Daemon 必须 fail-closed——在任何本地副作用之前失败、不建立控制面、不启动用户进程，
- * 并以 `daemon failed:` 输出固定平台原因。这里在 Linux 上固定平台为 darwin 驱动控制流，不冒充真实 macOS 验收。
+ * 并以 `daemon failed:` 输出固定平台原因。仅在工厂边界模拟 darwin，不验证 Darwin 原生实现。
  */
 describe('daemon main strict-confinement fence (macOS)', () => {
   it(
@@ -534,9 +534,17 @@ describe('daemon main strict-confinement fence (macOS)', () => {
 
       const beforeInt = new Set<Listener>(process.listeners('SIGINT') as Listener[])
       const beforeTerm = new Set<Listener>(process.listeners('SIGTERM') as Listener[])
-      const supervisorSpy = vi.spyOn(native, 'createProcessSupervisor')
+      // 只在工厂边界模拟 darwin：配置解析与文件权限检测仍用宿主真实平台，仅工厂的平台分派驱动拒绝。
+      const realCreateProcessSupervisor = native.createProcessSupervisor
+      const supervisorSpy = vi.spyOn(native, 'createProcessSupervisor').mockImplementation(() => {
+        const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+        try {
+          return realCreateProcessSupervisor()
+        } finally {
+          platformSpy.mockRestore()
+        }
+      })
       const transportSpy = vi.spyOn(control, 'createWebSocketTransport')
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
       const captured = capture()
       let code: number
       // mock 历史在 restore 时被清空，必须在 finally 还原之前抓取。
@@ -550,7 +558,6 @@ describe('daemon main strict-confinement fence (macOS)', () => {
         transportCalls = transportSpy.mock.calls.length
       } finally {
         captured.restore()
-        platformSpy.mockRestore()
         supervisorSpy.mockRestore()
         transportSpy.mockRestore()
       }
