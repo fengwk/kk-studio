@@ -72,13 +72,13 @@ export class WindowsProcessSupervisor implements ProcessSupervisor {
     return managed
   }
 
-  /** Windows 上后代由 Job 在创建期直接归属，登记即把它显式指派进同一个 Job。 */
+  /** Windows 上后代由 Job 在创建期直接归属；这里只**确认**它已在同一 Job 内，绝不把任意 pid 补指派进来。 */
   async trackDescendant(rootPid: number, childPid: number): Promise<void> {
     const managed = [...this.processes].find((candidate) => candidate.pid === rootPid)
     if (managed === undefined) {
       throw new Error(`no managed process is owned by pid ${rootPid}`)
     }
-    managed.assignDescendant(childPid)
+    managed.confirmDescendant(childPid)
   }
 
   async close(): Promise<void> {
@@ -162,11 +162,11 @@ export class WindowsManagedProcess implements ManagedProcess {
     state.publish(this.stateDir, state.PERMIT_FILE, 'permit')
   }
 
-  assignDescendant(childPid: number): void {
+  confirmDescendant(childPid: number): void {
     if (this.job === null) {
       throw new Error('the scope job object is not open')
     }
-    this.job.assignProcess(childPid)
+    this.job.confirmDescendant(childPid)
   }
 
   /**
