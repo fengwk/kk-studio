@@ -201,9 +201,6 @@ async function runCommandPalette(page, title) {
  * and choosing "Don't Save" is the documented user action that actually drops the dirty state.
  */
 async function clearAllDirtyBuffers(page, report, label) {
-  if ((await page.locator('.tabs-container .tab.dirty').count()) === 0) {
-    return false
-  }
   await runCommandPalette(page, 'Close All Editors')
   const dontSave = page
     .locator('.monaco-dialog-box .monaco-button', { hasText: /Don't Save|Do not save/i })
@@ -217,7 +214,7 @@ async function clearAllDirtyBuffers(page, report, label) {
     report.notes.push(`[${label}] discarded unsaved editors via Don't Save`)
   }
   await page.waitForFunction(
-    () => document.querySelectorAll('.tabs-container .tab.dirty').length === 0,
+    () => document.querySelectorAll('.tabs-container .tab').length === 0,
     undefined,
     { timeout: 15_000 },
   )
@@ -282,7 +279,11 @@ async function main() {
         report.notes.push(`[${view.name}] bootstrap status ${response ? response.status() : 'none'}`)
         await page.waitForSelector('.monaco-workbench', { timeout: 60_000 })
         await dismissTrustDialogIfPresent(page, report)
-        return 'loaded'
+        await page
+          .locator('.explorer-folders-view .monaco-list-row', { hasText: 'alpha.txt' })
+          .first()
+          .waitFor({ state: 'visible', timeout: 60_000 })
+        return 'workspace loaded with expected files'
       })
       pages[view.name] = page
       report.screenshots.push(await screenshot(page, config.screenshotDir, `workbench-${view.name}`))
@@ -310,18 +311,25 @@ async function main() {
       return pid
     }
     const closeView = async (view) => {
-      const response = await fetch(
-        `${config.baseUrl}/api/harness/environments/${config.environmentId}/ide/views/${view.viewId}`,
-        { method: 'DELETE' },
-      )
-      const body = redact(await response.text().catch(() => ''))
-      report.notes.push(
-        `close view ${view.name} HTTP ${response.status}${body ? ' body=' + body.slice(0, 200) : ''}`,
-      )
-      if (!response.ok) {
+      // Editor UI and the remote extension host propagate discard asynchronously.
+      // Only the exact DIRTY refusal is pending; all other errors fail immediately.
+      await waitFor(async () => {
+        const response = await fetch(
+          `${config.baseUrl}/api/harness/environments/${config.environmentId}/ide/views/${view.viewId}`,
+          { method: 'DELETE' },
+        )
+        const body = redact(await response.text())
+        report.notes.push(
+          `close view ${view.name} HTTP ${response.status}${body ? ' body=' + body.slice(0, 200) : ''}`,
+        )
+        if (response.ok) {
+          return true
+        }
+        if (response.status === 400 && /save or discard unsaved changes before closing the view/i.test(body)) {
+          return false
+        }
         throw new Error(`close view ${view.name} HTTP ${response.status}: ${body.slice(0, 200)}`)
-      }
-      return response.status
+      }, 5_000, `view ${view.name} close after UI discard`)
     }
 
     // Required: edit + save in view A, proven by the editor buffer and by the on-disk file.
@@ -412,8 +420,8 @@ async function main() {
       report.notes.push(
         `dirty change-directory HTTP ${response.status} body=${body.slice(0, 200)}`,
       )
-      if (response.ok) {
-        throw new Error('directory change was accepted while an editor was dirty')
+      if (response.status !== 400) {
+        throw new Error(`dirty directory change must return HTTP 400, got ${response.status}`)
       }
       if (!/unsaved/i.test(body)) {
         throw new Error(
@@ -518,8 +526,8 @@ async function main() {
       )
       const body = redact(await response.text().catch(() => ''))
       report.notes.push(`dirty close view B HTTP ${response.status} body=${body.slice(0, 200)}`)
-      if (response.ok) {
-        throw new Error('view B closed while its editor still had unsaved changes')
+      if (response.status !== 400) {
+        throw new Error(`dirty view close must return HTTP 400, got ${response.status}`)
       }
       if (!/unsaved/i.test(body)) {
         throw new Error(

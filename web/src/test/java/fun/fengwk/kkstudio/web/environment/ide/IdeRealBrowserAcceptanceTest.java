@@ -124,6 +124,8 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   private Process playwright;
   private Path daemonLog;
   private Set<String> scopesBefore;
+  private boolean completed;
+  private final Set<ProcessHandle> helperProcesses = new LinkedHashSet<>();
 
   @BeforeEach
   void seedEnvironment() {
@@ -138,16 +140,21 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   void cleanUp() {
     boolean daemonStopped = terminateDaemon();
     boolean playwrightStopped = terminatePlaywright();
+    boolean helpersStopped = terminateRetainedHelpers();
     retainArtifacts();
     if (tempRoot == null) {
       return;
     }
-    if (!daemonStopped || !playwrightStopped) {
+    if (!daemonStopped || !playwrightStopped || !helpersStopped) {
       // 子进程未确认结束：保留 owner-only 证据并让用例显式失败，绝不只 warn 后当作通过。
       log.error(
           "helper processes did not terminate; kept owner-only temp root {}",
           tempRoot.toAbsolutePath());
       fail("helper processes did not terminate; kept evidence at " + tempRoot.toAbsolutePath());
+    }
+    if (!completed) {
+      log.info("kept failed acceptance evidence in owner-only directory {}", tempRoot);
+      return;
     }
     try {
       deleteRecursively(tempRoot);
@@ -193,6 +200,14 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     EnvironmentIdeViewDTO viewB = openView(VIEW_B, workspaceDirectory);
     assertNotNull(viewA.getEntryUrl(), "OPEN_VIEW must mint a one-time bootstrap entry");
     assertNotNull(viewB.getEntryUrl(), "OPEN_VIEW must mint a one-time bootstrap entry");
+    for (String viewId : List.of(VIEW_A, VIEW_B)) {
+      Path workspaceFile = stage.resolve("data/ide/views/" + viewId + ".code-workspace");
+      JsonNode workspace = OBJECT_MAPPER.readTree(workspaceFile.toFile());
+      assertEquals(
+          workspaceDirectory.toRealPath().toString(),
+          workspace.path("folders").get(0).path("path").asText(),
+          "the managed workspace must contain the requested host directory");
+    }
 
     Path report = tempRoot.resolve("report.json");
     Path screenshots = tempRoot.resolve("screenshots");
@@ -231,6 +246,29 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     stopDaemonAndAssertConverged();
     assertFalse(isAlive(pidA), "terminal A pid must stay converged after daemon shutdown");
     assertFalse(isAlive(pidB), "terminal B pid must stay converged after daemon shutdown");
+    completed = true;
+  }
+
+  /** 忽略 SIGTERM 的辅助进程仍须被强制终止，且必须等待真实 exit。 */
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void forciblyTerminatesHelperThatIgnoresSigterm() throws Exception {
+    assumeLinuxPosix();
+    tempRoot = Files.createTempDirectory("kk-ide-browser-cleanup-");
+    Files.setPosixFilePermissions(tempRoot, PosixFilePermissions.fromString("rwx------"));
+    playwright =
+        new ProcessBuilder(
+                resolveNodeBinary().toString(),
+                "-e",
+                "process.on('SIGTERM', () => {});"
+                    + "setInterval(() => {}, 1000); console.log('ready')")
+            .start();
+    assertEquals("ready", playwright.inputReader().readLine());
+    stopProcessTree(playwright, "SIGTERM-ignoring helper");
+    assertFalse(playwright.isAlive());
+    assertTrue(helperProcesses.isEmpty());
+    playwright = null;
+    completed = true;
   }
 
   private void assumeLinuxPosix() throws IOException {
@@ -275,7 +313,6 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     if (!Files.isDirectory(daemonSource.resolve("node_modules"))) {
       fail("daemon/node_modules is missing; run `npm ci` in daemon/ before this acceptance test");
     }
-    deleteRecursively(daemonSource.resolve("dist"));
     Map<String, String> environment = new HashMap<>();
     environment.put("PATH", node.toAbsolutePath().getParent() + File.pathSeparator + systemPath());
     environment.put("TMPDIR", processTmp.toString());
@@ -422,9 +459,9 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     } catch (Throwable error) {
       failure = error;
     } finally {
-      playwright = null;
       try {
         stopProcessTree(process, "playwright");
+        playwright = null;
       } catch (IOException cleanupFailure) {
         if (failure == null) {
           throw cleanupFailure;
@@ -538,42 +575,57 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     return names;
   }
 
-  /**
-   * 只销毁本用例自己启动的进程及其“销毁前”快照出的后代，并按真实 exit 等待收敛。Chromium 会脱离 Node 父进程，
-   * 因此必须先快照后代句柄、再销毁父进程，之后逐个等待自己拥有的句柄；绝不 kill 随机 PID 或外部 Chrome。 先温和 destroy，5 秒后对仍存活者
-   * forcible，再各自等待；仍有存活则抛明确 IOException（不是只 warn 返回通过）。
-   */
-  private static void stopProcessTree(Process process, String label) throws IOException {
+  /** 销毁前保留自己启动的进程树句柄；失败后仍能在 AfterEach 收敛，不按随机 PID 杀进程。 */
+  private void stopProcessTree(Process process, String label) throws IOException {
     if (process == null) {
       return;
     }
-    List<ProcessHandle> owned = process.toHandle().descendants().collect(Collectors.toList());
+    helperProcesses.add(process.toHandle());
+    helperProcesses.addAll(process.toHandle().descendants().toList());
     process.destroy();
     awaitExit(process.toHandle(), Duration.ofSeconds(5));
+    stopHandles(helperProcesses, label);
+    helperProcesses.clear();
+  }
+
+  private static void stopHandles(Set<ProcessHandle> owned, String label) throws IOException {
     List<ProcessHandle> alive = new ArrayList<>();
-    if (process.isAlive()) {
-      alive.add(process.toHandle());
-    }
     for (ProcessHandle handle : owned) {
       if (handle.isAlive()) {
+        handle.destroy();
         alive.add(handle);
       }
-    }
-    for (ProcessHandle handle : alive) {
-      handle.destroy();
     }
     List<ProcessHandle> stubborn = new ArrayList<>();
     for (ProcessHandle handle : alive) {
       if (!awaitExit(handle, Duration.ofSeconds(5))) {
+        handle.destroyForcibly();
         stubborn.add(handle);
       }
     }
-    if (!stubborn.isEmpty()) {
+    List<ProcessHandle> remaining = new ArrayList<>();
+    for (ProcessHandle handle : stubborn) {
+      if (!awaitExit(handle, Duration.ofSeconds(5))) {
+        remaining.add(handle);
+      }
+    }
+    if (!remaining.isEmpty()) {
       String pids =
-          stubborn.stream()
+          remaining.stream()
               .map(handle -> Long.toString(handle.pid()))
               .collect(Collectors.joining(","));
       throw new IOException(label + " did not terminate: " + pids);
+    }
+  }
+
+  private boolean terminateRetainedHelpers() {
+    try {
+      stopHandles(helperProcesses, "acceptance helpers");
+      helperProcesses.clear();
+      return true;
+    } catch (IOException error) {
+      log.error("acceptance helpers did not terminate: {}", error.getMessage());
+      return false;
     }
   }
 
@@ -665,7 +717,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  private static void runCommand(
+  private void runCommand(
       List<String> command,
       Path cwd,
       Path log,
