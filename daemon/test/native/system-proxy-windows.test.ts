@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import { SYSTEM_PROXY_SESSION_FAILED, systemProxyErrorWithCode } from '../../src/native/system-proxy-errors.js'
 import type {
   WindowsAutoProxyOptions,
   WindowsProxyBindings,
@@ -36,6 +37,13 @@ const h = vi.hoisted(() => {
     globalFreeThrows: new Set<bigint>(),
     closedHandles: [] as unknown[],
     closeResult: 1,
+    closeThrows: false,
+    closeSetsLastError: null as number | null,
+    allocThrows: false,
+    encodeThrows: false,
+    freed: [] as unknown[],
+    freeThrows: new Set<bigint>(),
+    contextSlot: 0x9n,
     statusCallbackFlags: 0,
     strings: new Map<bigint, string>(),
     registered: [] as unknown[],
@@ -80,6 +88,12 @@ vi.mock('koffi', () => {
     WinHttpFreeProxyResult: () => undefined,
     WinHttpCloseHandle: (handle: unknown) => {
       state.closedHandles.push(handle)
+      if (state.closeSetsLastError !== null) {
+        state.lastError = state.closeSetsLastError
+      }
+      if (state.closeThrows) {
+        throw new Error('native close failed')
+      }
       return state.closeResult
     },
     WinHttpGetIEProxyConfigForCurrentUser: (config: Record<string, unknown>) => {
@@ -120,10 +134,25 @@ vi.mock('koffi', () => {
     struct: (nameOrDef: unknown) => ({ name: typeof nameOrDef === 'string' ? nameOrDef : 'anonymous' }),
     proto: () => ({ name: 'callback' }),
     pointer: () => ({ name: 'pointer' }),
-    alloc: () => 0n,
-    encode: () => undefined,
+    alloc: () => {
+      if (state.allocThrows) {
+        throw new Error('native allocation failed')
+      }
+      return state.contextSlot
+    },
+    encode: () => {
+      if (state.encodeThrows) {
+        throw new Error('native encoding failed')
+      }
+    },
     sizeof: () => 8,
     decode,
+    free: (pointer: unknown) => {
+      state.freed.push(pointer)
+      if (typeof pointer === 'bigint' && state.freeThrows.has(pointer)) {
+        throw new Error('koffi free failed')
+      }
+    },
     register: (callback: unknown) => {
       state.registered.push(callback)
       return BigInt(state.registered.length)
@@ -256,6 +285,17 @@ async function flush(): Promise<void> {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  h.state.closeThrows = false
+  h.state.closeSetsLastError = null
+  h.state.allocThrows = false
+  h.state.encodeThrows = false
+  h.state.openResult = 0x100n
+  h.state.setOptionResult = 1
+  h.state.closeResult = 1
+  h.state.lastError = 0
+  h.state.freed = []
+  h.state.closedHandles = []
+  h.state.freeThrows.clear()
 })
 
 describe('windows manual proxy selection', () => {
@@ -300,6 +340,20 @@ describe('windows manual proxy selection', () => {
     expect(() => selectManualProxy('http=http://', null, 'http://api.example.com/')).toThrow(/malformed/)
   })
 
+  test('uses an https protocol-table entry as the same unauthenticated http proxy for https targets', () => {
+    // `https=` 是目标协议表键，值仍是同一个无认证 HTTP 代理；缺省端口补齐 443。
+    expect(selectManualProxy('https=secure:8443', null, 'https://api.example.com/')).toBe('http://secure:8443')
+  })
+
+  test('rejects a literal https proxy value and values carrying path, query, fragment, or a zero port', () => {
+    // `http=` 的值里字面 `https://` 指的是 HTTPS 代理（TLS 到代理），本守护进程不支持，绝不降级成 http://。
+    expect(() => selectManualProxy('http=https://proxy:8443', null, 'http://api.example.com/')).toThrow(/does not support/)
+    expect(() => selectManualProxy('http=proxy:8080/path', null, 'http://api.example.com/')).toThrow(/malformed/)
+    expect(() => selectManualProxy('http=proxy:8080?q', null, 'http://api.example.com/')).toThrow(/malformed/)
+    expect(() => selectManualProxy('http=proxy:8080#f', null, 'http://api.example.com/')).toThrow(/malformed/)
+    expect(() => selectManualProxy('http=proxy:0', null, 'http://api.example.com/')).toThrow(/malformed/)
+  })
+
   test('bypass tokens cover wildcard, domain suffix, exact, and skipped empty tokens', () => {
     expect(matchesBypass('*', 'anything.example', 'http')).toBe(true)
     expect(matchesBypass('.example.com', 'sub.example.com', 'http')).toBe(true)
@@ -331,6 +385,11 @@ describe('windows automatic proxy resolution', () => {
     expect(interpretAutomatic([entry({ proxy: false })])).toBeNull()
     expect(interpretAutomatic([])).toBeNull()
     expect(interpretAutomatic([entry({ port: 0 })])).toBe('http://proxy:80')
+  })
+
+  test('brackets a bare IPv6 PAC proxy host into a canonical http url', () => {
+    // WinHTTP 可能返回不带方括号的裸 IPv6 地址；对外必须是合法 URI authority。
+    expect(interpretAutomatic([entry({ host: '::1' })])).toBe('http://[::1]:8080')
   })
 
   test('rejects unsupported proxy schemes and malformed hosts from a PAC result', () => {
@@ -595,6 +654,41 @@ describe('windows cancellation and callback lifecycle', () => {
     expect(fake.unregistered).toEqual([])
   })
 
+  test('a session close that throws is an unconfirmed teardown reported with a fixed message', async () => {
+    const fake = new FakeBindings()
+    fake.config = { autoDetect: true, autoConfigUrl: null, proxy: null, bypass: null }
+    fake.closeThrows.add(fake.session)
+    const resolver = new WindowsSystemProxyResolver(fake.build())
+    const pending = resolver.resolve('http://api.example.com/', new AbortController().signal)
+    fake.emitComplete(fake.lastContext())
+    await expect(pending).resolves.toBeNull()
+    // 关闭抛错绝不能被当作已释放：固定文案，且不回显原生异常原文。
+    const failure = await resolver.close().catch((error: Error) => error)
+    expect((failure as Error).message).toBe('the operating system proxy session teardown was not confirmed')
+    expect(fake.unregistered).toEqual([])
+    await expect(resolver.resolve('http://api.example.com/', new AbortController().signal)).rejects.toThrow(/unusable/)
+  })
+
+  test('a failed registration whose session close also throws is aggregate and fatal, never a fake cleanup', async () => {
+    const fake = new FakeBindings()
+    fake.config = { autoDetect: true, autoConfigUrl: null, proxy: null, bypass: null }
+    fake.statusCallbackError = systemProxyErrorWithCode(SYSTEM_PROXY_SESSION_FAILED, 0)
+    fake.closeThrows.add(fake.session)
+    const resolver = new WindowsSystemProxyResolver(fake.build())
+    const failure = (await resolver
+      .resolve('http://api.example.com/', new AbortController().signal)
+      .catch((error: unknown) => error)) as AggregateError
+    // 注册失败与关闭未被确认两个固定诊断都保留：主失败取注册失败，绝不伪称会话已清理。
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure.message).toBe('the operating system proxy session could not be opened (code 0)')
+    expect(failure.errors.map((error: Error) => error.message)).toEqual([
+      'the operating system proxy session could not be opened (code 0)',
+      'the operating system proxy session teardown was not confirmed',
+    ])
+    expect(fake.unregistered).toEqual([])
+    await expect(resolver.resolve('http://api.example.com/', new AbortController().signal)).rejects.toThrow(/unusable/)
+  })
+
   test('a native close that throws is an unproven release, never a success', async () => {
     const fake = new FakeBindings()
     fake.config = { autoDetect: true, autoConfigUrl: null, proxy: null, bypass: null }
@@ -778,6 +872,58 @@ describe('windows bindings loader (mocked winhttp)', () => {
     expect(h.state.closedHandles).toEqual([0x200n])
     h.state.openResult = 0x100n
     h.state.setOptionResult = 1
+  })
+
+  test('frees the copied session context exactly once after successful configuration', () => {
+    expect(loadWindowsProxyBindings().openAsyncSession()).toBe(0x100n)
+    expect(h.state.freed).toEqual([h.state.contextSlot])
+    expect(h.state.closedHandles).toEqual([])
+  })
+
+  test.each(['allocation', 'encoding', 'free'] as const)('releases the half-built session after %s failure', (failure) => {
+    h.state.openResult = 0x200n
+    h.state.allocThrows = failure === 'allocation'
+    h.state.encodeThrows = failure === 'encoding'
+    if (failure === 'free') {
+      h.state.freeThrows.add(h.state.contextSlot)
+    }
+    let error: unknown
+    try {
+      loadWindowsProxyBindings().openAsyncSession()
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(Error)
+    expect(String(error)).not.toContain('native allocation failed')
+    expect(String(error)).not.toContain('native encoding failed')
+    expect(String(error)).not.toContain('koffi free failed')
+    expect(h.state.closedHandles).toEqual([0x200n])
+    expect(h.state.freed).toEqual(failure === 'allocation' ? [] : [h.state.contextSlot])
+  })
+
+  test.each(['success', 'false', 'throw'] as const)('preserves the configuration error before a %s close', (close) => {
+    h.state.openResult = 0x200n
+    h.state.setOptionResult = 0
+    h.state.lastError = 1234
+    h.state.closeSetsLastError = 9999
+    h.state.closeResult = close === 'false' ? 0 : 1
+    h.state.closeThrows = close === 'throw'
+    let error: unknown
+    try {
+      loadWindowsProxyBindings().openAsyncSession()
+    } catch (caught) {
+      error = caught
+    }
+    expect(String(error)).toContain('(code 1234)')
+    expect(String(error)).not.toContain('(code 9999)')
+    expect(String(error)).not.toContain('native close failed')
+    if (close !== 'success') {
+      expect(error).toBeInstanceOf(AggregateError)
+      expect((error as AggregateError).errors).toHaveLength(2)
+      expect((error as AggregateError).errors[1].message).toContain('handle could not be released')
+    }
+    expect(h.state.freed).toEqual([h.state.contextSlot])
+    expect(h.state.closedHandles).toEqual([0x200n])
   })
 
   test('translates raw status callbacks into pointer, error, complete, and closing events', () => {

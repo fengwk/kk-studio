@@ -1,6 +1,7 @@
 import koffi from 'koffi'
 import type { SystemProxyResolver } from '../contracts.js'
 import {
+  SystemProxyError,
   SYSTEM_PROXY_CLOSED,
   SYSTEM_PROXY_CANCELLED,
   SYSTEM_PROXY_MALFORMED,
@@ -141,6 +142,8 @@ interface PendingLookup {
   readonly autoDetectionOnly: boolean
   handleClosed: boolean
   closeFailed: boolean
+  /** 句柄释放失败时同线程读到的数值诊断码。 */
+  releaseCode: number
   cancelled: boolean
   settled: boolean
   removeAbort: () => void
@@ -168,8 +171,35 @@ interface SessionState {
   readonly closed: { promise: Promise<void>; resolve: () => void }
 }
 
+/** 保留本边界的安全诊断，未知 FFI 异常仅返回固定文案。 */
 function asError(value: unknown): Error {
-  return value instanceof Error ? value : systemProxyError(SYSTEM_PROXY_LOOKUP_FAILED)
+  return value instanceof SystemProxyError ? value : systemProxyError(SYSTEM_PROXY_SESSION_FAILED)
+}
+
+/** 展开嵌套的 AggregateError，保证一次上报里所有安全诊断都在同一层，绝不把主失败埋进嵌套。 */
+function flattenFailures(failures: readonly unknown[]): Error[] {
+  const flat: Error[] = []
+  for (const failure of failures) {
+    if (failure instanceof AggregateError) {
+      flat.push(...flattenFailures(failure.errors))
+    } else if (failure instanceof Error) {
+      flat.push(failure)
+    }
+  }
+  return flat
+}
+
+/** 多个安全诊断都要保留：单一失败直接抛出，多个用 AggregateError 承载（message 取主失败，不含任何原文）。 */
+function throwFailures(failures: Error[]): never {
+  const flat = flattenFailures(failures)
+  const primary = flat[0]
+  if (primary === undefined) {
+    throw systemProxyError(SYSTEM_PROXY_SESSION_FAILED)
+  }
+  if (flat.length === 1) {
+    throw primary
+  }
+  throw new AggregateError(flat, primary.message)
 }
 
 /**
@@ -190,7 +220,17 @@ export function interpretAutomatic(entries: WindowsProxyEntry[]): string | null 
   if (entry.host === '') {
     throw systemProxyError(SYSTEM_PROXY_MALFORMED)
   }
-  return `http://${entry.host}:${entry.port === 0 ? 80 : entry.port}`
+  // `ProxyPort == 0` 表示操作系统没有给出显式端口，按 http 默认端口 80 规范化。
+  const port = entry.port === 0 ? 80 : entry.port
+  return `http://${formatProxyHost(entry.host)}:${port}`
+}
+
+/** IPv6 主机必须带方括号才是合法的 URI authority；WinHTTP 可能返回不带方括号的裸地址。 */
+function formatProxyHost(host: string): string {
+  if (host.includes(':') && !host.startsWith('[')) {
+    return `[${host}]`
+  }
+  return host
 }
 
 /**
@@ -308,13 +348,18 @@ function findManualProxy(proxyServer: string, targetScheme: 'http' | 'https'): s
   return fallback
 }
 
-/** 解析手动代理项为规范 `http://host:port`；无法解释时失败关闭而不是当作直连。 */
+/**
+ * 解析手动代理项为规范 `http://host:port`；无法解释时失败关闭而不是当作直连。
+ *
+ * <p>`http=`/`https=` 是**目标协议**表键（值仍是同一个无认证 HTTP 代理），但值里字面的 `https://` 前缀指的是 HTTPS
+ * 代理（TLS 到代理），本守护进程不支持，绝不降级成 `http://`。值只允许主机与端口（可带冗余的 `http://` 前缀与根路径
+ * 尾斜杠）；额外的 path/query/fragment 或显式 0 端口都不能被悄悄丢弃。
+ */
 function parseManualProxyValue(value: string, defaultPort: number): string {
   let candidate = value.trim()
   const boundary = candidate.indexOf('://')
   if (boundary > 0) {
-    const scheme = candidate.slice(0, boundary).toLowerCase()
-    if (scheme !== 'http' && scheme !== 'https') {
+    if (candidate.slice(0, boundary).toLowerCase() !== 'http') {
       throw systemProxyError(SYSTEM_PROXY_UNSUPPORTED)
     }
     candidate = candidate.slice(boundary + 3)
@@ -331,6 +376,14 @@ function parseManualProxyValue(value: string, defaultPort: number): string {
   }
   if (parsed.username !== '' || parsed.password !== '') {
     throw systemProxyError(SYSTEM_PROXY_UNSUPPORTED)
+  }
+  if (
+    (parsed.pathname !== '' && parsed.pathname !== '/') ||
+    parsed.search !== '' ||
+    parsed.hash !== '' ||
+    parsed.port === '0'
+  ) {
+    throw systemProxyError(SYSTEM_PROXY_MALFORMED)
   }
   return `http://${parsed.hostname}:${parsed.port === '' ? String(defaultPort) : parsed.port}`
 }
@@ -404,6 +457,7 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
       autoDetectionOnly,
       handleClosed: false,
       closeFailed: false,
+      releaseCode: 0,
       cancelled: false,
       settled: false,
       removeAbort: () => undefined,
@@ -417,18 +471,21 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     let status: number
     try {
       status = this.bindings.getProxyForUrlEx(resolver, uri, options, context)
-    } catch (error) {
+    } catch {
       this.pending.delete(context)
       op.removeAbort()
-      this.releaseResolver(op)
-      throw asError(error)
+      const closeFailed = this.releaseResolver(op)
+      if (closeFailed) {
+        throw systemProxyErrorWithCode(SYSTEM_PROXY_HANDLE_FAILED, op.releaseCode)
+      }
+      throw systemProxyError(SYSTEM_PROXY_LOOKUP_FAILED)
     }
     if (status !== ERROR_IO_PENDING) {
       this.pending.delete(context)
       op.removeAbort()
       const closeFailed = this.releaseResolver(op)
       if (closeFailed) {
-        throw systemProxyErrorWithCode(SYSTEM_PROXY_HANDLE_FAILED, this.bindings.lastError())
+        throw systemProxyErrorWithCode(SYSTEM_PROXY_HANDLE_FAILED, op.releaseCode)
       }
       throw systemProxyErrorWithCode(SYSTEM_PROXY_LOOKUP_FAILED, status)
     }
@@ -445,10 +502,21 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
       this.callbackToken = this.bindings.setStatusCallback(handle, (closedHandle, context, event) => {
         this.handleStatus(closedHandle, context, event)
       })
-    } catch (error) {
-      // 回调注册失败：session 从未进入可用状态，立即释放句柄，绝不留下半初始化的 session。
-      this.bindings.closeHandle(handle)
-      throw asError(error)
+    } catch (registrationFailure) {
+      // 回调注册失败：session 从未进入可用状态。关闭句柄；关闭未被确认时两个安全诊断都要保留。
+      let released = false
+      try {
+        released = this.bindings.closeHandle(handle)
+      } catch {
+        released = false
+      }
+      const primary = asError(registrationFailure)
+      if (!released) {
+        // 无法证明句柄已消失：解析器进入不可用终态，绝不再创建句柄。
+        this.fatal = true
+        throwFailures([primary, systemProxyError(SYSTEM_PROXY_TEARDOWN_FAILED)])
+      }
+      throw primary
     }
     this.session = state
     return handle
@@ -466,9 +534,12 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
       op.handleClosed = true
       try {
         op.closeFailed = !this.bindings.closeHandle(op.resolver)
+        // 与原生调用同线程立即取诊断码，避免之后被无关调用覆盖。
+        op.releaseCode = op.closeFailed ? this.bindings.lastError() : 0
       } catch {
         // 原生关闭本身抛错 = 无法证明句柄已释放：按失败处理，绝不当作成功。
         op.closeFailed = true
+        op.releaseCode = this.bindings.lastError()
       }
     }
     if (op.closeFailed) {
@@ -512,7 +583,7 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     }
     const closeFailed = this.releaseResolver(op)
     if (closeFailed) {
-      op.reject(systemProxyErrorWithCode(SYSTEM_PROXY_HANDLE_FAILED, this.bindings.lastError()))
+      op.reject(systemProxyErrorWithCode(SYSTEM_PROXY_HANDLE_FAILED, op.releaseCode))
       return
     }
     if (failure !== null) {
@@ -540,7 +611,13 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     }
     // 证据二：session 句柄确实关闭，且收到它官方保证的最后一次回调（HANDLE_CLOSING）。
     // resolver 句柄本身不带 context、不会有 HANDLE_CLOSING，绝不假造一次；session closing 单独也不足以证明孩子回调消失。
-    const handleClosed = this.bindings.closeHandle(state.handle)
+    let handleClosed = false
+    try {
+      handleClosed = this.bindings.closeHandle(state.handle)
+    } catch {
+      // 关闭抛错 = 无法确认句柄已释放：保留 registration，以固定文案失败，不回显原生异常原文。
+      handleClosed = false
+    }
     if (!handleClosed) {
       this.fatal = true
     }
@@ -700,7 +777,7 @@ export function loadWindowsProxyBindings(): WindowsProxyBindings {
             continue
           }
           try {
-            // 不使用 `||=`：它会在首次失败后短路，跳过剩余字符串的释放。
+            // 逐个调用：任一释放失败也不能跳过其余字符串的释放。
             if (GlobalFree(pointer) !== null) {
               releaseFailed = true
             }
@@ -718,11 +795,38 @@ export function loadWindowsProxyBindings(): WindowsProxyBindings {
       if (session === null) {
         throw systemProxyErrorWithCode(SYSTEM_PROXY_SESSION_FAILED, Number(GetLastError()))
       }
-      const contextSlot = koffi.alloc('uintptr_t', 1)
-      koffi.encode(contextSlot, 'uintptr_t', SESSION_CONTEXT)
-      if (Number(WinHttpSetOption(session, WINHTTP_OPTION_CONTEXT_VALUE, contextSlot, koffi.sizeof('uintptr_t'))) === 0) {
-        WinHttpCloseHandle(session)
-        throw systemProxyErrorWithCode(SYSTEM_PROXY_SESSION_FAILED, Number(GetLastError()))
+      // 会话已打开：从这里开始任何失败都必须先关闭会话，绝不让句柄泄漏。分配 slot 也必须在这个保护范围内。
+      let contextSlot: bigint | null = null
+      const failures: Error[] = []
+      try {
+        contextSlot = koffi.alloc('uintptr_t', 1)
+        koffi.encode(contextSlot, 'uintptr_t', SESSION_CONTEXT)
+        if (Number(WinHttpSetOption(session, WINHTTP_OPTION_CONTEXT_VALUE, contextSlot, koffi.sizeof('uintptr_t'))) === 0) {
+          // 先捕获错误码：任何后续调用都会覆盖 GetLastError。
+          failures.push(systemProxyErrorWithCode(SYSTEM_PROXY_SESSION_FAILED, Number(GetLastError())))
+        }
+      } catch (error) {
+        failures.push(asError(error))
+      } finally {
+        if (contextSlot !== null) {
+          try {
+            koffi.free(contextSlot)
+          } catch {
+            // slot 释放未被确认：与主失败一起保留，绝不伪称已释放。
+            failures.push(systemProxyError(SYSTEM_PROXY_HANDLE_FAILED))
+          }
+        }
+      }
+      if (failures.length > 0) {
+        // 关闭这个不可用会话；关闭未被确认同样作为独立安全诊断保留，不覆盖主失败。
+        try {
+          if (!WinHttpCloseHandle(session)) {
+            failures.push(systemProxyError(SYSTEM_PROXY_HANDLE_FAILED))
+          }
+        } catch {
+          failures.push(systemProxyError(SYSTEM_PROXY_HANDLE_FAILED))
+        }
+        throwFailures(failures)
       }
       return session
     },
@@ -748,8 +852,15 @@ export function loadWindowsProxyBindings(): WindowsProxyBindings {
       }, koffi.pointer(statusCallbackProto))
       const previous = WinHttpSetStatusCallback(session, token, CALLBACK_FLAGS, 0) as bigint | null
       if (previous === INVALID_STATUS_CALLBACK || previous === UNSIGNED_INVALID_STATUS_CALLBACK) {
-        koffi.unregister(token)
-        throw systemProxyErrorWithCode(SYSTEM_PROXY_SESSION_FAILED, Number(GetLastError()))
+        // 先捕获错误码，再 unregister：卸载调用会覆盖 GetLastError。
+        const failures: Error[] = [systemProxyErrorWithCode(SYSTEM_PROXY_SESSION_FAILED, Number(GetLastError()))]
+        try {
+          koffi.unregister(token)
+        } catch {
+          // 注册本就无效，蹦床不会再被调用；卸载未被确认仍必须独立上报，绝不伪称已清理。
+          failures.push(systemProxyError(SYSTEM_PROXY_HANDLE_FAILED))
+        }
+        throwFailures(failures)
       }
       return token
     },

@@ -47,12 +47,15 @@ export const SYSTEM_PROXY_TEARDOWN_FAILED = 'the operating system proxy session 
 /** 一次未证实安全的释放之后，解析器保持不可用，绝不再创建任何句柄或回调注册。 */
 export const SYSTEM_PROXY_FATAL = 'the operating system proxy resolver is unusable after a failed teardown'
 
+/** 标识原生边界已构造的安全诊断，避免把任意 FFI 异常原文当作安全错误返回。 */
+export class SystemProxyError extends Error {}
+
 /** 固定安全文案。 */
 export function systemProxyError(message: string): Error {
-  return new Error(message)
+  return new SystemProxyError(message)
 }
 
 /** 固定安全文案加数值错误码：只附加有限整数，不回显任何原始文本。 */
 export function systemProxyErrorWithCode(message: string, code: number): Error {
-  return new Error(`${message} (code ${code})`)
+  return new SystemProxyError(`${message} (code ${code})`)
 }
