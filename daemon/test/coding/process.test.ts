@@ -361,4 +361,72 @@ describe('process.exec', () => {
     expect(result.error).toBe(true)
     expect(textOf(result)).toContain('did not converge')
   })
+
+  it('自然读取 EIO 返回 FAILED 并保留已读前缀', async () => {
+    const dir = await tempDir()
+    const stdout = new Readable({ read() {} })
+    stdout.push(Buffer.from('prefix\n'))
+    const stderr = Readable.from([])
+    const exit = new Promise<ProcessExit>((resolve) =>
+      setTimeout(() => resolve({ exitCode: 0, signal: null }), 30),
+    )
+    const proc: ManagedProcess = {
+      pid: 9,
+      stdin: new PassThrough(),
+      stdout,
+      stderr,
+      exit,
+      async terminate() {
+        stdout.destroy()
+      },
+    }
+    setTimeout(() => stdout.destroy(new Error('EIO')), 10)
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'x', workdir: dir },
+      makeContext(dir, { processes: { start: async () => proc, close: async () => {} } }),
+    )
+    expect(result.error).toBe(true)
+    expect(textOf(result)).toContain('prefix')
+    expect(textOf(result)).toContain('failed while reading')
+  })
+
+  it('取消导致的 premature close 仍为 CANCELLED 且保留前缀', async () => {
+    const dir = await tempDir()
+    const controller = new AbortController()
+    const stdout = new Readable({ read() {} })
+    stdout.push(Buffer.from('keep\n'))
+    const stderr = new Readable({ read() {} })
+    let resolveExit!: (exit: ProcessExit) => void
+    const exit = new Promise<ProcessExit>((resolve) => {
+      resolveExit = resolve
+    })
+    const proc: ManagedProcess = {
+      pid: 11,
+      stdin: new PassThrough(),
+      stdout,
+      stderr,
+      exit,
+      async terminate() {
+        stdout.destroy(new Error('premature close'))
+        stderr.destroy(new Error('premature close'))
+        resolveExit({ exitCode: null, signal: 'SIGTERM' })
+      },
+    }
+    const pending = callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'x', workdir: dir },
+      makeContext(dir, {
+        processes: { start: async () => proc, close: async () => {} },
+        signal: controller.signal,
+      }),
+    )
+    setTimeout(() => controller.abort(), 10)
+    const result = await pending
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({ process: { outcome: 'CANCELLED' } })
+    expect(textOf(result)).toContain('keep')
+  })
 })

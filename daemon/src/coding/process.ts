@@ -4,6 +4,7 @@ import type { CapabilityExecutor, CapabilityResult, ManagedProcess } from '../co
 import { errorResult } from '../contracts.js'
 import {
   ToolInputRejectedError,
+  ToolRunFailureError,
   displayPath,
   guide,
   isAbsolute,
@@ -126,14 +127,23 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     // 命令以参数传入，进程不会从 stdin 读取；立刻关闭写端，等待 EOF 的命令才能自然退出。
     managed.stdin.end()
     const running = managed
-    await drainMerged([running.stdout, running.stderr], async (chunk) => {
-      await spool?.write(chunk)
-      await emitter.accept(decoder.decode(chunk))
-      if (spool !== null && spool.isCaptureTruncated() && !emitter.truncationReported) {
-        emitter.truncationReported = true
-        await emitter.snapshot(spool)
-      }
-    })
+    await drainMerged(
+      [running.stdout, running.stderr],
+      async (chunk) => {
+        await spool?.write(chunk)
+        await emitter.accept(decoder.decode(chunk))
+        if (spool !== null && spool.isCaptureTruncated() && !emitter.truncationReported) {
+          emitter.truncationReported = true
+          await emitter.snapshot(spool)
+        }
+      },
+      // 真实读错误：先让执行范围收敛（幂等），再继续排空其它流。
+      () => {
+        void requestTermination()
+      },
+      // 只有取消/超时之后的 premature close / destroyed 才算预期 EOF。
+      () => cancelled || timedOut,
+    )
     await emitter.accept(decoder.finish())
     await emitter.flush()
 
@@ -156,6 +166,10 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     await requestTermination()
     if (terminationFailure !== null) {
       return convergenceFailure(call.invocationId, spool)
+    }
+    // 已捕获输出仍是真实内容：读失败（如 EIO）时以 error 结果保留前缀，绝不声称成功。
+    if (spool !== null && spool.totalBytes() > 0 && error instanceof ToolRunFailureError) {
+      return spool.finish(true, `[${error.message}]`)
     }
     return toErrorResult(call.invocationId, error)
   } finally {
@@ -197,31 +211,57 @@ async function resolveWorkdir(raw: string): Promise<string> {
 /**
  * 真正 Readable 背压合并：每个流最多保留一个在途读取，`onChunk` 变慢时不会把整段 stdout 积进内存。
  *
- * <p>终止/断流导致的流错误或 premature close 视为该流结束：不丢已读字节，也不会因为缺少 `end` 而挂起。两个流按就绪顺序公平合并。
+ * <p>读错误分两类：取消/超时之后的 premature close / destroyed 是预期 EOF（`terminationExpected`）；其余（例如真实 EIO）是读失败——先触发
+ * `onReadFailure`（让执行范围收敛），再继续排空其它流，最后把安全错误抛给外层。生成器**不**在 finally 里 await `iterator.return()`，避免在外层终止之前死锁。
  */
-async function* mergeStreams(streams: Readable[]): AsyncGenerator<Uint8Array> {
+async function* mergeStreams(
+  streams: Readable[],
+  onReadFailure: () => void,
+  terminationExpected: () => boolean,
+): AsyncGenerator<Uint8Array> {
+  type MergeEvent =
+    | { kind: 'chunk'; index: number; value: Uint8Array }
+    | { kind: 'end'; index: number }
+    | { kind: 'error'; index: number; error: unknown }
   const iterators = streams.map(
     (stream) => stream[Symbol.asyncIterator]() as AsyncIterator<Uint8Array>,
   )
-  type Step = { index: number; result: IteratorResult<Uint8Array> }
-  const step = (index: number): Promise<Step> =>
+  const step = (index: number): Promise<MergeEvent> =>
     (iterators[index] as AsyncIterator<Uint8Array>).next().then(
-      (result) => ({ index, result }),
-      () => ({ index, result: { done: true, value: undefined } as IteratorResult<Uint8Array> }),
+      (result) =>
+        result.done
+          ? ({ kind: 'end', index } as MergeEvent)
+          : ({ kind: 'chunk', index, value: result.value } as MergeEvent),
+      (error) =>
+        terminationExpected()
+          ? ({ kind: 'end', index } as MergeEvent)
+          : ({ kind: 'error', index, error } as MergeEvent),
     )
-  const pending = new Map<number, Promise<Step>>()
+  const pending = new Map<number, Promise<MergeEvent>>()
   for (let index = 0; index < iterators.length; index++) {
     pending.set(index, step(index))
   }
+  let failure: unknown = null
   while (pending.size > 0) {
-    const { index, result } = await Promise.race(pending.values())
-    pending.delete(index)
-    if (result.done) {
+    const event = await Promise.race(pending.values())
+    pending.delete(event.index)
+    if (event.kind === 'end') {
       continue
     }
-    yield result.value
+    if (event.kind === 'error') {
+      if (failure === null) {
+        failure = event.error
+        onReadFailure()
+      }
+      // 不重新请求该流，但继续排空其它流（有界内存），最后统一抛出安全错误。
+      continue
+    }
+    yield event.value
     // 消费完当前 chunk 才请求下一块：形成真实背压。
-    pending.set(index, step(index))
+    pending.set(event.index, step(event.index))
+  }
+  if (failure !== null) {
+    throw new ToolRunFailureError('the process output stream failed while reading', 'FAILED')
   }
 }
 
@@ -229,8 +269,10 @@ async function* mergeStreams(streams: Readable[]): AsyncGenerator<Uint8Array> {
 async function drainMerged(
   streams: Readable[],
   onChunk: (chunk: Uint8Array) => Promise<void>,
+  onReadFailure: () => void,
+  terminationExpected: () => boolean,
 ): Promise<void> {
-  for await (const chunk of mergeStreams(streams)) {
+  for await (const chunk of mergeStreams(streams, onReadFailure, terminationExpected)) {
     await onChunk(chunk)
   }
 }

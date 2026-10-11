@@ -756,6 +756,11 @@ export class OutputSpool {
     if (staging === null) {
       return null
     }
+    if (this.captureFailed) {
+      // 真实的磁盘 IO 失败不能伪装成完整捕获：绝不发布，保留有界预览并显式标注 captureFailed。
+      await this.abandonStaging(staging)
+      return null
+    }
     try {
       await this.closeFile()
     } catch {
@@ -839,7 +844,7 @@ export class OutputSpool {
       totalLines: this.totalLines(),
       capturedBytes: this.capturedByteCount,
       captureTruncated: this.captureTruncated,
-      captureFailed: published === null,
+      captureFailed: this.captureFailed || published === null,
     }
     if (published !== null) {
       textOutput.path = published
