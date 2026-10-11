@@ -91,11 +91,18 @@ jobs:
         shell: bash
         run: npm --prefix frontend run test:install:windows
 
+  # 三平台 Node 矩阵由可复用工作流提供：tag 发布与 main/dev 推送上跑同一套门禁，发布不会因为
+  # tag 触发而绕过平台矩阵。
+  daemon_ci:
+    name: node daemon matrix
+    uses: ./.github/workflows/daemon-ci.yml
+
   publish:
     name: build, stage and publish daemon release
     needs:
       - validate_daemon
       - validate_windows_daemon
+      - daemon_ci
     runs-on: ubuntu-latest
     steps:
       # 全量历史：父提交必须可达，否则无法判定 tag 是否落在 main 上。
@@ -140,14 +147,60 @@ jobs:
         run: python3 scripts/dev/verify/repository/check-sensitive-data.py
       - name: Check documentation layout
         run: node scripts/dev/verify/repository/check.mjs
-      - name: Verify the repository version is 1.0.12
+      # 版本对齐以仓库里的真实文件为准：根 POM 的 <version>、kk-studio.version 属性、daemon 包
+      # 版本与发布 tag 必须完全一致。这里不写死任何版本号，因此改版本时不需要修改本工作流。
+      - name: Verify the repository version alignment
         run: |
           set -euo pipefail
-          version=$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' pom.xml | head -n 1)
-          project=$(sed -n 's/.*<project.version>\([^<]*\)<\/project.version>.*/\1/p' pom.xml | head -n 1)
-          test "${version}" = "1.0.12"
-          test "${project}" = "1.0.12"
-          test "${GITHUB_REF_NAME}" = "v${version}"
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ElementTree
+
+          POM_NAMESPACE = '{http://maven.apache.org/POM/4.0.0}'
+
+          def required_text(element, label):
+              value = None if element is None or element.text is None else element.text.strip()
+              if not value:
+                  raise SystemExit(f'cannot read {label} from pom.xml')
+              return value
+
+          def required_string(value, label):
+              if not isinstance(value, str) or value.strip() == '':
+                  raise SystemExit(f'cannot read {label}')
+              return value.strip()
+
+          project = ElementTree.parse('pom.xml').getroot()
+          expected = required_text(project.find(f'{POM_NAMESPACE}version'), 'the root <version>')
+          properties = project.find(f'{POM_NAMESPACE}properties')
+          declared = required_text(
+              None if properties is None else properties.find(f'{POM_NAMESPACE}kk-studio.version'),
+              'the kk-studio.version property',
+          )
+          package = json.loads(pathlib.Path('daemon/package.json').read_text(encoding='utf-8'))
+          daemon_version = required_string(package.get('version'), 'the daemon package version')
+          tag = os.environ.get('GITHUB_REF_NAME', '')
+          tag_version = tag[1:] if tag.startswith('v') else tag
+          sources = {
+              'pom.xml <version>': expected,
+              'pom.xml kk-studio.version': declared,
+              'daemon/package.json version': daemon_version,
+              f'release tag {tag!r}': tag_version,
+          }
+          mismatches = [
+              f'{label} is {value!r}, expected {expected!r}'
+              for label, value in sources.items()
+              if value != expected
+          ]
+          if mismatches:
+              print('repository version alignment failed:', file=sys.stderr)
+              for mismatch in mismatches:
+                  print(f'- {mismatch}', file=sys.stderr)
+              raise SystemExit(1)
+          print(f'repository version {expected} is aligned across pom.xml, kk-studio.version, daemon/package.json and {tag}')
+          PY
       - name: Set up PostgreSQL client tools
         run: |
           set -euo pipefail
