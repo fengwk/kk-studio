@@ -20,23 +20,13 @@ class EnvironmentInstallConfigsTest {
 
   @Test
   void canonicalConfigRoundtripsForEachOperatingSystem() {
-    for (Map.Entry<String, String> host :
-        Map.of(
-                "linux",
-                "/opt/jdk21",
-                "macos",
-                "/Library/Java/Home",
-                "windows",
-                "C:\\Program Files\\Java\\jdk21")
-            .entrySet()) {
+    for (String os : List.of("linux", "macos", "windows")) {
       var value =
           EnvironmentInstallConfigs.parse(
               json.valueToTree(
                   Map.of(
                       "operatingSystem",
-                      host.getKey(),
-                      "javaHome",
-                      host.getValue(),
+                      os,
                       "daemon",
                       Map.of("studioUrl", "https://studio.example.com/"))));
       assertEquals("https://studio.example.com", value.getDaemon().getStudioUrl());
@@ -47,29 +37,19 @@ class EnvironmentInstallConfigsTest {
   }
 
   @Test
-  void rejectsWrongOsPathsPlaceholdersControlsAndTypes() {
-    for (String path :
-        List.of(
-            "relative",
-            "~/jdk",
-            "${JAVA_HOME}",
-            "/opt/%JAVA_HOME%",
-            "/jdk\n21",
-            " /jdk",
-            "C:\\Java")) {
-      assertThrows(
-          AiValidationException.class,
-          () ->
-              EnvironmentInstallConfigs.parse(
-                  json.valueToTree(
-                      Map.of(
-                          "operatingSystem",
-                          "linux",
-                          "javaHome",
-                          path,
-                          "daemon",
-                          Map.of("studioUrl", "https://studio.example.com")))));
-    }
+  void rejectsUnknownJavaHomeInvalidOperatingSystemAndNull() {
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            EnvironmentInstallConfigs.parse(
+                json.valueToTree(
+                    Map.of(
+                        "operatingSystem",
+                        "linux",
+                        "javaHome",
+                        "/opt/jdk21",
+                        "daemon",
+                        Map.of("studioUrl", "https://studio.example.com")))));
     for (Object os : List.of("wsl", "", 123, true)) {
       assertThrows(
           AiValidationException.class,
@@ -103,45 +83,6 @@ class EnvironmentInstallConfigsTest {
     }
   }
 
-  @Test
-  void windowsRequiresDriveOrUncAbsolutePathAndRejectsInvalidCharacters() {
-    for (String path : List.of("C:\\", "\\\\server\\share\\jdk21")) {
-      var value =
-          EnvironmentInstallConfigs.parse(
-              json.valueToTree(
-                  Map.of(
-                      "operatingSystem",
-                      "windows",
-                      "javaHome",
-                      path,
-                      "daemon",
-                      Map.of("studioUrl", "https://studio.example.com"))));
-      assertEquals(path, value.getJavaHome());
-    }
-    for (String path :
-        List.of(
-            "/opt/jdk",
-            "\\jdk",
-            "C:jdk",
-            "C:\\jdk?",
-            "C:\\jdk:stream",
-            "\\\\server",
-            "\\\\?\\C:\\jdk")) {
-      assertThrows(
-          AiValidationException.class,
-          () ->
-              EnvironmentInstallConfigs.parse(
-                  json.valueToTree(
-                      Map.of(
-                          "operatingSystem",
-                          "windows",
-                          "javaHome",
-                          path,
-                          "daemon",
-                          Map.of("studioUrl", "https://studio.example.com")))));
-    }
-  }
-
   /** 边界必须原样保留未知字段与标量类型：成功请求解析，嵌套未知字段/错误类型一律拒绝，不静默丢弃或强转。 */
   @Test
   void parseUpdateAcceptsValidBodyAndRejectsUnknownNestedFieldsAndTypeCoercion() throws Exception {
@@ -154,6 +95,7 @@ class EnvironmentInstallConfigsTest {
 
     for (String raw :
         List.of(
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"javaHome\":\"/opt/jdk\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"unknown\":true}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknown\":1,\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{\"jdtls\":{\"command\":[\"jdtls\"],\"extensions\":[\".java\"],\"unknown\":true}}}}}}",

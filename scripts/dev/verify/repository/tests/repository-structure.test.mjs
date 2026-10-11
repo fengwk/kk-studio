@@ -118,7 +118,6 @@ test('repository structure guard verifies root and harness POM module lists', ()
     'contributor-api',
     'builtin',
     'infra',
-    'daemon',
   ])
 })
 
@@ -651,16 +650,6 @@ const CORE_STATE_ENUMS = [
       'BELOW_MINIMUM',
       'NOTHING_TO_COMPACT',
     ],
-  },
-  {
-    path: 'harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeState.java',
-    enumName: 'DaemonRuntimeState',
-    constants: ['STOPPED', 'CONNECTING', 'READY', 'DISCONNECTED', 'FAILED'],
-  },
-  {
-    path: 'harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/journal/DaemonInvocationState.java',
-    enumName: 'DaemonInvocationState',
-    constants: ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',

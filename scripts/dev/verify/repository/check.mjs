@@ -42,7 +42,6 @@ const moduleDocuments = [
   'harness-builtin.md',
   'harness-common.md',
   'harness-contributor-api.md',
-  'harness-daemon.md',
   'harness-environment.md',
   'harness-environment-server.md',
   'harness-infra.md',
@@ -64,11 +63,6 @@ const documentPaths = [
   'docs/canvas-project.md',
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
-  'docs/operations/builtin-read-tests.md',
-  'docs/operations/builtin-mutation-tests.md',
-  'docs/operations/builtin-search-tests.md',
-  'docs/operations/builtin-bash-tests.md',
-  'docs/operations/builtin-lsp-tests.md',
   'docs/operations/builtin-task-tests.md',
   'docs/operations/development-and-testing.md',
   'docs/operations/environment-daemon.md',
@@ -487,7 +481,6 @@ function checkRepositoryStructure() {
     'contributor-api',
     'builtin',
     'infra',
-    'daemon',
   ]
   const harnessRoot = path.join(repositoryRoot, 'harness')
   if (existsSync(harnessRoot)) {
@@ -599,7 +592,6 @@ const harnessProductionModules = [
   'builtin',
   'environment',
   'environment-server',
-  'daemon',
   'runtime',
   'provider',
   'infra',

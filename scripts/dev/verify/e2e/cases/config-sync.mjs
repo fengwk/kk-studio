@@ -320,7 +320,10 @@ registerCase({
       assertInstallConfig(envelopeData(afterImportJson).installConfig)
 
       // 原子更新：新 token + 新配置在同一 environment 条目内一次导入生效。
-      const updatedConfig = { ...linuxInstallConfig(), javaHome: '/opt/jdk' }
+      const updatedConfig = {
+        ...linuxInstallConfig(),
+        daemon: { ...linuxInstallConfig().daemon, note: 'e2e updated install config' },
+      }
       const updateYaml = JSON.stringify({
         environments: [{ name: envName, registrationToken: newToken, installConfig: updatedConfig }],
       })
@@ -334,7 +337,7 @@ registerCase({
       )
       const { json: updatedCardJson } = await ctx.call('GET', cardPath(envId))
       assert(
-        envelopeData(updatedCardJson).installConfig?.javaHome === '/opt/jdk',
+        envelopeData(updatedCardJson).installConfig?.daemon?.note === 'e2e updated install config',
         'atomic sync update must persist the new install config',
       )
 
