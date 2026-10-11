@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
@@ -42,7 +43,8 @@ class IdeBrowserWebSocketGatewayTest {
         properties,
         sessions,
         mock(ClusterNodeRegistry.class),
-        mock(ClusterInternalClient.class));
+        mock(ClusterInternalClient.class),
+        new StandardWebSocketClient());
   }
 
   private static MockHttpServletRequest request() {
@@ -110,7 +112,8 @@ class IdeBrowserWebSocketGatewayTest {
             new IdeBrowserSessionRegistry(
                 new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1)),
             mock(ClusterNodeRegistry.class),
-            mock(ClusterInternalClient.class));
+            mock(ClusterInternalClient.class),
+            new StandardWebSocketClient());
     MockHttpServletRequest request = request();
     request.addHeader("Origin", "http://" + IDE_HOST);
     MockHttpServletResponse response = new MockHttpServletResponse();

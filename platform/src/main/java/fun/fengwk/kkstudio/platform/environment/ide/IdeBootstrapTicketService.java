@@ -22,6 +22,9 @@ public interface IdeBootstrapTicketService {
   /** 撤销某 Environment 指定租约代际下尚未消费的票据（租约失效/接管时调用）。 */
   void revoke(EnvironmentId environmentId, UUID leaseToken);
 
+  /** 撤销某视图尚未消费的入口票据（视图关闭时调用）；同一视图再次打开时旧票据不得继续有效。 */
+  void revokeView(EnvironmentId environmentId, String viewId);
+
   record Ticket(IdeSessionIdentity identity, String viewId, String workspacePath) {
 
     public EnvironmentId environmentId() {

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -88,7 +89,9 @@ class IdeGatewayDataPlaneTest {
     }
 
     String sessionCookie() {
-      return sessions.open(identity, UUID.randomUUID().toString(), "/managed/workspace");
+      String view = UUID.randomUUID().toString();
+      sessions.viewOpened(identity, view, "/managed/workspace");
+      return sessions.open(identity, view, "/managed/workspace");
     }
 
     MockHttpServletRequest request(String method, String path) {
@@ -290,7 +293,9 @@ class IdeGatewayDataPlaneTest {
     Harness harness = new Harness();
     harness.transport.peerFactory = () -> new ScriptedPeer(0, List.of());
     // 第二个面板：同代际的另一个受管 workspace。
-    harness.sessions.open(harness.identity, UUID.randomUUID().toString(), "/managed/other");
+    String otherView = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, otherView, "/managed/other");
+    harness.sessions.open(harness.identity, otherView, "/managed/other");
 
     MockHttpServletRequest allowed = harness.request("GET", "/");
     allowed.setParameter("workspace", "/managed/other");
@@ -350,9 +355,10 @@ class IdeGatewayDataPlaneTest {
   @Test
   void bootstrapConsumesTicketAndRedirectsToServerWorkspace() throws Exception {
     Harness harness = new Harness();
-    String ticket =
-        harness.bootstrap.issue(
-            harness.identity, UUID.randomUUID().toString(), "/managed/workspace");
+    // 真实前置：视图先由 OPEN_VIEW 授权，票据才能被消费。
+    String view = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, view, "/managed/workspace");
+    String ticket = harness.bootstrap.issue(harness.identity, view, "/managed/workspace");
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/__ide/bootstrap");
     request.setServerName(ENV + ".ide.test");
     request.setQueryString("token=" + ticket);
@@ -368,6 +374,25 @@ class IdeGatewayDataPlaneTest {
     assertTrue(setCookie.contains("SameSite=Strict"));
     assertTrue(setCookie.startsWith("kk_ide_session="));
     assertEquals("/?workspace=%2Fmanaged%2Fworkspace", response.getHeader("Location"));
+  }
+
+  /** 视图关闭后旧票据必须失效（410），且绝不因此重新授权视图。 */
+  @Test
+  void bootstrapRejectsTicketOfClosedView() throws Exception {
+    Harness harness = new Harness();
+    String view = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, view, "/managed/workspace");
+    String ticket = harness.bootstrap.issue(harness.identity, view, "/managed/workspace");
+    harness.sessions.viewClosed(harness.identity, view);
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/__ide/bootstrap");
+    request.setParameter("token", ticket);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleBootstrap(ENV, request, response);
+
+    assertEquals(410, response.getStatus());
+    assertNull(response.getHeader("Set-Cookie"));
+    assertEquals(0, harness.sessions.viewCount(harness.identity));
   }
 
   @Test

@@ -24,7 +24,6 @@ import org.apache.catalina.Context;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.tomcat.websocket.server.WsSci;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -74,6 +73,7 @@ import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -156,7 +156,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(identity, UUID.randomUUID(), reply);
             });
-    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/home/dev/project");
+    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
     OkHttpClient browser = localhostClient();
     try {
@@ -195,6 +195,8 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
 
     String firstView = UUID.randomUUID().toString();
     String secondView = UUID.randomUUID().toString();
+    sessions.viewOpened(identity, firstView, "/managed/one");
+    sessions.viewOpened(identity, secondView, "/managed/two");
     String firstTicket = bootstrapTickets.issue(identity, firstView, "/managed/one");
     String secondTicket = bootstrapTickets.issue(identity, secondView, "/managed/two");
 
@@ -220,13 +222,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     }
   }
 
-  /**
-   * 浏览器 WS 经 A 的原生分段桥接到 B，再由 B 配对 Daemon 反向连接完成 echo。
-   *
-   * <p>未完成：A 侧 {@code StandardWebSocketClient} 向 B 内部 {@code /ws} 的拨号在该裸 Tomcat
-   * 测试宿主里始终不完成（无失败也无成功回调）， 因此跨节点浏览器 WS 单跳尚未验证；内部 {@code /ws} 端点与桥接实现已就位，缺口记录在交付报告里。
-   */
-  @Disabled("cross-node browser WS single hop is not yet validated")
+  /** 浏览器 WS 经 A 的原生分段桥接到 B，再由 B 配对 Daemon 反向连接完成 echo。 */
   @Test
   void forwardsBrowserWebSocketThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
@@ -245,7 +241,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(identity, UUID.randomUUID(), reply);
             });
-    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/home/dev/project");
+    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
     OkHttpClient browser = localhostClient();
     try {
@@ -335,7 +331,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     IdeSessionIdentity identity =
         new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
     when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
-    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/home/dev/project");
+    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
     OkHttpClient browser = localhostClient();
     try {
@@ -372,7 +368,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(current, UUID.randomUUID(), reply);
             });
-    String cookie = sessions.open(stale, UUID.randomUUID().toString(), "/home/dev/project");
+    String cookie = openSession(stale, UUID.randomUUID().toString(), "/home/dev/project");
 
     OkHttpClient browser = localhostClient();
     try {
@@ -413,7 +409,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(identity, UUID.randomUUID(), reply);
             });
-    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/home/dev/project");
+    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
     OkHttpClient browser = localhostClient();
     try {
@@ -571,14 +567,14 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
             registry,
             remoteRegistry,
             client,
-            new StandardWebSocketClient());
+            ideWebSocketClient(properties));
     IdeReverseStreamWebSocketHandler reverseHandler =
         new IdeReverseStreamWebSocketHandler(
             new InMemoryIdeStreamTicketService(),
             new IdeStreamPairingRegistry<>(),
             unavailableTransport(),
             remoteRegistry,
-            new IdeOwnerStreamForwarder(client));
+            new IdeOwnerStreamForwarder(client, ideWebSocketClient(properties)));
     DefaultHandshakeHandler handshakeHandler = new DefaultHandshakeHandler();
 
     Tomcat tomcat = new Tomcat();
@@ -635,6 +631,16 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     serverContainer.setDefaultMaxTextMessageBufferSize(16 * 1024 * 1024);
     forwarderNode = tomcat;
     forwarderPort = tomcat.getConnector().getLocalPort();
+  }
+
+  /** 与生产装配一致：把握手 I/O 超时对齐到 pairing-timeout 的 WS 客户端。 */
+  private static StandardWebSocketClient ideWebSocketClient(IdeGatewayProperties properties) {
+    StandardWebSocketClient client = new StandardWebSocketClient();
+    client.setUserProperties(
+        Map.of(
+            IdeGatewayConfiguration.TOMCAT_HANDSHAKE_IO_TIMEOUT_MS,
+            String.valueOf(properties.requirePairingTimeout().toMillis())));
+    return client;
   }
 
   private static IdeCommandTransport unavailableTransport() {
@@ -854,5 +860,11 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
         webSocket.send(ByteString.of(codec.encodeAck(frame.length - 2)));
       }
     }
+  }
+
+  /** bootstrap 消费的真实前置：先由真实 OPEN_VIEW 授权视图，再消费一次性票据换 cookie。 */
+  private String openSession(IdeSessionIdentity identity, String viewId, String workspacePath) {
+    sessions.viewOpened(identity, viewId, workspacePath);
+    return sessions.open(identity, viewId, workspacePath);
   }
 }

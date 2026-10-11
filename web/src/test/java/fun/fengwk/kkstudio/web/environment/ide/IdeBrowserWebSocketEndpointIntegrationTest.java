@@ -86,7 +86,7 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
               return new IdeRequest(identity, UUID.randomUUID(), reply);
             });
 
-    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/home/dev/project");
+    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
     OkHttpClient browser = localhostClient();
     try {
       BlockingQueue<String> echoed = new LinkedBlockingQueue<>();
@@ -208,5 +208,11 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
         // 网关对 echo 字节的 ACK：无需处理。
       }
     }
+  }
+
+  /** bootstrap 消费的真实前置：先由真实 OPEN_VIEW 授权视图，再消费一次性票据换 cookie。 */
+  private String openSession(IdeSessionIdentity identity, String viewId, String workspacePath) {
+    sessions.viewOpened(identity, viewId, workspacePath);
+    return sessions.open(identity, viewId, workspacePath);
   }
 }
