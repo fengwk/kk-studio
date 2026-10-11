@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { FolderOpen, PanelRightClose, Terminal, X } from 'lucide-react'
 import { environmentService } from '@/shared/api/environment-service'
 import type { EnvironmentCardDTO, IdeViewDTO } from '@/shared/api/contracts/ai-environment'
 import { OpenDirectoryModal } from '@/features/ai/ide/OpenDirectoryModal'
@@ -341,8 +342,8 @@ export function IdeOverlayPanel({
     }
   }, [view, executeClose])
 
-  // 新建终端
-  const handleNewTerminal = useCallback(async () => {
+  // 打开当前视图的终端
+  const handleOpenTerminal = useCallback(async () => {
     if (!view) return
     setTerminalError(null)
     try {
@@ -448,9 +449,11 @@ export function IdeOverlayPanel({
     return null
   }
 
-  const currentEnvName = environment?.name
-    ?? availableEnvironments.find((e) => e.id === view?.environmentId || e.id === selectedEnvId)?.name
+  const currentEnvId = view?.environmentId ?? environment?.id ?? selectedEnvId
+  const currentEnvName = availableEnvironments.find((e) => e.id === currentEnvId)?.name
+    ?? (environment?.id === currentEnvId ? environment.name : undefined)
     ?? ''
+  const locationTitle = [currentEnvName, view?.directory].filter(Boolean).join(' · ')
 
   return (
     <aside
@@ -465,53 +468,62 @@ export function IdeOverlayPanel({
     >
       <header className="ide-toolbar" data-testid="ide-toolbar">
         <div className="ide-toolbar-info">
-          {currentEnvName ? (
-            <span className="ide-toolbar-env" data-testid="ide-env-badge" title={currentEnvName}>
-              {currentEnvName}
-            </span>
-          ) : null}
           {view?.directory ? (
-            <span className="ide-toolbar-dir" data-testid="ide-directory-badge" title={view.directory}>
-              {view.directory}
+            <Button
+              variant="ghost"
+              size="compact"
+              className="ide-toolbar-directory"
+              onClick={() => setIsDirectoryModalOpen(true)}
+              aria-label={t('ai.ide.openDirectory')}
+              title={locationTitle}
+              data-testid="ide-open-directory-btn"
+            >
+              <FolderOpen size={14} aria-hidden="true" />
+              <span className="ide-toolbar-dir" data-testid="ide-directory-badge">
+                {view.directory}
+              </span>
+            </Button>
+          ) : (
+            <span className="ide-toolbar-title" title={currentEnvName || undefined}>
+              {t('ai.ide.title')}
             </span>
-          ) : null}
+          )}
         </div>
         <div className="ide-toolbar-actions">
           {view != null ? (
-            <>
-              <Button
-                variant="ghost"
-                size="compact"
-                onClick={() => setIsDirectoryModalOpen(true)}
-                data-testid="ide-open-directory-btn"
-              >
-                {t('ai.ide.openDirectory')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="compact"
-                onClick={handleNewTerminal}
-                data-testid="ide-new-terminal-btn"
-              >
-                {t('ai.ide.newTerminal')}
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="compact"
+              className="ide-toolbar-icon"
+              onClick={handleOpenTerminal}
+              aria-label={t('ai.ide.openTerminal')}
+              title={t('ai.ide.openTerminal')}
+              data-testid="ide-terminal-btn"
+            >
+              <Terminal size={14} aria-hidden="true" />
+            </Button>
           ) : null}
           <Button
             variant="ghost"
             size="compact"
+            className="ide-toolbar-icon"
             onClick={handleCollapse}
+            aria-label={t('ai.ide.collapse')}
+            title={t('ai.ide.collapse')}
             data-testid="ide-collapse-btn"
           >
-            {t('ai.ide.collapse')}
+            <PanelRightClose size={14} aria-hidden="true" />
           </Button>
           <Button
             variant="ghost"
             size="compact"
+            className="ide-toolbar-icon"
             onClick={handleCloseClick}
+            aria-label={t('ai.ide.close')}
+            title={t('ai.ide.close')}
             data-testid="ide-close-btn"
           >
-            {t('ai.ide.close')}
+            <X size={14} aria-hidden="true" />
           </Button>
         </div>
       </header>
