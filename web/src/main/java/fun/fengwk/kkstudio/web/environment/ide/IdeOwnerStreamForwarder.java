@@ -75,6 +75,8 @@ public final class IdeOwnerStreamForwarder {
             new AbstractWebSocketHandler() {
               @Override
               public void afterConnectionEstablished(WebSocketSession session) {
+                session.setBinaryMessageSizeLimit(IdeStreamFrameBridge.MAX_BINARY_FRAME_BYTES);
+                session.setTextMessageSizeLimit(IdeStreamFrameBridge.MAX_TEXT_FRAME_BYTES);
                 WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
                 ownerPeer.set(peer);
                 new IdeStreamFrameBridge(nodePeer, peer).start();

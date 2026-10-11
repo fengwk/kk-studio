@@ -54,6 +54,8 @@ public final class IdeReverseStreamWebSocketHandler extends AbstractWebSocketHan
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+    session.setBinaryMessageSizeLimit(IdeStreamFrameBridge.MAX_BINARY_FRAME_BYTES);
+    session.setTextMessageSizeLimit(IdeStreamFrameBridge.MAX_TEXT_FRAME_BYTES);
     String ticket = ticketOf(session);
     EnvironmentId environmentId = environmentOf(session);
     if (ticket == null || environmentId == null) {

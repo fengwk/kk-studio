@@ -12,7 +12,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.websocket.server.ServerContainer;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -273,11 +272,7 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
         });
     context.addServletMappingDecoded(IdeGatewayProperties.STREAM_PATH + "/*", "ideReverseStream");
     tomcat.start();
-    // 与生产一致：容器级 JSR-356 帧上限必须容纳 64 KiB 数据分段与 16 KiB 控制帧。
-    ServerContainer serverContainer =
-        (ServerContainer) context.getServletContext().getAttribute(ServerContainer.class.getName());
-    serverContainer.setDefaultMaxBinaryMessageBufferSize(16 * 1024 * 1024);
-    serverContainer.setDefaultMaxTextMessageBufferSize(16 * 1024 * 1024);
+    // 帧上限一律由生产代码按会话显式设置（反向端点与 owner 转发客户端），不再用容器级整包缓冲兜底。
     forwarderNode = tomcat;
     return tomcat.getConnector().getLocalPort();
   }

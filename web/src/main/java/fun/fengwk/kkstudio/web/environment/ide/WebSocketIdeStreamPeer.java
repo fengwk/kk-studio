@@ -35,7 +35,7 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
   private final Object stateLock = new Object();
   private final Object sendLock = new Object();
   private long queuedBytes;
-  private boolean closed;
+  private volatile boolean closed;
 
   WebSocketIdeStreamPeer(WebSocketSession session) {
     this.session = Objects.requireNonNull(session, "session");
