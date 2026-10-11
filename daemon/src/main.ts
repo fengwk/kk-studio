@@ -3,7 +3,6 @@ import { pathToFileURL } from 'node:url'
 
 import type { CapabilityExecutor, DaemonConfig } from './contracts.js'
 import {
-  INVALID_CONFIGURATION_MARKER,
   checkConfig,
   decodeBase64Args,
   invalidConfigurationLine,
@@ -214,12 +213,12 @@ async function closeAll(closers: Array<() => Promise<void>>): Promise<unknown[]>
 /**
  * 启动失败的安全单行诊断。
  *
- * <p>平台无法提供严格收敛时给出固定原因（例如 darwin 的 strict confinement/setsid 不可用），让 operator 看到真实的平台
- * 事实；其它失败继续复用配置诊断的脱敏规则。这里只输出 native 构造的固定文案，绝不回显原始异常、路径或凭证。
+ * <p>平台无法提供严格收敛时使用 `daemon failed:` 前缀，避免把它误当成配置错误而诱导 operator 改配置；其它启动失败继续复用
+ * 配置诊断的脱敏规则。这里只输出 native 构造的固定文案，绝不回显原始异常、路径或凭证。
  */
 function startupFailureLine(error: unknown): string {
   if (error instanceof UnsupportedPlatformError) {
-    return `${INVALID_CONFIGURATION_MARKER}: ${error.message}`
+    return `daemon failed: ${error.message}`
   }
   return invalidConfigurationLine(error)
 }

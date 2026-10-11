@@ -149,13 +149,13 @@ describe('daemon compiled CLI runtime', () => {
       await writeConfig(fixture)
 
       const result = await runCli(['--config', fixture.configPath])
-      // 正常 READY 启动在 macOS 上被 native 工厂拒绝：非零退出，且不建立 control 连接。
+      // 正常 READY 启动在 macOS 上被 native 工厂拒绝：非零退出，且控制面未收到任何消息。
       expect(result.signal).toBeNull()
       expect(result.code).toBe(1)
       expect(result.stdout).toBe('')
       expect(fixture.received).toHaveLength(0)
-      // operator 看到真实平台原因，且不回显注册凭证。
-      expect(result.stderr).toContain('Invalid daemon configuration:')
+      // 平台原因以 `daemon failed:` 输出，不误导为配置错误；不回显注册凭证。
+      expect(result.stderr).toContain('daemon failed:')
       expect(result.stderr).toContain('strict native process confinement is unavailable on darwin')
       expect(result.stderr).toContain('setsid')
       expect(result.stderr).not.toContain(TOKEN)
