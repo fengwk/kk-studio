@@ -96,6 +96,7 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
               new Request.Builder()
                   .url("ws://" + ENVIRONMENT + ".ide.test:" + port + "/ws/echo")
                   .header("Cookie", cookieHeader(cookie))
+                  .header("Origin", "http://" + ENVIRONMENT + ".ide.test:" + port)
                   .build(),
               new WebSocketListener() {
                 @Override

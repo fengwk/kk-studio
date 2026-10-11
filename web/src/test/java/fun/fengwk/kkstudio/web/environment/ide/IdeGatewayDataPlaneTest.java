@@ -160,6 +160,7 @@ class IdeGatewayDataPlaneTest {
     harness.transport.peerFactory = () -> peer;
 
     MockHttpServletRequest request = harness.request("POST", "/upload");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
     request.setContent(new byte[4 * 1024 * 1024]);
     MockHttpServletResponse response = new MockHttpServletResponse();
     harness.dataPlane.handleHttp(ENV, "/upload", request, response);
@@ -177,6 +178,7 @@ class IdeGatewayDataPlaneTest {
     byte[] payload = "hello-code-server".getBytes(StandardCharsets.UTF_8);
 
     MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
     request.setContent(payload);
     MockHttpServletResponse response = new MockHttpServletResponse();
     harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
@@ -185,6 +187,87 @@ class IdeGatewayDataPlaneTest {
     assertEquals(payload.length, peer.receivedRequestBytes);
     assertEquals("/api/save", harness.transport.lastCommand.get().path());
     assertEquals("POST", harness.transport.lastCommand.get().method());
+  }
+
+  /** 同站其它子域或跨站的 unsafe 请求必须被拒绝（精确同源，不允许任意 scheme/port）。 */
+  @Test
+  void rejectsUnsafeRequestFromForeignOrigin() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Origin", "https://evil." + ENV + ".ide.test");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+  }
+
+  /** 缺 Origin 且无明确同站声明（Sec-Fetch-Site）时 fail-closed。 */
+  @Test
+  void rejectsUnsafeRequestWithoutOriginAndSecFetchSite() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+  }
+
+  @Test
+  void rejectsCrossSiteSecFetchSite() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Sec-Fetch-Site", "cross-site");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+  }
+
+  /** 精确同源（scheme+host+effective port）的 unsafe 请求与同站声明都放行。 */
+  @Test
+  void allowsExactSameOriginUnsafeRequest() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer = new ScriptedPeer(0, List.of());
+    harness.transport.peerFactory = () -> peer;
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
+    request.addHeader("Sec-Fetch-Site", "same-origin");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(200, response.getStatus());
+  }
+
+  /** 缺 Origin 但声明 same-origin/none（直接输入/同源导航）时按同源处理。 */
+  @Test
+  void allowsUnsafeRequestWithSameSiteSecFetchSiteOnly() throws Exception {
+    Harness harness = new Harness();
+    harness.transport.peerFactory = () -> new ScriptedPeer(0, List.of());
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Sec-Fetch-Site", "none");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(200, response.getStatus());
+  }
+
+  /** OPTIONS 不被代理。 */
+  @Test
+  void doesNotProxyOptions() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("OPTIONS", "/api/save");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+    assertEquals(0, harness.transport.abandoned.size());
   }
 
   @Test
