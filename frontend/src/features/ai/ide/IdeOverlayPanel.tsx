@@ -560,7 +560,6 @@ export function IdeOverlayPanel({
                 <Select
                   value={selectedEnvId}
                   onChange={(val) => setSelectedEnvId(val)}
-                  size="compact"
                   options={availableEnvironments.map((env) => ({
                     value: env.id,
                     label: `${env.name}${env.ready ? '' : ` (${t('ai.ide.offline')})`}`,
@@ -623,7 +622,7 @@ export function IdeOverlayPanel({
                 {t('ai.ide.cancel')}
               </Button>
               <Button
-                variant="danger"
+                danger
                 size="compact"
                 onClick={() => {
                   setConfirmCloseOpen(false)
@@ -648,7 +647,7 @@ export function IdeOverlayPanel({
           role="alertdialog"
         >
           <div className="ide-confirm-dialog-content">
-            <p>{t('ai.ide.dirtyWarning', undefined, '切换环境将关闭当前 IDE 会话，未保存的修改可能会丢失。确认切换？')}</p>
+            <p>{t('ai.ide.dirtyNotice')}</p>
             <div className="ide-confirm-dialog-actions">
               <Button
                 variant="ghost"
@@ -661,7 +660,7 @@ export function IdeOverlayPanel({
                 {t('ai.ide.cancel')}
               </Button>
               <Button
-                variant="danger"
+                danger
                 size="compact"
                 onClick={handleApplyPendingSwitchEnv}
                 data-testid="ide-confirm-switch-btn"
