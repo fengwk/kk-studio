@@ -6,10 +6,10 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WebSocketServer } from 'ws'
+import { WebSocketServer, type WebSocket } from 'ws'
 import type { DaemonConfig, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
 import { createIdeService } from '../../src/ide/service.js'
-import { decodeBinaryFrame, decodeTextFrame } from '../../src/ide/wire.js'
+import { decodeBinaryFrame, decodeTextFrame, encodeWsFrame } from '../../src/ide/wire.js'
 
 /**
  * Opt-in acceptance test against a real, frozen code-server distribution.
@@ -102,6 +102,7 @@ interface Captured {
   body: string
   ended: boolean
   errors: string[]
+  wsMessages: string[]
 }
 
 async function createDistribution(): Promise<string> {
@@ -142,8 +143,10 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server acceptance', () => {
       await new Promise<void>((resolve) => gatewayServer.listen(0, '127.0.0.1', resolve))
       const gatewayPort = (gatewayServer.address() as AddressInfo).port
       const wss = new WebSocketServer({ server: gatewayServer })
-      const captured: Captured = { headers: [], body: '', ended: false, errors: [] }
+      const captured: Captured = { headers: [], body: '', ended: false, errors: [], wsMessages: [] }
+      const gatewaySockets: WebSocket[] = []
       wss.on('connection', (socket) => {
+        gatewaySockets.push(socket)
         socket.on('error', (error) => captured.errors.push(error.message))
         socket.on('message', (data, isBinary) => {
           if (!isBinary) {
@@ -161,6 +164,8 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server acceptance', () => {
             captured.body += frame.payload.toString('utf8')
           } else if (frame.kind === 'http-end') {
             captured.ended = true
+          } else if (frame.kind === 'ws-text' || frame.kind === 'ws-binary') {
+            captured.wsMessages.push(frame.payload.toString('utf8'))
           }
         })
       })
@@ -223,6 +228,29 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server acceptance', () => {
       const contentType = captured.headers.find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? ''
       expect(contentType).toContain('text/html')
       expect(captured.body.toLowerCase()).toContain('<html')
+
+      // A real WebSocket upgrade is proxied through the stream: code-server's health route answers
+      // every message with a JSON heartbeat, proving the reverse data plane end to end.
+      const before = gatewaySockets.length
+      const wsStream = service.handle(
+        {
+          action: 'OPEN_STREAM',
+          streamUrl: endpoint,
+          ticket: 'ticket-real',
+          mode: 'WS',
+          method: 'GET',
+          path: '/healthz',
+          headers: [],
+        },
+        signal(),
+      )
+      await waitFor(() => gatewaySockets.length > before)
+      const wsGateway = gatewaySockets[gatewaySockets.length - 1] as WebSocket
+      wsGateway.send(encodeWsFrame('text', Buffer.from('ping'), true))
+      await waitFor(() => captured.wsMessages.length > 0)
+      expect(captured.wsMessages.join('')).toContain('"event":"health"')
+      wsGateway.close()
+      expect((await wsStream).ok).toBe(true)
     },
     120_000,
   )
