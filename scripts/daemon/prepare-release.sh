@@ -19,7 +19,11 @@
 # 跨平台正确性：脚本用 `npm ci --omit=dev --os=<npmOs> --cpu=<npmCpu>` 为目标平台安装依赖，
 # 因此只会装入对应平台的 optional 预编译产物（例如 koffi 的 `@koromix/koffi-<os>-<arch>`），
 # 而不是把 Linux 上装出的 node_modules 原样打包成“假跨平台”。缺失对应预编译产物即失败，
-# 不静默降级。
+# 不静默降级。暂存前再删除其它平台的 `@koromix/koffi-*`，避免宿主上已有的可选包被复制进归档。
+#
+# code-server 只来自 `runtime-manifest.json` 里冻结的 GitHub Release（fengwk/code-server 的
+# `v4.141.0-kk.1`）。清单里的 URL 与 SHA256 在构建期原样使用；本脚本不查询 latest、不回退官方
+# coder/code-server 归档，也不在缺少正式摘要时编造哈希。
 #
 # 暂存资产（输出目录每次整体重建，因此每次恰好只包含下列五个文件）：
 #   kk-studio-daemon-<tag>-<os>-<arch>.tar.gz          可运行发行归档
@@ -149,14 +153,70 @@ koffi_optional_name() {
   echo "@koromix/koffi-${npm_os}-${npm_cpu}"
 }
 
+# 只保留目标平台的 koffi 预编译目录。npm --os/--cpu 负责选择安装；这里清掉其它平台目录，
+# 防止宿主 node_modules 里已经存在的可选包进入发行归档。
+prune_foreign_koffi() {
+  local keep=$1 directory name
+  [ -d "$NODE_MODULES/@koromix" ] || return 0
+  for directory in "$NODE_MODULES/@koromix"/koffi-*; do
+    [ -e "$directory" ] || continue
+    name=${directory##*/}
+    if [ "$name" != "${keep##*/}" ]; then
+      rm -rf -- "$directory"
+    fi
+  done
+}
+
+# 解包前拒绝绝对路径、盘符和 `..`。归档内指向解包根之内的符号链接保留（官方 code-server
+# 的 bin 与 node_modules 依赖它），指向根外的链接拒绝。只做一次列表，没有第二套解包实现。
+# GNU 与 BSD tar 的详细列表都以类型字符开头，路径从第 6 列开始。
+assert_archive_paths() {
+  local archive=$1 listing line type path target
+  listing=$(tar -tvzf "$archive") || die "cannot list the frozen code-server archive"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    type=${line%% *}
+    # GNU/BSD 详细列表：权限 用户/组 大小 日期 时间 路径。符号链接在路径后带 " -> target"。
+    path=$(printf '%s\n' "$line" | awk '{ for (i = 6; i <= NF; i++) printf "%s%s", $i, (i < NF ? " " : "") }')
+    target=
+    case "$type" in
+      l*)
+        target=${path#*" -> "}
+        path=${path%%" -> "*}
+        ;;
+    esac
+    case "$path" in
+      /* | ./*..* | *"/../"* | *"/.." | ".." | "../"* | *":"* | *\\*)
+        die "frozen code-server archive contains an unsafe path"
+        ;;
+    esac
+    if [ -n "$target" ]; then
+      case "$target" in
+        /* | *":"* | *\\*) die "frozen code-server archive contains a link that escapes the extraction root" ;;
+      esac
+      python3 - "$path" "$target" <<'PY' || die "frozen code-server archive contains a link that escapes the extraction root"
+import os, sys
+link, target = sys.argv[1], sys.argv[2]
+# prepare-release strips the archive's top-level directory before judging the link.
+stripped = link.split("/", 1)[1] if "/" in link else link
+base = os.path.dirname(stripped)
+resolved = os.path.normpath(os.path.join(base, target))
+if resolved == ".." or resolved.startswith("../") or os.path.isabs(resolved):
+    raise SystemExit(1)
+PY
+    fi
+  done <<<"$listing"
+}
+
 manifest_field() {
   local key=$1 field=$2
   "$NODE_BIN" -e '
     const fs = require("fs");
     const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const asset = manifest.codeServer[process.argv[2]];
-    if (!asset) { process.exit(2); }
-    process.stdout.write(String(asset[process.argv[3]] ?? ""));
+    const asset = manifest.codeServer && manifest.codeServer[process.argv[2]];
+    if (!asset || typeof asset !== "object") { process.exit(2); }
+    const value = asset[process.argv[3]];
+    process.stdout.write(value === undefined || value === null ? "" : String(value));
   ' "$RUNTIME_MANIFEST" "$key" "$field" 2>/dev/null || die "runtime manifest has no asset for $key"
 }
 
@@ -173,6 +233,7 @@ install_platform_dependencies() {
     --os="$npm_os" --cpu="$npm_cpu" ||
     die "cannot install production dependencies for $npm_os-$npm_cpu"
   koffi_optional=$(koffi_optional_name "$npm_os" "$npm_cpu")
+  prune_foreign_koffi "$koffi_optional"
   [ -d "$NODE_MODULES/$koffi_optional" ] ||
     die "target platform prebuilt is missing: $koffi_optional (refusing a fake cross-platform archive)"
 }
@@ -238,8 +299,13 @@ main() {
   local code_server_url code_server_sha
   code_server_url=$(manifest_field "$os-$arch" url)
   code_server_sha=$(manifest_field "$os-$arch" sha256)
+  case "$code_server_url" in
+    https://github.com/fengwk/code-server/releases/download/v4.141.0-kk.1/code-server-4.141.0-kk.1-"$os"-"$arch".tar.gz)
+      ;;
+    *) die "runtime manifest URL for $os-$arch is not the frozen fork release asset" ;;
+  esac
   [[ $code_server_sha =~ ^[0-9a-f]{64}$ ]] ||
-    die "runtime manifest sha256 for $os-$arch is not 64 hex characters"
+    die "runtime manifest sha256 for $os-$arch is not frozen yet"
 
   local commit source_date_epoch
   if ! commit=$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}' 2>/dev/null); then
@@ -264,6 +330,7 @@ main() {
   actual_sha=$(sha256_of "$code_server_tar")
   [ "$actual_sha" = "$code_server_sha" ] ||
     die "code-server runtime SHA256 does not match the frozen manifest for $os-$arch"
+  assert_archive_paths "$code_server_tar"
 
   STAGING_DIR=$(mktemp -d "$(dirname "$RELEASE_DIR")/.kk-studio-daemon-release.XXXXXX")
   mkdir -p "$STAGING_DIR/node_modules" "$STAGING_DIR/runtime/code-server"
@@ -271,8 +338,16 @@ main() {
   cp -R "$DIST_DIR/." "$STAGING_DIR/"
   cp -R "$NODE_MODULES/." "$STAGING_DIR/node_modules/"
   tar -xzf "$code_server_tar" -C "$STAGING_DIR/runtime/code-server" --strip-components=1
-  [ -x "$STAGING_DIR/runtime/code-server/lib/node" ] ||
-    die "code-server runtime does not provide lib/node for $os-$arch"
+  local node_name=node
+  if [ "$os" = windows ]; then node_name=node.exe; fi
+  [ -f "$STAGING_DIR/runtime/code-server/lib/$node_name" ] ||
+    die "code-server runtime does not provide lib/$node_name for $os-$arch"
+  if [ "$os" != windows ]; then
+    [ -x "$STAGING_DIR/runtime/code-server/lib/$node_name" ] ||
+      die "code-server runtime lib/$node_name is not executable for $os-$arch"
+  fi
+  [ -f "$STAGING_DIR/runtime/code-server/out/node/entry.js" ] ||
+    die "code-server runtime does not provide out/node/entry.js for $os-$arch"
   # IDE 扩展源码随发行包一起复制；缺失时跳过（扩展尚未提供的平台/阶段不伪造）。
   if [ -d "$IDE_EXTENSION_DIR" ]; then
     mkdir -p "$STAGING_DIR/ide-extension"
