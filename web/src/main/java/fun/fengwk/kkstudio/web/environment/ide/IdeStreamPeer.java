@@ -14,6 +14,14 @@ public interface IdeStreamPeer extends AutoCloseable {
 
   void sendBinary(byte[] frame);
 
+  /**
+   * 发送一个消费 credit 的 ACK 帧。
+   *
+   * <p>ACK 只是对已真实交付字节的消费反馈：连接断开后这些反馈可以安全丢弃（不得因此丢弃已入队待交付的响应），因此已关闭的 peer 收到 ACK 不报错。数据与其它控制帧在关闭后仍必须
+   * fail-closed。
+   */
+  void sendAcknowledgement(byte[] frame);
+
   /** 阻塞直到有入站帧或超时；返回 {@code null} 表示本次没有入站帧（需结合 {@link #closed()} 判断连接是否已关闭）。 */
   Inbound poll(Duration timeout) throws InterruptedException;
 
