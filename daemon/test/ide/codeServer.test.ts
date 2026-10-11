@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { request } from 'node:http'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { DaemonConfig, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
 import { createCodeServerManager, idePaths, resolveCodeServerLaunch } from '../../src/ide/codeServer.js'
 
@@ -68,6 +70,12 @@ const SLOW_READY_SERVER = READY_SERVER.replace(
   'server.listen(Number(portText), host)',
   'setTimeout(function () { server.listen(Number(portText), host) }, 300)',
 )
+const IPC_READY_SERVER = READY_SERVER.replace(
+  'const shutdown = () =>',
+  `const ipc = http.createServer((req, res) => { res.end('private-session') })
+ipc.listen(arg('--session-socket'))
+const shutdown = () =>`,
+)
 
 function delay(millis: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, millis))
@@ -75,9 +83,12 @@ function delay(millis: number): Promise<void> {
 
 class TestSupervisor implements ProcessSupervisor {
   readonly children: ChildProcess[] = []
+  readonly specs: ProcessSpec[] = []
+  readonly terminatedPids: number[] = []
   readonly options: { terminateError?: Error } = {}
 
   async start(spec: ProcessSpec): Promise<ManagedProcess> {
+    this.specs.push(spec)
     const child = spawn(spec.executable, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] })
     this.children.push(child)
     const exit = new Promise<ProcessExit>((resolve) => {
@@ -90,6 +101,7 @@ class TestSupervisor implements ProcessSupervisor {
       stderr: child.stderr as ManagedProcess['stderr'],
       exit,
       terminate: async () => {
+        this.terminatedPids.push(child.pid as number)
         // Read the flag lazily so a test can fail termination after startup.
         if (this.options.terminateError) {
           throw this.options.terminateError
@@ -108,6 +120,13 @@ class TestSupervisor implements ProcessSupervisor {
     for (const child of this.children) {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGKILL')
+        await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      }
+    }
+    for (const spec of this.specs) {
+      const index = spec.args.indexOf('--session-socket')
+      if (index >= 0) {
+        await rm(dirname(spec.args[index + 1]!), { recursive: true, force: true })
       }
     }
   }
@@ -119,9 +138,8 @@ async function distribution(script: string): Promise<string> {
   const codeServerRoot = join(root, 'runtime', 'code-server')
   await mkdir(join(codeServerRoot, 'lib'), { recursive: true })
   await mkdir(join(codeServerRoot, 'out', 'node'), { recursive: true })
-  const launcher = join(codeServerRoot, 'lib', 'node')
-  await writeFile(launcher, '#!/bin/sh\nexec node "$@"\n')
-  await chmod(launcher, 0o755)
+  const launcher = join(codeServerRoot, 'lib', process.platform === 'win32' ? 'node.exe' : 'node')
+  await copyFile(process.execPath, launcher)
   await writeFile(join(codeServerRoot, 'out', 'node', 'entry.js'), script)
   const extensionDir = join(root, 'ide-extension')
   await mkdir(extensionDir, { recursive: true })
@@ -147,6 +165,40 @@ const credentials = { url: 'http://127.0.0.1:1', token: 'secret' }
 const signal = (): AbortSignal => new AbortController().signal
 
 describe('code-server process manager', () => {
+  it.runIf(process.platform !== 'win32')('keeps IPC private and short even with a long persistent data path', async () => {
+    const root = await distribution(IPC_READY_SERVER)
+    const cfg = config(root)
+    cfg.dataDir = join(root, '目录'.repeat(35))
+    const supervisor = new TestSupervisor()
+    cleanups.push(() => supervisor.close())
+    const manager = createCodeServerManager(cfg, supervisor, credentials)
+    await manager.ensureStarted(signal())
+    const args = supervisor.specs[0]!.args
+    const socket = args[args.indexOf('--session-socket') + 1]!
+    expect(Buffer.byteLength(join(idePaths(cfg).userDataDir, 'code-server-ipc.sock'))).toBeGreaterThan(107)
+    expect(Buffer.byteLength(socket)).toBeLessThanOrEqual(107)
+    const info = await stat(dirname(socket))
+    expect(info.mode & 0o777).toBe(0o700)
+    expect(info.uid).toBe(process.getuid!())
+    expect((await stat(socket)).isSocket()).toBe(true)
+    const response = await new Promise<string>((resolve, reject) => {
+      const req = request({ socketPath: socket, path: '/', agent: false }, (res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => { body += chunk })
+        res.on('end', () => resolve(body))
+        res.on('error', reject)
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    expect(response).toBe('private-session')
+    const close = manager.close()
+    expect(manager.close()).toBe(close)
+    await close
+    expect(existsSync(dirname(socket))).toBe(false)
+  })
+
   it('derives private paths and resolves the bundled Node launcher', async () => {
     const root = await distribution(READY_SERVER)
     const paths = idePaths(config(root))
@@ -187,6 +239,7 @@ describe('code-server process manager', () => {
     const manager = createCodeServerManager(config(root), supervisor, credentials)
 
     await expect(manager.ensureStarted(signal())).rejects.toThrow(/could not be terminated/)
+    await expect(manager.close()).rejects.toThrow('cannot terminate')
   })
 
   it('fails the login when the upstream connection resets', async () => {
@@ -237,14 +290,31 @@ describe('code-server process manager', () => {
     const manager = createCodeServerManager(config(root), supervisor, credentials)
 
     const pending = manager.ensureStarted(signal())
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     await delay(50)
     await manager.close()
     expect(manager.session()).toBeUndefined()
-    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await rejected
     for (const child of supervisor.children) {
       expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
     }
     await expect(manager.ensureStarted(signal())).rejects.toThrow('ide service is closed')
+  })
+
+  it('converges an exited scope before starting a replacement', async () => {
+    const root = await distribution(READY_SERVER)
+    const supervisor = new TestSupervisor()
+    cleanups.push(() => supervisor.close())
+    const manager = createCodeServerManager(config(root), supervisor, credentials)
+    const first = await manager.ensureStarted(signal())
+    const child = supervisor.children[0]!
+    child.kill('SIGKILL')
+    await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    expect(manager.session()).toBeUndefined()
+    const replacement = await manager.ensureStarted(signal())
+    expect(replacement.pid).not.toBe(first.pid)
+    expect(supervisor.terminatedPids).toContain(first.pid)
+    await manager.close()
   })
 
   it('surfaces a termination failure on close', async () => {
@@ -256,5 +326,9 @@ describe('code-server process manager', () => {
 
     supervisor.options.terminateError = new Error('cannot terminate')
     await expect(manager.close()).rejects.toThrow('cannot terminate')
+    const args = supervisor.specs[0]!.args
+    if (process.platform !== 'win32') {
+      expect(existsSync(dirname(args[args.indexOf('--session-socket') + 1]!))).toBe(true)
+    }
   })
 })

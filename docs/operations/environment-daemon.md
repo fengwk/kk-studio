@@ -15,14 +15,17 @@ OS 用户只运行**一个受管 Daemon**，固定根目录 `~/.kk-studio`（Win
 LSP client 已内嵌在 Daemon 发行归档中。Studio 没有内置登录鉴权，入口须配置外部认证，只有可信的
 用户与 Agent 才应取得 Environment 的宿主权限。
 
+当前可运行平台为 Linux 与 Windows。macOS 无法在无特权条件下提供所需的完整进程收敛，
+Daemon 启动会明确失败；提供 macOS 归档与安装器入口不代表该平台通过运行验收。
+
 | 平台 | 额外条件 | 常驻方式 |
 | --- | --- | --- |
 | Linux | 可用的 `systemctl --user`，curl 与 `sha256sum` 或 `shasum` | 用户服务 `kk-studio-daemon.service` |
-| macOS | 已登录桌面，可用的 `gui/$(id -u)` 域；curl 与 `sha256sum` 或 `shasum` | LaunchAgent `fun.fengwk.kkstudio.environment-daemon` |
+| macOS | 不具备严格原生进程收敛能力 | 启动失败（`UnsupportedPlatformError`） |
 | Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、可用的 Bash（配置绝对可执行路径或服务 PATH 上可解析） | 当前用户的 AtLogOn 计划任务，仅在该用户交互登录期间运行 |
 
 Linux 注销后要持续运行，由管理员开启 `loginctl enable-linger <用户名>`，安装器不代为开启。
-macOS 纯 SSH 会话如果没有图形登录域，不能安装 LaunchAgent。Windows 的 Bash 可来自 Git for
+Windows 的 Bash 可来自 Git for
 Windows 或兼容实现，这是命令工具的解释器要求，不需要用 Git 克隆源码；计划任务是普通
 AtLogOn 任务，不是 Windows Service，重启设置只是尽力而为，Task Scheduler 也不捕获
 stdout/stderr。
@@ -148,6 +151,10 @@ token 是独立兄弟文件 `daemon.token`。Daemon 不做任何独立配置解�
 `~/Library` 及其上级）是用户自己的信任边界，安装器不检查也不修改它们，不因 group 可写或为符号
 链接而拒绝安装，也不承诺抵御能修改这些目录的本机用户。token 是磁盘明文凭证，隐藏程度取决于
 文件权限，不等于加密存储。
+
+Linux 的 IDE 会话 IPC 使用独立的 `/tmp/kk-studio-ide-<随机标识>/` 私有目录（0700），
+避免 Unix socket 长度限制与持久数据路径耦合。它不保存用户文件，只有确认进程范围已收敛后才删除；
+运行期间不要手动清理。Windows 使用 code-server 的命名管道。
 
 ## 安装配置的字段与校验
 
@@ -306,13 +313,16 @@ IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`�
 环境代理地址只接受无认证的 `http://host:port`；HTTPS/WSS 通过 CONNECT，
 不支持 SOCKS、代理认证或 TLS 到代理，非法配置在启动时拒绝。
 
-macOS 的回退来源是网络设置；Linux 的桌面代理取决于宿主支持，服务器/容器通常应显式
-传入环境变量。Windows 读取当前运行用户的系统代理（含系统自动代理能力），不是
-`netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。未显式指定时
-Daemon 的 HTTP 客户端使用操作系统的代理设置；环境变量始终优先于系统代理回退。
+Linux 通过宿主的 GLib/GIO 读取桌面代理，运行环境须提供相应共享库；服务器/容器通常应显式
+传入环境变量。Windows 通过 WinHTTP 读取当前运行用户的手动代理与 PAC/自动发现设置，不是
+`netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。系统解析失败或返回不支持的
+代理类型时请求失败，不静默改为直连。macOS 因无法提供严格原生进程收敛而拒绝启动，不提供系统代理回退。
+
+私有 code-server 的探活、登录与 IDE loopback HTTP 通道使用显式直连；环境或系统代理不会收到
+这些请求中的私有凭据。
 
 环境变量必须进入 Daemon 进程：终端 `export` 不会改变已经运行的服务。安装器不保存
-代理配置文件；Linux systemd user service、macOS LaunchAgent 或 Windows 计划任务
+代理配置文件；Linux systemd user service 或 Windows 计划任务
 需要由对应的用户环境/服务管理器提供变量，修改后重新启动 Daemon。将 studio 和
 对象存储的内网地址加入绕过规则，避免控制连接与预签名上传误走外部代理。
 
@@ -335,6 +345,20 @@ Environment 页面确认 `READY`**。只有 READY 才表示 Daemon 已接受当�
 Chat 分支中选择该 Environment，并给 Agent 配置所需的 Environment Tools。READY 后 Platform 会
 异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用，技能引用可退回
 Platform Skill URI。
+
+## 在 Chat 中查看文件与使用终端
+
+先将聊天窗格绑定到一个 `READY` 的 Environment。在输入框输入 `/files` 或通过 `+` 菜单打开
+文件面板；输入 `/shell` 会打开面板并按需创建或聚焦终端。面板从宿主用户的 home 目录开始，
+点击顶部目录可切换到其它已有目录，终端图标用于再次聚焦终端。
+
+桌面面板从聊天窗格右侧覆盖，窄窗格下覆盖整个窗格。收起面板或切换聊天窗格不会丢弃编辑缓冲区，
+也不会关闭终端；点击关闭才释放该视图和所属终端。存在未保存编辑时，先保存或丢弃修改再关闭、
+切换目录或离开页面。
+
+每个聊天窗格有独立视图、编辑状态和终端，但同一 Environment 的文件存储共享。这不是实时协作
+编辑：其他视图保存后会产生磁盘外部变更；若自己的缓冲区也有修改，编辑器可能提示保存冲突，
+需要比较内容或明确选择覆盖。
 
 ## 管理身份与冲突处理
 

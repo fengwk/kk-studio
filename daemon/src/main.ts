@@ -222,7 +222,7 @@ async function closeAll(closers: Array<() => Promise<void>>): Promise<unknown[]>
  * 启动失败的安全单行诊断。
  *
  * <p>平台无法提供严格收敛时使用 `daemon failed:` 前缀，避免把它误当成配置错误而诱导 operator 改配置；其它启动失败继续复用
- * 配置诊断的脱敏规则。这里只输出 native 构造的固定文案，绝不回显原始异常、路径或凭证。
+ * 配置诊断的脱敏规则。这里只输出原生与代理边界构造的固定文案，绝不回显原始异常、路径或凭证。
  */
 function startupFailureLine(error: unknown): string {
   if (error instanceof UnsupportedPlatformError || error instanceof ProxyConfigurationError) {

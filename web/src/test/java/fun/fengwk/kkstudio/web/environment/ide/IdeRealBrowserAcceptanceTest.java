@@ -193,8 +193,8 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
 
     Path node = resolveNodeBinary();
     Path daemonSource = repositoryRoot().resolve("daemon");
-    ensureDaemonBuilt(daemonSource, node);
-    Path stage = stageDistribution(daemonSource, requireEnv("KK_STUDIO_IDE_ACCEPTANCE_DIR"));
+    Path builtDaemon = buildDaemon(daemonSource, node);
+    Path stage = stageDistribution(builtDaemon, requireEnv("KK_STUDIO_IDE_ACCEPTANCE_DIR"));
 
     scopesBefore = scopeDirectories();
     startDaemon(node, stage);
@@ -212,6 +212,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
           workspace.path("folders").get(0).path("path").asText(),
           "the managed workspace must contain the requested host directory");
     }
+    Path sessionSocket = assertCodeServerIpc(node);
 
     Path report = tempRoot.resolve("report.json");
     Path screenshots = tempRoot.resolve("screenshots");
@@ -252,6 +253,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     awaitPidGone(pidB, Duration.ofSeconds(30), "terminal B after its view closed");
 
     stopDaemonAndAssertConverged();
+    assertFalse(Files.exists(sessionSocket.getParent()), "private IPC directory must be released");
     assertFalse(isAlive(pidA), "terminal A pid must stay converged after daemon shutdown");
     assertFalse(isAlive(pidB), "terminal B pid must stay converged after daemon shutdown");
     completed = true;
@@ -314,25 +316,71 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
 
   /**
    * 本用例不联网装依赖：{@code daemon/node_modules} 必须已就绪，否则明确失败并给出 setup 指引。随后每次都用生产 {@code npm run build}
-   * 重新构建（PATH 前置随包 Node24，使 npm/tsc 与实际 Node override 一致），并先删除旧 {@code
-   * dist}，避免拿陈旧产物或已删除源码的残留产物通过验收。
+   * 在用例独占目录重新构建（PATH 前置随包 Node24），不删除其它并行验证使用的 {@code dist}，也不复用陈旧产物。
    */
-  private void ensureDaemonBuilt(Path daemonSource, Path node) throws Exception {
+  private Path buildDaemon(Path daemonSource, Path node) throws Exception {
     if (!Files.isDirectory(daemonSource.resolve("node_modules"))) {
       fail("daemon/node_modules is missing; run `npm ci` in daemon/ before this acceptance test");
     }
+    Path buildRoot = tempRoot.resolve("daemon-build");
+    Files.createDirectories(buildRoot);
+    copyTree(daemonSource.resolve("src"), buildRoot.resolve("src"));
+    copyTree(daemonSource.resolve("ide-extension"), buildRoot.resolve("ide-extension"));
+    for (String file : List.of("package.json", "tsconfig.json")) {
+      Files.copy(daemonSource.resolve(file), buildRoot.resolve(file));
+    }
+    Files.createSymbolicLink(buildRoot.resolve("node_modules"), daemonSource.resolve("node_modules"));
     Map<String, String> environment = new HashMap<>();
     environment.put("PATH", node.toAbsolutePath().getParent() + File.pathSeparator + systemPath());
     environment.put("TMPDIR", processTmp.toString());
     runCommand(
         List.of("npm", "run", "build"),
-        daemonSource,
+        buildRoot,
         tempRoot.resolve("daemon-build.log"),
         600,
         environment);
     assertTrue(
-        Files.isRegularFile(daemonSource.resolve("dist/main.js")),
+        Files.isRegularFile(buildRoot.resolve("dist/main.js")),
         "daemon dist/main.js must exist after `npm run build`");
+    return buildRoot;
+  }
+
+  /** 长数据目录仍须有真实可连接的 IPC，不能仅凭 workbench 可见判定完整启动。 */
+  private Path assertCodeServerIpc(Path node) throws Exception {
+    Set<Path> sockets = new LinkedHashSet<>();
+    try (Stream<ProcessHandle> descendants = daemon.toHandle().descendants()) {
+      descendants.forEach(
+          child -> {
+            String[] args = child.info().arguments().orElse(new String[0]);
+            for (int index = 0; index + 1 < args.length; index++) {
+              if ("--session-socket".equals(args[index])) {
+                sockets.add(Path.of(args[index + 1]));
+              }
+            }
+          });
+    }
+    assertEquals(1, sockets.size(), "one environment must own one private session IPC socket");
+    Path socket = sockets.iterator().next();
+    assertTrue(
+        socket.toString().getBytes(StandardCharsets.UTF_8).length <= 107,
+        "IPC path must fit the Linux kernel boundary");
+    assertEquals(
+        PosixFilePermissions.fromString("rwx------"), Files.getPosixFilePermissions(socket.getParent()));
+    runCommand(
+        List.of(
+            node.toString(),
+            "-e",
+            "const http=require('node:http');"
+                + "const req=http.request({socketPath:process.argv[1],"
+                + "path:'/session?filePath=probe',agent:false},res=>{"
+                + "res.resume();res.on('end',()=>{process.exitCode=res.statusCode===200?0:1})});"
+                + "req.on('error',()=>{process.exitCode=1});req.end()",
+            socket.toString()),
+        tempRoot,
+        tempRoot.resolve("ipc-probe.log"),
+        10,
+        Map.of());
+    return socket;
   }
 
   private static String systemPath() {
