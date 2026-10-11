@@ -104,15 +104,30 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
  * 这之外的任何查询失败都会抛出。
  */
 export class LinuxSystemProxyResolver implements SystemProxyResolver {
-  private readonly bindings: LinuxProxyBindings | null
+  private readonly loadBindings: () => LinuxProxyBindings | null
+  private bindings: LinuxProxyBindings | null = null
+  private bindingsLoaded = false
   private readonly active = new Set<ActiveLookup>()
   private closed = false
   private closing: Promise<void> | null = null
   /** 一次未被确认的原生释放：解析器进入不可用终态，绝不再分配新句柄，且 `close` 必须显式失败。 */
   private cleanupFailure: Error | null = null
 
-  constructor(bindings: LinuxProxyBindings | null) {
-    this.bindings = bindings
+  constructor(bindingsOrLoader: LinuxProxyBindings | null | (() => LinuxProxyBindings | null)) {
+    this.loadBindings = typeof bindingsOrLoader === 'function' ? bindingsOrLoader : () => bindingsOrLoader
+  }
+
+  /** 第一次查询才加载绑定。`null` 仍是有证据的桌面库缺失。加载期的其它失败必须抛出，不能改写成直连。 */
+  private bindingsForResolve(): LinuxProxyBindings | null {
+    if (!this.bindingsLoaded) {
+      try {
+        this.bindings = this.loadBindings()
+      } catch (error) {
+        throw asError(error)
+      }
+      this.bindingsLoaded = true
+    }
+    return this.bindings
   }
 
   async resolve(uri: string, signal: AbortSignal): Promise<string | null> {
@@ -126,7 +141,7 @@ export class LinuxSystemProxyResolver implements SystemProxyResolver {
       // 取消必须先于「来源缺失」判定：已取消的查询绝不因为缺少桌面代理库而被改写成直连。
       throw systemProxyError(SYSTEM_PROXY_CANCELLED)
     }
-    const bindings = this.bindings
+    const bindings = this.bindingsForResolve()
     if (bindings === null) {
       // 有证据的来源缺失（桌面代理库不存在）：操作系统没有代理来源可委托，等价于直连。
       return null

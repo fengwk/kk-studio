@@ -5,38 +5,30 @@ import { WindowsProcessSupervisor } from './process-supervisor-windows.js'
 /**
  * 按平台创建进程 supervisor。
  *
- * <p>所有用户子进程都必须经由这里启动：Linux 用新 session + 子进程收养（POSIX）收尾，Windows 用创建期归属的 Job 收尾。
- * 其它平台一律显式失败，绝不静默回退到「直接 spawn / 只 kill 根进程」。
+ * <p>所有用户子进程都必须经由这里启动：Linux 与 macOS 用同一套 POSIX supervisor（新 session、会话成员枚举、TERM→宽限→KILL、
+ * 启动身份核验），Windows 用创建期归属的 Job。其它平台一律显式失败，绝不静默回退到「直接 spawn / 只 kill 根进程」。
  *
- * <p>冻结契约要求无法提供**严格收敛保证**的平台必须 fail-closed。macOS 没有子进程收养者，未登记且故意 `setsid` 的后代会被
- * 重新挂到 launchd，native 层无法证明其归属，因此这里拒绝创建带副作用的 supervisor，而不是提供一个覆盖不全的假保证。
+ * <p>macOS 没有 Linux 的子进程收养者。未登记且故意 `setsid` 的后代会被重新挂到 launchd，收尾无法再证明它仍属于本次调用；
+ * 这是会话生命周期的边界，由 {@link processScopeCapabilities} 如实暴露，不是拒绝启动普通进程的理由，也不是安全沙箱。
  */
 export function createProcessSupervisor(): ProcessSupervisor {
   if (process.platform === 'win32') {
     return new WindowsProcessSupervisor()
   }
-  if (process.platform === 'linux') {
+  if (process.platform === 'linux' || process.platform === 'darwin') {
     return new PosixProcessSupervisor()
   }
   throw new UnsupportedPlatformError(process.platform)
 }
 
 /**
- * 平台无法提供严格收敛保证时的启动错误。
+ * 平台没有可用进程 supervisor 时的启动错误。
  *
  * <p>构造参数只接受平台名，{@link message} 由内部生成，是固定安全诊断：不含路径、凭证或原始异常，可直接作为单行启动诊断输出。
  */
 export class UnsupportedPlatformError extends Error {
   constructor(platform: NodeJS.Platform) {
-    super(unsupportedPlatformDiagnostic(platform))
+    super(`the native process supervisor does not support ${platform}`)
     this.name = 'UnsupportedPlatformError'
   }
-}
-
-/** darwin 说明严格收敛不可用，其它平台只报告不支持；固定文案，绝不回退。 */
-function unsupportedPlatformDiagnostic(platform: NodeJS.Platform): string {
-  if (platform === 'darwin') {
-    return 'strict native process confinement is unavailable on darwin: macOS has no child subreaper, so an unregistered descendant that calls setsid is reparented to launchd and cannot be proven converged'
-  }
-  return `the native process supervisor does not support ${platform}`
 }

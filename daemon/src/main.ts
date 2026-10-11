@@ -105,7 +105,7 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
   // 唯一由本 Daemon 注册的信号处理；finally 必须精确移除它，绝不动用进程上其它外部监听。
   const onDaemonSignal = (): void => runtime?.close()
   try {
-    // native 工厂是最严格的启动前提：平台无法提供严格收敛时，必须在任何本地副作用（mkdir/lock）之前失败关闭。
+    // 进程 supervisor 是启动前提：不支持的平台必须在任何本地副作用（mkdir/lock）之前失败。
     // 立即登记 closer，保证后续任一装配步骤失败时这个真实资源也会被释放。
     const supervisor = createProcessSupervisor()
     closers.push(() => supervisor.close())
@@ -221,8 +221,8 @@ async function closeAll(closers: Array<() => Promise<void>>): Promise<unknown[]>
 /**
  * 启动失败的安全单行诊断。
  *
- * <p>平台无法提供严格收敛时使用 `daemon failed:` 前缀，避免把它误当成配置错误而诱导 operator 改配置；其它启动失败继续复用
- * 配置诊断的脱敏规则。这里只输出原生与代理边界构造的固定文案，绝不回显原始异常、路径或凭证。
+ * <p>平台没有可用 supervisor，或出站代理配置本身非法时，使用 `daemon failed:` 前缀，避免把它误当成可改配置项；其它启动失败
+ * 继续复用配置诊断的脱敏规则。这里只输出原生与代理边界构造的固定文案，绝不回显原始异常、路径或凭证。
  */
 function startupFailureLine(error: unknown): string {
   if (error instanceof UnsupportedPlatformError || error instanceof ProxyConfigurationError) {

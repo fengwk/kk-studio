@@ -32,12 +32,12 @@ const MESSAGE_LIMIT = 300
  * 所以「许可之前失败」永远等价于「用户命令没有产生任何副作用」；许可之后则一律走完整收敛。
  *
  * <p>helper 与父进程之间另有一条**专用 IPC 通道**（不在用户命令的 stdin/stdout/stderr 里）：父进程被强杀时该通道由内核关闭，
- * helper 收到 `disconnect` 后收敛整个会话再退出，因此父进程崩溃不会留下失控的后代。
+ * helper 收到 `disconnect` 后尝试收敛会话再退出；这不是阻止命令主动逃逸的安全沙箱。
  *
- * <p>父进程同时把自己变成子进程收养者（Linux `PR_SET_CHILD_SUBREAPER`，失败即失败关闭）：helper 崩溃时，它名下已经 `setsid`
- * 的后代会被内核重新挂到父进程。父进程只收敛**本次调用新增**的直接子进程（对照 `start()` 时的基线）并排除其它活动 helper，
- * 绝不因为「是父进程的孩子」就整片收敛陌生会话。没有收养机制的平台（macOS）无法核实这层集合，限制由
- * `processScopeCapabilities()` 如实暴露。
+ * <p>在 Linux 上父进程同时把自己变成子进程收养者（`PR_SET_CHILD_SUBREAPER`，失败即失败关闭）：helper 崩溃时，它名下已经
+ * `setsid` 的后代会被内核重新挂到父进程。父进程只收敛**本次调用新增**的直接子进程（对照 `start()` 时的基线）并排除其它活动
+ * helper，绝不因为「是父进程的孩子」就整片收敛陌生会话。macOS 没有收养机制，`becomeChildSubreaper()` 返回 `false`，收尾
+ * 不做这层扫描；未登记且故意脱离的后代不在本次会话生命周期内，限制由 `processScopeCapabilities()` 如实暴露。
  */
 export class PosixProcessSupervisor implements ProcessSupervisor {
   private readonly processes = new Set<PosixManagedProcess>()
@@ -93,8 +93,7 @@ export class PosixProcessSupervisor implements ProcessSupervisor {
    * 登记 IDE PTY 等在 helper 会话之外、故意建立自己 POSIX session 的后代。
    *
    * <p>登记前必须先核实它确实是本范围的后代，并冻结其启动身份：只有「真后代 + 身份未变」才允许把它的会话纳入收敛集合，因此
-   * 复用了同一个 sid 的陌生进程绝不会被误杀。未登记的窗口由内核收养覆盖：后代一旦失去父进程就被重新挂到 helper（或 helper 已
-   * 崩溃时的父 daemon）名下，收尾时仍可核实并收敛。
+   * 复用了同一个 sid 的陌生进程不会被纳入本次收尾。Linux 的子进程收养可补充未登记窗口；macOS 没有这层能力。
    */
   async trackDescendant(rootPid: number, childPid: number): Promise<void> {
     const managed = [...this.processes].find((candidate) => candidate.pid === rootPid)
@@ -136,7 +135,7 @@ export class PosixManagedProcess implements ManagedProcess {
   /** 命令自然退出或 helper 结束的事实。 */
   readonly exit: Promise<ProcessExit>
 
-  /** 本次调用已经彻底结束（自然收敛完或显式收尾成功）：supervisor 据此释放记录。 */
+  /** 本次调用的本地资源所有权已结束；失败由 terminate/close 报告，supervisor 据此释放记录。 */
   readonly settled: Promise<void>
 
   private readonly helper: ChildProcessWithoutNullStreams
@@ -256,6 +255,8 @@ export class PosixManagedProcess implements ManagedProcess {
     } catch (error) {
       // 收敛失败时保留 0700 状态目录：scope/error/cleanup 是唯一可复核的收尾证据，绝不静默丢弃。
       this.clearPoll()
+      this.releaseHelperResources(true)
+      this.resolveSettled()
       throw error
     }
     this.complete()
@@ -271,8 +272,22 @@ export class PosixManagedProcess implements ManagedProcess {
       return
     }
     this.clearPoll()
+    this.releaseHelperResources()
     state.removeStateDir(this.stateDir)
     this.settle()
+  }
+
+  /** 有界收尾结束后释放本进程的管道与引用，不把残留后代持有的输出管道变成无限等待。 */
+  private releaseHelperResources(force = false): void {
+    this.helper.stdin.destroy()
+    if (force) {
+      this.helper.stdout.destroy()
+      this.helper.stderr.destroy()
+    }
+    if (this.helper.connected) {
+      this.helper.disconnect()
+    }
+    this.helper.unref()
   }
 
   private async awaitScope(): Promise<void> {

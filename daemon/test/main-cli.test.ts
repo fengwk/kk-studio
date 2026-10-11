@@ -20,13 +20,10 @@ import {
 /**
  * 编译产物 CLI 回归：以真实子进程运行 `dist/main.js`，不读取 TS 源码，也不做源码 fallback。
  *
- * <p>信息命令（`--help` / `--version` / `--check-config`）与平台无关，在所有平台都对真实编译产物断言；正常
- * READY 启动是唯一有平台能力要求的路径：Linux/Windows 上走真实控制面，POSIX 用真实 OS `SIGTERM` 停机、
- * Windows 用真实控制面 `ERROR/REGISTRATION_REJECTED` 触发正常停机（Node 的 `kill('SIGTERM')` 在 Windows 上是
- * 强制 `TerminateProcess`，不派发 JS 信号监听）。
- *
- * <p>冻结契约下 native 工厂拒绝在 darwin 创建 supervisor：macOS 上编译产物没有任何正常启动路径，对应的真实
- * 编译产物测试改为断言「显式拒绝 + 安全固定平台诊断」，而不是跳过。
+ * <p>信息命令（`--help` / `--version` / `--check-config`）与平台无关，在所有平台都对真实编译产物断言。正常 READY
+ * 启动在 Linux、macOS 与 Windows 上都走真实控制面：POSIX 用真实 OS `SIGTERM` 停机，Windows 用控制面
+ * `ERROR/REGISTRATION_REJECTED` 触发正常停机（Node 的 `kill('SIGTERM')` 在 Windows 上是强制 `TerminateProcess`）。
+ * macOS 缺少子进程收养者不阻止这次启动。
  */
 const MAIN_ENTRY = fileURLToPath(new URL('../dist/main.js', import.meta.url))
 
@@ -85,7 +82,7 @@ describe('daemon compiled CLI information commands', () => {
 })
 
 describe('daemon compiled CLI runtime', () => {
-  it.runIf(process.platform !== 'darwin')(
+  it(
     'stops and releases the data lock: POSIX via a real OS SIGTERM, Windows via a graceful control abort',
     async () => {
       expect(existsSync(MAIN_ENTRY), `build the daemon first: ${MAIN_ENTRY}`).toBe(true)
@@ -142,27 +139,6 @@ describe('daemon compiled CLI runtime', () => {
     120_000,
   )
 
-  it.runIf(process.platform === 'darwin')(
-    'refuses to start on macOS and surfaces the fixed strict-confinement diagnostic',
-    async () => {
-      const fixture = await createControlServer()
-      cleans.push(() => fixture.dispose())
-      await writeConfig(fixture)
-
-      const result = await runCli(['--config', fixture.configPath])
-      // 正常 READY 启动在 macOS 上被 native 工厂拒绝：非零退出，且控制面未收到任何消息。
-      expect(result.signal).toBeNull()
-      expect(result.code).toBe(1)
-      expect(result.stdout).toBe('')
-      expect(fixture.received).toHaveLength(0)
-      // 平台原因以 `daemon failed:` 输出，不误导为配置错误；不回显注册凭证。
-      expect(result.stderr).toContain('daemon failed:')
-      expect(result.stderr).toContain('strict native process confinement is unavailable on darwin')
-      expect(result.stderr).toContain('setsid')
-      expect(result.stderr).not.toContain(TOKEN)
-    },
-    60_000,
-  )
 })
 
 function promiseFromExit(child: ChildProcess): Promise<[number | null, NodeJS.Signals | null]> {

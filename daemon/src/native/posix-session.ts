@@ -258,8 +258,8 @@ export async function convergeSession(session: number, excludedPid: number, grac
 /**
  * 让本进程成为子进程收养者（Linux `PR_SET_CHILD_SUBREAPER`）。
  *
- * <p>Linux 上这是收尾完整性的前提：`prctl` 失败会让「未登记且故意 `setsid` 的后代也能被核实」的承诺失真，因此**失败即
- * 抛出**，绝不返回「没有收养者」继续跑。没有收养机制的平台（macOS）返回 `false`：这里的限制由调用方如实声明为未验收。
+ * <p>Linux 上 `prctl` 失败会让「未登记且故意 `setsid` 的后代也能被核实」失真，因此**失败即抛出**。macOS 没有这个原语，返回
+ * `false`：会话生命周期仍然可用，只是未登记且故意脱离的后代不在收养集合里。
  */
 export function becomeChildSubreaper(): boolean {
   if (process.platform !== 'linux') {

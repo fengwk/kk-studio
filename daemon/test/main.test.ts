@@ -8,7 +8,6 @@ import { main } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
 import type { Envelope } from '../src/protocol.js'
 import * as native from '../src/native/index.js'
-import { PosixProcessSupervisor } from '../src/native/posix-supervisor.js'
 import * as control from '../src/transport/control.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
@@ -284,17 +283,8 @@ describe('daemon main information commands', () => {
   })
 })
 
-// 冻结契约下 native 工厂拒绝在 darwin 创建 supervisor，但装配/释放本身与平台无关：macOS 上注入平台自身的真实 POSIX
-// 实现来验证装配、在途收敛与释放；生产 darwin 拒绝路径由下方 strict-confinement 围栏用例单独覆盖。
+// 装配/释放在 Linux 与 macOS 上都走真实 POSIX supervisor。macOS 没有子进程收养，但不拒绝启动。
 describe('daemon main real assembly', () => {
-  beforeEach(() => {
-    if (process.platform === 'darwin') {
-      vi.spyOn(native, 'createProcessSupervisor').mockImplementation(() => new PosixProcessSupervisor())
-    }
-  })
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
 
   it('rejects invalid proxies before connecting and closes the resolver and data lock', async () => {
     const fixture = await createControlServer()
@@ -500,8 +490,7 @@ describe('daemon main real assembly', () => {
 describe('daemon main cleanup fault injection', () => {
   /** 包装真实 supervisor：close 先真正收敛，再按注入标记抛错。 */
   function spySupervisor(injectCloseFailure: () => boolean): void {
-    // macOS 上生产工厂按契约拒绝 darwin：这里注入平台自身的真实 POSIX 实现，只验证释放/装配聚合，不冒充生产拒绝。
-    const real = process.platform === 'darwin' ? new PosixProcessSupervisor() : native.createProcessSupervisor()
+    const real = native.createProcessSupervisor()
     const wrapper: ProcessSupervisor = {
       start: (spec: ProcessSpec) => real.start(spec),
       trackDescendant: real.trackDescendant?.bind(real),
@@ -574,12 +563,11 @@ describe('daemon main cleanup fault injection', () => {
 })
 
 /**
- * macOS 严格收敛围栏：工厂拒绝 darwin 时，Daemon 必须 fail-closed——在任何本地副作用之前失败、不建立控制面、不启动用户进程，
- * 并以 `daemon failed:` 输出固定平台原因。仅在工厂边界模拟 darwin，不验证 Darwin 原生实现。
+ * 不支持的平台仍必须在本地副作用之前失败。这里只在工厂边界模拟 freebsd，不把 darwin 当成不可启动。
  */
-describe('daemon main strict-confinement fence (macOS)', () => {
+describe('daemon main unsupported platform', () => {
   it(
-    'refuses darwin before side effects and surfaces the fixed platform diagnostic',
+    'refuses an unsupported platform before side effects and keeps the diagnostic fixed',
     async () => {
       const fixture = await createControlServer()
       cleans.push(() => fixture.dispose())
@@ -587,10 +575,9 @@ describe('daemon main strict-confinement fence (macOS)', () => {
 
       const beforeInt = new Set<Listener>(process.listeners('SIGINT') as Listener[])
       const beforeTerm = new Set<Listener>(process.listeners('SIGTERM') as Listener[])
-      // 只在工厂边界模拟 darwin：配置解析与文件权限检测仍用宿主真实平台，仅工厂的平台分派驱动拒绝。
       const realCreateProcessSupervisor = native.createProcessSupervisor
       const supervisorSpy = vi.spyOn(native, 'createProcessSupervisor').mockImplementation(() => {
-        const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+        const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('freebsd')
         try {
           return realCreateProcessSupervisor()
         } finally {
@@ -600,7 +587,6 @@ describe('daemon main strict-confinement fence (macOS)', () => {
       const transportSpy = vi.spyOn(control, 'createWebSocketTransport')
       const captured = capture()
       let code: number
-      // mock 历史在 restore 时被清空，必须在 finally 还原之前抓取。
       let supervisorCalls = 0
       let supervisorResults: Array<{ type: string; value?: unknown }> = []
       let transportCalls = 0
@@ -617,25 +603,22 @@ describe('daemon main strict-confinement fence (macOS)', () => {
 
       expect(code).toBe(1)
       expect(captured.out.join('')).toBe('')
-      // 真实到达 runDaemon 最前的 native 工厂并抛出 UnsupportedPlatformError，而不是任意早期失败。
       expect(supervisorCalls).toBe(1)
       expect(supervisorResults[0]?.type).toBe('throw')
       const rejection = supervisorResults[0]?.value as Error | undefined
       expect(rejection?.name).toBe('UnsupportedPlatformError')
-      expect(rejection?.message).toContain('strict native process confinement is unavailable on darwin')
-      // 拒绝在任何装配之前：控制面传输工厂未被调用（补充：control server 未收到任何消息）。
+      expect(rejection?.message).toContain('does not support freebsd')
+      expect(rejection?.message).not.toContain('strict')
       expect(transportCalls).toBe(0)
       expect(fixture.received).toHaveLength(0)
-      // operator 看到固定平台原因；不回显注册凭证或路径。
       const stderr = captured.err.join('')
       expect(stderr).toContain('daemon failed:')
-      expect(stderr).toContain('strict native process confinement is unavailable on darwin')
-      expect(stderr).toContain('setsid')
+      expect(stderr).toContain('does not support freebsd')
+      expect(stderr).not.toContain('strict')
       expect(stderr).not.toContain(TOKEN)
       expect(stderr).not.toContain(fixture.root)
       expect(new Set(process.listeners('SIGINT'))).toEqual(beforeInt)
       expect(new Set(process.listeners('SIGTERM'))).toEqual(beforeTerm)
-      // 围栏在 mkdir/lock 之前：未创建目录锁文件。
       expect(existsSync(join(fixture.dataDir, 'daemon.lock'))).toBe(false)
       const lock = await native.acquireDirectoryLock(fixture.dataDir)
       await lock.close()
