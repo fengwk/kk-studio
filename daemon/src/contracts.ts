@@ -49,7 +49,12 @@ export interface ProcessSupervisor {
   close(): Promise<void>
 }
 
-/** Current-user OS proxy lookup; null means the OS selected a direct connection. */
+/**
+ * Current-user OS proxy lookup.
+ *
+ * `null` means the operating system explicitly selected a direct connection. A lookup failure,
+ * an unsupported proxy, or an unavailable resolver is an error and is never reported as direct.
+ */
 export interface SystemProxyResolver {
   resolve(uri: string, signal: AbortSignal): Promise<string | null>
   close(): Promise<void>

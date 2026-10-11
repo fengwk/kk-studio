@@ -13,6 +13,7 @@ import {
   SYSTEM_PROXY_TEARDOWN_FAILED,
   SYSTEM_PROXY_FATAL,
   SYSTEM_PROXY_UNSUPPORTED,
+  SYSTEM_PROXY_UNAVAILABLE,
   SYSTEM_PROXY_LOOKUP_FAILED,
   systemProxyError,
   systemProxyErrorWithCode,
@@ -404,7 +405,8 @@ export function buildAutoProxyOptions(config: WindowsProxyConfig): WindowsAutoPr
 
 /** Windows 操作系统代理解析器状态机。 */
 export class WindowsSystemProxyResolver implements SystemProxyResolver {
-  private readonly bindings: WindowsProxyBindings
+  private readonly loadBindings: () => WindowsProxyBindings
+  private bindings: WindowsProxyBindings | null = null
   private readonly pending = new Map<bigint, PendingLookup>()
   private session: SessionState | null = null
   private callbackToken: unknown = null
@@ -413,8 +415,28 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
   private fatal = false
   private closing: Promise<void> | null = null
 
-  constructor(bindings: WindowsProxyBindings) {
-    this.bindings = bindings
+  constructor(bindingsOrLoader: WindowsProxyBindings | (() => WindowsProxyBindings)) {
+    this.loadBindings = typeof bindingsOrLoader === 'function' ? bindingsOrLoader : () => bindingsOrLoader
+  }
+
+  /** 第一次查询才加载 WinHTTP。close 在从未查询时不触碰原生库。 */
+  private bindingsForResolve(): WindowsProxyBindings {
+    if (this.bindings === null) {
+      try {
+        this.bindings = this.loadBindings()
+      } catch (error) {
+        throw asError(error)
+      }
+    }
+    return this.bindings
+  }
+
+  /** 已由 resolve 加载的绑定。未查询时没有原生资源，调用方不得在这里触发加载。 */
+  private loadedBindings(): WindowsProxyBindings {
+    if (this.bindings === null) {
+      throw systemProxyError(SYSTEM_PROXY_UNAVAILABLE)
+    }
+    return this.bindings
   }
 
   async resolve(uri: string, signal: AbortSignal): Promise<string | null> {
@@ -424,7 +446,7 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     if (signal.aborted) {
       throw systemProxyError(SYSTEM_PROXY_CANCELLED)
     }
-    const config = this.bindings.readCurrentUserProxyConfig()
+    const config = this.bindingsForResolve().readCurrentUserProxyConfig()
     if (config.autoConfigUrl !== null || config.autoDetect) {
       return this.resolveAutomatic(uri, config, signal)
     }
@@ -439,8 +461,9 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
   }
 
   private resolveAutomatic(uri: string, config: WindowsProxyConfig, signal: AbortSignal): Promise<string | null> {
+    const bindings = this.bindingsForResolve()
     const session = this.ensureSession()
-    const resolver = this.bindings.createProxyResolver(session)
+    const resolver = bindings.createProxyResolver(session)
     const context = this.nextContext
     this.nextContext += 1n
     const options = buildAutoProxyOptions(config)
@@ -470,7 +493,7 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     signal.addEventListener('abort', onAbort, { once: true })
     let status: number
     try {
-      status = this.bindings.getProxyForUrlEx(resolver, uri, options, context)
+      status = bindings.getProxyForUrlEx(resolver, uri, options, context)
     } catch {
       this.pending.delete(context)
       op.removeAbort()
@@ -496,17 +519,17 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     if (this.session !== null) {
       return this.session.handle
     }
-    const handle = this.bindings.openAsyncSession()
+    const handle = this.loadedBindings().openAsyncSession()
     const state: SessionState = { handle, closed: deferred() }
     try {
-      this.callbackToken = this.bindings.setStatusCallback(handle, (closedHandle, context, event) => {
+      this.callbackToken = this.loadedBindings().setStatusCallback(handle, (closedHandle, context, event) => {
         this.handleStatus(closedHandle, context, event)
       })
     } catch (registrationFailure) {
       // 回调注册失败：session 从未进入可用状态。关闭句柄；关闭未被确认时两个安全诊断都要保留。
       let released = false
       try {
-        released = this.bindings.closeHandle(handle)
+        released = this.loadedBindings().closeHandle(handle)
       } catch {
         released = false
       }
@@ -533,13 +556,13 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     if (!op.handleClosed) {
       op.handleClosed = true
       try {
-        op.closeFailed = !this.bindings.closeHandle(op.resolver)
+        op.closeFailed = !this.loadedBindings().closeHandle(op.resolver)
         // 与原生调用同线程立即取诊断码，避免之后被无关调用覆盖。
-        op.releaseCode = op.closeFailed ? this.bindings.lastError() : 0
+        op.releaseCode = op.closeFailed ? this.loadedBindings().lastError() : 0
       } catch {
         // 原生关闭本身抛错 = 无法证明句柄已释放：按失败处理，绝不当作成功。
         op.closeFailed = true
-        op.releaseCode = this.bindings.lastError()
+        op.releaseCode = this.loadedBindings().lastError()
       }
     }
     if (op.closeFailed) {
@@ -570,7 +593,7 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     let failure: Error | null = null
     if (event.kind === 'complete') {
       try {
-        value = interpretAutomatic(this.bindings.readProxyResult(op.resolver))
+        value = interpretAutomatic(this.loadedBindings().readProxyResult(op.resolver))
       } catch (error) {
         failure = asError(error)
       }
@@ -613,7 +636,7 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     // resolver 句柄本身不带 context、不会有 HANDLE_CLOSING，绝不假造一次；session closing 单独也不足以证明孩子回调消失。
     let handleClosed = false
     try {
-      handleClosed = this.bindings.closeHandle(state.handle)
+      handleClosed = this.loadedBindings().closeHandle(state.handle)
     } catch {
       // 关闭抛错 = 无法确认句柄已释放：保留 registration，以固定文案失败，不回显原生异常原文。
       handleClosed = false
@@ -625,7 +648,7 @@ export class WindowsSystemProxyResolver implements SystemProxyResolver {
     if (terminalsProven && closingProven && !this.fatal) {
       if (this.callbackToken !== null) {
         try {
-          this.bindings.unregisterCallback(this.callbackToken)
+          this.loadedBindings().unregisterCallback(this.callbackToken)
         } catch {
           // 卸载本身失败 = 无法证明蹦床已拆除：保留 registration 与 token，进入不可用终态并显式失败。
           this.fatal = true

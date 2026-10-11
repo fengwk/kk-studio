@@ -12,8 +12,8 @@ const STREAM_TIMEOUT = 10_000
 
 // 执行范围的跨平台真实进程验收：用只依赖 Node 的夹具造出真实父子/孙进程层级，并用原生 pid 断言收敛。
 //
-// 这里直接构造 POSIX 实现，而不是经工厂：冻结契约下工厂拒绝在 macOS 创建 supervisor（严格收敛不可用），
-// 但 POSIX 实现本身仍要在真实的两种 POSIX 平台（Linux / macOS）上被验证；工厂分派由 platform-capabilities 覆盖。
+// 这里直接构造 POSIX 实现：Linux 与 macOS 共用它。工厂分派由 platform-capabilities 覆盖。
+// macOS 没有子进程收养者，未登记且故意 setsid 的后代不在会话生命周期内，相关用例只在 Linux 上断言。
 describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)', () => {
   let workdir: string
   let supervisor: ProcessSupervisor
@@ -192,8 +192,7 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
   }, TEST_TIMEOUT)
 
   test('an unregistered setsid descendant is an unverified boundary on macOS', async () => {
-    // macOS 没有子进程收养者：脱离会话的后代被重新挂到 launchd，native 无法核实其归属。这里把该实现边界固定成原生证据，
-    // 正是生产工厂拒绝在 darwin 创建 supervisor 的依据；不是静默泄漏，也不是可容忍的降级。
+    // macOS 没有子进程收养者：未登记且故意脱离的后代不属于会话生命周期，仍须支持普通进程。
     if (process.platform !== 'darwin') {
       return
     }

@@ -12,10 +12,11 @@ describe('native process scope capabilities', () => {
       expect(capabilities.jobMembership).toBe(false)
     }
     if (process.platform === 'darwin') {
-      // macOS 无法证明未登记且 setsid 的后代收敛：不声明任何保证，必须如实说明。
-      expect(capabilities.sessionConvergence).toBe(false)
+      // macOS 提供会话生命周期，但没有子进程收养：限制必须写明，不能写成绝对隔离失败。
+      expect(capabilities.sessionConvergence).toBe(true)
       expect(capabilities.orphanAdoption).toBe(false)
       expect(capabilities.unverifiedLimits.length).toBeGreaterThan(0)
+      expect(capabilities.unverifiedLimits.join(' ')).not.toContain('strict')
     }
     if (process.platform === 'win32') {
       expect(capabilities.jobMembership).toBe(true)
