@@ -1,0 +1,119 @@
+#!/bin/sh
+# Frozen-runtime shim for smoke-harness contract tests (NOT a product runtime).
+#
+# It answers exactly the calls ``scripts/daemon/smoke-archive.sh`` makes to the archive's
+# ``runtime/code-server/lib/node``: ``--version``, ``-e <script> <path>`` for JSON reads,
+# a ``.mjs`` probe invocation, and ``main.js --version|--help|--check-config|--config``.
+# Every knob below is substituted by the test module. The shim runs under the harness's
+# controlled PATH (only sh/bash), so it never relies on PATH for external tools.
+NODE_VERSION='@NODE_VERSION@'
+CLI_VERSION='@CLI_VERSION@'
+DAEMON_VERSION='@DAEMON_VERSION@'
+MANIFEST_VERSION='@MANIFEST_VERSION@'
+HELP_OK='@HELP_OK@'
+VALID_OK='@VALID_OK@'
+INVALID_REJECTED='@INVALID_REJECTED@'
+WRAPPED_REJECTED='@WRAPPED_REJECTED@'
+PROBE_OUT='@PROBE_OUT@'
+PROBE_EXIT='@PROBE_EXIT@'
+CONFIG_MODE='@CONFIG_MODE@'
+PID_FILE='@PID_FILE@'
+
+# Mirrors the real schema: the bare config object is valid, an outer "daemon" wrapper and a
+# non-HTTP(S) studioUrl are rejected with the stable marker.
+check_config() {
+  cfg=$1
+  if [ ! -s "$cfg" ]; then exit 2; fi
+  if @GREP@ -q '"daemon"[[:space:]]*:' "$cfg"; then
+    if [ "$WRAPPED_REJECTED" = 1 ]; then
+      printf 'Invalid daemon configuration: daemon.daemon: unknown field\n' >&2
+      exit 2
+    fi
+    printf 'Daemon configuration is valid\n'
+    exit 0
+  fi
+  if ! @GREP@ -q '"studioUrl"[[:space:]]*:[[:space:]]*"http' "$cfg"; then
+    if [ "$INVALID_REJECTED" = 1 ]; then
+      printf 'Invalid daemon configuration: daemon.studioUrl: must be an HTTP(S) origin\n' >&2
+      exit 2
+    fi
+    printf 'Daemon configuration is valid\n'
+    exit 0
+  fi
+  if [ "$VALID_OK" = 1 ]; then
+    printf 'Daemon configuration is valid\n'
+    exit 0
+  fi
+  printf 'Invalid daemon configuration: rejected by fixture\n' >&2
+  exit 2
+}
+
+# A minimal stand-in for the real entrypoint's lifetime:
+#   hold          acquire the lock, then keep running until signalled (graceful on TERM)
+#   ignore-term   acquire the lock, then keep running and ignore TERM (forces SIGKILL)
+#   sleep-no-lock never acquire a lock (the harness must time out and still reap)
+run_config() {
+  cfg=$1
+  dir=${cfg%/*}
+  case "$CONFIG_MODE" in
+    hold)
+      if [ -e "$dir/held" ]; then exit 1; fi
+      @MKDIR@ -p "$dir"
+      @TOUCH@ "$dir/daemon.lock" "$dir/held"
+      if [ -n "$PID_FILE" ]; then printf '%s' "$$" >"$PID_FILE"; fi
+      # Emulate a daemon that shuts down gracefully on TERM and exits 0.
+      @SLEEP@ 300 &
+      child=$!
+      trap 'kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; exit 0' TERM INT
+      wait "$child"
+      exit 0
+      ;;
+    ignore-term)
+      if [ -e "$dir/held" ]; then exit 1; fi
+      @MKDIR@ -p "$dir"
+      @TOUCH@ "$dir/daemon.lock" "$dir/held"
+      if [ -n "$PID_FILE" ]; then printf '%s' "$$" >"$PID_FILE"; fi
+      # SIG_IGN survives exec, so the replacement process ignores TERM and needs SIGKILL.
+      trap '' TERM
+      exec @SLEEP@ 300
+      ;;
+    sleep-no-lock)
+      if [ -n "$PID_FILE" ]; then printf '%s' "$$" >"$PID_FILE"; fi
+      exec @SLEEP@ 300
+      ;;
+    fail) exit 1 ;;
+    *) exit 3 ;;
+  esac
+}
+
+case "$1" in
+  --version) printf '%s\n' "$NODE_VERSION" ;;
+  -e)
+    case "$3" in
+      */package.json) printf '%s' "$DAEMON_VERSION" ;;
+      */runtime-manifest.json) printf '%s' "$MANIFEST_VERSION" ;;
+      *) printf '%s' "$MANIFEST_VERSION" ;;
+    esac
+    ;;
+  *.mjs)
+    if [ "$PROBE_EXIT" = 0 ]; then printf '%s\n' "$PROBE_OUT"; exit 0; fi
+    printf 'probe failure\n' >&2
+    exit "$PROBE_EXIT"
+    ;;
+  *.js)
+    case "$2" in
+      --version) printf '%s\n' "$CLI_VERSION" ;;
+      --help)
+        if [ "$HELP_OK" = 1 ]; then
+          printf 'Usage: kk-studio-daemon --config <absolute-path>\n  --check-config <absolute-path>\n'
+        else
+          printf 'unexpected help\n'
+        fi
+        ;;
+      --check-config) check_config "$3" ;;
+      --config) run_config "$3" ;;
+      *) exit 3 ;;
+    esac
+    ;;
+  *) exit 3 ;;
+esac
