@@ -33,7 +33,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
 import { Button } from '@/shared/ui/controls/Button'
-import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { useIdeLifecycle } from '@/features/ai/ide/ide-lifecycle-context'
 import { ThreadPresentationActions } from '@/features/ai/runtime/ThreadPresentationActions'
 import type { ThreadPresentation } from '@/features/ai/runtime/thread-presentation'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
@@ -99,7 +99,6 @@ function ChatWorkspaceContent({
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chat.id))
   const [presentations, setPresentations] = useState<Record<string, ThreadPresentation | null>>({})
   const [debugSource, setDebugSource] = useState<{ paneId: string; viewKey: string } | null>(null)
-  const [ideMountedPaneIds, setIdeMountedPaneIds] = useState<Set<string>>(() => new Set())
   const paneStateRef = useRef(paneState)
   useLayoutEffect(() => { paneStateRef.current = paneState }, [paneState])
   const handlePresentation = useCallback((paneId: string, report: ThreadPresentation | null) => {
@@ -118,8 +117,7 @@ function ChatWorkspaceContent({
         ? { paneId, viewKey: report.viewKey } : null
     })
   }, [])
-  const navigate = useNavigate()
-  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false)
+  const { isPaneActive } = useIdeLifecycle()
   const [deepLinkOwner, setDeepLinkOwner] = useState(() => ({
     navigationKey: location.key,
     paneId: paneState.focusedPaneId,
@@ -228,22 +226,6 @@ function ChatWorkspaceContent({
         return current
       }
       return { ...current, [paneId]: report }
-    })
-  }, [])
-
-  const handleIdeMounted = useCallback((paneId: string, mounted: boolean) => {
-    setIdeMountedPaneIds((current) => {
-      const has = current.has(paneId)
-      if (has === mounted) {
-        return current
-      }
-      const next = new Set(current)
-      if (mounted) {
-        next.add(paneId)
-      } else {
-        next.delete(paneId)
-      }
-      return next
     })
   }, [])
 
@@ -357,7 +339,7 @@ function ChatWorkspaceContent({
   const visiblePanes = visibleChatPanes(paneState)
   const visiblePaneIds = new Set(visiblePanes.map((pane) => pane.id))
   const mountedPanes = paneState.panes.filter(
-    (pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending || ideMountedPaneIds.has(pane.id),
+    (pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending || isPaneActive(pane.id),
   )
   const currentView = presentations[debugSource?.paneId ?? paneState.focusedPaneId] ?? null
   const focusedPaneVisible = visiblePaneIds.has(paneState.focusedPaneId)
@@ -385,12 +367,6 @@ function ChatWorkspaceContent({
             to="/chats"
             title={t('ai.chat.backToConversation')}
             aria-label={t('ai.chat.backToConversation')}
-            onClick={(e) => {
-              if (ideMountedPaneIds.size > 0) {
-                e.preventDefault()
-                setConfirmLeaveOpen(true)
-              }
-            }}
           >
             <ArrowLeft aria-hidden="true" />
             <span>{t('ai.chat.backToConversation')}</span>
@@ -453,7 +429,6 @@ function ChatWorkspaceContent({
               onRequestBranch={handleRequestBranch}
               onPaneReport={handlePaneReport}
               onPresentation={handlePresentation}
-              onIdeMounted={handleIdeMounted}
             />
           )
         })}
@@ -474,33 +449,6 @@ function ChatWorkspaceContent({
           onConfirm={handleBranchConfirm}
           onClose={closeBranchDialog}
         />
-      ) : null}
-      {confirmLeaveOpen ? (
-        <Dialog
-          title={t('ai.ide.leaveConfirmTitle')}
-          onClose={() => setConfirmLeaveOpen(false)}
-          role="alertdialog"
-        >
-          <div className="ide-confirm-dialog-content">
-            <p>{t('ai.ide.leaveConfirmMessage')}</p>
-            <div className="ide-confirm-dialog-actions">
-              <Button variant="ghost" size="compact" onClick={() => setConfirmLeaveOpen(false)}>
-                {t('ai.ide.cancel')}
-              </Button>
-              <Button
-                variant="danger"
-                size="compact"
-                onClick={() => {
-                  setConfirmLeaveOpen(false)
-                  navigate('/chats')
-                }}
-                data-testid="ide-confirm-leave-btn"
-              >
-                {t('ai.ide.confirm')}
-              </Button>
-            </div>
-          </div>
-        </Dialog>
       ) : null}
     </section>
   )

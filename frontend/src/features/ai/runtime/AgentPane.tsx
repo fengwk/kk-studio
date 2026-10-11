@@ -241,6 +241,11 @@ export function AgentPane({
     }
   }, [matchedEnvCard])
 
+  const handleCloseIde = useCallback(() => {
+    setIdeOpen(false)
+    handleIdeMountedChange(false)
+  }, [handleIdeMountedChange])
+
   // 只有根面板能接管 pane 内导航；只读路径不提供接管者（ThreadLink 保留独立地址）。
   return (
     <ThreadNavigationContext.Provider value={isRoot === true ? navigation.openThread : null}>
@@ -334,15 +339,13 @@ export function AgentPane({
         <IdeOverlayPanel
           isOpen={ideOpen}
           viewId={viewId}
+          paneId={paneId}
           environment={resolvedEnvironment}
           availableEnvironments={environments}
           action={ideAction}
           isNarrow={layoutMode === 'narrow'}
           onCollapse={() => setIdeOpen(false)}
-          onClose={() => {
-            setIdeOpen(false)
-            handleIdeMountedChange(false)
-          }}
+          onClose={handleCloseIde}
           onRestoreFocus={() => {
             visiblePresentation?.act(visiblePresentation.viewKey, 'restore-focus')
           }}

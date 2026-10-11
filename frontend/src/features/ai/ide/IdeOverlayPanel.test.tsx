@@ -1,5 +1,6 @@
-import { StrictMode } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createContext, StrictMode, useContext, useState, type ReactNode } from 'react'
+import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
@@ -10,6 +11,34 @@ import {
 import { validateIdeEntryUrl } from '@/features/ai/ide/ide-url'
 import { environmentService } from '@/shared/api/environment-service'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
+
+function TestRouter({ children }: { children: ReactNode }) {
+  const [ctx] = useState(() => {
+    const ContentContext = createContext<ReactNode>(children)
+    function RouteContainer() {
+      const c = useContext(ContentContext)
+      return <IdeLifecycleProvider>{c}</IdeLifecycleProvider>
+    }
+    const router = createMemoryRouter([
+      {
+        path: '*',
+        Component: RouteContainer,
+      },
+    ])
+    return { ContentContext, router }
+  })
+
+  return (
+    <ctx.ContentContext.Provider value={children}>
+      <RouterProvider router={ctx.router} />
+    </ctx.ContentContext.Provider>
+  )
+}
+
+function render(ui: ReactNode) {
+  return rtlRender(ui, { wrapper: TestRouter })
+}
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
