@@ -47,6 +47,10 @@ EOF
 # SIGINT/SIGTERM 都经此路径，绝不只删目录而留下进程。
 tmp=
 daemon_pid=
+# 回收结果：daemon_forced=1 表示需要 SIGKILL；daemon_exit_status 保存 wait 的真实退出码。
+# 失败路径不回写原始退出码；成功路径据此断言 daemon 是收到 SIGTERM 后优雅退出。
+daemon_forced=0
+daemon_exit_status=
 terminate_daemon() {
   [ -n "$daemon_pid" ] || return 0
   local pid=$daemon_pid attempt
@@ -58,11 +62,14 @@ terminate_daemon() {
       sleep 0.1
     done
     if kill -0 "$pid" 2>/dev/null; then
+      daemon_forced=1
       kill -KILL "$pid" 2>/dev/null || true
     fi
   fi
   # 只有 wait 成功返回才说明该进程已被真实回收；随后才能安全删除临时目录。
-  wait "$pid" 2>/dev/null || true
+  daemon_exit_status=0
+  wait "$pid" 2>/dev/null || daemon_exit_status=$?
+  return 0
 }
 cleanup() {
   local code=$?
@@ -294,7 +301,14 @@ kill -0 "$daemon_pid" 2>/dev/null || fail "the daemon exited right after acquiri
 if second=$(run_isolated "$node_bin" "$main_js" --config "$run_dir/daemon.json" 2>&1); then
   fail "a second daemon instance must fail on the held lock: $second"
 fi
+# 第二实例失败后第一实例仍须持锁存活：证明拒绝来自锁冲突，而不是同一配置本身就无效。
+kill -0 "$daemon_pid" 2>/dev/null || fail "the first daemon exited before the lock-conflict check"
+[ -f "$run_dir/daemon.lock" ] || fail "the held lock disappeared during the lock-conflict check"
 
 terminate_daemon
+# 成功烟测要求真实 daemon 在 SIGTERM 后自行优雅退出；需要 SIGKILL 或非 0 退出都不算通过。
+[ "$daemon_forced" = 0 ] || fail "the daemon required SIGKILL; it must exit gracefully on SIGTERM"
+[ "$daemon_exit_status" = 0 ] ||
+  fail "the daemon exited with status ${daemon_exit_status} instead of 0 after SIGTERM"
 
 echo "archive smoke ok: ${archive_name} (kk-studio-daemon ${version}, ${frozen_node_version}, ${koffi})"

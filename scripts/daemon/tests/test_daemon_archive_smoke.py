@@ -26,10 +26,15 @@ import time
 import unittest
 from pathlib import Path
 
-DAEMON_VERSION = "1.0.12"
+from daemon_fixture import DAEMON_VERSION
+
 ARCHIVE_NAME = f"kk-studio-daemon-v{DAEMON_VERSION}-linux-{{arch}}.tar.gz"
 
 _SMOKE = Path(__file__).resolve().parent.parent / "smoke-archive.sh"
+_SHIM_TEMPLATE = Path(__file__).resolve().parent / "fixtures" / "fake-frozen-runtime.sh.in"
+
+# Host npm/koffi naming: the archive must carry the prebuilt for this host's architecture.
+_KOFFI_BY_ARCH = {"amd64": "koffi-linux-x64", "arm64": "koffi-linux-arm64"}
 
 
 def _host_arch() -> str:
@@ -86,100 +91,7 @@ def _shim(
         "@TOUCH@": touch,
         "@GREP@": grep,
     }
-    template = r"""#!/bin/sh
-# Frozen-runtime shim for smoke-harness contract tests (not a product runtime).
-NODE_VERSION='@NODE_VERSION@'
-CLI_VERSION='@CLI_VERSION@'
-DAEMON_VERSION='@DAEMON_VERSION@'
-MANIFEST_VERSION='@MANIFEST_VERSION@'
-HELP_OK='@HELP_OK@'
-VALID_OK='@VALID_OK@'
-INVALID_REJECTED='@INVALID_REJECTED@'
-WRAPPED_REJECTED='@WRAPPED_REJECTED@'
-PROBE_OUT='@PROBE_OUT@'
-PROBE_EXIT='@PROBE_EXIT@'
-CONFIG_MODE='@CONFIG_MODE@'
-PID_FILE='@PID_FILE@'
-
-check_config() {
-  cfg=$1
-  if [ ! -s "$cfg" ]; then exit 2; fi
-  if @GREP@ -q '"daemon"[[:space:]]*:' "$cfg"; then
-    if [ "$WRAPPED_REJECTED" = 1 ]; then
-      printf 'Invalid daemon configuration: daemon.daemon: unknown field\n' >&2
-      exit 2
-    fi
-    printf 'Daemon configuration is valid\n'
-    exit 0
-  fi
-  if ! @GREP@ -q '"studioUrl"[[:space:]]*:[[:space:]]*"http' "$cfg"; then
-    if [ "$INVALID_REJECTED" = 1 ]; then
-      printf 'Invalid daemon configuration: daemon.studioUrl: must be an HTTP(S) origin\n' >&2
-      exit 2
-    fi
-    printf 'Daemon configuration is valid\n'
-    exit 0
-  fi
-  if [ "$VALID_OK" = 1 ]; then
-    printf 'Daemon configuration is valid\n'
-    exit 0
-  fi
-  printf 'Invalid daemon configuration: rejected by fixture\n' >&2
-  exit 2
-}
-
-run_config() {
-  cfg=$1
-  dir=${cfg%/*}
-  case "$CONFIG_MODE" in
-    hold)
-      if [ -e "$dir/held" ]; then exit 1; fi
-      @MKDIR@ -p "$dir"
-      @TOUCH@ "$dir/daemon.lock" "$dir/held"
-      if [ -n "$PID_FILE" ]; then printf '%s' "$$" >"$PID_FILE"; fi
-      exec @SLEEP@ 300
-      ;;
-    sleep-no-lock)
-      if [ -n "$PID_FILE" ]; then printf '%s' "$$" >"$PID_FILE"; fi
-      exec @SLEEP@ 300
-      ;;
-    fail) exit 1 ;;
-    *) exit 3 ;;
-  esac
-}
-
-case "$1" in
-  --version) printf '%s\n' "$NODE_VERSION" ;;
-  -e)
-    case "$3" in
-      */package.json) printf '%s' "$DAEMON_VERSION" ;;
-      */runtime-manifest.json) printf '%s' "$MANIFEST_VERSION" ;;
-      *) printf '%s' "$MANIFEST_VERSION" ;;
-    esac
-    ;;
-  *.mjs)
-    if [ "$PROBE_EXIT" = 0 ]; then printf '%s\n' "$PROBE_OUT"; exit 0; fi
-    printf 'probe failure\n' >&2
-    exit "$PROBE_EXIT"
-    ;;
-  *.js)
-    case "$2" in
-      --version) printf '%s\n' "$CLI_VERSION" ;;
-      --help)
-        if [ "$HELP_OK" = 1 ]; then
-          printf 'Usage: kk-studio-daemon --config <absolute-path>\n  --check-config <absolute-path>\n'
-        else
-          printf 'unexpected help\n'
-        fi
-        ;;
-      --check-config) check_config "$3" ;;
-      --config) run_config "$3" ;;
-      *) exit 3 ;;
-    esac
-    ;;
-  *) exit 3 ;;
-esac
-"""
+    template = _SHIM_TEMPLATE.read_text(encoding="utf-8")
     for marker, value in values.items():
         template = template.replace(marker, value)
     return template
@@ -198,8 +110,9 @@ def _build_archive(
     build = path.parent / "build"
     if build.exists():
         shutil.rmtree(build)
-    (build / "node_modules" / "@koromix" / "koffi-linux-x64").mkdir(parents=True)
-    (build / "node_modules" / "@koromix" / "koffi-linux-x64" / "index.js").write_text("module.exports = {}\n")
+    koffi_dir = build / "node_modules" / "@koromix" / _KOFFI_BY_ARCH[_host_arch()]
+    koffi_dir.mkdir(parents=True)
+    (koffi_dir / "index.js").write_text("module.exports = {}\n")
     if include_ide:
         (build / "ide-extension").mkdir(parents=True)
         (build / "ide-extension" / "extension.cjs").write_text("module.exports = {}\n")
@@ -211,7 +124,7 @@ def _build_archive(
     if include_main:
         (build / "main.js").write_text("export {}\n")
     if not include_koffi:
-        shutil.rmtree(build / "node_modules" / "@koromix" / "koffi-linux-x64")
+        shutil.rmtree(koffi_dir)
     (build / "package.json").write_text('{"name":"@kk-studio/daemon","version":"' + DAEMON_VERSION + '","type":"module"}\n')
     (build / "runtime-manifest.json").write_text('{"schemaVersion":1}\n')
     (build / "LICENSE").write_text("Apache License 2.0\n")
@@ -409,6 +322,20 @@ class SmokeArchiveTest(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait()
+        self._assert_pid_reaped(int(pid_file.read_text()))
+        self.assertFalse(list(tmpdir.glob("kk-studio-daemon-smoke.*")))
+
+    def test_a_daemon_that_ignores_sigterm_is_not_reported_as_success(self) -> None:
+        # A daemon that requires SIGKILL must not produce a green smoke: the success path only
+        # accepts a graceful SIGTERM exit, while the process is still forcibly reaped.
+        pid_file = self.root / "ignore.pid"
+        tmpdir = self.root / "tmp-ignore"
+        tmpdir.mkdir()
+        archive = self._archive(config_mode="ignore-term", pid_file=str(pid_file))
+        result = self._run(archive, tmpdir=tmpdir, timeout=60.0)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must exit gracefully on SIGTERM", result.stderr)
+        self.assertNotIn("archive smoke ok", result.stdout)
         self._assert_pid_reaped(int(pid_file.read_text()))
         self.assertFalse(list(tmpdir.glob("kk-studio-daemon-smoke.*")))
 
