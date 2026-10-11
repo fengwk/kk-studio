@@ -18,23 +18,23 @@ export function createProcessSupervisor(): ProcessSupervisor {
   if (process.platform === 'linux') {
     return new PosixProcessSupervisor()
   }
-  throw new UnsupportedPlatformError(unsupportedPlatformDiagnostic(process.platform))
+  throw new UnsupportedPlatformError(process.platform)
 }
 
 /**
  * 平台无法提供严格收敛保证时的启动错误。
  *
- * <p>{@link message} 是固定安全诊断（只由平台名构造），不含路径、凭证或原始异常，可直接作为单行启动诊断输出。
+ * <p>构造参数只接受平台名，{@link message} 由内部生成，是固定安全诊断：不含路径、凭证或原始异常，可直接作为单行启动诊断输出。
  */
 export class UnsupportedPlatformError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(platform: NodeJS.Platform) {
+    super(unsupportedPlatformDiagnostic(platform))
     this.name = 'UnsupportedPlatformError'
   }
 }
 
-/** 未支持平台的安全固定诊断：darwin 说明严格收敛不可用，其它平台只报告不支持，绝不回退。 */
-export function unsupportedPlatformDiagnostic(platform: NodeJS.Platform): string {
+/** darwin 说明严格收敛不可用，其它平台只报告不支持；固定文案，绝不回退。 */
+function unsupportedPlatformDiagnostic(platform: NodeJS.Platform): string {
   if (platform === 'darwin') {
     return 'strict native process confinement is unavailable on darwin: macOS has no child subreaper, so an unregistered descendant that calls setsid is reparented to launchd and cannot be proven converged'
   }
