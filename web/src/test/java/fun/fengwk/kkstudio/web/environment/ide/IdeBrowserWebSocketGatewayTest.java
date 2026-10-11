@@ -11,6 +11,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -38,7 +40,9 @@ class IdeBrowserWebSocketGatewayTest {
         new InMemoryIdeStreamTicketService(),
         new IdeStreamPairingRegistry<>(),
         properties,
-        sessions);
+        sessions,
+        mock(ClusterNodeRegistry.class),
+        mock(ClusterInternalClient.class));
   }
 
   private static MockHttpServletRequest request() {
@@ -104,7 +108,9 @@ class IdeBrowserWebSocketGatewayTest {
             new IdeStreamPairingRegistry<>(),
             properties,
             new IdeBrowserSessionRegistry(
-                new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1)));
+                new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1)),
+            mock(ClusterNodeRegistry.class),
+            mock(ClusterInternalClient.class));
     MockHttpServletRequest request = request();
     request.addHeader("Origin", "http://" + IDE_HOST);
     MockHttpServletResponse response = new MockHttpServletResponse();

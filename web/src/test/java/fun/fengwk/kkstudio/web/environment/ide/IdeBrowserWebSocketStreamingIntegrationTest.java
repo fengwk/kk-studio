@@ -183,7 +183,7 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(identity, UUID.randomUUID(), reply);
             });
-    String cookie = sessions.open(identity, "/home/dev/project");
+    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/home/dev/project");
     OkHttpClient client =
         new OkHttpClient.Builder()
             .dns(hostname -> List.of(InetAddress.getByName("127.0.0.1")))

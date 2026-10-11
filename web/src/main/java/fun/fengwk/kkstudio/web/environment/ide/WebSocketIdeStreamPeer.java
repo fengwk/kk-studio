@@ -43,12 +43,22 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
 
   @Override
   public void sendText(String frame) {
-    send(new TextMessage(frame));
+    sendText(frame, true);
   }
 
   @Override
   public void sendBinary(byte[] frame) {
-    send(new BinaryMessage(frame));
+    sendBinary(frame, true);
+  }
+
+  /** 原生分段发送文本：{@code last=false} 表示本帧不是该消息的最后一段。 */
+  void sendText(String frame, boolean last) {
+    send(new TextMessage(frame, last));
+  }
+
+  /** 原生分段发送二进制：{@code last=false} 表示本帧不是该消息的最后一段。 */
+  void sendBinary(byte[] frame, boolean last) {
+    send(new BinaryMessage(frame, last));
   }
 
   private void send(WebSocketMessage<?> message) {

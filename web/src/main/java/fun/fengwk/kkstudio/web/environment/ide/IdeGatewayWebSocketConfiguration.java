@@ -16,9 +16,10 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 /**
  * 反向数据连接的 WebSocket 注册：Node 侧的受控 public stream endpoint 与节点间的内部单跳转发端点。
  *
- * <p>两个端点都在网关自身 Origin 上：{@code /api/harness/environment-stream/v1/{ticket}} 由 Daemon 握手消费一次性
+ * <p>三个端点都在网关自身 Origin 上：{@code /api/harness/environment-stream/v1/{ticket}} 由 Daemon 握手消费一次性
  * ticket； {@code /internal/environment-ide/{env}/reverse?ticket=...} 只接受已通过 HMAC 认证的其它节点，并在任何握手前校验
- * owner 归属。浏览器 IDE Origin 的流量由 {@link IdeOriginRequestFilter} 在更早处截获，不会到达这里。
+ * owner 归属；{@code /internal/environment-ide/{env}/ws?path=...} 同样先认证再作为浏览器数据面执行。浏览器 IDE Origin 的流量由
+ * {@link IdeOriginRequestFilter} 在更早处截获，不会到达这里。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocket
@@ -27,6 +28,8 @@ public class IdeGatewayWebSocketConfiguration implements WebSocketConfigurer {
   private final IdeReverseStreamWebSocketHandler publicHandler;
   private final IdeInternalReverseWebSocketHandler internalHandler;
   private final InternalReverseHandshakeInterceptor internalHandshakeInterceptor;
+  private final IdeInternalBrowserWebSocketHandler internalBrowserHandler;
+  private final IdeInternalBrowserHandshakeInterceptor internalBrowserHandshakeInterceptor;
 
   public IdeGatewayWebSocketConfiguration(
       IdeStreamTicketService streamTickets,
@@ -34,6 +37,8 @@ public class IdeGatewayWebSocketConfiguration implements WebSocketConfigurer {
       IdeCommandTransport transport,
       ClusterNodeRegistry clusterNodeRegistry,
       ClusterInternalAuthentication clusterInternalAuthentication,
+      IdeGatewayProperties ideGatewayProperties,
+      IdeBrowserSessionRegistry sessions,
       IdeOwnerStreamForwarder ownerForwarder) {
     this.publicHandler =
         new IdeReverseStreamWebSocketHandler(
@@ -43,6 +48,16 @@ public class IdeGatewayWebSocketConfiguration implements WebSocketConfigurer {
             streamTickets, pairings, transport, clusterNodeRegistry);
     this.internalHandshakeInterceptor =
         new InternalReverseHandshakeInterceptor(clusterInternalAuthentication, clusterNodeRegistry);
+    this.internalBrowserHandler =
+        new IdeInternalBrowserWebSocketHandler(
+            new IdeStreamDeps(transport, streamTickets, pairings, ideGatewayProperties));
+    this.internalBrowserHandshakeInterceptor =
+        new IdeInternalBrowserHandshakeInterceptor(
+            clusterInternalAuthentication,
+            clusterNodeRegistry,
+            sessions,
+            transport,
+            ideGatewayProperties);
   }
 
   @Bean
@@ -55,11 +70,19 @@ public class IdeGatewayWebSocketConfiguration implements WebSocketConfigurer {
     return internalHandler;
   }
 
+  @Bean
+  public IdeInternalBrowserWebSocketHandler ideInternalBrowserWebSocketHandler() {
+    return internalBrowserHandler;
+  }
+
   @Override
   public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
     registry.addHandler(publicHandler, IdeGatewayProperties.STREAM_PATH + "/*");
     registry
         .addHandler(internalHandler, ClusterInternalPaths.INTERNAL_IDE_PREFIX + "/*/reverse")
         .addInterceptors(internalHandshakeInterceptor);
+    registry
+        .addHandler(internalBrowserHandler, ClusterInternalPaths.INTERNAL_IDE_PREFIX + "/*/ws")
+        .addInterceptors(internalBrowserHandshakeInterceptor);
   }
 }

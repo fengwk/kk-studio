@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.ide;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -23,7 +24,13 @@ public class EnvironmentIdeConfiguration {
   public EnvironmentIdeServiceImpl localEnvironmentIdeService(
       IdeCommandTransport ideCommandTransport,
       IdeOriginProperties originProperties,
-      IdeBootstrapTicketService bootstrapTickets) {
-    return new EnvironmentIdeServiceImpl(ideCommandTransport, originProperties, bootstrapTickets);
+      IdeBootstrapTicketService bootstrapTickets,
+      ObjectProvider<IdeViewAuthorizationListener> viewAuthorization) {
+    return new EnvironmentIdeServiceImpl(
+        ideCommandTransport,
+        originProperties,
+        bootstrapTickets,
+        EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT,
+        viewAuthorization.getIfAvailable());
   }
 }

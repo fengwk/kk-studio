@@ -23,6 +23,8 @@ import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingException;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamRelay;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
 
 import java.io.IOException;
@@ -33,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -69,6 +72,22 @@ public final class IdeGatewayDataPlane {
   private static final Set<String> DROPPED_REQUEST_HEADERS =
       Set.of("host", "content-length", "connection", "upgrade", "transfer-encoding");
 
+  /** 绝不进入 Daemon 的请求头：浏览器凭据、内部认证、代理链与 WS 握手材料。 */
+  private static final Set<String> NEVER_FORWARDED_REQUEST_HEADERS =
+      Set.of(
+          "cookie",
+          "authorization",
+          "proxy-authorization",
+          "forwarded",
+          "sec-websocket-key",
+          "sec-websocket-version",
+          "sec-websocket-extensions",
+          "sec-websocket-protocol");
+
+  /** 前缀级屏蔽：内部路由头与 {@code X-Forwarded-*} 代理链绝不透传。 */
+  private static final List<String> NEVER_FORWARDED_REQUEST_HEADER_PREFIXES =
+      List.of("x-kk-cluster-", "x-forwarded-");
+
   private static final int MAX_FORWARDED_HEADERS = 64;
 
   /** 单次入站轮询间隔：空闲轮询必须远小于 exchange 的真实 deadline，从而既能及时反应关闭也不误判慢速上游。 */
@@ -80,6 +99,8 @@ public final class IdeGatewayDataPlane {
   private final IdeGatewayProperties properties;
   private final IdeBrowserSessionRegistry sessions;
   private final IdeBootstrapTicketService bootstrapTickets;
+  private final ClusterNodeRegistry clusterNodeRegistry;
+  private final IdeRemoteDataPlaneForwarder remoteForwarder;
 
   public IdeGatewayDataPlane(
       IdeCommandTransport transport,
@@ -87,13 +108,17 @@ public final class IdeGatewayDataPlane {
       IdeStreamPairingRegistry<IdeStreamPeer> pairings,
       IdeGatewayProperties properties,
       IdeBrowserSessionRegistry sessions,
-      IdeBootstrapTicketService bootstrapTickets) {
+      IdeBootstrapTicketService bootstrapTickets,
+      ClusterNodeRegistry clusterNodeRegistry,
+      IdeRemoteDataPlaneForwarder remoteForwarder) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.streamTickets = Objects.requireNonNull(streamTickets, "streamTickets");
     this.pairings = Objects.requireNonNull(pairings, "pairings");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
+    this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
+    this.remoteForwarder = Objects.requireNonNull(remoteForwarder, "remoteForwarder");
   }
 
   /**
@@ -107,14 +132,41 @@ public final class IdeGatewayDataPlane {
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
+    handleHttp(environmentId, rawPathAndQuery, request, response, true);
+  }
+
+  /**
+   * 内部（已 HMAC 认证 + owner 核对）的 HTTP 数据面入口：跳过浏览器 Origin 校验，其余 cookie/代际/workspace 鉴权与转发完全一致。
+   *
+   * <p>owner 在这里消费 bootstrap/cookie 并执行数据面，因此非 owner 节点无需持有浏览器会话状态。
+   */
+  public void handleInternalHttp(
+      EnvironmentId environmentId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    handleHttp(environmentId, rawPathAndQuery, request, response, false);
+  }
+
+  private void handleHttp(
+      EnvironmentId environmentId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response,
+      boolean requireOrigin)
+      throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
     if (!properties.configured()) {
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
-    if (!IdeOriginPolicy.httpRequestAllowed(request)) {
+    if (requireOrigin && !IdeOriginPolicy.httpRequestAllowed(request)) {
       response.sendError(HttpServletResponse.SC_FORBIDDEN);
+      return;
+    }
+    if (requireOrigin && forwardRemote(environmentId, rawPathAndQuery, request, response)) {
       return;
     }
     IdeBrowserSessionRegistry.Session session = requireSession(environmentId, request);
@@ -198,6 +250,9 @@ public final class IdeGatewayDataPlane {
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
+    if (forwardRemote(environmentId, rawPathAndQuery(request), request, response)) {
+      return;
+    }
     Optional<IdeBootstrapTicketService.Ticket> consumed =
         bootstrapTickets.consume(request.getParameter("token"));
     if (consumed.isEmpty() || !consumed.get().environmentId().equals(environmentId)) {
@@ -210,7 +265,13 @@ public final class IdeGatewayDataPlane {
       response.sendError(HttpServletResponse.SC_GONE);
       return;
     }
-    String cookieValue = sessions.open(ticket.identity(), ticket.workspacePath());
+    String cookieValue;
+    try {
+      cookieValue = sessions.open(ticket.identity(), ticket.viewId(), ticket.workspacePath());
+    } catch (IllegalStateException error) {
+      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return;
+    }
     StringBuilder cookie =
         new StringBuilder(properties.requireSessionCookieName())
             .append('=')
@@ -224,6 +285,28 @@ public final class IdeGatewayDataPlane {
     response.setHeader(
         "Location",
         "/?workspace=" + URLEncoder.encode(ticket.workspacePath(), StandardCharsets.UTF_8));
+  }
+
+  /** 非 owner 节点把整个浏览器 exchange 单跳到 READY owner；本地 owner 或未配置集群时返回 false 走本地交付。 */
+  private boolean forwardRemote(
+      EnvironmentId environmentId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    Optional<ClusterIdeOwnerRoute> route = clusterNodeRegistry.route(environmentId);
+    if (route.isEmpty() || route.get().local()) {
+      return false;
+    }
+    remoteForwarder.forwardHttp(route.get(), environmentId, rawPathAndQuery, request, response);
+    return true;
+  }
+
+  /** 原始 path（含 query）；对内部入口即转发方还原出的浏览器原始 path。 */
+  static String rawPathAndQuery(HttpServletRequest request) {
+    String uri = request.getRequestURI();
+    String query = request.getQueryString();
+    return query == null || query.isEmpty() ? uri : uri + "?" + query;
   }
 
   private IdeBrowserSessionRegistry.Session requireSession(
@@ -269,10 +352,11 @@ public final class IdeGatewayDataPlane {
     if (names == null) {
       return headers;
     }
+    Set<String> connectionTokens = connectionTokens(request);
     while (names.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
       String name = names.nextElement();
       String lower = name.toLowerCase(Locale.ROOT);
-      if (HOP_BY_HOP.contains(lower) || DROPPED_REQUEST_HEADERS.contains(lower)) {
+      if (isNeverForwarded(lower) || connectionTokens.contains(lower)) {
         continue;
       }
       Enumeration<String> values = request.getHeaders(name);
@@ -290,6 +374,40 @@ public final class IdeGatewayDataPlane {
 
   private static boolean isHopByHop(String name) {
     return HOP_BY_HOP.contains(name.toLowerCase(Locale.ROOT));
+  }
+
+  /** 该请求头名是否永不转发给 Daemon（含 hop-by-hop、凭据、内部/代理链与 WS 握手材料）。 */
+  static boolean isNeverForwarded(String lowerName) {
+    if (HOP_BY_HOP.contains(lowerName) || DROPPED_REQUEST_HEADERS.contains(lowerName)) {
+      return true;
+    }
+    if (NEVER_FORWARDED_REQUEST_HEADERS.contains(lowerName)) {
+      return true;
+    }
+    for (String prefix : NEVER_FORWARDED_REQUEST_HEADER_PREFIXES) {
+      if (lowerName.startsWith(prefix)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** {@code Connection} 头列出的连接级头名（逗号分隔），这些头本身也必须按 hop-by-hop 处理。 */
+  static Set<String> connectionTokens(HttpServletRequest request) {
+    Set<String> tokens = new LinkedHashSet<>();
+    Enumeration<String> values = request.getHeaders("Connection");
+    if (values == null) {
+      return tokens;
+    }
+    while (values.hasMoreElements()) {
+      for (String token : values.nextElement().split(",")) {
+        String trimmed = token.trim().toLowerCase(Locale.ROOT);
+        if (!trimmed.isEmpty()) {
+          tokens.add(trimmed);
+        }
+      }
+    }
+    return tokens;
   }
 
   private static void sendError(HttpServletResponse response, int status) throws IOException {

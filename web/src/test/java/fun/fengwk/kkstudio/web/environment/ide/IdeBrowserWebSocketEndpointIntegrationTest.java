@@ -86,7 +86,7 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
               return new IdeRequest(identity, UUID.randomUUID(), reply);
             });
 
-    String cookie = sessions.open(identity, "/home/dev/project");
+    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/home/dev/project");
     OkHttpClient browser = localhostClient();
     try {
       BlockingQueue<String> echoed = new LinkedBlockingQueue<>();
