@@ -11,7 +11,12 @@ import {
 } from './config.js'
 import { Runtime, detectEnvironmentInfo } from './runtime.js'
 import { createWebSocketTransport } from './transport/control.js'
-import { acquireDirectoryLock, createProcessSupervisor, ensurePrivateDirectory } from './native/index.js'
+import {
+  acquireDirectoryLock,
+  createProcessSupervisor,
+  ensurePrivateDirectory,
+  type DirectoryLock,
+} from './native/index.js'
 import { fileCapabilities, setFileCapabilityHooks } from './coding/files.js'
 import { searchCapabilities } from './coding/search.js'
 import { processCapability } from './coding/process.js'
@@ -90,14 +95,14 @@ function runCheckConfig(args: string[]): number {
 
 async function runDaemon(config: DaemonConfig): Promise<number> {
   const closers: Array<() => Promise<void>> = []
+  let lock: DirectoryLock | null = null
   let runtime: Runtime | null = null
   let outcome = 0
   let failure: unknown = null
   try {
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
-    const lock = await acquireDirectoryLock(dataDir)
-    closers.push(() => lock.close())
+    lock = await acquireDirectoryLock(dataDir)
 
     const supervisor = createProcessSupervisor()
     closers.push(() => supervisor.close())
@@ -130,7 +135,8 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       processes: supervisor,
       environment: detectEnvironmentInfo(config, join(dataDir, 'tmp')),
       ide,
-      update: { handleUpdate },
+      // 受管更新以 supervisor 运行受控子进程；装配层绑定 native 端口。
+      update: { handleUpdate: (command, cfg, signal) => handleUpdate(command, cfg, signal, supervisor) },
       // WELCOME 下发的 TTL 热更直接驱动 Files 受控临时输出的同一份 lease 清扫。
       temporaryResources: {
         async sweep(ttlSeconds: number): Promise<void> {
@@ -155,9 +161,23 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
   } finally {
     if (runtime !== null) {
       runtime.close()
+      // 停机只发布终止；必须等所有在途执行真正收敛后，才释放锁与 native 资源。
+      await runtime.awaitCompletion()
     }
-    releaseTextOutputStore(config.dataDir)
     const cleanupErrors = await closeAll(closers)
+    // 受控临时输出缓存必须在全部能力调用结束后释放；无在途租约才真正移除，绝不提前删缓存。
+    try {
+      await releaseTextOutputStore(config.dataDir)
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    if (lock !== null) {
+      try {
+        await lock.close()
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+    }
     if (cleanupErrors.length > 0) {
       // 释放失败绝不静默：以失败退出并携带原始错误，诊断只保留安全摘要。
       throw aggregateFailure(failure, cleanupErrors)

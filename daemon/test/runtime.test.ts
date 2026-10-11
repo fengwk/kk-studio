@@ -669,3 +669,246 @@ describe('runtime protocol version and scope', () => {
     expect(setup.runtime.getState()).toBe('STOPPED')
   })
 })
+
+describe('runtime IDE stream lifetime and shutdown convergence', () => {
+  /**
+   * 元数据动作受 ideCommandTimeoutMillis 约束，OPEN_STREAM 是活动通道不受该 deadline 约束，
+   * 连接失效即中止，且两类 IDE 请求都不进入 Agent journal、也不跨代际重放。
+   */
+  it('exempts OPEN_STREAM from the metadata deadline and aborts it on disconnect without journaling', async () => {
+    let metadataAborted = false
+    let streamAborted = false
+    const setup = buildRuntime({
+      ideCommandTimeoutMillis: 30,
+      ide: {
+        async handle(command, signal) {
+          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+          if (command.action === 'OPEN_STREAM') {
+            streamAborted = true
+          } else {
+            metadataAborted = true
+          }
+          return { ok: false, message: 'aborted' }
+        },
+        async close() {},
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'meta-1', payload: { action: 'OPEN_VIEW' } }),
+    )
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', {
+        environmentId: ENV,
+        invocationId: 'stream-1',
+        payload: { action: 'OPEN_STREAM', mode: 'WS', streamUrl: 'https://stream.example/s', path: '/' },
+      }),
+    )
+    await waitFor(() => metadataAborted)
+    expect(
+      sent(setup.transport)
+        .filter((envelope) => envelope.messageType === 'IDE_RESULT')
+        .map((envelope) => envelope.invocationId),
+    ).toEqual(['meta-1'])
+
+    // 超过 2 倍元数据 deadline 后 OPEN_STREAM 仍在途，且没有结果帧。
+    await new Promise((resolve) => setTimeout(resolve, 90))
+    expect(streamAborted).toBe(false)
+    expect(
+      sent(setup.transport).some(
+        (envelope) => envelope.messageType === 'IDE_RESULT' && envelope.invocationId === 'stream-1',
+      ),
+    ).toBe(false)
+
+    // IDE 请求既不进入 Agent journal，也不会被重放。
+    expect(setup.runtime.getJournal().find('stream-1')).toBeUndefined()
+    expect(setup.runtime.getJournal().find('meta-1')).toBeUndefined()
+
+    setup.transport.disconnect()
+    await waitFor(() => streamAborted)
+
+    await waitFor(() => setup.transport.connectCount >= 2)
+    setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
+    await waitFor(() => setup.runtime.getState() === 'READY')
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT')).toBe(false)
+    setup.runtime.close()
+  })
+
+  /** 停机必须中止在途 controller，并且只有所有在途执行真正收敛后才发布完成信号。 */
+  it('aborts in-flight executions on shutdown and only completes after they settle', async () => {
+    let streamAborted = false
+    let capabilityAborted = false
+    let releaseCapability: (() => void) | null = null
+    const capabilityGate = new Promise<void>((resolve) => {
+      releaseCapability = resolve
+    })
+    const setup = buildRuntime({
+      ideCommandTimeoutMillis: 60_000,
+      ide: {
+        async handle(_command, signal) {
+          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+          streamAborted = true
+          return { ok: false, message: 'aborted' }
+        },
+        async close() {},
+      },
+      capabilities: {
+        'fs.read': async (call, context) => {
+          await new Promise<void>((resolve) => {
+            context.signal.addEventListener(
+              'abort',
+              () => {
+                capabilityAborted = true
+                resolve()
+              },
+              { once: true },
+            )
+          })
+          // 收敛延迟：验证 termination 只在 Promise.allSettled 之后发布。
+          await capabilityGate
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', {
+        environmentId: ENV,
+        invocationId: 'stream-1',
+        payload: { action: 'OPEN_STREAM', mode: 'HTTP', streamUrl: 'https://stream.example/s', path: '/' },
+      }),
+    )
+    setup.transport.receive(
+      serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload('fs.read', 60_000) }),
+    )
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'STARTED'))
+
+    let completed = false
+    const completion = setup.runtime.awaitCompletion().then(() => {
+      completed = true
+    })
+    setup.runtime.close()
+    await waitFor(() => streamAborted)
+    await waitFor(() => capabilityAborted)
+    await tick(3)
+    expect(completed).toBe(false)
+
+    releaseCapability?.()
+    await waitFor(() => completed)
+    await completion
+  })
+
+  /** 受管更新也有独立 controller；停机必须中止它，并在其收敛后才完成终止。 */
+  it('aborts an in-flight managed update on shutdown and awaits its outcome', async () => {
+    let updateAborted = false
+    let releaseUpdate: (() => void) | null = null
+    const updateGate = new Promise<void>((resolve) => {
+      releaseUpdate = resolve
+    })
+    const update: UpdatePort = {
+      async handleUpdate(_command, _config, signal) {
+        await new Promise<void>((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => {
+              updateAborted = true
+              resolve()
+            },
+            { once: true },
+          ),
+        )
+        await updateGate
+        return { phase: 'FAILED', message: 'aborted' }
+      },
+    }
+    const setup = buildRuntime({ update })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: {
+          operationId: '55555555-4444-4555-8666-777777777777',
+          targetVersion: '1.0.13',
+          artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.13/kk-studio-daemon-v1.0.13.jar',
+          artifactSha256: 'b'.repeat(64),
+        },
+      }),
+    )
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'UPDATE_RESULT'))
+
+    let completed = false
+    const completion = setup.runtime.awaitCompletion().then(() => {
+      completed = true
+    })
+    setup.runtime.close()
+    await waitFor(() => updateAborted)
+    await tick(3)
+    expect(completed).toBe(false)
+
+    releaseUpdate?.()
+    await waitFor(() => completed)
+    await completion
+  })
+
+  /**
+   * OPEN_STREAM 可无限存活：在途 IDE 请求必须有硬上限。同 ID 重复不占名额，不同 ID 洪泛到上限一律固定 busy，
+   * 释放名额后可再接新请求。
+   */
+  it('bounds in-flight IDE commands, reports busy on overflow and accepts again after release', async () => {
+    const releases: Array<() => void> = []
+    const ide: IdeService = {
+      async handle(_command, signal) {
+        await new Promise<void>((resolve) => {
+          releases.push(resolve)
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        return { ok: true }
+      },
+      async close() {},
+    }
+    const setup = buildRuntime({ ideCommandTimeoutMillis: 60_000, ide })
+    await handshake(setup)
+    const uuid = (n: number): string => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`
+    const cap = 256
+    const streamPayload = { action: 'OPEN_STREAM', mode: 'WS', streamUrl: 'https://stream.example/s', path: '/' }
+    for (let index = 0; index < cap; index++) {
+      setup.transport.receive(
+        serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(index), payload: streamPayload }),
+      )
+    }
+    expect(releases.length).toBe(cap)
+
+    // 同 ID 重复不占新名额。
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(0), payload: streamPayload }),
+    )
+    await tick()
+    expect(releases.length).toBe(cap)
+
+    // 不同 ID 超过上限：固定 busy，绝不执行副作用。
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(cap), payload: streamPayload }),
+    )
+    await waitFor(() =>
+      sent(setup.transport).some(
+        (envelope) => envelope.messageType === 'IDE_RESULT' && envelope.invocationId === uuid(cap),
+      ),
+    )
+    const busy = sent(setup.transport).find((envelope) => envelope.invocationId === uuid(cap))
+    expect(busy?.payload).toMatchObject({ ok: false, message: 'too many in-flight IDE commands' })
+    expect(releases.length).toBe(cap)
+
+    // 释放一个名额后可再接新请求。
+    releases[0]?.()
+    await waitFor(() =>
+      sent(setup.transport).some(
+        (envelope) => envelope.messageType === 'IDE_RESULT' && envelope.invocationId === uuid(0),
+      ),
+    )
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(cap + 1), payload: streamPayload }),
+    )
+    await waitFor(() => releases.length === cap + 1)
+    setup.runtime.close()
+  })
+})

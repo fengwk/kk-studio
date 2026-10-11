@@ -3,7 +3,7 @@ import { visit as jsoncVisit, type JSONPath } from 'jsonc-parser'
 import type { CapabilityResult, IdeCommand, IdeReply, ResultContent } from './contracts.js'
 
 /**
- * Daemon wire 协议的严格 codec（v3 envelope / READY v4 / capability catalog v2）。
+ * Daemon wire 协议的严格 codec（v4 envelope / READY v5 / capability catalog v2）。
  *
  * <p>这是 Java Environment Daemon codec 的 Node 等价实现，wire 形状逐字段对齐 harness/environment 的
  * DaemonEnvelopeCodec / DaemonCapabilitiesCodec / DaemonCapabilityInvokeCodec /

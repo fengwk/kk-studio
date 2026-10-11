@@ -122,6 +122,9 @@ const DEFAULT_INITIAL_RECONNECT_DELAY_MILLIS = 1_000
 const DEFAULT_MAX_RECONNECT_DELAY_MILLIS = 30_000
 const DEFAULT_MAX_CONCURRENT_INVOCATIONS = 64
 const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
+/** 在途 IDE 请求条数上界：OPEN_STREAM 可无限存活，必须以此硬上限防止无界 map 与资源耗尽。 */
+const MAX_IN_FLIGHT_IDE_COMMANDS = 256
+const IDE_BUSY_MESSAGE = 'too many in-flight IDE commands'
 /** 内存中保留的受管更新回执条数上界：足够覆盖少量重发与重连重放，不无界累积。 */
 const MAX_TRACKED_UPDATE_OPERATIONS = 8
 const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
@@ -149,6 +152,9 @@ export class Runtime {
   private readonly running = new Map<string, RunningInvocation>()
   private readonly ideInFlight = new Map<string, AbortController>()
   private readonly updateResults = new Map<string, string>()
+  /** 所有已登记的在途执行（capability/IDE/update）；停机后必须全部收敛才发布完成信号。 */
+  private readonly inFlight = new Set<Promise<void>>()
+  private activeUpdateController: AbortController | null = null
 
   private boundEnvironmentId: string | null = null
   private maxResourceBytes = 0
@@ -245,6 +251,11 @@ export class Runtime {
     return this.termination
   }
 
+  /** 停机后所有在途执行真正收敛的完成信号；与 awaitTermination 同时发布。 */
+  async awaitCompletion(): Promise<void> {
+    await this.termination
+  }
+
   getState(): RuntimeState {
     return this.state
   }
@@ -334,6 +345,11 @@ export class Runtime {
     this.maxResourceBytes = 0
     this.boundEnvironmentId = null
     this.state = 'DISCONNECTED'
+    // IDE 请求绑定于控制代际：连接失效即中止在途 IDE 请求，绝不跨代际重放副作用。
+    for (const controller of this.ideInFlight.values()) {
+      controller.abort('CONTROL_DISCONNECTED')
+    }
+    this.ideInFlight.clear()
     const delay = this.nextReconnectDelay
     this.nextReconnectDelay = Math.min(this.nextReconnectDelay * 2, this.maxReconnectDelayMillis)
     this.scheduleReconnect(delay)
@@ -612,7 +628,7 @@ export class Runtime {
         arguments: invoke.arguments,
         timeoutMillis: invoke.timeoutMillis,
       }
-      void this.execute(invocation, executor, call)
+      void this.track(this.execute(invocation, executor, call))
     } catch (error) {
       this.terminal(invocationId, 'FAILED', JSON.stringify(errorPayload(safeMessage(error))), null)
     }
@@ -811,16 +827,17 @@ export class Runtime {
     this.sendUpdateResult(
       encodeUpdateResult({ operationId: command.operationId, phase: 'ACCEPTED', message: null }),
     )
-    void this.runUpdate(command)
+    const controller = new AbortController()
+    this.activeUpdateController = controller
+    void this.track(this.runUpdate(command, controller))
   }
 
-  private async runUpdate(command: UpdateCommand): Promise<void> {
+  private async runUpdate(command: UpdateCommand, controller: AbortController): Promise<void> {
     let payloadJson: string
     try {
       if (this.update === null) {
         throw new Error('managed update is not configured')
       }
-      const controller = new AbortController()
       const raw = await this.update.handleUpdate(
         command as unknown as Record<string, unknown>,
         this.config,
@@ -835,6 +852,9 @@ export class Runtime {
       })
     } finally {
       this.activeUpdateOperationId = null
+      if (this.activeUpdateController === controller) {
+        this.activeUpdateController = null
+      }
     }
     this.rememberUpdateResult(command.operationId, payloadJson)
     if (this.state === 'READY') {
@@ -878,7 +898,8 @@ export class Runtime {
   }
 
   // -------------------------------------------------------------------------
-  // IDE 元数据请求（独立 deadline，不进入 Agent journal，断线不重放副作用）
+  // IDE 请求（元数据动作有独立 deadline；OPEN_STREAM 是活动通道，不进入 Agent journal，
+  // 断线/停机中止而不跨代际重放副作用）
   // -------------------------------------------------------------------------
 
   private handleIdeCommand(envelope: Envelope): void {
@@ -895,17 +916,27 @@ export class Runtime {
       this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: 'IDE service is unavailable' }))
       return
     }
+    // 硬上限在插入前判定：同 ID 重复已在上面去重、不占名额；不同 ID 洪泛到上限一律固定 busy，绝不无界增长。
+    if (this.ideInFlight.size >= MAX_IN_FLIGHT_IDE_COMMANDS) {
+      this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: IDE_BUSY_MESSAGE }))
+      return
+    }
     const controller = new AbortController()
     this.ideInFlight.set(invocationId, controller)
-    const timer = setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
-    void this.runIdeCommand(invocationId, command, controller, timer)
+    // 只有元数据动作有固定 deadline；OPEN_STREAM 是活动通道，其寿命由 IDE 流传输的 connect 超时与
+    // peer/控制代际失效决定，绝不被运行时 30s 上限切断。
+    const timer =
+      command.action === 'OPEN_STREAM'
+        ? null
+        : setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
+    void this.track(this.runIdeCommand(invocationId, command, controller, timer))
   }
 
   private async runIdeCommand(
     invocationId: string,
     command: IdeCommand,
     controller: AbortController,
-    timer: NodeJS.Timeout,
+    timer: NodeJS.Timeout | null,
   ): Promise<void> {
     try {
       const reply = await (this.ide as IdeService).handle(command, controller.signal)
@@ -913,7 +944,9 @@ export class Runtime {
     } catch (error) {
       this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: safeMessage(error) }))
     } finally {
-      clearTimeout(timer)
+      if (timer !== null) {
+        clearTimeout(timer)
+      }
       this.ideInFlight.delete(invocationId)
     }
   }
@@ -969,11 +1002,35 @@ export class Runtime {
       controller.abort('SHUTDOWN')
     }
     this.ideInFlight.clear()
+    // 受管更新使用独立 controller；停机必须中止，否则其 OS 作业句柄悬空。
+    this.activeUpdateController?.abort('SHUTDOWN')
+    this.activeUpdateController = null
     try {
       this.transport.close()
     } catch {
       // transport 关闭失败不影响终止收敛。
     }
+    void this.finalize(terminalState)
+  }
+
+  /** 登记一个在途执行 Promise，并在其收敛后自动移除。 */
+  private track(promise: Promise<void>): Promise<void> {
+    this.inFlight.add(promise)
+    const remove = (): void => {
+      this.inFlight.delete(promise)
+    }
+    promise.then(remove, remove)
+    return promise
+  }
+
+  /**
+   * 停机后等待所有在途执行（capability/IDE/update）真正收敛，再发布终止与完成信号。
+   *
+   * <p>运行时调度的 deadline 已在 shutdown 中清除、controller 已中止，因此 well-behaved 执行器必然收敛，
+   * 不会因本 runtime 自身的定时器死锁。
+   */
+  private async finalize(terminalState: RuntimeState): Promise<void> {
+    await Promise.allSettled([...this.inFlight])
     this.terminationResolve(terminalState)
   }
 }
