@@ -30,13 +30,13 @@ local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc �
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" \
   mvn -B -ntp -Pdistribution -pl web -am clean package
-test -f web/target/kk-studio-web-1.0.11.jar
+test -f web/target/kk-studio-web-1.0.12.jar
 sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
-  web/target/kk-studio-web-1.0.11.jar \
+  web/target/kk-studio-web-1.0.12.jar \
   web/target/convention4j-agent/convention4j-agent.jar
 "$JAVA_HOME_21/bin/java" \
   -javaagent:web/target/convention4j-agent/convention4j-agent.jar \
-  -jar web/target/kk-studio-web-1.0.11.jar
+  -jar web/target/kk-studio-web-1.0.12.jar
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -60,7 +60,7 @@ sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
 验证静态资源已进入产物：
 
 ```bash
-"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.0.11.jar \
+"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.0.12.jar \
   | grep -E '^BOOT-INF/classes/static/(index.html|assets/)'
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
@@ -220,8 +220,7 @@ fake Function 与 Chat 的应用契约检查。一次运行的通过范围以退
 ### [`deploy/distributed`](../../deploy/distributed)：双节点零 App-to-App 网络栈
 
 `kk-studio-distributed` project 是免费 mock 拓扑：App 镜像复用
-[deploy/local/Dockerfile](../../deploy/local/Dockerfile)，Daemon 镜像复用
-[deploy/reliability/daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile)，HTTP mock 直接
+[deploy/local/Dockerfile](../../deploy/local/Dockerfile)，HTTP mock 直接
 挂载 [`deploy/test/mock`](../../deploy/test/mock)。
 
 ```bash
@@ -231,7 +230,7 @@ fake Function 与 Chat 的应用契约检查。一次运行的通过范围以退
 ./scripts/dev/verify/e2e/distributed.sh down --volumes
 ```
 
-`node-a-db`、`node-b-db`、`daemon-a`、`daemon-b` 都是 `internal: true`，没有任何网络同时包含
+`node-a-db`、`node-b-db` 都是 `internal: true`，没有任何网络同时包含
 App-A 与 App-B；宿主只经 `app-ingress-a`/`app-ingress-b` 发布 loopback 端口（默认 app-a
 `18082`、app-b `18083`，PostgreSQL `15433`、MinIO `19001`、mock `18090`）。两个 App 共享同一
 PostgreSQL database 与 MinIO bucket，节点身份用可覆盖的 disposable 变量表达：
@@ -239,21 +238,18 @@ PostgreSQL database 与 MinIO bucket，节点身份用可覆盖的 disposable �
 ```text
 DISTRIBUTED_ENV_A_NAME=distributed-a
 DISTRIBUTED_ENV_B_NAME=distributed-b
-DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=e2e-token-dist-a
-DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=e2e-token-dist-b
 DISTRIBUTED_APP_A_PORT=18082
 DISTRIBUTED_APP_B_PORT=18083
 ```
 
-distributed.sh disconnect-db-a / reconnect-db-a 是按容器与网络精确操作的幂等故障注入，不会影响
-`daemon-a` 网络与 daemon workspace volume。
+distributed.sh disconnect-db-a / reconnect-db-a 是按容器与网络精确操作的幂等故障注入。
 [`scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) 的 `--distributed` 通过该入口启停栈
 并在退出时清理。
 
-### [`deploy/reliability`](../../deploy/reliability)：App + Environment Daemon
+### [`deploy/reliability`](../../deploy/reliability)：App
 
-`kk-studio-reliability` project 运行 `e2e` profile 的 App 与容器内 Daemon，用于 Environment
-工具隔离、S3 和显式可靠性矩阵。`reliability` network 是 `internal: true`，App 另加入
+`kk-studio-reliability` project 运行 `e2e` profile 的 App，用于 S3 和显式可靠性矩阵。
+`reliability` network 是 `internal: true`，App 另加入
 `app-ingress` 发布 loopback API（默认 `RELIABILITY_APP_PORT=18091`，MinIO
 `RELIABILITY_MINIO_PORT=19002`）。
 
@@ -261,42 +257,14 @@ distributed.sh disconnect-db-a / reconnect-db-a 是按容器与网络精确操�
 ./scripts/dev/verify/reliability/stack.sh up
 ./scripts/dev/verify/reliability/stack.sh status
 ./scripts/dev/verify/reliability/stack.sh inspect
-./scripts/dev/verify/reliability/stack.sh logs postgres app workspace-init daemon
+./scripts/dev/verify/reliability/stack.sh logs postgres app
 ./scripts/dev/verify/reliability/stack.sh down --volumes
 ```
 
-Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-daemon/v1` 连接 App。
+`up` 等待 PostgreSQL health 与 App `/actuator/health`。`inspect` fail closed 检查：
 
-容器入口在启动前按与产品相同的布局物化配置与凭证：把注入的注册凭证写为
-`/workspace/.kk-studio/daemon.token`（目录 0700、文件 0600），并按 studioUrl `http://app:8080`
-生成兄弟 `daemon.json`，最后用唯一的 `--config /workspace/.kk-studio/daemon.json` 启动 Daemon。
-凭证文本既不进入 argv（`ps` 不可见），也不残留在 `/proc/<pid>/environ`；Daemon 由配置的
-`studioUrl` 自行派生上述 gateway。容器配置不含 `--gateway-uri`、`--data-dir` 或 `--lsp-config`
-等第二入口。
-
-[daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 JDK 21 builder 构建
-[`harness/daemon`](../../harness/daemon) 单文件 shaded JAR，runtime 使用
-`eclipse-temurin:21.0.8_9-jdk-jammy`，预装
-Node `22.19.0`/npm `11.19.0`、bash、git，创建 `kkdaemon` uid/gid `10001`，入口先物化凭证再
-`exec java -jar /opt/kk-studio/daemon.jar`。Daemon 只挂载一个 `/workspace` named volume，
-`workspace-init` 完成 owner 初始化（`chown 10001:10001`）后 Daemon 才启动。
-
-`up` 等待 PostgreSQL health、App `/actuator/health` 和公共 `GET /api/harness/environments` 的
-`status=READY`。`inspect` fail closed 检查：
-
-- Daemon uid 不是 root；
-- mount 只有 `volume -> /workspace` 且可写、没有 bind mount；
-- `java`/`javap`、Node/npm/git/bash 可执行，`rg`/`fd` 不存在；
-- workspace 可写、Environment `READY`；
+- mount 只有受控 volume 且可写、没有 bind mount；
 - Compose config 不含 provider credential 或 bind mount。
-
-向 Daemon named volume 写入跨仓基线是独立的显式操作，必须给出 clean Git worktree：
-
-```bash
-PI_ANCHOR=/path/to/pi \
-PI_BASE_ANCHOR=/path/to/pi-base \
-  ./scripts/dev/verify/reliability/stack.sh snapshot
-```
 
 可靠性栈与 Agent 矩阵的运行入口见
 [开发与测试](development-and-testing.md#隔离栈与真实-agent-矩阵)。
@@ -316,7 +284,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
 | distributed | node identity/ports | `DISTRIBUTED_*` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_MINIO_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
-| supply-chain | reports/images/cache/network | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`SUPPLY_CHAIN_TRIVY_NETWORK`、`TRIVY_SKIP_DB_UPDATE` |
+| supply-chain | reports/images/cache/network | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`SUPPLY_CHAIN_TRIVY_NETWORK`、`TRIVY_SKIP_DB_UPDATE` |
 | 显式 `--real` E2E | 仅宿主 credential 同步 | `TEST_GOOGLE_*`、`TEST_OPENAI_*`、`TEST_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
@@ -387,11 +355,11 @@ docker compose -f deploy/local/compose.yaml down -v
 docker compose -f deploy/test/compose.yaml --profile app down --remove-orphans
 docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
 
-# distributed：停止并保留数据；第二条删除 PG/MinIO/daemon workspace volumes
+# distributed：停止并保留数据；第二条删除 PG/MinIO volumes
 ./scripts/dev/verify/e2e/distributed.sh down
 ./scripts/dev/verify/e2e/distributed.sh down --volumes
 
-# reliability：保留或删除 PostgreSQL/MinIO/workspace named volumes
+# reliability：保留或删除 PostgreSQL/MinIO named volumes
 ./scripts/dev/verify/reliability/stack.sh down
 ./scripts/dev/verify/reliability/stack.sh down --volumes
 

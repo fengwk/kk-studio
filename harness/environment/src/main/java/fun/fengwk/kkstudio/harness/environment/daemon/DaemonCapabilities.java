@@ -6,15 +6,15 @@ import java.util.regex.Pattern;
 /**
  * Daemon READY 上报的版本化宿主 metadata。
  *
- * <p>这是 READY 的唯一 wire 形状：capabilities 协议版本、Daemon 自身构建版本（JAR manifest {@code
- * Implementation-Version}，未打包时为固定标记 {@code development}）与一份 {@link DaemonEnvironmentInfo}。READY
- * 只描述宿主 本身，不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Card 上的 CAS {@code version} 无关。
+ * <p>这是 READY 的唯一 wire 形状：capabilities 协议版本、Daemon 自身构建版本（打包期写入冻结运行时清单的 {@code
+ * daemonVersion}，未打包时为固定标记 {@code development}）与一份 {@link DaemonEnvironmentInfo}。READY 只描述宿主本身，
+ * 不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Card 上的 CAS {@code version} 无关。
  */
 public record DaemonCapabilities(
     int version, String daemonVersion, DaemonEnvironmentInfo environment) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 4;
+  public static final int VERSION = 5;
 
   /** daemon 构建版本上界；manifest 版本与 {@code development} 标记都远小于该值。 */
   public static final int MAX_DAEMON_VERSION_CHARS = 64;

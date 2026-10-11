@@ -101,4 +101,17 @@ class EnvironmentDtoContractTest {
     String badJson = "{\"expectedVersion\":\"5\",\"extra\":true}";
     assertThrows(Exception.class, () -> MAPPER.readValue(badJson, EnvironmentRotateTokenDTO.class));
   }
+
+  /** 意图：验证 EnvironmentInstallConfigDTO 仅包含 operatingSystem 与 daemon，不含 javaHome。 */
+  @Test
+  void environmentInstallConfigDtoDeclaresOnlyOperatingSystemAndDaemon() {
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> EnvironmentInstallConfigDTO.class.getDeclaredField("javaHome"));
+    assertEquals(
+        List.of("operatingSystem", "daemon"),
+        List.of(EnvironmentInstallConfigDTO.class.getDeclaredFields()).stream()
+            .map(Field::getName)
+            .toList());
+  }
 }

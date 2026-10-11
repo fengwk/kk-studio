@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 
 import java.util.ArrayList;
@@ -12,90 +14,119 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 意图：官方发布解析必须只接受「非草稿、tag 匹配、五件套资产齐全、制品地址就是官方地址」的完整发布，并从官方校验文件取 SHA256；
- * 任何不完整或可疑的元数据都收敛为不可用，绝不回退到任意版本或任意 URL。
+ * 意图：官方发布解析必须只接受「非草稿、tag 匹配、目标 os/arch 五件套资产齐全、制品地址就是官方地址」的完整发布，并从官方校验文件取 SHA256；
+ * 任何不完整、平台不匹配或可疑的元数据都收敛为不可用，绝不回退到任意版本、任意 URL 或其他平台归档。
  */
 class OfficialDaemonReleaseProviderTest {
 
   private static final String VERSION = "1.0.9";
   private static final String TAG = "v1.0.9";
   private static final String SHA = "a".repeat(64);
-  private static final String JAR = "kk-studio-daemon-v1.0.9.jar";
-  private static final String JAR_URL = DaemonUpdateArtifact.artifactUrl(VERSION);
+  private static final DaemonOperatingSystem OS = DaemonOperatingSystem.LINUX;
+  private static final DaemonArchitecture ARCH = DaemonArchitecture.AMD64;
+  private static final String ARTIFACT = "kk-studio-daemon-v1.0.9-linux-amd64.tar.gz";
+  private static final String ARTIFACT_URL = DaemonUpdateArtifact.artifactUrl(VERSION, OS, ARCH);
   private static final String DOWNLOAD_BASE =
       "https://github.com/fengwk/kk-studio/releases/download/v1.0.9/";
 
   private static final List<String> COMPLETE_ASSETS =
       List.of(
-          JAR, JAR + ".sha256", "kk-studio-daemon-v1.0.9.json", "LICENSE", "THIRD_PARTY_NOTICES");
+          ARTIFACT,
+          ARTIFACT + ".sha256",
+          "kk-studio-daemon-v1.0.9-linux-amd64.json",
+          "LICENSE",
+          "THIRD_PARTY_NOTICES");
 
   @Test
   void resolvesCompleteNonDraftRelease() {
-    FakeFeed feed = new FakeFeed(release(false, TAG, COMPLETE_ASSETS, JAR_URL), SHA + "  " + JAR);
+    FakeFeed feed =
+        new FakeFeed(release(false, TAG, COMPLETE_ASSETS, ARTIFACT_URL), SHA + "  " + ARTIFACT);
 
     Optional<DaemonReleaseTarget> target =
-        new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget();
+        new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget(OS, ARCH);
 
     assertTrue(target.isPresent());
     assertEquals(VERSION, target.get().targetVersion());
-    assertEquals(JAR_URL, target.get().artifactUrl());
+    assertEquals(ARTIFACT_URL, target.get().artifactUrl());
     assertEquals(SHA, target.get().artifactSha256());
     assertEquals(TAG, feed.requestedTag);
   }
 
   @Test
   void rejectsDraft() {
-    FakeFeed feed = new FakeFeed(release(true, TAG, COMPLETE_ASSETS, JAR_URL), SHA);
-    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget().isEmpty());
+    FakeFeed feed = new FakeFeed(release(true, TAG, COMPLETE_ASSETS, ARTIFACT_URL), SHA);
+    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget(OS, ARCH).isEmpty());
   }
 
   @Test
   void rejectsTagMismatch() {
-    FakeFeed feed = new FakeFeed(release(false, "v9.9.9", COMPLETE_ASSETS, JAR_URL), SHA);
-    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget().isEmpty());
+    FakeFeed feed = new FakeFeed(release(false, "v9.9.9", COMPLETE_ASSETS, ARTIFACT_URL), SHA);
+    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget(OS, ARCH).isEmpty());
   }
 
   @Test
   void rejectsIncompleteAssetSet() {
     List<String> missingNotices = new ArrayList<>(COMPLETE_ASSETS);
     missingNotices.remove("THIRD_PARTY_NOTICES");
-    FakeFeed feed = new FakeFeed(release(false, TAG, missingNotices, JAR_URL), SHA);
-    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget().isEmpty());
+    FakeFeed feed = new FakeFeed(release(false, TAG, missingNotices, ARTIFACT_URL), SHA);
+    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget(OS, ARCH).isEmpty());
   }
 
   @Test
   void rejectsArtifactUrlThatIsNotTheOfficialUrl() {
     FakeFeed feed =
-        new FakeFeed(release(false, TAG, COMPLETE_ASSETS, "https://evil.example/daemon.jar"), SHA);
-    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget().isEmpty());
+        new FakeFeed(
+            release(false, TAG, COMPLETE_ASSETS, "https://evil.example/daemon.tar.gz"), SHA);
+    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget(OS, ARCH).isEmpty());
   }
 
   @Test
   void rejectsMalformedChecksum() {
-    FakeFeed feed = new FakeFeed(release(false, TAG, COMPLETE_ASSETS, JAR_URL), "not-a-digest");
-    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget().isEmpty());
+    FakeFeed feed =
+        new FakeFeed(release(false, TAG, COMPLETE_ASSETS, ARTIFACT_URL), "not-a-digest");
+    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget(OS, ARCH).isEmpty());
   }
 
   @Test
   void unavailableWhenPackagedVersionIsMissing() {
-    FakeFeed feed = new FakeFeed(release(false, TAG, COMPLETE_ASSETS, JAR_URL), SHA);
-    assertTrue(new OfficialDaemonReleaseProvider(feed, "").resolveTarget().isEmpty());
+    FakeFeed feed = new FakeFeed(release(false, TAG, COMPLETE_ASSETS, ARTIFACT_URL), SHA);
+    assertTrue(new OfficialDaemonReleaseProvider(feed, "").resolveTarget(OS, ARCH).isEmpty());
   }
 
   @Test
   void unavailableWhenMetadataIsMissing() {
     FakeFeed feed = new FakeFeed(null, SHA);
-    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget().isEmpty());
+    assertTrue(new OfficialDaemonReleaseProvider(feed, VERSION).resolveTarget(OS, ARCH).isEmpty());
+  }
+
+  /** 目标平台不在官方发布矩阵（windows-arm64）时不可用，且绝不回退到其他平台归档。 */
+  @Test
+  void unavailableForUnsupportedPlatform() {
+    FakeFeed feed = new FakeFeed(release(false, TAG, COMPLETE_ASSETS, ARTIFACT_URL), SHA);
+    assertTrue(
+        new OfficialDaemonReleaseProvider(feed, VERSION)
+            .resolveTarget(DaemonOperatingSystem.WINDOWS, DaemonArchitecture.ARM64)
+            .isEmpty());
+  }
+
+  /** 元数据只提供别的平台归档时不可用：必须严格按目标 os/arch 匹配。 */
+  @Test
+  void unavailableWhenOnlyAnotherPlatformArtifactIsPublished() {
+    FakeFeed feed = new FakeFeed(release(false, TAG, COMPLETE_ASSETS, ARTIFACT_URL), SHA);
+    assertTrue(
+        new OfficialDaemonReleaseProvider(feed, VERSION)
+            .resolveTarget(DaemonOperatingSystem.MACOS, DaemonArchitecture.ARM64)
+            .isEmpty());
   }
 
   private static String release(
-      boolean draft, String tag, List<String> assets, String jarDownloadUrl) {
+      boolean draft, String tag, List<String> assets, String artifactDownloadUrl) {
     StringBuilder builder = new StringBuilder();
     builder.append("{\"draft\":").append(draft).append(",\"tag_name\":\"").append(tag);
     builder.append("\",\"assets\":[");
     for (int i = 0; i < assets.size(); i++) {
       String name = assets.get(i);
-      String url = name.equals(JAR) ? jarDownloadUrl : DOWNLOAD_BASE + name;
+      String url = name.equals(ARTIFACT) ? artifactDownloadUrl : DOWNLOAD_BASE + name;
       if (i > 0) {
         builder.append(',');
       }

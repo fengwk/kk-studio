@@ -11,8 +11,8 @@ OS 用户只运行**一个受管 Daemon**，固定根目录 `~/.kk-studio`（Win
 
 ## 前置条件与平台
 
-主机需要 **JDK 21 与 Bash**。安装器与 Daemon 都不自动安装语言服务器、JDK 或包管理器；
-LSP client 已内嵌在 Daemon JAR 中。Studio 没有内置登录鉴权，入口须配置外部认证，只有可信的
+主机需要 **Bash**。安装器与 Daemon 都不自动安装语言服务器或包管理器；
+LSP client 已内嵌在 Daemon 发行归档中。Studio 没有内置登录鉴权，入口须配置外部认证，只有可信的
 用户与 Agent 才应取得 Environment 的宿主权限。
 
 | 平台 | 额外条件 | 常驻方式 |
@@ -36,7 +36,7 @@ stdout/stderr。
    - **操作系统**：默认按当前浏览器平台预选，可改。
    - **Studio 地址（仅 origin）**：默认当前 Studio origin，例如 `https://studio.example.com`；
      不要带路径、查询或片段。
-   - 可选的 **Java home (JDK 21)**、**Bash 可执行文件**、**备注**。空字段显示路径或备注示例，示例不是已填入的值。
+   - 可选的 **Bash 可执行文件**、**备注**。空字段显示路径或备注示例，示例不是已填入的值。
    - 可选的 **启用 LSP servers** 与 JSON `servers`。不需要选择本地文件路径，也没有 LSP 上传。
      启用后空编辑器显示灰色 JSON 示例，示例不会被保存。
 4. 点击**“保存并复制安装命令”**。Studio 先校验并保存配置，再签发 **5 分钟有效**的安装 code，
@@ -81,23 +81,21 @@ Environment 卡片上的“卸载”按钮复制一行卸载命令，从 Studio 
 
 ```text
 # Unix
-bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token> [--java-home <absolute JDK home>]
+bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token>
 bash install.sh status | uninstall | help
 
 # Windows (PS 5.1 与 PS7 pwsh 参数一致)
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token> [-JavaHome <absolute JDK21>]
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token>
 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 status|uninstall|help
 ```
 
 只有 `install` / `status` / `uninstall` / `help` 四个动作，**没有交互提示**，未知或重复选项
 直接失败。Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主私有的普通文件，
-不是符号链接，内容非空且有界；`--java-home` 指定 JDK 21 home。Windows 的 `-ConfigFile` /
+不是符号链接，内容非空且有界。Windows 的 `-ConfigFile` /
 `-TokenFile` 必须是同目录的 `daemon.json` / `daemon.token`，由当前 SID 拥有、禁用 ACL 继承、
 不含其它 SID 的 Allow ACE，且不是 reparse point。安装器只校验文件元数据，**不读取 token 内容**。
 
-Java home 发现顺序为 `--java-home` / `-JavaHome` → `JAVA_HOME_21` → `JAVA_HOME` → PATH；
-所选 home 必须是 JDK 21，Unix 只要求可执行的 `bin/java`（安装器与程序都不编译），Windows
-还要求 `bin/javac`。`DAEMON_VERIFY_TIMEOUT_SECONDS`
+`DAEMON_VERIFY_TIMEOUT_SECONDS`
 （默认 30）与 `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）可覆盖启动与稳定性验证窗口，均须十进制
 非负整数；0 表示立即检查，不等待对应窗口。
 
@@ -108,16 +106,17 @@ Java home 发现顺序为 `--java-home` / `-JavaHome` → `JAVA_HOME_21` → `JA
 1. 检查系统服务管理器是否可用、目标服务是否属于本安装器（见[管理身份](#管理身份与冲突处理)），
    并核验输入文件是私有、同目录、非符号链接且有界的 `daemon.json` / `daemon.token`。同名但非
    受管定义会在下载或写入前被拒绝。
-2. 解析 latest 官方 release tag，下载对应的 `kk-studio-daemon-<tag>.jar` 与 `.jar.sha256`，
-   核对摘要，并确认 JAR 版本与解析出的 tag 一致。
+2. 解析 latest 官方 release tag，下载对应本机 OS 与架构的发行归档
+   `kk-studio-daemon-v<version>-<os>-<arch>.tar.gz` 与 `.sha256`，核对摘要，并确认归档内
+   `runtime-manifest.json` 的版本与解析出的 tag 一致。
 3. 把暂存配置与 token 复制为下载目录内的 0600 快照，后续只针对该快照做预检，避免校验与发布
    之间被替换。
-4. 用下载的新 JAR 对快照执行 `--check-config` 预检：它读取配置与 token 文件，用共享 codec 校验
-   配置结构与取值，在本机只读文件系统中把配置的（缺省为 `bash`）Bash 解析为实际可执行路径，并
-   校验内联 LSP 的结构。它**不执行** Bash 或任何其它程序，不建数据目录、不加锁、不连接、不启动
-   LSP、不做服务变更；Bash 是否真能运行、语言服务器是否完整可用都不在这里判断。失败只输出固定
-   safe marker（字段路径与规则，不含原始取值），旧版 JAR 不认识该新参数时给出可操作错误。
-5. 预检全部通过后，先把现有的受管 JAR、`daemon.json`、`daemon.token` 复制到 `backups/` 下的
+4. 解包归档，用其中的运行时对本机快照执行 `--check-config` 预检：它读取配置与 token 文件，用共享
+   codec 校验配置结构与取值，在本机只读文件系统中把配置的（缺省为 `bash`）Bash 解析为实际可执行
+   路径，并校验内联 LSP 的结构。它**不执行** Bash 或任何其它程序，不建数据目录、不加锁、不连接、
+   不启动 LSP、不做服务变更；Bash 是否真能运行、语言服务器是否完整可用都不在这里判断。失败只输出
+   固定 safe marker（字段路径与规则，不含原始取值）。
+5. 预检全部通过后，先把现有的受管发行目录、`daemon.json`、`daemon.token` 复制到 `backups/` 下的
    唯一个人备份目录，再发布新文件并重启服务。
 
 预检失败时现有受管安装保持不变。**install 会整体替换程序、配置与 token，并重启服务**，保留数据
@@ -132,14 +131,14 @@ journal 不跨重启保留，已经发生的命令副作用不回滚。
 | 根目录 | `~/.kk-studio`（0700） | `%USERPROFILE%\.kk-studio`（owner-only ACL） |
 | 配置 | `~/.kk-studio/daemon.json`（0600） | `%USERPROFILE%\.kk-studio\daemon.json` |
 | token | `~/.kk-studio/daemon.token`（0600，与配置同目录） | `%USERPROFILE%\.kk-studio\daemon.token` |
-| 程序 | `~/.kk-studio/lib/kk-studio-daemon.jar` | `%USERPROFILE%\.kk-studio\lib\kk-studio-daemon.jar` |
+| 程序 | `~/.kk-studio/lib/`（Node Daemon 发行根：`main.js`、`node_modules/`、`runtime/code-server/`） | `%USERPROFILE%\.kk-studio\lib\` |
 | 日志 | `~/.kk-studio/logs/`（macOS） | Task Scheduler 不捕获 stdout/stderr |
 | 备份 | `~/.kk-studio/backups/`（仅安装时创建） | `%USERPROFILE%\.kk-studio\backups\` |
 | 数据 | 配置文件的父目录 | 配置文件的父目录 |
 
 `daemon.json` 就是 Web 中 `installConfig.daemon` 对象本身，只含 `studioUrl`、`note`、
-`bashExecutable` 与可选的 `lsp`，**不含** `operatingSystem`、`javaHome`，也不含 token、gateway
-或数据目录字段。`operatingSystem` 与 `javaHome` 只用于安装与生成命令，不进入运行时配置文件。
+`bashExecutable` 与可选的 `lsp`，**不含** `operatingSystem`，也不含 token、gateway
+或数据目录字段。`operatingSystem` 只用于安装与生成命令，不进入运行时配置文件。
 token 是独立兄弟文件 `daemon.token`。Daemon 不做任何独立配置解析：`daemon.json` 是唯一配置
 来源，没有第二个 LSP 文件，也没有环境变量配置入口。
 
@@ -157,7 +156,6 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 ```json
 {
   "operatingSystem": "linux",
-  "javaHome": null,
   "daemon": {
     "studioUrl": "https://studio.example.com",
     "note": null,
@@ -180,8 +178,6 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 与规则、不回显输入值：
 
 - `operatingSystem` 必填，取值为 `linux` / `macos` / `windows`。
-- `javaHome` 可选，必须是 OS 对应的绝对路径（Windows 为盘符或 UNC），不接受 `~`、`${VAR}`
-  或 `%VAR%` 占位符；服务端不做可执行探测。
 - `studioUrl` 必填，只能是 HTTP(S) origin：允许一个结尾 `/`（保存时去掉），拒绝 userinfo、
   path、query、fragment 与非法端口。Daemon 由它派生 WebSocket 入口
   `ws(s)://<authority>/api/harness/environment-daemon/v1`。
@@ -216,7 +212,6 @@ environments:
     registrationToken: token-env
     installConfig:
       operatingSystem: linux
-      javaHome: /opt/jdk21
       daemon:
         studioUrl: https://studio.example.com
         bashExecutable: /bin/bash
@@ -235,7 +230,7 @@ environments:
 
 ## 可选 LSP
 
-**LSP client 已在 Daemon JAR 中**，不需要额外安装客户端，Daemon 也不负责下载或升级语言服务器。
+**LSP client 已内嵌在 Daemon 发行归档中**，不需要额外安装客户端，Daemon 也不负责下载或升级语言服务器。
 服务器由你在 Web 的安装弹窗中以内联 JSON 声明；不启用时省略 `lsp`，LSP 查询返回明确的不可用
 错误，但文件、命令、检索仍可使用。没有独立的 `lsp.json` 或文件路径配置项。
 
@@ -299,12 +294,12 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 
 程序基名识别为 jdtls 后才提供 `java/classFileContents`，`jdt://` 反编译不能在其它服务器上使用。
 客户端连接按项目复用，调用超时或取消只取消请求并发送 `$/cancelRequest`，不杀掉其它调用共享的
-服务器；初始化失败不重试，进程范围与清理行为见[内置 LSP 验证](builtin-lsp-tests.md)。
+服务器；初始化失败不重试。
 
 ## 本机代理
 
 Daemon 不接收 Backend 的代理设置。启动时分别读取 `http_proxy`、`https_proxy`，
-兼容大写变量，小写存在时优先；空值明确直连，未设置的协议才委托 JDK 的操作系统代理。
+兼容大写变量，小写存在时优先；空值明确直连，未设置的协议才委托操作系统的代理设置。
 `no_proxy`/`NO_PROXY` 的逗号分隔绕过规则同样作用于操作系统回退结果，支持主机、域名后缀、
 IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`）；CIDR 只按目标 URL
 中的数值 IP 逐位匹配，不会为目标域名解析 DNS，因此按域名访问的内网服务仍应写域名规则。
@@ -314,7 +309,7 @@ IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`�
 macOS 的回退来源是网络设置；Linux 的桌面代理取决于宿主支持，服务器/容器通常应显式
 传入环境变量。Windows 读取当前运行用户的系统代理（含系统自动代理能力），不是
 `netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。未显式指定时
-Daemon 开启 `java.net.useSystemProxies`；显式 JVM 代理属性仍参与 JDK 回退。
+Daemon 的 HTTP 客户端使用操作系统的代理设置；环境变量始终优先于系统代理回退。
 
 环境变量必须进入 Daemon 进程：终端 `export` 不会改变已经运行的服务。安装器不保存
 代理配置文件；Linux systemd user service、macOS LaunchAgent 或 Windows 计划任务
@@ -354,7 +349,7 @@ Platform Skill URI。
 检查顺序在下载与写入之前。同名服务存在但标记不匹配、定义是符号链接/非普通文件、属主不是当前
 用户时，安装或卸载会拒绝并报告原因、服务定义路径或任务名，以及一条检查命令。
 确认归属后再由对应所有者处理冲突，先私密备份，保留未知程序与数据；不要直接删除系统文件。
-安装器**不会删除未知 JAR 或数据，也不会
+安装器**不会删除未知程序或数据，也不会
 伪造所有权标记**；标记只用于识别管理归属，不能通过手工补标记授权接管。
 
 同一 OS 用户只允许一个受管 Daemon；它继承启动用户的文件与命令权限，没有文件系统沙箱。
@@ -381,15 +376,15 @@ HOME 也不是默认工作目录。
 | `GET /api/harness/environments/{id}/update` | 只读最近一次更新投影（`operationId`、`targetVersion`、`phase`、可选 `error`、时间戳）；从未更新时为 null |
 
 更新目标不是“最新版”也不是浏览者提供的 URL，而是 **运行中 Platform 版本对应的官方 GitHub Release**：
-必须是非草稿、tag 匹配、五件套资产齐全（jar、其 `.sha256`、确定性元数据、`LICENSE`、
+必须是非草稿、tag 匹配、资产齐全（本机 OS/架构的发行归档、其 `.sha256`、确定性元数据、`LICENSE`、
 `THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到命令后再次校验 URL 形状、
-SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 预检，任何一步失败都不改动旧二进制。
+SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` 预检，任何一步失败都不改动旧发行目录。
 
 - 一个 Environment 同一时刻至多一次更新：内存准入与持久 operation 行双重保证；更新期间普通
   capability 调用在起点被 busy 拒绝，连接仍保持认证（catalog 版本不一致时只禁止普通工具，不影响
   版本查询与更新）。
-- 只有受管安装（存在 `lib/kk-studio-daemon.jar` 与同目录 `daemon.json`）接受更新；更新只替换
-  `lib` 下的二进制，`daemon.json`、`daemon.token`、技能与数据都不改动，也不隐式重跑已保存的安装配置。
+- 只有受管安装（存在 `lib/main.js` 与同目录 `daemon.json`）接受更新；更新只替换
+  `lib` 下的发行目录，`daemon.json`、`daemon.token`、技能与数据都不改动，也不隐式重跑已保存的安装配置。
 - 下载/预检/备份后，Daemon 把制品交给一个 **OS 级独立、短生命周期的更新器**（Linux `systemd-run`
   瞬时单元、macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务）完成替换与重启。
   更新器不常驻、不提权、不自动回滚；受管服务定义缺失或归属标记不匹配时 fail closed，不改动二进制。
@@ -403,7 +398,7 @@ SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 
 
 ## 卸载与数据保留
 
-`uninstall` 停止服务、删除受管服务定义与 `lib/kk-studio-daemon.jar`，**保留 `daemon.json`、
+`uninstall` 停止服务、删除受管服务定义与 `lib/` 发行目录，**保留 `daemon.json`、
 `daemon.token`、整个数据目录、日志与 `backups/`**。它是幂等的，服务管理器错误不会被吞掉。
 卸载不会删除任何 Studio Environment 记录，也不清理 token、数据与日志；彻底删除前先评估历史
 引用，并按需手动清理。
@@ -422,7 +417,6 @@ SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 
 | 动作 / 参数 | Unix | Windows | 说明 |
 | --- | --- | --- | --- |
 | install | `install` | `install` | 必填 `--config-file` / `-ConfigFile` 与 `--token-file` / `-TokenFile` |
-| 可选 Java | `--java-home` | `-JavaHome` | JDK 21 home 的绝对路径；缺省按 `JAVA_HOME_21` → `JAVA_HOME` → PATH 发现 |
 | status | `status` | `status` | 只读；退出码 0/1/3 见上 |
 | uninstall | `uninstall` | `uninstall` | 保留配置、token、数据、日志与备份 |
 | help | `help` | `help` | 输出用法 |
@@ -433,7 +427,6 @@ SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 
 | 现象 | 处理 |
 | --- | --- |
 | 下载脚本返回 HTTP 400 | 安装 code 已过期、被修改或因 token 轮换失效；回 Studio 重新复制安装命令 |
-| Java 版本或 home 预检失败 | 指定真正的 JDK 21 home；Unix 检查可执行的 `bin/java`，Windows 还要有 `bin/javac`；PATH 中的 java shim 未必指向正确 home |
 | GitHub 下载或 SHA 校验失败 | 检查网络、代理与 release 是否含成对资产；不要跳过校验，旧受管安装保持不动 |
 | `unmanaged unit` / `unmanaged plist` / `unmanaged Scheduled Task` | 按[管理身份与冲突处理](#管理身份与冲突处理)确认归属，检查、导出、停止并移开非受管定义；不要伪造所有权标记 |
 | 配置或 token 文件权限失败 | Unix 确认属主与无 group/other 写权限；Windows 检查当前 SID、继承与其它 Allow ACE。安装器拒绝不安全现存文件，不自动放宽规则 |
@@ -445,12 +438,12 @@ SHA256、官方校验文件与 JAR manifest 版本，并用现有 `daemon.json` 
 
 ### 前台诊断
 
-先停止受管服务，避免数据锁冲突，再用同一份 `daemon.json` 启动 JAR，输出直接写控制台；
-`Ctrl-C` 结束，不提供常驻守护。`daemon.token` 必须与配置同目录：
+先停止受管服务，避免数据锁冲突，再用同一份 `daemon.json` 与发行归档内的运行时前台启动，
+输出直接写控制台；`Ctrl-C` 结束，不提供常驻守护。`daemon.token` 必须与配置同目录：
 
 ```bash
-"$JAVA_HOME_21/bin/java" -jar "$HOME/.kk-studio/lib/kk-studio-daemon.jar" \
-  --config "$HOME/.kk-studio/daemon.json"
+"$HOME/.kk-studio/lib/runtime/code-server/lib/node" \
+  "$HOME/.kk-studio/lib/main.js" --config "$HOME/.kk-studio/daemon.json"
 ```
 
 Windows 路径可能含 Unicode，使用机器启动入口保留编码；它把完整的 `--config <路径>` 参数对
@@ -459,14 +452,13 @@ Windows 路径可能含 Unicode，使用机器启动入口保留编码；它把�
 ```powershell
 $encoded = @("--config", "$env:USERPROFILE\.kk-studio\daemon.json") |
     ForEach-Object { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) }
-& "$env:JAVA_HOME_21\bin\java.exe" -jar "$env:USERPROFILE\.kk-studio\lib\kk-studio-daemon.jar" --base64-args @encoded
+& "$env:USERPROFILE\.kk-studio\lib\runtime\code-server\lib\node.exe" "$env:USERPROFILE\.kk-studio\lib\main.js" --base64-args @encoded
 ```
 
 Daemon 自身 CLI 只有 `--config <绝对路径>`（及 `--check-config <绝对路径>` 预检、`--help`/`-h`、
 `--version` 与机器入口 `--base64-args`）。心跳、重连与最大退避固定为 `PT15S` / `PT1S` / `PT30S`，
 没有公开开关；工具执行超时由调用方提供，不是 Daemon 安装配置。
 
-上级：[系统设计](../system-design.md)。协议与执行实现：[Harness Daemon](../modules/harness-daemon.md)、
-[Harness Environment](../modules/harness-environment.md)、
+上级：[系统设计](../system-design.md)。协议与执行实现：[Harness Environment](../modules/harness-environment.md)、
 [Harness Environment Server](../modules/harness-environment-server.md)。容器内运行见
 [部署与运行](deployment.md)，开发验证见[开发与测试](development-and-testing.md)。

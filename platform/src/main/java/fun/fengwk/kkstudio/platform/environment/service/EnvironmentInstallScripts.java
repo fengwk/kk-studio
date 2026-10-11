@@ -30,12 +30,7 @@ public final class EnvironmentInstallScripts {
     EnvironmentInstallConfigDTO normalized = EnvironmentInstallConfigs.validate(config);
     text(registrationToken, "registrationToken");
     boolean windows = "windows".equals(normalized.getOperatingSystem());
-    return render(
-        windows,
-        "install",
-        daemonJson(normalized.getDaemon()),
-        registrationToken,
-        normalized.getJavaHome());
+    return render(windows, "install", daemonJson(normalized.getDaemon()), registrationToken);
   }
 
   public static String uninstall(String operatingSystem) {
@@ -43,11 +38,10 @@ public final class EnvironmentInstallScripts {
       throw new AiValidationException(
           "operatingSystem", "operatingSystem must be linux, macos or windows");
     }
-    return render("windows".equals(operatingSystem), "uninstall", "", "", null);
+    return render("windows".equals(operatingSystem), "uninstall", "", "");
   }
 
-  private static String render(
-      boolean windows, String action, String daemonJson, String token, String javaHome) {
+  private static String render(boolean windows, String action, String daemonJson, String token) {
     String template = windows ? WINDOWS : UNIX;
     String parameters = "";
     if (!daemonJson.isEmpty()) {
@@ -55,9 +49,6 @@ public final class EnvironmentInstallScripts {
           windows
               ? " -ConfigFile $config -TokenFile $token"
               : " --config-file \"$stage/daemon.json\" --token-file \"$stage/daemon.token\"";
-      if (javaHome != null) {
-        parameters += windows ? " -JavaHome " + ps(javaHome) : " --java-home " + sh(javaHome);
-      }
     }
     String staging =
         daemonJson.isEmpty()
