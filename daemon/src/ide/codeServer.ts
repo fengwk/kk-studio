@@ -6,6 +6,7 @@ import { createServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import type { Readable } from 'node:stream'
 import type { DaemonConfig, ManagedProcess, ProcessSupervisor } from '../contracts.js'
+import { withLoopbackResponse } from '../network.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { IdeError, safeMessage } from './errors.js'
 
@@ -200,10 +201,14 @@ async function waitForHealth(port: number, managed: ManagedProcess, signal: Abor
       throw new IdeError('code-server exited during startup')
     }
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
-        signal: boundedSignal(signal, HEALTH_FETCH_TIMEOUT_MILLIS),
-      })
-      if (response.ok) {
+      // 私有 code-server 探活绝不走环境代理，避免 NODE_USE_ENV_PROXY=1 把 loopback 请求泄露给代理。
+      const healthy = await withLoopbackResponse(
+        `http://127.0.0.1:${port}/healthz`,
+        { redirect: 'manual' },
+        boundedSignal(signal, HEALTH_FETCH_TIMEOUT_MILLIS),
+        async (response) => response.statusCode >= 200 && response.statusCode < 300,
+      )
+      if (healthy) {
         return
       }
     } catch (error) {
@@ -220,25 +225,31 @@ async function login(port: number, secret: string, signal: AbortSignal): Promise
   if (signal.aborted) {
     throw abortError()
   }
-  let response: Response
+  let session: string | undefined
   try {
-    response = await fetch(`http://127.0.0.1:${port}/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ password: secret }).toString(),
-      redirect: 'manual',
-      signal: boundedSignal(signal, LOGIN_TIMEOUT_MILLIS),
-    })
+    session = await withLoopbackResponse(
+      `http://127.0.0.1:${port}/login`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ password: secret }).toString(),
+        redirect: 'manual',
+      },
+      boundedSignal(signal, LOGIN_TIMEOUT_MILLIS),
+      async (response) => {
+        const header = response.headers['set-cookie']
+        const cookies = Array.isArray(header) ? header : header === undefined ? [] : [header]
+        return cookies
+          .map((cookie) => cookie.split(';')[0])
+          .find((cookie) => cookie?.startsWith('code-server-session='))
+      },
+    )
   } catch (error) {
     if (signal.aborted) {
       throw abortError()
     }
     throw new IdeError('code-server login failed')
   }
-  const session = response.headers
-    .getSetCookie()
-    .map((cookie) => cookie.split(';')[0])
-    .find((cookie) => cookie?.startsWith('code-server-session='))
   if (session === undefined) {
     throw new IdeError('code-server login failed')
   }

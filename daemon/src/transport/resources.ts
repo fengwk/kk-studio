@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 
 import type { ResourceUploader, ResultContent } from '../contracts.js'
+import { getOutboundNetwork } from '../network.js'
 import {
   decodeUploadTicket,
   encodeUploadCommit,
@@ -67,15 +68,22 @@ interface PendingTicket {
 /** 生产预签名 PUT：只发送票据声明的已签名方法/headers，失败只报告状态码，绝不回显 URL 或签名。 */
 export function createHttpPutObject(): PresignedPutSender {
   return async (presigned, bytes, signal) => {
-    const response = await fetch(presigned.url, {
-      method: presigned.method,
-      headers: presigned.headers,
-      body: bytes as unknown as BodyInit,
+    // 预签名 PUT 绝不跟随重定向：跨目标复用已签名 headers/body 会泄漏签名与对象内容。
+    await getOutboundNetwork().withResponse(
+      presigned.url,
+      {
+        method: presigned.method,
+        headers: presigned.headers,
+        body: Buffer.from(bytes),
+        redirect: 'error',
+      },
       signal,
-    })
-    if (!response.ok) {
-      throw new Error(`${REJECTED_PREFIX}: ${response.status}`)
-    }
+      async (response) => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw new Error(`${REJECTED_PREFIX}: ${response.statusCode}`)
+        }
+      },
+    )
   }
 }
 

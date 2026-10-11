@@ -50,6 +50,7 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['test/network-setup.ts'],
     maxWorkers: 4,
     testTimeout: 20_000,
     coverage: {

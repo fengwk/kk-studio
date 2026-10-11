@@ -1,5 +1,6 @@
 import WebSocket from 'ws'
 
+import { getOutboundNetwork } from '../network.js'
 import { MAX_PAYLOAD_UTF8_BYTES } from '../protocol.js'
 
 /**
@@ -83,13 +84,20 @@ class WebSocketHandshake {
     private readonly connectTimeoutMillis: number,
   ) {}
 
-  start(): Promise<ControlConnection> {
+  async start(): Promise<ControlConnection> {
+    // 系统 lookup 与握手共享同一连接 deadline；socket close/error 必定释放独占 Agent。
+    const signal = AbortSignal.timeout(this.connectTimeoutMillis)
+    const plan = await getOutboundNetwork().createWebSocketAgent(this.gatewayUri, signal)
     return new Promise<ControlConnection>((resolve, reject) => {
       const socket = new WebSocket(this.gatewayUri, {
         perMessageDeflate: true,
         handshakeTimeout: this.connectTimeoutMillis,
         maxPayload: this.maxInboundTextBytes,
+        agent: plan.agent,
       })
+      const releaseAgent = (): void => plan.destroy()
+      socket.once('close', releaseAgent)
+      socket.once('error', releaseAgent)
       this.connection.attach(socket)
       socket.on('open', () => {
         if (!socket.extensions.includes(PERMESSAGE_DEFLATE)) {

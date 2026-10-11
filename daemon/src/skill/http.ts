@@ -1,13 +1,13 @@
-import nodeHttp from 'isomorphic-git/http/node'
-import http from 'node:http'
-import https from 'node:https'
-import type { Duplex } from 'node:stream'
-import type { Socket } from 'node:net'
+import { Readable } from 'node:stream'
+import { errors as undiciErrors } from 'undici'
 import type { HttpClient, GitHttpRequest, GitHttpResponse } from 'isomorphic-git'
+
+import { getOutboundNetwork, type OutboundNetwork, type OutboundRequestInit, type OutboundResponse } from '../network.js'
 
 export const DEFAULT_CONNECT_MILLIS = 60_000
 export const DEFAULT_READ_MILLIS = 180_000
 
+/** git 感知的连接/读超时错误；分类逻辑只依赖稳定 code。 */
 export class TimeoutSocketError extends Error {
   readonly code: string
 
@@ -18,114 +18,72 @@ export class TimeoutSocketError extends Error {
   }
 }
 
-export class TimeoutHttpAgent extends http.Agent {
-  private readonly connectMillis: number
-  private readonly readMillis: number
-  private readonly signal?: AbortSignal
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
+const MAX_REDIRECTS = 10
 
-  constructor(connectMillis: number, readMillis: number, signal?: AbortSignal) {
-    super({ keepAlive: false })
-    this.connectMillis = connectMillis
-    this.readMillis = readMillis
-    this.signal = signal
+function abortError(): Error {
+  const error = new Error('Operation cancelled')
+  error.name = 'AbortError'
+  return error
+}
+
+/** 把底层 undici 超时映射回 git 常量，其它错误原样保留（错误文本绝不携带 URL 或查询串）。 */
+function translateGitError(error: unknown): unknown {
+  if (error instanceof undiciErrors.ConnectTimeoutError) {
+    return new TimeoutSocketError('GIT_CONNECT_TIMEOUT', 'Git connect timeout')
   }
+  if (error instanceof undiciErrors.HeadersTimeoutError || error instanceof undiciErrors.BodyTimeoutError) {
+    return new TimeoutSocketError('GIT_READ_TIMEOUT', 'Git read timeout')
+  }
+  return error
+}
 
-  override createConnection(options: http.ClientRequestArgs, callback?: (err: Error | null, stream: Duplex) => void): Duplex | null | undefined {
-    const socket = super.createConnection(options, callback) as Socket | null | undefined
-    if (socket) {
-      setupSocketTimeouts(socket, this.connectMillis, this.readMillis, this.signal)
+function combineSignals(client: AbortSignal | undefined, request: AbortSignal | undefined): AbortSignal | undefined {
+  if (client && request) {
+    return AbortSignal.any([client, request])
+  }
+  return request ?? client
+}
+
+/**
+ * 逐跳处理重定向：只有无 body 的 GET/HEAD 跟随，且每跳按新 URL 重新选择代理；任何超限或跨目标重定向确定失败。
+ */
+async function openWithRedirects(
+  network: OutboundNetwork,
+  url: string,
+  method: string,
+  init: OutboundRequestInit,
+  signal: AbortSignal | undefined,
+): Promise<{ response: OutboundResponse; finalUrl: string }> {
+  let current = url
+  for (let hop = 0; ; hop += 1) {
+    const response = await network.openResponse(current, { ...init, redirect: 'manual' }, signal ?? new AbortController().signal)
+    if (!REDIRECT_STATUS.has(response.statusCode)) {
+      return { response, finalUrl: current }
     }
-    return socket
+    const location = response.headers.location
+    await response.dispose()
+    if (typeof location !== 'string' || hop >= MAX_REDIRECTS || (method !== 'GET' && method !== 'HEAD')) {
+      throw new Error('git request refused an unexpected redirect')
+    }
+    current = new URL(location, current).toString()
   }
 }
 
-export class TimeoutHttpsAgent extends https.Agent {
-  private readonly connectMillis: number
-  private readonly readMillis: number
-  private readonly signal?: AbortSignal
-
-  constructor(connectMillis: number, readMillis: number, signal?: AbortSignal) {
-    super({ keepAlive: false })
-    this.connectMillis = connectMillis
-    this.readMillis = readMillis
-    this.signal = signal
+/** 把响应 body 交给调用方消费；end/error/close 或提前销毁时都释放独占 dispatcher。 */
+function streamingBody(response: OutboundResponse): AsyncIterableIterator<Uint8Array> {
+  const stream = response.body
+  const dispose = (): void => {
+    void response.dispose()
   }
-
-  override createConnection(options: https.RequestOptions, callback?: (err: Error | null, stream: Duplex) => void): Duplex | null | undefined {
-    const socket = super.createConnection(options, callback) as Socket | null | undefined
-    if (socket) {
-      setupSocketTimeouts(socket, this.connectMillis, this.readMillis, this.signal)
-    }
-    return socket
-  }
+  stream.once('end', dispose)
+  stream.once('error', dispose)
+  stream.once('close', dispose)
+  return stream as unknown as AsyncIterableIterator<Uint8Array>
 }
 
-function setupSocketTimeouts(
-  socket: Socket,
-  connectMillis: number,
-  readMillis: number,
-  signal?: AbortSignal,
-): void {
-  let connectTimer: NodeJS.Timeout | null = setTimeout(() => {
-    socket.destroy(new TimeoutSocketError('GIT_CONNECT_TIMEOUT', 'Git connect timeout'))
-  }, connectMillis)
-
-  let readTimer: NodeJS.Timeout | null = null
-
-  const resetReadTimer = (): void => {
-    if (readTimer) {
-      clearTimeout(readTimer)
-    }
-    readTimer = setTimeout(() => {
-      socket.destroy(new TimeoutSocketError('GIT_READ_TIMEOUT', 'Git read timeout'))
-    }, readMillis)
-  }
-
-  const cleanup = (): void => {
-    if (connectTimer) {
-      clearTimeout(connectTimer)
-      connectTimer = null
-    }
-    if (readTimer) {
-      clearTimeout(readTimer)
-      readTimer = null
-    }
-  }
-
-  socket.once('connect', () => {
-    if (connectTimer) {
-      clearTimeout(connectTimer)
-      connectTimer = null
-    }
-    resetReadTimer()
-  })
-
-  socket.on('data', () => {
-    resetReadTimer()
-  })
-
-  socket.once('close', cleanup)
-  socket.once('error', cleanup)
-
-  if (signal) {
-    if (signal.aborted) {
-      cleanup()
-      const abortErr = new Error('Operation cancelled')
-      abortErr.name = 'AbortError'
-      socket.destroy(abortErr)
-    } else {
-      const onAbort = (): void => {
-        cleanup()
-        const abortErr = new Error('Operation cancelled')
-        abortErr.name = 'AbortError'
-        socket.destroy(abortErr)
-      }
-      signal.addEventListener('abort', onAbort, { once: true })
-      socket.once('close', () => {
-        signal.removeEventListener('abort', onAbort)
-      })
-    }
-  }
+function bufferedBody(bytes: Buffer): AsyncIterableIterator<Uint8Array> {
+  return Readable.from(bytes.length === 0 ? [] : [bytes]) as unknown as AsyncIterableIterator<Uint8Array>
 }
 
 export function createGitHttpClient(options?: {
@@ -135,38 +93,77 @@ export function createGitHttpClient(options?: {
 }): HttpClient {
   const connectMillis = options?.connectMillis ?? DEFAULT_CONNECT_MILLIS
   const readMillis = options?.readMillis ?? DEFAULT_READ_MILLIS
-  const signal = options?.signal
-
-  const httpAgent = new TimeoutHttpAgent(connectMillis, readMillis, signal)
-  const httpsAgent = new TimeoutHttpsAgent(connectMillis, readMillis, signal)
+  const clientSignal = options?.signal
 
   return {
     async request(req: GitHttpRequest): Promise<GitHttpResponse> {
+      const signal = combineSignals(clientSignal, req.signal)
       if (signal?.aborted) {
-        const err = new Error('Operation cancelled')
-        err.name = 'AbortError'
-        throw err
+        throw abortError()
       }
-
-      let combinedSignal = signal
-      if (req.signal && signal) {
-        combinedSignal = AbortSignal.any([signal, req.signal])
-      } else if (req.signal) {
-        combinedSignal = req.signal
+      const method = (req.method ?? 'GET').toUpperCase()
+      const network = getOutboundNetwork()
+      let opened: { response: OutboundResponse; finalUrl: string }
+      try {
+        opened = await openWithRedirects(
+          network,
+          req.url,
+          method,
+          {
+            method,
+            headers: req.headers,
+            body: req.body === undefined ? null : Readable.from(req.body),
+            headersTimeout: readMillis,
+            bodyTimeout: readMillis,
+            connectTimeout: connectMillis,
+          },
+          signal,
+        )
+      } catch (error) {
+        throw translateGitError(error)
       }
-
-      const urlObj = new URL(req.url)
-      const agent = urlObj.protocol === 'https:' ? httpsAgent : httpAgent
-
-      const res = await nodeHttp.request({
-        ...req,
-        agent,
-        signal: combinedSignal,
-      })
-
-      return res
+      const { response, finalUrl } = opened
+      // 非 2xx 也把 body 收干并释放，绝不把无人关闭的响应交给调用方。
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        const chunks: Buffer[] = []
+        try {
+          for await (const chunk of response.body) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array))
+          }
+        } catch {
+          // 读取错误体失败不影响已确定的失败状态，释放仍必须完成。
+        }
+        await response.dispose()
+        return {
+          url: finalUrl,
+          method,
+          headers: flattenHeaders(response.headers),
+          body: bufferedBody(Buffer.concat(chunks)),
+          statusCode: response.statusCode,
+          statusMessage: response.statusMessage,
+        }
+      }
+      return {
+        url: finalUrl,
+        method,
+        headers: flattenHeaders(response.headers),
+        body: streamingBody(response),
+        statusCode: response.statusCode,
+        statusMessage: response.statusMessage,
+      }
     },
   }
+}
+
+function flattenHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+  const flat: Record<string, string> = {}
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) {
+      continue
+    }
+    flat[name] = Array.isArray(value) ? value.join(', ') : value
+  }
+  return flat
 }
 
 export function isAbortError(error: unknown): boolean {
@@ -197,7 +194,6 @@ export function classifyGitError(error: unknown): string {
 
   if (err.code === 'GIT_CONNECT_TIMEOUT') return 'GIT_CONNECT_TIMEOUT'
   if (err.code === 'GIT_READ_TIMEOUT') return 'GIT_READ_TIMEOUT'
-
   if (err.code === 'UnknownTransportError') return 'UNSUPPORTED_REPOSITORY_SCHEME'
 
   const message = (err.message ?? '').toLowerCase()

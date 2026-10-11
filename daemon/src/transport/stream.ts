@@ -20,6 +20,7 @@ import http from 'node:http'
 import type { IncomingMessage } from 'node:http'
 import { once } from 'node:events'
 import WebSocket, { type RawData } from 'ws'
+import { getOutboundNetwork } from '../network.js'
 import {
   CreditWindow,
   MAX_PAYLOAD,
@@ -693,12 +694,18 @@ export async function openStreamExchange(options: StreamExchangeOptions): Promis
     throw abortError()
   }
   const timeout = options.connectTimeoutMillis ?? 10_000
+  // 系统 lookup 与原连接 deadline/取消共享同一 signal；socket close/error 必定释放独占 Agent。
+  const deadline = AbortSignal.any([options.signal, AbortSignal.timeout(timeout)])
+  const plan = await getOutboundNetwork().createWebSocketAgent(options.streamUrl, deadline)
   const gateway = new WebSocket(options.streamUrl, {
     perMessageDeflate: false,
     maxPayload: MAX_PAYLOAD + 2,
     followRedirects: false,
     handshakeTimeout: timeout,
+    agent: plan.agent,
   })
+  gateway.once('close', () => plan.destroy())
+  gateway.once('error', () => plan.destroy())
   const exchange = options.request.mode === 'HTTP' ? new HttpExchange(options, gateway) : new WebSocketExchange(options, gateway)
   exchange.listen()
   const onAbort = (): void => exchange.fail(abortError())
