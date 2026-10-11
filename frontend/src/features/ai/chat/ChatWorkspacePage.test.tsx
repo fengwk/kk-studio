@@ -2,8 +2,9 @@ import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
+import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
@@ -204,6 +205,37 @@ beforeEach(() => {
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
 })
 
+function renderWorkspaceRouter(
+  initialEntries: string[],
+  element: React.ReactNode = <ChatWorkspacePage />,
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/chats/:chatId',
+        element: <IdeLifecycleProvider>{element}</IdeLifecycleProvider>,
+      },
+      {
+        path: '/chats',
+        element: <div>Chats List</div>,
+      },
+    ],
+    { initialEntries },
+  )
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+}
+
+function renderWorkspace(chatId = CHAT_ID) {
+  return renderWorkspaceRouter([`/chats/${chatId}`])
+}
+
 describe('ChatWorkspacePage', () => {
   it('renders the Chat title and changes the shared pane layout', async () => {
     const user = userEvent.setup()
@@ -315,18 +347,7 @@ describe('ChatWorkspacePage', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: OTHER_THREAD }),
     )
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}?thread=${THREAD_ID}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_ID}?thread=${THREAD_ID}`])
 
     await screen.findByRole('heading', { name: 'Workspace' })
     // 根控制区在各自 Thread 身份加载完成后才出现，因此等待两个 pane 都就绪。
@@ -344,9 +365,6 @@ describe('ChatWorkspacePage', () => {
 
   it('supports in-component navigation to new thread via searchParams and consumes it via callback', async () => {
     // 测试意图：验证同组件在 URL 导航至新 thread 时，当前 focused pane 正常消费并通过 callback 确认清理 query
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
     const NEW_THREAD = '33333333-4444-5555-6666-777777777777'
     let testNavigate!: (to: string) => void
     function NavTestBridge() {
@@ -357,15 +375,7 @@ describe('ChatWorkspacePage', () => {
       return <ChatWorkspacePage />
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<NavTestBridge />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <NavTestBridge />)
 
     await screen.findByRole('heading', { name: 'Workspace' })
     act(() => {
@@ -381,9 +391,6 @@ describe('ChatWorkspacePage', () => {
     // 测试意图：验证当 pane 处于在途操作（如 acceptCommandBatch 在途）时，
     // URL deep-link 触发 initialTarget 变更会被 hasPendingOperation 门禁拦截，
     // 不切换目标且不消费 URL query
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
     const user = userEvent.setup()
     let resolveBatch!: () => void
     const pendingPromise = new Promise<{ thread: HarnessThreadDTO; entries: HarnessSessionEntryDTO[] }>((resolve) => {
@@ -402,15 +409,7 @@ describe('ChatWorkspacePage', () => {
       return <ChatWorkspacePage />
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<NavTestBridge />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <NavTestBridge />)
 
     await screen.findByRole('heading', { name: 'Workspace' })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -463,10 +462,6 @@ describe('ChatWorkspacePage', () => {
       }),
     )
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-
     let testNavigate!: (to: string) => void
     function SwitchTestBridge() {
       const nav = useNavigate()
@@ -476,15 +471,7 @@ describe('ChatWorkspacePage', () => {
       return <ChatWorkspacePage />
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_A}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<SwitchTestBridge />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_A}`], <SwitchTestBridge />)
 
     // 确认 chat A 渲染
     expect(await screen.findByRole('heading', { name: 'Workspace chat-A' })).toBeInTheDocument()
@@ -529,21 +516,6 @@ describe('ChatWorkspacePage', () => {
     expect(finalB.layout).toBe('grid-4')
   })
 })
-
-function renderWorkspace(chatId = CHAT_ID) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
-        <Routes>
-          <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
-}
 
 describe('ChatWorkspacePage 新建分支路由', () => {
   const ROOT_ENTRY: HarnessSessionEntryDTO = {

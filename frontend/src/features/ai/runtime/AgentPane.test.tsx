@@ -1,9 +1,33 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
+
+function MemoryRouter({ children }: { children: ReactNode }) {
+  const [ctx] = useState(() => {
+    const ContentContext = createContext<ReactNode>(children)
+    function RouteContainer() {
+      const c = useContext(ContentContext)
+      return <IdeLifecycleProvider>{c}</IdeLifecycleProvider>
+    }
+    const router = createMemoryRouter([
+      {
+        path: '*',
+        Component: RouteContainer,
+      },
+    ])
+    return { ContentContext, router }
+  })
+
+  return (
+    <ctx.ContentContext.Provider value={children}>
+      <RouterProvider router={ctx.router} />
+    </ctx.ContentContext.Provider>
+  )
+}
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import {
   branchDraftFromEntry,

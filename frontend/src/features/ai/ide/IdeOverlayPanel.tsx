@@ -8,6 +8,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n } from '@/shared/i18n'
 import { validateIdeEntryUrl } from '@/features/ai/ide/ide-url'
+import { useIdeLifecycle } from '@/features/ai/ide/ide-lifecycle-context'
 import '@/features/ai/ide/ide-overlay-panel.css'
 
 export interface ResolvedEnvironmentInfo {
@@ -25,6 +26,7 @@ export interface IdeCommandAction {
 export interface IdeOverlayPanelProps {
   isOpen: boolean
   viewId: string
+  paneId?: string
   environment: ResolvedEnvironmentInfo | null
   availableEnvironments: EnvironmentCardDTO[]
   action?: IdeCommandAction | null
@@ -53,6 +55,7 @@ function formatSafeError(err: unknown, fallback: string): string {
 export function IdeOverlayPanel({
   isOpen,
   viewId,
+  paneId,
   environment,
   availableEnvironments,
   action,
@@ -76,6 +79,7 @@ export function IdeOverlayPanel({
   const [pendingSwitchEnv, setPendingSwitchEnv] = useState<ResolvedEnvironmentInfo | null>(null)
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
 
+  const { registerIdeView } = useIdeLifecycle()
   const activeViewRef = useRef<IdeViewDTO | null>(null)
   useEffect(() => {
     activeViewRef.current = view
@@ -86,11 +90,17 @@ export function IdeOverlayPanel({
     onIdeMountedChangeRef.current = onIdeMountedChange
   }, [onIdeMountedChange])
 
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
   // 操作 Epoch 与并发防线：
   // operationEpochRef 覆盖创建、切换目录、关闭与切换环境；
   // 任何关闭或切换环境立即递增 epoch，使晚到达的 PUT 目录更新不会复活已关闭的 iframe。
   const operationEpochRef = useRef(0)
   const openInFlightRef = useRef(false)
+  const openingPromiseRef = useRef<Promise<void> | null>(null)
   const closeInFlightRef = useRef(false)
   const mountedRef = useRef(true)
   const lastHandledActionIdRef = useRef(0)
@@ -131,34 +141,54 @@ export function IdeOverlayPanel({
       openInFlightRef.current = true
       setStatus('opening')
       setErrorMessage(null)
-      try {
-        const res = await environmentService.createIdeView(targetEnv.id, { viewId })
-        // 如果在 opening 期间发生了关闭、切换环境或组件真正卸载：清理新建视图
-        if (operationEpochRef.current !== epoch || !mountedRef.current) {
-          void Promise.resolve(environmentService.closeIdeView(targetEnv.id, res.viewId)).catch(() => {})
-          return
-        }
-
-        // 校验 entryUrl 安全契约；校验失败必须主动释放已在后端创建的视图
+      onIdeMountedChangeRef.current?.(true)
+      const promise = (async () => {
         try {
-          validateIdeEntryUrl(res.entryUrl)
-        } catch (valErr) {
-          void Promise.resolve(environmentService.closeIdeView(targetEnv.id, res.viewId)).catch(() => {})
-          throw valErr
-        }
+          const res = await environmentService.createIdeView(targetEnv.id, { viewId })
+          // 同步写入 activeViewRef.current，防止在 React 批量更新提交前路由离开导致孤儿视图
+          activeViewRef.current = res
 
-        setView(res)
-        setStatus('ready')
-        onIdeMountedChangeRef.current?.(true)
-      } catch (err: unknown) {
-        if (operationEpochRef.current !== epoch || !mountedRef.current) {
-          return
+          // 如果在 opening 期间发生了关闭、切换环境或组件真正卸载：清理新建视图
+          if (operationEpochRef.current !== epoch || !mountedRef.current) {
+            try {
+              await environmentService.closeIdeView(targetEnv.id, res.viewId)
+              activeViewRef.current = null
+            } catch (err: unknown) {
+              setErrorMessage(formatSafeError(err, t('ai.ide.dirtyCloseWarning')))
+            }
+            return
+          }
+
+          // 校验 entryUrl 安全契约；校验失败必须主动释放已在后端创建的视图
+          try {
+            validateIdeEntryUrl(res.entryUrl)
+          } catch (valErr) {
+            try {
+              await environmentService.closeIdeView(targetEnv.id, res.viewId)
+              activeViewRef.current = null
+            } catch (cleanErr: unknown) {
+              setErrorMessage(formatSafeError(cleanErr, t('ai.ide.dirtyCloseWarning')))
+              throw cleanErr
+            }
+            throw valErr
+          }
+
+          setView(res)
+          setStatus('ready')
+          onIdeMountedChangeRef.current?.(true)
+        } catch (err: unknown) {
+          if (operationEpochRef.current !== epoch || !mountedRef.current) {
+            return
+          }
+          setStatus('error')
+          onIdeMountedChangeRef.current?.(false)
+          setErrorMessage(formatSafeError(err, t('ai.ide.error')))
+        } finally {
+          openInFlightRef.current = false
         }
-        setStatus('error')
-        setErrorMessage(formatSafeError(err, t('ai.ide.error')))
-      } finally {
-        openInFlightRef.current = false
-      }
+      })()
+      openingPromiseRef.current = promise
+      await promise
     },
     [viewId, t],
   )
@@ -238,11 +268,23 @@ export function IdeOverlayPanel({
     onRestoreFocus?.()
   }, [onCollapse, onRestoreFocus])
 
-  // 真正执行关闭逻辑：递增 operationEpoch，使在途的打开/目录更改失效；
-  // 失败时保留界面与错误，不伪造成功清理
-  const executeClose = useCallback(async () => {
+  // 统一切断与关闭逻辑：供全局路由拦截与本地关闭调用。
+  // 成功关闭返回 true，失败（如后端报 DIRTY 错误）返回 false 并保留 DOM 与错误提示
+  const requestClose = useCallback(async (): Promise<boolean> => {
+    // 若正在处于 opening 流程，等待其完成后再执行关闭
+    if (openInFlightRef.current && openingPromiseRef.current) {
+      try {
+        await openingPromiseRef.current
+      } catch {
+        // 创建已失败且无活跃视图时成功返回
+        if (!activeViewRef.current) {
+          return true
+        }
+      }
+    }
+
     if (closeInFlightRef.current) {
-      return
+      return false
     }
     closeInFlightRef.current = true
     operationEpochRef.current += 1
@@ -250,21 +292,44 @@ export function IdeOverlayPanel({
     if (active) {
       try {
         await environmentService.closeIdeView(active.environmentId, viewId)
+        activeViewRef.current = null
       } catch (err: unknown) {
         closeInFlightRef.current = false
+        // 关闭失败：保留 activeViewRef 与活跃状态，不关闭面板，显示错误
         setErrorMessage(formatSafeError(err, t('ai.ide.dirtyCloseWarning')))
-        return
+        return false
       }
     }
     closeInFlightRef.current = false
+    activeViewRef.current = null
     setView(null)
     setStatus('idle')
     setIsIframeLoaded(false)
     setTerminalError(null)
     onIdeMountedChangeRef.current?.(false)
-    onClose()
-    onRestoreFocus?.()
-  }, [viewId, onClose, onRestoreFocus, t])
+    onCloseRef.current?.()
+    return true
+  }, [viewId, t])
+
+  const executeClose = useCallback(async () => {
+    const success = await requestClose()
+    if (success) {
+      onRestoreFocus?.()
+    }
+  }, [requestClose, onRestoreFocus])
+
+  // 全局注册 IDE 生命周期：从 opening 阶段起就处于 active 状态，
+  // 保护在 opening 期间以及 ready 期间不受路由跳转和缩容 unmount 的意外影响。
+  // 若关闭发生异常（activeViewRef 仍存在），仍保持 active 状态。
+  useEffect(() => {
+    const isActive = status === 'opening' || status === 'ready' || activeViewRef.current != null
+    return registerIdeView({
+      viewId,
+      paneId,
+      active: isActive,
+      requestClose,
+    })
+  }, [viewId, paneId, status, requestClose, registerIdeView])
 
   // 点击关闭按钮：如果已挂载活跃视图，弹出确认对话框提示未保存修改；
   // 用户取消则不发生任何 DELETE 或清理
