@@ -136,11 +136,34 @@ class WebSocketHandshake {
         reject(error)
         return
       }
-      const releaseAgent = (): void => plan.destroy()
+      if (deadline.aborted) {
+        socket.terminate()
+        plan.destroy()
+        reject(abortError())
+        return
+      }
+      // 握手期间 transport.close/deadline 到点必须立即终止 socket，而不是只依赖 handshakeTimeout。
+      const onAbort = (): void => {
+        deadline.removeEventListener('abort', onAbort)
+        plan.destroy()
+        socket.terminate()
+        this.notifyDisconnected(abortError())
+        if (!this.settled) {
+          this.settled = true
+          reject(abortError())
+        }
+      }
+      deadline.addEventListener('abort', onAbort, { once: true })
+      const releaseAgent = (): void => {
+        deadline.removeEventListener('abort', onAbort)
+        plan.destroy()
+      }
       socket.once('close', releaseAgent)
       socket.once('error', releaseAgent)
       this.connection.attach(socket)
       socket.on('open', () => {
+        // 握手成功即摘除 deadline abort 监听：已建立的连接绝不能被连接超时终止。
+        deadline.removeEventListener('abort', onAbort)
         if (!socket.extensions.includes(PERMESSAGE_DEFLATE)) {
           this.reject(socket, MANDATORY_EXTENSION, 'server did not negotiate permessage-deflate')
           reject(new Error('server did not negotiate permessage-deflate'))
