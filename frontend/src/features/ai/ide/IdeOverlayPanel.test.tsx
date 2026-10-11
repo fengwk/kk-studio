@@ -1,5 +1,5 @@
 import { createContext, StrictMode, useContext, useState, type ReactNode } from 'react'
-import { fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -627,11 +627,14 @@ describe('IdeOverlayPanel', () => {
     )
 
     // Now directory change resolves late (even with a non-null entryUrl)
-    resolveChangeDir({
-      viewId: 'v-race',
-      environmentId: readyEnv.id,
-      directory: '/home/user/new-dir',
-      entryUrl: 'https://ide.example.com/?bootstrap=late-resurrect',
+    await act(async () => {
+      resolveChangeDir({
+        viewId: 'v-race',
+        environmentId: readyEnv.id,
+        directory: '/home/user/new-dir',
+        entryUrl: 'https://ide.example.com/?bootstrap=late-resurrect',
+      })
+      await changeDirPromise
     })
 
     // Closed view must NOT be resurrected!

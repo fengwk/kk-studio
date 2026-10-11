@@ -4617,12 +4617,12 @@ describe('AgentPane root control mounting', () => {
       homeDirectory: '/home/user',
     }
 
-    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
-      viewId: 'v-test',
+    vi.mocked(environmentService.createIdeView).mockImplementationOnce(async (_envId, req) => ({
+      viewId: req.viewId,
       environmentId: envCard.id,
       directory: '/home/user',
       entryUrl: 'https://ide.test/?workspace=1',
-    })
+    }))
 
     const onIdeMounted = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -4650,13 +4650,13 @@ describe('AgentPane root control mounting', () => {
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
 
-    // IDE overlay opens and creates view with environment UUID
+    // IDE overlay opens and creates view with environment UUID and canonical pane viewId
     await waitFor(() => {
-      expect(environmentService.createIdeView).toHaveBeenCalledWith(
-        envCard.id,
-        expect.objectContaining({ viewId: expect.any(String) }),
-      )
+      expect(environmentService.createIdeView).toHaveBeenCalledTimes(1)
     })
+    const createdViewId = vi.mocked(environmentService.createIdeView).mock.calls[0]?.[1]?.viewId ?? ''
+    expect(createdViewId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+    expect(environmentService.createIdeView).toHaveBeenCalledWith(envCard.id, { viewId: createdViewId })
     expect(onIdeMounted).toHaveBeenCalledWith(true)
 
     // Overlay is rendered inside chat-pane with compact toolbar and bound tooltip
@@ -4674,7 +4674,7 @@ describe('AgentPane root control mounting', () => {
   })
 
   it('opens IDE overlay via typed /shell slash command and via composer + menu, preserving view environment binding until explicit close', async () => {
-    // 测试意图：验证真实 AgentPane 的 /shell 斜杠入口与 composer + 命令表入口；已开视图保持环境绑定，显式关闭后重开才切换环境。
+    // 测试意图：验证真实 AgentPane 的 /shell 斜杠入口与 composer + 命令表入口；已开视图保持环境绑定与同一 viewId，显式关闭后重开才切换环境。
     const user = userEvent.setup()
     const envCard: EnvironmentCardDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
@@ -4704,18 +4704,24 @@ describe('AgentPane root control mounting', () => {
     }
 
     vi.mocked(environmentService.createIdeView)
-      .mockResolvedValueOnce({
-        viewId: 'v-shell',
+      .mockImplementationOnce(async (_envId, req) => ({
+        viewId: req.viewId,
         environmentId: envCard.id,
         directory: '/home/user',
         entryUrl: 'https://ide.test/?workspace=shell',
-      })
-      .mockResolvedValueOnce({
-        viewId: 'v-shell',
+      }))
+      .mockImplementationOnce(async (_envId, req) => ({
+        viewId: req.viewId,
         environmentId: secondEnvCard.id,
         directory: '/srv/second',
         entryUrl: 'https://ide.test/?workspace=second',
-      })
+      }))
+    vi.mocked(environmentService.changeIdeViewDirectory).mockImplementationOnce(async (_envId, viewId, req) => ({
+      viewId,
+      environmentId: envCard.id,
+      directory: req.directory,
+      entryUrl: null,
+    }))
     vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
 
     const onIdeMounted = vi.fn()
@@ -4742,18 +4748,20 @@ describe('AgentPane root control mounting', () => {
     await user.keyboard('/shell{Enter}')
     expect(composer).toHaveTextContent(/^$/)
 
-    // Wait for iframe and trigger load -> terminal opens on envCard.id
+    // Wait for iframe and trigger load -> terminal opens on envCard.id with the exact pane viewId
     const iframe = await screen.findByTestId('ide-iframe')
+    const paneViewId = vi.mocked(environmentService.createIdeView).mock.calls[0]?.[1]?.viewId ?? ''
+    expect(paneViewId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
     fireEvent.load(iframe)
 
     await waitFor(() => {
       expect(environmentService.openIdeViewTerminal).toHaveBeenCalledWith(
         envCard.id,
-        expect.any(String),
+        paneViewId,
       )
     })
 
-    // 2. Change AgentPane defaults environmentName while view is open; view stays bound to local-node
+    // 2. Change AgentPane defaults environmentName while view is open; view stays bound to local-node and paneViewId
     rerender(
       <QueryClientProvider client={client}>
         <MemoryRouter>
@@ -4773,11 +4781,25 @@ describe('AgentPane root control mounting', () => {
     expect(screen.getByTestId('ide-iframe')).toBe(iframe)
     expect(environmentService.createIdeView).toHaveBeenCalledTimes(1)
 
+    // Directory change while open hits the same envCard.id and paneViewId without replacing the iframe
+    await user.click(screen.getByTestId('ide-open-directory-btn'))
+    const dirInput = screen.getByTestId('ide-directory-input')
+    await user.clear(dirInput)
+    await user.type(dirInput, '/home/user/sub')
+    await user.click(screen.getByTestId('ide-directory-confirm'))
+    await waitFor(() => {
+      expect(environmentService.changeIdeViewDirectory).toHaveBeenCalledWith(envCard.id, paneViewId, {
+        directory: '/home/user/sub',
+      })
+    })
+    expect(screen.getByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'local-node · /home/user/sub')
+    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+
     // 3. Explicitly close the view, then open via composer + ("打开命令表") -> files
     await user.click(screen.getByTestId('ide-close-btn'))
     await user.click(screen.getByTestId('ide-confirm-close-btn'))
     await waitFor(() => {
-      expect(environmentService.closeIdeView).toHaveBeenCalledWith(envCard.id, expect.any(String))
+      expect(environmentService.closeIdeView).toHaveBeenCalledWith(envCard.id, paneViewId)
     })
     expect(onIdeMounted).toHaveBeenLastCalledWith(false)
 
@@ -4790,7 +4812,7 @@ describe('AgentPane root control mounting', () => {
       expect(environmentService.createIdeView).toHaveBeenNthCalledWith(
         2,
         secondEnvCard.id,
-        expect.objectContaining({ viewId: expect.any(String) }),
+        { viewId: paneViewId },
       )
     })
     expect(await screen.findByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'second-node · /srv/second')
