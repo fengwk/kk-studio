@@ -1,0 +1,68 @@
+# kk-studio Node daemon platform matrix.
+#
+# Node Daemon 的平台行为不能只在一台 runner 上验证：Linux 覆盖 POSIX session/进程组收尾，macOS
+# 覆盖同一套代码在另一种 POSIX 实现上的分歧，Windows 覆盖 Win32 Job Object、计划任务与命令行
+# 拼装。三个平台都必须真跑完整 Node 套件（native 进程范围、核心与能力层都包含在内），平台特有
+# 用例由各用例自己的条件决定是否执行，不做整体跳过。
+#
+# 本工作流既是 `push`/`pull_request` 上的独立门禁（等价于原来的 process-scope 矩阵），也以
+# `workflow_call` 被 daemon-release 复用，保证 tag 发布与分支推送上跑的是同一套门禁。
+name: daemon-ci
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'daemon/**'
+      - 'scripts/daemon/**'
+      - '.github/workflows/daemon-ci.yml'
+      - '.github/workflows/daemon-release.yml'
+  pull_request:
+    paths:
+      - 'daemon/**'
+      - 'scripts/daemon/**'
+      - '.github/workflows/daemon-ci.yml'
+      - '.github/workflows/daemon-release.yml'
+  workflow_dispatch:
+
+# 只读仓库内容：本工作流不发布任何产物，也不读取 secrets。
+permissions:
+  contents: read
+
+concurrency:
+  group: daemon-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24.14.0'
+
+jobs:
+  node_daemon:
+    name: node daemon (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - name: Install daemon dependencies
+        run: npm --prefix daemon ci
+      - name: Type-check the daemon
+        run: npm --prefix daemon run check
+      # 构建必须先于测试与覆盖率：发行 JS 的加载/解析路径就是被测对象，缺 build 会让矩阵给出假绿。
+      - name: Build the daemon before testing
+        run: npm --prefix daemon run build
+      - name: Test the daemon with coverage
+        run: npm --prefix daemon run coverage
