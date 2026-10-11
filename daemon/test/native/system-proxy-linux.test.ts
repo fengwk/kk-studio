@@ -70,6 +70,23 @@ describe('linux system proxy interpretation', () => {
     expect(() => interpretLinuxProxy('proxy.example:8080')).toThrow(/malformed/)
   })
 
+  test('accepts a root path and a bracketed IPv6 host, but only a bare direct:// token', () => {
+    // OS provider 常见的根路径尾斜杠可接受，对外仍是规范 http://host:port。
+    expect(interpretLinuxProxy('http://proxy:8080/')).toBe('http://proxy:8080')
+    // IPv6 主机必须带方括号，端口仍规范化。
+    expect(interpretLinuxProxy('http://[::1]:8080')).toBe('http://[::1]:8080')
+    // direct:// 只表示直连本身；带 host 的取值语义不明，失败关闭。
+    expect(() => interpretLinuxProxy('direct://host')).toThrow(/malformed/)
+  })
+
+  test('rejects proxy candidates carrying path, query, fragment, or a zero port', () => {
+    // 额外的 path/query/fragment 或显式 0 端口都不能被悄悄丢弃，一律失败关闭。
+    expect(() => interpretLinuxProxy('http://proxy:8080/path')).toThrow(/malformed/)
+    expect(() => interpretLinuxProxy('http://proxy:8080?q')).toThrow(/malformed/)
+    expect(() => interpretLinuxProxy('http://proxy:8080#f')).toThrow(/malformed/)
+    expect(() => interpretLinuxProxy('http://proxy:0')).toThrow(/malformed/)
+  })
+
   test('an empty candidate list resolves to direct', () => {
     expect(interpretLinuxProxy(null)).toBeNull()
   })
@@ -224,7 +241,7 @@ describe('linux system proxy resolver behaviour', () => {
     expect(fake.unrefed).toEqual([fake.cancellable])
   })
 
-  test('a failing native release still settles the lookup instead of leaking it', async () => {
+  test('a failing native release is reported as an unconfirmed cleanup and makes the resolver unusable', async () => {
     const fake = new FakeLinuxProxy()
     fake.autoOutcome = { kind: 'proxies', first: 'direct://' }
     fake.unrefError = new Error('native release failed')
@@ -234,8 +251,49 @@ describe('linux system proxy resolver behaviour', () => {
       .catch((error: Error) => error)
     // 释放抛错必须以固定文案上报，绝不假装释放完成，也不回显原生异常原文。
     expect((failure as Error).message).toBe('the operating system proxy handle could not be released')
-    // 释放抛错时查询仍被清出集合：close 立即结束而不是永久等待。
-    await expect(resolver.close()).resolves.toBeUndefined()
+    // 未确认的清理必须阻止未来再分配句柄，并在 close 上显式失败（不能因为查询已结束就伪称释放已确认）。
+    await expect(resolver.resolve('http://example.com/', new AbortController().signal)).rejects.toThrow(/unusable/)
+    await expect(resolver.close()).rejects.toThrow(/handle could not be released/)
+    // 只尝试释放一次：重复释放会触发 use-after-free。
+    expect(fake.unrefed).toEqual([fake.cancellable])
+  })
+
+  test('a lookup failure and a release failure are both reported without masking each other', async () => {
+    const fake = new FakeLinuxProxy()
+    fake.autoOutcome = { kind: 'error', code: 5 }
+    fake.unrefError = new Error('native release failed')
+    const resolver = new LinuxSystemProxyResolver(fake.bindings())
+    const failure = (await resolver
+      .resolve('http://example.com/', new AbortController().signal)
+      .catch((error: unknown) => error)) as AggregateError
+    // 主失败与释放失败都保留在固定 AggregateError 中，message 取主失败，不含任何原生原文。
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure.message).toMatch(/lookup failed/)
+    expect(failure.errors.map((error: Error) => error.message)).toEqual([
+      expect.stringMatching(/lookup failed/),
+      expect.stringMatching(/handle could not be released/),
+    ])
+  })
+
+  test('a cancel failure, a lookup failure and a release failure are all reported', async () => {
+    const fake = new FakeLinuxProxy()
+    fake.cancelError = new Error('native cancel failed')
+    fake.unrefError = new Error('native release failed')
+    fake.autoOutcome = null
+    const resolver = new LinuxSystemProxyResolver(fake.bindings())
+    const controller = new AbortController()
+    const pending = resolver.resolve('http://example.com/', controller.signal)
+    // 同步取消失败不从 abort 派发逃逸；lookup 随后以主失败结束。
+    controller.abort()
+    fake.complete({ kind: 'error', code: 7 })
+    const failure = (await pending.catch((error: unknown) => error)) as Error
+    // 三个安全诊断都要出现：取消、查询、释放，且都不是原生原文。
+    const messages = [failure.message, ...(failure instanceof AggregateError ? failure.errors.map((error: Error) => error.message) : [])]
+    expect(messages.some((message) => /cancellation could not be requested/.test(message))).toBe(true)
+    expect(messages.some((message) => /lookup failed/.test(message))).toBe(true)
+    expect(messages.some((message) => /handle could not be released/.test(message))).toBe(true)
+    expect(JSON.stringify(messages)).not.toMatch(/native (cancel|release) failed/)
+    await expect(resolver.close()).rejects.toThrow(/handle could not be released/)
   })
 })
 

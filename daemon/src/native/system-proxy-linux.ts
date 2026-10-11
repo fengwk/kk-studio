@@ -1,9 +1,11 @@
 import koffi from 'koffi'
 import type { SystemProxyResolver } from '../contracts.js'
 import {
+  SystemProxyError,
   SYSTEM_PROXY_CLOSED,
   SYSTEM_PROXY_CANCELLED,
   SYSTEM_PROXY_CANCEL_FAILED,
+  SYSTEM_PROXY_FATAL,
   SYSTEM_PROXY_HANDLE_FAILED,
   SYSTEM_PROXY_MALFORMED,
   SYSTEM_PROXY_UNAVAILABLE,
@@ -26,8 +28,10 @@ import {
  * （`g_object_unref`）。默认解析器是借用单例，绝不 unref。
  */
 
-/** 一次查询的归一化结果：要么拿到首个候选，要么拿到数值错误码。原生缓冲区已在端口内释放。 */
-export type LinuxLookupOutcome = { kind: 'proxies'; first: string | null } | { kind: 'error'; code: number }
+/** 一次查询的归一化结果：候选或数值错误码，外加「原生资源释放未被确认」。原生缓冲区已在端口内释放。 */
+export type LinuxLookupOutcome =
+  | { kind: 'proxies'; first: string | null; cleanupFailed: boolean }
+  | { kind: 'error'; code: number; cleanupFailed: boolean }
 
 /** Linux 代理的真实端口：把 GLib/GIO 的细节与所有权都收敛在这一层。 */
 export interface LinuxProxyBindings {
@@ -37,18 +41,51 @@ export interface LinuxProxyBindings {
   createCancellable(): bigint | null
   /** 跨线程取消。 */
   cancelCancellable(cancellable: bigint): void
-  /** 派发同步 `g_proxy_resolver_lookup`；端口负责解码并释放全部原生结果/错误后回调一次。 */
+  /** 派发同步 `g_proxy_resolver_lookup`；端口负责解码、释放全部原生结果/错误/slot 后**恰好结算一次**。 */
   startLookup(resolver: bigint, uri: string, cancellable: bigint, settle: (outcome: LinuxLookupOutcome) => void): void
   /** `g_object_unref`：void 调用，成败只能由调用本身是否抛错判断。 */
   unref(object: bigint): void
 }
 
-/** 进行中的查询：取消标志、原生取消令牌、「取消请求失败」记录与「已经释放完毕」的结算承诺。 */
+/** 进行中的查询：取消标志、原生取消令牌、「取消请求失败」记录与「已经结束」的结算承诺。 */
 interface ActiveLookup {
   readonly cancellable: bigint
   readonly finished: Promise<void>
   cancelled: boolean
   cancelFailed: boolean
+}
+
+/** 保留本边界的安全诊断，未知 FFI 异常仅返回固定文案。 */
+function asError(value: unknown): Error {
+  return value instanceof SystemProxyError ? value : systemProxyError(SYSTEM_PROXY_LOOKUP_FAILED)
+}
+
+/** 展开嵌套的 AggregateError，保证一次上报里所有安全诊断都在同一层，绝不把主失败埋进嵌套。 */
+function flattenFailures(failures: readonly unknown[]): Error[] {
+  const flat: Error[] = []
+  for (const failure of failures) {
+    if (failure instanceof AggregateError) {
+      flat.push(...flattenFailures(failure.errors))
+    } else if (failure instanceof Error) {
+      flat.push(failure)
+    }
+  }
+  return flat
+}
+
+/** 全部安全诊断都必须保留：单一失败原样返回，多个用 AggregateError 承载（message 取首个，即主失败）。 */
+function combineFailures(failures: Error[]): Error {
+  const flat = flattenFailures(failures)
+  const primary = flat[0]
+  if (primary === undefined) {
+    return systemProxyError(SYSTEM_PROXY_LOOKUP_FAILED)
+  }
+  return flat.length === 1 ? primary : new AggregateError(flat, primary.message)
+}
+
+/** 主失败与释放失败都必须保留。 */
+function aggregateFailure(primary: Error, secondary: Error | null): Error {
+  return combineFailures(secondary === null ? [primary] : [primary, secondary])
 }
 
 /** 一次性承诺。 */
@@ -71,6 +108,8 @@ export class LinuxSystemProxyResolver implements SystemProxyResolver {
   private readonly active = new Set<ActiveLookup>()
   private closed = false
   private closing: Promise<void> | null = null
+  /** 一次未被确认的原生释放：解析器进入不可用终态，绝不再分配新句柄，且 `close` 必须显式失败。 */
+  private cleanupFailure: Error | null = null
 
   constructor(bindings: LinuxProxyBindings | null) {
     this.bindings = bindings
@@ -79,6 +118,9 @@ export class LinuxSystemProxyResolver implements SystemProxyResolver {
   async resolve(uri: string, signal: AbortSignal): Promise<string | null> {
     if (this.closed) {
       throw systemProxyError(SYSTEM_PROXY_CLOSED)
+    }
+    if (this.cleanupFailure !== null) {
+      throw systemProxyError(SYSTEM_PROXY_FATAL)
     }
     if (signal.aborted) {
       // 取消必须先于「来源缺失」判定：已取消的查询绝不因为缺少桌面代理库而被改写成直连。
@@ -111,20 +153,21 @@ export class LinuxSystemProxyResolver implements SystemProxyResolver {
       }
     }
     signal.addEventListener('abort', onAbort, { once: true })
+    let settled: { value: string | null } | { failure: Error }
+    let releaseFailure: Error | null = null
     try {
       const outcome = await new Promise<LinuxLookupOutcome>((settle) => {
-        bindings.startLookup(resolver, uri, cancellable, settle)
+        try {
+          bindings.startLookup(resolver, uri, cancellable, settle)
+        } catch (error) {
+          // 端口违反「恰好结算一次」时，原生异常也不能以未固定文案逃逸或让 resolve 永久挂起。
+          settle({ kind: 'error', code: -1, cleanupFailed: true })
+          void error
+        }
       })
-      if (active.cancelFailed) {
-        throw systemProxyError(SYSTEM_PROXY_CANCEL_FAILED)
-      }
-      if (active.cancelled) {
-        throw systemProxyError(SYSTEM_PROXY_CANCELLED)
-      }
-      if (outcome.kind === 'error') {
-        throw systemProxyErrorWithCode(SYSTEM_PROXY_LOOKUP_FAILED, outcome.code)
-      }
-      return interpretLinuxProxy(outcome.first)
+      settled = this.interpretOutcome(outcome, active)
+    } catch (error) {
+      settled = { failure: asError(error) }
     } finally {
       signal.removeEventListener('abort', onAbort)
       // `g_object_unref` 是 void：从返回值无法判定成败，只有原生调用本身抛错才算「释放未被确认」。
@@ -137,9 +180,48 @@ export class LinuxSystemProxyResolver implements SystemProxyResolver {
       this.active.delete(active)
       finished.resolve()
       if (releaseUnconfirmed) {
-        throw systemProxyError(SYSTEM_PROXY_HANDLE_FAILED)
+        // 不重复释放（UAF），但绝不声称「已释放」：记住失败、停止再分配句柄，并让 close 显式失败。
+        releaseFailure = systemProxyError(SYSTEM_PROXY_HANDLE_FAILED)
+        this.cleanupFailure ??= releaseFailure
       }
     }
+    if ('value' in settled) {
+      if (releaseFailure !== null) {
+        throw releaseFailure
+      }
+      return settled.value
+    }
+    throw aggregateFailure(settled.failure, releaseFailure)
+  }
+
+  private interpretOutcome(outcome: LinuxLookupOutcome, active: ActiveLookup): { value: string | null } | { failure: Error } {
+    // 取消、查询结果与原生清理失败各自独立：全部收集，绝不因为一个失败而丢弃另一个。
+    const failures: Error[] = []
+    if (active.cancelFailed) {
+      failures.push(systemProxyError(SYSTEM_PROXY_CANCEL_FAILED))
+    } else if (active.cancelled) {
+      // 取消已成功请求：lookup 就是被取消的，这是调用方视角的主因。
+      failures.push(systemProxyError(SYSTEM_PROXY_CANCELLED))
+    }
+    if (outcome.kind === 'error') {
+      failures.push(systemProxyErrorWithCode(SYSTEM_PROXY_LOOKUP_FAILED, outcome.code))
+    }
+    if (outcome.cleanupFailed) {
+      const failure = systemProxyError(SYSTEM_PROXY_HANDLE_FAILED)
+      failures.push(failure)
+      this.cleanupFailure ??= failure
+    }
+    if (failures.length === 0 && outcome.kind === 'proxies') {
+      try {
+        return { value: interpretLinuxProxy(outcome.first) }
+      } catch (error) {
+        failures.push(asError(error))
+      }
+    }
+    if (failures.length === 0) {
+      return { value: null }
+    }
+    return { failure: combineFailures(failures) }
   }
 
   close(): Promise<void> {
@@ -165,8 +247,12 @@ export class LinuxSystemProxyResolver implements SystemProxyResolver {
         }
       }
     }
-    // 每个进行中的查询仍会真正结束并释放原生缓冲区；调用方的错误已在各自 promise 上送达，这里只等待结算。
+    // 每个进行中的查询仍会真正结束并释放原生缓冲区；调用方的错误已在各自 promise 上送达，这里只等待结束。
     await Promise.all(pending.map((lookup) => lookup.finished))
+    // 释放未被确认优先于取消失败：它意味着解析器已不可用，绝不能在这里伪称清理完成。
+    if (this.cleanupFailure !== null) {
+      throw this.cleanupFailure
+    }
     if (cancelFailed) {
       throw systemProxyError(SYSTEM_PROXY_CANCEL_FAILED)
     }
@@ -176,8 +262,8 @@ export class LinuxSystemProxyResolver implements SystemProxyResolver {
 /**
  * 解释 `g_proxy_resolver_lookup` 的首个候选。
  *
- * <p>`direct://` 表示操作系统选择直连；只有 `http://` 能变成规范的 `http://host:port`。其它协议与带认证候选都失败关闭，
- * 解析不了同样抛出，绝不当作直连。
+ * <p>直连必须是 GIO 规范的 `direct://` token（不许 `direct://host` 这种凭空直连）；只有无认证的 `http://` 代理能变成规范的
+ * `http://host:port`。其它协议与带认证候选都失败关闭，解析不了同样抛出，绝不当作直连。
  */
 export function interpretLinuxProxy(first: string | null): string | null {
   if (first === null) {
@@ -189,6 +275,10 @@ export function interpretLinuxProxy(first: string | null): string | null {
   }
   const scheme = first.slice(0, boundary).toLowerCase()
   if (scheme === 'direct') {
+    // 只有 `direct://` 本身是直连 token；`direct://host` 之类的取值语义不明，失败关闭。
+    if (first.slice(boundary + 3) !== '') {
+      throw systemProxyError(SYSTEM_PROXY_MALFORMED)
+    }
     return null
   }
   if (scheme !== 'http') {
@@ -203,11 +293,17 @@ export function interpretLinuxProxy(first: string | null): string | null {
   if (parsed.username !== '' || parsed.password !== '') {
     throw systemProxyError(SYSTEM_PROXY_UNSUPPORTED)
   }
-  if (parsed.hostname === '') {
+  // OS provider 常见形态（无显式端口 -> 补 80、根路径尾斜杠）可接受；额外的 path/query/fragment 或 0 端口都不能
+  // 被悄悄丢弃，一律失败关闭。
+  if (
+    (parsed.pathname !== '' && parsed.pathname !== '/') ||
+    parsed.search !== '' ||
+    parsed.hash !== '' ||
+    parsed.port === '0'
+  ) {
     throw systemProxyError(SYSTEM_PROXY_MALFORMED)
   }
-  const port = parsed.port === '' ? '80' : parsed.port
-  return `http://${parsed.hostname}:${port}`
+  return `http://${parsed.hostname}:${parsed.port === '' ? '80' : parsed.port}`
 }
 
 /**
@@ -268,32 +364,101 @@ function loadLinuxProxyBindingsUncached(): LinuxProxyBindings | null {
       objectUnref(object)
     },
     startLookup: (resolver, uri, cancellable, settle) => {
-      const errorSlot = koffi.alloc('void *', 1)
-      koffi.encode(errorSlot, 'void *', null)
-      lookup.async(resolver, uri, cancellable, errorSlot, (_failure: unknown, result: unknown) => {
-        // 在回调内一次性解码并释放全部原生结果/错误：没有任何原生内存活过这次查询。
-        const nativeError = koffi.decode(errorSlot, 'void *') as bigint | null
+      // 端口契约要求恰好结算一次；回调内任何原生异常都不允许逃逸（Koffi 回调里的未捕获异常不会结算，
+      // resolve/close 会永久挂起）。
+      let settled = false
+      const settleOnce = (outcome: LinuxLookupOutcome): void => {
+        if (!settled) {
+          settled = true
+          settle(outcome)
+        }
+      }
+      let errorSlot: bigint
+      try {
+        // 传给 g_proxy_resolver_lookup 的 GError 出参槽由本端口用 koffi.free 自己负责释放。
+        errorSlot = koffi.alloc('void *', 1)
+      } catch {
+        // 还没有分配任何 slot。
+        settleOnce({ kind: 'error', code: -1, cleanupFailed: false })
+        return
+      }
+      try {
+        koffi.encode(errorSlot, 'void *', null)
+      } catch {
+        let cleanupFailed = false
+        try {
+          koffi.free(errorSlot)
+        } catch {
+          // 未能确认 slot 释放：必须与主失败一起上报，绝不静默。
+          cleanupFailed = true
+        }
+        settleOnce({ kind: 'error', code: -1, cleanupFailed })
+        return
+      }
+      const handleCompletion = (failure: unknown, result: unknown): void => {
+        // 先收集，再判断：无论哪一步失败，其余原生资源都仍要被尝试释放。
+        let cleanupFailed = false
         let first: string | null = null
         let hasResult = false
         if (result !== null && result !== undefined) {
           try {
             first = koffi.decode(result, 'char *') as string | null
             hasResult = true
-          } finally {
-            strfreev(result as bigint)
+          } catch {
+            cleanupFailed = true
           }
+          try {
+            strfreev(result as bigint)
+          } catch {
+            cleanupFailed = true
+          }
+        }
+        let nativeError: bigint | null = null
+        try {
+          nativeError = koffi.decode(errorSlot, 'void *') as bigint | null
+        } catch {
+          cleanupFailed = true
         }
         let code: number | null = null
         if (nativeError !== null) {
           try {
             const detail = koffi.decode(nativeError, errorStruct) as { code: number | bigint }
             code = Number(detail.code)
-          } finally {
+          } catch {
+            cleanupFailed = true
+          }
+          try {
             errorFree(nativeError)
+          } catch {
+            cleanupFailed = true
           }
         }
-        settle(hasResult ? { kind: 'proxies', first } : { kind: 'error', code: code ?? -1 })
-      })
+        try {
+          koffi.free(errorSlot)
+        } catch {
+          cleanupFailed = true
+        }
+        const dispatchFailed = failure !== null && failure !== undefined
+        // 主失败（派发失败 / 没有候选 / 解码不到结果）与清理失败都要上报：清理失败不掩盖主失败，
+        // 也不被主失败掩盖。
+        if (dispatchFailed || !hasResult) {
+          settleOnce({ kind: 'error', code: code ?? -1, cleanupFailed })
+          return
+        }
+        settleOnce({ kind: 'proxies', first, cleanupFailed })
+      }
+      try {
+        lookup.async(resolver, uri, cancellable, errorSlot, handleCompletion)
+      } catch {
+        // 同步启动就失败：已分配的 slot 也必须释放，释放是否被确认一并上报。
+        let cleanupFailed = false
+        try {
+          koffi.free(errorSlot)
+        } catch {
+          cleanupFailed = true
+        }
+        settleOnce({ kind: 'error', code: -1, cleanupFailed })
+      }
     },
   }
 }
