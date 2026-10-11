@@ -117,6 +117,58 @@ class IdeGatewayDataPlaneTest {
     assertEquals(1, harness.transport.abandoned.size());
   }
 
+  /** 慢速上游超过一个轮询间隔才产出首字节时必须继续等待，而不是误判连接关闭。 */
+  @Test
+  void slowUpstreamIdlePollIsNotTreatedAsClosed() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer =
+        new ScriptedPeer(0, List.of(new IdeHeader("content-type", "text/plain")))
+            .withIdlePollsBeforeResponse(8);
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/slow");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/slow", request, response);
+
+    assertEquals(200, response.getStatus());
+    assertEquals(0, response.getContentAsByteArray().length);
+  }
+
+  /** 与 Node peer 一致：所有 method（含 GET）都转发请求体，绝不因 method 丢弃 body。 */
+  @Test
+  void forwardsRequestBodyForGetMethod() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer = new ScriptedPeer(0, List.of());
+    harness.transport.peerFactory = () -> peer;
+    byte[] payload = "get-with-body".getBytes(StandardCharsets.UTF_8);
+
+    MockHttpServletRequest request = harness.request("GET", "/search");
+    request.setContent(payload);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/search", request, response);
+
+    assertEquals(200, response.getStatus());
+    assertEquals(payload.length, peer.receivedRequestBytes);
+    assertEquals("GET", harness.transport.lastCommand.get().method());
+  }
+
+  /** 上游提前响应（不等待大请求体）时双向都不得死锁：响应照常完成。 */
+  @Test
+  void earlyUpstreamResponseDoesNotDeadlockOnLargeRequestBody() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer = new ScriptedPeer(0, List.of(new IdeHeader("content-type", "text/plain")));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("POST", "/upload");
+    request.setContent(new byte[4 * 1024 * 1024]);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/upload", request, response);
+
+    assertEquals(200, response.getStatus());
+    // 上游在请求体发完前就结束了 exchange，因此没有把整个请求体交给 Daemon。
+    assertTrue(peer.receivedRequestBytes < 4 * 1024 * 1024);
+  }
+
   @Test
   void forwardsRequestBodyToDaemon() throws Exception {
     Harness harness = new Harness();
@@ -265,6 +317,8 @@ class IdeGatewayDataPlaneTest {
 
     private final int bodyBytes;
     private final List<IdeHeader> headers;
+    private int idlePollsBeforeResponse;
+    private int idlePolls;
     private boolean responseSent;
     private int sentBytes;
     private boolean ended;
@@ -293,9 +347,19 @@ class IdeGatewayDataPlaneTest {
       return closed;
     }
 
+    ScriptedPeer withIdlePollsBeforeResponse(int idlePollsBeforeResponse) {
+      this.idlePollsBeforeResponse = idlePollsBeforeResponse;
+      return this;
+    }
+
     @Override
     public Inbound poll(Duration timeout) {
       if (closed) {
+        return null;
+      }
+      if (idlePolls < idlePollsBeforeResponse) {
+        // 空闲：返回 null 但不是关闭；数据面必须继续等到真实 deadline。
+        idlePolls++;
         return null;
       }
       if (!responseSent) {
