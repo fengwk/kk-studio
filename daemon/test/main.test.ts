@@ -58,8 +58,8 @@ interface RunnableMain {
 /**
  * 在 Vitest 进程内运行 main，并捕获 stdout/stderr。
  *
- * main 注册 SIGINT/SIGTERM 全局监听；这里记录进入前的集合，停机后校验集合完全一致，并只移除本用例新增的
- * 监听作为兜底，绝不污染同 worker 的其它测试或 Vitest 自身的信号处理。
+ * main 注册 SIGINT/SIGTERM 全局监听；这里记录进入前的集合，停机后校验集合完全一致。停止必须真正等待 main
+ * 收敛：绝不把「等待超时」当成「已经停止」而继续删资源，回收完全依赖 production 的 finally 真正移除它自己的监听。
  */
 function startMain(configPath: string): RunnableMain {
   const stdout: string[] = []
@@ -106,33 +106,22 @@ function startMain(configPath: string): RunnableMain {
     return true
   }
 
-  const removeLeakedListeners = (): void => {
-    for (const listener of process.listeners('SIGINT') as Listener[]) {
-      if (!beforeInt.has(listener)) {
-        process.removeListener('SIGINT', listener)
-      }
-    }
-    for (const listener of process.listeners('SIGTERM') as Listener[]) {
-      if (!beforeTerm.has(listener)) {
-        process.removeListener('SIGTERM', listener)
-      }
-    }
-  }
-
   const stop = async (): Promise<void> => {
     try {
-      if (!settled) {
-        const deadline = Date.now() + 5000
-        while (!settled && Date.now() < deadline) {
-          if (triggerShutdown()) {
-            break
-          }
-          await sleep(20)
-        }
-        await Promise.race([run.catch(() => undefined), sleep(5000)])
+      if (settled) {
+        return
       }
+      // 必须真正触发 main 自己的信号监听并等它收敛。绝不 race 一个固定 sleep 后继续删资源：
+      // 若 main 没有收敛就抛错（声明 Failure），由 Vitest 的 hook 超时兜住真正挂起的情况。
+      const deadline = Date.now() + 10_000
+      while (!settled && !triggerShutdown()) {
+        if (Date.now() >= deadline) {
+          throw new Error('the daemon did not register a signal listener to stop it')
+        }
+        await sleep(20)
+      }
+      await run.catch(() => undefined)
     } finally {
-      removeLeakedListeners()
       outSpy.mockRestore()
       errSpy.mockRestore()
     }
