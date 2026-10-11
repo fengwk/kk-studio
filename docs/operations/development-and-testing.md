@@ -605,8 +605,11 @@ env JAVA_HOME=$JAVA_HOME_21 \
   mvn -pl web test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-Daemon 以真实 `node dist/main.js --config <私有 0600 配置>` 启动（缺产物时先在 `daemon/` 下 `npm ci --offline`
-并用随包 Node24 `tsc` 构建）；浏览器用 `--host-resolver-rules 'MAP *.browser.localhost 127.0.0.1'` 访问独立 IDE
+Daemon 以真实 `node dist/main.js --config <私有 0600 配置>` 启动；运行前须先在 `daemon/` 下 `npm ci`（用例不联网装
+依赖，缺 `node_modules` 会明确失败），随后每次都用随包 Node24 重跑生产 `npm run build` 并先清理旧 `dist`，保证构建
+产物与当前源码一致。Daemon 与 Playwright 都以私有 `TMPDIR` 启动，用例只扫描自己这两棵进程树在该私有目录下的
+native scope，并按真实 OS 句柄等待其退出收敛；绝不全局扫 `/tmp`、不 kill 随机 PID 或外部 Chrome。浏览器用
+`--host-resolver-rules 'MAP *.browser.localhost 127.0.0.1'` 访问独立 IDE
 Origin；视图由真实 `EnvironmentIdeService.OPEN_VIEW` 铸一次性 bootstrap 入口。Origin、303 Location、host-only
 cookie 与反向流 WS 全部以运行期 `@LocalServerPort` 为准（测试体内覆盖同一单例 `IdeOriginProperties` /
 `IdeGatewayProperties`），不使用端口无关模板以外的假设，也不加预热或重试。
