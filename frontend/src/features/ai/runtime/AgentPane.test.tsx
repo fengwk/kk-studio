@@ -1,9 +1,33 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
+
+function MemoryRouter({ children }: { children: ReactNode }) {
+  const [ctx] = useState(() => {
+    const ContentContext = createContext<ReactNode>(children)
+    function RouteContainer() {
+      const c = useContext(ContentContext)
+      return <IdeLifecycleProvider>{c}</IdeLifecycleProvider>
+    }
+    const router = createMemoryRouter([
+      {
+        path: '*',
+        Component: RouteContainer,
+      },
+    ])
+    return { ContentContext, router }
+  })
+
+  return (
+    <ctx.ContentContext.Provider value={children}>
+      <RouterProvider router={ctx.router} />
+    </ctx.ContentContext.Provider>
+  )
+}
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import {
   branchDraftFromEntry,
@@ -19,6 +43,7 @@ import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { chatService } from '@/shared/api/chat-service'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApiError } from '@/shared/api/client'
@@ -163,6 +188,10 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn(),
     getEnvironmentUpdate: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
+    createIdeView: vi.fn().mockResolvedValue({}),
+    changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
+    openIdeViewTerminal: vi.fn().mockResolvedValue(undefined),
+    closeIdeView: vi.fn().mockResolvedValue(undefined),
   },
 }))
 vi.mock('@/shared/api/chat-service', () => ({
@@ -4563,5 +4592,161 @@ describe('AgentPane root control mounting', () => {
     const restored = await screen.findByLabelText('给 AI 发送消息')
     // 回到根：草稿从既有持久记录恢复，不需要任何额外接线。
     await waitFor(() => expect(restored).toHaveTextContent('root draft stays'))
+  })
+
+  it('opens IDE overlay on /files command, uses canonical UUID, and notifies onIdeMounted', async () => {
+    const user = userEvent.setup()
+    const envCard: EnvironmentCardDTO = {
+      id: 'a1000000-0000-4000-8000-000000000099',
+      name: 'local-node',
+      ready: true,
+      status: 'READY',
+      version: '1',
+      createTime: '2026-10-01T00:00:00Z',
+      updateTime: '2026-10-01T00:00:00Z',
+      capabilities: [],
+      statusExpiresAt: null,
+      lastSeen: null,
+      homeDirectory: '/home/user',
+    }
+
+    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+      viewId: 'v-test',
+      environmentId: envCard.id,
+      directory: '/home/user',
+      entryUrl: 'https://ide.test/?workspace=1',
+    })
+
+    const onIdeMounted = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[envCard]}
+            defaults={{ environmentName: 'local-node' }}
+            focused
+            onIdeMounted={onIdeMounted}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
+    await user.click(plusBtn)
+
+    // Select files command
+    const filesCmd = await screen.findByText('files')
+    await user.click(filesCmd)
+
+    // IDE overlay opens and creates view with environment UUID
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenCalledWith(
+        envCard.id,
+        expect.objectContaining({ viewId: expect.any(String) }),
+      )
+    })
+    expect(onIdeMounted).toHaveBeenCalledWith(true)
+
+    // Overlay is rendered inside chat-pane
+    const overlay = await screen.findByTestId('ide-overlay-panel')
+    expect(overlay).toBeInTheDocument()
+    expect(overlay).not.toHaveAttribute('hidden')
+
+    // Escape collapses overlay
+    overlay.focus()
+    await user.keyboard('{Escape}')
+    expect(overlay).toHaveAttribute('hidden')
+  })
+
+  it('opens IDE overlay on /shell command and calls openIdeViewTerminal', async () => {
+    const user = userEvent.setup()
+    const envCard: EnvironmentCardDTO = {
+      id: 'a1000000-0000-4000-8000-000000000099',
+      name: 'local-node',
+      ready: true,
+      status: 'READY',
+      version: '1',
+      createTime: '2026-10-01T00:00:00Z',
+      updateTime: '2026-10-01T00:00:00Z',
+      capabilities: [],
+      statusExpiresAt: null,
+      lastSeen: null,
+      homeDirectory: '/home/user',
+    }
+
+    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+      viewId: 'v-shell',
+      environmentId: envCard.id,
+      directory: '/home/user',
+      entryUrl: 'https://ide.test/?workspace=shell',
+    })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[envCard]}
+            defaults={{ environmentName: 'local-node' }}
+            focused
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
+    await user.click(plusBtn)
+
+    // Select shell command
+    const shellCmd = await screen.findByText('shell')
+    await user.click(shellCmd)
+
+    // Wait for iframe and trigger load
+    const iframe = await screen.findByTestId('ide-iframe')
+    fireEvent.load(iframe)
+
+    await waitFor(() => {
+      expect(environmentService.openIdeViewTerminal).toHaveBeenCalledWith(
+        envCard.id,
+        expect.any(String),
+      )
+    })
+  })
+
+  it('does not treat unknown environment name as UUID and shows selection state instead', async () => {
+    const user = userEvent.setup()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[]}
+            defaults={{ environmentName: 'unknown-env' }}
+            focused
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
+    await user.click(plusBtn)
+
+    const filesCmd = await screen.findByText('files')
+    await user.click(filesCmd)
+
+    // Should NOT call createIdeView with 'unknown-env' as id
+    expect(environmentService.createIdeView).not.toHaveBeenCalled()
+    // Shows inline select environment state
+    expect(await screen.findByTestId('ide-select-environment-state')).toBeInTheDocument()
   })
 })
