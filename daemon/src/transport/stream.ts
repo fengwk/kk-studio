@@ -280,6 +280,11 @@ function normalizeCloseReason(reason: Buffer | string | undefined): string {
   return text.slice(0, 120)
 }
 
+/** 与 lookup 共享同一绝对 deadline 的剩余毫秒数；至少 1ms，绝不重新计时。 */
+function remainingMillis(timeoutMillis: number, startedAt: number): number {
+  return Math.max(1, timeoutMillis - (Date.now() - startedAt))
+}
+
 function waitForOpen(socket: WebSocket, timeoutMillis: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const cleanup = (): void => {
@@ -694,16 +699,29 @@ export async function openStreamExchange(options: StreamExchangeOptions): Promis
     throw abortError()
   }
   const timeout = options.connectTimeoutMillis ?? 10_000
-  // 系统 lookup 与原连接 deadline/取消共享同一 signal；socket close/error 必定释放独占 Agent。
+  const startedAt = Date.now()
+  // lookup 与原连接 deadline/取消共享同一 signal；socket close/error 必定释放独占 Agent。
   const deadline = AbortSignal.any([options.signal, AbortSignal.timeout(timeout)])
   const plan = await getOutboundNetwork().createWebSocketAgent(options.streamUrl, deadline)
-  const gateway = new WebSocket(options.streamUrl, {
-    perMessageDeflate: false,
-    maxPayload: MAX_PAYLOAD + 2,
-    followRedirects: false,
-    handshakeTimeout: timeout,
-    agent: plan.agent,
-  })
+  // lookup 返回后立刻检查取消，覆盖“await 之后、listener 之前”的窗口。
+  if (deadline.aborted) {
+    plan.destroy()
+    throw abortError()
+  }
+  // 握手沿用共享 deadline 的剩余时间；构造抛错也必须销毁已建 Agent。
+  let gateway: WebSocket
+  try {
+    gateway = new WebSocket(options.streamUrl, {
+      perMessageDeflate: false,
+      maxPayload: MAX_PAYLOAD + 2,
+      followRedirects: false,
+      handshakeTimeout: remainingMillis(timeout, startedAt),
+      agent: plan.agent,
+    })
+  } catch (error) {
+    plan.destroy()
+    throw error
+  }
   gateway.once('close', () => plan.destroy())
   gateway.once('error', () => plan.destroy())
   const exchange = options.request.mode === 'HTTP' ? new HttpExchange(options, gateway) : new WebSocketExchange(options, gateway)
@@ -711,7 +729,7 @@ export async function openStreamExchange(options: StreamExchangeOptions): Promis
   const onAbort = (): void => exchange.fail(abortError())
   options.signal.addEventListener('abort', onAbort, { once: true })
   try {
-    await waitForOpen(gateway, timeout)
+    await waitForOpen(gateway, remainingMillis(timeout, startedAt))
     exchange.start()
     await exchange.done
   } catch (error) {

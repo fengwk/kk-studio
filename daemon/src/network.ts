@@ -216,7 +216,9 @@ function parseProxy(value: string): string {
   if (port < 1 || port > 65535) {
     throw new ProxyConfigurationError()
   }
-  normalizeHost(rawHost)
+  if (normalizeHost(rawHost) === '*') {
+    throw new ProxyConfigurationError()
+  }
   const stripped = stripBrackets(rawHost)
   return `http://${stripped.includes(':') ? `[${stripped}]` : stripped}:${port}`
 }
@@ -342,6 +344,10 @@ function ipv4Bytes(value: string): Uint8Array | null {
 /** 解析纯数字 IPv6；IPv4-mapped 保持 16 字节地址族，不接受 zone ID。 */
 function ipv6Bytes(value: string): Uint8Array | null {
   if (value.length === 0 || !IPV6_TEXT_PATTERN.test(value)) {
+    return null
+  }
+  // 以标准数值 IPv6 校验结构（拒绝 `192.0.2.1::` 这类压缩前嵌入 IPv4 的形式）；zone 已被字符集拒绝。
+  if (!net.isIPv6(value)) {
     return null
   }
   const halves = value.split('::')
@@ -489,16 +495,26 @@ export interface WebSocketAgent {
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 
 class DefaultOutboundNetwork implements OutboundNetwork {
+  private readonly dispatchers = new Set<Dispatcher>()
+  private readonly agents = new Set<http.Agent | https.Agent>()
+  private readonly inflight = new Set<Promise<unknown>>()
+  private readonly lifetime = new AbortController()
+  private closed = false
+  private closePromise: Promise<void> | undefined
+
   constructor(private readonly policy: ProxyPolicy) {}
 
   selectProxy(uri: string, signal: AbortSignal): Promise<ProxyChoice> {
-    return this.policy.select(uri, signal)
+    return this.policy.select(uri, this.combine(signal))
   }
 
   async openResponse(url: string, init: OutboundRequestInit, signal: AbortSignal): Promise<OutboundResponse> {
-    const choice = await this.policy.select(url, signal)
+    this.ensureOpen()
+    const choice = await this.track(this.policy.select(url, this.combine(signal)))
+    this.ensureOpen()
     const dispatcher = createDispatcher(choice, init.connectTimeout)
-    return this.dispatch(dispatcher, url, init, signal)
+    this.dispatchers.add(dispatcher)
+    return this.dispatch(dispatcher, url, init, this.combine(signal))
   }
 
   async withResponse<T>(
@@ -508,17 +524,37 @@ class DefaultOutboundNetwork implements OutboundNetwork {
     use: (response: OutboundResponse) => Promise<T>,
   ): Promise<T> {
     const response = await this.openResponse(url, init, signal)
+    let result: T | undefined
+    let primary: unknown
+    let failed = false
     try {
-      return await use(response)
-    } finally {
-      await response.dispose()
+      result = await use(response)
+    } catch (error) {
+      primary = error
+      failed = true
     }
+    let cleanup: unknown
+    try {
+      await response.dispose()
+    } catch (error) {
+      cleanup = error
+    }
+    if (failed) {
+      // use 与 cleanup 同时失败时两者都要保留，不能相互覆盖。
+      throw combineFailures(primary, cleanup)
+    }
+    if (cleanup !== undefined) {
+      throw cleanup
+    }
+    return result as T
   }
 
   async createWebSocketAgent(target: string | URL, signal: AbortSignal): Promise<WebSocketAgent> {
+    this.ensureOpen()
     const url = typeof target === 'string' ? new URL(target) : target
     const secure = url.protocol === 'wss:' || url.protocol === 'https:'
-    const choice = await this.policy.select(url.toString(), signal)
+    const choice = await this.track(this.policy.select(url.toString(), this.combine(signal)))
+    this.ensureOpen()
     const agent =
       choice.kind === 'proxy'
         ? secure
@@ -527,7 +563,27 @@ class DefaultOutboundNetwork implements OutboundNetwork {
         : secure
           ? new https.Agent({ keepAlive: false })
           : new http.Agent({ keepAlive: false })
-    return { agent, destroy: () => agent.destroy() }
+    this.agents.add(agent)
+    let destroyed = false
+    return {
+      agent,
+      destroy: () => {
+        if (destroyed) {
+          return
+        }
+        destroyed = true
+        this.agents.delete(agent)
+        agent.destroy()
+      },
+    }
+  }
+
+  /** 关闭本次网络：中止生命周期并等待自身 pending 退场，再强制销毁独占资源（不无限等待未消费 body）。 */
+  close(): Promise<void> {
+    if (this.closePromise === undefined) {
+      this.closePromise = this.dispose()
+    }
+    return this.closePromise
   }
 
   /** 独占 dispatcher 的一次交换：任何失败路径都释放，重定向按 redirect 选项裁决。 */
@@ -549,32 +605,93 @@ class DefaultOutboundNetwork implements OutboundNetwork {
         bodyTimeout: init.bodyTimeout,
       })
     } catch (error) {
-      await dispatcher.close().catch(() => undefined)
-      throw error
+      throw combineFailures(error, await this.retire(dispatcher, true))
     }
+    // 未消费的 body 也不得让 abort/teardown 变成进程级 unhandled error；真实消费者仍能通过迭代收到错误。
+    response.body.on('error', () => undefined)
     const redirect = init.redirect ?? 'error'
     if (redirect === 'error' && REDIRECT_STATUS.has(response.statusCode) && response.headers.location !== undefined) {
       destroyBody(response.body)
-      await dispatcher.close()
-      throw new Error('outbound request refused an unexpected redirect')
+      throw combineFailures(
+        new Error('outbound request refused an unexpected redirect'),
+        await this.retire(dispatcher, false),
+      )
     }
-    let disposed = false
+    let disposePromise: Promise<void> | undefined
     return {
       statusCode: response.statusCode,
       statusMessage: response.statusText,
       headers: response.headers,
       body: response.body,
-      dispose: async () => {
-        if (disposed) {
-          return
+      // 幂等且共享：并发/二次调用等待同一次关闭，不会在首次尚未结束时提前成功。
+      dispose: () => {
+        if (disposePromise === undefined) {
+          disposePromise = (async () => {
+            destroyBody(response.body)
+            const cleanup = await this.retire(dispatcher, false)
+            if (cleanup !== undefined) {
+              throw cleanup
+            }
+          })()
         }
-        disposed = true
-        // 先取消/释放可能尚未消费的 body，再关闭独占 dispatcher；destroy 的 teardown abort 必须被吸收，
-        // 否则未消费响应会在进程级变成未处理异常。
-        destroyBody(response.body)
-        await dispatcher.close()
+        return disposePromise
       },
     }
+  }
+
+  private combine(signal: AbortSignal): AbortSignal {
+    return AbortSignal.any([signal, this.lifetime.signal])
+  }
+
+  private ensureOpen(): void {
+    if (this.closed) {
+      throw new Error('outbound network is closed')
+    }
+  }
+
+  private track<T>(promise: Promise<T>): Promise<T> {
+    this.inflight.add(promise)
+    const settle = (): void => {
+      this.inflight.delete(promise)
+    }
+    promise.then(settle, settle)
+    return promise
+  }
+
+  /** 移出活跃集合后关闭/销毁；返回失败而非抛出，便于与主错误一并保留。 */
+  private async retire(dispatcher: Dispatcher, force: boolean): Promise<unknown> {
+    this.dispatchers.delete(dispatcher)
+    try {
+      if (force) {
+        await dispatcher.destroy()
+      } else {
+        await dispatcher.close()
+      }
+      return undefined
+    } catch (error) {
+      return error
+    }
+  }
+
+  private async dispose(): Promise<void> {
+    this.closed = true
+    this.lifetime.abort()
+    await Promise.allSettled([...this.inflight])
+    const dispatchers = [...this.dispatchers]
+    this.dispatchers.clear()
+    const agents = [...this.agents]
+    this.agents.clear()
+    const results = await Promise.allSettled([
+      ...dispatchers.map((dispatcher) => dispatcher.destroy()),
+      ...agents.map((agent) =>
+        Promise.resolve().then(() => {
+          agent.destroy()
+        }),
+      ),
+    ])
+    throwFailures(
+      results.filter((result) => result.status === 'rejected').map((result) => (result as PromiseRejectedResult).reason),
+    )
   }
 }
 
@@ -585,13 +702,34 @@ function createDispatcher(choice: ProxyChoice, connectTimeout: number | undefine
     : new Agent(timeout)
 }
 
-/** 安全 teardown：已结束/已销毁的 body 不动，未消费的 body 吸收主动 abort 造成的 teardown 错误。 */
+/** 安全 teardown：已结束/已销毁的 body 不动；未消费的 body 直接销毁（创建期已吸收其 abort 错误）。 */
 function destroyBody(body: Readable): void {
   if (body.destroyed || body.readableEnded) {
     return
   }
-  body.once('error', () => undefined)
   body.destroy()
+}
+
+/** 保留主错误与清理错误：只有一个时直接返回，两者都有时用固定安全摘要聚合，避免覆盖。 */
+function combineFailures(primary: unknown, cleanup: unknown): unknown {
+  if (cleanup === undefined) {
+    return primary
+  }
+  if (primary === undefined) {
+    return cleanup
+  }
+  return new AggregateError([primary, cleanup], 'outbound request and cleanup both failed')
+}
+
+/** 关闭阶段的失败汇总：单个直接抛出，多个用固定安全摘要聚合。 */
+function throwFailures(failures: readonly unknown[]): void {
+  if (failures.length === 0) {
+    return
+  }
+  if (failures.length === 1) {
+    throw failures[0]
+  }
+  throw new AggregateError(failures, 'outbound network cleanup failed')
 }
 
 /** 已安装网络句柄；close 幂等，恢复先前网络并关闭本次安装持有的 resolver。 */
@@ -619,18 +757,38 @@ export async function installOutboundNetwork(
   const previous = currentNetwork
   const network = new DefaultOutboundNetwork(policy)
   currentNetwork = network
-  let closed = false
+  let closePromise: Promise<void> | undefined
   return {
     network,
-    async close(): Promise<void> {
-      if (closed) {
-        return
+    close(): Promise<void> {
+      if (closePromise === undefined) {
+        closePromise = (async () => {
+          if (currentNetwork === network) {
+            currentNetwork = previous
+          }
+          const failures: unknown[] = []
+          // 先请求 system.close，使仍在等待 native 查询的 resolve 退出；再中止并等待自身 pending。
+          let systemClosed: Promise<void>
+          try {
+            systemClosed = system.close()
+          } catch (error) {
+            failures.push(error)
+            systemClosed = Promise.resolve()
+          }
+          try {
+            await network.close()
+          } catch (error) {
+            failures.push(error)
+          }
+          try {
+            await systemClosed
+          } catch (error) {
+            failures.push(error)
+          }
+          throwFailures(failures)
+        })()
       }
-      closed = true
-      if (currentNetwork === network) {
-        currentNetwork = previous
-      }
-      await system.close()
+      return closePromise
     },
   }
 }

@@ -244,6 +244,9 @@ describe('proxy policy', () => {
       'http://secret.invalid:80#secret',
       'http://secret invalid:80',
       'http://[fe80::1%25secret]:80',
+      'http://*:80',
+      'http://[*]:80',
+      'http://[192.0.2.1::]:80',
     ]) {
       assertRedacted(() => policy(value, ''))
       assertRedacted(() => ProxyPolicy.fromEnvironment({ https_proxy: value }, directResolver()))
@@ -269,6 +272,8 @@ describe('proxy policy', () => {
       '::ffff:1.2.3.4/129',
       '1:2:3:4:5:6:7:8:9/64',
       'fe80::1%eth0/64',
+      '192.0.2.1::/64',
+      '::ffff:192.168.0.5/129',
       '[::1]/128',
       'foo*bar',
       '*.*',
