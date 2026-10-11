@@ -184,3 +184,16 @@
   border-bottom: 1px solid var(--border);
 }
 
+.ide-confirm-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.ide-confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+

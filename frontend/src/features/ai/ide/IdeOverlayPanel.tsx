@@ -4,6 +4,7 @@ import type { EnvironmentCardDTO, IdeViewDTO } from '@/shared/api/contracts/ai-e
 import { OpenDirectoryModal } from '@/features/ai/ide/OpenDirectoryModal'
 import { Button } from '@/shared/ui/controls/Button'
 import { Select } from '@/shared/ui/controls/Select'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n } from '@/shared/i18n'
 import { validateIdeEntryUrl } from '@/features/ai/ide/ide-url'
@@ -27,12 +28,26 @@ export interface IdeOverlayPanelProps {
   environment: ResolvedEnvironmentInfo | null
   availableEnvironments: EnvironmentCardDTO[]
   action?: IdeCommandAction | null
-  initialMode?: 'files' | 'shell'
   isNarrow?: boolean
   onCollapse: () => void
   onClose: () => void
   onRestoreFocus?: () => void
   onIdeMountedChange?: (mounted: boolean) => void
+}
+
+/**
+ * 安全格式化面向用户的错误文案：
+ * 避免泄露服务端内部工作区绝对路径（例如 /var/data/ 或 /home/ 路径）。
+ */
+function formatSafeError(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    const msg = err.message
+    if (msg.includes('/home/') || msg.includes('/var/') || msg.includes('/tmp/')) {
+      return fallback
+    }
+    return msg
+  }
+  return fallback
 }
 
 export function IdeOverlayPanel({
@@ -41,7 +56,6 @@ export function IdeOverlayPanel({
   environment,
   availableEnvironments,
   action,
-  initialMode = 'files',
   isNarrow = false,
   onCollapse,
   onClose,
@@ -60,6 +74,7 @@ export function IdeOverlayPanel({
   const [isIframeLoaded, setIsIframeLoaded] = useState(false)
   const [confirmSwitchEnvOpen, setConfirmSwitchEnvOpen] = useState(false)
   const [pendingSwitchEnv, setPendingSwitchEnv] = useState<ResolvedEnvironmentInfo | null>(null)
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
 
   const activeViewRef = useRef<IdeViewDTO | null>(null)
   useEffect(() => {
@@ -71,11 +86,12 @@ export function IdeOverlayPanel({
     onIdeMountedChangeRef.current = onIdeMountedChange
   }, [onIdeMountedChange])
 
-  // 并发控制与生命周期：
-  // inFlightRef 防止同一组件重复发起并发创建；
-  // activeSessionIdRef 仅在用户显式关闭或切换环境时递增，支持 React StrictMode 双重挂载
-  const inFlightRef = useRef(false)
-  const activeSessionIdRef = useRef(0)
+  // 操作 Epoch 与并发防线：
+  // operationEpochRef 覆盖创建、切换目录、关闭与切换环境；
+  // 任何关闭或切换环境立即递增 epoch，使晚到达的 PUT 目录更新不会复活已关闭的 iframe。
+  const operationEpochRef = useRef(0)
+  const openInFlightRef = useRef(false)
+  const closeInFlightRef = useRef(false)
   const mountedRef = useRef(true)
   const lastHandledActionIdRef = useRef(0)
   const pendingShellActionRef = useRef<number | null>(null)
@@ -101,45 +117,47 @@ export function IdeOverlayPanel({
   }, [view])
 
   // 打开 IDE 视图的核心动作：
-  // 缺目录时服务端取 HOME 校验；初次 POST 响应校验 entryUrl 安全契约；
-  // 单飞锁与会话保护，若真实卸载或会话改变则关闭新建视图防止泄漏。
+  // 检查当前 epoch；初次响应校验 entryUrl，若校验失败必须立即向后端发送 closeIdeView 清理。
   const startOpenView = useCallback(
     async (targetEnv: ResolvedEnvironmentInfo) => {
-      if (inFlightRef.current) {
+      if (openInFlightRef.current) {
         return
       }
       if (!targetEnv.ready) {
         setStatus('offline')
         return
       }
-      const sessionId = activeSessionIdRef.current
-      inFlightRef.current = true
+      const epoch = operationEpochRef.current
+      openInFlightRef.current = true
       setStatus('opening')
       setErrorMessage(null)
       try {
         const res = await environmentService.createIdeView(targetEnv.id, { viewId })
-        // 会话已显式关闭或切换：关闭新创建的视图，避免后端资源泄漏
-        if (activeSessionIdRef.current !== sessionId) {
+        // 如果在 opening 期间发生了关闭、切换环境或组件真正卸载：清理新建视图
+        if (operationEpochRef.current !== epoch || !mountedRef.current) {
           void Promise.resolve(environmentService.closeIdeView(targetEnv.id, res.viewId)).catch(() => {})
           return
         }
-        // 组件已真实卸载（非 StrictMode 期间重挂载）：关闭新建视图
-        if (!mountedRef.current) {
+
+        // 校验 entryUrl 安全契约；校验失败必须主动释放已在后端创建的视图
+        try {
+          validateIdeEntryUrl(res.entryUrl)
+        } catch (valErr) {
           void Promise.resolve(environmentService.closeIdeView(targetEnv.id, res.viewId)).catch(() => {})
-          return
+          throw valErr
         }
-        validateIdeEntryUrl(res.entryUrl)
+
         setView(res)
         setStatus('ready')
         onIdeMountedChangeRef.current?.(true)
       } catch (err: unknown) {
-        if (activeSessionIdRef.current !== sessionId || !mountedRef.current) {
+        if (operationEpochRef.current !== epoch || !mountedRef.current) {
           return
         }
         setStatus('error')
-        setErrorMessage(err instanceof Error ? err.message : t('ai.ide.error'))
+        setErrorMessage(formatSafeError(err, t('ai.ide.error')))
       } finally {
-        inFlightRef.current = false
+        openInFlightRef.current = false
       }
     },
     [viewId, t],
@@ -152,7 +170,7 @@ export function IdeOverlayPanel({
     if (active && pendingShellActionRef.current != null) {
       pendingShellActionRef.current = null
       void Promise.resolve(environmentService.openIdeViewTerminal(active.environmentId, viewId)).catch((err) => {
-        setTerminalError(err instanceof Error ? err.message : t('ai.ide.terminalFailed'))
+        setTerminalError(formatSafeError(err, t('ai.ide.terminalFailed')))
       })
     }
   }, [viewId, t])
@@ -168,7 +186,7 @@ export function IdeOverlayPanel({
       if (view != null && isIframeLoaded) {
         // 视图已存在且 iframe 已就绪：唤起终端
         void Promise.resolve(environmentService.openIdeViewTerminal(view.environmentId, viewId)).catch((err) => {
-          setTerminalError(err instanceof Error ? err.message : t('ai.ide.terminalFailed'))
+          setTerminalError(formatSafeError(err, t('ai.ide.terminalFailed')))
         })
       } else {
         // 首次打开或 iframe 尚未就绪：等待 iframe 真正 load 后由 handleIframeLoaded 消费
@@ -204,36 +222,6 @@ export function IdeOverlayPanel({
     }
   }, [action, view, isIframeLoaded, environment, availableEnvironments, viewId, startOpenView, t])
 
-  // 无显式 action 时的兜底打开与环境选择状态处理
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-    if (view != null) {
-      return
-    }
-    if (action != null && action.id > 0) {
-      return
-    }
-
-    if (environment != null) {
-      if (environment.ready) {
-        if (initialMode === 'shell') {
-          pendingShellActionRef.current = -1
-        }
-        void startOpenView(environment)
-      } else {
-        setStatus('offline')
-      }
-    } else {
-      setStatus('select-environment')
-      const firstReady = availableEnvironments.find((e) => e.ready) ?? availableEnvironments[0]
-      if (firstReady) {
-        setSelectedEnvId(firstReady.id)
-      }
-    }
-  }, [isOpen, view, environment, availableEnvironments, action, initialMode, startOpenView])
-
   // 组件完全卸载时释放活跃 view
   useEffect(() => {
     return () => {
@@ -250,18 +238,25 @@ export function IdeOverlayPanel({
     onRestoreFocus?.()
   }, [onCollapse, onRestoreFocus])
 
-  // 显式关闭：释放后端 view；失败时保留界面与错误，不伪造成功清理
-  const handleClose = useCallback(async () => {
+  // 真正执行关闭逻辑：递增 operationEpoch，使在途的打开/目录更改失效；
+  // 失败时保留界面与错误，不伪造成功清理
+  const executeClose = useCallback(async () => {
+    if (closeInFlightRef.current) {
+      return
+    }
+    closeInFlightRef.current = true
+    operationEpochRef.current += 1
     const active = activeViewRef.current
     if (active) {
       try {
         await environmentService.closeIdeView(active.environmentId, viewId)
       } catch (err: unknown) {
-        setErrorMessage(err instanceof Error ? err.message : t('ai.ide.error'))
+        closeInFlightRef.current = false
+        setErrorMessage(formatSafeError(err, t('ai.ide.dirtyCloseWarning')))
         return
       }
     }
-    activeSessionIdRef.current += 1
+    closeInFlightRef.current = false
     setView(null)
     setStatus('idle')
     setIsIframeLoaded(false)
@@ -271,6 +266,16 @@ export function IdeOverlayPanel({
     onRestoreFocus?.()
   }, [viewId, onClose, onRestoreFocus, t])
 
+  // 点击关闭按钮：如果已挂载活跃视图，弹出确认对话框提示未保存修改；
+  // 用户取消则不发生任何 DELETE 或清理
+  const handleCloseClick = useCallback(() => {
+    if (view != null) {
+      setConfirmCloseOpen(true)
+    } else {
+      void executeClose()
+    }
+  }, [view, executeClose])
+
   // 新建终端
   const handleNewTerminal = useCallback(async () => {
     if (!view) return
@@ -278,24 +283,31 @@ export function IdeOverlayPanel({
     try {
       await environmentService.openIdeViewTerminal(view.environmentId, viewId)
     } catch (err: unknown) {
-      setTerminalError(err instanceof Error ? err.message : t('ai.ide.terminalFailed'))
+      setTerminalError(formatSafeError(err, t('ai.ide.terminalFailed')))
     }
   }, [view, viewId, t])
 
-  // 目录更改：PUT 请求；PUT 结果 entryUrl 可能为 null，保留已有 entryUrl 不重新加载 iframe
+  // 目录更改：PUT 请求；使用 epoch 校验，晚到达的响应绝不能复活已关闭的 iframe
   const handleChangeDirectory = useCallback(
     async (newDirectory: string) => {
       if (!view) return
+      const epoch = operationEpochRef.current
       setDirectoryPending(true)
       setDirectoryError(null)
       try {
         const res = await environmentService.changeIdeViewDirectory(view.environmentId, viewId, {
           directory: newDirectory,
         })
+        if (operationEpochRef.current !== epoch || !mountedRef.current) {
+          return
+        }
         setView((prev) => (prev ? { ...res, entryUrl: res.entryUrl ?? prev.entryUrl } : res))
         setIsDirectoryModalOpen(false)
       } catch (err: unknown) {
-        setDirectoryError(err instanceof Error ? err.message : t('ai.ide.changeDirectoryFailed'))
+        if (operationEpochRef.current !== epoch || !mountedRef.current) {
+          return
+        }
+        setDirectoryError(formatSafeError(err, t('ai.ide.changeDirectoryFailed')))
       } finally {
         setDirectoryPending(false)
       }
@@ -313,7 +325,7 @@ export function IdeOverlayPanel({
         && !event.nativeEvent.isComposing
         && event.keyCode !== 229
       ) {
-        if (isDirectoryModalOpen || confirmSwitchEnvOpen) {
+        if (isDirectoryModalOpen || confirmSwitchEnvOpen || confirmCloseOpen) {
           return
         }
         event.preventDefault()
@@ -321,7 +333,7 @@ export function IdeOverlayPanel({
         handleCollapse()
       }
     },
-    [isDirectoryModalOpen, confirmSwitchEnvOpen, handleCollapse],
+    [isDirectoryModalOpen, confirmSwitchEnvOpen, confirmCloseOpen, handleCollapse],
   )
 
   // 无 environment 时在面板内手动选择环境并启动
@@ -347,18 +359,18 @@ export function IdeOverlayPanel({
   const handleApplyPendingSwitchEnv = async () => {
     if (!pendingSwitchEnv) return
     const target = pendingSwitchEnv
+    operationEpochRef.current += 1
     if (view) {
       try {
         await environmentService.closeIdeView(view.environmentId, viewId)
       } catch (err: unknown) {
-        setErrorMessage(err instanceof Error ? err.message : t('ai.ide.error'))
+        setErrorMessage(formatSafeError(err, t('ai.ide.dirtyCloseWarning')))
         setConfirmSwitchEnvOpen(false)
         return
       }
     }
     setConfirmSwitchEnvOpen(false)
     setPendingSwitchEnv(null)
-    activeSessionIdRef.current += 1
     setView(null)
     setIsIframeLoaded(false)
     setTerminalError(null)
@@ -431,7 +443,7 @@ export function IdeOverlayPanel({
           <Button
             variant="ghost"
             size="compact"
-            onClick={handleClose}
+            onClick={handleCloseClick}
             data-testid="ide-close-btn"
           >
             {t('ai.ide.close')}
@@ -533,12 +545,46 @@ export function IdeOverlayPanel({
         />
       ) : null}
 
+      {confirmCloseOpen ? (
+        <Dialog
+          title={t('ai.ide.closeConfirmTitle')}
+          onClose={() => setConfirmCloseOpen(false)}
+          role="alertdialog"
+        >
+          <div className="ide-confirm-dialog-content">
+            <p>{t('ai.ide.closeConfirmMessage')}</p>
+            <div className="ide-confirm-dialog-actions">
+              <Button variant="ghost" size="compact" onClick={() => setConfirmCloseOpen(false)}>
+                {t('ai.ide.cancel')}
+              </Button>
+              <Button
+                variant="danger"
+                size="compact"
+                onClick={() => {
+                  setConfirmCloseOpen(false)
+                  void executeClose()
+                }}
+                data-testid="ide-confirm-close-btn"
+              >
+                {t('ai.ide.confirm')}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      ) : null}
+
       {confirmSwitchEnvOpen && pendingSwitchEnv ? (
-        <div className="ide-switch-confirm-overlay" data-testid="ide-switch-confirm-overlay">
-          <div className="ide-switch-confirm-card">
-            <h4>{t('ai.ide.selectEnvironment')}</h4>
+        <Dialog
+          title={t('ai.ide.selectEnvironment')}
+          onClose={() => {
+            setConfirmSwitchEnvOpen(false)
+            setPendingSwitchEnv(null)
+          }}
+          role="alertdialog"
+        >
+          <div className="ide-confirm-dialog-content">
             <p>{t('ai.ide.dirtyWarning', undefined, '切换环境将关闭当前 IDE 会话，未保存的修改可能会丢失。确认切换？')}</p>
-            <div className="ide-switch-confirm-actions">
+            <div className="ide-confirm-dialog-actions">
               <Button
                 variant="ghost"
                 size="compact"
@@ -549,12 +595,17 @@ export function IdeOverlayPanel({
               >
                 {t('ai.ide.cancel')}
               </Button>
-              <Button variant="primary" size="compact" onClick={handleApplyPendingSwitchEnv}>
+              <Button
+                variant="danger"
+                size="compact"
+                onClick={handleApplyPendingSwitchEnv}
+                data-testid="ide-confirm-switch-btn"
+              >
                 {t('ai.ide.confirm')}
               </Button>
             </div>
           </div>
-        </div>
+        </Dialog>
       ) : null}
     </aside>
   )

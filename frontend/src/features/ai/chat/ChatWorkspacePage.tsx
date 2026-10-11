@@ -33,6 +33,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
 import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ThreadPresentationActions } from '@/features/ai/runtime/ThreadPresentationActions'
 import type { ThreadPresentation } from '@/features/ai/runtime/thread-presentation'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
@@ -117,6 +118,8 @@ function ChatWorkspaceContent({
         ? { paneId, viewKey: report.viewKey } : null
     })
   }, [])
+  const navigate = useNavigate()
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false)
   const [deepLinkOwner, setDeepLinkOwner] = useState(() => ({
     navigationKey: location.key,
     paneId: paneState.focusedPaneId,
@@ -382,6 +385,12 @@ function ChatWorkspaceContent({
             to="/chats"
             title={t('ai.chat.backToConversation')}
             aria-label={t('ai.chat.backToConversation')}
+            onClick={(e) => {
+              if (ideMountedPaneIds.size > 0) {
+                e.preventDefault()
+                setConfirmLeaveOpen(true)
+              }
+            }}
           >
             <ArrowLeft aria-hidden="true" />
             <span>{t('ai.chat.backToConversation')}</span>
@@ -465,6 +474,33 @@ function ChatWorkspaceContent({
           onConfirm={handleBranchConfirm}
           onClose={closeBranchDialog}
         />
+      ) : null}
+      {confirmLeaveOpen ? (
+        <Dialog
+          title={t('ai.ide.leaveConfirmTitle')}
+          onClose={() => setConfirmLeaveOpen(false)}
+          role="alertdialog"
+        >
+          <div className="ide-confirm-dialog-content">
+            <p>{t('ai.ide.leaveConfirmMessage')}</p>
+            <div className="ide-confirm-dialog-actions">
+              <Button variant="ghost" size="compact" onClick={() => setConfirmLeaveOpen(false)}>
+                {t('ai.ide.cancel')}
+              </Button>
+              <Button
+                variant="danger"
+                size="compact"
+                onClick={() => {
+                  setConfirmLeaveOpen(false)
+                  navigate('/chats')
+                }}
+                data-testid="ide-confirm-leave-btn"
+              >
+                {t('ai.ide.confirm')}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
       ) : null}
     </section>
   )

@@ -1032,6 +1032,64 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     })
   })
 
+  it('prompts confirmation when leaving workspace with mounted IDE, and cancels navigation on cancel', async () => {
+    const user = userEvent.setup()
+    seedLayout('split-2')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      {
+        id: 'a1000000-0000-4000-8000-000000000001',
+        name: 'env-1',
+        ready: true,
+        status: 'READY',
+        version: '1',
+        createTime: '2026-10-01T00:00:00Z',
+        updateTime: '2026-10-01T00:00:00Z',
+        capabilities: [],
+        statusExpiresAt: null,
+        lastSeen: null,
+        homeDirectory: '/home/user',
+      },
+    ])
+    vi.mocked(environmentService.createIdeView).mockResolvedValue({
+      viewId: 'v-pane-2',
+      environmentId: 'a1000000-0000-4000-8000-000000000001',
+      directory: '/home/user',
+      entryUrl: 'https://ide.test/?workspace=p2',
+    })
+
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
+
+    // Open IDE on pane-2
+    const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
+    await user.click(plusButtons[1]!)
+    const filesCommands = await screen.findAllByText('files')
+    await user.click(filesCommands[0]!)
+    const confirmBtn = await screen.findByRole('button', { name: '确认' })
+    await user.click(confirmBtn)
+
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenCalled()
+    })
+
+    // Click back to conversation ("回到对话")
+    const backBtn = screen.getByRole('link', { name: '回到对话' })
+    await user.click(backBtn)
+
+    // Confirmation dialog appears
+    expect(screen.getByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).toBeInTheDocument()
+
+    // Click cancel in leave dialog
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    // Workspace and panes remain in document, navigation did not happen
+    expect(screen.queryByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+    expect(document.querySelectorAll('.chat-pane')).toHaveLength(2)
+  })
+
   // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费本切片
   // RootAgentPane 提供的 EntryBranchContext（null = 不渲染）；按钮到达 workspace 的
   // 请求形状与 /tree 完全一致，因此上面的用例同时覆盖两条入口的命名与目标流程。
