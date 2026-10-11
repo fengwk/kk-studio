@@ -329,7 +329,8 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     for (String file : List.of("package.json", "tsconfig.json")) {
       Files.copy(daemonSource.resolve(file), buildRoot.resolve(file));
     }
-    Files.createSymbolicLink(buildRoot.resolve("node_modules"), daemonSource.resolve("node_modules"));
+    Files.createSymbolicLink(
+        buildRoot.resolve("node_modules"), daemonSource.resolve("node_modules"));
     Map<String, String> environment = new HashMap<>();
     environment.put("PATH", node.toAbsolutePath().getParent() + File.pathSeparator + systemPath());
     environment.put("TMPDIR", processTmp.toString());
@@ -365,7 +366,8 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
         socket.toString().getBytes(StandardCharsets.UTF_8).length <= 107,
         "IPC path must fit the Linux kernel boundary");
     assertEquals(
-        PosixFilePermissions.fromString("rwx------"), Files.getPosixFilePermissions(socket.getParent()));
+        PosixFilePermissions.fromString("rwx------"),
+        Files.getPosixFilePermissions(socket.getParent()));
     runCommand(
         List.of(
             node.toString(),
