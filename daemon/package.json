@@ -21,6 +21,7 @@
     "picomatch": "4.0.7",
     "re2-wasm": "1.0.2",
     "tar": "7.5.22",
+    "undici": "8.11.2",
     "vscode-jsonrpc": "9.0.3",
     "ws": "8.22.0"
   },
