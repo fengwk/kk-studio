@@ -107,6 +107,7 @@ describe('IdeOverlayPanel', () => {
           viewId="v-strict"
           environment={readyEnv}
           availableEnvironments={availableEnvironments}
+          action={{ id: 1, mode: 'files' }}
           onCollapse={vi.fn()}
           onClose={vi.fn()}
         />
@@ -143,6 +144,7 @@ describe('IdeOverlayPanel', () => {
         viewId="v-unmount"
         environment={readyEnv}
         availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         onCollapse={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -165,6 +167,33 @@ describe('IdeOverlayPanel', () => {
       // Must call closeIdeView to clean up the leaked server view
       expect(environmentService.closeIdeView).toHaveBeenCalledWith(readyEnv.id, 'v-unmount')
     })
+  })
+
+  it('cleans up newly created server view if URL validation fails', async () => {
+    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+      viewId: 'v-invalid-url',
+      environmentId: readyEnv.id,
+      directory: '/home/user',
+      entryUrl: 'javascript:alert(1)',
+    })
+
+    render(
+      <IdeOverlayPanel
+        isOpen={true}
+        viewId="v-invalid-url"
+        environment={readyEnv}
+        availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
+        onCollapse={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => {
+      // Must call closeIdeView because entryUrl validation failed
+      expect(environmentService.closeIdeView).toHaveBeenCalledWith(readyEnv.id, 'v-invalid-url')
+    })
+    expect(await screen.findByTestId('ide-error-state')).toBeInTheDocument()
   })
 
   it('manages shell command actions: does not pre-call terminal before iframe load, and triggers on action', async () => {
@@ -235,7 +264,45 @@ describe('IdeOverlayPanel', () => {
     })
   })
 
-  it('preserves view and displays error when close fails', async () => {
+  it('cancels pane close when user clicks cancel in confirmation dialog', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+      viewId: 'v-cancel-close',
+      environmentId: readyEnv.id,
+      directory: '/home/user',
+      entryUrl: 'https://ide.example.com/?workspace=cancel',
+    })
+
+    const onClose = vi.fn()
+    render(
+      <IdeOverlayPanel
+        isOpen={true}
+        viewId="v-cancel-close"
+        environment={readyEnv}
+        availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
+        onCollapse={vi.fn()}
+        onClose={onClose}
+      />,
+    )
+
+    await screen.findByTestId('ide-iframe')
+    await user.click(screen.getByTestId('ide-close-btn'))
+
+    // Dialog appears with confirmation prompt
+    expect(screen.getByText('可能存在未保存的修改，确认关闭工作区 IDE？')).toBeInTheDocument()
+
+    // Click cancel
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    // Dialog closes, view stays open, closeIdeView was NOT called
+    expect(screen.queryByText('可能存在未保存的修改，确认关闭工作区 IDE？')).not.toBeInTheDocument()
+    expect(environmentService.closeIdeView).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+  })
+
+  it('preserves view and displays error when confirmed close fails on backend', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
       viewId: 'v-close-fail',
@@ -252,6 +319,7 @@ describe('IdeOverlayPanel', () => {
         viewId="v-close-fail"
         environment={readyEnv}
         availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         onCollapse={vi.fn()}
         onClose={onClose}
       />,
@@ -260,45 +328,70 @@ describe('IdeOverlayPanel', () => {
     await screen.findByTestId('ide-iframe')
     await user.click(screen.getByTestId('ide-close-btn'))
 
+    // Confirm close in dialog
+    await user.click(screen.getByTestId('ide-confirm-close-btn'))
+
     // Close failure must NOT call onClose or clear view
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
     expect(screen.getByText('Cannot close view with unsaved changes')).toBeInTheDocument()
   })
 
-  it('aborts environment switch and preserves view when closing old view fails', async () => {
+  it('prevents late directory change from resurrecting closed view', async () => {
+    const user = userEvent.setup()
+    let resolveChangeDir: (value: unknown) => void = () => {}
+    const changeDirPromise = new Promise((resolve) => {
+      resolveChangeDir = resolve
+    })
     vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
-      viewId: 'v-sw-fail',
+      viewId: 'v-race',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=sw',
+      entryUrl: 'https://ide.example.com/?workspace=race',
     })
-    vi.mocked(environmentService.closeIdeView).mockRejectedValueOnce(new Error('Old view is locked'))
+    vi.mocked(environmentService.changeIdeViewDirectory).mockReturnValueOnce(changeDirPromise as never)
+    vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
 
-    const otherReady: EnvironmentCardDTO = {
-      ...availableEnvironments[1]!,
-      id: 'a1000000-0000-4000-8000-000000000009',
-      name: 'other-node',
-      ready: true,
-      status: 'READY',
-    }
-
+    const onClose = vi.fn()
     render(
       <IdeOverlayPanel
         isOpen={true}
-        viewId="v-sw-fail"
+        viewId="v-race"
         environment={readyEnv}
-        availableEnvironments={[availableEnvironments[0]!, otherReady]}
+        availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         onCollapse={vi.fn()}
-        onClose={vi.fn()}
+        onClose={onClose}
       />,
     )
 
     await screen.findByTestId('ide-iframe')
+    await user.click(screen.getByTestId('ide-open-directory-btn'))
 
-    // Trigger select environment inside panel
-    const selectRow = screen.queryByTestId('ide-select-environment-state')
-    expect(selectRow).toBeNull() // Already ready
+    // Submit directory change (remains in-flight)
+    const input = screen.getByTestId('ide-directory-input')
+    await user.clear(input)
+    await user.type(input, '/home/user/new-dir')
+    await user.click(screen.getByTestId('ide-directory-confirm'))
+
+    // While directory change is in-flight, user closes the view
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(screen.getByTestId('ide-confirm-close-btn'))
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled()
+    })
+
+    // Now directory change resolves late
+    resolveChangeDir({
+      viewId: 'v-race',
+      environmentId: readyEnv.id,
+      directory: '/home/user/new-dir',
+      entryUrl: null,
+    })
+
+    // Closed view must NOT be resurrected!
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
   })
 
   it('displays terminal creation error in UI when terminal request fails', async () => {
@@ -317,6 +410,7 @@ describe('IdeOverlayPanel', () => {
         viewId="v-term-err"
         environment={readyEnv}
         availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         onCollapse={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -344,6 +438,7 @@ describe('IdeOverlayPanel', () => {
         viewId="v-dir"
         environment={readyEnv}
         availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         onCollapse={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -387,6 +482,7 @@ describe('IdeOverlayPanel', () => {
         viewId="v-off"
         environment={offlineEnv}
         availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         onCollapse={vi.fn()}
         onClose={vi.fn()}
       />,
@@ -408,6 +504,7 @@ describe('IdeOverlayPanel', () => {
         viewId="v-esc"
         environment={offlineEnv}
         availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         onCollapse={onCollapse}
         onClose={vi.fn()}
         onRestoreFocus={onRestoreFocus}
@@ -429,6 +526,7 @@ describe('IdeOverlayPanel', () => {
         viewId="v-narrow"
         environment={offlineEnv}
         availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
         isNarrow={true}
         onCollapse={vi.fn()}
         onClose={vi.fn()}
