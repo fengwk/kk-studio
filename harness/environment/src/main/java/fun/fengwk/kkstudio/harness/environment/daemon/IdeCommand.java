@@ -13,8 +13,9 @@ import java.util.UUID;
  * UUID、合法 URL/路径/header、未知组合拒绝），不解释宿主文件系统事实——目录是否可访问、文档是否 dirty 一律由 Daemon 按 Node 标准失败回执，Server
  * 不伪造结果。
  *
- * <p>{@code OPEN_STREAM} 的 {@code streamUrl} 是 Server 当前实例受控的 endpoint；客户端（浏览器）不得指定任意 proxy
- * 地址，因此这里拒绝 userinfo、非 http(s) scheme 与 fragment，只保留受控 origin + path + query。
+ * <p>{@code OPEN_STREAM} 的 {@code streamUrl} 是 Server 当前实例受控的 WebSocket endpoint；客户端（浏览器）不得指定任意
+ * proxy 地址，因此这里拒绝 userinfo、非 ws(s) scheme 与 fragment，只保留受控 origin + path + query（与 Node 契约一致：Daemon
+ * 以 ws/wss 直连该 endpoint）。
  */
 public record IdeCommand(
     IdeAction action,
@@ -38,7 +39,7 @@ public record IdeCommand(
 
   public IdeCommand {
     action = Objects.requireNonNull(action, "action");
-    viewId = validateViewId(viewId);
+    viewId = validateOptionalViewId(viewId);
     directory = validateOptionalDirectory(directory);
     headers = headers == null ? List.of() : List.copyOf(headers);
     if (headers.size() > MAX_HEADERS) {
@@ -89,6 +90,18 @@ public record IdeCommand(
   /** 校验 viewId 为规范小写 UUID。 */
   public static String validateViewId(String value) {
     Objects.requireNonNull(value, "viewId");
+    return requireCanonicalViewId(value);
+  }
+
+  /** 校验可选 viewId：{@code null} 保留为 {@code null}（如 OPEN_STREAM 不携带 view），否则必须是规范小写 UUID。 */
+  static String validateOptionalViewId(String value) {
+    if (value == null) {
+      return null;
+    }
+    return requireCanonicalViewId(value);
+  }
+
+  private static String requireCanonicalViewId(String value) {
     UUID parsed;
     try {
       parsed = UUID.fromString(value);
@@ -154,12 +167,11 @@ public record IdeCommand(
       throw new IllegalArgumentException("streamUrl must be a valid absolute URI");
     }
     String scheme = uri.getScheme();
-    if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
-      throw new IllegalArgumentException("streamUrl scheme must be http or https");
+    if (scheme == null || !(scheme.equalsIgnoreCase("ws") || scheme.equalsIgnoreCase("wss"))) {
+      throw new IllegalArgumentException("streamUrl scheme must be ws or wss");
     }
     if (!uri.isAbsolute() || uri.getHost() == null) {
-      throw new IllegalArgumentException(
-          "streamUrl must be an absolute http(s) origin with a host");
+      throw new IllegalArgumentException("streamUrl must be an absolute ws(s) origin with a host");
     }
     if (uri.getUserInfo() != null) {
       throw new IllegalArgumentException("streamUrl must not contain userinfo");

@@ -1734,6 +1734,16 @@ public final class EnvironmentDaemonServer
     }
     // IDE 元数据命令不重放：连接代际关闭（断线/接管/换代）后在途命令一律按结果不确定终结。
     failPendingIdeCalls(state);
+    if (environmentId != null && leaseToken != null) {
+      notifyEnvironmentDisconnected(environmentId, leaseToken);
+    }
+  }
+
+  private void notifyEnvironmentDisconnected(EnvironmentId environmentId, UUID leaseToken) {
+    try {
+      sessionListener.onEnvironmentDisconnected(environmentId, leaseToken);
+    } catch (RuntimeException ignored) {
+    }
   }
 
   private void notifyEnvironmentReady(EnvironmentId environmentId) {

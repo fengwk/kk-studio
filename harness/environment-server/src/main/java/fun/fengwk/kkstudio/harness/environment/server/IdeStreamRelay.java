@@ -71,26 +71,23 @@ public final class IdeStreamRelay {
     sink.sendBinary(codec.encodeHttpEnd());
   }
 
-  /** 发送一条 WS 消息（text/binary），按 65536 上限分段并保持 FIN；超窗即 fail-closed。 */
-  public void sendWsMessage(boolean text, byte[] payload) {
+  /**
+   * 发送一个 WS 分段（≤65536，{@code fin} 标记本消息是否结束）。
+   *
+   * <p>适配层把一条 WS 消息切成逐段调用本方法，并在每段前用 {@link #sendableToDaemon()} 等待 credit：本方法只裁决单段，超窗即 fail-closed
+   * 且不发送，因此不会像整条消息一次性发送那样在发送数段后才因 credit 不足产生「部分已发」的副作用。
+   */
+  public void sendWsSegment(boolean text, boolean fin, byte[] chunk) {
     requireOpen();
-    Objects.requireNonNull(payload, "payload");
-    if (payload.length == 0) {
-      sink.sendBinary(codec.encodeWsSegment(text, true, payload));
-      return;
+    Objects.requireNonNull(chunk, "chunk");
+    if (chunk.length > DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES) {
+      throw new DaemonProtocolException(
+          "ws segment exceeds " + DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES + " bytes");
     }
-    int offset = 0;
-    while (offset < payload.length) {
-      int end = Math.min(offset + DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES, payload.length);
-      int length = end - offset;
-      if (!toDaemon.onSend(length)) {
-        throw new DaemonProtocolException("ws fragment exceeds available send credit");
-      }
-      byte[] chunk = new byte[length];
-      System.arraycopy(payload, offset, chunk, 0, length);
-      sink.sendBinary(codec.encodeWsSegment(text, end == payload.length, chunk));
-      offset = end;
+    if (!toDaemon.onSend(chunk.length)) {
+      throw new DaemonProtocolException("ws segment exceeds available send credit");
     }
+    sink.sendBinary(codec.encodeWsSegment(text, fin, chunk));
   }
 
   /** 处理 Daemon 的文本控制帧。 */
