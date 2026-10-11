@@ -44,9 +44,9 @@ export function OpenDirectoryModal({
     >
       <form onSubmit={handleSubmit} className="ide-directory-form">
         <div className="ide-directory-form-field">
-          <FieldLabel htmlFor="ide-directory-input">
-            {t('ai.ide.directoryPathLabel')}
-          </FieldLabel>
+          <label htmlFor="ide-directory-input">
+            <FieldLabel>{t('ai.ide.directoryPathLabel')}</FieldLabel>
+          </label>
           <TextInput
             id="ide-directory-input"
             data-testid="ide-directory-input"

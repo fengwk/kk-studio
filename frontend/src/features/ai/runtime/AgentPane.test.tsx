@@ -848,12 +848,14 @@ describe('AgentPane orchestration', () => {
     )
     render(
       <QueryClientProvider client={client}>
-        <AgentPane
-          owner={{ type: 'CHAT', chatId: CHAT_ID }}
-          paneId="pane-1"
-          agents={agents}
-          focused
-        />
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            focused
+          />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -2208,13 +2210,15 @@ describe('AgentPane orchestration', () => {
 
     render(
       <QueryClientProvider client={client}>
-        <AgentPane
-          owner={issueOwner}
-          paneId="pane-issue"
-          agents={agents}
-          initialTarget={{ kind: 'BOUND_THREAD', threadId: issueThreadId }}
-          focused
-        />
+        <MemoryRouter>
+          <AgentPane
+            owner={issueOwner}
+            paneId="pane-issue"
+            agents={agents}
+            initialTarget={{ kind: 'BOUND_THREAD', threadId: issueThreadId }}
+            focused
+          />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
 
@@ -3108,12 +3112,14 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       })
       render(
         <QueryClientProvider client={client}>
-          <AgentPane
-            paneId={THREAD_ID}
-            agents={agents}
-            environments={[]}
-            focused
-          />
+          <MemoryRouter>
+            <AgentPane
+              paneId={THREAD_ID}
+              agents={agents}
+              environments={[]}
+              focused
+            />
+          </MemoryRouter>
         </QueryClientProvider>,
       )
 
