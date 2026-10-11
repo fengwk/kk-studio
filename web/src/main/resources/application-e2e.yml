@@ -11,7 +11,7 @@ spring:
     password: ${KK_STUDIO_DB_PASSWORD:kk_studio}
 
 mybatis:
-  mapper-locations: classpath:**/*Mapper.xml
+  mapper-locations: classpath*:**/*Mapper.xml
   type-aliases-package: fun.fengwk.kkstudio.**.model
   configuration:
     map-underscore-to-camel-case: true

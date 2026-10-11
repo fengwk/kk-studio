@@ -21,7 +21,7 @@ spring:
       maximum-pool-size: 4
 
 mybatis:
-  mapper-locations: classpath:**/*Mapper.xml
+  mapper-locations: classpath*:**/*Mapper.xml
   type-aliases-package: fun.fengwk.kkstudio.**.model
   configuration:
     map-underscore-to-camel-case: true
