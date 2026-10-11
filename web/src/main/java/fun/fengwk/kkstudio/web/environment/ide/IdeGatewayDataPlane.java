@@ -76,6 +76,9 @@ public final class IdeGatewayDataPlane {
   private static final Set<String> NEVER_FORWARDED_REQUEST_HEADERS =
       Set.of(
           "cookie",
+          // 浏览器 Origin/Referer 只在浏览器面向的边缘有意义；内部单跳由 HMAC 认证，绝不携带浏览器来源。
+          "origin",
+          "referer",
           "authorization",
           "proxy-authorization",
           "forwarded",
@@ -269,7 +272,8 @@ public final class IdeGatewayDataPlane {
     try {
       cookieValue = sessions.open(ticket.identity(), ticket.viewId(), ticket.workspacePath());
     } catch (IllegalStateException error) {
-      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      // 票据对应的视图已关闭/workspace 不匹配：该入口凭据永久失效（与未知票据同一语义），绝不建立会话。
+      response.sendError(HttpServletResponse.SC_GONE);
       return;
     }
     StringBuilder cookie =

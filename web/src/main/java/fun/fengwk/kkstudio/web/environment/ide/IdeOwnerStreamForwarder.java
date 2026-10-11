@@ -9,7 +9,6 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.WebSocketClient;
-import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -40,11 +39,7 @@ public final class IdeOwnerStreamForwarder {
   private final WebSocketClient webSocketClient;
 
   @Autowired
-  public IdeOwnerStreamForwarder(ClusterInternalClient clusterInternalClient) {
-    this(clusterInternalClient, new StandardWebSocketClient());
-  }
-
-  IdeOwnerStreamForwarder(
+  public IdeOwnerStreamForwarder(
       ClusterInternalClient clusterInternalClient, WebSocketClient webSocketClient) {
     this.clusterInternalClient =
         Objects.requireNonNull(clusterInternalClient, "clusterInternalClient");

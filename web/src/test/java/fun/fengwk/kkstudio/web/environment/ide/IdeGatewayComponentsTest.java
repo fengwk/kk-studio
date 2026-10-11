@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -26,8 +27,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 意图：IDE Origin 识别必须严格（只有模板形状的 Host 才算 IDE Origin），浏览器会话必须绑定代际且随租约关闭而失效，且 IDE Origin
@@ -65,23 +74,28 @@ class IdeGatewayComponentsTest {
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(5));
     IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    String view = UUID.randomUUID().toString();
 
     // 未知 cookie 必须是「未命中」而不是 NPE。
     assertTrue(sessions.lookup("unknown-cookie").isEmpty());
-    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/managed/workspace");
+    sessions.viewOpened(identity, view, "/managed/workspace");
+    String cookie = sessions.open(identity, view, "/managed/workspace");
     assertTrue(sessions.lookup(cookie).orElseThrow().authorizesWorkspace("/managed/workspace"));
     assertFalse(sessions.lookup(cookie).orElseThrow().authorizesWorkspace("/other"));
 
-    // 过期即失效。
+    // cookie 过期只作废凭据：仍然打开着的视图授权不受影响（无空闲自动销毁）。
     clock.advance(Duration.ofMinutes(6));
     assertTrue(sessions.lookup(cookie).isEmpty());
+    assertEquals(1, sessions.viewCount(identity), "expired cookie must not destroy an open view");
+    String refreshed = sessions.open(identity, view, "/managed/workspace");
+    assertFalse(refreshed.equals(cookie), "expired cookie must be replaced");
+    assertTrue(sessions.lookup(refreshed).orElseThrow().authorizesWorkspace("/managed/workspace"));
 
     // 租约关闭按代际清除。
-    String other = sessions.open(identity, UUID.randomUUID().toString(), "/managed/workspace");
     sessions.closeGeneration(ENV, UUID.randomUUID());
-    assertFalse(sessions.lookup(other).isEmpty());
+    assertFalse(sessions.lookup(refreshed).isEmpty());
     sessions.closeGeneration(ENV, identity.leaseToken());
-    assertTrue(sessions.lookup(other).isEmpty());
+    assertTrue(sessions.lookup(refreshed).isEmpty());
   }
 
   /** 多面板：同一代际复用同一 cookie，新授权 workspace 对已存在的 cookie 立即可用，CLOSE_VIEW 真实撤销。 */
@@ -94,6 +108,8 @@ class IdeGatewayComponentsTest {
 
     String firstView = UUID.randomUUID().toString();
     String secondView = UUID.randomUUID().toString();
+    sessions.viewOpened(identity, firstView, "/managed/one");
+    sessions.viewOpened(identity, secondView, "/managed/two");
     String first = sessions.open(identity, firstView, "/managed/one");
     String second = sessions.open(identity, secondView, "/managed/two");
     // 同一代际只保留一个 cookie：多次 bootstrap 不互相覆盖。
@@ -104,8 +120,9 @@ class IdeGatewayComponentsTest {
 
     // 别的代际不可见。
     IdeSessionIdentity otherGeneration = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
-    String otherCookie =
-        sessions.open(otherGeneration, UUID.randomUUID().toString(), "/managed/three");
+    String otherView = UUID.randomUUID().toString();
+    sessions.viewOpened(otherGeneration, otherView, "/managed/three");
+    String otherCookie = sessions.open(otherGeneration, otherView, "/managed/three");
     assertFalse(sessions.lookup(otherCookie).orElseThrow().authorizesWorkspace("/managed/one"));
 
     // CLOSE_VIEW 按真实视图事件撤销授权，而不是等待时间推断。
@@ -117,6 +134,80 @@ class IdeGatewayComponentsTest {
     String thirdView = UUID.randomUUID().toString();
     sessions.viewOpened(identity, thirdView, "/managed/three");
     assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/three"));
+  }
+
+  /** bootstrap 只校验真实视图授权，绝不新增授权：否则已关闭视图的旧票据可以复活视图。 */
+  @Test
+  void bootstrapConsumptionNeverAuthorizesByItself() {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    IdeBrowserSessionRegistry sessions =
+        new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
+    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    String view = UUID.randomUUID().toString();
+
+    // 未经 OPEN_VIEW 的票据不得建立任何会话。
+    assertThrows(IllegalStateException.class, () -> sessions.open(identity, view, "/managed/one"));
+    // 视图已授权但 ticket 的 workspace 与授权不一致时同样拒绝。
+    sessions.viewOpened(identity, view, "/managed/one");
+    assertThrows(IllegalStateException.class, () -> sessions.open(identity, view, "/managed/two"));
+    String cookie = sessions.open(identity, view, "/managed/one");
+    assertTrue(sessions.lookup(cookie).isPresent());
+
+    // 视图关闭后旧 ticket 不得复活视图（授权不被重新创建）。
+    sessions.viewClosed(identity, view);
+    assertThrows(IllegalStateException.class, () -> sessions.open(identity, view, "/managed/one"));
+    assertTrue(sessions.lookup(cookie).orElseThrow().authorizedWorkspaces().isEmpty());
+  }
+
+  /** 并发 bootstrap/OPEN_VIEW 必须落在同一代际与同一 cookie 上，既不丢视图也不产生第二个 cookie。 */
+  @Test
+  void concurrentOpensShareOneGenerationAndCookie() throws Exception {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    IdeBrowserSessionRegistry sessions =
+        new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
+    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    int views = 32;
+    ExecutorService pool = Executors.newFixedThreadPool(8);
+    try {
+      List<Future<String>> results = new ArrayList<>();
+      for (int index = 0; index < views; index++) {
+        String view = UUID.randomUUID().toString();
+        String workspace = "/managed/" + index;
+        results.add(
+            pool.submit(
+                () -> {
+                  sessions.viewOpened(identity, view, workspace);
+                  return sessions.open(identity, view, workspace);
+                }));
+      }
+      Set<String> cookies = new HashSet<>();
+      for (Future<String> result : results) {
+        cookies.add(result.get(30, TimeUnit.SECONDS));
+      }
+      assertEquals(1, cookies.size(), "one generation must keep exactly one cookie");
+      assertEquals(views, sessions.viewCount(identity), "no authorized view may be lost");
+      assertEquals(1, sessions.size());
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  /** 视图/代际额度耗尽必须显式失败（可在 Native 副作用之前预检），绝不静默伪成功。 */
+  @Test
+  void capacityLimitsFailExplicitly() {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    IdeBrowserSessionRegistry sessions =
+        new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
+    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    for (int index = 0; index < IdeBrowserSessionRegistry.MAX_VIEWS_PER_GENERATION; index++) {
+      sessions.viewOpened(identity, UUID.randomUUID().toString(), "/managed/" + index);
+    }
+    assertThrows(
+        IllegalStateException.class,
+        () -> sessions.viewOpened(identity, UUID.randomUUID().toString(), "/managed/overflow"));
+    assertThrows(IllegalStateException.class, () -> sessions.ensureViewCapacity(ENV));
+    // 已授权的 viewId 仍可重复上报（幂等），不因上界而失败。
+    assertEquals(IdeBrowserSessionRegistry.MAX_VIEWS_PER_GENERATION, sessions.viewCount(identity));
   }
 
   @Test

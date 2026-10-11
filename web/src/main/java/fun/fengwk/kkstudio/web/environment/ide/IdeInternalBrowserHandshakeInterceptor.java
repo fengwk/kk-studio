@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.web.socket.WebSocketHandler;
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentic
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -31,6 +33,7 @@ import java.util.TreeMap;
  *
  * <p>只接受转发方携带的 IDE 会话 cookie（按 cookie 名精确匹配）；Studio 域 cookie 与 {@code Authorization} 在转发方就被剥离。
  */
+@Slf4j
 final class IdeInternalBrowserHandshakeInterceptor implements HandshakeInterceptor {
 
   private final ClusterInternalAuthentication authentication;
@@ -59,21 +62,29 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
       WebSocketHandler webSocketHandler,
       Map<String, Object> attributes) {
     URI uri = request.getURI();
+    String rawPath = uri.getRawPath() == null ? "" : uri.getRawPath();
+    String rawQuery = uri.getRawQuery();
     try {
-      authentication.verify("GET", canonicalPath(uri), headers(request));
+      // 签名基准必须逐字等于发送端：用原始（未解码）path/query，绝不使用 URI#getPath/getQuery。
+      authentication.verify(
+          "GET", ClusterInternalRequests.canonicalPath(rawPath, rawQuery), headers(request));
     } catch (ClusterInternalAuthenticationException error) {
+      log.debug("rejected internal browser handshake authentication: {}", error.getMessage());
       return false;
     }
-    Optional<EnvironmentId> environmentId = environmentOf(uri.getPath());
+    Optional<EnvironmentId> environmentId = environmentOf(rawPath);
     if (environmentId.isEmpty() || !local(environmentId.get())) {
+      log.debug("rejected internal browser handshake: not this node's READY owner route");
       return false;
     }
-    String rawPathAndQuery = pathParameter(uri.getQuery());
+    String rawPathAndQuery = pathParameter(rawQuery);
     if (rawPathAndQuery == null || !rawPathAndQuery.startsWith("/")) {
+      log.debug("rejected internal browser handshake: missing browser path parameter");
       return false;
     }
     Optional<IdeBrowserSessionRegistry.Session> session = session(request, environmentId.get());
     if (session.isEmpty() || !generationCurrent(environmentId.get(), session.get())) {
+      log.debug("rejected internal browser handshake: browser session is missing or stale");
       return false;
     }
     attributes.put(IdeInternalBrowserWebSocketHandler.ATTRIBUTE_ENVIRONMENT, environmentId.get());
@@ -123,12 +134,6 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
     return Optional.empty();
   }
 
-  private static String canonicalPath(URI uri) {
-    String path = uri.getPath() == null ? "" : uri.getPath();
-    String query = uri.getQuery();
-    return query == null || query.isEmpty() ? path : path + "?" + query;
-  }
-
   private static Map<String, String> headers(ServerHttpRequest request) {
     Map<String, String> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     request
@@ -155,7 +160,7 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
     }
   }
 
-  /** 从内部 query 还原转发方声明的原始浏览器 path（含 query）。 */
+  /** 从内部原始 query 还原转发方声明的浏览器 path（含 query）；整体只做一次 percent-decode。 */
   private static String pathParameter(String query) {
     if (query == null || query.isEmpty()) {
       return null;

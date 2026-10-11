@@ -13,7 +13,6 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.WebSocketClient;
-import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 import org.springframework.web.socket.server.support.WebSocketHttpRequestHandler;
@@ -63,25 +62,6 @@ public final class IdeBrowserWebSocketGateway {
 
   @Autowired
   public IdeBrowserWebSocketGateway(
-      IdeCommandTransport transport,
-      IdeStreamTicketService streamTickets,
-      IdeStreamPairingRegistry<IdeStreamPeer> pairings,
-      IdeGatewayProperties properties,
-      IdeBrowserSessionRegistry sessions,
-      ClusterNodeRegistry clusterNodeRegistry,
-      ClusterInternalClient clusterInternalClient) {
-    this(
-        transport,
-        streamTickets,
-        pairings,
-        properties,
-        sessions,
-        clusterNodeRegistry,
-        clusterInternalClient,
-        new StandardWebSocketClient());
-  }
-
-  IdeBrowserWebSocketGateway(
       IdeCommandTransport transport,
       IdeStreamTicketService streamTickets,
       IdeStreamPairingRegistry<IdeStreamPeer> pairings,
@@ -333,6 +313,7 @@ public final class IdeBrowserWebSocketGateway {
               rawPathAndQuery,
               headers,
               browserScheme,
+              properties.requirePairingTimeout(),
               browser);
       bridge = current;
       current.start();
