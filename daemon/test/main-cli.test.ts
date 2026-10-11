@@ -95,6 +95,7 @@ describe('daemon compiled CLI runtime', () => {
 
       const child = spawn(process.execPath, [MAIN_ENTRY, '--config', fixture.configPath], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, http_proxy: '', https_proxy: '', no_proxy: '' },
       })
       const stdout: string[] = []
       const stderr: string[] = []

@@ -6,7 +6,7 @@ import { WindowsSystemProxyResolver, loadWindowsProxyBindings } from './system-p
 /**
  * 按平台创建操作系统代理解析器。
  *
- * <p>调用方（Core 代理切片）把等价的 HTTP/HTTPS URL 交给 {@link SystemProxyResolver.resolve}：`null` 严格表示操作系统
+ * <p>出站策略把等价的 HTTP/HTTPS URL 交给 {@link SystemProxyResolver.resolve}：`null` 严格表示操作系统
  * 选择了直连，绝不把任意连接失败兜底成直连。委托只读取操作系统配置，不修改它，也不回显任何 URI/环境变量/请求头/原生异常
  * 原文。
  *

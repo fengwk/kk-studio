@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { SYSTEM_PROXY_SESSION_FAILED, systemProxyErrorWithCode } from '../../src/native/system-proxy-errors.js'
+import { createSystemProxyResolver } from '../../src/native/system-proxy.js'
 import type {
   WindowsAutoProxyOptions,
   WindowsProxyBindings,
@@ -750,10 +751,12 @@ describe('windows cancellation and callback lifecycle', () => {
 })
 
 describe('windows bindings loader (mocked winhttp)', () => {
-  test('dispatches to the Windows resolver on win32', () => {
+  test('dispatches to the Windows resolver on win32', async () => {
     const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     try {
-      expect(loadWindowsProxyBindings()).toBeTruthy()
+      const resolver = createSystemProxyResolver()
+      expect(resolver).toBeInstanceOf(WindowsSystemProxyResolver)
+      await resolver.close()
     } finally {
       spy.mockRestore()
     }

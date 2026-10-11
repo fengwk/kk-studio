@@ -11,10 +11,12 @@ import {
 } from './config.js'
 import { Runtime, detectEnvironmentInfo } from './runtime.js'
 import { createWebSocketTransport } from './transport/control.js'
+import { installOutboundNetwork, ProxyConfigurationError } from './network.js'
 import {
   UnsupportedPlatformError,
   acquireDirectoryLock,
   createProcessSupervisor,
+  createSystemProxyResolver,
   ensurePrivateDirectory,
   type DirectoryLock,
 } from './native/index.js'
@@ -111,6 +113,12 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
     lock = await acquireDirectoryLock(dataDir)
+
+    const systemProxy = createSystemProxyResolver()
+    let closeNetwork = (): Promise<void> => systemProxy.close()
+    closers.push(() => closeNetwork())
+    const network = await installOutboundNetwork(process.env, systemProxy)
+    closeNetwork = () => network.close()
 
     const lspGroup = createLspCapabilities(config, supervisor)
     closers.push(() => lspGroup.close())
@@ -217,7 +225,7 @@ async function closeAll(closers: Array<() => Promise<void>>): Promise<unknown[]>
  * 配置诊断的脱敏规则。这里只输出 native 构造的固定文案，绝不回显原始异常、路径或凭证。
  */
 function startupFailureLine(error: unknown): string {
-  if (error instanceof UnsupportedPlatformError) {
+  if (error instanceof UnsupportedPlatformError || error instanceof ProxyConfigurationError) {
     return `daemon failed: ${error.message}`
   }
   return invalidConfigurationLine(error)
