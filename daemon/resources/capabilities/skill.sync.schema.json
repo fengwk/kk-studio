@@ -16,7 +16,7 @@
     },
     "targetCommit": {
       "type": "string",
-      "description": "Target Git commit hash to install."
+      "description": "Target Git commit hash to install (40-character lowercase SHA-1)."
     },
     "credential": {
       "type": "string",

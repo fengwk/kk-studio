@@ -1,60 +1,14 @@
-import fs from 'node:fs'
+import { ensurePrivateDirectory, writePrivateFile } from '../../src/native/index.js'
 import type { PrivateFs } from '../../src/skill/types.js'
 
 /**
- * POSIX-faithful PrivateFs test implementation for isolated worktree tests.
+ * Default private FS port for skill installer tests: the real native implementation.
  *
- * Clearly documented: This is a test double used ONLY because the native private FS
- * slice (daemon/src/native/index.ts) lives in a sibling worktree and is not present
- * in this isolated worktree. Production code always uses the native module via
- * loadNativePrivateFs().
- *
- * Enforces:
- * - Directories created owner-only (0700) with lstat verification.
- * - Files written owner-only (0600) with lstat NOFOLLOW pre-check (refusing to overwrite).
+ * Tests may override individual members of the returned object to inject failures, but the
+ * default path exercises the production owner-only primitives (0700 directories / 0600 files,
+ * symlink refusal) from `src/native`, so the installer is validated against its real dependency
+ * instead of a re-implementation.
  */
 export function createTestPrivateFs(): PrivateFs {
-  return {
-    async ensurePrivateDirectory(dirPath: string): Promise<string> {
-      let stat: fs.Stats | null = null
-      try {
-        stat = await fs.promises.lstat(dirPath)
-      } catch {
-        stat = null
-      }
-      if (!stat) {
-        await fs.promises.mkdir(dirPath, { recursive: true, mode: 0o700 })
-        if (process.platform !== 'win32') {
-          await fs.promises.chmod(dirPath, 0o700)
-        }
-        stat = await fs.promises.lstat(dirPath)
-      }
-      if (!stat.isDirectory() || stat.isSymbolicLink()) {
-        throw new Error(`directory path must be a real directory: ${dirPath}`)
-      }
-      if (process.platform !== 'win32') {
-        await fs.promises.chmod(dirPath, 0o700)
-      }
-      return dirPath
-    },
-
-    async writePrivateFile(filePath: string, data: string | Uint8Array): Promise<void> {
-      let stat: fs.Stats | null = null
-      try {
-        stat = await fs.promises.lstat(filePath)
-      } catch {
-        stat = null
-      }
-      if (stat !== null) {
-        throw new Error(`file already exists: ${filePath}`)
-      }
-      await fs.promises.writeFile(filePath, data, {
-        flag: 'wx',
-        mode: 0o600,
-      })
-      if (process.platform !== 'win32') {
-        await fs.promises.chmod(filePath, 0o600)
-      }
-    },
-  }
+  return { ensurePrivateDirectory, writePrivateFile }
 }
