@@ -51,26 +51,51 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
     sendBinary(frame, true);
   }
 
+  @Override
+  public void sendAcknowledgement(byte[] frame) {
+    send(new BinaryMessage(frame, true), true);
+  }
+
   /** 原生分段发送文本：{@code last=false} 表示本帧不是该消息的最后一段。 */
   void sendText(String frame, boolean last) {
-    send(new TextMessage(frame, last));
+    send(new TextMessage(frame, last), false);
   }
 
   /** 原生分段发送二进制：{@code last=false} 表示本帧不是该消息的最后一段。 */
   void sendBinary(byte[] frame, boolean last) {
-    send(new BinaryMessage(frame, last));
+    send(new BinaryMessage(frame, last), false);
   }
 
-  private void send(WebSocketMessage<?> message) {
+  /**
+   * 在会话锁内串行发送一帧。
+   *
+   * <p>{@code acknowledgement=true} 表示这是消费 credit 的 ACK：它只承载「已真实交付字节」的反馈，连接关闭后属于可安全丢弃的信息，因此 closed
+   * 或发送失败（IOException，或底层已关闭会话抛出的 IllegalStateException）都不报错，只把传输标记为关闭；数据/控制帧仍 fail-closed。
+   * 会话仍存活时抛出的 IllegalStateException 是未知状态，必须原样抛出而不是吞掉。
+   */
+  private void send(WebSocketMessage<?> message, boolean acknowledgement) {
     synchronized (sendLock) {
       if (closed) {
+        if (acknowledgement) {
+          return;
+        }
         throw new IllegalStateException("reverse stream peer is closed");
       }
       try {
         session.sendMessage(message);
       } catch (IOException error) {
         onTransportClosed();
+        if (acknowledgement) {
+          return;
+        }
         throw new IllegalStateException("failed to send on the reverse stream", error);
+      } catch (IllegalStateException error) {
+        if (acknowledgement && (closed || !session.isOpen())) {
+          // 底层会话确已关闭：ACK 丢失即可，传输进入关闭态，最终结果由 HTTP_END/WS CLOSE 判定。
+          onTransportClosed();
+          return;
+        }
+        throw error;
       }
     }
   }

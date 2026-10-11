@@ -28,6 +28,7 @@ class IdeStreamRelayTest {
 
     final List<String> texts = new ArrayList<>();
     final List<byte[]> binaries = new ArrayList<>();
+    final List<byte[]> acks = new ArrayList<>();
 
     @Override
     public void sendText(String frame) {
@@ -37,6 +38,11 @@ class IdeStreamRelayTest {
     @Override
     public void sendBinary(byte[] frame) {
       binaries.add(frame);
+    }
+
+    @Override
+    public void sendAcknowledgement(byte[] encodedAck) {
+      acks.add(encodedAck);
     }
 
     long bodyBytes() {
@@ -112,10 +118,23 @@ class IdeStreamRelayTest {
     RecordingSink sink = new RecordingSink();
     IdeStreamRelay relay = new IdeStreamRelay(sink);
     relay.receiveBinary(CODEC.encodeHttpBody(new byte[1000]));
+    int binariesBefore = sink.binaries.size();
     relay.ackFromDaemon(1000);
-    byte[] last = sink.binaries.get(sink.binaries.size() - 1);
+    // ACK 走独立窄出口：不得混入数据帧（sendBinary）序列。
+    assertEquals(binariesBefore, sink.binaries.size());
+    byte[] last = sink.acks.get(sink.acks.size() - 1);
     assertEquals(3, last[0]);
     assertEquals(1000, ((IdeStreamBinaryFrame.Ack) CODEC.decodeBinary(last)).byteCount());
+  }
+
+  /** 非法 ACK（负数/超出未确认发送量）必须 fail-closed，而不是被静默忽略或发出。 */
+  @Test
+  void rejectsInvalidAckBookkeeping() {
+    RecordingSink sink = new RecordingSink();
+    IdeStreamRelay relay = new IdeStreamRelay(sink);
+    assertThrows(DaemonProtocolException.class, () -> relay.ackFromDaemon(-1));
+    assertThrows(DaemonProtocolException.class, () -> relay.ackFromDaemon(1));
+    assertTrue(sink.acks.isEmpty());
   }
 
   @Test

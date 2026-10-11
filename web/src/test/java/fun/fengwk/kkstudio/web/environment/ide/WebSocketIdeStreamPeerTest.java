@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -8,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.WebSocketSession;
@@ -131,6 +133,47 @@ class WebSocketIdeStreamPeerTest {
     doThrow(new IOException("boom")).when(session).sendMessage(any());
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
     assertThrows(IllegalStateException.class, () -> peer.sendBinary(new byte[] {1}));
+    assertTrue(peer.closed());
+  }
+
+  /** 连接侧关闭后消费 ACK 可安全丢弃（不丢已入队响应）；数据帧仍必须 fail-closed。 */
+  @Test
+  void acknowledgementAfterTransportCloseIsDroppedButDataStillRejected() {
+    WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
+    peer.onTransportClosed();
+    assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
+    assertTrue(peer.closed());
+    assertThrows(IllegalStateException.class, () -> peer.sendBinary(new byte[] {1}));
+    assertThrows(IllegalStateException.class, () -> peer.sendText("{}"));
+  }
+
+  /** 回送 ACK 时发生 IOException：只标记传输关闭，绝不把 ACK 失败升级为异常（结果由 END/CLOSE 判定）。 */
+  @Test
+  void acknowledgementSendIoFailureMarksClosedAndDoesNotThrow() throws Exception {
+    doThrow(new IOException("boom")).when(session).sendMessage(any());
+    WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
+    assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
+    assertTrue(peer.closed());
+  }
+
+  /** 会话仍存活时底层抛出的 IllegalStateException 是未知状态，ACK 发送也必须原样抛出而不是吞掉。 */
+  @Test
+  void acknowledgementIllegalStateOnLiveSessionPropagates() throws Exception {
+    when(session.isOpen()).thenReturn(true);
+    doThrow(new IllegalStateException("live session failure")).when(session).sendMessage(any());
+    WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
+    assertThrows(
+        IllegalStateException.class, () -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
+    assertFalse(peer.closed());
+  }
+
+  /** 会话确已关闭时 IllegalStateException 视为关闭：ACK 丢弃并标记传输关闭。 */
+  @Test
+  void acknowledgementIllegalStateOnClosedSessionIsSwallowed() throws Exception {
+    when(session.isOpen()).thenReturn(false);
+    doThrow(new IllegalStateException("session closed")).when(session).sendMessage(any());
+    WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
+    assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
     assertTrue(peer.closed());
   }
 }
