@@ -12,7 +12,7 @@ vi.mock('../../src/native/posix-session.js', async (importOriginal) => {
   return { ...actual, membersSnapshot: () => null }
 })
 
-// 仅 POSIX：Windows 走 Job 收敛，不经会话枚举。这里直接构造 POSIX 实现，不经工厂（工厂按契约拒绝 darwin）。
+// 仅 POSIX：Windows 走 Job 收敛，不经会话枚举。
 describe.skipIf(process.platform === 'win32')('native close evidence', () => {
   test('an unprovable convergence keeps the state directory', async () => {
     const workdir = mkdtempSync(join(tmpdir(), 'kk-studio-native-evidence-'))
@@ -20,10 +20,15 @@ describe.skipIf(process.platform === 'win32')('native close evidence', () => {
     const command = fixtureCommand('hold.mjs', join(workdir, 'root.pid'))
     const managed = await supervisor.start({ executable: command.executable, args: command.args, cwd: workdir })
     await waitForPid(join(workdir, 'root.pid'))
-    const stateDir = (managed as unknown as { stateDir: string }).stateDir
+    const processState = managed as unknown as { stateDir: string; settled: Promise<void> }
+    const stateDir = processState.stateDir
     expect(existsSync(stateDir)).toBe(true)
 
     await expect(managed.terminate()).rejects.toThrow(/proven converged/)
+    expect(managed.stdin.destroyed).toBe(true)
+    expect(managed.stdout.destroyed).toBe(true)
+    expect(managed.stderr.destroyed).toBe(true)
+    await processState.settled
     await expect(managed.close()).rejects.toThrow(/proven converged/)
     // 收敛失败时状态目录必须还在：它是这次收尾的唯一证据。
     expect(existsSync(stateDir)).toBe(true)
