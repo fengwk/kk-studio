@@ -126,8 +126,6 @@ kk-studio:
       request-timeout: ${KK_STUDIO_IDE_GATEWAY_REQUEST_TIMEOUT:5m}
       # 浏览器 IDE 会话 cookie 的有效期与名称（host-only、HttpOnly、SameSite=Strict）。
       session-ttl: ${KK_STUDIO_IDE_GATEWAY_SESSION_TTL:12h}
-      # 受管 workspace 视图授权的有效期：同一 Daemon 代际下的多面板授权随该 TTL 淘汰。
-      view-ttl: ${KK_STUDIO_IDE_GATEWAY_VIEW_TTL:12h}
       session-cookie-name: ${KK_STUDIO_IDE_GATEWAY_SESSION_COOKIE_NAME:kk_ide_session}
   cluster:
     # 本实例对其他节点可达的 HTTP(S) origin；留空表示单节点部署，只做本地交付，不注册也不接受跨节点路由。

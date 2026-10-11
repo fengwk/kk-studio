@@ -27,7 +27,6 @@ public class IdeGatewayProperties {
   private static final Duration DEFAULT_PAIRING_TIMEOUT = Duration.ofSeconds(10);
   private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofMinutes(5);
   private static final Duration DEFAULT_SESSION_TTL = Duration.ofHours(12);
-  private static final Duration DEFAULT_VIEW_TTL = Duration.ofHours(12);
 
   /** 形如 {@code wss://gateway.example.com/api/harness/environment-stream/v1}；留空表示不提供 IDE 数据面。 */
   private String streamUrlTemplate;
@@ -40,9 +39,6 @@ public class IdeGatewayProperties {
 
   /** 浏览器 IDE 会话 cookie 有效期（host-only、HttpOnly）。 */
   private Duration sessionTtl = DEFAULT_SESSION_TTL;
-
-  /** 受管 workspace 视图授权的有效期：同一 Daemon 代际下的多面板授权随该 TTL 淘汰。 */
-  private Duration viewTtl = DEFAULT_VIEW_TTL;
 
   /** 浏览器 IDE 会话 cookie 名。 */
   private String sessionCookieName = "kk_ide_session";
@@ -107,10 +103,6 @@ public class IdeGatewayProperties {
 
   public Duration requireSessionTtl() {
     return requirePositive(sessionTtl, "session-ttl");
-  }
-
-  public Duration requireViewTtl() {
-    return requirePositive(viewTtl, "view-ttl");
   }
 
   public String requireSessionCookieName() {

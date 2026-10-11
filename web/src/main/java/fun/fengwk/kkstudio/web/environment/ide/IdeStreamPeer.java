@@ -23,11 +23,26 @@ public interface IdeStreamPeer extends AutoCloseable {
   @Override
   void close();
 
-  /** 入站帧：文本控制帧或二进制帧。 */
+  /**
+   * 入站帧：文本控制帧或二进制帧。
+   *
+   * <p>{@code last} 是 WebSocket FIN 标记：反向数据面的帧始终是完整消息（{@code true}），浏览器 WS 单跳桥接则必须逐字保留 partial
+   * 语义，因此这里显式携带 FIN 而不是把分段悄悄拼成一条消息。
+   */
   sealed interface Inbound {
 
-    record Text(String json) implements Inbound {}
+    record Text(String json, boolean last) implements Inbound {
 
-    record Binary(byte[] frame) implements Inbound {}
+      Text(String json) {
+        this(json, true);
+      }
+    }
+
+    record Binary(byte[] frame, boolean last) implements Inbound {
+
+      Binary(byte[] frame) {
+        this(frame, true);
+      }
+    }
   }
 }

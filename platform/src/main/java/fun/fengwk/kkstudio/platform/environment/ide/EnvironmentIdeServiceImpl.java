@@ -39,12 +39,13 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   private final IdeOriginProperties originProperties;
   private final IdeBootstrapTicketService bootstrapTickets;
   private final Duration commandTimeout;
+  private final IdeViewAuthorizationListener viewAuthorization;
 
   public EnvironmentIdeServiceImpl(
       IdeCommandTransport transport,
       IdeOriginProperties originProperties,
       IdeBootstrapTicketService bootstrapTickets) {
-    this(transport, originProperties, bootstrapTickets, DEFAULT_COMMAND_TIMEOUT);
+    this(transport, originProperties, bootstrapTickets, DEFAULT_COMMAND_TIMEOUT, null);
   }
 
   public EnvironmentIdeServiceImpl(
@@ -52,10 +53,20 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       IdeOriginProperties originProperties,
       IdeBootstrapTicketService bootstrapTickets,
       Duration commandTimeout) {
+    this(transport, originProperties, bootstrapTickets, commandTimeout, null);
+  }
+
+  public EnvironmentIdeServiceImpl(
+      IdeCommandTransport transport,
+      IdeOriginProperties originProperties,
+      IdeBootstrapTicketService bootstrapTickets,
+      Duration commandTimeout,
+      IdeViewAuthorizationListener viewAuthorization) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.originProperties = Objects.requireNonNull(originProperties, "originProperties");
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
     this.commandTimeout = Objects.requireNonNull(commandTimeout, "commandTimeout");
+    this.viewAuthorization = viewAuthorization;
     if (commandTimeout.isZero() || commandTimeout.isNegative()) {
       throw new IllegalArgumentException("commandTimeout must be positive");
     }
@@ -85,6 +96,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     EnvironmentIdeViewDTO dto =
         toDto(environmentId, reply.viewId() == null ? viewId : reply.viewId(), reply.directory());
     String workspacePath = requireWorkspace(reply);
+    // 视图授权跟随真实视图生命周期：创建即授权，关闭即撤销（不使用空闲超时推断）。
+    if (viewAuthorization != null) {
+      viewAuthorization.viewOpened(result.identity(), dto.getViewId(), workspacePath);
+    }
     // 入口凭据绑定命令的代际；租约失效/接管时由 host/router 依代际关闭并 revoke。
     String ticket = bootstrapTickets.issue(result.identity(), dto.getViewId(), workspacePath);
     dto.setEntryUrl(originProperties.bootstrapEntryUrl(environmentId, ticket));
@@ -129,7 +144,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   @Override
   public void closeView(EnvironmentId environmentId, String viewId) {
     Objects.requireNonNull(environmentId, "environmentId");
-    call(environmentId, IdeCommand.view(IdeAction.CLOSE_VIEW, parseViewId(viewId), null));
+    String parsedViewId = parseViewId(viewId);
+    IdeCall result = call(environmentId, IdeCommand.view(IdeAction.CLOSE_VIEW, parsedViewId, null));
+    if (viewAuthorization != null) {
+      viewAuthorization.viewClosed(result.identity(), parsedViewId);
+    }
   }
 
   private IdeCall call(EnvironmentId environmentId, IdeCommand command) {

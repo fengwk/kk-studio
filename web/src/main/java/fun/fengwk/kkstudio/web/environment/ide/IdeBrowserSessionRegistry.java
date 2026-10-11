@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
+import fun.fengwk.kkstudio.platform.environment.ide.IdeViewAuthorizationListener;
 
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -23,17 +24,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * IDE 独立 Origin 的浏览器会话：一次性 bootstrap ticket 消费后设置 host-only/HttpOnly cookie，绑定 {@link
  * IdeSessionIdentity} 代际（Environment + Daemon 实例 + 租约代币），而不是绑定单个 workspace 视图。
  *
- * <p>cookie 值是不透明 256-bit 随机串，只在本节点有效；每个请求都要复核其绑定代际是否仍是当前 READY 代际（由数据面完成）。租约失效/接管时按代际
- * 关闭全部会话与已授权视图，使旧 cookie 立即失效；读取时同时判定过期。
+ * <p>cookie 值是不透明 256-bit 随机串，只在本节点有效；每个请求都要复核其绑定代际是否仍是当前 READY 代际（由数据面完成）。**同一代际只保留一个 cookie**：多次
+ * bootstrap（多面板）复用同一 cookie，既不互相覆盖也不会随 bootstrap 次数增长。租约失效/接管时按代际关闭会话与视图授权，使旧 cookie
+ * 立即失效；读取时同时判定过期。
  *
- * <p><b>多窗口/多面板：</b>受管 workspace 授权按**代际**维护并带 TTL——每个成功消费的 bootstrap ticket 把其 workspace
- * 记入该代际的授权集合，因此同一 Daemon 代际下新开的面板（另一个 workspace 视图）不会因为 cookie 只绑定了首个 workspace 而被
- * 403；视图长期未再出现即过期移除。
+ * <p><b>受管 workspace 授权：</b>按代际维护 view → workspace 的授权集合，生命周期跟随真实视图事件（{@link
+ * IdeViewAuthorizationListener#viewOpened}/{@link IdeViewAuthorizationListener#viewClosed}）与
+ * bootstrap 消费， 不做空闲超时推断。集合有固定上界，代际与会话数量同样有界，超界 fail-closed。
  */
 @Component
-public final class IdeBrowserSessionRegistry {
+public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationListener {
 
-  /** 一个浏览器 IDE 会话：绑定代际，并给出该代际当前（未过期）的受管 workspace 授权视图。 */
+  /** 一个浏览器 IDE 会话：绑定代际，并给出该代际当前的受管 workspace 授权视图。 */
   public record Session(IdeSessionIdentity identity, Set<String> authorizedWorkspaces) {
 
     public Session {
@@ -53,110 +55,168 @@ public final class IdeBrowserSessionRegistry {
 
   private static final int TOKEN_BYTES = 32;
 
+  /** 单代际的视图授权上界；真实额度由 Daemon 的 OPEN_VIEW 约束，这里只是内存安全上界。 */
+  static final int MAX_VIEWS_PER_GENERATION = 64;
+
+  /** 并存代际（会话）上界；每次 open 先清理过期代际，仍超界即 fail-closed。 */
+  static final int MAX_GENERATIONS = 4096;
+
   private final SecureRandom random;
   private final Clock clock;
   private final Duration sessionTtl;
-  private final Duration viewTtl;
-  private final Map<String, Entry> sessions = new ConcurrentHashMap<>();
-  private final Map<Generation, Map<String, Instant>> generationViews = new ConcurrentHashMap<>();
+  private final Map<Generation, GenerationState> generations = new ConcurrentHashMap<>();
+  private final Map<String, Generation> cookies = new ConcurrentHashMap<>();
 
   @Autowired
   public IdeBrowserSessionRegistry(IdeGatewayProperties properties) {
-    this(
-        new SecureRandom(),
-        Clock.systemUTC(),
-        properties.requireSessionTtl(),
-        properties.requireViewTtl());
+    this(new SecureRandom(), Clock.systemUTC(), properties.requireSessionTtl());
   }
 
   /** 测试用构造：可注入确定性时钟与 TTL。 */
-  IdeBrowserSessionRegistry(SecureRandom random, Clock clock, Duration ttl) {
-    this(random, clock, ttl, ttl);
-  }
-
-  IdeBrowserSessionRegistry(
-      SecureRandom random, Clock clock, Duration sessionTtl, Duration viewTtl) {
+  IdeBrowserSessionRegistry(SecureRandom random, Clock clock, Duration sessionTtl) {
     this.random = Objects.requireNonNull(random, "random");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.sessionTtl = Objects.requireNonNull(sessionTtl, "sessionTtl");
-    this.viewTtl = Objects.requireNonNull(viewTtl, "viewTtl");
   }
 
-  /** 建立一个浏览器会话、把该视图授权给整个代际，并返回 cookie 值。 */
-  public String open(IdeSessionIdentity identity, String workspacePath) {
+  /**
+   * 建立一个浏览器会话并返回 cookie 值；同一代际复用既有有效 cookie。
+   *
+   * @throws IllegalStateException 并存代际已达上界（fail-closed，不静默淘汰他人会话）
+   */
+  public String open(IdeSessionIdentity identity, String viewId, String workspacePath) {
     Objects.requireNonNull(identity, "identity");
+    Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(workspacePath, "workspacePath");
     Instant now = clock.instant();
-    authorize(identity, workspacePath, now);
-    byte[] bytes = new byte[TOKEN_BYTES];
-    random.nextBytes(bytes);
-    String value = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    sessions.put(value, new Entry(new Generation(identity), now.plus(sessionTtl)));
-    return value;
+    purgeExpired(now);
+    Generation generation = new Generation(identity);
+    GenerationState state = generations.get(generation);
+    if (state == null) {
+      if (generations.size() >= MAX_GENERATIONS) {
+        throw new IllegalStateException("too many concurrent IDE browser sessions");
+      }
+      state = new GenerationState();
+      generations.put(generation, state);
+    }
+    authorize(generation, state, viewId, workspacePath);
+    synchronized (state) {
+      if (state.cookie == null || !state.expiresAt.isAfter(now)) {
+        state.cookie = newToken();
+        cookies.put(state.cookie, generation);
+      }
+      state.expiresAt = now.plus(sessionTtl);
+      return state.cookie;
+    }
   }
 
-  /** 解析 cookie 值；不存在或过期返回 empty；返回的授权视图是该代际当前未过期的集合。 */
+  /** 解析 cookie 值；不存在或过期返回 empty；返回的授权视图是该代际当前的集合。 */
   public Optional<Session> lookup(String cookieValue) {
     if (cookieValue == null || cookieValue.isBlank()) {
       return Optional.empty();
     }
-    Entry entry = sessions.get(cookieValue);
-    if (entry == null) {
+    Generation generation = cookies.get(cookieValue);
+    if (generation == null) {
       return Optional.empty();
     }
+    GenerationState state = generations.get(generation);
     Instant now = clock.instant();
-    if (!entry.expiresAt.isAfter(now)) {
-      sessions.remove(cookieValue, entry);
+    if (state == null || !state.expiresAt.isAfter(now)) {
+      cookies.remove(cookieValue, generation);
       return Optional.empty();
     }
-    return Optional.of(
-        new Session(entry.generation.identity, authorizedWorkspaces(entry.generation, now)));
+    synchronized (state) {
+      return Optional.of(
+          new Session(generation.identity, new LinkedHashSet<>(state.views.values())));
+    }
   }
 
   /** 关闭某代际的全部会话与视图授权（租约失效/接管）。 */
   public void closeGeneration(EnvironmentId environmentId, UUID leaseToken) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(leaseToken, "leaseToken");
-    sessions
-        .values()
-        .removeIf(
-            entry ->
-                entry.generation.identity.environmentId().equals(environmentId)
-                    && entry.generation.identity.leaseToken().equals(leaseToken));
-    generationViews
-        .keySet()
-        .removeIf(
-            generation ->
-                generation.identity.environmentId().equals(environmentId)
-                    && generation.identity.leaseToken().equals(leaseToken));
+    for (Map.Entry<Generation, GenerationState> entry : generations.entrySet()) {
+      Generation generation = entry.getKey();
+      if (!generation.identity.environmentId().equals(environmentId)
+          || !generation.identity.leaseToken().equals(leaseToken)) {
+        continue;
+      }
+      if (generations.remove(generation, entry.getValue())) {
+        String cookie = entry.getValue().cookie;
+        if (cookie != null) {
+          cookies.remove(cookie, generation);
+        }
+      }
+    }
+  }
+
+  @Override
+  public void viewOpened(IdeSessionIdentity identity, String viewId, String workspacePath) {
+    Objects.requireNonNull(identity, "identity");
+    Objects.requireNonNull(viewId, "viewId");
+    Objects.requireNonNull(workspacePath, "workspacePath");
+    Generation generation = new Generation(identity);
+    GenerationState state =
+        generations.computeIfAbsent(generation, ignored -> new GenerationState());
+    authorize(generation, state, viewId, workspacePath);
+  }
+
+  @Override
+  public void viewClosed(IdeSessionIdentity identity, String viewId) {
+    Objects.requireNonNull(identity, "identity");
+    Objects.requireNonNull(viewId, "viewId");
+    GenerationState state = generations.get(new Generation(identity));
+    if (state != null) {
+      synchronized (state) {
+        state.views.remove(viewId);
+      }
+    }
   }
 
   /** 当前会话数量（诊断/测试）。 */
   public int size() {
-    return sessions.size();
+    return cookies.size();
   }
 
-  private void authorize(IdeSessionIdentity identity, String workspacePath, Instant now) {
-    generationViews
-        .computeIfAbsent(new Generation(identity), ignored -> new ConcurrentHashMap<>())
-        .put(workspacePath, now.plus(viewTtl));
-  }
-
-  /** 代际当前未过期的受管 workspace 集合；读取时顺手淘汰过期视图（TTL 生命周期）。 */
-  private Set<String> authorizedWorkspaces(Generation generation, Instant now) {
-    Map<String, Instant> views = generationViews.get(generation);
-    if (views == null) {
-      return Set.of();
+  private void authorize(
+      Generation generation, GenerationState state, String viewId, String workspacePath) {
+    synchronized (state) {
+      if (state.views.size() >= MAX_VIEWS_PER_GENERATION && !state.views.containsKey(viewId)) {
+        // 上界保护：超出即不再授权，不静默淘汰其它视图（真实额度由 Daemon OPEN_VIEW 约束）。
+        return;
+      }
+      state.views.put(viewId, workspacePath);
     }
-    views.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
-    if (views.isEmpty()) {
-      generationViews.remove(generation, views);
-      return Set.of();
-    }
-    return new LinkedHashSet<>(views.keySet());
   }
 
-  private record Entry(Generation generation, Instant expiresAt) {}
+  private void purgeExpired(Instant now) {
+    for (Map.Entry<Generation, GenerationState> entry : generations.entrySet()) {
+      GenerationState state = entry.getValue();
+      if (state.expiresAt.isAfter(now)) {
+        continue;
+      }
+      if (generations.remove(entry.getKey(), state)) {
+        String cookie = state.cookie;
+        if (cookie != null) {
+          cookies.remove(cookie, entry.getKey());
+        }
+      }
+    }
+  }
+
+  private String newToken() {
+    byte[] bytes = new byte[TOKEN_BYTES];
+    random.nextBytes(bytes);
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+  }
+
+  /** 一个代际的会话状态：复用的 cookie 与 view → workspace 授权集合。 */
+  private static final class GenerationState {
+
+    private String cookie;
+    private Instant expiresAt = Instant.EPOCH;
+    private final Map<String, String> views = new ConcurrentHashMap<>();
+  }
 
   private record Generation(IdeSessionIdentity identity) {}
 }

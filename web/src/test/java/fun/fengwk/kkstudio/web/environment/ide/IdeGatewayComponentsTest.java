@@ -68,7 +68,7 @@ class IdeGatewayComponentsTest {
 
     // 未知 cookie 必须是「未命中」而不是 NPE。
     assertTrue(sessions.lookup("unknown-cookie").isEmpty());
-    String cookie = sessions.open(identity, "/managed/workspace");
+    String cookie = sessions.open(identity, UUID.randomUUID().toString(), "/managed/workspace");
     assertTrue(sessions.lookup(cookie).orElseThrow().authorizesWorkspace("/managed/workspace"));
     assertFalse(sessions.lookup(cookie).orElseThrow().authorizesWorkspace("/other"));
 
@@ -77,36 +77,46 @@ class IdeGatewayComponentsTest {
     assertTrue(sessions.lookup(cookie).isEmpty());
 
     // 租约关闭按代际清除。
-    String other = sessions.open(identity, "/managed/workspace");
+    String other = sessions.open(identity, UUID.randomUUID().toString(), "/managed/workspace");
     sessions.closeGeneration(ENV, UUID.randomUUID());
     assertFalse(sessions.lookup(other).isEmpty());
     sessions.closeGeneration(ENV, identity.leaseToken());
     assertTrue(sessions.lookup(other).isEmpty());
   }
 
-  /** 多面板：同一代际下新授权的 workspace 对已存在的 cookie 立即可用，且按 TTL 淘汰。 */
+  /** 多面板：同一代际复用同一 cookie，新授权 workspace 对已存在的 cookie 立即可用，CLOSE_VIEW 真实撤销。 */
   @Test
-  void browserSessionAuthorizesSiblingViewsPerGeneration() {
+  void browserSessionSharesCookieAndRevokesClosedView() {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
-        new IdeBrowserSessionRegistry(
-            new SecureRandom(), clock, Duration.ofMinutes(30), Duration.ofMinutes(5));
+        new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
     IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
 
-    String first = sessions.open(identity, "/managed/one");
-    String second = sessions.open(identity, "/managed/two");
+    String firstView = UUID.randomUUID().toString();
+    String secondView = UUID.randomUUID().toString();
+    String first = sessions.open(identity, firstView, "/managed/one");
+    String second = sessions.open(identity, secondView, "/managed/two");
+    // 同一代际只保留一个 cookie：多次 bootstrap 不互相覆盖。
+    assertEquals(first, second);
+    assertEquals(1, sessions.size());
     assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/two"));
-    assertTrue(sessions.lookup(second).orElseThrow().authorizesWorkspace("/managed/one"));
+    assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/one"));
+
     // 别的代际不可见。
     IdeSessionIdentity otherGeneration = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
-    String otherCookie = sessions.open(otherGeneration, "/managed/three");
+    String otherCookie =
+        sessions.open(otherGeneration, UUID.randomUUID().toString(), "/managed/three");
     assertFalse(sessions.lookup(otherCookie).orElseThrow().authorizesWorkspace("/managed/one"));
 
-    // 视图 TTL 到期后授权被淘汰（会话本身仍在有效期内）。
-    clock.advance(Duration.ofMinutes(6));
+    // CLOSE_VIEW 按真实视图事件撤销授权，而不是等待时间推断。
+    sessions.viewClosed(identity, firstView);
     assertFalse(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/one"));
-    assertFalse(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/two"));
-    assertFalse(sessions.lookup(first).isEmpty());
+    assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/two"));
+
+    // owner 侧 OPEN_VIEW 事件先于 bootstrap 也能授权。
+    String thirdView = UUID.randomUUID().toString();
+    sessions.viewOpened(identity, thirdView, "/managed/three");
+    assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/three"));
   }
 
   @Test

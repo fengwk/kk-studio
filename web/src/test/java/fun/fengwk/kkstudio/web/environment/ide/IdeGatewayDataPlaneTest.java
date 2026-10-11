@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
@@ -23,9 +24,12 @@ import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -66,15 +70,25 @@ class IdeGatewayDataPlaneTest {
     final IdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
     final IdeSessionIdentity identity = new IdeSessionIdentity(ENV, INSTANCE, LEASE);
     final FakeTransport transport = new FakeTransport(pairings);
+    final ClusterNodeRegistry clusterNodeRegistry = environmentId -> Optional.empty();
     final IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(transport, tickets, pairings, properties, sessions, bootstrap);
+        new IdeGatewayDataPlane(
+            transport,
+            tickets,
+            pairings,
+            properties,
+            sessions,
+            bootstrap,
+            clusterNodeRegistry,
+            new IdeRemoteDataPlaneForwarder(
+                mock(ClusterInternalClient.class), properties, mock(HttpClient.class)));
 
     Harness() {
       transport.identity = identity;
     }
 
     String sessionCookie() {
-      return sessions.open(identity, "/managed/workspace");
+      return sessions.open(identity, UUID.randomUUID().toString(), "/managed/workspace");
     }
 
     MockHttpServletRequest request(String method, String path) {
@@ -276,7 +290,7 @@ class IdeGatewayDataPlaneTest {
     Harness harness = new Harness();
     harness.transport.peerFactory = () -> new ScriptedPeer(0, List.of());
     // 第二个面板：同代际的另一个受管 workspace。
-    harness.sessions.open(harness.identity, "/managed/other");
+    harness.sessions.open(harness.identity, UUID.randomUUID().toString(), "/managed/other");
 
     MockHttpServletRequest allowed = harness.request("GET", "/");
     allowed.setParameter("workspace", "/managed/other");
