@@ -25,6 +25,8 @@ fi
 NVD_SETTINGS_SERVER_ID=kk-studio-supply-chain-nvd
 NVD_DATAFEED_URL=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz
 NPM_AUDIT_REGISTRY=https://registry.npmjs.org
+# npm 生态的项目根：SBOM 与漏洞审计按项目分别产出报告与状态，任一项目有漏洞都让门禁失败。
+NPM_PROJECTS=(frontend daemon)
 TRIVY_IMAGE=aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2
 TRIVY_JAVA_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-java-db:1
@@ -43,7 +45,9 @@ JAVA_HOME_FOR_BUILD=
 TEMP_SETTINGS_FILE=
 BACKEND_SBOM_STATUS=SKIPPED
 FRONTEND_SBOM_STATUS=SKIPPED
+DAEMON_SBOM_STATUS=SKIPPED
 NPM_AUDIT_STATUS=SKIPPED
+DAEMON_AUDIT_STATUS=SKIPPED
 MAVEN_AUDIT_STATUS=SKIPPED
 APP_IMAGE_BUILD_STATUS=SKIPPED
 APP_IMAGE_SMOKE_STATUS=SKIPPED
@@ -65,8 +69,8 @@ usage() {
 Usage: scripts/dev/verify/supply-chain/run.sh <command>
 
 Commands:
-  sbom    Generate and validate backend and frontend CycloneDX SBOMs
-  audit   Run npm audit and the Maven Dependency-Check gate
+  sbom    Generate and validate backend, frontend and daemon CycloneDX SBOMs
+  audit   Run npm audit for every npm project and the Maven Dependency-Check gate
   image   Build and scan the current app image with pinned Trivy
   all     Run sbom, dependency audit, and image scan in one report
   test    Run permanent supply-chain script tests only
@@ -242,7 +246,9 @@ init_report() {
     mkdir -p \
         "$RUN_DIR/backend-sbom" \
         "$RUN_DIR/frontend-sbom" \
+        "$RUN_DIR/daemon-sbom" \
         "$RUN_DIR/frontend-audit" \
+        "$RUN_DIR/daemon-audit" \
         "$RUN_DIR/backend-audit" \
         "$RUN_DIR/image" \
         "$RUN_DIR/logs"
@@ -278,31 +284,62 @@ run_backend_sbom() {
     fi
 }
 
-run_frontend_sbom() {
-    local output_file="$RUN_DIR/frontend-sbom/bom.json"
-    echo "==> Generating frontend CycloneDX SBOM"
+npm_sbom_output_dir() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/frontend-sbom" ;;
+        daemon) printf '%s' "$RUN_DIR/daemon-sbom" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
 
-    if npm --prefix "$REPO_ROOT/frontend" sbom \
+npm_sbom_log_file() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/logs/npm-sbom.log" ;;
+        daemon) printf '%s' "$RUN_DIR/logs/npm-daemon-sbom.log" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+set_npm_sbom_status() {
+    case "$1" in
+        frontend) FRONTEND_SBOM_STATUS=$2 ;;
+        daemon) DAEMON_SBOM_STATUS=$2 ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+# 每个 npm 项目各自生成、各自记录状态与产物；一个项目的失败不会掩盖另一个项目的结论。
+run_npm_sbom() {
+    local project=$1
+    local output_dir log_file
+    output_dir=$(npm_sbom_output_dir "$project")
+    log_file=$(npm_sbom_log_file "$project")
+    echo "==> Generating $project CycloneDX SBOM"
+
+    if npm --prefix "$REPO_ROOT/$project" sbom \
         --package-lock-only \
         --sbom-format=cyclonedx \
-        >"$output_file" 2>"$RUN_DIR/logs/npm-sbom.log"
+        >"$output_dir/bom.json" 2>"$log_file"
     then
-        if json_object_file_is_non_empty "$output_file"; then
-            FRONTEND_SBOM_STATUS=PASS
+        if json_object_file_is_non_empty "$output_dir/bom.json"; then
+            set_npm_sbom_status "$project" PASS
         else
-            FRONTEND_SBOM_STATUS=FAIL
-            record_failure "frontend CycloneDX JSON is missing, empty, or invalid"
+            set_npm_sbom_status "$project" FAIL
+            record_failure "$project CycloneDX JSON is missing, empty, or invalid"
         fi
     else
         local rc=$?
-        FRONTEND_SBOM_STATUS=FAIL
-        record_failure "frontend CycloneDX failed (exit $rc)"
+        set_npm_sbom_status "$project" FAIL
+        record_failure "$project CycloneDX failed (exit $rc)"
     fi
 }
 
 run_sbom() {
     run_backend_sbom
-    run_frontend_sbom
+    local project
+    for project in "${NPM_PROJECTS[@]}"; do
+        run_npm_sbom "$project"
+    done
 }
 
 create_nvd_settings() {
@@ -366,29 +403,57 @@ validate_dependency_check_reports() {
     json_object_file_is_non_empty "$output_dir/dependency-check-report.sarif" || return 1
 }
 
-run_npm_audit() {
-    local output_file="$RUN_DIR/frontend-audit/audit.json"
-    echo "==> Running npm audit (dev dependencies are included by default)"
+npm_audit_output_file() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/frontend-audit/audit.json" ;;
+        daemon) printf '%s' "$RUN_DIR/daemon-audit/audit.json" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
 
-    if npm --prefix "$REPO_ROOT/frontend" audit \
+npm_audit_log_file() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/logs/npm-audit.log" ;;
+        daemon) printf '%s' "$RUN_DIR/logs/npm-daemon-audit.log" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+set_npm_audit_status() {
+    case "$1" in
+        frontend) NPM_AUDIT_STATUS=$2 ;;
+        daemon) DAEMON_AUDIT_STATUS=$2 ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+# 每个 npm 项目各自审计、各自记录状态与报告；任一项目命中漏洞都让整体门禁失败。
+run_npm_audit() {
+    local project=$1
+    local output_file log_file
+    output_file=$(npm_audit_output_file "$project")
+    log_file=$(npm_audit_log_file "$project")
+    echo "==> Running $project npm audit (dev dependencies are included by default)"
+
+    if npm --prefix "$REPO_ROOT/$project" audit \
         --audit-level=low \
         "--registry=$NPM_AUDIT_REGISTRY" \
         --json \
-        >"$output_file" 2>"$RUN_DIR/logs/npm-audit.log"
+        >"$output_file" 2>"$log_file"
     then
         if json_object_file_is_non_empty "$output_file"; then
-            NPM_AUDIT_STATUS=PASS
+            set_npm_audit_status "$project" PASS
         else
-            NPM_AUDIT_STATUS=FAIL
-            record_failure "npm audit JSON is missing, empty, or invalid"
+            set_npm_audit_status "$project" FAIL
+            record_failure "$project npm audit JSON is missing, empty, or invalid"
         fi
     else
         local rc=$?
-        NPM_AUDIT_STATUS=FAIL
+        set_npm_audit_status "$project" FAIL
         if json_object_file_is_non_empty "$output_file"; then
-            record_failure "npm audit found vulnerabilities or failed the online audit (exit $rc)"
+            record_failure "$project npm audit found vulnerabilities or failed the online audit (exit $rc)"
         else
-            record_failure "npm audit did not produce valid JSON (exit $rc)"
+            record_failure "$project npm audit did not produce valid JSON (exit $rc)"
         fi
     fi
 }
@@ -443,7 +508,10 @@ run_maven_audit() {
 }
 
 run_audit() {
-    run_npm_audit
+    local project
+    for project in "${NPM_PROJECTS[@]}"; do
+        run_npm_audit "$project"
+    done
     run_maven_audit
 }
 
@@ -900,7 +968,9 @@ write_summary() {
         SUPPLY_CHAIN_STATUS="$status" \
         SUPPLY_CHAIN_BACKEND_SBOM_STATUS="$BACKEND_SBOM_STATUS" \
         SUPPLY_CHAIN_FRONTEND_SBOM_STATUS="$FRONTEND_SBOM_STATUS" \
+        SUPPLY_CHAIN_DAEMON_SBOM_STATUS="$DAEMON_SBOM_STATUS" \
         SUPPLY_CHAIN_NPM_AUDIT_STATUS="$NPM_AUDIT_STATUS" \
+        SUPPLY_CHAIN_DAEMON_AUDIT_STATUS="$DAEMON_AUDIT_STATUS" \
         SUPPLY_CHAIN_MAVEN_AUDIT_STATUS="$MAVEN_AUDIT_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_BUILD_STATUS="$APP_IMAGE_BUILD_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_SMOKE_STATUS="$APP_IMAGE_SMOKE_STATUS" \
@@ -939,10 +1009,22 @@ const report = {
             log: 'logs/npm-sbom.log',
         },
         {
+            name: 'daemon-sbom',
+            status: env.SUPPLY_CHAIN_DAEMON_SBOM_STATUS,
+            artifact: 'daemon-sbom/bom.json',
+            log: 'logs/npm-daemon-sbom.log',
+        },
+        {
             name: 'npm-audit',
             status: env.SUPPLY_CHAIN_NPM_AUDIT_STATUS,
             artifact: 'frontend-audit/audit.json',
             log: 'logs/npm-audit.log',
+        },
+        {
+            name: 'daemon-audit',
+            status: env.SUPPLY_CHAIN_DAEMON_AUDIT_STATUS,
+            artifact: 'daemon-audit/audit.json',
+            log: 'logs/npm-daemon-audit.log',
         },
         {
             name: 'maven-dependency-check',
@@ -1000,7 +1082,9 @@ NODE
 | --- | --- | --- | --- |
 | Backend CycloneDX aggregate | $BACKEND_SBOM_STATUS | [backend-sbom/bom.json](backend-sbom/bom.json) | [logs/maven-sbom.log](logs/maven-sbom.log) |
 | Frontend CycloneDX | $FRONTEND_SBOM_STATUS | [frontend-sbom/bom.json](frontend-sbom/bom.json) | [logs/npm-sbom.log](logs/npm-sbom.log) |
+| Daemon CycloneDX | $DAEMON_SBOM_STATUS | [daemon-sbom/bom.json](daemon-sbom/bom.json) | [logs/npm-daemon-sbom.log](logs/npm-daemon-sbom.log) |
 | npm audit (low) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
+| Daemon npm audit (low) | $DAEMON_AUDIT_STATUS | [daemon-audit/audit.json](daemon-audit/audit.json) | [logs/npm-daemon-audit.log](logs/npm-daemon-audit.log) |
 | Maven Dependency-Check | $MAVEN_AUDIT_STATUS | [HTML](backend-audit/dependency-check-report.html), [JSON](backend-audit/dependency-check-report.json), [SARIF](backend-audit/dependency-check-report.sarif) | [logs/maven-audit.log](logs/maven-audit.log) |
 | App image build | $APP_IMAGE_BUILD_STATUS | \`$APP_IMAGE\` | [logs/app-image-build.log](logs/app-image-build.log) |
 | App image smoke | $APP_IMAGE_SMOKE_STATUS | \`$APP_IMAGE\` | [logs/app-image-smoke.log](logs/app-image-smoke.log) |
@@ -1012,16 +1096,16 @@ EOF
         local success_note
         case "$MODE" in
             sbom)
-                success_note="The requested backend and frontend SBOM checks completed successfully, and both CycloneDX JSON reports are non-empty and parseable."
+                success_note="The requested backend and frontend SBOM checks completed successfully, and both CycloneDX JSON reports are non-empty and parseable. The daemon CycloneDX JSON report is non-empty and parseable as well."
                 ;;
             audit)
-                success_note="The requested dependency audit checks completed successfully. npm audit reported no findings at the low threshold, and Dependency-Check JSON contains zero non-suppressed vulnerabilities."
+                success_note="The requested dependency audit checks completed successfully. npm audit reported no findings at the low threshold for every npm project (frontend and daemon), and Dependency-Check JSON contains zero non-suppressed vulnerabilities."
                 ;;
             image)
                 success_note="The requested image checks completed successfully. Both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
                 ;;
             all)
-                success_note="All requested checks completed successfully. Both SBOMs are valid, npm audit and Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
+                success_note="All requested checks completed successfully. Every SBOM is valid, npm audit (frontend and daemon) and Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
                 ;;
             *)
                 success_note="All requested checks completed successfully."
