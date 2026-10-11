@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# scripts/daemon/smoke-archive.sh — Linux-only acceptance smoke for one staged Node
+# scripts/daemon/smoke-archive.sh — host-arch acceptance smoke for one staged Node
 # Daemon release archive.
 #
-# 单一职责：在 Linux 主机上把 `prepare-release.sh` 暂存的官方 linux 归档解开，用归档自带的
-# 冻结运行时 (`runtime/code-server/lib/node`) 运行发行入口 `main.js`，在**受控 PATH（不含
-# 用户 Node / Java）** 下证明归档自足：
+# 单一职责：在 Linux 或 macOS 主机上把 `prepare-release.sh` 暂存的、与本机匹配的归档解开，
+# 用归档自带的冻结运行时 (`runtime/code-server/lib/node`) 运行发行入口 `main.js`，在**受控
+# PATH（不含用户 Node / Java）** 下证明归档自足：
 #   * `--version` / `--help` / `--check-config` 的发行契约行为；真实 schema 是裸 daemon
 #     对象，被外层 `daemon` 包裹的假结构必须被真实入口拒绝；
-#   * 目标平台 `@koromix/koffi-linux-*` 原生预编译模块确实可加载：私有数据目录 0700、
-#     `daemon.lock` 0600 与内核 `flock` 独占；
+#   * 冻结 code-server 布局含 `lib/node` 与 `out/node/entry.js`，且归档内 code-server 的
+#     原生模块能被这份 Node 加载；
+#   * 目标平台 `@koromix/koffi-<linux|darwin>-*` 原生预编译模块确实可加载：私有数据目录
+#     0700、`daemon.lock` 0600 与内核锁独占；
 #   * 真实入口 `main.js --config` 能启动、持锁并被第二个实例按锁冲突拒绝，且在失败、
 #     超时或 SIGINT/SIGTERM 时被终止并等待真实退出后再删除临时目录。
 #
-# 范围严格限定为 Linux：本脚本只对 linux 归档运行，没有 Darwin 分支，也不在 Darwin 主机上
-# 宣称归档可启动（macOS 启动由 native 切片 strict fail-closed 管）。它不下载、不发布、不
-# 注册服务、不改动 systemd，也不触碰用户目录；它启动的唯一长驻进程是被本脚本收尾的受测
-# daemon 实例。
+# Windows 归档不能在 Unix 主机上执行，显式失败而不是跳过。它不下载、不发布、不注册服务，
+# 也不触碰用户目录；它启动的唯一长驻进程是被本脚本收尾的受测 daemon 实例。
 #
 # 用法：
 #   scripts/daemon/smoke-archive.sh <archive.tar.gz>
 #
-# <archive.tar.gz> 必须形如 `kk-studio-daemon-v<version>-linux-<arch>.tar.gz` 且与本机匹配；
-# windows/macos 归档或跨平台归档显式失败而不是整体跳过。
+# <archive.tar.gz> 必须形如 `kk-studio-daemon-v<version>-<linux|macos>-<arch>.tar.gz` 且与
+# 本机匹配；windows 归档或跨平台归档显式失败而不是整体跳过。
 
 set -euo pipefail
 umask 077
@@ -30,16 +30,17 @@ usage() {
   cat <<'EOF'
 Usage: scripts/daemon/smoke-archive.sh <archive.tar.gz>
 
-Linux-only acceptance smoke for one staged Node Daemon release archive. Extracts the
-archive and runs it with its own frozen runtime under a PATH that contains no user Node
-or Java: --version / --help / --check-config (including rejecting a wrapped "daemon"
-object the real schema forbids), the target-platform koffi prebuilt (private directory +
-kernel lock), and a real main.js --config launch that is terminated and reaped on every
-exit path. Only a linux archive for this host's architecture can run; any other platform
-fails closed instead of being skipped. Nothing is downloaded, uploaded or registered.
+Acceptance smoke for one staged Node Daemon release archive on Linux or macOS. Extracts
+the archive and runs it with its own frozen runtime under a PATH that contains no user
+Node or Java: --version / --help / --check-config (including rejecting a wrapped "daemon"
+object the real schema forbids), the frozen code-server entry and its native modules, the
+target-platform koffi prebuilt (private directory + kernel lock), and a real main.js
+--config launch that is terminated and reaped on every exit path. Only a linux or macos
+archive for this host can run; Windows and cross-platform archives fail instead of being
+skipped. Nothing is downloaded, uploaded or registered.
 
-The archive must already exist: run `scripts/daemon/prepare-release.sh <tag> linux <arch>`
-first.
+The archive must already exist: run
+`scripts/daemon/prepare-release.sh <tag> <linux|macos> <arch>` first.
 EOF
 }
 
@@ -101,23 +102,28 @@ require_cmd() {
 }
 for tool in tar uname mktemp cp chmod ln rm; do require_cmd "$tool"; done
 
-# 归档名即平台契约：本脚本只对 linux 归档运行，否则显式失败而不是跳过。
+# 归档名即平台契约：只运行与本机匹配的 linux/macos 归档，否则显式失败而不是跳过。
 archive_name=${ARCHIVE##*/}
-name_pattern='^kk-studio-daemon-v[0-9A-Za-z._-]+-linux-(amd64|arm64)\.tar\.gz$'
+name_pattern='^kk-studio-daemon-v[0-9A-Za-z._-]+-(linux|macos)-(amd64|arm64)\.tar\.gz$'
 [[ $archive_name =~ $name_pattern ]] ||
-  fail "unsupported archive name; this smoke only runs a linux archive named kk-studio-daemon-v<version>-linux-<arch>.tar.gz: $archive_name"
-archive_arch=${BASH_REMATCH[1]}
+  fail "unsupported archive name; this smoke only runs a linux or macos archive named kk-studio-daemon-v<version>-<os>-<arch>.tar.gz: $archive_name"
+archive_os=${BASH_REMATCH[1]}
+archive_arch=${BASH_REMATCH[2]}
 
-[ "$(uname -s)" = Linux ] ||
-  fail "this archive smoke only runs on Linux; macOS/Windows launches are out of its scope"
+host_kernel=$(uname -s)
+case "$host_kernel" in
+  Linux) host_os=linux ;;
+  Darwin) host_os=macos ;;
+  *) fail "this archive smoke only runs on Linux or macOS; Windows launches are out of its scope" ;;
+esac
 host_machine=$(uname -m)
 case "$host_machine" in
   x86_64 | amd64) expected_arch=amd64 ;;
   arm64 | aarch64) expected_arch=arm64 ;;
   *) fail "unsupported host architecture: $host_machine" ;;
 esac
-if [ "$archive_arch" != "$expected_arch" ]; then
-  fail "archive targets linux-${archive_arch} but this host is linux-${expected_arch}; cross-platform archives cannot run here"
+if [ "$archive_os" != "$host_os" ] || [ "$archive_arch" != "$expected_arch" ]; then
+  fail "archive targets ${archive_os}-${archive_arch} but this host is ${host_os}-${expected_arch}; cross-platform archives cannot run here"
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon-smoke.XXXXXXXX")
@@ -128,8 +134,10 @@ mkdir -p "$extract"
 tar -xzf "$ARCHIVE" -C "$extract" || fail "cannot extract the archive"
 
 node_bin="$extract/runtime/code-server/lib/node"
+code_server_entry="$extract/runtime/code-server/out/node/entry.js"
 main_js="$extract/main.js"
 [ -x "$node_bin" ] || fail "archive is missing its frozen runtime: runtime/code-server/lib/node"
+[ -f "$code_server_entry" ] || fail "archive is missing the frozen code-server entry: runtime/code-server/out/node/entry.js"
 [ -f "$main_js" ] || fail "archive is missing its entrypoint: main.js"
 [ -f "$extract/package.json" ] || fail "archive is missing package.json"
 [ -f "$extract/runtime-manifest.json" ] || fail "archive is missing runtime-manifest.json"
@@ -137,9 +145,12 @@ main_js="$extract/main.js"
 [ -f "$extract/THIRD_PARTY_NOTICES" ] || fail "archive is missing THIRD_PARTY_NOTICES"
 [ -d "$extract/ide-extension" ] || fail "archive is missing the IDE extension"
 
-case "$archive_arch" in
-  amd64) koffi=@koromix/koffi-linux-x64 ;;
-  arm64) koffi=@koromix/koffi-linux-arm64 ;;
+case "$archive_os-$archive_arch" in
+  linux-amd64) koffi=@koromix/koffi-linux-x64 ;;
+  linux-arm64) koffi=@koromix/koffi-linux-arm64 ;;
+  macos-amd64) koffi=@koromix/koffi-darwin-x64 ;;
+  macos-arm64) koffi=@koromix/koffi-darwin-arm64 ;;
+  *) fail "no koffi prebuilt mapping for $archive_os-$archive_arch" ;;
 esac
 [ -e "$extract/node_modules/$koffi" ] ||
   fail "archive is missing the target-platform koffi prebuilt: node_modules/$koffi"
@@ -278,6 +289,69 @@ data_dir="$tmp/data"
 probe_out=$(run_isolated "$node_bin" "$probe" "$extract" "$data_dir" 2>&1) ||
   fail "koffi directory lock probe failed: $probe_out"
 [ "$probe_out" = "koffi directory lock ok" ] || fail "unexpected probe output: '$probe_out'"
+
+# 冻结 code-server 自带的原生模块必须能被同一份 Node 加载。没有 .node 即失败，不把空目录当成通过。
+native_probe="$tmp/probe-code-server-native.mjs"
+cat >"$native_probe" <<'PROBE'
+import { readdirSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { isAbsolute, join, relative, resolve } from 'node:path'
+
+const root = resolve(process.argv[2])
+const host = process.argv[3]
+if (!isAbsolute(root)) {
+  console.error('code-server root must be absolute')
+  process.exit(2)
+}
+const require = createRequire(join(root, 'package.json'))
+const found = []
+const foreignMarkers = {
+  'linux-amd64': ['darwin-arm64', 'darwin-x64', 'win32-arm64', 'win32-x64', 'linux-arm64'],
+  'linux-arm64': ['darwin-arm64', 'darwin-x64', 'win32-arm64', 'win32-x64', 'linux-x64'],
+  'macos-amd64': ['linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64', 'darwin-arm64'],
+  'macos-arm64': ['linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64', 'darwin-x64'],
+}[host] ?? []
+function walk(directory) {
+  if (!isAbsolute(directory) || relative(root, directory).startsWith('..')) {
+    console.error('native walk escaped the code-server root')
+    process.exit(4)
+  }
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const target = join(directory, entry.name)
+    if (entry.isSymbolicLink()) {
+      continue
+    }
+    if (entry.isDirectory()) {
+      walk(target)
+    } else if (entry.isFile() && entry.name.endsWith('.node')) {
+      const folded = target.toLowerCase()
+      if (foreignMarkers.some((marker) => folded.includes(marker))) {
+        console.error(`code-server native module is not for ${host}`)
+        process.exit(5)
+      }
+      found.push(target)
+    }
+  }
+}
+walk(root)
+if (found.length === 0) {
+  console.error('code-server native modules are missing')
+  process.exit(2)
+}
+for (const modulePath of found) {
+  require(modulePath)
+  if (!statSync(modulePath).isFile()) {
+    process.exit(3)
+  }
+}
+process.stdout.write(`code-server native modules ok ${found.length}\n`)
+PROBE
+native_out=$(run_isolated "$node_bin" "$native_probe" "$extract/runtime/code-server" "$archive_os-$archive_arch" 2>&1) ||
+  fail "frozen code-server native modules failed to load: $native_out"
+case "$native_out" in
+  "code-server native modules ok "*) ;;
+  *) fail "unexpected code-server native probe output: '$native_out'" ;;
+esac
 
 # 4) 真实入口：陪伴进程持锁后，第二个实例必须因锁冲突失败，并优雅退出。
 run_dir="$tmp/run"

@@ -76,7 +76,16 @@ function harness(
         daemonVersion: options.manifestVersion ?? VERSION,
       }
       if (options.manifestPlatform !== false) {
-        manifest.codeServer = { [`${os}-${arch}`]: { version: '4.141.0' } }
+        manifest.codeServer = {
+          [`${os}-${arch}`]: {
+            url: `https://github.com/fengwk/code-server/releases/download/v4.141.0-kk.1/code-server-4.141.0-kk.1-${os}-${arch}.tar.gz`,
+            sha256: 'a'.repeat(64),
+          },
+        }
+      }
+      if (options.manifestPlatform !== false) {
+        await mkdir(path.join(destination, 'runtime', 'code-server', 'out', 'node'), { recursive: true })
+        await writeFile(path.join(destination, 'runtime', 'code-server', 'out', 'node', 'entry.js'), '')
       }
       await writeFile(path.join(destination, RUNTIME_MANIFEST), JSON.stringify(manifest))
       await writeFile(
@@ -266,6 +275,42 @@ describe('update handler', () => {
     const h = harness({ manifestPlatform: false })
     const outcome = await createUpdateHandler(h.deps)(command(), config(dataDir), new AbortController().signal)
     expect(outcome.phase).toBe('FAILED')
+    expect(outcome.message).toContain('platform runtime')
+  })
+
+  it('rejects a staged runtime that is not the frozen fork asset', async () => {
+    const h = harness({ os: 'macos', arch: 'arm64' })
+    const deps = h.deps
+    const rewritten = createUpdateHandler({
+      ...deps,
+      async extractArchive(archive, destination, signal) {
+        await deps.extractArchive(archive, destination, signal)
+        const manifestPath = path.join(destination, RUNTIME_MANIFEST)
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+          codeServer: Record<string, { url: string }>
+        }
+        manifest.codeServer['macos-arm64'].url =
+          'https://github.com/coder/code-server/releases/download/v4.141.0/code-server-4.141.0-macos-arm64.tar.gz'
+        await writeFile(manifestPath, JSON.stringify(manifest))
+      },
+    })
+    const outcome = await rewritten(
+      command({ artifactUrl: artifactUrl(VERSION, 'macos', 'arm64') }),
+      config(dataDir),
+      new AbortController().signal,
+    )
+    expect(outcome.phase).toBe('FAILED')
+    expect(outcome.message).toContain('not the frozen fork release')
+  })
+
+  it('accepts a macOS staged runtime with the frozen node and entry', async () => {
+    const h = harness({ os: 'macos', arch: 'amd64' })
+    const outcome = await createUpdateHandler(h.deps)(
+      command({ artifactUrl: artifactUrl(VERSION, 'macos', 'amd64') }),
+      config(dataDir),
+      new AbortController().signal,
+    )
+    expect(outcome.phase).toBe('PREPARED')
   })
 
   it('surfaces a non-ENOENT inspection failure instead of treating it as missing', async () => {

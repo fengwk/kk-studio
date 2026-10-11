@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 
-from daemon_fixture import RELEASE_TAG, InstallFixture, TempDirTestCase
+from daemon_fixture import RELEASE_TAG, InstallFixture, TempDirTestCase, sha256_of
 
 
 class LinuxInstallTest(TempDirTestCase):
@@ -42,6 +43,25 @@ class LinuxInstallTest(TempDirTestCase):
         self.assertIn(f"{root}/lib/runtime/code-server/lib/node", text)
         self.assertIn(f"{root}/lib/main.js", text)
         self.assertTrue((self.fixture.state / "active").is_file())
+
+    def test_failed_publication_restores_the_previous_program(self) -> None:
+        # 新发行目录改名失败时，已经移进备份的旧 lib 必须回到受管位置。
+        self.assertEqual(self.install().returncode, 0)
+        previous = (self.fixture.install_root / "lib" / "main.js").read_text()
+        script = Path(self.fixture.script).read_text()
+        patched = script.replace(
+            'mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB"',
+            'false',
+            1,
+        )
+        self.assertNotEqual(script, patched)
+        patched_script = self.tmp / "install-fail-publish.sh"
+        patched_script.write_text(patched)
+        self.fixture.script = patched_script
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.fixture.install_root / "lib" / "main.js").is_file())
+        self.assertEqual((self.fixture.install_root / "lib" / "main.js").read_text(), previous)
 
     def test_second_install_backs_up_previous_program(self) -> None:
         self.assertEqual(self.install().returncode, 0)
@@ -142,6 +162,20 @@ class UnsupportedPlatformTest(TempDirTestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((fixture.install_root / "lib").exists())
 
+    def test_rejects_archive_for_another_platform(self) -> None:
+        # 归档名可以是本机平台，清单里的平台键不是时必须在写入前拒绝。
+        fixture = InstallFixture(self.tmp)
+        foreign = fixture.root / "foreign.tar.gz"
+        fixture._build_archive(foreign, platform="macos-arm64")
+        archive = fixture.http_dir / fixture.asset
+        archive.write_bytes(foreign.read_bytes())
+        (fixture.http_dir / (fixture.asset + ".sha256")).write_text(f"{sha256_of(archive)}  {fixture.asset}\n")
+        config_file, token_file = fixture.make_inputs()
+        result = fixture.run("install", "--config-file", str(config_file), "--token-file", str(token_file))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("不是本机平台", result.stderr)
+        self.assertFalse((fixture.install_root / "lib").exists())
+
 
 class MacosInstallTest(TempDirTestCase):
     def setUp(self) -> None:
@@ -158,6 +192,9 @@ class MacosInstallTest(TempDirTestCase):
         text = plist.read_text()
         self.assertIn("Managed by scripts/daemon/install.sh", text)
         self.assertIn("runtime/code-server/lib/node", text)
+        self.assertIn("<key>ProgramArguments</key>", text)
+        self.assertNotIn("java", text.lower())
+        self.assertNotIn(".jar", text.lower())
         self.assertTrue((self.fixture.install_root / "logs").is_dir())
         self.assertEqual(self.fixture.release_arch, "arm64")
         self.assertEqual(self.fixture.asset, f"kk-studio-daemon-{RELEASE_TAG}-macos-arm64.tar.gz")

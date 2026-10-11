@@ -12,6 +12,8 @@ import json
 import tarfile
 import unittest
 
+from pathlib import Path
+
 from daemon_fixture import (
     DAEMON_VERSION,
     InstallFixture,  # noqa: F401  (re-exported for sibling suites)
@@ -59,6 +61,7 @@ class PrepareReleaseTest(TempDirTestCase):
             "runtime-manifest.json",
             "node_modules/@koromix/koffi-linux-x64/index.js",
             "runtime/code-server/lib/node",
+            "runtime/code-server/out/node/entry.js",
             "ide-extension/extension.js",
             "LICENSE",
             "THIRD_PARTY_NOTICES",
@@ -85,6 +88,29 @@ class PrepareReleaseTest(TempDirTestCase):
                 with tarfile.open(archive) as tar:
                     names = [name.lstrip("./") for name in tar.getnames()]
                 self.assertIn(f"node_modules/@koromix/{koffi}/index.js", names)
+                self.assertIn("runtime/code-server/out/node/entry.js", names)
+                node_name = "node.exe" if os_name == "windows" else "node"
+                self.assertIn(f"runtime/code-server/lib/{node_name}", names)
+                self.assertFalse(any("koffi-freebsd" in name for name in names))
+
+    def test_prunes_foreign_koffi_prebuilts(self) -> None:
+        result = self.fixture.run(RELEASE_TAG, "linux", "amd64", extra_env={"FAKE_NPM_FOREIGN_PREBUILT": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        archive = self.fixture.release_dir("linux-amd64") / f"kk-studio-daemon-{RELEASE_TAG}-linux-amd64.tar.gz"
+        with tarfile.open(archive) as tar:
+            names = [name.lstrip("./") for name in tar.getnames()]
+        self.assertIn("node_modules/@koromix/koffi-linux-x64/index.js", names)
+        self.assertFalse(any("koffi-freebsd" in name for name in names))
+
+    def test_refuses_to_package_before_the_runtime_sha_is_frozen(self) -> None:
+        manifest_path = self.fixture.repo / "daemon" / "runtime-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        del manifest["codeServer"]["linux-amd64"]["sha256"]
+        manifest_path.write_text(json.dumps(manifest))
+        result = self.fixture.run(RELEASE_TAG, "linux", "amd64")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not frozen yet", result.stderr)
+        self.assertFalse(self.fixture.release_dir("linux-amd64").exists())
 
     def test_rejects_missing_target_prebuilt(self) -> None:
         result = self.fixture.run(RELEASE_TAG, "linux", "amd64", extra_env={"FAKE_NPM_OMIT_PREBUILT": "1"})
@@ -106,6 +132,32 @@ class PrepareReleaseTest(TempDirTestCase):
         self.assertNotEqual(self.fixture.run("1.0.12", "linux", "amd64").returncode, 0)
         self.assertNotEqual(self.fixture.run(RELEASE_TAG, "plan9", "amd64").returncode, 0)
         self.assertNotEqual(self.fixture.run(RELEASE_TAG, "linux", "sparc").returncode, 0)
+
+    def test_rejects_a_code_server_link_that_escapes_the_archive(self) -> None:
+        platform = "linux-amd64"
+        name = f"code-server-4.141.0-kk.1-{platform}.tar.gz"
+        runtime = self.fixture.http_dir / name
+        work = self.tmp / "escape"
+        root = work / f"code-server-4.141.0-kk.1-{platform}"
+        (root / "lib").mkdir(parents=True)
+        node = root / "lib" / "node"
+        node.write_text("#!/bin/sh\n")
+        node.chmod(0o755)
+        entry = root / "out" / "node" / "entry.js"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("// entry\n")
+        (root / "lib" / "escape").symlink_to(Path("..") / ".." / "outside")
+        runtime.unlink()
+        with tarfile.open(runtime, "w:gz") as archive:
+            archive.add(root, arcname=root.name)
+        manifest_path = self.fixture.repo / "daemon" / "runtime-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["codeServer"][platform]["sha256"] = sha256_of(runtime)
+        manifest_path.write_text(json.dumps(manifest))
+        result = self.fixture.run(RELEASE_TAG, "linux", "amd64")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("escapes the extraction root", result.stderr)
+        self.assertFalse(self.fixture.release_dir("linux-amd64").exists())
 
     def test_rejects_code_server_hash_mismatch(self) -> None:
         manifest_path = self.fixture.repo / "daemon" / "runtime-manifest.json"

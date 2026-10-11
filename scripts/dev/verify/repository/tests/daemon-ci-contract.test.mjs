@@ -53,6 +53,7 @@ function stepField(step, field, indent = 8) {
     // 一个 step 块的第一行来自 `- ` 之后，因此既可能在 8 空格缩进，也可能在行首。
     return step.match(new RegExp(`^ {${indent}}${field}: (.+)$`, 'm'))?.[1]
         ?? step.match(new RegExp(`^${field}: (.+)$`, 'm'))?.[1]
+        ?? step.match(new RegExp(`^ +${field}: (.+)$`, 'm'))?.[1]
 }
 
 function stepRun(step) {
@@ -84,11 +85,18 @@ function pythonHeredoc(script) {
     return lines.slice(start + 1, end).join('\n')
 }
 
-test('daemon-ci runs the full Node daemon suite on all three platforms', () => {
-    // 平台条件用例由各用例自己决定是否执行；矩阵本身必须覆盖三个平台，并且不整体跳过任何一步。
+test('daemon-ci runs the full Node daemon suite on the five release targets', () => {
+    // 平台条件用例由各用例自己决定是否执行；矩阵必须覆盖五个发行目标，并且不整体跳过 native 套件。
     const job = jobBlock(CI, 'node_daemon')
-    const runners = job.match(/^ {8}os: \[(.+)\]$/m)?.[1]?.split(',').map((value) => value.trim())
-    assert.deepEqual(runners, ['ubuntu-latest', 'macos-latest', 'windows-latest'])
+    const runners = [...job.matchAll(/^ {10}- os: (\S+)\n {12}platform: (\S+)$/gm)]
+        .map((match) => `${match[2]}@${match[1]}`)
+    assert.deepEqual(runners, [
+        'linux-amd64@ubuntu-latest',
+        'linux-arm64@ubuntu-24.04-arm',
+        'macos-arm64@macos-14',
+        'macos-amd64@macos-15-intel',
+        'windows-amd64@windows-latest',
+    ])
     assert.doesNotMatch(job, /fail-fast: true/u)
 
     const steps = stepsOf(job)
@@ -107,8 +115,13 @@ test('daemon-ci runs the full Node daemon suite on all three platforms', () => {
         assert.equal(stepField(step, 'if'), undefined, `${command} must not be conditional`)
         assert.doesNotMatch(step, /continue-on-error:|--passWithNoTests/u)
     }
-    // 覆盖率步骤是矩阵的最后一道 daemon 门禁，构建必须先于它完成。
-    assert.equal(runs.at(-1), 'npm --prefix daemon run coverage')
+    // 构建必须先于覆盖率。macOS 安装器烟测可以跟在覆盖率之后，但不能插到构建之前。
+    const coverage = runs.indexOf('npm --prefix daemon run coverage')
+    assert.ok(coverage > runs.indexOf('npm --prefix daemon run build'))
+    const trailing = steps.slice(coverage + 1)
+    for (const step of trailing) {
+        assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
+    }
 })
 
 test('daemon-ci pins the daemon lockfile cache and stays a read-only push/pull-request gate', () => {
@@ -159,7 +172,8 @@ test('the release pipeline smoke-tests the staged Linux archive with its own run
 
     const run = stepRun(smoke)
     assert.match(run, /scripts\/daemon\/smoke-archive\.sh/u)
-    assert.match(run, /linux-amd64/u)
+    assert.match(run, /linux-\$\{arch\}/u)
+    assert.match(run, /uname -m/u)
     assert.match(run, /GITHUB_REF_NAME/u)
 
     // 烟测入口必须真实使用归档自带的冻结运行时，并在不含用户 Node/Java 的 PATH 下调用。
@@ -173,6 +187,20 @@ test('the release pipeline smoke-tests the staged Linux archive with its own run
     }
     assert.match(smokeScript, /koffi/u)
     assert.match(smokeScript, /acquireDirectoryLock/u)
+    assert.match(smokeScript, /Darwin/u)
+    assert.match(smokeScript, /out\/node\/entry\.js/u)
+    assert.match(smokeScript, /\.node/u)
+    assert.match(smokeScript, /only runs on Linux or macOS/u)
+    assert.doesNotMatch(smokeScript, /only runs on Linux;/u)
+})
+
+test('daemon-ci runs the installer and archive smoke on the macOS runner', () => {
+    const step = stepNamed(CI, 'node_daemon', 'Test the macOS installer and archive smoke with system Bash')
+    assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
+    assert.match(step, /\/bin\/bash --noprofile --norc/u)
+    const run = stepRun(step)
+    assert.match(run, /python3 -m unittest discover -s scripts\/daemon\/tests/u)
+    assert.match(run, /\/bin\/bash --version/u)
 })
 
 test('the release pipeline reuses the same matrix and cannot publish without it', () => {

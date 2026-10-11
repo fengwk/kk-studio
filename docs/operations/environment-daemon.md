@@ -15,13 +15,15 @@ OS 用户只运行**一个受管 Daemon**，固定根目录 `~/.kk-studio`（Win
 LSP client 已内嵌在 Daemon 发行归档中。Studio 没有内置登录鉴权，入口须配置外部认证，只有可信的
 用户与 Agent 才应取得 Environment 的宿主权限。
 
-当前可运行平台为 Linux 与 Windows。macOS 无法在无特权条件下提供所需的完整进程收敛，
-Daemon 启动会明确失败；提供 macOS 归档与安装器入口不代表该平台通过运行验收。
+正式支持 Linux amd64/arm64、macOS amd64/arm64 与 Windows amd64。发行包自带受管 Node 与
+code-server，用户机器不需要安装 Node、JRE 或编译器。进程管理是生命周期管理，不是安全沙箱：
+macOS 没有 Linux 的子进程收养者，不能证明任意故意脱离会话的后代都被收敛；这不拒绝启动普通进程。
+本页不把尚未在真实 macOS/Windows 上跑过的 CI fixture 写成平台验收。
 
 | 平台 | 额外条件 | 常驻方式 |
 | --- | --- | --- |
 | Linux | 可用的 `systemctl --user`，curl 与 `sha256sum` 或 `shasum` | 用户服务 `kk-studio-daemon.service` |
-| macOS | 不具备严格原生进程收敛能力 | 启动失败（`UnsupportedPlatformError`） |
+| macOS | 当前用户 GUI 域的 `launchctl`，curl 与 `shasum` | 用户 LaunchAgent `fun.fengwk.kkstudio.environment-daemon` |
 | Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、可用的 Bash（配置绝对可执行路径或服务 PATH 上可解析） | 当前用户的 AtLogOn 计划任务，仅在该用户交互登录期间运行 |
 
 Linux 注销后要持续运行，由管理员开启 `loginctl enable-linger <用户名>`，安装器不代为开启。
@@ -110,8 +112,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 status|uninstall
    并核验输入文件是私有、同目录、非符号链接且有界的 `daemon.json` / `daemon.token`。同名但非
    受管定义会在下载或写入前被拒绝。
 2. 解析 latest 官方 release tag，下载对应本机 OS 与架构的发行归档
-   `kk-studio-daemon-v<version>-<os>-<arch>.tar.gz` 与 `.sha256`，核对摘要，并确认归档内
-   `runtime-manifest.json` 的版本与解析出的 tag 一致。
+   `kk-studio-daemon-v<version>-<os>-<arch>.tar.gz` 与 `.sha256`，核对摘要。归档内
+   `runtime-manifest.json` 必须声明本机平台的冻结 code-server（`lib/node` 或 Windows 的
+   `lib/node.exe`，以及 `out/node/entry.js`），版本与解析出的 tag 一致。路径不安全或清单不是
+   本机平台时，在写入受管目录前拒绝。用户机器不需要自行安装 Node、编译器或 code-server。
 3. 把暂存配置与 token 复制为下载目录内的 0600 快照，后续只针对该快照做预检，避免校验与发布
    之间被替换。
 4. 解包归档，用其中的运行时对本机快照执行 `--check-config` 预检：它读取配置与 token 文件，用共享
@@ -316,7 +320,8 @@ IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`�
 Linux 通过宿主的 GLib/GIO 读取桌面代理，运行环境须提供相应共享库；服务器/容器通常应显式
 传入环境变量。Windows 通过 WinHTTP 读取当前运行用户的手动代理与 PAC/自动发现设置，不是
 `netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。系统解析失败或返回不支持的
-代理类型时请求失败，不静默改为直连。macOS 因无法提供严格原生进程收敛而拒绝启动，不提供系统代理回退。
+代理类型时请求失败，不静默改为直连。macOS 是受支持的安装与运行平台：进程管理是生命周期
+管理，不是安全沙箱，不能证明任意故意脱离会话的后代都被收敛。系统代理的平台适配不在发行切片内。
 
 私有 code-server 的探活、登录与 IDE loopback HTTP 通道使用显式直连；环境或系统代理不会收到
 这些请求中的私有凭据。
