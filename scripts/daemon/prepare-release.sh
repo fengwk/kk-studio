@@ -335,7 +335,10 @@ EOF
 
   echo "staged daemon release ${release_tag} for ${os}-${arch} (commit ${commit}, version ${version})"
   echo "output: ${RELEASE_DIR}"
-  ls -1 -- "$RELEASE_DIR" | sed 's/^/  /'
+  local output_file
+  for output_file in "$RELEASE_DIR"/*; do
+    printf '  %s\n' "${output_file##*/}"
+  done
 }
 
 main "$@"
