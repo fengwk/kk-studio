@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { once } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { DAEMON_VERSION } from '../src/config.js'
 import * as native from '../src/native/index.js'
 import { waitFor } from './helpers.js'
 import { awaitGone, isAlive } from './native/process-test-util.js'
@@ -17,15 +18,16 @@ import {
 } from './support/daemon-control-server.js'
 
 /**
- * 编译产物 CLI 回归：以真实子进程运行 `dist/main.js`，用真实停机路径结束。
+ * 编译产物 CLI 回归：以真实子进程运行 `dist/main.js`，不读取 TS 源码，也不做源码 fallback。
  *
- * 这是对「同一份编译源码」的端到端证据：控制面走真实 loopback WSS，进程约束走真实 native supervisor。
- * 停机的事实边界：POSIX 上 `child.kill('SIGTERM')` 派发真实 OS 信号、main 正常退出 0；Windows 上 Node 的
- * `kill('SIGTERM')` 是强制 `TerminateProcess`，不会派发 JS 信号监听，因此 Windows 用真实控制面
- * `ERROR/REGISTRATION_REJECTED` 触发正常停机（退出 1）。两条路径都必须收敛在途进程并释放目录锁。
- * 运行前必须先构建（`npm run build`）；本用例不读取 TS 源码，也不做源码 fallback。
+ * <p>信息命令（`--help` / `--version` / `--check-config`）与平台无关，在所有平台都对真实编译产物断言；正常
+ * READY 启动是唯一有平台能力要求的路径：Linux/Windows 上走真实控制面，POSIX 用真实 OS `SIGTERM` 停机、
+ * Windows 用真实控制面 `ERROR/REGISTRATION_REJECTED` 触发正常停机（Node 的 `kill('SIGTERM')` 在 Windows 上是
+ * 强制 `TerminateProcess`，不派发 JS 信号监听）。
+ *
+ * <p>冻结契约下 native 工厂拒绝在 darwin 创建 supervisor：macOS 上编译产物没有任何正常启动路径，对应的真实
+ * 编译产物测试改为断言「显式拒绝 + 安全固定平台诊断」，而不是跳过。
  */
-
 const MAIN_ENTRY = fileURLToPath(new URL('../dist/main.js', import.meta.url))
 
 const cleans: Array<() => void | Promise<void>> = []
@@ -35,8 +37,55 @@ afterEach(async () => {
   }
 })
 
-describe('daemon compiled CLI', () => {
-  it(
+interface CliResult {
+  code: number | null
+  signal: NodeJS.Signals | null
+  stdout: string
+  stderr: string
+}
+
+/** 运行真实编译产物并完整收敛：成功退出或真实信号结束都必须被等待到。 */
+async function runCli(args: string[]): Promise<CliResult> {
+  expect(existsSync(MAIN_ENTRY), `build the daemon first: ${MAIN_ENTRY}`).toBe(true)
+  const child = spawn(process.execPath, [MAIN_ENTRY, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const stdout: string[] = []
+  const stderr: string[] = []
+  child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk.toString('utf8')))
+  child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk.toString('utf8')))
+  cleans.push(() => reap(child))
+  const [code, signal] = await promiseFromExit(child)
+  return { code, signal, stdout: stdout.join(''), stderr: stderr.join('') }
+}
+
+describe('daemon compiled CLI information commands', () => {
+  it('prints usage and version from the compiled entry', async () => {
+    const help = await runCli(['--help'])
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('Usage: kk-studio-daemon --config')
+
+    const version = await runCli(['--version'])
+    expect(version.code).toBe(0)
+    expect(version.stdout).toContain(`kk-studio-daemon ${DAEMON_VERSION}`)
+  })
+
+  it('validates --check-config from the compiled entry with safe diagnostics', async () => {
+    const fixture = await createControlServer()
+    cleans.push(() => fixture.dispose())
+    await writeConfig(fixture)
+
+    const ok = await runCli(['--check-config', fixture.configPath])
+    expect(ok.code).toBe(0)
+    expect(ok.stdout).toContain('Daemon configuration is valid')
+
+    const bad = await runCli(['--check-config', join(fixture.root, 'missing.json')])
+    expect(bad.code).toBe(1)
+    expect(bad.stderr).toContain('Invalid daemon configuration:')
+    expect(bad.stderr).not.toContain(TOKEN)
+  })
+})
+
+describe('daemon compiled CLI runtime', () => {
+  it.runIf(process.platform !== 'darwin')(
     'stops and releases the data lock: POSIX via a real OS SIGTERM, Windows via a graceful control abort',
     async () => {
       expect(existsSync(MAIN_ENTRY), `build the daemon first: ${MAIN_ENTRY}`).toBe(true)
@@ -90,6 +139,28 @@ describe('daemon compiled CLI', () => {
       expect(stderr.join('')).not.toContain(TOKEN)
     },
     120_000,
+  )
+
+  it.runIf(process.platform === 'darwin')(
+    'refuses to start on macOS and surfaces the fixed strict-confinement diagnostic',
+    async () => {
+      const fixture = await createControlServer()
+      cleans.push(() => fixture.dispose())
+      await writeConfig(fixture)
+
+      const result = await runCli(['--config', fixture.configPath])
+      // 正常 READY 启动在 macOS 上被 native 工厂拒绝：非零退出，且控制面未收到任何消息。
+      expect(result.signal).toBeNull()
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(fixture.received).toHaveLength(0)
+      // 平台原因以 `daemon failed:` 输出，不误导为配置错误；不回显注册凭证。
+      expect(result.stderr).toContain('daemon failed:')
+      expect(result.stderr).toContain('strict native process confinement is unavailable on darwin')
+      expect(result.stderr).toContain('setsid')
+      expect(result.stderr).not.toContain(TOKEN)
+    },
+    60_000,
   )
 })
 

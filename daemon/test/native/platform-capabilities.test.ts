@@ -4,6 +4,7 @@ import {
   createProcessSupervisor,
   processScopeCapabilities,
 } from '../../src/native/index.js'
+import { PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
 import { WindowsProcessSupervisor } from '../../src/native/process-supervisor-windows.js'
 import {
   becomeChildSubreaper,
@@ -37,14 +38,15 @@ afterEach(() => {
 })
 
 describe('native capabilities per platform', () => {
-  test('darwin declares session convergence but no orphan adoption', () => {
+  test('darwin declares no guarantee and names the missing strict confinement', () => {
     const capabilities = withPlatform('darwin', () => processScopeCapabilities())
     expect(capabilities.platform).toBe('darwin')
-    expect(capabilities.sessionConvergence).toBe(true)
+    expect(capabilities.sessionConvergence).toBe(false)
     expect(capabilities.orphanAdoption).toBe(false)
     expect(capabilities.jobMembership).toBe(false)
-    // macOS 没有子进程收养者、且未在真实主机验收：限制必须显式暴露。
-    expect(capabilities.unverifiedLimits.length).toBe(2)
+    // macOS 无法证明未登记 setsid 后代的收敛：自述必须与生产拒绝一致，不声明任何保证。
+    expect(capabilities.unverifiedLimits).toHaveLength(1)
+    expect(capabilities.unverifiedLimits[0]).toContain('child subreaper')
   })
 
   test('win32 declares job membership only and no session convergence', () => {
@@ -69,6 +71,22 @@ describe('native capabilities per platform', () => {
 describe('native entry points fail closed on unsupported platforms', () => {
   test('an unsupported platform cannot create a process supervisor', () => {
     expect(() => withPlatform('freebsd', () => createProcessSupervisor())).toThrow(/does not support freebsd/)
+  })
+
+  test('darwin cannot create a side-effecting supervisor', () => {
+    // macOS 无法证明未登记 setsid 后代的收敛：工厂必须拒绝创建，而不是给出覆盖不全的假保证。
+    expect(() => withPlatform('darwin', () => createProcessSupervisor())).toThrow(
+      /strict native process confinement is unavailable on darwin/,
+    )
+    expect(() => withPlatform('darwin', () => createProcessSupervisor())).toThrow(/setsid/)
+  })
+
+  test.runIf(process.platform === 'linux')('linux selects the POSIX supervisor with orphan adoption', async () => {
+    // 工厂在受支持平台上不降级：仍返回 POSIX 实现（子进程收养由构造函数启用）。
+    const supervisor = createProcessSupervisor()
+    expect(supervisor).toBeInstanceOf(PosixProcessSupervisor)
+    // 没有启动任何进程：真实 close 必须直接收敛，不需要任何假绑定。
+    await expect(supervisor.close()).resolves.toBeUndefined()
   })
 
   test('win32 selects the Job-based supervisor and closes cleanly with no processes', async () => {
