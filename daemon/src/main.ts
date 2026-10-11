@@ -99,6 +99,8 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
   let runtime: Runtime | null = null
   let outcome = 0
   let failure: unknown = null
+  // 唯一由本 Daemon 注册的信号处理；finally 必须精确移除它，绝不动用进程上其它外部监听。
+  const onDaemonSignal = (): void => runtime?.close()
   try {
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
@@ -145,9 +147,8 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       },
     })
 
-    const shutdown = (): void => runtime?.close()
-    process.once('SIGINT', shutdown)
-    process.once('SIGTERM', shutdown)
+    process.once('SIGINT', onDaemonSignal)
+    process.once('SIGTERM', onDaemonSignal)
     runtime.start()
     const finalState = await runtime.awaitTermination()
     if (finalState === 'FAILED') {
@@ -159,6 +160,9 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     process.stderr.write(`${invalidConfigurationLine(error)}\n`)
     outcome = 1
   } finally {
+    // 无论正常退出、注册失败还是释放异常，都只移除本 Daemon 自己注册的信号监听；外部监听原样保留。
+    process.removeListener('SIGINT', onDaemonSignal)
+    process.removeListener('SIGTERM', onDaemonSignal)
     if (runtime !== null) {
       runtime.close()
       // 停机只发布终止；必须等所有在途执行真正收敛后，才释放锁与 native 资源。

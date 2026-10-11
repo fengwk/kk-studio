@@ -131,6 +131,13 @@ Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明�
 `pull_request` 作为独立门禁，等价于原来的 process-scope 矩阵；`daemon-release` 通过
 `workflow_call` 复用同一份定义，因此 tag 发布不会绕过平台矩阵。
 
+针对真实冻结 code-server 的 IDE 验收默认跳过，不进入 `daemon-ci`，也不联网下载运行时。本机已解压
+4.141.0 发行包（含随包 Node）时，先 `npm run build`（native 进程范围 helper 与搜索 Worker 只运行编译产物），
+再在 `daemon/` 下用
+`env KK_STUDIO_IDE_ACCEPTANCE_DIR=<解压目录> npx vitest run test/ide` 显式开启：
+`acceptance.test.ts` 验证真实 HTTP/WS 反向数据面与扩展安装，`native-acceptance.test.ts` 用真实原生
+supervisor 启动同一 code-server、覆盖两个 UUID view 的私有 workspace 与关闭期进程收敛。
+
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
 `psql`、`pg_dump`、`pg_restore`、`createdb`、`pg_isready` 必须来自同一主版本且不低于 17；
