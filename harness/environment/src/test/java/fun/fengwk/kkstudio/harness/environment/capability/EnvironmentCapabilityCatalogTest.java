@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaElement;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 
 import java.util.List;
 import java.util.Set;
@@ -126,6 +128,20 @@ class EnvironmentCapabilityCatalogTest {
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC)
             .inputSchema()
             .required());
+
+    // skill.sync 的 targetCommit 只支持本地 Git 后端的真实能力：40 位小写 SHA-1；目录描述必须诚实，
+    // 不得暗示 SHA-256 可用（schema DSL 不支持 pattern，description 是唯一载体）。
+    SchemaElement targetCommitSchema =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC)
+            .inputSchema()
+            .properties()
+            .get("targetCommit");
+    assertTrue(
+        targetCommitSchema instanceof StringSchema,
+        "skill.sync targetCommit must be declared as a string");
+    assertTrue(
+        ((StringSchema) targetCommitSchema).description().contains("40-character"),
+        "skill.sync targetCommit must document the real 40-character SHA-1 support");
 
     List<EnvironmentCapabilityId> fileAndLspCapabilities =
         List.of(

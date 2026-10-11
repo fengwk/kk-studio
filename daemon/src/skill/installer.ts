@@ -19,7 +19,7 @@ import {
   canFallback,
   isAbortError,
 } from './http.js'
-import { loadNativePrivateFs } from './private-fs.js'
+import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 
 const SHA1_PATTERN = /^[0-9a-f]{40}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
@@ -51,12 +51,11 @@ export class SkillPackageInstaller {
   private readonly _skillsRoot: string
   private readonly _stagingRoot: string
   private readonly _backupRoot: string
-  private readonly options: SkillPackageInstallerOptions
   private readonly connectMillis: number
   private readonly readMillis: number
   private readonly directoryMover: DirectoryMover
   private readonly packageLocks = new PackageLocks()
-  private privateFs?: PrivateFs
+  private readonly privateFs: PrivateFs
   private initPromise?: Promise<void>
 
   constructor(
@@ -68,9 +67,9 @@ export class SkillPackageInstaller {
     this._skillsRoot = path.resolve(skillsRoot)
     this._stagingRoot = path.resolve(stagingRoot)
     this._backupRoot = path.resolve(backupRoot)
-    this.options = options ?? {}
     this.connectMillis = options?.connectMillis ?? DEFAULT_CONNECT_MILLIS
     this.readMillis = options?.readMillis ?? DEFAULT_READ_MILLIS
+    this.privateFs = options?.privateFs ?? { ensurePrivateDirectory, writePrivateFile }
     this.directoryMover =
       options?.directoryMover ??
       (async (source: string, target: string): Promise<void> => {
@@ -103,7 +102,6 @@ export class SkillPackageInstaller {
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
       this.initPromise = (async () => {
-        this.privateFs = this.options.privateFs ?? (await loadNativePrivateFs())
         await this.privateFs.ensurePrivateDirectory(this._skillsRoot)
         await this.privateFs.ensurePrivateDirectory(this._stagingRoot)
         await this.privateFs.ensurePrivateDirectory(this._backupRoot)
@@ -354,7 +352,7 @@ export class SkillPackageInstaller {
     checkAbort(signal)
 
     const cloneDir = path.join(this._stagingRoot, `${packageName}.${uuid}.clone`)
-    await this.privateFs!.ensurePrivateDirectory(cloneDir)
+    await this.privateFs.ensurePrivateDirectory(cloneDir)
 
     try {
       const http = createGitHttpClient({
@@ -471,7 +469,7 @@ export class SkillPackageInstaller {
   ): Promise<InstalledSkillPackage> {
     let backedUp = false
     try {
-      await this.privateFs!.ensurePrivateDirectory(stagingDir)
+      await this.privateFs.ensurePrivateDirectory(stagingDir)
 
       await this.materializeTree(source, targetCommit, stagingDir, signal)
 
@@ -481,7 +479,7 @@ export class SkillPackageInstaller {
       try {
         await fs.promises.unlink(commitFile)
       } catch {}
-      await this.privateFs!.writePrivateFile(commitFile, `${targetCommit}\n`)
+      await this.privateFs.writePrivateFile(commitFile, `${targetCommit}\n`)
 
       checkAbort(signal)
 
@@ -636,7 +634,7 @@ export class SkillPackageInstaller {
           )
         }
 
-        await this.privateFs!.writePrivateFile(targetFile, content)
+        await this.privateFs.writePrivateFile(targetFile, content)
 
         // For executable entries (mode 100755):
         // ONLY on POSIX, set the exec bit (chmod 0o700); on Windows rely on writePrivateFile DACL.
@@ -670,7 +668,7 @@ export class SkillPackageInstaller {
           throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Path element is not a directory')
         }
       } else {
-        await this.privateFs!.ensurePrivateDirectory(current)
+        await this.privateFs.ensurePrivateDirectory(current)
       }
     }
   }
