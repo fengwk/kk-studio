@@ -7,10 +7,13 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
@@ -32,24 +35,44 @@ public final class IdeReverseStreamWebSocketHandler extends AbstractWebSocketHan
   private final IdeStreamTicketService streamTickets;
   private final IdeStreamPairingRegistry<IdeStreamPeer> pairings;
   private final IdeCommandTransport transport;
+  private final ClusterNodeRegistry clusterNodeRegistry;
+  private final IdeOwnerStreamForwarder ownerForwarder;
   private final Map<String, WebSocketIdeStreamPeer> peers = new ConcurrentHashMap<>();
 
   public IdeReverseStreamWebSocketHandler(
       IdeStreamTicketService streamTickets,
       IdeStreamPairingRegistry<IdeStreamPeer> pairings,
-      IdeCommandTransport transport) {
+      IdeCommandTransport transport,
+      ClusterNodeRegistry clusterNodeRegistry,
+      IdeOwnerStreamForwarder ownerForwarder) {
     this.streamTickets = Objects.requireNonNull(streamTickets, "streamTickets");
     this.pairings = Objects.requireNonNull(pairings, "pairings");
     this.transport = Objects.requireNonNull(transport, "transport");
+    this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
+    this.ownerForwarder = Objects.requireNonNull(ownerForwarder, "ownerForwarder");
   }
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) throws Exception {
     String ticket = ticketOf(session);
-    if (ticket == null) {
-      reject(session, "reverse stream handshake without a ticket");
+    EnvironmentId environmentId = environmentOf(session);
+    if (ticket == null || environmentId == null) {
+      reject(session, "reverse stream handshake without a ticket or environment");
       return;
     }
+    Optional<ClusterIdeOwnerRoute> route = clusterNodeRegistry.route(environmentId);
+    if (route.isPresent() && !route.get().local()) {
+      // Node 可能落在负载均衡后的非 owner 节点：单跳转发给 READY owner，绝不本地兜底。
+      WebSocketIdeStreamPeer nodePeer = new WebSocketIdeStreamPeer(session);
+      peers.put(session.getId(), nodePeer);
+      ownerForwarder.forward(route.get(), environmentId, ticket, nodePeer);
+      return;
+    }
+    attachLocally(session, ticket);
+  }
+
+  /** 本节点即 owner（或单节点部署）：直接消费 ticket 并交付配对。 */
+  private void attachLocally(WebSocketSession session, String ticket) throws Exception {
     Optional<IdeStreamTicketService.Consumed> consumed = streamTickets.consume(ticket);
     if (consumed.isEmpty()) {
       reject(session, "reverse stream ticket is unknown, consumed or expired");
@@ -68,6 +91,23 @@ public final class IdeReverseStreamWebSocketHandler extends AbstractWebSocketHan
       return;
     }
     peers.put(session.getId(), peer);
+  }
+
+  private static EnvironmentId environmentOf(WebSocketSession session) {
+    if (session.getUri() == null || session.getUri().getQuery() == null) {
+      return null;
+    }
+    for (String pair : session.getUri().getQuery().split("&")) {
+      int equals = pair.indexOf('=');
+      if (equals > 0 && "environment".equals(pair.substring(0, equals))) {
+        try {
+          return EnvironmentId.parse(pair.substring(equals + 1));
+        } catch (IllegalArgumentException error) {
+          return null;
+        }
+      }
+    }
+    return null;
   }
 
   @Override

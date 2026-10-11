@@ -56,6 +56,10 @@ public class ClusterEnvironmentIdeInternalController {
 
   private static final int MAX_METADATA_BODY_BYTES = ClusterInternalPaths.MAX_METADATA_BODY_BYTES;
 
+  /** viewId 的路径约束：只匹配规范 UUID 形状，避免把同前缀下的其它内部子资源（如反向数据端点 {@code /reverse}）误判为 viewId 并返回 405。 */
+  private static final String VIEW_ID =
+      "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+
   private static final List<String> AUTH_HEADER_NAMES =
       List.of(
           HmacClusterInternalAuthentication.HEADER_TARGET,
@@ -90,7 +94,7 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.openView(environment, body);
   }
 
-  @PutMapping("/{viewId}/directory")
+  @PutMapping("/{viewId:" + VIEW_ID + "}/directory")
   public EnvironmentIdeViewDTO changeDirectory(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -99,14 +103,14 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.changeDirectory(environment, viewId, body);
   }
 
-  @PostMapping("/{viewId}/terminal")
+  @PostMapping("/{viewId:" + VIEW_ID + "}/terminal")
   public void focusTerminal(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     localEnvironmentIdeService.focusTerminal(environment, viewId);
   }
 
-  @DeleteMapping("/{viewId}")
+  @DeleteMapping("/{viewId:" + VIEW_ID + "}")
   public void closeView(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);

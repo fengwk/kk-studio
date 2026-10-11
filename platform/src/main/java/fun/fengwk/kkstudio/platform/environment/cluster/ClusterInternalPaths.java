@@ -37,4 +37,14 @@ public final class ClusterInternalPaths {
   public static String viewPath(EnvironmentId environmentId, String viewId) {
     return viewsPath(environmentId) + "/" + viewId;
   }
+
+  /**
+   * 非 owner 节点转发 Daemon 反向数据连接的单跳入口：{@code /internal/environment-ide/{env}/reverse?ticket=<opaque>}。
+   *
+   * <p>ticket 是不透明的 256-bit 一次性凭据，由 owner 铸造并绑定其代际；转发方只做有界帧透传，不解释也不重放。canonical path（含
+   * query）整体参与 HMAC 签名，因此这里返回的字符串必须与发送端逐字一致。
+   */
+  public static String reversePath(EnvironmentId environmentId, String ticket) {
+    return environmentPrefix(environmentId) + "/reverse?ticket=" + ticket;
+  }
 }

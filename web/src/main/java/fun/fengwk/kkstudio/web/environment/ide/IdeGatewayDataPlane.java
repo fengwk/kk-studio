@@ -150,7 +150,7 @@ public final class IdeGatewayDataPlane {
             abandonOnce);
     IdeStreamPeer peer = null;
     try {
-      String streamUrl = properties.streamUrl(issued.ticket());
+      String streamUrl = properties.streamUrl(environmentId, issued.ticket());
       IdeCommand command =
           new IdeCommand(
               IdeAction.OPEN_STREAM,

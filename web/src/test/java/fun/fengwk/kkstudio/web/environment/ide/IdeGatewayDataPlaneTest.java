@@ -212,14 +212,15 @@ class IdeGatewayDataPlaneTest {
     assertEquals(410, response.getStatus());
   }
 
-  /** 由 streamUrl 生成：必须在受控 stream endpoint 前缀下，且携带一次性 ticket、不泄露注册 token。 */
+  /** 由 streamUrl 生成：必须在受控 stream endpoint 前缀下，携带一次性 ticket 与 environment 查询，不泄露注册 token。 */
   @Test
   void streamUrlCarriesTicketUnderControlledPath() {
     IdeGatewayProperties properties = properties();
     assertEquals(
-        "wss://gateway.test/api/harness/environment-stream/v1/abc", properties.streamUrl("abc"));
+        "wss://gateway.test/api/harness/environment-stream/v1/abc?environment=" + ENV,
+        properties.streamUrl(ENV, "abc"));
     properties.setStreamUrlTemplate("https://gateway.test/api/harness/environment-stream/v1");
-    assertThrows(IllegalStateException.class, () -> properties.streamUrl("abc"));
+    assertThrows(IllegalStateException.class, () -> properties.streamUrl(ENV, "abc"));
   }
 
   /** 可编程 IDE 命令传输：OPEN_STREAM 时把脚本化 peer 交付给配对注册表。 */

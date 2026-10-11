@@ -50,6 +50,19 @@ public abstract class WebPostgresTestSupport {
     }
   }
 
+  /** 共享 PG 容器的 JDBC 地址；供需要额外应用上下文（跨节点集成）的测试复用同一实例。 */
+  protected static String sharedJdbcUrl() {
+    return POSTGRES.getJdbcUrl();
+  }
+
+  protected static String sharedJdbcUsername() {
+    return POSTGRES.getUsername();
+  }
+
+  protected static String sharedJdbcPassword() {
+    return POSTGRES.getPassword();
+  }
+
   @DynamicPropertySource
   static void overrideDataSource(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.driver-class-name", Driver.class::getName);
