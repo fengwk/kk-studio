@@ -148,12 +148,12 @@ async function runPosix(stateDir: string, spec: LaunchSpec, state: StateModule):
   }
   process.on('SIGTERM', () => {
     stopping = true
-    void shutdown().then((code) => process.exit(code))
+    void shutdown().then((code) => process.exit(code), () => process.exit(1))
   })
   // 父进程消失也是收尾信号：必须在范围发布之前注册，保证「许可之前没有副作用」的前提不被父进程崩溃打破。
   installParentGoneHook(() => {
     stopping = true
-    void shutdown().then((code) => process.exit(code))
+    void shutdown().then((code) => process.exit(code), () => process.exit(1))
   })
 
   // hook 必须在范围发布之前注册：发布之后父进程随时可能对会话广播温和信号。
@@ -189,19 +189,25 @@ async function runWindows(stateDir: string, spec: LaunchSpec, state: StateModule
   let stopping = false
   let shutdownPromise: Promise<number> | null = null
   // 父进程消失：Job 由 helper 持有，KILL_ON_JOB_CLOSE 只在 helper 自己的句柄关闭时生效，因此这里必须显式清空整个 Job。
+  // 收敛失败（`terminateAndDrain` 抛出）如实发布 cleanup=false 并返回非 0，绝不假装已经清空。
   const shutdown = (): Promise<number> => {
     if (shutdownPromise === null) {
       shutdownPromise = (async () => {
-        const drained = await job.terminateAndDrain(JOB_DRAIN_BUDGET_MILLIS)
-        state.publishQuietly(stateDir, state.CLEANUP_FILE, String(drained))
-        return drained ? 0 : 1
+        try {
+          await job.terminateAndDrain(JOB_DRAIN_BUDGET_MILLIS)
+          state.publishQuietly(stateDir, state.CLEANUP_FILE, 'true')
+          return 0
+        } catch {
+          state.publishQuietly(stateDir, state.CLEANUP_FILE, 'false')
+          return 1
+        }
       })()
     }
     return shutdownPromise
   }
   installParentGoneHook(() => {
     stopping = true
-    void shutdown().then((code) => process.exit(code))
+    void shutdown().then((code) => process.exit(code), () => process.exit(1))
   })
   try {
     state.publish(stateDir, state.SCOPE_FILE, String(job.processId))
@@ -215,9 +221,14 @@ async function runWindows(stateDir: string, spec: LaunchSpec, state: StateModule
     if (stopping) {
       return shutdown()
     }
-    const drained = await job.terminateAndDrain(JOB_DRAIN_BUDGET_MILLIS)
-    state.publish(stateDir, state.CLEANUP_FILE, String(drained))
-    return drained ? 0 : 1
+    try {
+      await job.terminateAndDrain(JOB_DRAIN_BUDGET_MILLIS)
+      state.publish(stateDir, state.CLEANUP_FILE, 'true')
+      return 0
+    } catch {
+      state.publishQuietly(stateDir, state.CLEANUP_FILE, 'false')
+      return 1
+    }
   } finally {
     job.close()
   }

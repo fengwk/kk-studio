@@ -106,6 +106,7 @@ export class WindowsManagedProcess implements ManagedProcess {
   private scopeEstablished = false
   private job: WindowsJobScope | null = null
   private termination: Promise<void> | null = null
+  private closeFailure: unknown = null
   private exitSettled = false
   private settledFlag = false
   private helperExited = false
@@ -177,6 +178,10 @@ export class WindowsManagedProcess implements ManagedProcess {
    */
   async terminate(graceMillis = CONVERGENCE_BUDGET_MILLIS): Promise<void> {
     if (this.settledFlag) {
+      // 收敛已证明，但若收尾时句柄关闭失败，仍然如实抛出，绝不假装成功。
+      if (this.closeFailure !== null) {
+        throw this.closeFailure
+      }
       return
     }
     if (this.termination === null) {
@@ -190,6 +195,9 @@ export class WindowsManagedProcess implements ManagedProcess {
       throw error
     }
     this.complete()
+    if (this.closeFailure !== null) {
+      throw this.closeFailure
+    }
   }
 
   async close(): Promise<void> {
@@ -208,8 +216,15 @@ export class WindowsManagedProcess implements ManagedProcess {
     }
     this.clearPoll()
     if (this.job !== null) {
-      this.job.close()
+      const job = this.job
       this.job = null
+      try {
+        job.close()
+      } catch (error) {
+        // 句柄关闭失败不改变「已经收敛」的结论，但必须留存并在调用方询问时如实上报，绝不假装成功。
+        // 这里不抛出：自然退出路径是在 helper 的 'close' 事件回调里触发的，抛出会变成未捕获异常。
+        this.closeFailure = error
+      }
     }
     state.removeStateDir(this.stateDir)
     this.settle()
@@ -258,16 +273,27 @@ export class WindowsManagedProcess implements ManagedProcess {
       }
       return
     }
-    const drained = await this.job.terminateAndDrain(graceMillis)
-    this.job.close()
+    const job = this.job
     this.job = null
+    let failure: unknown = null
+    try {
+      await job.terminateAndDrain(graceMillis)
+    } catch (error) {
+      failure = error
+    }
+    try {
+      // 即使整组收敛失败也必须释放父进程持有的 Job 句柄：句柄泄漏比单步失败更严重。
+      job.close()
+    } catch (error) {
+      failure = failure === null ? error : new Error(`${describe(failure)}; additionally ${describe(error)}`)
+    }
     await this.awaitHelperExit(graceMillis)
     if (!this.helperExited) {
       this.helper.kill('SIGKILL')
       await this.awaitHelperExit(graceMillis)
     }
-    if (!drained) {
-      throw new Error('the process scope job could not be proven converged')
+    if (failure !== null) {
+      throw failure
     }
   }
 
