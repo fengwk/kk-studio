@@ -4,7 +4,7 @@ import { lstat, open, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { DaemonConfig, ProcessSpec, ProcessSupervisor } from './contracts.js'
+import type { DaemonConfig, ManagedProcess, ProcessSpec, ProcessSupervisor } from './contracts.js'
 import { extractArchive as extractArchiveSafely, MAX_ARCHIVE_BYTES, MAX_CHECKSUM_BYTES, MAX_MANIFEST_BYTES } from './archive.js'
 import { ensurePrivateDirectory, verifyPrivateFile, writePrivateFile } from './native/index.js'
 import { UNIX_UPDATE_SCRIPT, WINDOWS_UPDATE_SCRIPT } from './update-scripts.js'
@@ -146,11 +146,17 @@ function requiredText(raw: Record<string, unknown>, field: string): string {
   return value
 }
 
+/**
+ * 只把 ENOENT 视为「不存在」；权限、路径中段不是目录或其他 IO 故障必须显式失败，绝不伪装成缺失。
+ */
 async function lstatOrNull(target: string): Promise<Awaited<ReturnType<typeof lstat>> | null> {
   try {
     return await lstat(target)
-  } catch {
-    return null
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+      return null
+    }
+    throw new UpdateFailure('the managed installation could not be inspected')
   }
 }
 
@@ -207,6 +213,27 @@ export function releaseOsFor(platform: NodeJS.Platform): ReleaseOs {
   }
 }
 
+/** 官方发布矩阵：daemon 只接受这五个 (os, arch) 组合，绝不让不存在的制品被推导出来。 */
+const PUBLISHED_PLATFORMS = new Set(['linux-amd64', 'linux-arm64', 'macos-amd64', 'macos-arm64', 'windows-amd64'])
+
+/**
+ * 严格把宿主 (os, arch) 聚合到官方发布组合；未发布的组合（例如 windows-arm64）显式失败。
+ *
+ * <p>仅看架构无法判断制品是否存在（Windows 只有 amd64），因此组合校验必须发生在映射处，
+ * 而不是等到下载一个并不存在的资产。
+ */
+export function releasePlatformFor(
+  platform: NodeJS.Platform,
+  arch: string,
+): { os: ReleaseOs; arch: ReleaseArch } {
+  const os = releaseOsFor(platform)
+  const releaseArch = releaseArchFor(arch)
+  if (!PUBLISHED_PLATFORMS.has(`${os}-${releaseArch}`)) {
+    throw new UpdateFailure('the host platform is not covered by the managed update')
+  }
+  return { os, arch: releaseArch }
+}
+
 /**
  * 严格把宿主 CPU 架构映射到官方发布架构；未覆盖架构显式失败，绝不静默回退到 amd64。
  */
@@ -243,61 +270,168 @@ class BoundedText {
   }
 }
 
-async function drain(stream: NodeJS.ReadableStream, sink: BoundedText): Promise<void> {
-  for await (const chunk of stream) {
-    sink.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
-  }
+interface DrainOutcome {
+  error: unknown | null
+}
+
+/** 终止导致的流中断（premature close / destroy / abort）是该流的预期结束；其余读写故障必须如实上报。 */
+const TERMINATION_STREAM_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'ERR_STREAM_DESTROYED', 'ABORT_ERR'])
+
+function isTerminationNoise(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return typeof code === 'string' && TERMINATION_STREAM_CODES.has(code)
 }
 
 /**
- * 通过原生 supervisor 运行一个受管子进程：始终有界消费 stdout/stderr，超时或取消都会终止整个
- * ManagedProcess 并等待其真正收敛，随后才返回结果。
+ * 持续排空一条流到有界收集器：无论正常结束还是失败都返回结果而不抛出，保证两条流都能落定，
+ * 绝不把未处理的 Promise 拒绝留在事件循环里。
+ */
+async function drainBounded(
+  stream: NodeJS.ReadableStream,
+  sink: BoundedText,
+  terminationExpected: () => boolean,
+): Promise<DrainOutcome> {
+  try {
+    for await (const chunk of stream) {
+      sink.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+    }
+    return { error: null }
+  } catch (error) {
+    if (terminationExpected() && isTerminationNoise(error)) {
+      return { error: null }
+    }
+    return { error }
+  }
+}
+
+function convergenceFailure(): UpdateFailure {
+  return new UpdateFailure('the managed process could not be proven converged after termination')
+}
+
+/**
+ * 通过原生 supervisor 运行一个受管子进程。
+ *
+ * <p>stdin 立即关闭（命令只以 argv 传参，绝不从 stdin 读取）；stdout/stderr 始终有界排空，各保留
+ * {@code STREAM_LIMIT_BYTES} 但持续消费以避免背压。超时预算覆盖进程冷启动，取消在启动之前与启动 await
+ * 之后都设围栏，信号随启动规格一起下传。终止只发起一次并缓存为同一个 Promise（发起时即挂拒绝处理，
+ * 绝无未处理拒绝），主路径与 {@code finally} 都 await 同一 Promise，因此返回前执行范围一定已收敛。
+ *
+ * <p>收敛失败与真实 IO 故障都必须显式上报为安全的期望失败，绝不把「终止没有收敛」当成执行成功。
  */
 export async function runManagedProcess(
   processes: ProcessSupervisor,
   spec: ProcessSpec,
   options: RunOptions,
 ): Promise<RunResult> {
-  const managed = await processes.start(spec)
+  const signal = options.signal ?? spec.signal
   const stdout = new BoundedText(STREAM_LIMIT_BYTES)
   const stderr = new BoundedText(STREAM_LIMIT_BYTES)
-  const outDone = drain(managed.stdout, stdout).catch(() => undefined)
-  const errDone = drain(managed.stderr, stderr).catch(() => undefined)
+  let managed: ManagedProcess | null = null
+  let timer: NodeJS.Timeout | null = null
+  let cancelled = false
   let timedOut = false
-  let terminating = false
-  const terminate = (): void => {
-    if (terminating) {
-      return
+  let termination: Promise<void> | null = null
+  let terminationFailure: unknown = null
+
+  const requestTermination = (): Promise<void> => {
+    if (termination !== null) {
+      return termination
     }
-    terminating = true
-    void managed.terminate().catch(() => undefined)
+    if (managed === null) {
+      // 取消可能早于启动，此时没有可终止的范围：必须在启动 await 之后重新收敛。
+      return Promise.resolve()
+    }
+    const target = managed
+    termination = (async () => {
+      try {
+        await target.terminate()
+      } catch (error) {
+        terminationFailure = error
+      }
+    })()
+    return termination
   }
-  const timer =
-    options.timeoutMillis === undefined
-      ? undefined
-      : setTimeout(() => {
-          timedOut = true
-          terminate()
-        }, options.timeoutMillis)
+  const terminationExpected = (): boolean => cancelled || timedOut || termination !== null
   const onAbort = (): void => {
-    terminate()
+    cancelled = true
+    void requestTermination()
   }
-  if (options.signal !== undefined) {
-    if (options.signal.aborted) {
-      terminate()
-    } else {
-      options.signal.addEventListener('abort', onAbort, { once: true })
+  const closeStdin = (target: ManagedProcess): void => {
+    if (!target.stdin.writableEnded) {
+      target.stdin.end()
     }
   }
+  const drain = (target: ManagedProcess, expected: () => boolean): Promise<[DrainOutcome, DrainOutcome]> =>
+    Promise.all([
+      drainBounded(target.stdout, stdout, expected),
+      drainBounded(target.stderr, stderr, expected),
+    ])
+
   try {
-    const exit = await managed.exit
-    await Promise.all([outDone, errDone])
-    return { code: timedOut ? null : exit.exitCode, stdout: stdout.text(), stderr: stderr.text() }
+    if (signal?.aborted === true) {
+      // 取消早于启动：不启动任何进程。
+      cancelled = true
+      return { code: null, stdout: '', stderr: '' }
+    }
+    if (options.timeoutMillis !== undefined && options.timeoutMillis > 0) {
+      // deadline 覆盖进程冷启动；取消/超时在启动 await 之前也生效。
+      timer = setTimeout(() => {
+        timedOut = true
+        void requestTermination()
+      }, options.timeoutMillis)
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    try {
+      managed = await processes.start({ ...spec, signal })
+    } catch {
+      await requestTermination()
+      if (terminationFailure !== null) {
+        throw convergenceFailure()
+      }
+      if (cancelled || timedOut) {
+        return { code: null, stdout: '', stderr: '' }
+      }
+      throw new UpdateFailure('the managed process could not be started')
+    }
+    const running = managed
+    closeStdin(running)
+
+    // 启动 await 之后重新设围栏：取消/超时窗口内绝不继续等待自然退出。
+    if (cancelled || timedOut) {
+      await requestTermination()
+      await drain(running, () => true)
+      if (terminationFailure !== null) {
+        throw convergenceFailure()
+      }
+      return { code: null, stdout: stdout.text(), stderr: stderr.text() }
+    }
+
+    const drained = drain(running, terminationExpected)
+    const exit = await running.exit
+    // 自然退出时这里是幂等空操作；超时/取消时等到终止完全收敛。
+    await requestTermination()
+    const [out, err] = await drained
+    if (terminationFailure !== null) {
+      throw convergenceFailure()
+    }
+    if (out.error !== null || err.error !== null) {
+      throw new UpdateFailure('the managed process output could not be read')
+    }
+    return { code: cancelled || timedOut ? null : exit.exitCode, stdout: stdout.text(), stderr: stderr.text() }
+  } catch (error) {
+    // 异常路径同样先收敛再决定终态；收敛失败绝不报告成功。
+    await requestTermination()
+    if (terminationFailure !== null) {
+      throw convergenceFailure()
+    }
+    throw error
   } finally {
-    if (timer !== undefined) {
+    if (timer !== null) {
       clearTimeout(timer)
     }
-    options.signal?.removeEventListener('abort', onAbort)
+    signal?.removeEventListener('abort', onAbort)
+    await requestTermination()
   }
 }
 
@@ -640,9 +774,10 @@ async function launch(
 
 /** 生产依赖：官方 HTTPS 下载、受控归档解包、原生 supervisor 与 UUID。 */
 export function productionDependencies(processes: ProcessSupervisor): UpdateDependencies {
+  const platform = releasePlatformFor(process.platform, process.arch)
   return {
-    releaseOs: releaseOsFor(process.platform),
-    releaseArch: releaseArchFor(process.arch),
+    releaseOs: platform.os,
+    releaseArch: platform.arch,
     id: () => randomUUID(),
     async fetchTo(url, destination, signal, maxBytes) {
       const effective = AbortSignal.any([signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLIS)])
