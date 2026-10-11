@@ -103,13 +103,17 @@ class LinuxInstallTest(TempDirTestCase):
         self.assertFalse((self.fixture.install_root / "lib").exists())
 
     def test_rejects_invalid_config_without_changing_installation(self) -> None:
-        config_file, token_file = self.fixture.make_inputs(
-            config='{"invalid":true,"daemon":{"studioUrl":"https://studio.example.com"}}'
-        )
-        result = self.fixture.run("install", "--config-file", str(config_file), "--token-file", str(token_file))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Invalid daemon configuration", result.stderr)
-        self.assertFalse((self.fixture.install_root / "lib").exists())
+        # 真实契约是裸 daemon 对象：既拒绝非法取值，也拒绝外层 "daemon" 包裹的假结构。
+        for config in (
+            '{"invalid":true,"studioUrl":"https://studio.example.com"}',
+            '{"daemon":{"studioUrl":"https://studio.example.com"}}',
+        ):
+            with self.subTest(config=config):
+                config_file, token_file = self.fixture.make_inputs(config=config)
+                result = self.fixture.run("install", "--config-file", str(config_file), "--token-file", str(token_file))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Invalid daemon configuration", result.stderr)
+                self.assertFalse((self.fixture.install_root / "lib").exists())
 
     def test_status_before_install_reports_absent(self) -> None:
         result = self.fixture.run("status")
