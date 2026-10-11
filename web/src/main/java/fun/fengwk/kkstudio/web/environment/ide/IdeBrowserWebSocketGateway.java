@@ -326,7 +326,7 @@ public final class IdeBrowserWebSocketGateway {
                 null,
                 null,
                 issued.ticket(),
-                properties.streamUrl(issued.ticket()),
+                properties.streamUrl(environmentId, issued.ticket()),
                 IdeStreamMode.WS,
                 "GET",
                 rawPathAndQuery,

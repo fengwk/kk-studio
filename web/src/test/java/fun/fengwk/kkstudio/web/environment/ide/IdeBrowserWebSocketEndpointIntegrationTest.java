@@ -121,7 +121,13 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
   }
 
   private String reverseUrl(String ticket) {
-    return "ws://localhost:" + port + IdeGatewayProperties.STREAM_PATH + "/" + ticket;
+    return "ws://localhost:"
+        + port
+        + IdeGatewayProperties.STREAM_PATH
+        + "/"
+        + ticket
+        + "?environment="
+        + ENVIRONMENT;
   }
 
   private String cookieHeader(String cookie) {
