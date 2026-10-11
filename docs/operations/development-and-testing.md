@@ -602,7 +602,7 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 env JAVA_HOME=$JAVA_HOME_21 \
   KK_STUDIO_IDE_ACCEPTANCE_DIR=<code-server 解包目录（含随包 lib/node）> \
   KK_STUDIO_PLAYWRIGHT_MODULE_DIR=<@playwright/test 包目录> \
-  mvn -pl web test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false
+  mvn -pl web -am test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Daemon 以真实 `node dist/main.js --config <私有 0600 配置>` 启动；运行前须先在 `daemon/` 下 `npm ci`（用例不联网装
@@ -612,7 +612,9 @@ native scope，并按真实 OS 句柄等待其退出收敛；绝不全局扫 `/t
 `--host-resolver-rules 'MAP *.browser.localhost 127.0.0.1'` 访问独立 IDE
 Origin；视图由真实 `EnvironmentIdeService.OPEN_VIEW` 铸一次性 bootstrap 入口。Origin、303 Location、host-only
 cookie 与反向流 WS 全部以运行期 `@LocalServerPort` 为准（测试体内覆盖同一单例 `IdeOriginProperties` /
-`IdeGatewayProperties`），不使用端口无关模板以外的假设，也不加预热或重试。
+`IdeGatewayProperties`），不通过预热或重跑用户动作掩盖失败。Workbench 就绪要求 Explorer 展示预期文件，
+不只检查外壳已渲染；正常 UI 丢弃后，关闭断言最多等待 5 秒让远端 Extension Host 的 dirty 状态收敛，
+仅明确的 DIRTY 拒绝可继续等待，其它错误立即失败。
 
 必过断言（缺一即失败）：两个 UUID 视图各自加载 workbench；A 编辑保存落盘；B 在同盘观察到 A 的外部改动；每个
 视图的真实终端由浏览器 shell 回写真实 OS pid；dirty 时目录切换被 Daemon 以 `save or discard unsaved changes`
@@ -627,9 +629,24 @@ buffer 与终端，不能拿 reload 冒充清稿。
 静默覆盖；当磁盘上的打开文件被外部删除后，对仍 dirty 的缓冲区保存，冻结版 code-server/VS Code 的原生行为是
 **直接重建该文件**、不弹提示——这是产品行为，验收按此强断言，不为测试去改 VS Code 或伪造 toast。
 
-失败或超时会把脱敏诊断保留到 [reports/e2e/ide-browser/<timestamp>](../../reports/e2e/)（`report.json`、
+诊断产物保留到 `reports/e2e/ide-browser/<timestamp>/`（`report.json`、
 `playwright.log`、`daemon.log`、`screenshots/`）；URL query（bootstrap 与连接 token）一律 `<redacted>`，不
 拷贝私有配置、token、暂存目录或 entry URL 原文。
+验收失败时另外保留原始 owner-only 临时目录用于本地诊断，不上传其中的配置与凭据；进程须先确认收敛。
+
+### Chat IDE 布局与保活
+
+```bash
+npm --prefix frontend run test:layout -- browser-tests/ide-overlay.pw.ts
+```
+
+此 Chromium 回归使用真实 `IdeOverlayPanel` 与 `IdeLifecycleProvider`，API 和 iframe 内容为离线 fixture：
+验证宽 pane 的右侧抽屉、窄 pane 的全宽覆盖、宽窄切换和收起恢复时 iframe 节点不变且只有一次加载，
+以及双 pane 的视图隔离和输入保留。截图写入 `reports/ide-overlay/`。
+
+该基座不经过真实 `AgentPane` 的 slash 或 `+` 菜单，不验证 code-server 与 dirty 协议。真实 IDE 链路由
+上面的单节点验收覆盖；入口接线与路由退出阻断由 `AgentPane`、`IdeOverlayPanel`、
+`IdeLifecycleProvider` 的组件测试覆盖。
 
 ## 可靠性
 
