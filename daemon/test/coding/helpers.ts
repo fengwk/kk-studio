@@ -1,19 +1,5 @@
-import { fileURLToPath } from 'node:url'
 import type { CapabilityCall, CapabilityContext, CapabilityExecutor, CapabilityResult, DaemonConfig } from '../../src/contracts.js'
 import { TextOutputStore } from '../../src/coding/output.js'
-import { configureSearchWorker } from '../../src/coding/search.js'
-
-// 源码/测试态：让搜索能力在 Worker 线程加载 .ts 入口（真实并发，非假后端），钩子把相对 ./x.js 重写为 ./x.ts。
-// 生产默认直接引用编译后的 ./search-worker.js，不经过该注入点，也不引用测试文件。
-configureSearchWorker({
-  workerPath: new URL('../../src/coding/search-worker.ts', import.meta.url),
-  execArgv: [
-    '--import',
-    fileURLToPath(new URL('./ts-strip-hook.mjs', import.meta.url)),
-    '--experimental-transform-types',
-    '--no-warnings',
-  ],
-})
 
 /** 测试用最小配置：只填能力读取的字段。 */
 export function makeConfig(dataDir: string): DaemonConfig {

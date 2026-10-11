@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import type { CapabilityExecutor } from '../contracts.js'
 import { errorResult, textResult } from '../contracts.js'
@@ -246,29 +248,33 @@ function runSearchInWorker(
 }
 
 /**
- * 搜索 Worker 的启动方式。
+ * 搜索 Worker 的定位契约：Worker 只加载编译后的 JS 入口。
  *
- * <p>生产默认基于编译产物事实：编译后的 {@code search.js} 与 {@code search-worker.js} 同目录，直接引用 {@code ./search-worker.js}，不引用任何测试文件、也不需要额外
- * Node 选项。源码/测试态由测试注入 {@link configureSearchWorker} 指向 {@code .ts} 入口与解析钩子，注入点与并发逻辑无关。
+ * <p>只按模块入口位置定位同一个编译产物——编译后的 {@code search.js} 与 {@code search-worker.js} 同目录，默认引用同目录
+ * {@code ./search-worker.js}；Vitest 源码态回落到本项目 {@code dist/coding/search-worker.js}。没有编译产物即 fail-closed 并提示先构建，不使用
+ * loader hooks，也不做源码兼容。
  */
-export interface SearchWorkerOptions {
-  workerPath: URL
-  execArgv: string[]
-}
-
-let searchWorkerOptions: SearchWorkerOptions | null = null
-
-/** 覆盖 Worker 启动方式；测试态注入源码入口与钩子，生产态无需调用。 */
-export function configureSearchWorker(options: SearchWorkerOptions): void {
-  searchWorkerOptions = options
+export function resolveSearchWorkerEntry(base: URL = new URL(import.meta.url)): URL | null {
+  const sibling = new URL('./search-worker.js', base)
+  if (existsSync(fileURLToPath(sibling))) {
+    return sibling
+  }
+  const fromSource = new URL('../../dist/coding/search-worker.js', base)
+  if (existsSync(fileURLToPath(fromSource))) {
+    return fromSource
+  }
+  return null
 }
 
 function createSearchWorker(): Worker {
-  const options = searchWorkerOptions
-  if (options !== null) {
-    return new Worker(options.workerPath, { execArgv: options.execArgv })
+  const entry = resolveSearchWorkerEntry()
+  if (entry === null) {
+    throw new ToolRunFailureError(
+      'the compiled search worker is missing; build the daemon so dist/coding/search-worker.js exists',
+      'INTERNAL',
+    )
   }
-  return new Worker(new URL('./search-worker.js', import.meta.url))
+  return new Worker(entry)
 }
 
 function utf8(value: string): Uint8Array {
