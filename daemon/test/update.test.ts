@@ -3,8 +3,9 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { DaemonConfig } from '../src/contracts.js'
+import { Readable, Writable } from 'node:stream'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DaemonConfig, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import {
   HANDOFF_FILE,
   MANAGED_ENTRY,
@@ -22,6 +23,7 @@ import {
   productionDependencies,
   releaseArchFor,
   releaseOsFor,
+  releasePlatformFor,
   type ReleaseArch,
   type ReleaseOs,
   type UpdateDependencies,
@@ -255,6 +257,23 @@ describe('update handler', () => {
     expect(outcome.phase).toBe('FAILED')
   })
 
+  it('surfaces a non-ENOENT inspection failure instead of treating it as missing', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'kk-update-'))
+    const file = path.join(root, 'not-a-directory')
+    await writeFile(file, 'x')
+    try {
+      const outcome = await createUpdateHandler(harness().deps)(
+        command(),
+        config(path.join(file, 'child')),
+        new AbortController().signal,
+      )
+      expect(outcome.phase).toBe('FAILED')
+      expect(outcome.message).toContain('could not be inspected')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('rejects a staged manifest without an explicit daemon version', async () => {
     const h = harness({ manifestVersion: undefined })
     const deps = h.deps
@@ -425,6 +444,16 @@ describe('release platform mapping', () => {
     expect(releaseArchFor('x64')).toBe('amd64')
     expect(releaseArchFor('arm64')).toBe('arm64')
     expect(() => releaseArchFor('ia32')).toThrow()
+  })
+
+  it('rejects a platform pair that has no published artifact', () => {
+    expect(releasePlatformFor('linux', 'x64')).toEqual({ os: 'linux', arch: 'amd64' })
+    expect(releasePlatformFor('darwin', 'arm64')).toEqual({ os: 'macos', arch: 'arm64' })
+    expect(releasePlatformFor('win32', 'x64')).toEqual({ os: 'windows', arch: 'amd64' })
+    // Windows 只发布 amd64：绝不允许由架构推导出一份并不存在的 windows-arm64 制品。
+    expect(() => releasePlatformFor('win32', 'arm64')).toThrow('the host platform is not covered')
+    expect(() => releasePlatformFor('freebsd', 'x64')).toThrow()
+    expect(() => releasePlatformFor('linux', 'ia32')).toThrow()
   })
 
   it('fails closed when the same operation id is prepared for another platform', async () => {
@@ -603,6 +632,180 @@ describe('production dependencies', () => {
     const url = artifactUrl(VERSION, 'macos', 'arm64')
     expect(url).toBe(`${'https://github.com/fengwk/kk-studio/releases/download'}/v${VERSION}/${artifactFileName(VERSION, 'macos', 'arm64')}`)
     expect(checksumUrl(VERSION, 'macos', 'arm64')).toBe(`${url}.sha256`)
+  })
+})
+
+function stubProcess(
+  options: {
+    stdout?: Readable
+    stderr?: Readable
+    exit?: Promise<ProcessExit>
+    terminate?: () => Promise<void>
+  } = {},
+): ManagedProcess {
+  return {
+    pid: 4242,
+    stdin: new Writable({
+      write(_chunk, _encoding, callback) {
+        callback()
+      },
+    }),
+    stdout: options.stdout ?? Readable.from([]),
+    stderr: options.stderr ?? Readable.from([]),
+    exit: options.exit ?? Promise.resolve({ exitCode: 0, signal: null }),
+    terminate: options.terminate ?? (async () => undefined),
+  }
+}
+
+function supervisorOf(start: (spec: ProcessSpec) => Promise<ManagedProcess>): ProcessSupervisor {
+  return {
+    start,
+    async close() {},
+  }
+}
+
+describe('managed process lifecycle', () => {
+  it('never starts a process when the caller already aborted', async () => {
+    const start = vi.fn(async () => stubProcess())
+    const controller = new AbortController()
+    controller.abort()
+
+    const result = await productionDependencies(supervisorOf(start)).run('node', ['--version'], {
+      signal: controller.signal,
+    })
+
+    expect(result.code).toBeNull()
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('terminates and converges when the caller cancels during startup', async () => {
+    let terminateCalls = 0
+    let release!: () => void
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const managed = stubProcess({
+      exit: new Promise<ProcessExit>(() => undefined),
+      terminate: async () => {
+        terminateCalls += 1
+      },
+    })
+    const controller = new AbortController()
+
+    const running = productionDependencies(
+      supervisorOf(async () => {
+        await gate
+        return managed
+      }),
+    ).run('node', [], { signal: controller.signal, timeoutMillis: 5000 })
+    controller.abort()
+    release()
+    const result = await running
+
+    expect(result.code).toBeNull()
+    expect(terminateCalls).toBe(1)
+    expect(managed.stdin.writableEnded).toBe(true)
+  })
+
+  it('surfaces a termination failure instead of reporting success', async () => {
+    let terminateCalls = 0
+    const managed = stubProcess({
+      terminate: async () => {
+        terminateCalls += 1
+        throw new Error('the scope was not proven converged')
+      },
+    })
+
+    await expect(
+      productionDependencies(supervisorOf(async () => managed)).run('node', [], { timeoutMillis: 1000 }),
+    ).rejects.toThrow('could not be proven converged')
+    expect(terminateCalls).toBe(1)
+  })
+
+  it('closes stdin so a non-interactive command can exit', async () => {
+    const managed = stubProcess()
+
+    const result = await productionDependencies(supervisorOf(async () => managed)).run('node', [], {
+      timeoutMillis: 1000,
+    })
+
+    expect(result.code).toBe(0)
+    expect(managed.stdin.writableEnded).toBe(true)
+  })
+
+  it('counts process startup against the timeout budget', async () => {
+    let terminateCalls = 0
+    const managed = stubProcess({
+      terminate: async () => {
+        terminateCalls += 1
+      },
+    })
+
+    const result = await productionDependencies(
+      supervisorOf(async () => {
+        await new Promise(resolve => setTimeout(resolve, 200))
+        return managed
+      }),
+    ).run('node', [], { timeoutMillis: 50 })
+
+    // deadline 在启动前生效：冷启动耗尽的预算不允许再进入等待自然退出。
+    expect(result.code).toBeNull()
+    expect(terminateCalls).toBe(1)
+  })
+
+  it('surfaces a genuine output failure instead of reporting success', async () => {
+    const ioError = Object.assign(new Error('i/o error'), { code: 'EIO' })
+    const stdout = Readable.from(
+      (async function* () {
+        yield Buffer.from('partial')
+        throw ioError
+      })(),
+    )
+
+    await expect(
+      productionDependencies(supervisorOf(async () => stubProcess({ stdout }))).run('node', [], {
+        timeoutMillis: 1000,
+      }),
+    ).rejects.toThrow('output could not be read')
+  })
+
+  it('absorbs a premature close caused by termination and still converges', async () => {
+    let terminated = false
+    let releaseStream: () => void = () => undefined
+    let releaseExit!: (exit: ProcessExit) => void
+    const stdout = Readable.from(
+      (async function* () {
+        yield Buffer.from('partial')
+        await new Promise<void>(resolve => {
+          releaseStream = resolve
+        })
+        throw Object.assign(new Error('premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' })
+      })(),
+    )
+    const managed = stubProcess({
+      stdout,
+      exit: new Promise<ProcessExit>(resolve => {
+        releaseExit = resolve
+      }),
+      terminate: async () => {
+        terminated = true
+        releaseExit({ exitCode: null, signal: 'SIGKILL' })
+        releaseStream()
+      },
+    })
+    const controller = new AbortController()
+
+    const running = productionDependencies(supervisorOf(async () => managed)).run('node', [], {
+      signal: controller.signal,
+      timeoutMillis: 5000,
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    controller.abort()
+    const result = await running
+
+    expect(terminated).toBe(true)
+    expect(result.code).toBeNull()
+    expect(result.stdout).toBe('partial')
   })
 })
 
