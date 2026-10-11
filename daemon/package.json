@@ -3,7 +3,9 @@
   "version": "1.0.12",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
@@ -18,6 +20,7 @@
     "koffi": "3.3.3",
     "picomatch": "4.0.7",
     "re2-wasm": "1.0.2",
+    "tar": "7.5.22",
     "vscode-jsonrpc": "9.0.3",
     "ws": "8.22.0"
   },

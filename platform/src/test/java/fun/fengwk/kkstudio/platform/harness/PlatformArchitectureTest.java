@@ -38,12 +38,10 @@ class PlatformArchitectureTest {
       List.of(
           "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.canvas.infra.",
-          "fun.fengwk.kkstudio.web.",
-          "fun.fengwk.kkstudio.harness.daemon.");
+          "fun.fengwk.kkstudio.web.");
 
   /** platform/pom.xml 完全禁止声明的组合根模块：platform 永远不是启动入口。 */
-  private static final List<String> FORBIDDEN_POM_ARTIFACTS =
-      List.of("kk-studio-web", "kk-studio-harness-daemon");
+  private static final List<String> FORBIDDEN_POM_ARTIFACTS = List.of("kk-studio-web");
 
   /** 只允许 test scope 声明的下游基础设施模块：主产物不得依赖它们，测试可用真实实现做集成覆盖。 */
   private static final List<String> TEST_SCOPED_POM_ARTIFACTS =
@@ -331,13 +329,6 @@ class PlatformArchitectureTest {
                 "dev.langchain4j",
                 "langchain4j-open-ai",
                 "1.19.0"),
-            // 在非 harness/mcp 模块中引入 MCP
-            new DeclaredDependency(
-                "harness/daemon/pom.xml",
-                "dependencies",
-                "dev.langchain4j",
-                "langchain4j-mcp",
-                "1.19.0"),
             // 使用 io.github.langchain4j 坐标
             new DeclaredDependency(
                 "share/pom.xml",
@@ -354,15 +345,13 @@ class PlatformArchitectureTest {
                 "1.19.0"));
 
     List<String> violations = findDisallowedLangChainDependencies(simulated);
-    assertEquals(4, violations.size());
+    assertEquals(3, violations.size());
     assertTrue(violations.get(0).contains("platform/pom.xml"));
     assertTrue(violations.get(0).contains("langchain4j-open-ai"));
-    assertTrue(violations.get(1).contains("harness/daemon/pom.xml"));
-    assertTrue(violations.get(1).contains("langchain4j-mcp"));
-    assertTrue(violations.get(2).contains("share/pom.xml"));
-    assertTrue(violations.get(2).contains("io.github.langchain4j"));
-    assertTrue(violations.get(3).contains("web/pom.xml"));
-    assertTrue(violations.get(3).contains("dependencyManagement"));
+    assertTrue(violations.get(1).contains("share/pom.xml"));
+    assertTrue(violations.get(1).contains("io.github.langchain4j"));
+    assertTrue(violations.get(2).contains("web/pom.xml"));
+    assertTrue(violations.get(2).contains("dependencyManagement"));
   }
 
   /** 验证 profile、pluginManagement 等隐蔽上下文中的 LangChain 依赖均会被精确拦截。 */

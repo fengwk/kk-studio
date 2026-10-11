@@ -4,19 +4,15 @@ name: kk-studio-distributed
 #
 # 网络不变量（scripts/dev/verify/e2e/validate_distributed.py 静态验证）：
 # - postgres / minio / http-mock 同时加入 node-a-db 与 node-b-db 两个隔离网络；
-# - app-a 只加入 node-a-db + daemon-a + app-ingress-a，app-b 只加入 node-b-db
-#   + daemon-b + app-ingress-b；daemon-a / daemon-b 各只加入自己的 daemon 网络；
+# - app-a 只加入 node-a-db + app-ingress-a，app-b 只加入 node-b-db + app-ingress-b；
 # - 任何网络都不同时包含 app-a 与 app-b，两节点之间没有 DNS/IP 路径；
 # - 数据库网络是 internal，app 的宿主端口只通过各自的 ingress 网络发布。
 #
-# 复用约束：app 镜像用 deploy/local/Dockerfile，daemon 镜像用
-# deploy/reliability/daemon.Dockerfile，HTTP mock 直接挂载 deploy/test/mock，
+# 复用约束：app 镜像用 deploy/local/Dockerfile，HTTP mock 直接挂载 deploy/test/mock，
 # 不复制任何实现。两个 App 共享同一 PostgreSQL database 与 MinIO bucket。
 #
-# 身份变量（固定默认值，可由宿主环境覆盖；scripts/dev/verify/e2e/distributed.sh 导出同一组
+# 端口变量（固定默认值，可由宿主环境覆盖；scripts/dev/verify/e2e/distributed.sh 导出同一组
 # 默认值）：
-#   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME daemon 对应的 environment name
-#   DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN / DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
 #   DISTRIBUTED_APP_A_PORT / DISTRIBUTED_APP_B_PORT 宿主 app 端口
 #
 # 全部凭据是固定、可丢弃的测试值；宿主 MiniMax 凭据不会被本栈读取，
@@ -174,7 +170,6 @@ services:
         condition: service_healthy
     networks:
       - node-a-db
-      - daemon-a
       - app-ingress-a
 
   app-b:
@@ -195,79 +190,17 @@ services:
         condition: service_healthy
     networks:
       - node-b-db
-      - daemon-b
       - app-ingress-b
-
-  workspace-init:
-    build:
-      context: ../..
-      dockerfile: deploy/reliability/daemon.Dockerfile
-    image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
-    user: "0:0"
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      [
-        "mkdir -p /workspace-a /workspace-b && chown -R 10001:10001 /workspace-a /workspace-b",
-      ]
-    volumes:
-      - daemon-workspace-a:/workspace-a
-      - daemon-workspace-b:/workspace-b
-    # 只初始化 named volume owner，不需要网络；加入 daemon-a 只是避免 Compose
-    # 隐式 default network，不产生任何 App 间路径。
-    networks:
-      - daemon-a
-
-  daemon-a:
-    image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
-    init: true
-    depends_on:
-      app-a:
-        condition: service_healthy
-      workspace-init:
-        condition: service_completed_successfully
-    environment:
-      KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}
-      KK_STUDIO_DAEMON_STUDIO_URL: http://app-a:8080
-      KK_STUDIO_DAEMON_NOTE: Distributed test node A (shared data, no app-to-app network).
-    volumes:
-      - daemon-workspace-a:/workspace
-    networks:
-      - daemon-a
-
-  daemon-b:
-    image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
-    init: true
-    depends_on:
-      app-b:
-        condition: service_healthy
-      workspace-init:
-        condition: service_completed_successfully
-    environment:
-      KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}
-      KK_STUDIO_DAEMON_STUDIO_URL: http://app-b:8080
-      KK_STUDIO_DAEMON_NOTE: Distributed test node B (shared data, no app-to-app network).
-    volumes:
-      - daemon-workspace-b:/workspace
-    networks:
-      - daemon-b
 
 volumes:
   postgres-data:
   minio-data:
-  daemon-workspace-a:
-  daemon-workspace-b:
 
 networks:
   node-a-db:
     driver: bridge
     internal: true
   node-b-db:
-    driver: bridge
-    internal: true
-  daemon-a:
-    driver: bridge
-    internal: true
-  daemon-b:
     driver: bridge
     internal: true
   app-ingress-a:

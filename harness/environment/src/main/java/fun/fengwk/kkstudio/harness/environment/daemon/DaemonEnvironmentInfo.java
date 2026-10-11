@@ -5,11 +5,13 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 /**
- * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、时区、真实进程用户、canonical HOME、稳定说明与受控临时目录。
+ * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、CPU 架构、时区、真实进程用户、canonical HOME、稳定说明与受控临时目录。
  *
  * <p>{@code note} 会进入受信任的模型 SYSTEM Prompt，只能来自 Daemon 固定默认值或可信操作者配置，禁止包含凭证、秘密或不可信外部文本。格式校验与下游 XML
  * escape 不能替代这一信任边界。{@code userName}、{@code homeDirectory} 与 {@code tempDirectory} 只用于 Card 和当前
  * Environment Prompt 展示，不构成 cwd、默认 workdir 或沙箱。
+ *
+ * <p>{@code architecture} 是宿主真实 CPU 架构，用于在官方发布矩阵中挑选与本机一致的发行归档；它是稳定 canonical 取值，不接受任意自由文本。
  */
 public record DaemonEnvironmentInfo(
     DaemonOperatingSystem operatingSystem,
@@ -17,12 +19,14 @@ public record DaemonEnvironmentInfo(
     String userName,
     String homeDirectory,
     String note,
-    String tempDirectory) {
+    String tempDirectory,
+    DaemonArchitecture architecture) {
 
   public static final int MAX_NOTE_CHARS = 512;
 
   public DaemonEnvironmentInfo {
     operatingSystem = Objects.requireNonNull(operatingSystem, "operatingSystem");
+    architecture = Objects.requireNonNull(architecture, "architecture");
     timeZone = validateTimeZone(timeZone);
     userName = validateUserName(userName);
     homeDirectory = validateHomeDirectory(homeDirectory, operatingSystem);

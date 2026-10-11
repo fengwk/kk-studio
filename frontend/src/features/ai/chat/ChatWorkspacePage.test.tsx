@@ -2,8 +2,9 @@ import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
+import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
@@ -45,6 +46,10 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn(),
     getEnvironmentUpdate: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
+    createIdeView: vi.fn().mockResolvedValue({}),
+    changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
+    openIdeViewTerminal: vi.fn().mockResolvedValue(undefined),
+    closeIdeView: vi.fn().mockResolvedValue(undefined),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -200,6 +205,37 @@ beforeEach(() => {
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
 })
 
+function renderWorkspaceRouter(
+  initialEntries: string[],
+  element: React.ReactNode = <ChatWorkspacePage />,
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/chats/:chatId',
+        element: <IdeLifecycleProvider>{element}</IdeLifecycleProvider>,
+      },
+      {
+        path: '/chats',
+        element: <div>Chats List</div>,
+      },
+    ],
+    { initialEntries },
+  )
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+}
+
+function renderWorkspace(chatId = CHAT_ID) {
+  return renderWorkspaceRouter([`/chats/${chatId}`])
+}
+
 describe('ChatWorkspacePage', () => {
   it('renders the Chat title and changes the shared pane layout', async () => {
     const user = userEvent.setup()
@@ -311,18 +347,7 @@ describe('ChatWorkspacePage', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: OTHER_THREAD }),
     )
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}?thread=${THREAD_ID}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_ID}?thread=${THREAD_ID}`])
 
     await screen.findByRole('heading', { name: 'Workspace' })
     // 根控制区在各自 Thread 身份加载完成后才出现，因此等待两个 pane 都就绪。
@@ -340,9 +365,6 @@ describe('ChatWorkspacePage', () => {
 
   it('supports in-component navigation to new thread via searchParams and consumes it via callback', async () => {
     // 测试意图：验证同组件在 URL 导航至新 thread 时，当前 focused pane 正常消费并通过 callback 确认清理 query
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
     const NEW_THREAD = '33333333-4444-5555-6666-777777777777'
     let testNavigate!: (to: string) => void
     function NavTestBridge() {
@@ -353,15 +375,7 @@ describe('ChatWorkspacePage', () => {
       return <ChatWorkspacePage />
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<NavTestBridge />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <NavTestBridge />)
 
     await screen.findByRole('heading', { name: 'Workspace' })
     act(() => {
@@ -377,9 +391,6 @@ describe('ChatWorkspacePage', () => {
     // 测试意图：验证当 pane 处于在途操作（如 acceptCommandBatch 在途）时，
     // URL deep-link 触发 initialTarget 变更会被 hasPendingOperation 门禁拦截，
     // 不切换目标且不消费 URL query
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
     const user = userEvent.setup()
     let resolveBatch!: () => void
     const pendingPromise = new Promise<{ thread: HarnessThreadDTO; entries: HarnessSessionEntryDTO[] }>((resolve) => {
@@ -398,15 +409,7 @@ describe('ChatWorkspacePage', () => {
       return <ChatWorkspacePage />
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<NavTestBridge />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <NavTestBridge />)
 
     await screen.findByRole('heading', { name: 'Workspace' })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -459,10 +462,6 @@ describe('ChatWorkspacePage', () => {
       }),
     )
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-
     let testNavigate!: (to: string) => void
     function SwitchTestBridge() {
       const nav = useNavigate()
@@ -472,15 +471,7 @@ describe('ChatWorkspacePage', () => {
       return <ChatWorkspacePage />
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[`/chats/${CHAT_A}`]}>
-          <Routes>
-            <Route path="/chats/:chatId" element={<SwitchTestBridge />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWorkspaceRouter([`/chats/${CHAT_A}`], <SwitchTestBridge />)
 
     // 确认 chat A 渲染
     expect(await screen.findByRole('heading', { name: 'Workspace chat-A' })).toBeInTheDocument()
@@ -525,21 +516,6 @@ describe('ChatWorkspacePage', () => {
     expect(finalB.layout).toBe('grid-4')
   })
 })
-
-function renderWorkspace(chatId = CHAT_ID) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
-        <Routes>
-          <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
-}
 
 describe('ChatWorkspacePage 新建分支路由', () => {
   const ROOT_ENTRY: HarnessSessionEntryDTO = {
@@ -957,6 +933,133 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     })
     expect(document.querySelector('[data-breadcrumb="session"]')).toBeNull()
     expect(document.querySelector('[data-breadcrumb="branch"]')).toBeNull()
+  })
+
+  it('retains pane in DOM when it has an active IDE view after layout shrinks, without fake pending effect', async () => {
+    const user = userEvent.setup()
+    seedLayout('split-2')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      {
+        id: 'a1000000-0000-4000-8000-000000000001',
+        name: 'env-1',
+        ready: true,
+        status: 'READY',
+        version: '1',
+        createTime: '2026-10-01T00:00:00Z',
+        updateTime: '2026-10-01T00:00:00Z',
+        capabilities: [],
+        statusExpiresAt: null,
+        lastSeen: null,
+        homeDirectory: '/home/user',
+      },
+    ])
+    vi.mocked(environmentService.createIdeView).mockResolvedValue({
+      viewId: 'v-pane-2',
+      environmentId: 'a1000000-0000-4000-8000-000000000001',
+      directory: '/home/user',
+      entryUrl: 'https://ide.test/?workspace=p2',
+    })
+
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
+
+    // Open IDE on pane-2
+    const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
+    await user.click(plusButtons[1]!)
+    const filesCommands = await screen.findAllByText('files')
+    await user.click(filesCommands[0]!)
+
+    // Pane-2 has no bound environment, so it presents the inline environment selector. Confirming starts the view.
+    const confirmBtn = await screen.findByRole('button', { name: '确认' })
+    await user.click(confirmBtn)
+
+    // Wait for pane-2 IDE view to mount
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenCalled()
+    })
+
+    // Switch layout to 1 pane
+    const layoutTrigger = screen.getByRole('button', { name: '布局' })
+    await user.click(layoutTrigger)
+    await user.click(screen.getByRole('option', { name: '1' }))
+
+    // Pane-2 must still be retained in mountedPanes with hidden and inert
+    const paneElements = document.querySelectorAll('.chat-pane')
+    expect(paneElements.length).toBe(2)
+    const hiddenPane = Array.from(paneElements).find((el) => el.getAttribute('data-pane-id') === 'pane-2')
+    expect(hiddenPane).toHaveAttribute('hidden')
+    expect(hiddenPane).toHaveAttribute('inert')
+
+    // And it must NOT block new branch dialog destination (not fake pending effect)
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'branch-to-hidden')
+    await chooseDestination(user, 2)
+    await confirmBranch(user)
+
+    // Branch creation succeeds and closes dialog without blocking on destination
+    await waitFor(() => {
+      expect(document.querySelector('.new-branch-dialog')).toBeNull()
+    })
+  })
+
+  it('prompts confirmation when leaving workspace with mounted IDE, and cancels navigation on cancel', async () => {
+    const user = userEvent.setup()
+    seedLayout('split-2')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      {
+        id: 'a1000000-0000-4000-8000-000000000001',
+        name: 'env-1',
+        ready: true,
+        status: 'READY',
+        version: '1',
+        createTime: '2026-10-01T00:00:00Z',
+        updateTime: '2026-10-01T00:00:00Z',
+        capabilities: [],
+        statusExpiresAt: null,
+        lastSeen: null,
+        homeDirectory: '/home/user',
+      },
+    ])
+    vi.mocked(environmentService.createIdeView).mockResolvedValue({
+      viewId: 'v-pane-2',
+      environmentId: 'a1000000-0000-4000-8000-000000000001',
+      directory: '/home/user',
+      entryUrl: 'https://ide.test/?workspace=p2',
+    })
+
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
+
+    // Open IDE on pane-2
+    const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
+    await user.click(plusButtons[1]!)
+    const filesCommands = await screen.findAllByText('files')
+    await user.click(filesCommands[0]!)
+    const confirmBtn = await screen.findByRole('button', { name: '确认' })
+    await user.click(confirmBtn)
+
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenCalled()
+    })
+
+    // Click back to conversation ("回到对话")
+    const backBtn = screen.getByRole('link', { name: '回到对话' })
+    await user.click(backBtn)
+
+    // Confirmation dialog appears
+    expect(screen.getByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).toBeInTheDocument()
+
+    // Click cancel in leave dialog
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    // Workspace and panes remain in document, navigation did not happen
+    expect(screen.queryByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+    expect(document.querySelectorAll('.chat-pane')).toHaveLength(2)
   })
 
   // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费本切片

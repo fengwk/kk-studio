@@ -22,13 +22,13 @@ vi.mock('@/shared/api/environment-service', () => ({
 vi.mock('./clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
 const saved: EnvironmentInstallConfigDTO = {
-  operatingSystem: 'windows', javaHome: 'C:\\Java\\21',
+  operatingSystem: 'windows',
   daemon: { studioUrl: 'https://saved.example.com', bashExecutable: 'bash.exe', note: 'saved note',
     lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'] } } } },
 }
 // Shared codec normalization adds the omitted optional marker array.
 const savedNormalized: EnvironmentInstallConfigDTO = {
-  operatingSystem: 'windows', javaHome: 'C:\\Java\\21',
+  operatingSystem: 'windows',
   daemon: { studioUrl: 'https://saved.example.com', bashExecutable: 'bash.exe', note: 'saved note',
     lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'], firstMatchMarkers: [] } } } },
 }
@@ -76,7 +76,6 @@ describe('EnvironmentInstallModal', () => {
     expect(environmentService.getEnvironment).toHaveBeenCalled()
     expect(screen.queryByText(/可选：Java/)).toBeNull()
     expect(document.querySelector('details, summary')).toBeNull()
-    expect(screen.getByRole('textbox', { name: 'Java home (JDK 21)' })).toHaveValue('C:\\Java\\21')
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('saved note')
     expect(screen.getByRole('checkbox')).toBeChecked()
     expect(screen.getByRole('textbox', { name: 'LSP servers (JSON)' }))
@@ -259,7 +258,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith(
       'env-1', '7',
-      { operatingSystem: 'linux', javaHome: null,
+      { operatingSystem: 'linux',
         daemon: { studioUrl: window.location.origin, note: null, bashExecutable: null, lsp: null } },
     ))
   })
@@ -298,18 +297,13 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Studio 地址无效/))
     await user.clear(origin()); await user.type(origin(), 'https://valid.example.com/')
     await chooseSelectOption(user, '操作系统', 'Linux')
-    const java = screen.getByRole('textbox', { name: 'Java home (JDK 21)' })
-    fireEvent.change(java, { target: { value: '/opt/${JAVA_HOME}' } })
-    await user.click(copyButton())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Java home 无效/))
-    fireEvent.change(java, { target: { value: '' } })
     const bash = screen.getByRole('textbox', { name: 'Bash 可执行文件' })
     await user.clear(bash); await user.type(bash, ' bash ')
     const note = screen.getByRole('textbox', { name: '备注' })
     await user.clear(note); await user.type(note, '  note  ')
     await user.click(copyButton())
     await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
-      operatingSystem: 'linux', javaHome: null,
+      operatingSystem: 'linux',
       daemon: { studioUrl: 'https://valid.example.com', bashExecutable: ' bash ', note: 'note', lsp: null },
     }))
   })
@@ -322,8 +316,6 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(copyButton()).toBeEnabled())
     expect(screen.getByText('不含路径或查询参数。')).toBeInTheDocument()
     expect(origin()).toHaveAttribute('placeholder', 'https://studio.example.com')
-    expect(screen.getByRole('textbox', { name: 'Java home (JDK 21)' })).toHaveAttribute(
-      'placeholder', '/usr/lib/jvm/java-21-openjdk')
     expect(screen.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveAttribute('placeholder', '/bin/bash')
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveAttribute('placeholder', '例如：开发工作站')
     await user.click(screen.getByRole('checkbox'))
@@ -352,7 +344,6 @@ describe('EnvironmentInstallModal', () => {
     vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
-    expect(screen.getByRole('textbox', { name: 'Java home (JDK 21)' })).toHaveValue('')
     expect(screen.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveValue('')
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('')
     expect(screen.queryByRole('textbox', { name: 'LSP servers (JSON)' })).toBeNull()
@@ -379,7 +370,7 @@ describe('EnvironmentInstallModal', () => {
     expect(editor).toHaveValue(real)
     await user.click(copyButton())
     await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
-      operatingSystem: 'linux', javaHome: null,
+      operatingSystem: 'linux',
       daemon: {
         studioUrl: window.location.origin, note: null, bashExecutable: null,
         lsp: { servers: { jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'], rootMarkers: [], firstMatchMarkers: [] } } },
@@ -421,40 +412,33 @@ describe('EnvironmentInstallModal', () => {
     vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
-    const java = screen.getByRole('textbox', { name: 'Java home (JDK 21)' })
     const bash = screen.getByRole('textbox', { name: 'Bash 可执行文件' })
     const note = screen.getByRole('textbox', { name: '备注' })
     const examples = {
-      linux: { javaHome: '/usr/lib/jvm/java-21-openjdk', bash: '/bin/bash' },
-      macos: { javaHome: '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home', bash: '/bin/bash' },
-      windows: { javaHome: 'C:\\Program Files\\Java\\jdk-21', bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
+      linux: { bash: '/bin/bash' },
+      macos: { bash: '/bin/bash' },
+      windows: { bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
     }
-    expect(java).toHaveAttribute('placeholder', examples.linux.javaHome)
     expect(bash).toHaveAttribute('placeholder', examples.linux.bash)
     expect(note).toHaveAttribute('placeholder', '例如：开发工作站')
-    expect(java).toHaveValue('')
     expect(bash).toHaveValue('')
     expect(note).toHaveValue('')
     await chooseSelectOption(user, '操作系统', 'macOS')
-    expect(java).toHaveAttribute('placeholder', examples.macos.javaHome)
     expect(bash).toHaveAttribute('placeholder', examples.macos.bash)
-    expect(java).toHaveValue('')
-    fireEvent.change(java, { target: { value: 'D:\\custom\\jdk' } })
+    expect(bash).toHaveValue('')
     fireEvent.change(bash, { target: { value: 'D:\\custom\\bash.exe' } })
     await user.type(note, '我的工作站')
     await chooseSelectOption(user, '操作系统', 'Windows')
-    expect(java).toHaveAttribute('placeholder', examples.windows.javaHome)
     expect(bash).toHaveAttribute('placeholder', examples.windows.bash)
-    expect(java).toHaveValue('D:\\custom\\jdk')
     expect(bash).toHaveValue('D:\\custom\\bash.exe')
     expect(note).toHaveValue('我的工作站')
     await user.click(copyButton())
     await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
-      operatingSystem: 'windows', javaHome: 'D:\\custom\\jdk',
+      operatingSystem: 'windows',
       daemon: { studioUrl: window.location.origin, bashExecutable: 'D:\\custom\\bash.exe', note: '我的工作站', lsp: null },
     }))
     const payload = JSON.stringify(vi.mocked(environmentService.saveInstallConfig).mock.calls[0])
-    expect(payload).not.toContain(examples.windows.javaHome)
+    expect(payload).not.toContain(examples.windows.bash)
     expect(payload).not.toContain('开发工作站')
   })
 

@@ -14,7 +14,7 @@ import java.util.Set;
  * Daemon READY 宿主 metadata payload 的严格 codec：版本化、类型化，拒绝未知字段、重复键、尾随内容与缺失字段。
  *
  * <p>wire shape：{@code
- * {"version":4,"daemonVersion":"1.0.10","environment":{"operatingSystem":...,"timeZone":...,"userName":...,"homeDirectory":...,"note":...,"tempDirectory":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
+ * {"version":5,"daemonVersion":"1.0.12","environment":{"operatingSystem":...,"architecture":...,"timeZone":...,"userName":...,"homeDirectory":...,"note":...,"tempDirectory":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
  */
 public final class DaemonCapabilitiesCodec {
 
@@ -25,7 +25,14 @@ public final class DaemonCapabilitiesCodec {
 
   private static final Set<String> ROOT_FIELDS = Set.of("version", "daemonVersion", "environment");
   private static final Set<String> ENVIRONMENT_FIELDS =
-      Set.of("operatingSystem", "timeZone", "userName", "homeDirectory", "note", "tempDirectory");
+      Set.of(
+          "operatingSystem",
+          "architecture",
+          "timeZone",
+          "userName",
+          "homeDirectory",
+          "note",
+          "tempDirectory");
 
   public String encode(DaemonCapabilities capabilities) {
     Objects.requireNonNull(capabilities, "capabilities");
@@ -34,6 +41,7 @@ public final class DaemonCapabilitiesCodec {
     root.put("daemonVersion", capabilities.daemonVersion());
     ObjectNode environment = root.putObject("environment");
     environment.put("operatingSystem", capabilities.environment().operatingSystem().wireValue());
+    environment.put("architecture", capabilities.environment().architecture().wireValue());
     environment.put("timeZone", capabilities.environment().timeZone());
     environment.put("userName", capabilities.environment().userName());
     environment.put("homeDirectory", capabilities.environment().homeDirectory());
@@ -103,6 +111,7 @@ public final class DaemonCapabilitiesCodec {
               }
             });
     String operatingSystemText = text(node, "operatingSystem", "READY environment");
+    String architectureText = text(node, "architecture", "READY environment");
     String timeZone = text(node, "timeZone", "READY environment");
     String userName = text(node, "userName", "READY environment");
     String homeDirectory = text(node, "homeDirectory", "READY environment");
@@ -115,7 +124,8 @@ public final class DaemonCapabilitiesCodec {
           userName,
           homeDirectory,
           note,
-          tempDirectory);
+          tempDirectory,
+          DaemonArchitecture.fromWireValue(architectureText));
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           "READY environment validation failed: " + error.getMessage(), error);

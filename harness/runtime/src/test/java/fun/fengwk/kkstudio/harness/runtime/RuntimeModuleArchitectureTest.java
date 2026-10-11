@@ -142,20 +142,6 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "org.postgresql:postgresql",
             "org.springframework:spring-jdbc"));
-    assertDirectProductionDependencies(
-        harnessRoot.resolve("daemon/pom.xml"),
-        Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
-            "com.google.re2j:re2j",
-            "com.squareup.okhttp3:okhttp",
-            "fun.fengwk.kk-studio:kk-studio-share",
-            "fun.fengwk.kk-studio:kk-studio-harness-common",
-            "fun.fengwk.kk-studio:kk-studio-harness-environment",
-            "net.java.dev.jna:jna",
-            "net.java.dev.jna:jna-platform",
-            "org.eclipse.lsp4j:org.eclipse.lsp4j",
-            "org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc",
-            "org.eclipse.jgit:org.eclipse.jgit"));
 
     List<String> violations = scanViolations(main);
     assertTrue(
@@ -249,10 +235,9 @@ class RuntimeModuleArchitectureTest {
                 "provider",
                 "contributor-api",
                 "builtin",
-                "infra",
-                "daemon")),
+                "infra")),
         () ->
-            "harness modules must be exactly common/mcp/tool/environment/environment-server/runtime/provider/contributor-api/builtin/infra/daemon, got "
+            "harness modules must be exactly common/mcp/tool/environment/environment-server/runtime/provider/contributor-api/builtin/infra, got "
                 + modules);
   }
 

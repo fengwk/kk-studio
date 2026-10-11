@@ -12,8 +12,6 @@ const installCode = "code'$(touch NEVER)"
 
 const config = (): EnvironmentInstallConfigDTO => ({
   operatingSystem: 'linux',
-  // Backend forbids $ % ~ in javaHome; quotes/backticks still exercise shell escaping.
-  javaHome: "/opt/jdk-21/汉字 '`",
   daemon: {
     studioUrl: 'https://daemon.example.com/',
     note: "汉字 ' \" $ ` $(touch NEVER) KK_STUDIO_INSTALL",
@@ -129,7 +127,6 @@ describe('install command', () => {
   it('quotes the Windows download and does not stage credentials on the client', () => {
     const input = config()
     input.operatingSystem = 'windows'
-    input.javaHome = "C:\\Program Files\\Java\\it's"
     const command = generateInstallCommand(origin, environmentId, 'windows', installCode)
     const encoded = encodeURIComponent(environmentId).replaceAll("'", "''")
     const encodedCode = encodeURIComponent(installCode).replaceAll("'", "''")
@@ -144,7 +141,6 @@ describe('install command', () => {
     expect(command).not.toContain('WriteAllText')
     expect(command).not.toContain('Set-Acl')
     expect(command).not.toContain('-JavaHome')
-    expect(command).not.toContain(input.javaHome!)
     const uninstall = generateUninstallCommand('windows', origin)
     expect(uninstall).toContain(
       "'https://studio.example.com/api/harness/environments/uninstall/windows'",
@@ -155,7 +151,6 @@ describe('install command', () => {
   it('normalizes like the shared codec: origin, note, extension case and marker trim', () => {
     expect(validateInstallConfig({
       operatingSystem: 'linux',
-      javaHome: '/opt/jdk',
       daemon: {
         studioUrl: 'HTTPS://Host:8443/',
         note: '  hi  ',
@@ -173,7 +168,6 @@ describe('install command', () => {
       },
     })).toEqual({
       operatingSystem: 'linux',
-      javaHome: '/opt/jdk',
       daemon: {
         studioUrl: 'https://host:8443',
         note: 'hi',
@@ -194,8 +188,8 @@ describe('install command', () => {
 
   it('detects defaults without overriding saved settings', () => {
     expect(['Win32', 'MacIntel', 'Linux'].map(detectInstallOS)).toEqual(['windows', 'macos', 'linux'])
-    expect(validateInstallConfig({ operatingSystem: 'linux', javaHome: null, daemon: { studioUrl: 'http://[::1]:8080/', note: null, bashExecutable: null } }))
-      .toEqual({ operatingSystem: 'linux', javaHome: null,
+    expect(validateInstallConfig({ operatingSystem: 'linux', daemon: { studioUrl: 'http://[::1]:8080/', note: null, bashExecutable: null } }))
+      .toEqual({ operatingSystem: 'linux',
         daemon: { studioUrl: 'http://[::1]:8080', note: null, bashExecutable: null, lsp: null } })
   })
 
@@ -208,9 +202,7 @@ describe('install command', () => {
   })
 
   it.each([
-    { javaHome: 'relative' }, { javaHome: '/${JAVA_HOME}' }, { javaHome: '/opt/jdk~' },
-    { javaHome: '/opt/jdk%20' }, { javaHome: '/opt/jdk ' }, { javaHome: ' /opt/jdk' },
-    { javaHome: ' ' }, { javaHome: 12 },
+    { javaHome: '/opt/jdk' },
     { operatingSystem: 'unknown' }, { daemon: { studioUrl: '' } },
     { daemon: { studioUrl: 'https://host', note: 'x'.repeat(513) } },
     { daemon: { studioUrl: 'https://host', note: '' } },
@@ -219,20 +211,13 @@ describe('install command', () => {
     { daemon: { studioUrl: 'https://host', bashExecutable: 'a\nb' } },
     { daemon: { studioUrl: 'https://host', other: 1 } }, { other: 1 },
   ])('rejects invalid fields without echoing values %#', patch => {
-    expect(() => validateInstallConfig({ ...config(), ...patch } as EnvironmentInstallConfigDTO))
+    expect(() => validateInstallConfig({ ...config(), ...patch } as unknown as EnvironmentInstallConfigDTO))
       .toThrow(/^Invalid /)
   })
 
-  it('rejects Windows javaHome with invalid characters or UNC gaps', () => {
-    const input = config()
-    input.operatingSystem = 'windows'
-    for (const javaHome of ['java', 'C:java', 'C:\\Java|bad', '/opt/jdk', 'C:\\Java\\jdk~']) {
-      expect(() => validateInstallConfig({ ...input, javaHome })).toThrow('installConfig.javaHome')
-    }
-    expect(validateInstallConfig({ ...input, javaHome: 'C:\\Java\\jdk-21' }).javaHome)
-      .toBe('C:\\Java\\jdk-21')
-    expect(validateInstallConfig({ ...input, javaHome: '\\\\server\\share\\jdk' }).javaHome)
-      .toBe('\\\\server\\share\\jdk')
+  it('rejects javaHome as an unknown field', () => {
+    expect(() => validateInstallConfig({ ...config(), javaHome: '/opt/jdk' } as unknown as EnvironmentInstallConfigDTO))
+      .toThrow('Invalid installConfig')
   })
 
   it.each([

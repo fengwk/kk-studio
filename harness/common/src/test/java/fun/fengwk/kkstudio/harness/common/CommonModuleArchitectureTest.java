@@ -34,7 +34,6 @@ class CommonModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.contributor.",
           "fun.fengwk.kkstudio.harness.builtin.",
           "fun.fengwk.kkstudio.harness.infra.",
-          "fun.fengwk.kkstudio.harness.daemon.",
           "fun.fengwk.kkstudio.harness.kernel.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",
