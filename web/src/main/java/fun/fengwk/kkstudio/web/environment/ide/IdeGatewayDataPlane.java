@@ -73,6 +73,9 @@ public final class IdeGatewayDataPlane {
 
   private static final int MAX_FORWARDED_HEADERS = 64;
 
+  /** 单次入站轮询间隔：空闲轮询必须远小于 exchange 的真实 deadline，从而既能及时反应关闭也不误判慢速上游。 */
+  private static final long POLL_INTERVAL_NANOS = 200_000_000L;
+
   private final IdeCommandTransport transport;
   private final IdeStreamTicketService streamTickets;
   private final IdeStreamPairingRegistry<IdeStreamPeer> pairings;
@@ -372,11 +375,13 @@ public final class IdeGatewayDataPlane {
       }
     }
 
+    /**
+     * 转发请求体并在结束后发送 HTTP END。
+     *
+     * <p>与 Node peer 一致：所有 method（含 GET/HEAD）都走同一条「流式 body + END」路径，绝不因为 method 丢弃 body；无 body 时
+     * {@code read} 立即返回 -1，只发送 END。
+     */
     private void sendRequestBody(HttpServletRequest request) throws IOException {
-      if (!expectsBody(request.getMethod())) {
-        relay.sendHttpEnd();
-        return;
-      }
       try (InputStream input = request.getInputStream()) {
         byte[] buffer = new byte[DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES];
         int read;
@@ -414,7 +419,7 @@ public final class IdeGatewayDataPlane {
     private void pump() throws IOException {
       IdeStreamPeer.Inbound inbound = nextInbound();
       if (inbound == null) {
-        closed = true;
+        // 空闲轮询（非关闭）不应终止 exchange：nextInbound 只在 peer.closed() 时置位 closed。
         return;
       }
       if (inbound instanceof IdeStreamPeer.Inbound.Text text) {
@@ -424,15 +429,21 @@ public final class IdeGatewayDataPlane {
       }
     }
 
+    /**
+     * 取下一个入站帧。
+     *
+     * <p>{@code poll} 返回 {@code null} 只表示本次没有入站帧（空闲），不是连接关闭：慢速 IDE 可能超过一个 poll 间隔才产生首字节。只有 {@link
+     * IdeStreamPeer#closed()} 才视为关闭，其余情况继续等待到本次 exchange 的真实 deadline。
+     */
     private IdeStreamPeer.Inbound nextInbound() throws IOException {
       long remaining = deadlineNanos - System.nanoTime();
       if (remaining <= 0L) {
         throw new SocketTimeoutException("ide exchange timed out");
       }
-      Duration wait = Duration.ofNanos(Math.min(remaining, 1_000_000_000L));
+      Duration wait = Duration.ofNanos(Math.min(remaining, POLL_INTERVAL_NANOS));
       try {
         IdeStreamPeer.Inbound inbound = peer.poll(wait);
-        if (inbound == null) {
+        if (inbound == null && peer.closed()) {
           closed = true;
         }
         return inbound;
@@ -481,10 +492,5 @@ public final class IdeGatewayDataPlane {
       }
       responseStarted = true;
     }
-  }
-
-  private static boolean expectsBody(String method) {
-    String upper = method == null ? "" : method.toUpperCase(Locale.ROOT);
-    return !upper.equals("GET") && !upper.equals("HEAD");
   }
 }
