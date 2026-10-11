@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { createProcessSupervisor } from '../../src/native/index.js'
+import { PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
 import type { ManagedProcess, ProcessSupervisor } from '../../src/contracts.js'
 import { awaitGone, fixtureCommand, fixturePath, isAlive, waitForFile, waitForPid } from './process-test-util.js'
 
@@ -11,6 +11,9 @@ const TEST_TIMEOUT = 30_000
 const STREAM_TIMEOUT = 10_000
 
 // 执行范围的跨平台真实进程验收：用只依赖 Node 的夹具造出真实父子/孙进程层级，并用原生 pid 断言收敛。
+//
+// 这里直接构造 POSIX 实现，而不是经工厂：冻结契约下工厂拒绝在 macOS 创建 supervisor（严格收敛不可用），
+// 但 POSIX 实现本身仍要在真实的两种 POSIX 平台（Linux / macOS）上被验证；工厂分派由 platform-capabilities 覆盖。
 describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)', () => {
   let workdir: string
   let supervisor: ProcessSupervisor
@@ -18,7 +21,7 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
 
   beforeEach(() => {
     workdir = mkdtempSync(join(tmpdir(), 'kk-studio-native-proc-'))
-    supervisor = createProcessSupervisor()
+    supervisor = new PosixProcessSupervisor()
   })
 
   afterEach(async () => {
@@ -189,7 +192,8 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
   }, TEST_TIMEOUT)
 
   test('an unregistered setsid descendant is an unverified boundary on macOS', async () => {
-    // macOS 没有子进程收养者：脱离会话的后代被重新挂到 launchd，native 无法核实其归属——这是明确暴露的限制，不是静默泄漏。
+    // macOS 没有子进程收养者：脱离会话的后代被重新挂到 launchd，native 无法核实其归属。这里把该实现边界固定成原生证据，
+    // 正是生产工厂拒绝在 darwin 创建 supervisor 的依据；不是静默泄漏，也不是可容忍的降级。
     if (process.platform !== 'darwin') {
       return
     }
@@ -358,7 +362,7 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
   }, TEST_TIMEOUT)
 
   test('start after close fails closed', async () => {
-    const local = createProcessSupervisor()
+    const local = new PosixProcessSupervisor()
     await local.close()
     const command = fixtureCommand('hold.mjs', join(workdir, 'x.pid'))
     await expect(local.start({ executable: command.executable, args: command.args, cwd: workdir })).rejects.toThrow(/closed/)

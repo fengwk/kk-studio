@@ -12,8 +12,8 @@ describe('native process scope capabilities', () => {
       expect(capabilities.jobMembership).toBe(false)
     }
     if (process.platform === 'darwin') {
-      // macOS 没有子进程收养者：未登记且 setsid 的后代无法被证明收敛，必须如实说明。
-      expect(capabilities.sessionConvergence).toBe(true)
+      // macOS 无法证明未登记且 setsid 的后代收敛：不声明任何保证，必须如实说明。
+      expect(capabilities.sessionConvergence).toBe(false)
       expect(capabilities.orphanAdoption).toBe(false)
       expect(capabilities.unverifiedLimits.length).toBeGreaterThan(0)
     }

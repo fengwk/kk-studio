@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 
 import type { CapabilityExecutor, DaemonConfig } from './contracts.js'
 import {
+  INVALID_CONFIGURATION_MARKER,
   checkConfig,
   decodeBase64Args,
   invalidConfigurationLine,
@@ -12,6 +13,7 @@ import {
 import { Runtime, detectEnvironmentInfo } from './runtime.js'
 import { createWebSocketTransport } from './transport/control.js'
 import {
+  UnsupportedPlatformError,
   acquireDirectoryLock,
   createProcessSupervisor,
   ensurePrivateDirectory,
@@ -102,12 +104,14 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
   // 唯一由本 Daemon 注册的信号处理；finally 必须精确移除它，绝不动用进程上其它外部监听。
   const onDaemonSignal = (): void => runtime?.close()
   try {
+    // native 工厂是最严格的启动前提：平台无法提供严格收敛时，必须在任何本地副作用（mkdir/lock）之前失败关闭。
+    // 立即登记 closer，保证后续任一装配步骤失败时这个真实资源也会被释放。
+    const supervisor = createProcessSupervisor()
+    closers.push(() => supervisor.close())
+
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
     lock = await acquireDirectoryLock(dataDir)
-
-    const supervisor = createProcessSupervisor()
-    closers.push(() => supervisor.close())
 
     const lspGroup = createLspCapabilities(config, supervisor)
     closers.push(() => lspGroup.close())
@@ -157,7 +161,7 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     }
   } catch (error) {
     failure = error
-    process.stderr.write(`${invalidConfigurationLine(error)}\n`)
+    process.stderr.write(`${startupFailureLine(error)}\n`)
     outcome = 1
   } finally {
     // 无论正常退出、注册失败还是释放异常，都只移除本 Daemon 自己注册的信号监听；外部监听原样保留。
@@ -205,6 +209,19 @@ async function closeAll(closers: Array<() => Promise<void>>): Promise<unknown[]>
     }
   }
   return errors
+}
+
+/**
+ * 启动失败的安全单行诊断。
+ *
+ * <p>平台无法提供严格收敛时给出固定原因（例如 darwin 的 strict confinement/setsid 不可用），让 operator 看到真实的平台
+ * 事实；其它失败继续复用配置诊断的脱敏规则。这里只输出 native 构造的固定文案，绝不回显原始异常、路径或凭证。
+ */
+function startupFailureLine(error: unknown): string {
+  if (error instanceof UnsupportedPlatformError) {
+    return `${INVALID_CONFIGURATION_MARKER}: ${error.message}`
+  }
+  return invalidConfigurationLine(error)
 }
 
 function aggregateFailure(primary: unknown, cleanupErrors: unknown[]): Error {
