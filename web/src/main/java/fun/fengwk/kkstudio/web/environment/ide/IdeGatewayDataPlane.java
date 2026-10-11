@@ -162,11 +162,11 @@ public final class IdeGatewayDataPlane {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
     if (!properties.configured()) {
-      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
     if (requireOrigin && !IdeOriginPolicy.httpRequestAllowed(request)) {
-      response.sendError(HttpServletResponse.SC_FORBIDDEN);
+      sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
     }
     if (requireOrigin && forwardRemote(environmentId, rawPathAndQuery, request, response)) {
@@ -174,15 +174,15 @@ public final class IdeGatewayDataPlane {
     }
     IdeBrowserSessionRegistry.Session session = requireSession(environmentId, request);
     if (session == null) {
-      response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+      sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
       return;
     }
     if (!generationCurrent(environmentId, session)) {
-      response.sendError(HttpServletResponse.SC_CONFLICT);
+      sendError(response, HttpServletResponse.SC_CONFLICT);
       return;
     }
     if (!workspaceQueryAllowed(session, request)) {
-      response.sendError(HttpServletResponse.SC_FORBIDDEN);
+      sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
     }
 
@@ -231,6 +231,11 @@ public final class IdeGatewayDataPlane {
         | EnvironmentCapabilityBusyException
         | EnvironmentCapabilitySendUncertainException error) {
       sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+    } catch (IOException | RuntimeException error) {
+      // 上游/传输失败：尚未提交时清理已被 forward 写入的响应头与缓冲，避免残留 Content-Encoding/ETag/Location 污染错误响应；
+      // 已提交的截断响应无法回滚，保持异常中止（绝不伪造已完整收到的压缩字节）。
+      resetUncommitted(response);
+      throw error;
     } finally {
       abandonOnce.run();
       pairing.close();
@@ -250,7 +255,7 @@ public final class IdeGatewayDataPlane {
       throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
     if (!properties.configured()) {
-      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
     if (forwardRemote(environmentId, rawPathAndQuery(request), request, response)) {
@@ -259,13 +264,13 @@ public final class IdeGatewayDataPlane {
     Optional<IdeBootstrapTicketService.Ticket> consumed =
         bootstrapTickets.consume(request.getParameter("token"));
     if (consumed.isEmpty() || !consumed.get().environmentId().equals(environmentId)) {
-      response.sendError(HttpServletResponse.SC_GONE);
+      sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
     IdeBootstrapTicketService.Ticket ticket = consumed.get();
     Optional<IdeSessionIdentity> current = transport.ideSessionIdentity(environmentId);
     if (current.isEmpty() || !current.get().equals(ticket.identity())) {
-      response.sendError(HttpServletResponse.SC_GONE);
+      sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
     String cookieValue;
@@ -273,7 +278,7 @@ public final class IdeGatewayDataPlane {
       cookieValue = sessions.open(ticket.identity(), ticket.viewId(), ticket.workspacePath());
     } catch (IllegalStateException error) {
       // 票据对应的视图已关闭/workspace 不匹配：该入口凭据永久失效（与未知票据同一语义），绝不建立会话。
-      response.sendError(HttpServletResponse.SC_GONE);
+      sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
     StringBuilder cookie =
@@ -414,9 +419,18 @@ public final class IdeGatewayDataPlane {
     return tokens;
   }
 
+  /** 尚未提交时发出错误响应：先 reset 清除任何已写入的响应头/缓冲（如上游转发的 Content-Encoding），再 sendError。 */
   private static void sendError(HttpServletResponse response, int status) throws IOException {
     if (!response.isCommitted()) {
+      response.reset();
       response.sendError(status);
+    }
+  }
+
+  /** 尚未提交时回滚响应状态/头/缓冲；已提交的响应无法回滚。 */
+  private static void resetUncommitted(HttpServletResponse response) {
+    if (!response.isCommitted()) {
+      response.reset();
     }
   }
 
@@ -447,6 +461,11 @@ public final class IdeGatewayDataPlane {
                 @Override
                 public void sendBinary(byte[] frame) {
                   peer.sendBinary(frame);
+                }
+
+                @Override
+                public void sendAcknowledgement(byte[] encodedAck) {
+                  peer.sendAcknowledgement(encodedAck);
                 }
               });
     }

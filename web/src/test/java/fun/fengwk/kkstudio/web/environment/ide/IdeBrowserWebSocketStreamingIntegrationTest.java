@@ -26,13 +26,18 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeStreamCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
 import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
 import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamControlFrame;
 import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamMode;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -51,6 +56,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * 浏览器 WS 数据面的**原生分段**契约：大消息按 ≤64 KiB 分段与 FIN 标记双向流转，不整包缓冲。
@@ -152,6 +159,70 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
             codec().encodeWsSegment(true, index == segments.size() - 1, segments.get(index)));
       }
       assertEquals(payload, browser.textMessages.poll(20, TimeUnit.SECONDS));
+    }
+  }
+
+  /**
+   * 原生 HTTP 数据面（真实 Tomcat + 真实 Spring WebSocket 反向连接）：code-server 发送小型 gzip 压缩响应（HTTP_RESPONSE +
+   * body + END）后立即断开反向连接，网关仍必须向浏览器交付完整 200 与原始压缩字节。
+   *
+   * <p>这是「传输在响应入队后关闭」的整链回归：关闭后的消费 ACK 不得中断已入队的交付，也不得在浏览器侧残留 Content-Encoding 错误响应。
+   */
+  @Test
+  void completesCompressedHttpResponseThenReverseClose() throws Exception {
+    byte[] plain = "hello-from-code-server".getBytes(StandardCharsets.UTF_8);
+    byte[] compressed = gzip(plain);
+    IdeSessionIdentity identity =
+        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    HttpFakeDaemon daemon = new HttpFakeDaemon(compressed);
+    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    when(endpoint.requestIde(eq(ENVIRONMENT), any()))
+        .thenAnswer(
+            invocation -> {
+              IdeCommand command = invocation.getArgument(1);
+              assertEquals(IdeAction.OPEN_STREAM, command.action());
+              assertEquals(IdeStreamMode.HTTP, command.mode());
+              daemon.dial(reverseUrl(command.ticket()));
+              CompletableFuture<IdeReply> reply = new CompletableFuture<>();
+              reply.complete(IdeReply.ok(null, null, null));
+              return new IdeRequest(identity, UUID.randomUUID(), reply);
+            });
+    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
+
+    OkHttpClient client =
+        new OkHttpClient.Builder()
+            .dns(hostname -> List.of(InetAddress.getByName("127.0.0.1")))
+            .build();
+    Request request =
+        new Request.Builder()
+            .url("http://" + ENVIRONMENT + ".ide.test:" + port + "/")
+            .header("Cookie", gatewayProperties.requireSessionCookieName() + "=" + cookie)
+            // 显式禁用 OkHttp 的透明 gzip，保留原始压缩字节用于断言。
+            .header("Accept-Encoding", "identity")
+            .build();
+    try (Response response = client.newCall(request).execute()) {
+      assertEquals(200, response.code());
+      assertEquals("gzip", response.header("Content-Encoding"));
+      byte[] body = response.body().bytes();
+      assertArrayEquals(compressed, body);
+      assertArrayEquals(plain, gunzip(body));
+    } finally {
+      client.dispatcher().executorService().shutdown();
+      client.connectionPool().evictAll();
+    }
+  }
+
+  private static byte[] gzip(byte[] payload) throws IOException {
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (GZIPOutputStream gzip = new GZIPOutputStream(bytes)) {
+      gzip.write(payload);
+    }
+    return bytes.toByteArray();
+  }
+
+  private static byte[] gunzip(byte[] payload) throws IOException {
+    try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(payload))) {
+      return gzip.readAllBytes();
     }
   }
 
@@ -354,6 +425,34 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
         webSocket.send(ByteString.of(frame));
         webSocket.send(ByteString.of(codec.encodeAck(payload.length)));
       }
+    }
+  }
+
+  /** 反向 WS Daemon peer（HTTP 模式）：投递一条小型压缩响应后立即断开反向连接。 */
+  private final class HttpFakeDaemon extends WebSocketListener {
+
+    private final DaemonIdeStreamCodec codec = new DaemonIdeStreamCodec();
+    private final byte[] compressedBody;
+
+    private HttpFakeDaemon(byte[] compressedBody) {
+      this.compressedBody = compressedBody;
+    }
+
+    void dial(String streamUrl) {
+      OkHttpClient client = new OkHttpClient();
+      client.newWebSocket(new Request.Builder().url(streamUrl).build(), this);
+    }
+
+    @Override
+    public void onOpen(WebSocket webSocket, Response response) {
+      webSocket.send(
+          codec.encodeHttpResponse(
+              new IdeStreamControlFrame.HttpResponse(
+                  200, List.of(new IdeHeader("content-encoding", "gzip")))));
+      webSocket.send(ByteString.of(codec.encodeHttpBody(compressedBody)));
+      webSocket.send(ByteString.of(codec.encodeHttpEnd()));
+      // 完整响应已入队后立即断开：网关必须仍能交付，且关闭后的消费 ACK 不得中断交付。
+      webSocket.close(1000, "done");
     }
   }
 

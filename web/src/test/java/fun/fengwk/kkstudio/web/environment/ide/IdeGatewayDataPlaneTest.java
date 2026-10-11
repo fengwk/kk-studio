@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -30,6 +31,9 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -40,8 +44,11 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * 意图：IDE 数据面必须真实地把浏览器 HTTP exchange 经一次性 ticket 与反向连接配对后双向转发（远大于 16MiB 的真实 servlet 流）， 过滤
@@ -418,6 +425,108 @@ class IdeGatewayDataPlaneTest {
     assertThrows(IllegalStateException.class, () -> properties.streamUrl(ENV, "abc"));
   }
 
+  /**
+   * 传输在响应已经入队之后关闭（如 code-server 发送完整压缩响应后立即断开）：网关仍必须把队列中剩余的 HTTP_RESPONSE/body/END 交付， 对已关闭 peer
+   * 发送消费 ACK 不得中断成交付，最终得到原始 200 与原始压缩字节。
+   */
+  @Test
+  void completesCompressedResponseAfterTransportClosed() throws Exception {
+    Harness harness = new Harness();
+    byte[] plain = "hello-ide-compressed-body".getBytes(StandardCharsets.UTF_8);
+    byte[] compressed = gzip(plain);
+    TransportClosedPeer peer =
+        new TransportClosedPeer(
+            List.of(
+                new IdeStreamPeer.Inbound.Text(
+                    CODEC.encodeHttpResponse(
+                        new IdeStreamControlFrame.HttpResponse(
+                            200, List.of(new IdeHeader("content-encoding", "gzip"))))),
+                new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpBody(compressed)),
+                new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpEnd())));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/", request, response);
+
+    assertEquals(200, response.getStatus());
+    assertEquals("gzip", response.getHeader("content-encoding"));
+    assertArrayEquals(compressed, response.getContentAsByteArray());
+    assertArrayEquals(plain, gunzip(response.getContentAsByteArray()));
+    // 关闭后的消费 ACK 必须被丢弃（counted 但绝不抛出），数据交付照常完成。
+    assertTrue(peer.acknowledgements.get() > 0);
+  }
+
+  /** 传输在 HTTP_END 之前关闭：响应不完整，必须以 IOException 失败，不得伪造成功。 */
+  @Test
+  void incompleteResponseBeforeEndFailsWithIoException() throws Exception {
+    Harness harness = new Harness();
+    byte[] plain = "truncated-compressed-body".getBytes(StandardCharsets.UTF_8);
+    byte[] compressed = gzip(plain);
+    TransportClosedPeer peer =
+        new TransportClosedPeer(
+            List.of(
+                new IdeStreamPeer.Inbound.Text(
+                    CODEC.encodeHttpResponse(
+                        new IdeStreamControlFrame.HttpResponse(
+                            200,
+                            List.of(
+                                new IdeHeader("content-encoding", "gzip"),
+                                new IdeHeader("etag", "\"v1\""),
+                                new IdeHeader("location", "/proxy/xxx"))))),
+                new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpBody(compressed))));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    assertThrows(
+        IOException.class, () -> harness.dataPlane.handleHttp(ENV, "/", request, response));
+
+    // 未提交的错误响应必须被 reset：不得残留上游 Content-Encoding/ETag/Location，也不得留下半截压缩体。
+    assertNull(response.getHeader("content-encoding"));
+    assertNull(response.getHeader("etag"));
+    assertNull(response.getHeader("location"));
+    assertEquals(0, response.getContentAsByteArray().length);
+  }
+
+  /** 已提交的响应无法回滚：仍以异常中止截断，绝不把残留压缩字节当作完整成功。 */
+  @Test
+  void committedResponseIsNotResetOnFailure() throws Exception {
+    Harness harness = new Harness();
+    byte[] compressed = gzip("committed-body".getBytes(StandardCharsets.UTF_8));
+    TransportClosedPeer peer =
+        new TransportClosedPeer(
+            List.of(
+                new IdeStreamPeer.Inbound.Text(
+                    CODEC.encodeHttpResponse(
+                        new IdeStreamControlFrame.HttpResponse(
+                            200, List.of(new IdeHeader("content-encoding", "gzip"))))),
+                new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpBody(compressed))));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    response.setCommitted(true);
+    assertThrows(
+        IOException.class, () -> harness.dataPlane.handleHttp(ENV, "/", request, response));
+    // 已提交响应不能被 reset：上游 Content-Encoding 保留（无法回滚），但同时也没有被伪装成功。
+    assertEquals("gzip", response.getHeader("content-encoding"));
+  }
+
+  private static byte[] gzip(byte[] payload) throws IOException {
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (GZIPOutputStream gzip = new GZIPOutputStream(bytes)) {
+      gzip.write(payload);
+    }
+    return bytes.toByteArray();
+  }
+
+  private static byte[] gunzip(byte[] payload) throws IOException {
+    try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(payload))) {
+      return gzip.readAllBytes();
+    }
+  }
+
   /** 可编程 IDE 命令传输：OPEN_STREAM 时把脚本化 peer 交付给配对注册表。 */
   private static final class FakeTransport implements IdeCommandTransport {
 
@@ -486,6 +595,11 @@ class IdeGatewayDataPlaneTest {
     }
 
     @Override
+    public void sendAcknowledgement(byte[] frame) {
+      // HTTP 模式下的消费 ACK：本脚本 peer 不需要据此推进。
+    }
+
+    @Override
     public boolean closed() {
       return closed;
     }
@@ -524,6 +638,64 @@ class IdeGatewayDataPlaneTest {
         return new Inbound.Binary(CODEC.encodeHttpEnd());
       }
       return null;
+    }
+
+    @Override
+    public void close() {
+      closed = true;
+    }
+  }
+
+  /**
+   * 模拟「请求已发出后传输关闭、但入站队列仍保留待交付响应」的 Daemon 反向连接（与 {@link WebSocketIdeStreamPeer} 的 {@code
+   * onTransportClosed} 语义一致）。
+   *
+   * <p>首次轮询即标记传输关闭，随后逐个交付脚本化帧；数据发送（请求体/END）由调用方在关闭前完成，关闭后的消费 ACK 必须被丢弃而不是抛出。
+   */
+  private static final class TransportClosedPeer implements IdeStreamPeer {
+
+    private final List<Inbound> frames;
+    private final AtomicInteger acknowledgements = new AtomicInteger();
+    private int index;
+    private volatile boolean closed;
+
+    private TransportClosedPeer(List<Inbound> frames) {
+      this.frames = frames;
+    }
+
+    @Override
+    public void sendText(String frame) {
+      // HTTP 模式下的响应读取阶段不再发送文本帧。
+    }
+
+    @Override
+    public void sendBinary(byte[] frame) {
+      if (closed) {
+        throw new IllegalStateException("reverse stream peer is closed");
+      }
+    }
+
+    @Override
+    public void sendAcknowledgement(byte[] frame) {
+      // 关闭后的消费 ACK 可安全丢弃：只计数，绝不抛出。
+      acknowledgements.incrementAndGet();
+    }
+
+    @Override
+    public Inbound poll(Duration timeout) {
+      if (index == 0) {
+        // 请求体与 END 已经发出；此刻传输关闭，但响应仍在入站队列中等待交付。
+        closed = true;
+      }
+      if (index < frames.size()) {
+        return frames.get(index++);
+      }
+      return null;
+    }
+
+    @Override
+    public boolean closed() {
+      return closed;
     }
 
     @Override

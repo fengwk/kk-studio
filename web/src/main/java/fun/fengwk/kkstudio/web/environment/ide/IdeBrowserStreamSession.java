@@ -209,6 +209,11 @@ final class IdeBrowserStreamSession {
                 public void sendBinary(byte[] frame) {
                   peer.sendBinary(frame);
                 }
+
+                @Override
+                public void sendAcknowledgement(byte[] encodedAck) {
+                  peer.sendAcknowledgement(encodedAck);
+                }
               });
       if (awaitReady(System.nanoTime() + deps.properties().requireRequestTimeout().toNanos())) {
         relayUntilClosed();
