@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.JdbcClusterNodeRegistry;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URI;
@@ -262,7 +263,7 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
         new HttpServlet() {
           @Override
           protected void service(HttpServletRequest request, HttpServletResponse response)
-              throws ServletException, java.io.IOException {
+              throws ServletException, IOException {
             handshakeHandler.setServletContext(request.getServletContext());
             handshakeHandler.start();
             new WebSocketHttpRequestHandler(handler, handshakeHandler)
