@@ -12,7 +12,6 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -23,16 +22,12 @@ import java.util.Objects;
 public final class HttpProxySelector extends ProxySelector {
 
   private static final List<Proxy> DIRECT = List.of(Proxy.NO_PROXY);
-  private final Proxy http;
-  private final Proxy https;
+  private final Proxy proxy;
   private final List<Bypass> bypass;
-  private final ProxySelector fallback;
 
-  private HttpProxySelector(Proxy http, Proxy https, List<Bypass> bypass, ProxySelector fallback) {
-    this.http = http;
-    this.https = https;
+  private HttpProxySelector(Proxy proxy, List<Bypass> bypass) {
+    this.proxy = proxy;
     this.bypass = bypass;
-    this.fallback = fallback;
   }
 
   /**
@@ -45,37 +40,7 @@ public final class HttpProxySelector extends ProxySelector {
   public static ProxySelector fixed(String proxyUrl, String noProxyHosts) {
     List<Bypass> bypass = parseBypass(noProxyHosts);
     Proxy proxy = proxyUrl == null ? Proxy.NO_PROXY : parseProxy(proxyUrl);
-    return new HttpProxySelector(proxy, proxy, bypass, null);
-  }
-
-  /**
-   * 环境变量优先，HTTP/HTTPS 独立配置，ws/wss 分别映射到 HTTP/HTTPS。
-   *
-   * <p>小写变量存在时优先于大写（包括空值）；空代理值表示该协议明确直连，未配置则委托 fallback（null 表示直连）。no_proxy 同样约束
-   * fallback。非法配置在构建时失败， 不暗中回退；环境代理也使用严格 URL 语法。
-   */
-  public static ProxySelector fromEnvironment(
-      Map<String, String> environment, ProxySelector fallback) {
-    Objects.requireNonNull(environment, "environment");
-    String noProxy = variable(environment, "no_proxy");
-    return new HttpProxySelector(
-        environmentProxy(variable(environment, "http_proxy")),
-        environmentProxy(variable(environment, "https_proxy")),
-        parseBypass(noProxy == null ? "" : noProxy),
-        fallback);
-  }
-
-  private static String variable(Map<String, String> environment, String name) {
-    String key = environment.containsKey(name) ? name : name.toUpperCase(Locale.ROOT);
-    String value = environment.get(key);
-    if (value == null && environment.containsKey(key)) {
-      throw invalid();
-    }
-    return value;
-  }
-
-  private static Proxy environmentProxy(String value) {
-    return value == null ? null : value.isEmpty() ? Proxy.NO_PROXY : parseProxy(value);
+    return new HttpProxySelector(proxy, bypass);
   }
 
   private static Proxy parseProxy(String value) {
@@ -293,15 +258,7 @@ public final class HttpProxySelector extends ProxySelector {
         return DIRECT;
       }
     }
-    Proxy proxy = secure ? https : http;
-    if (proxy != null) {
-      return List.of(proxy);
-    }
-    if (fallback == null) {
-      return DIRECT;
-    }
-    // JDK OS selector 不识别 WebSocket scheme，以等价 HTTP scheme 委托。
-    return fallback.select(httpUri(uri));
+    return List.of(proxy);
   }
 
   @Override
@@ -309,22 +266,6 @@ public final class HttpProxySelector extends ProxySelector {
     Objects.requireNonNull(uri, "uri");
     Objects.requireNonNull(address, "address");
     Objects.requireNonNull(error, "error");
-    String scheme = uri.getScheme();
-    Proxy configured =
-        "https".equalsIgnoreCase(scheme) || "wss".equalsIgnoreCase(scheme) ? https : http;
-    if (configured == null && fallback != null) {
-      fallback.connectFailed(httpUri(uri), address, error);
-    }
-  }
-
-  private static URI httpUri(URI uri) {
-    String scheme = uri.getScheme();
-    if ("ws".equalsIgnoreCase(scheme) || "wss".equalsIgnoreCase(scheme)) {
-      return URI.create(
-          ("wss".equalsIgnoreCase(scheme) ? "https" : "http")
-              + uri.toString().substring(scheme.length()));
-    }
-    return uri;
   }
 
   /** 绕过规则匹配：{@code host} 是归一化域名/字面量，{@code literal} 是剥离方括号的原始 URI host。 */

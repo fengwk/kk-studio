@@ -8,11 +8,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.ProxySelector;
-import java.net.SocketAddress;
 import java.net.URI;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /** 只检查真实 selector 输出，不访问 DNS 或外网。 */
 class HttpProxySelectorTest {
@@ -179,9 +176,9 @@ class HttpProxySelectorTest {
             .type());
   }
 
-  /** 意图：用户真实 no_proxy 混合域名与 CIDR 初始化成功；CIDR 覆盖 OS 回退且适用各端口与协议。 */
+  /** 意图：用户真实 no_proxy 混合域名与 CIDR 初始化成功；CIDR 适用各端口与 HTTP/WebSocket。 */
   @Test
-  void cidrInteroperatesWithHostsAndEnvironmentFallback() {
+  void cidrInteroperatesWithHostsAndSchemes() {
     String userNoProxy =
         "localhost,127.0.0.1,localaddress,.localdomain.com,.kk1.fun,192.168.0.0/16,"
             + "100.64.0.0/10,.local,.minimaxi.com,langbase.netease.com,.internal";
@@ -205,27 +202,20 @@ class HttpProxySelectorTest {
       assertEquals(Proxy.Type.HTTP, select(selector, "http://" + host).type(), host);
     }
 
-    // 环境形式同样接受 CIDR：命中时 DIRECT，未命中才委托 fallback（含 https 与 WebSocket）。
-    RecordingFallback fallback = new RecordingFallback();
-    ProxySelector environment =
-        HttpProxySelector.fromEnvironment(
-            Map.of("no_proxy", "192.168.0.0/16,100.64.0.0/10,2001:db8::/32"), fallback);
-    assertDirect(environment, "http://192.168.1.1");
-    assertDirect(environment, "wss://100.64.5.5");
-    assertDirect(environment, "https://[2001:db8::9]");
-    assertEquals(0, fallback.calls);
-    assertEquals(fallback.proxy, select(environment, "http://192.169.0.1"));
-    assertEquals(fallback.proxy, select(environment, "https://100.128.0.1"));
-    assertEquals(2, fallback.calls);
+    // 同一套 CIDR 在 HTTP 与 WebSocket 上命中直连、未命中仍走固定代理。
+    ProxySelector cidr = HttpProxySelector.fixed(URL, "192.168.0.0/16,100.64.0.0/10,2001:db8::/32");
+    assertDirect(cidr, "http://192.168.1.1");
+    assertDirect(cidr, "wss://100.64.5.5");
+    assertDirect(cidr, "https://[2001:db8::9]");
+    assertEquals(Proxy.Type.HTTP, select(cidr, "http://192.169.0.1").type());
+    assertEquals(Proxy.Type.HTTP, select(cidr, "https://100.128.0.1").type());
+    assertEquals(Proxy.Type.HTTP, select(cidr, "ws://192.169.0.1").type());
   }
 
   /** 意图：所有非法配置都在构建时拒绝，异常消息及 cause 不泄漏原始输入。 */
   @Test
   void invalidConfigurationIsRedactedAndFailsClosed() {
     assertRedacted(() -> HttpProxySelector.fixed("", ""));
-    assertDirect(
-        HttpProxySelector.fromEnvironment(Map.of("https_proxy", ""), null),
-        "https://remote.invalid");
     for (String value :
         List.of(
             "secret.invalid:80",
@@ -242,7 +232,6 @@ class HttpProxySelectorTest {
             "http://secret invalid:80",
             "http://[fe80::1%25secret]:80")) {
       assertRedacted(() -> HttpProxySelector.fixed(value, ""));
-      assertRedacted(() -> HttpProxySelector.fromEnvironment(Map.of("https_proxy", value), null));
     }
     for (String value :
         List.of(
@@ -289,81 +278,12 @@ class HttpProxySelectorTest {
       assertRedacted(() -> HttpProxySelector.fixed(URL, value));
     }
     assertRedacted(() -> HttpProxySelector.fixed(URL, null));
-    Map<String, String> nullValue = new HashMap<>();
-    nullValue.put("http_proxy", null);
-    assertRedacted(() -> HttpProxySelector.fromEnvironment(nullValue, null));
-  }
-
-  /** 意图：小写明确优先，协议独立；空值禁用该协议，no_proxy 覆盖系统回退结果。 */
-  @Test
-  void environmentPrecedenceAndFallback() {
-    RecordingFallback fallback = new RecordingFallback();
-    ProxySelector selector =
-        HttpProxySelector.fromEnvironment(
-            Map.of(
-                "http_proxy",
-                URL,
-                "HTTP_PROXY",
-                "invalid-secret",
-                "HTTPS_PROXY",
-                "http://secure.invalid:8443",
-                "no_proxy",
-                "bypass.invalid",
-                "NO_PROXY",
-                "*"),
-            fallback);
-    assertEquals("proxy.invalid", addressHost(select(selector, "ws://remote.invalid")));
-    assertEquals("secure.invalid", addressHost(select(selector, "wss://remote.invalid")));
-    assertDirect(selector, "https://bypass.invalid");
-    assertEquals(0, fallback.calls);
-
-    selector =
-        HttpProxySelector.fromEnvironment(
-            Map.of("http_proxy", URL, "no_proxy", "bypass.invalid"), fallback);
-    assertDirect(selector, "https://bypass.invalid");
-    assertEquals(0, fallback.calls);
-    assertEquals(fallback.proxy, select(selector, "wss://remote.invalid/path?q=x%20y"));
-    assertEquals("https", fallback.last.getScheme());
-    assertEquals("q=x%20y", fallback.last.getRawQuery());
-    assertEquals(fallback.proxy, select(selector, "https://remote.invalid"));
-    selector.connectFailed(
-        URI.create("https://remote.invalid"), new InetSocketAddress(80), new IOException());
-    assertEquals(1, fallback.failures);
-    selector.connectFailed(
-        URI.create("http://remote.invalid"), new InetSocketAddress(80), new IOException());
-    assertEquals(1, fallback.failures);
-
-    selector =
-        HttpProxySelector.fromEnvironment(
-            Map.of("http_proxy", "", "HTTP_PROXY", URL, "no_proxy", "", "NO_PROXY", "*"), fallback);
-    assertDirect(selector, "http://remote.invalid");
-    assertEquals(fallback.proxy, select(selector, "wsS://remote.invalid"));
-    selector = HttpProxySelector.fromEnvironment(Map.of(), fallback);
-    assertEquals(fallback.proxy, select(selector, "ws://remote.invalid"));
-    assertEquals("http", fallback.last.getScheme());
-    assertDirect(HttpProxySelector.fromEnvironment(Map.of(), null), "https://remote.invalid");
-    assertDirect(
-        HttpProxySelector.fromEnvironment(Map.of("NO_PROXY", "*"), fallback),
-        "http://remote.invalid");
-    assertEquals(
-        "proxy.invalid",
-        addressHost(
-            select(
-                HttpProxySelector.fromEnvironment(Map.of("HTTP_PROXY", URL), null),
-                "http://remote.invalid")));
-    assertDirect(
-        HttpProxySelector.fromEnvironment(Map.of("http_proxy", URL), null),
-        "https://remote.invalid");
   }
 
   private static void assertRedacted(Runnable operation) {
     IllegalArgumentException error = assertThrows(IllegalArgumentException.class, operation::run);
     assertEquals("Invalid HTTP proxy or bypass configuration", error.getMessage());
     assertNull(error.getCause());
-  }
-
-  private static String addressHost(Proxy proxy) {
-    return ((InetSocketAddress) proxy.address()).getHostString();
   }
 
   private static Proxy select(ProxySelector selector, String target) {
@@ -374,25 +294,5 @@ class HttpProxySelectorTest {
 
   private static void assertDirect(ProxySelector selector, String target) {
     assertEquals(Proxy.NO_PROXY, select(selector, target), target);
-  }
-
-  private static final class RecordingFallback extends ProxySelector {
-    private final Proxy proxy =
-        new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved("os.invalid", 9000));
-    private int calls;
-    private int failures;
-    private URI last;
-
-    @Override
-    public List<Proxy> select(URI uri) {
-      calls++;
-      last = uri;
-      return List.of(proxy);
-    }
-
-    @Override
-    public void connectFailed(URI uri, SocketAddress address, IOException error) {
-      failures++;
-    }
   }
 }
