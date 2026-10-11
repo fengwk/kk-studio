@@ -352,4 +352,31 @@ describe('createSkillCapability', () => {
     expect(result.details).toEqual({ code: 'SKILL_SYNC_FAILED' })
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Skill sync failed' }])
   })
+
+  it('registered skill.sync executor fails closed for a 64-hex SHA-256 target commit', async () => {
+    const capability = createSkillCapability(config, createTestInstaller())
+    const sha256Commit = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+    const call: CapabilityCall = {
+      invocationId: 'call-sha256',
+      capabilityId: 'skill.sync',
+      arguments: {
+        packageName: 'sha256-package',
+        repositoryUrl: pathToFileURL(remoteRepoDir).toString(),
+        branch: 'main',
+        targetCommit: sha256Commit,
+      },
+      timeoutMillis: 5000,
+    }
+
+    const result = await capability(call, createContext())
+    expect(result.error).toBe(true)
+    expect(result.details).toEqual({ code: 'INVALID_TARGET_COMMIT' })
+    expect(result.contents).toEqual([
+      {
+        type: 'text',
+        text: 'Error: Target commit must be a 40-character SHA-1 commit; SHA-256 commits are not supported by the local Git backend',
+      },
+    ])
+  })
 })
