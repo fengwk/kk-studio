@@ -103,6 +103,17 @@ function harness(
   }
 }
 
+/**
+ * 受管文件的隐私边界：POSIX 上必须只有属主可读写；Windows 没有 POSIX mode 位，隐私由原生 ACL 校验
+ * （verifyPrivateFile）承担，因此这里只断言文件真实存在。
+ */
+async function expectOwnerOnlyFile(target: string): Promise<void> {
+  expect((await stat(target)).isFile()).toBe(true)
+  if (process.platform !== 'win32') {
+    expect((await stat(target)).mode & 0o777).toBe(0o600)
+  }
+}
+
 function config(dataDir: string): DaemonConfig {
   return {
     configPath: path.join(dataDir, 'daemon.json'),
@@ -169,7 +180,7 @@ describe('update handler', () => {
     })
     const operationDir = path.join(dataDir, 'updates', OPERATION_ID)
     const script = path.join(operationDir, UNIX_UPDATE_SCRIPT_NAME)
-    expect((await stat(script)).mode & 0o777).toBe(0o600)
+    await expectOwnerOnlyFile(script)
     expect((await stat(path.join(operationDir, PERMIT_FILE))).isFile()).toBe(true)
     expect(h.runCalls().some(call => call.command === 'systemd-run')).toBe(true)
   })
@@ -568,7 +579,8 @@ describe('production dependencies', () => {
     })
   })
 
-  it('rejects a real archive with an escaping entry', async () => {
+  // Windows 上没有 /etc/hosts，且该夹具依赖 POSIX 绝对路径与 tar -P 语义，因此只在 POSIX 平台断言。
+  it.runIf(process.platform !== 'win32')('rejects a real archive with an escaping entry', async () => {
     await withLayout(async dir => {
       const source = path.join(dir, 'source')
       await mkdir(source, { recursive: true })
@@ -613,7 +625,7 @@ describe('production dependencies', () => {
         const destination = path.join(dir, 'download')
         await deps.fetchTo(`http://127.0.0.1:${port}/ok`, destination, new AbortController().signal, 1024)
         expect(await readFile(destination, 'utf8')).toBe('payload')
-        expect((await stat(destination)).mode & 0o777).toBe(0o600)
+        await expectOwnerOnlyFile(destination)
         await expect(
           deps.fetchTo(`http://127.0.0.1:${port}/missing`, path.join(dir, 'nope'), new AbortController().signal, 1024),
         ).rejects.toThrow()

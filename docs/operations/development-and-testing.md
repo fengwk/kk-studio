@@ -124,6 +124,13 @@ Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；
 Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明确检查 Bash 3.2，
 不以 Homebrew Bash 的结果替代系统自带版本。Daemon Release 发布也依赖同一套三平台安装器门禁。
 
+`daemon-ci` 是 Node Daemon 的平台矩阵：在 Ubuntu、macOS、Windows 上装入 `daemon/package-lock.json`
+的依赖，依次执行 `npm run check`、`npm run build` 与 `npm run coverage`（构建先于测试与覆盖率）。
+三个平台都跑完整 Node 套件（native 进程范围、核心与能力层），平台特有用例由用例自身的条件决定
+是否执行，不整体跳过某个平台。它以 `push`（`main`/`dev`，按 `daemon/**` 等路径触发）与
+`pull_request` 作为独立门禁，等价于原来的 process-scope 矩阵；`daemon-release` 通过
+`workflow_call` 复用同一份定义，因此 tag 发布不会绕过平台矩阵。
+
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
 `psql`、`pg_dump`、`pg_restore`、`createdb`、`pg_isready` 必须来自同一主版本且不低于 17；
@@ -689,8 +696,8 @@ TERM 都执行 `down --volumes --remove-orphans`。
 
 | 子命令 | 内容 |
 | --- | --- |
-| `sbom` | backend/frontend CycloneDX JSON SBOM，校验文件非空可解析 |
-| `audit` | frontend `npm audit` + Maven OWASP Dependency-Check |
+| `sbom` | backend/frontend/daemon CycloneDX JSON SBOM，校验文件非空可解析 |
+| `audit` | 每个 npm 项目（frontend、daemon）的 `npm audit` + Maven OWASP Dependency-Check |
 | `image` | 构建 App/Daemon，运行功能 smoke，再用 pinned Trivy 扫描 |
 | `all` | `sbom`、`audit`、`image` 的合取结果 |
 | `test` | [supply-chain.test.mjs](../../scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs)，不联网 |
@@ -714,6 +721,10 @@ Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声�
   log；无 key 时使用 NVD 官方 JSON 2.0 feed。
 - 在线源、Maven Central、npm registry、NVD 或 report generation 不可用时保持 `FAIL`；缺失数据
   不能生成 `PASS`。策略是零 suppression 与零漏洞，Dependency-Check 与 npm audit 都不配置白名单。
+- npm 生态按项目分别审计：frontend 与 daemon 各自产出 `frontend-audit/audit.json`、
+  `daemon-audit/audit.json` 与独立状态；任一项目命中漏洞都让整条门禁 `FAIL`，另一个项目的结论
+  不会被掩盖。Node Daemon 迁移后 daemon 依赖不再经过 Maven，因此它的 lockfile 必须由这里的
+  npm 审计与 SBOM 覆盖；App 镜像扫描只覆盖镜像内容，不等于发行归档里第三方运行时的漏洞结论。
 - Trivy image 固定为脚本中的 immutable digest，并校验版本 `0.74.0`；扫描过滤 `HIGH,CRITICAL`
   且包含无修复版本的条目，不使用 suppression 或 `--ignore-unfixed`。cache volume 默认 `kk-studio-trivy-cache`，可用
   `SUPPLY_CHAIN_TRIVY_CACHE_VOLUME` 覆盖；已有完整 cache 时设置 `TRIVY_SKIP_DB_UPDATE=true`，
@@ -1045,13 +1056,14 @@ reports/reliability/
   LATEST_AGENT_RUN.txt
 
 reports/supply-chain/
-  <timestamp>-<pid>/{backend-sbom,frontend-sbom,frontend-audit,backend-audit,image,logs/,summary.md,summary.json}
+  <timestamp>-<pid>/{backend-sbom,frontend-sbom,daemon-sbom,frontend-audit,daemon-audit,backend-audit,image,logs/,summary.md,summary.json}
   latest/
   LATEST_RUN.txt
 ```
 
-`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend SBOM、npm audit、
-Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、smoke log 和 summary。
+`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend/daemon SBOM、
+两个 npm 项目的 audit、Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、
+smoke log 和 summary。
 
 分布式 E2E 在销毁栈前收集脱敏日志：`logs/distributed-<service>.log` 是容器标准输出，
 `logs/distributed-app-a/` 和 `logs/distributed-app-b/` 是容器 `/app/logs` 中的文本 `.log` 文件。

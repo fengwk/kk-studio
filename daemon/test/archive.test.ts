@@ -92,12 +92,12 @@ describe('archive entry validation', () => {
     expect(normalizeArchivePath('a\\b')).toBeNull()
   })
 
-  it('extracts a legitimate archive with a relative internal symlink', async () => {
+  it('extracts a legitimate archive with relative entries', async () => {
     const archive = await archiveOf([
       { name: './', type: '5' },
       { name: './main.js', body: Buffer.from('entry') },
       { name: './lib/', type: '5' },
-      { name: './lib/link.js', type: '2', linkname: '../main.js' },
+      { name: './lib/nested.js', body: Buffer.from('nested') },
     ])
     const destination = path.join(dir, 'out')
     await mkdir(destination, { recursive: true })
@@ -105,8 +105,33 @@ describe('archive entry validation', () => {
     await extractArchive(archive, destination, new AbortController().signal)
 
     expect(await readFile(path.join(destination, 'main.js'), 'utf8')).toBe('entry')
-    expect(await readlink(path.join(destination, 'lib/link.js'))).toBe('../main.js')
+    expect(await readFile(path.join(destination, 'lib/nested.js'), 'utf8')).toBe('nested')
   })
+
+  it('accepts a relative symlink that stays inside the extraction root', async () => {
+    const archive = await archiveOf([
+      { name: './main.js', body: Buffer.from('entry') },
+      { name: './lib/link.js', type: '2', linkname: '../main.js' },
+    ])
+    await expect(validateArchive(archive, new AbortController().signal)).resolves.toBeUndefined()
+  })
+
+  // 创建符号链接在 Windows 上需要额外权限，因此真实落盘的链接目标只在 POSIX 平台断言。
+  it.runIf(process.platform !== 'win32')(
+    'materializes a relative internal symlink when extracting',
+    async () => {
+      const archive = await archiveOf([
+        { name: './main.js', body: Buffer.from('entry') },
+        { name: './lib/link.js', type: '2', linkname: '../main.js' },
+      ])
+      const destination = path.join(dir, 'out-link')
+      await mkdir(destination, { recursive: true })
+
+      await extractArchive(archive, destination, new AbortController().signal)
+
+      expect(await readlink(path.join(destination, 'lib/link.js'))).toBe('../main.js')
+    },
+  )
 
   it('rejects an absolute path entry', async () => {
     const archive = await archiveOf([{ name: '/etc/passwd', body: Buffer.from('x') }])

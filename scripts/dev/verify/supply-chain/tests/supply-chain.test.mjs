@@ -108,9 +108,22 @@ set -euo pipefail
 if [[ -n "\${FAKE_NPM_ARGS_FILE:-}" ]]; then
     printf '%s\\n' "$@" >>"$FAKE_NPM_ARGS_FILE"
 fi
+# 每个 npm 项目按 --prefix 区分：SBOM 与审计都按项目产出不同内容与不同结论。
+prefix=
+previous=
+for argument in "$@"; do
+    if [[ "$previous" == "--prefix" ]]; then
+        prefix="$argument"
+    fi
+    previous="$argument"
+done
+project=frontend
+if [[ "$prefix" == */daemon ]]; then
+    project=daemon
+fi
 case " $* " in
     *" sbom "*)
-        printf '%s\\n' '{"bomFormat":"CycloneDX","components":[{"name":"fake-frontend"}]}'
+        printf '{"bomFormat":"CycloneDX","components":[{"name":"fake-%s"}]}\\n' "$project\"
         ;;
     *" audit "*)
         registry=
@@ -125,7 +138,12 @@ case " $* " in
             printf '%s\\n' 'npm error audit 404 Not Found - POST https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk - [NOT_IMPLEMENTED]' >&2
             exit 1
         fi
-        if [[ "\${FAKE_NPM_REPORT_VULNERABILITY:-}" == true ]]; then
+        if [[ "$project" == "daemon" ]]; then
+            if [[ "\${FAKE_NPM_DAEMON_REPORT_VULNERABILITY:-}" == true ]]; then
+                printf '%s\\n' '{"auditReportVersion":2,"vulnerabilities":{"tar":{"name":"tar","severity":"high"}}}'
+                exit 1
+            fi
+        elif [[ "\${FAKE_NPM_REPORT_VULNERABILITY:-}" == true ]]; then
             printf '%s\\n' '{"auditReportVersion":2,"vulnerabilities":{"browserslist":{"name":"browserslist","severity":"high"}}}'
             exit 1
         fi
@@ -519,6 +537,93 @@ test('honors a custom report root and publishes timestamped and latest reports',
         assert.match(summaryMarkdown, /requested backend and frontend SBOM checks completed/i)
         assert.doesNotMatch(summaryMarkdown, /Dependency-Check JSON contains zero/)
         assert.doesNotMatch(summaryMarkdown, /image functional smokes passed/)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+
+test('generates a daemon CycloneDX SBOM alongside the frontend one', () => {
+    // Intent: Node Daemon 的 npm 依赖也必须进入 SBOM 门禁，并与前端按项目分别产出报告。
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'daemon-sbom-reports')
+    const npmArgsFile = path.join(toolchain.root, 'daemon-sbom-args.txt')
+    try {
+        const result = runScript(['sbom'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_NPM_ARGS_FILE: npmArgsFile,
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'PASS')
+        const daemon = summary.checks.find(check => check.name === 'daemon-sbom')
+        assert.equal(daemon.status, 'PASS')
+        assert.equal(daemon.artifact, 'daemon-sbom/bom.json')
+        assert.equal(summary.checks.find(check => check.name === 'frontend-sbom').status, 'PASS')
+
+        // 两个项目都必须真的被 npm 调用；daemon 的报告内容与前端不同，证明不是复用了前端的输出。
+        const argumentsList = readFileSync(npmArgsFile, 'utf8').split('\n').filter(Boolean)
+        assert.equal(argumentsList.includes(path.join(REPOSITORY_ROOT, 'daemon')), true)
+        assert.equal(argumentsList.includes(path.join(REPOSITORY_ROOT, 'frontend')), true)
+        const bom = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/daemon-sbom/bom.json'), 'utf8'),
+        )
+        assert.equal(bom.components[0].name, 'fake-daemon')
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('fails closed when the daemon npm audit reports a vulnerability', () => {
+    // Intent: daemon 自己的 npm 依赖命中漏洞必须让门禁失败，且不得污染前端项目的结论。
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'daemon-vulnerability-reports')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_NPM_DAEMON_REPORT_VULNERABILITY: 'true',
+        })
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'FAIL')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-audit').status, 'FAIL')
+        assert.equal(summary.checks.find(check => check.name === 'npm-audit').status, 'PASS')
+        assert.match(summary.failures.join('\n'), /daemon npm audit found vulnerabilities/)
+        assert.doesNotMatch(summary.failures.join('\n'), /frontend npm audit found vulnerabilities/)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('keeps every npm project audit report on its own artifact path', () => {
+    // Intent: 两个 npm 项目的审计报告必须分开落盘，任何一个项目缺报告都不能算通过。
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'npm-project-reports')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.checks.find(check => check.name === 'npm-audit').artifact, 'frontend-audit/audit.json')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-audit').artifact, 'daemon-audit/audit.json')
+        for (const artifact of ['frontend-audit/audit.json', 'daemon-audit/audit.json']) {
+            const report = JSON.parse(readFileSync(path.join(reportRoot, 'latest', artifact), 'utf8'))
+            assert.equal(report.auditReportVersion, 2)
+            assert.deepEqual(report.vulnerabilities, {})
+        }
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
