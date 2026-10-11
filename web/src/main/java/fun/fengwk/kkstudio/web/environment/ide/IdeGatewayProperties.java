@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
@@ -45,8 +47,12 @@ public class IdeGatewayProperties {
     return streamUrlTemplate != null && !streamUrlTemplate.isBlank();
   }
 
-  /** 生成某 ticket 的受控 streamUrl；未配置或非法时抛 {@link IllegalStateException}（fail-closed）。 */
-  public String streamUrl(String ticket) {
+  /**
+   * 生成某 ticket 的受控 streamUrl，并附带 {@code environment} 查询，使非 owner 节点可据此定位 READY owner 做单跳转发；未配置或非法时抛
+   * {@link IllegalStateException}（fail-closed）。
+   */
+  public String streamUrl(EnvironmentId environmentId, String ticket) {
+    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(ticket, "ticket");
     if (!configured()) {
       throw new IllegalStateException(
@@ -77,7 +83,14 @@ public class IdeGatewayProperties {
     if (!STREAM_PATH.equals(path)) {
       throw new IllegalStateException("stream-url-template path must be " + STREAM_PATH);
     }
-    return normalizedScheme + "://" + uri.getAuthority() + STREAM_PATH + "/" + ticket;
+    return normalizedScheme
+        + "://"
+        + uri.getAuthority()
+        + STREAM_PATH
+        + "/"
+        + ticket
+        + "?environment="
+        + environmentId;
   }
 
   public Duration requirePairingTimeout() {

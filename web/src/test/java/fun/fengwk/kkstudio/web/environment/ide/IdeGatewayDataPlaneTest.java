@@ -3,8 +3,10 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
@@ -23,9 +25,12 @@ import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -66,15 +71,27 @@ class IdeGatewayDataPlaneTest {
     final IdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
     final IdeSessionIdentity identity = new IdeSessionIdentity(ENV, INSTANCE, LEASE);
     final FakeTransport transport = new FakeTransport(pairings);
+    final ClusterNodeRegistry clusterNodeRegistry = environmentId -> Optional.empty();
     final IdeGatewayDataPlane dataPlane =
-        new IdeGatewayDataPlane(transport, tickets, pairings, properties, sessions, bootstrap);
+        new IdeGatewayDataPlane(
+            transport,
+            tickets,
+            pairings,
+            properties,
+            sessions,
+            bootstrap,
+            clusterNodeRegistry,
+            new IdeRemoteDataPlaneForwarder(
+                mock(ClusterInternalClient.class), properties, mock(HttpClient.class)));
 
     Harness() {
       transport.identity = identity;
     }
 
     String sessionCookie() {
-      return sessions.open(identity, "/managed/workspace");
+      String view = UUID.randomUUID().toString();
+      sessions.viewOpened(identity, view, "/managed/workspace");
+      return sessions.open(identity, view, "/managed/workspace");
     }
 
     MockHttpServletRequest request(String method, String path) {
@@ -117,6 +134,59 @@ class IdeGatewayDataPlaneTest {
     assertEquals(1, harness.transport.abandoned.size());
   }
 
+  /** 慢速上游超过一个轮询间隔才产出首字节时必须继续等待，而不是误判连接关闭。 */
+  @Test
+  void slowUpstreamIdlePollIsNotTreatedAsClosed() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer =
+        new ScriptedPeer(0, List.of(new IdeHeader("content-type", "text/plain")))
+            .withIdlePollsBeforeResponse(8);
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/slow");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/slow", request, response);
+
+    assertEquals(200, response.getStatus());
+    assertEquals(0, response.getContentAsByteArray().length);
+  }
+
+  /** 与 Node peer 一致：所有 method（含 GET）都转发请求体，绝不因 method 丢弃 body。 */
+  @Test
+  void forwardsRequestBodyForGetMethod() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer = new ScriptedPeer(0, List.of());
+    harness.transport.peerFactory = () -> peer;
+    byte[] payload = "get-with-body".getBytes(StandardCharsets.UTF_8);
+
+    MockHttpServletRequest request = harness.request("GET", "/search");
+    request.setContent(payload);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/search", request, response);
+
+    assertEquals(200, response.getStatus());
+    assertEquals(payload.length, peer.receivedRequestBytes);
+    assertEquals("GET", harness.transport.lastCommand.get().method());
+  }
+
+  /** 上游提前响应（不等待大请求体）时双向都不得死锁：响应照常完成。 */
+  @Test
+  void earlyUpstreamResponseDoesNotDeadlockOnLargeRequestBody() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer = new ScriptedPeer(0, List.of(new IdeHeader("content-type", "text/plain")));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("POST", "/upload");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
+    request.setContent(new byte[4 * 1024 * 1024]);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/upload", request, response);
+
+    assertEquals(200, response.getStatus());
+    // 上游在请求体发完前就结束了 exchange，因此没有把整个请求体交给 Daemon。
+    assertTrue(peer.receivedRequestBytes < 4 * 1024 * 1024);
+  }
+
   @Test
   void forwardsRequestBodyToDaemon() throws Exception {
     Harness harness = new Harness();
@@ -125,6 +195,7 @@ class IdeGatewayDataPlaneTest {
     byte[] payload = "hello-code-server".getBytes(StandardCharsets.UTF_8);
 
     MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
     request.setContent(payload);
     MockHttpServletResponse response = new MockHttpServletResponse();
     harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
@@ -133,6 +204,110 @@ class IdeGatewayDataPlaneTest {
     assertEquals(payload.length, peer.receivedRequestBytes);
     assertEquals("/api/save", harness.transport.lastCommand.get().path());
     assertEquals("POST", harness.transport.lastCommand.get().method());
+  }
+
+  /** 同站其它子域或跨站的 unsafe 请求必须被拒绝（精确同源，不允许任意 scheme/port）。 */
+  @Test
+  void rejectsUnsafeRequestFromForeignOrigin() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Origin", "https://evil." + ENV + ".ide.test");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+  }
+
+  /** 缺 Origin 且无明确同站声明（Sec-Fetch-Site）时 fail-closed。 */
+  @Test
+  void rejectsUnsafeRequestWithoutOriginAndSecFetchSite() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+  }
+
+  @Test
+  void rejectsCrossSiteSecFetchSite() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Sec-Fetch-Site", "cross-site");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+  }
+
+  /** 精确同源（scheme+host+effective port）的 unsafe 请求与同站声明都放行。 */
+  @Test
+  void allowsExactSameOriginUnsafeRequest() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer = new ScriptedPeer(0, List.of());
+    harness.transport.peerFactory = () -> peer;
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Origin", "http://" + ENV + ".ide.test");
+    request.addHeader("Sec-Fetch-Site", "same-origin");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(200, response.getStatus());
+  }
+
+  /** 缺 Origin 但声明 same-origin/none（直接输入/同源导航）时按同源处理。 */
+  @Test
+  void allowsUnsafeRequestWithSameSiteSecFetchSiteOnly() throws Exception {
+    Harness harness = new Harness();
+    harness.transport.peerFactory = () -> new ScriptedPeer(0, List.of());
+    MockHttpServletRequest request = harness.request("POST", "/api/save");
+    request.addHeader("Sec-Fetch-Site", "none");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(200, response.getStatus());
+  }
+
+  /** OPTIONS 不被代理。 */
+  @Test
+  void doesNotProxyOptions() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("OPTIONS", "/api/save");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/api/save", request, response);
+
+    assertEquals(403, response.getStatus());
+    assertEquals(0, harness.transport.abandoned.size());
+  }
+
+  /** 多面板：同一代际下另一个受管 workspace 请求必须放行，未授权的仍拒绝。 */
+  @Test
+  void allowsAuthorizedSiblingWorkspaceButRejectsUnknownOne() throws Exception {
+    Harness harness = new Harness();
+    harness.transport.peerFactory = () -> new ScriptedPeer(0, List.of());
+    // 第二个面板：同代际的另一个受管 workspace。
+    String otherView = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, otherView, "/managed/other");
+    harness.sessions.open(harness.identity, otherView, "/managed/other");
+
+    MockHttpServletRequest allowed = harness.request("GET", "/");
+    allowed.setParameter("workspace", "/managed/other");
+    MockHttpServletResponse allowedResponse = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/", allowed, allowedResponse);
+    assertEquals(200, allowedResponse.getStatus());
+
+    MockHttpServletRequest rejected = harness.request("GET", "/");
+    rejected.setParameter("workspace", "/etc");
+    MockHttpServletResponse rejectedResponse = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/", rejected, rejectedResponse);
+    assertEquals(403, rejectedResponse.getStatus());
   }
 
   @Test
@@ -180,9 +355,10 @@ class IdeGatewayDataPlaneTest {
   @Test
   void bootstrapConsumesTicketAndRedirectsToServerWorkspace() throws Exception {
     Harness harness = new Harness();
-    String ticket =
-        harness.bootstrap.issue(
-            harness.identity, UUID.randomUUID().toString(), "/managed/workspace");
+    // 真实前置：视图先由 OPEN_VIEW 授权，票据才能被消费。
+    String view = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, view, "/managed/workspace");
+    String ticket = harness.bootstrap.issue(harness.identity, view, "/managed/workspace");
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/__ide/bootstrap");
     request.setServerName(ENV + ".ide.test");
     request.setQueryString("token=" + ticket);
@@ -200,6 +376,25 @@ class IdeGatewayDataPlaneTest {
     assertEquals("/?workspace=%2Fmanaged%2Fworkspace", response.getHeader("Location"));
   }
 
+  /** 视图关闭后旧票据必须失效（410），且绝不因此重新授权视图。 */
+  @Test
+  void bootstrapRejectsTicketOfClosedView() throws Exception {
+    Harness harness = new Harness();
+    String view = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, view, "/managed/workspace");
+    String ticket = harness.bootstrap.issue(harness.identity, view, "/managed/workspace");
+    harness.sessions.viewClosed(harness.identity, view);
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/__ide/bootstrap");
+    request.setParameter("token", ticket);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleBootstrap(ENV, request, response);
+
+    assertEquals(410, response.getStatus());
+    assertNull(response.getHeader("Set-Cookie"));
+    assertEquals(0, harness.sessions.viewCount(harness.identity));
+  }
+
   @Test
   void bootstrapRejectsUnknownTicket() throws Exception {
     Harness harness = new Harness();
@@ -212,14 +407,15 @@ class IdeGatewayDataPlaneTest {
     assertEquals(410, response.getStatus());
   }
 
-  /** 由 streamUrl 生成：必须在受控 stream endpoint 前缀下，且携带一次性 ticket、不泄露注册 token。 */
+  /** 由 streamUrl 生成：必须在受控 stream endpoint 前缀下，携带一次性 ticket 与 environment 查询，不泄露注册 token。 */
   @Test
   void streamUrlCarriesTicketUnderControlledPath() {
     IdeGatewayProperties properties = properties();
     assertEquals(
-        "wss://gateway.test/api/harness/environment-stream/v1/abc", properties.streamUrl("abc"));
+        "wss://gateway.test/api/harness/environment-stream/v1/abc?environment=" + ENV,
+        properties.streamUrl(ENV, "abc"));
     properties.setStreamUrlTemplate("https://gateway.test/api/harness/environment-stream/v1");
-    assertThrows(IllegalStateException.class, () -> properties.streamUrl("abc"));
+    assertThrows(IllegalStateException.class, () -> properties.streamUrl(ENV, "abc"));
   }
 
   /** 可编程 IDE 命令传输：OPEN_STREAM 时把脚本化 peer 交付给配对注册表。 */
@@ -264,6 +460,8 @@ class IdeGatewayDataPlaneTest {
 
     private final int bodyBytes;
     private final List<IdeHeader> headers;
+    private int idlePollsBeforeResponse;
+    private int idlePolls;
     private boolean responseSent;
     private int sentBytes;
     private boolean ended;
@@ -288,8 +486,23 @@ class IdeGatewayDataPlaneTest {
     }
 
     @Override
+    public boolean closed() {
+      return closed;
+    }
+
+    ScriptedPeer withIdlePollsBeforeResponse(int idlePollsBeforeResponse) {
+      this.idlePollsBeforeResponse = idlePollsBeforeResponse;
+      return this;
+    }
+
+    @Override
     public Inbound poll(Duration timeout) {
       if (closed) {
+        return null;
+      }
+      if (idlePolls < idlePollsBeforeResponse) {
+        // 空闲：返回 null 但不是关闭；数据面必须继续等到真实 deadline。
+        idlePolls++;
         return null;
       }
       if (!responseSent) {

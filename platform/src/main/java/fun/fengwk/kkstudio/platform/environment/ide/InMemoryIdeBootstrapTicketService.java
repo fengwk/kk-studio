@@ -36,6 +36,16 @@ public final class InMemoryIdeBootstrapTicketService implements IdeBootstrapTick
                 && ticket.identity().leaseToken().equals(leaseToken));
   }
 
+  @Override
+  public void revokeView(EnvironmentId environmentId, String viewId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(viewId, "viewId");
+    store.revoke(
+        ticket ->
+            ticket.identity().environmentId().equals(environmentId)
+                && ticket.viewId().equals(viewId));
+  }
+
   /** 当前未消费票据数量（诊断/测试）。 */
   public int pendingCount() {
     return store.pendingCount();

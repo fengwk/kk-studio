@@ -39,12 +39,13 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   private final IdeOriginProperties originProperties;
   private final IdeBootstrapTicketService bootstrapTickets;
   private final Duration commandTimeout;
+  private final IdeViewAuthorizationListener viewAuthorization;
 
   public EnvironmentIdeServiceImpl(
       IdeCommandTransport transport,
       IdeOriginProperties originProperties,
       IdeBootstrapTicketService bootstrapTickets) {
-    this(transport, originProperties, bootstrapTickets, DEFAULT_COMMAND_TIMEOUT);
+    this(transport, originProperties, bootstrapTickets, DEFAULT_COMMAND_TIMEOUT, null);
   }
 
   public EnvironmentIdeServiceImpl(
@@ -52,10 +53,20 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       IdeOriginProperties originProperties,
       IdeBootstrapTicketService bootstrapTickets,
       Duration commandTimeout) {
+    this(transport, originProperties, bootstrapTickets, commandTimeout, null);
+  }
+
+  public EnvironmentIdeServiceImpl(
+      IdeCommandTransport transport,
+      IdeOriginProperties originProperties,
+      IdeBootstrapTicketService bootstrapTickets,
+      Duration commandTimeout,
+      IdeViewAuthorizationListener viewAuthorization) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.originProperties = Objects.requireNonNull(originProperties, "originProperties");
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
     this.commandTimeout = Objects.requireNonNull(commandTimeout, "commandTimeout");
+    this.viewAuthorization = viewAuthorization;
     if (commandTimeout.isZero() || commandTimeout.isNegative()) {
       throw new IllegalArgumentException("commandTimeout must be positive");
     }
@@ -69,6 +80,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     String viewId = parseViewId(request.getViewId());
     // 先校验独立 Origin 配置：缺配置时在任何 Daemon 副作用之前 fail-closed，不回退 Studio 同源。
     requireConfiguredOrigin(environmentId);
+    // 容量预检同样在任何 Daemon 副作用之前：视图/代际额度耗尽时显式失败，绝不先建 Native 视图再静默不授权。
+    if (viewAuthorization != null) {
+      try {
+        viewAuthorization.ensureViewCapacity(environmentId);
+      } catch (IllegalStateException error) {
+        throw new AiEnvironmentIdeUnavailableException(
+            "environment IDE view capacity is exhausted", error);
+      }
+    }
     IdeCommand command =
         new IdeCommand(
             IdeAction.OPEN_VIEW,
@@ -85,6 +105,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     EnvironmentIdeViewDTO dto =
         toDto(environmentId, reply.viewId() == null ? viewId : reply.viewId(), reply.directory());
     String workspacePath = requireWorkspace(reply);
+    // 视图授权跟随真实视图生命周期：创建即授权，关闭即撤销（不使用空闲超时推断）。
+    if (viewAuthorization != null) {
+      try {
+        viewAuthorization.viewOpened(result.identity(), dto.getViewId(), workspacePath);
+      } catch (IllegalStateException error) {
+        throw new AiEnvironmentIdeUnavailableException(
+            "environment IDE view capacity is exhausted", error);
+      }
+    }
     // 入口凭据绑定命令的代际；租约失效/接管时由 host/router 依代际关闭并 revoke。
     String ticket = bootstrapTickets.issue(result.identity(), dto.getViewId(), workspacePath);
     dto.setEntryUrl(originProperties.bootstrapEntryUrl(environmentId, ticket));
@@ -129,7 +158,13 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   @Override
   public void closeView(EnvironmentId environmentId, String viewId) {
     Objects.requireNonNull(environmentId, "environmentId");
-    call(environmentId, IdeCommand.view(IdeAction.CLOSE_VIEW, parseViewId(viewId), null));
+    String parsedViewId = parseViewId(viewId);
+    IdeCall result = call(environmentId, IdeCommand.view(IdeAction.CLOSE_VIEW, parsedViewId, null));
+    if (viewAuthorization != null) {
+      viewAuthorization.viewClosed(result.identity(), parsedViewId);
+    }
+    // 撤销该视图尚未消费的入口票据：否则视图关闭后（尤其同一 viewId 再次打开时）旧票据仍能换到 cookie。
+    bootstrapTickets.revokeView(environmentId, parsedViewId);
   }
 
   private IdeCall call(EnvironmentId environmentId, IdeCommand command) {

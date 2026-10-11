@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentic
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
@@ -33,9 +32,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -56,12 +52,9 @@ public class ClusterEnvironmentIdeInternalController {
 
   private static final int MAX_METADATA_BODY_BYTES = ClusterInternalPaths.MAX_METADATA_BODY_BYTES;
 
-  private static final List<String> AUTH_HEADER_NAMES =
-      List.of(
-          HmacClusterInternalAuthentication.HEADER_TARGET,
-          HmacClusterInternalAuthentication.HEADER_TIMESTAMP,
-          HmacClusterInternalAuthentication.HEADER_NONCE,
-          HmacClusterInternalAuthentication.HEADER_SIGNATURE);
+  /** viewId 的路径约束：只匹配规范 UUID 形状，避免把同前缀下的其它内部子资源（如反向数据端点 {@code /reverse}）误判为 viewId 并返回 405。 */
+  private static final String VIEW_ID =
+      "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 
   private final EnvironmentIdeServiceImpl localEnvironmentIdeService;
   private final ClusterNodeRegistry clusterNodeRegistry;
@@ -90,7 +83,7 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.openView(environment, body);
   }
 
-  @PutMapping("/{viewId}/directory")
+  @PutMapping("/{viewId:" + VIEW_ID + "}/directory")
   public EnvironmentIdeViewDTO changeDirectory(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -99,14 +92,14 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.changeDirectory(environment, viewId, body);
   }
 
-  @PostMapping("/{viewId}/terminal")
+  @PostMapping("/{viewId:" + VIEW_ID + "}/terminal")
   public void focusTerminal(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     localEnvironmentIdeService.focusTerminal(environment, viewId);
   }
 
-  @DeleteMapping("/{viewId}")
+  @DeleteMapping("/{viewId:" + VIEW_ID + "}")
   public void closeView(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -115,7 +108,10 @@ public class ClusterEnvironmentIdeInternalController {
 
   /** 认证 + owner 核对先于请求体读取；任一失败都不会有任何 daemon 副作用。 */
   private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, String environmentId) {
-    authentication.verify(request.getMethod(), canonicalPath(request), authHeaders(request));
+    authentication.verify(
+        request.getMethod(),
+        ClusterInternalRequests.canonicalPath(request),
+        ClusterInternalRequests.authHeaders(request));
     EnvironmentId environment = parseEnvironmentId(environmentId);
     requireLocalOwner(environment);
     return environment;
@@ -150,30 +146,6 @@ public class ClusterEnvironmentIdeInternalController {
       throw new AiEnvironmentIdeUnavailableException(
           "internal IDE request does not match this node's READY owner route");
     }
-  }
-
-  private static String canonicalPath(HttpServletRequest request) {
-    String uri = request.getRequestURI();
-    String query = request.getQueryString();
-    return query == null ? uri : uri + "?" + query;
-  }
-
-  /** 认证头必须恰好出现一次：重复出现的同名头一律按认证失败拒绝，绝不静默取首个。 */
-  private static Map<String, String> authHeaders(HttpServletRequest request) {
-    Map<String, String> headers = new HashMap<>();
-    for (String name : AUTH_HEADER_NAMES) {
-      Enumeration<String> values = request.getHeaders(name);
-      if (values == null || !values.hasMoreElements()) {
-        continue;
-      }
-      String value = values.nextElement();
-      if (values.hasMoreElements()) {
-        throw new ClusterInternalAuthenticationException(
-            "duplicate internal authentication header");
-      }
-      headers.put(name, value);
-    }
-    return headers;
   }
 
   private static EnvironmentId parseEnvironmentId(String text) {
