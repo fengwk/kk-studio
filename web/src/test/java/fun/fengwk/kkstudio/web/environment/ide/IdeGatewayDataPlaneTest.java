@@ -513,6 +513,71 @@ class IdeGatewayDataPlaneTest {
     assertEquals("gzip", response.getHeader("content-encoding"));
   }
 
+  /** 未先收到 HTTP_RESPONSE 的 HTTP_END 是协议错误：不得默认成 200 空 body，未提交响应必须被 reset。 */
+  @Test
+  void endBeforeResponseFailsAndResetsUncommittedResponse() {
+    Harness harness = new Harness();
+    TransportClosedPeer peer =
+        new TransportClosedPeer(List.of(new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpEnd())));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    // 模拟上一层已写入的残留头：失败时必须被 reset 清除，而不是被当成成功的 200 空 body。
+    response.addHeader("content-encoding", "br");
+    assertThrows(
+        IOException.class, () -> harness.dataPlane.handleHttp(ENV, "/", request, response));
+    assertNull(response.getHeader("content-encoding"));
+    assertEquals(0, response.getContentAsByteArray().length);
+  }
+
+  /** 重复 HTTP_RESPONSE 是协议错误：不得静默覆盖状态/headers，必须以失败终止并清空未提交响应。 */
+  @Test
+  void duplicateResponseFailsAndClearsHeaders() {
+    Harness harness = new Harness();
+    TransportClosedPeer peer =
+        new TransportClosedPeer(
+            List.of(
+                new IdeStreamPeer.Inbound.Text(
+                    CODEC.encodeHttpResponse(
+                        new IdeStreamControlFrame.HttpResponse(
+                            200,
+                            List.of(
+                                new IdeHeader("content-encoding", "gzip"),
+                                new IdeHeader("etag", "\"v1\""))))),
+                new IdeStreamPeer.Inbound.Text(
+                    CODEC.encodeHttpResponse(
+                        new IdeStreamControlFrame.HttpResponse(
+                            500, List.of(new IdeHeader("content-encoding", "br"))))),
+                new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpEnd())));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    assertThrows(
+        IOException.class, () -> harness.dataPlane.handleHttp(ENV, "/", request, response));
+    // 第二次响应不得覆盖：状态退回默认且所有残留 headers 被清空。
+    assertEquals(200, response.getStatus());
+    assertNull(response.getHeader("content-encoding"));
+    assertNull(response.getHeader("etag"));
+  }
+
+  /** 未先收到 HTTP_RESPONSE 的 HTTP body 是协议错误：不得写入响应，必须以失败终止。 */
+  @Test
+  void bodyBeforeResponseFails() {
+    Harness harness = new Harness();
+    TransportClosedPeer peer =
+        new TransportClosedPeer(
+            List.of(new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpBody(new byte[] {1, 2, 3}))));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    assertThrows(
+        IOException.class, () -> harness.dataPlane.handleHttp(ENV, "/", request, response));
+    assertEquals(0, response.getContentAsByteArray().length);
+  }
+
   private static byte[] gzip(byte[] payload) throws IOException {
     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     try (GZIPOutputStream gzip = new GZIPOutputStream(bytes)) {
