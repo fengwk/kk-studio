@@ -38,6 +38,13 @@ export class WireError extends Error {
   }
 }
 
+/** A cancelled credit wait surfaces as an AbortError so callers can distinguish it. */
+function creditAbortError(): Error {
+  const error = new Error('credit wait aborted')
+  error.name = 'AbortError'
+  return error
+}
+
 export type BinaryFrame =
   | { kind: 'http-body'; payload: Buffer }
   | { kind: 'http-end' }
@@ -144,20 +151,6 @@ export function encodeWsFrame(kind: 'text' | 'binary', payload: Buffer, last: bo
   return out
 }
 
-/** Splits a WS message into protocol frames, preserving order and the FIN flag. */
-export function* fragmentWsMessage(kind: 'text' | 'binary', payload: Buffer): Generator<Buffer> {
-  if (payload.length === 0) {
-    yield encodeWsFrame(kind, payload, true)
-    return
-  }
-  let offset = 0
-  while (offset < payload.length) {
-    const end = Math.min(offset + MAX_PAYLOAD, payload.length)
-    yield encodeWsFrame(kind, payload.subarray(offset, end), end === payload.length)
-    offset = end
-  }
-}
-
 function assertOnlyKeys(object: Record<string, unknown>, allowed: readonly string[]): void {
   for (const key of Object.keys(object)) {
     if (!allowed.includes(key)) {
@@ -228,7 +221,8 @@ export function encodeTextFrame(frame: TextFrame): string {
  * Tracks how many payload bytes were reserved but not yet acknowledged.
  *
  * Used in both directions; `reserve` guards against window overrun, `ack` releases
- * capacity and wakes blocked senders.
+ * capacity and wakes blocked senders. `waitFor` accepts a signal so a cancelled exchange
+ * cannot strand a sender that is waiting for credit.
  */
 export class CreditWindow {
   private unacked = 0
@@ -275,12 +269,26 @@ export class CreditWindow {
     }
   }
 
-  async waitFor(bytes: number): Promise<void> {
+  async waitFor(bytes: number, signal?: AbortSignal): Promise<void> {
     if (!Number.isInteger(bytes) || bytes < 0 || bytes > this.limit) {
       throw new WireError('invalid credit wait')
     }
     while (this.available < bytes) {
-      await new Promise<void>((resolve) => this.waiters.add(resolve))
+      if (signal?.aborted) {
+        throw creditAbortError()
+      }
+      await new Promise<void>((resolve, reject) => {
+        const waiter = (): void => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve()
+        }
+        const onAbort = (): void => {
+          this.waiters.delete(waiter)
+          reject(creditAbortError())
+        }
+        this.waiters.add(waiter)
+        signal?.addEventListener('abort', onAbort, { once: true })
+      })
     }
   }
 }

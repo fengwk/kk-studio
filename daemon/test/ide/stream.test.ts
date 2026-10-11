@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server } from 'node:http'
+import { createHash } from 'node:crypto'
+import type { AddressInfo, Socket } from 'node:net'
 import { WebSocketServer, WebSocket } from 'ws'
 import { openStreamExchange } from '../../src/transport/stream.js'
+import { UpstreamWebSocket } from '../../src/transport/upstream-websocket.js'
 import {
   INITIAL_CREDIT,
   MAX_PAYLOAD,
+  CreditWindow,
   decodeBinaryFrame,
   decodeTextFrame,
   encodeAck,
@@ -124,6 +127,335 @@ function upstreamOf(url: string): { host: string; port: number } {
   const parsed = new URL(url)
   return { host: parsed.hostname, port: Number(parsed.port) }
 }
+
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+
+/**
+ * A raw RFC 6455 server that completes the handshake and then lets the test write arbitrary
+ * bytes, so malformed framing that `ws` would never emit can be exercised.
+ */
+async function startRawWsUpstream(onOpen: (socket: Socket) => void): Promise<Harness> {
+  const sockets = new Set<Socket>()
+  const server = createServer()
+  server.on('upgrade', (request, socket, head) => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
+    // A malformed-frame test lets the daemon destroy the connection; that must not throw here.
+    socket.on('error', () => undefined)
+    const key = String(request.headers['sec-websocket-key'] ?? '')
+    socket.write(switchingProtocols(key))
+    onOpen(socket)
+  })
+  const port = await listen(server)
+  const harness = {
+    url: `ws://127.0.0.1:${port}`,
+    close: () => {
+      // Upgraded sockets are not tracked by the HTTP server, so close them explicitly.
+      for (const socket of sockets) {
+        socket.destroy()
+      }
+      sockets.clear()
+      return closeServer(server)
+    },
+  }
+  cleanups.push(harness.close)
+  return harness
+}
+
+function acceptFor(key: string): string {
+  return createHash('sha1')
+    .update(key + WS_GUID)
+    .digest('base64')
+}
+
+/**
+ * A raw TCP server that answers the upgrade request with whatever the test wants, so handshake
+ * validation (status, headers, accept key, extensions, subprotocol) can be exercised.
+ */
+async function startHandshakeReplier(
+  response: (key: string) => string,
+  onRequest?: (request: IncomingMessage) => void,
+): Promise<Harness> {
+  const sockets = new Set<Socket>()
+  const server = createServer()
+  server.on('upgrade', (request, socket) => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
+    socket.on('error', () => undefined)
+    onRequest?.(request)
+    socket.write(response(String(request.headers['sec-websocket-key'] ?? '')))
+  })
+  const port = await listen(server)
+  const harness = {
+    url: `ws://127.0.0.1:${port}`,
+    close: () => {
+      for (const socket of sockets) {
+        socket.destroy()
+      }
+      sockets.clear()
+      return closeServer(server)
+    },
+  }
+  cleanups.push(harness.close)
+  return harness
+}
+
+/**
+ * A server that answers with a raw, never-ended response and exposes whether the client tore the
+ * connection down, so a failed handshake can be checked for socket leaks.
+ */
+async function startStuckResponse(response: string): Promise<{ harness: Harness; gone: Promise<void> }> {
+  let resolveGone: () => void = () => undefined
+  const gone = new Promise<void>((resolve) => {
+    resolveGone = resolve
+  })
+  const sockets = new Set<Socket>()
+  const server = createServer()
+  server.on('upgrade', (request, socket) => {
+    sockets.add(socket)
+    // FIN (end), full close and reset all mean the peer connection is no longer usable.
+    let finished = false
+    const markGone = (): void => {
+      if (!finished) {
+        finished = true
+        resolveGone()
+      }
+    }
+    // Keep the socket tracked until it really closes so cleanup can still destroy it.
+    socket.on('close', () => {
+      sockets.delete(socket)
+      markGone()
+    })
+    socket.on('end', markGone)
+    socket.on('error', markGone)
+    socket.write(response)
+    // A paused socket never observes the peer's FIN, so the leak check would hang.
+    socket.resume()
+  })
+  const port = await listen(server)
+  const harness = {
+    url: `ws://127.0.0.1:${port}`,
+    close: () => {
+      for (const socket of sockets) {
+        socket.destroy()
+      }
+      sockets.clear()
+      return closeServer(server)
+    },
+  }
+  cleanups.push(harness.close)
+  return { harness, gone }
+}
+
+function connectUpstream(
+  harness: Harness,
+  extra: { protocols?: string[]; headers?: [string, string][]; handshakeTimeoutMillis?: number } = {},
+): Promise<UpstreamWebSocket> {
+  const { host, port } = upstreamOf(harness.url)
+  return UpstreamWebSocket.connect({
+    host,
+    port,
+    path: '/',
+    headers: extra.headers ?? [],
+    protocols: extra.protocols,
+    handshakeTimeoutMillis: extra.handshakeTimeoutMillis,
+    signal: newSignal().signal,
+  })
+}
+
+function switchingProtocols(key: string, extra = ''): string {
+  return (
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+    'Upgrade: websocket\r\n' +
+    'Connection: Upgrade\r\n' +
+    `Sec-WebSocket-Accept: ${acceptFor(key)}\r\n` +
+    extra +
+    '\r\n'
+  )
+}
+
+/** One invalid upgrade response and the protocol error it must produce. */
+const HANDSHAKE_FAILURES: { name: string; response: (key: string) => string; pattern: RegExp; protocols?: string[] }[] = [
+  {
+    name: 'a non-101 status',
+    pattern: /handshake returned status 403/,
+    response: () => 'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n',
+  },
+  {
+    name: 'a missing Upgrade header',
+    pattern: /missing the Upgrade header/,
+    response: (key) =>
+      `HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptFor(key)}\r\n\r\n`,
+  },
+  {
+    name: 'a missing Connection header',
+    pattern: /missing Connection: Upgrade/,
+    response: (key) =>
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${acceptFor(key)}\r\n\r\n`,
+  },
+  {
+    name: 'an accept key mismatch',
+    pattern: /accept mismatch/,
+    response: (key) =>
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptFor(`${key}x`)}\r\n\r\n`,
+  },
+  {
+    name: 'a negotiated extension',
+    pattern: /unsupported extension/,
+    response: (key) => switchingProtocols(key, 'Sec-WebSocket-Extensions: permessage-deflate\r\n'),
+  },
+  {
+    name: 'an unrequested subprotocol',
+    pattern: /unexpected subprotocol/,
+    response: (key) => switchingProtocols(key, 'Sec-WebSocket-Protocol: other\r\n'),
+  },
+  {
+    name: 'a subprotocol outside the allowlist',
+    pattern: /unexpected subprotocol/,
+    protocols: ['wanted'],
+    response: (key) => switchingProtocols(key, 'Sec-WebSocket-Protocol: other\r\n'),
+  },
+]
+
+/** Builds one unmasked (server-to-client) RFC 6455 frame. */
+function serverFrame(opcode: number, payload: Buffer, options: { fin?: boolean; rsv?: number } = {}): Buffer {
+  const fin = options.fin ?? true
+  const first = (fin ? 0x80 : 0) | (((options.rsv ?? 0) & 0x07) << 4) | opcode
+  const length = payload.length
+  if (length < 126) {
+    return Buffer.concat([Buffer.from([first, length]), payload])
+  }
+  if (length <= 0xffff) {
+    const header = Buffer.alloc(4)
+    header[0] = first
+    header[1] = 126
+    header.writeUInt16BE(length, 2)
+    return Buffer.concat([header, payload])
+  }
+  const header = Buffer.alloc(10)
+  header[0] = first
+  header[1] = 127
+  header.writeBigUInt64BE(BigInt(length), 2)
+  return Buffer.concat([header, payload])
+}
+
+/** One malformed upstream frame and the protocol error it must produce. */
+const MALFORMED_CASES: { name: string; bytes: () => Buffer; pattern: RegExp; end?: boolean }[] = [
+  {
+    name: 'a masked server frame',
+    pattern: /must not be masked/,
+    bytes: () => {
+      const payload = Buffer.from([1, 2, 3])
+      const mask = Buffer.from([9, 8, 7, 6])
+      const masked = Buffer.alloc(payload.length)
+      for (let index = 0; index < payload.length; index += 1) {
+        masked[index] = payload[index]! ^ mask[index & 3]!
+      }
+      return Buffer.concat([Buffer.from([0x82, 0x80 | payload.length]), mask, masked])
+    },
+  },
+  { name: 'reserved bits', pattern: /reserved bits/, bytes: () => serverFrame(0x1, Buffer.from('a'), { rsv: 1 }) },
+  {
+    name: 'a non-canonical two byte length',
+    pattern: /not canonical/,
+    bytes: () => Buffer.concat([Buffer.from([0x82, 126, 0x00, 0x05]), Buffer.alloc(5, 1)]),
+  },
+  {
+    name: 'a non-canonical eight byte length',
+    pattern: /not canonical/,
+    bytes: () => {
+      const header = Buffer.alloc(10)
+      header[0] = 0x82
+      header[1] = 127
+      header.writeBigUInt64BE(BigInt(5), 2)
+      return Buffer.concat([header, Buffer.alloc(5, 1)])
+    },
+  },
+  {
+    name: 'a fragmented control frame',
+    pattern: /control frame must not be fragmented/,
+    bytes: () => serverFrame(0x9, Buffer.from('x'), { fin: false }),
+  },
+  {
+    name: 'an oversized control frame',
+    pattern: /control frame is too large/,
+    bytes: () => serverFrame(0x9, Buffer.alloc(126)),
+  },
+  {
+    name: 'a new message before the previous one finished',
+    pattern: /started a new message/,
+    bytes: () => Buffer.concat([serverFrame(0x1, Buffer.from('a'), { fin: false }), serverFrame(0x1, Buffer.from('b'))]),
+  },
+  {
+    name: 'a continuation without a message',
+    pattern: /continuation without a message/,
+    bytes: () => serverFrame(0x0, Buffer.from('a')),
+  },
+  {
+    name: 'an unsupported data opcode',
+    pattern: /data opcode 3 is unsupported/,
+    bytes: () => serverFrame(0x3, Buffer.from('a')),
+  },
+  {
+    name: 'a truncated close frame',
+    pattern: /close frame is truncated/,
+    bytes: () => serverFrame(0x8, Buffer.from([0x03])),
+  },
+  {
+    name: 'invalid UTF-8 in a text message',
+    pattern: /not valid UTF-8/,
+    bytes: () => serverFrame(0x1, Buffer.from([0xff, 0xfe])),
+  },
+  {
+    name: 'a truncated two byte length',
+    pattern: /length is truncated/,
+    end: true,
+    bytes: () => Buffer.from([0x82, 126]),
+  },
+  {
+    name: 'a truncated eight byte length',
+    pattern: /length is truncated/,
+    end: true,
+    bytes: () => Buffer.from([0x82, 127, 0, 0, 0]),
+  },
+  {
+    name: 'an eight byte length with the high bit set',
+    pattern: /length is invalid/,
+    bytes: () => Buffer.from([0x82, 127, 0x80, 0, 0, 0, 0, 0, 0, 0]),
+  },
+  {
+    name: 'an eight byte length beyond safe integer range',
+    pattern: /too large/,
+    bytes: () => Buffer.from([0x82, 127, 0x00, 0x20, 0, 0, 0, 0, 0, 0]),
+  },
+  {
+    name: 'a truncated control payload',
+    pattern: /control frame is truncated/,
+    end: true,
+    bytes: () => Buffer.from([0x89, 0x05, 1, 2]),
+  },
+  {
+    name: 'a truncated data payload',
+    pattern: /payload is truncated/,
+    end: true,
+    bytes: () => Buffer.from([0x82, 0x05, 1, 2]),
+  },
+  {
+    name: 'an invalid close code',
+    pattern: /close code is invalid/,
+    bytes: () => serverFrame(0x8, Buffer.from([0x03, 0xed])),
+  },
+  {
+    name: 'a close reason that is not valid UTF-8',
+    pattern: /close reason is not valid UTF-8/,
+    bytes: () => serverFrame(0x8, Buffer.from([0x03, 0xe8, 0xff, 0xfe])),
+  },
+  {
+    name: 'an unsupported control opcode',
+    pattern: /control opcode 11 is unsupported/,
+    bytes: () => serverFrame(0xb, Buffer.alloc(0)),
+  },
+]
 
 function newSignal(): AbortController {
   const controller = new AbortController()
@@ -866,5 +1198,627 @@ describe('WebSocket exchanges over the reverse stream', () => {
     await exchange
     await waitFor(() => upstreamClosed)
     expect(upstreamClosed).toBe(true)
+  })
+
+  it(
+    'streams a >20MiB single upstream message without buffering it whole',
+    async () => {
+      const size = 20 * 1024 * 1024
+      const payload = Buffer.alloc(size, 0x5a)
+      let upstreamFlushed = false
+      const upstream = await startWsUpstream((socket) => {
+        // One huge frame: a whole-message client would have to hold all 20MiB before forwarding.
+        socket.send(payload, () => {
+          upstreamFlushed = true
+        })
+      })
+
+      let received = 0
+      let lastSeen = false
+      let unacked = 0
+      let peakUnacked = 0
+      let ackEnabled = false
+      let flushAck: (() => void) | undefined
+      let gatewaySocket: WebSocket | undefined
+      const gateway = await startGateway((conn) => {
+        gatewaySocket = conn.socket
+        flushAck = (): void => {
+          if (unacked > 0) {
+            conn.sendAck(unacked)
+            unacked = 0
+          }
+        }
+        conn.socket.on('message', (data, isBinary) => {
+          if (!isBinary) {
+            return
+          }
+          const frame = decodeBinaryFrame(data as Buffer)
+          if (frame.kind !== 'ws-binary' && frame.kind !== 'ws-text') {
+            return
+          }
+          received += frame.payload.length
+          lastSeen = lastSeen || frame.last
+          unacked += frame.payload.length
+          peakUnacked = Math.max(peakUnacked, unacked)
+          if (ackEnabled && unacked >= ACK_THRESHOLD) {
+            flushAck()
+          }
+        })
+      })
+
+      const exchange = openStreamExchange({
+        streamUrl: gateway.url,
+        request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      })
+
+      // While the browser withholds credit the daemon must stop draining the local socket: the
+      // upstream write is still blocked, proving nothing close to 20MiB was buffered.
+      await waitFor(() => received > 0, 20_000)
+      await delay(300)
+      expect(upstreamFlushed).toBe(false)
+      expect(received).toBeLessThan(size)
+      expect(peakUnacked).toBeLessThanOrEqual(INITIAL_CREDIT + MAX_PAYLOAD)
+
+      ackEnabled = true
+      flushAck?.()
+      await waitFor(() => received === size && lastSeen, 60_000)
+      expect(lastSeen).toBe(true)
+      expect(peakUnacked).toBeLessThanOrEqual(INITIAL_CREDIT + MAX_PAYLOAD)
+      await waitFor(() => upstreamFlushed, 30_000)
+
+      gatewaySocket?.close()
+      await exchange
+    },
+    120_000,
+  )
+
+  it('relays more than 256KiB in both directions at once', async () => {
+    const fromBrowser = Buffer.alloc(512 * 1024 + 7, 0x11)
+    const fromUpstream = Buffer.alloc(512 * 1024 + 9, 0x22)
+    let receivedByUpstream = Buffer.alloc(0)
+    const upstream = await startWsUpstream((socket) => {
+      socket.on('message', (data) => {
+        receivedByUpstream = Buffer.concat([receivedByUpstream, data as Buffer])
+      })
+      socket.send(fromUpstream)
+    })
+
+    let receivedByBrowser = Buffer.alloc(0)
+    let gatewaySocket: WebSocket | undefined
+    const gateway = await startGateway((conn) => {
+      gatewaySocket = conn.socket
+      let pump: WsFragmentPump | undefined
+      conn.socket.on('message', (data, isBinary) => {
+        if (!isBinary) {
+          if (decodeTextFrame(data.toString('utf8')).type === 'WS_READY') {
+            pump = new WsFragmentPump(conn, chunkBuffer(fromBrowser), 'binary', () => undefined)
+            pump.start()
+          }
+          return
+        }
+        const frame = decodeBinaryFrame(data as Buffer)
+        if (frame.kind === 'ack') {
+          pump?.ack(frame.bytes)
+        } else if (frame.kind === 'ws-binary' || frame.kind === 'ws-text') {
+          receivedByBrowser = Buffer.concat([receivedByBrowser, frame.payload])
+          conn.sendAck(frame.payload.length)
+        }
+      })
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+
+    await waitFor(() => receivedByUpstream.length === fromBrowser.length, 20_000)
+    await waitFor(() => receivedByBrowser.length === fromUpstream.length, 20_000)
+    expect(receivedByUpstream.equals(fromBrowser)).toBe(true)
+    expect(receivedByBrowser.equals(fromUpstream)).toBe(true)
+
+    gatewaySocket?.close()
+    await exchange
+  })
+
+  it('preserves UTF-8 text split across frame and socket boundaries', async () => {
+    // The first multi-byte character straddles the 64KiB piece boundary on purpose.
+    const head = Buffer.alloc(MAX_PAYLOAD - 1, 0x61)
+    const message = Buffer.concat([head, Buffer.from('世界🙂'.repeat(2048), 'utf8')])
+    const upstream = await startWsUpstream((socket) => {
+      // Sent as text so the daemon must validate UTF-8 while streaming it.
+      socket.send(message, { binary: false })
+    })
+
+    let received = Buffer.alloc(0)
+    let lastSeen = false
+    let gatewaySocket: WebSocket | undefined
+    const gateway = await startGateway((conn) => {
+      gatewaySocket = conn.socket
+      conn.socket.on('message', (data, isBinary) => {
+        if (!isBinary) {
+          return
+        }
+        const frame = decodeBinaryFrame(data as Buffer)
+        if (frame.kind === 'ws-text') {
+          received = Buffer.concat([received, frame.payload])
+          lastSeen = lastSeen || frame.last
+          conn.sendAck(frame.payload.length)
+        }
+      })
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+
+    await waitFor(() => lastSeen, 30_000)
+    expect(received.equals(message)).toBe(true)
+
+    gatewaySocket?.close()
+    await exchange
+  })
+
+  it('streams a fragmented upstream message whose final frame is empty', async () => {
+    const upstream = await startWsUpstream((socket) => {
+      socket.send(Buffer.from('hello'), { fin: false })
+      socket.send(Buffer.alloc(0), { fin: true })
+    })
+
+    const fragments: { payload: Buffer; last: boolean }[] = []
+    let gatewaySocket: WebSocket | undefined
+    const gateway = await startGateway((conn) => {
+      gatewaySocket = conn.socket
+      conn.socket.on('message', (data, isBinary) => {
+        if (!isBinary) {
+          return
+        }
+        const frame = decodeBinaryFrame(data as Buffer)
+        if (frame.kind === 'ws-text' || frame.kind === 'ws-binary') {
+          fragments.push({ payload: frame.payload, last: frame.last })
+          conn.sendAck(frame.payload.length)
+        }
+      })
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+
+    await waitFor(() => fragments.some((fragment) => fragment.last), 8000)
+    expect(Buffer.concat(fragments.map((fragment) => fragment.payload)).toString('utf8')).toBe('hello')
+    // The empty final frame is still a legal message terminator and is forwarded as such.
+    expect(fragments.at(-1)?.last).toBe(true)
+    expect(fragments.length).toBeGreaterThanOrEqual(2)
+
+    gatewaySocket?.close()
+    await exchange
+  })
+
+  it('answers an upstream ping so the local socket is not dropped', async () => {
+    let pongReceived = false
+    const upstream = await startWsUpstream((socket) => {
+      socket.on('pong', () => {
+        pongReceived = true
+      })
+      socket.ping()
+    })
+    let gatewaySocket: WebSocket | undefined
+    const gateway = await startGateway((conn) => {
+      gatewaySocket = conn.socket
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+
+    await waitFor(() => pongReceived, 8000)
+    expect(pongReceived).toBe(true)
+
+    gatewaySocket?.close()
+    await exchange
+  })
+
+  it('cancels an in-flight upstream handshake', async () => {
+    // A server that accepts the connection but never completes the upgrade.
+    const silent = createServer(() => undefined)
+    const port = await listen(silent)
+    cleanups.push(() => closeServer(silent))
+    const gateway = await startGateway(() => undefined)
+
+    const controller = new AbortController()
+    const pending = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: { host: '127.0.0.1', port },
+      signal: controller.signal,
+    })
+    await delay(20)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('ignores an http end frame during a websocket exchange', async () => {
+    const upstream = await startWsUpstream((socket) => {
+      socket.on('message', () => undefined)
+    })
+    let gatewaySocket: WebSocket | undefined
+    const gateway = await startGateway((conn) => {
+      gatewaySocket = conn.socket
+      // An HTTP end is meaningless for a WebSocket: only the socket close may end the exchange.
+      conn.sendEnd()
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+    await waitFor(() => gatewaySocket?.readyState === WebSocket.OPEN)
+    await delay(30)
+    expect(gatewaySocket?.readyState).toBe(WebSocket.OPEN)
+    gatewaySocket?.close()
+    await exchange
+  })
+
+  it('rejects an http body frame during a websocket exchange', async () => {
+    const upstream = await startWsUpstream(() => undefined)
+    const gateway = await startGateway((conn) => {
+      conn.sendBody(Buffer.from('x'))
+    })
+
+    await expect(
+      openStreamExchange({
+        streamUrl: gateway.url,
+        request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      }),
+    ).rejects.toThrow(/unexpected HTTP frame during WebSocket exchange/)
+  })
+})
+
+describe('upstream websocket framing is validated strictly', () => {
+  for (const testCase of MALFORMED_CASES) {
+    it(`rejects ${testCase.name}`, async () => {
+      const upstream = await startRawWsUpstream((socket) => {
+        socket.write(testCase.bytes())
+        if (testCase.end) {
+          socket.end()
+        }
+      })
+      const gateway = await startGateway(() => undefined)
+
+      await expect(
+        openStreamExchange({
+          streamUrl: gateway.url,
+          request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
+          upstream: upstreamOf(upstream.url),
+          signal: newSignal().signal,
+        }),
+      ).rejects.toThrow(testCase.pattern)
+    })
+  }
+})
+
+describe('wire framing is validated', () => {
+  const httpRequest = { mode: 'HTTP' as const, method: 'GET', path: '/', headers: [] }
+  const wsRequest = { mode: 'WS' as const, method: 'GET', path: '/ws', headers: [] }
+
+  it('rejects an empty http body frame', async () => {
+    const upstream = await startHttpUpstream(() => undefined)
+    const gateway = await startGateway((conn) => {
+      conn.sendRaw(encodeHttpBody(Buffer.alloc(0)))
+    })
+    await expect(
+      openStreamExchange({
+        streamUrl: gateway.url,
+        request: httpRequest,
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      }),
+    ).rejects.toThrow(/must not be empty/)
+  })
+
+  it('rejects a body frame after the request end', async () => {
+    const upstream = await startHttpUpstream(() => undefined)
+    const gateway = await startGateway((conn) => {
+      conn.sendEnd()
+      conn.sendBody(Buffer.from('x'))
+    })
+    await expect(
+      openStreamExchange({
+        streamUrl: gateway.url,
+        request: httpRequest,
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      }),
+    ).rejects.toThrow(/after the request end/)
+  })
+
+  it('rejects a duplicate request end', async () => {
+    const upstream = await startHttpUpstream(() => undefined)
+    const gateway = await startGateway((conn) => {
+      conn.sendEnd()
+      conn.sendEnd()
+    })
+    await expect(
+      openStreamExchange({
+        streamUrl: gateway.url,
+        request: httpRequest,
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      }),
+    ).rejects.toThrow(/duplicate http end/)
+  })
+
+  it('rejects a websocket message that changes type across fragments', async () => {
+    const upstream = await startWsUpstream(() => undefined)
+    const gateway = await startGateway((conn) => {
+      conn.sendWs('text', Buffer.from('a'), false)
+      conn.sendWs('binary', Buffer.from('b'), true)
+    })
+    await expect(
+      openStreamExchange({
+        streamUrl: gateway.url,
+        request: wsRequest,
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      }),
+    ).rejects.toThrow(/type changed across fragments/)
+  })
+
+  it('bounds a flood of zero length websocket fragments', async () => {
+    const upstream = await startWsUpstream(() => undefined)
+    const gateway = await startGateway((conn) => {
+      // Zero length fragments reserve no credit, so only the frame count can stop them.
+      for (let index = 0; index < 4000; index += 1) {
+        conn.sendWs('binary', Buffer.alloc(0), false)
+      }
+    })
+    await expect(
+      openStreamExchange({
+        streamUrl: gateway.url,
+        request: wsRequest,
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      }),
+    ).rejects.toThrow(/too many buffered websocket fragments/)
+  })
+})
+
+describe('credit window cancellation', () => {
+  it('releases a blocked wait when its signal aborts', async () => {
+    const window = new CreditWindow(INITIAL_CREDIT)
+    window.reserve(INITIAL_CREDIT)
+    const controller = new AbortController()
+    const blocked = window.waitFor(1, controller.signal)
+    controller.abort()
+    await expect(blocked).rejects.toMatchObject({ name: 'AbortError' })
+
+    // An already aborted signal never registers a waiter, and a normal ack still wakes waiters.
+    await expect(window.waitFor(1, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    window.ack(INITIAL_CREDIT)
+    await expect(window.waitFor(1)).resolves.toBeUndefined()
+  })
+})
+
+describe('upstream websocket client', () => {
+  for (const testCase of HANDSHAKE_FAILURES) {
+    it(`refuses ${testCase.name}`, async () => {
+      const upstream = await startHandshakeReplier(testCase.response)
+      await expect(connectUpstream(upstream, { protocols: testCase.protocols })).rejects.toThrow(testCase.pattern)
+    })
+  }
+
+  it('times out a handshake that never completes', async () => {
+    const silent = createServer(() => undefined)
+    const port = await listen(silent)
+    cleanups.push(() => closeServer(silent))
+    await expect(
+      UpstreamWebSocket.connect({
+        host: '127.0.0.1',
+        port,
+        path: '/',
+        headers: [],
+        signal: newSignal().signal,
+        handshakeTimeoutMillis: 40,
+      }),
+    ).rejects.toThrow(/handshake timed out/)
+  })
+
+  it('negotiates a requested subprotocol and forwards repeated headers', async () => {
+    let seen: IncomingHttpHeaders | undefined
+    const upstream = await startHandshakeReplier(
+      (key) => switchingProtocols(key, 'Sec-WebSocket-Protocol: vscode-api\r\n'),
+      (request) => {
+        seen = request.headers
+      },
+    )
+    const client = await connectUpstream(upstream, {
+      protocols: ['vscode-api'],
+      headers: [
+        ['x-dup', 'a'],
+        ['x-dup', 'b'],
+        ['x-dup', 'c'],
+      ],
+    })
+    expect(client.protocol).toBe('vscode-api')
+    expect(seen?.['x-dup']).toBe('a, b, c')
+    client.destroy()
+  })
+
+  it('sends masked fragments the IDE reassembles, then a masked close frame', async () => {
+    const received: Buffer[] = []
+    let closed: { code: number; reason: string } | undefined
+    const upstream = await startWsUpstream((socket) => {
+      socket.on('message', (data) => {
+        received.push(Buffer.from(data as Buffer))
+      })
+      socket.on('close', (code, reason) => {
+        closed = { code, reason: reason.toString() }
+      })
+    })
+    const client = await connectUpstream(upstream)
+    await client.sendFragment('text', Buffer.from('ab'), false)
+    await client.sendFragment('continuation', Buffer.from('cd'), true)
+    await waitFor(() => received.length === 1)
+    expect(received[0]?.toString()).toBe('abcd')
+
+    await client.close(1001, 'leaving')
+    await waitFor(() => closed !== undefined)
+    expect(closed).toEqual({ code: 1001, reason: 'leaving' })
+
+    // Once a close frame has been sent no further data frame may follow.
+    await expect(client.sendFragment('binary', Buffer.from('late'), true)).rejects.toThrow(/is closed/)
+  })
+
+  it('rejects a fragment sent after destroy', async () => {
+    const upstream = await startWsUpstream(() => undefined)
+    const client = await connectUpstream(upstream)
+    client.destroy()
+    await expect(client.sendFragment('binary', Buffer.from('x'), true)).rejects.toThrow(/is closed/)
+  })
+
+  it('reports an abnormal close when the socket ends without a close frame', async () => {
+    const upstream = await startRawWsUpstream((socket) => socket.end())
+    const client = await connectUpstream(upstream)
+    const iterator = client.frames()
+    await expect(iterator.next()).resolves.toEqual({ value: { type: 'close', code: 1006, reason: '' }, done: false })
+    client.destroy()
+  })
+
+  it('reports an empty close frame as code 1005', async () => {
+    const upstream = await startRawWsUpstream((socket) => socket.write(serverFrame(0x8, Buffer.alloc(0))))
+    const client = await connectUpstream(upstream)
+    const iterator = client.frames()
+    await expect(iterator.next()).resolves.toEqual({ value: { type: 'close', code: 1005, reason: '' }, done: false })
+    client.destroy()
+  })
+
+  it('ignores unsolicited pong frames', async () => {
+    const upstream = await startRawWsUpstream((socket) => {
+      socket.write(Buffer.concat([serverFrame(0xa, Buffer.from('p')), serverFrame(0x1, Buffer.from('ok'))]))
+    })
+    const client = await connectUpstream(upstream)
+    const iterator = client.frames()
+    const first = await iterator.next()
+    expect(first.value).toMatchObject({ type: 'data', kind: 'text', last: true })
+    expect((first.value as { payload: Buffer }).payload.toString()).toBe('ok')
+    client.destroy()
+  })
+
+  it('destroys the socket of a handshake response that never ends', async () => {
+    // A 200 with neither Content-Length nor EOF: a malicious body could stream forever.
+    const { harness, gone } = await startStuckResponse('HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n')
+    await expect(connectUpstream(harness)).rejects.toThrow(/handshake returned status 200/)
+    // The failed handshake must not leak the socket.
+    await gone
+  })
+
+  it('destroys the socket of a 101 that is not a complete upgrade', async () => {
+    const { harness, gone } = await startStuckResponse(
+      'HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\n\r\n',
+    )
+    await expect(connectUpstream(harness)).rejects.toThrow(/missing the Upgrade header/)
+    await gone
+  })
+
+  it('rejects an already aborted signal without opening a socket', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      UpstreamWebSocket.connect({
+        host: '127.0.0.1',
+        port: 1,
+        path: '/',
+        headers: [],
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('never publishes FIN for a text message whose trailing sequence is truncated', async () => {
+    // 'a' followed by the first two bytes of a three byte sequence: the message can never be valid.
+    const upstream = await startRawWsUpstream((socket) =>
+      socket.write(serverFrame(0x1, Buffer.from([0x61, 0xe4, 0xb8]))),
+    )
+    const client = await connectUpstream(upstream)
+    const iterator = client.frames()
+    // The very first read must fail; no data frame (and so no FIN) may be published.
+    await expect(iterator.next()).rejects.toThrow(/not valid UTF-8/)
+    client.destroy()
+  })
+
+  const CLOSE_CODES: { code: number; valid: boolean }[] = [
+    { code: 1000, valid: true },
+    { code: 1001, valid: true },
+    { code: 1011, valid: true },
+    { code: 1012, valid: true },
+    { code: 1013, valid: true },
+    { code: 1014, valid: true },
+    { code: 3000, valid: true },
+    { code: 4999, valid: true },
+    { code: 999, valid: false },
+    { code: 1004, valid: false },
+    { code: 1005, valid: false },
+    { code: 1006, valid: false },
+    { code: 1015, valid: false },
+    { code: 1016, valid: false },
+    { code: 2000, valid: false },
+    { code: 2999, valid: false },
+    { code: 5000, valid: false },
+  ]
+
+  it('accepts only the close codes the protocol allows', async () => {
+    for (const { code, valid } of CLOSE_CODES) {
+      const payload = Buffer.alloc(2)
+      payload.writeUInt16BE(code, 0)
+      const upstream = await startRawWsUpstream((socket) => socket.write(serverFrame(0x8, payload)))
+      const client = await connectUpstream(upstream)
+      const iterator = client.frames()
+      if (valid) {
+        await expect(iterator.next()).resolves.toEqual({ value: { type: 'close', code, reason: '' }, done: false })
+      } else {
+        await expect(iterator.next()).rejects.toThrow(/close code is invalid/)
+      }
+      client.destroy()
+    }
+  })
+
+  it('truncates a close reason on a code point boundary', async () => {
+    let received: { code: number; reason: string } | undefined
+    const upstream = await startWsUpstream((socket) => {
+      socket.on('close', (code, reason) => {
+        received = { code, reason: reason.toString('utf8') }
+      })
+    })
+    const client = await connectUpstream(upstream)
+    await client.close(1000, '😀'.repeat(60))
+    await waitFor(() => received !== undefined)
+    // 123 bytes would split the 31st four byte emoji, so only 30 complete ones fit.
+    expect(received).toEqual({ code: 1000, reason: '😀'.repeat(30) })
+  })
+
+  it('treats a close frame on an already gone socket as benign', async () => {
+    const upstream = await startWsUpstream((socket) => socket.terminate())
+    const client = await connectUpstream(upstream)
+    const iterator = client.frames()
+    // The peer reset the connection; draining reports it, after which the socket is gone.
+    await iterator.next().catch(() => undefined)
+    await expect(client.close(1000, 'bye')).resolves.toBeUndefined()
   })
 })

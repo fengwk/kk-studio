@@ -11,7 +11,6 @@ import {
   encodeTextFrame,
   encodeWsFrame,
   filterResponseHeaders,
-  fragmentWsMessage,
   isHopByHopHeader,
   validateIdePath,
 } from '../../src/ide/wire.js'
@@ -106,26 +105,7 @@ describe('credit window', () => {
   })
 })
 
-describe('fragmentation and header helpers', () => {
-  it('fragments a WS message preserving order and FIN', () => {
-    const payload = Buffer.alloc(MAX_PAYLOAD + 10, 7)
-    const frames = [...fragmentWsMessage('binary', payload)]
-    expect(frames).toHaveLength(2)
-    const first = decodeBinaryFrame(frames[0] as Buffer)
-    const second = decodeBinaryFrame(frames[1] as Buffer)
-    expect(first).toMatchObject({ kind: 'ws-binary', last: false })
-    expect(second).toMatchObject({ kind: 'ws-binary', last: true })
-    expect(Buffer.concat([
-      (first as { payload: Buffer }).payload,
-      (second as { payload: Buffer }).payload,
-    ])).toEqual(payload)
-  })
-
-  it('emits a single FIN frame for empty messages', () => {
-    const frames = [...fragmentWsMessage('text', Buffer.alloc(0))]
-    expect(decodeBinaryFrame(frames[0] as Buffer)).toEqual({ kind: 'ws-text', last: true, payload: Buffer.alloc(0) })
-  })
-
+describe('header helpers', () => {
   it('filters hop-by-hop response headers but keeps duplicates', () => {
     expect(isHopByHopHeader('Transfer-Encoding')).toBe(true)
     const filtered = filterResponseHeaders([
