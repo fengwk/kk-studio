@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
@@ -42,10 +44,15 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -112,7 +119,9 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
 
   private Path tempRoot;
   private Path workspaceDirectory;
+  private Path processTmp;
   private Process daemon;
+  private Process playwright;
   private Path daemonLog;
   private Set<String> scopesBefore;
 
@@ -127,21 +136,24 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
 
   @AfterEach
   void cleanUp() {
-    boolean terminated = terminateDaemon();
+    boolean daemonStopped = terminateDaemon();
+    boolean playwrightStopped = terminatePlaywright();
     retainArtifacts();
-    if (tempRoot != null) {
-      if (terminated) {
-        try {
-          deleteRecursively(tempRoot);
-          tempRoot = null;
-        } catch (IOException error) {
-          log.warn("could not delete temp root {}: {}", tempRoot, error.getMessage());
-        }
-      } else {
-        // 进程未确认结束时不删除：宁可保留证据也不制造假通过与悬空进程。
-        log.warn(
-            "daemon did not terminate; keeping owner-only temp root {}", tempRoot.toAbsolutePath());
-      }
+    if (tempRoot == null) {
+      return;
+    }
+    if (!daemonStopped || !playwrightStopped) {
+      // 子进程未确认结束：保留 owner-only 证据并让用例显式失败，绝不只 warn 后当作通过。
+      log.error(
+          "helper processes did not terminate; kept owner-only temp root {}",
+          tempRoot.toAbsolutePath());
+      fail("helper processes did not terminate; kept evidence at " + tempRoot.toAbsolutePath());
+    }
+    try {
+      deleteRecursively(tempRoot);
+      tempRoot = null;
+    } catch (IOException error) {
+      log.warn("could not delete temp root {}: {}", tempRoot.toAbsolutePath(), error.getMessage());
     }
   }
 
@@ -157,6 +169,11 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
         "ws://localhost:" + realPort + IdeGatewayProperties.STREAM_PATH);
 
     tempRoot = Files.createTempDirectory("kk-ide-browser-acceptance-");
+    Files.setPosixFilePermissions(tempRoot, PosixFilePermissions.fromString("rwx------"));
+    // 私有临时目录承载 Daemon/Playwright 的 native scope，Java 只扫描自己这个目录，
+    // 不与其它并发 agent 的 /tmp scope 互相误判。
+    processTmp = tempRoot.resolve("process-tmp");
+    Files.createDirectories(processTmp);
     workspaceDirectory = tempRoot.resolve("workspace");
     Files.createDirectories(workspaceDirectory.resolve("subdir"));
     Files.writeString(workspaceDirectory.resolve("alpha.txt"), "alpha-base\n");
@@ -184,6 +201,8 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
         playwrightConfig,
         playwrightConfigJson(viewA, viewB, report, screenshots),
         StandardCharsets.UTF_8);
+    // config 含一次性 entryUrl（凭据），显式 owner-only。
+    Files.setPosixFilePermissions(playwrightConfig, PosixFilePermissions.fromString("rw-------"));
     runPlaywright(node, playwrightConfig, report);
 
     JsonNode reportJson = OBJECT_MAPPER.readTree(report.toFile());
@@ -247,26 +266,32 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     return bundled;
   }
 
-  /** 确保发行入口已编译：缺 node_modules 时离线 npm ci，缺 dist 时用 Node24 tsc 构建。 */
+  /**
+   * 本用例不联网装依赖：{@code daemon/node_modules} 必须已就绪，否则明确失败并给出 setup 指引。随后每次都用生产 {@code npm run build}
+   * 重新构建（PATH 前置随包 Node24，使 npm/tsc 与实际 Node override 一致），并先删除旧 {@code
+   * dist}，避免拿陈旧产物或已删除源码的残留产物通过验收。
+   */
   private void ensureDaemonBuilt(Path daemonSource, Path node) throws Exception {
-    Path nodeModules = daemonSource.resolve("node_modules");
-    if (!Files.isDirectory(nodeModules)) {
-      runCommand(
-          List.of("npm", "ci", "--offline", "--no-audit", "--no-fund"),
-          daemonSource,
-          tempRoot.resolve("npm-ci.log"),
-          600);
+    if (!Files.isDirectory(daemonSource.resolve("node_modules"))) {
+      fail("daemon/node_modules is missing; run `npm ci` in daemon/ before this acceptance test");
     }
-    if (!Files.isRegularFile(daemonSource.resolve("dist/main.js"))) {
-      runCommand(
-          List.of(node.toString(), "node_modules/typescript/bin/tsc", "-p", "tsconfig.json"),
-          daemonSource,
-          tempRoot.resolve("tsc.log"),
-          300);
-    }
+    deleteRecursively(daemonSource.resolve("dist"));
+    Map<String, String> environment = new HashMap<>();
+    environment.put("PATH", node.toAbsolutePath().getParent() + File.pathSeparator + systemPath());
+    environment.put("TMPDIR", processTmp.toString());
+    runCommand(
+        List.of("npm", "run", "build"),
+        daemonSource,
+        tempRoot.resolve("daemon-build.log"),
+        600,
+        environment);
     assertTrue(
         Files.isRegularFile(daemonSource.resolve("dist/main.js")),
-        "daemon dist/main.js must exist after build");
+        "daemon dist/main.js must exist after `npm run build`");
+  }
+
+  private static String systemPath() {
+    return System.getenv().getOrDefault("PATH", "");
   }
 
   /** 复制编译产物与扩展，code-server/Node 与依赖以符号链接落到独占暂存根。 */
@@ -298,15 +323,17 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     Files.setPosixFilePermissions(tokenPath, PosixFilePermissions.fromString("rw-------"));
 
     daemonLog = tempRoot.resolve("daemon.log");
-    daemon =
+    ProcessBuilder builder =
         new ProcessBuilder(
-                node.toString(),
-                stage.resolve("dist/main.js").toString(),
-                "--config",
-                configPath.toString())
-            .redirectErrorStream(true)
-            .redirectOutput(daemonLog.toFile())
-            .start();
+            node.toString(),
+            stage.resolve("dist/main.js").toString(),
+            "--config",
+            configPath.toString());
+    // 让 Node os.tmpdir() 落在本用例私有目录：Daemon 的 native scope 只会在 process-tmp 下创建。
+    builder.environment().put("TMPDIR", processTmp.toString());
+    builder.redirectErrorStream(true);
+    builder.redirectOutput(daemonLog.toFile());
+    daemon = builder.start();
   }
 
   /** 轮询真实注册表直到 Daemon 握手进入 READY；Daemon 提前退出即报错并附日志。 */
@@ -332,40 +359,29 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   }
 
   private String playwrightConfigJson(
-      EnvironmentIdeViewDTO viewA, EnvironmentIdeViewDTO viewB, Path report, Path screenshots) {
-    String base = "http://localhost:" + port;
-    return "{\n"
-        + "  \"baseUrl\": \""
-        + base
-        + "\",\n"
-        + "  \"environmentId\": \""
-        + ENVIRONMENT
-        + "\",\n"
-        + "  \"reportPath\": \""
-        + report
-        + "\",\n"
-        + "  \"screenshotDir\": \""
-        + screenshots
-        + "\",\n"
-        + "  \"workspaceDirectory\": \""
-        + workspaceDirectory
-        + "\",\n"
-        + "  \"views\": [\n"
-        + viewJson("A", VIEW_A, viewA.getEntryUrl())
-        + ",\n"
-        + viewJson("B", VIEW_B, viewB.getEntryUrl())
-        + "\n  ]\n"
-        + "}\n";
+      EnvironmentIdeViewDTO viewA, EnvironmentIdeViewDTO viewB, Path report, Path screenshots)
+      throws JsonProcessingException {
+    Map<String, Object> config = new LinkedHashMap<>();
+    config.put("baseUrl", "http://localhost:" + port);
+    config.put("environmentId", ENVIRONMENT.toString());
+    config.put("reportPath", report.toAbsolutePath().toString());
+    config.put("screenshotDir", screenshots.toAbsolutePath().toString());
+    config.put("workspaceDirectory", workspaceDirectory.toAbsolutePath().toString());
+    config.put(
+        "views",
+        List.of(
+            viewConfig("A", VIEW_A, viewA.getEntryUrl()),
+            viewConfig("B", VIEW_B, viewB.getEntryUrl())));
+    // 用 Jackson 序列化含路径与一次性 entryUrl 的配置，避免手写 JSON 的转义错误。
+    return OBJECT_MAPPER.writeValueAsString(config);
   }
 
-  private static String viewJson(String name, String viewId, String entryUrl) {
-    return "    {\"name\": \""
-        + name
-        + "\", \"viewId\": \""
-        + viewId
-        + "\", \"entryUrl\": \""
-        + entryUrl
-        + "\"}";
+  private static Map<String, Object> viewConfig(String name, String viewId, String entryUrl) {
+    Map<String, Object> view = new LinkedHashMap<>();
+    view.put("name", name);
+    view.put("viewId", viewId);
+    view.put("entryUrl", entryUrl);
+    return view;
   }
 
   private void runPlaywright(Path node, Path playwrightConfig, Path report) throws Exception {
@@ -389,17 +405,47 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     builder
         .environment()
         .put("KK_STUDIO_PLAYWRIGHT_MODULE_DIR", requireEnv("KK_STUDIO_PLAYWRIGHT_MODULE_DIR"));
+    builder.environment().put("TMPDIR", processTmp.toString());
     builder.redirectErrorStream(true);
     builder.redirectOutput(log.toFile());
     Process process = builder.start();
-    if (!process.waitFor(5, TimeUnit.MINUTES)) {
-      process.destroyForcibly();
-      fail("playwright acceptance did not finish:\n" + tail(log));
+    playwright = process;
+    Throwable failure = null;
+    try {
+      if (!process.waitFor(5, TimeUnit.MINUTES)) {
+        failure = new IllegalStateException("playwright acceptance did not finish:\n" + tail(log));
+      } else if (process.exitValue() != 0) {
+        failure =
+            new IllegalStateException(
+                "playwright acceptance failed (code " + process.exitValue() + "):\n" + tail(log));
+      }
+    } catch (Throwable error) {
+      failure = error;
+    } finally {
+      playwright = null;
+      try {
+        stopProcessTree(process, "playwright");
+      } catch (IOException cleanupFailure) {
+        if (failure == null) {
+          throw cleanupFailure;
+        }
+        failure.addSuppressed(cleanupFailure);
+      }
     }
-    if (process.exitValue() != 0) {
-      fail("playwright acceptance failed (code " + process.exitValue() + "):\n" + tail(log));
+    if (failure != null) {
+      rethrow(failure);
     }
     assertTrue(Files.isRegularFile(report), "playwright must write its report");
+  }
+
+  private static void rethrow(Throwable failure) throws Exception {
+    if (failure instanceof Exception exception) {
+      throw exception;
+    }
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    throw new IllegalStateException(failure);
   }
 
   private static void assertStep(JsonNode report, String step) {
@@ -435,12 +481,24 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
 
   private void stopDaemonAndAssertConverged() throws Exception {
     Process current = daemon;
-    daemon = null;
+    if (current == null) {
+      fail("daemon was not started");
+    }
     current.destroy();
-    if (!current.waitFor(60, TimeUnit.SECONDS)) {
-      current.destroyForcibly();
+    boolean exited = current.waitFor(60, TimeUnit.SECONDS);
+    if (!exited) {
+      // 只在本用例自己的进程树范围内升级；句柄保留到 exit 真正确认，让 @AfterEach 仍能补收敛。
+      try {
+        stopProcessTree(current, "daemon");
+      } catch (IOException escalation) {
+        log.error("daemon tree escalation failed: {}", escalation.getMessage());
+      }
+      exited = current.waitFor(10, TimeUnit.SECONDS);
+    }
+    if (!exited) {
       fail("daemon did not stop; native scope did not converge:\n" + tail(daemonLog));
     }
+    daemon = null;
     assertEquals(
         0,
         current.exitValue(),
@@ -465,16 +523,72 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     fail("native process scopes must converge after shutdown, leftovers=" + leftovers);
   }
 
-  private static Set<String> scopeDirectories() throws IOException {
-    Path tmp = Path.of(System.getProperty("java.io.tmpdir"));
+  /** 只扫描本用例私有 {@code process-tmp} 里自己创建的 scope 目录；绝不全局扫 /tmp，避免把其它并发 agent 的 scope 误当作本用例泄漏。 */
+  private Set<String> scopeDirectories() throws IOException {
+    if (processTmp == null || !Files.isDirectory(processTmp)) {
+      return Set.of();
+    }
     Set<String> names = new LinkedHashSet<>();
-    try (Stream<Path> stream = Files.list(tmp)) {
+    try (Stream<Path> stream = Files.list(processTmp)) {
       stream
           .map(path -> path.getFileName().toString())
           .filter(name -> name.startsWith(SCOPE_DIR_PREFIX))
           .forEach(names::add);
     }
     return names;
+  }
+
+  /**
+   * 只销毁本用例自己启动的进程及其“销毁前”快照出的后代，并按真实 exit 等待收敛。Chromium 会脱离 Node 父进程，
+   * 因此必须先快照后代句柄、再销毁父进程，之后逐个等待自己拥有的句柄；绝不 kill 随机 PID 或外部 Chrome。 先温和 destroy，5 秒后对仍存活者
+   * forcible，再各自等待；仍有存活则抛明确 IOException（不是只 warn 返回通过）。
+   */
+  private static void stopProcessTree(Process process, String label) throws IOException {
+    if (process == null) {
+      return;
+    }
+    List<ProcessHandle> owned = process.toHandle().descendants().collect(Collectors.toList());
+    process.destroy();
+    awaitExit(process.toHandle(), Duration.ofSeconds(5));
+    List<ProcessHandle> alive = new ArrayList<>();
+    if (process.isAlive()) {
+      alive.add(process.toHandle());
+    }
+    for (ProcessHandle handle : owned) {
+      if (handle.isAlive()) {
+        alive.add(handle);
+      }
+    }
+    for (ProcessHandle handle : alive) {
+      handle.destroy();
+    }
+    List<ProcessHandle> stubborn = new ArrayList<>();
+    for (ProcessHandle handle : alive) {
+      if (!awaitExit(handle, Duration.ofSeconds(5))) {
+        stubborn.add(handle);
+      }
+    }
+    if (!stubborn.isEmpty()) {
+      String pids =
+          stubborn.stream()
+              .map(handle -> Long.toString(handle.pid()))
+              .collect(Collectors.joining(","));
+      throw new IOException(label + " did not terminate: " + pids);
+    }
+  }
+
+  private static boolean awaitExit(ProcessHandle handle, Duration timeout) {
+    try {
+      handle.onExit().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      return true;
+    } catch (TimeoutException error) {
+      return !handle.isAlive();
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      return !handle.isAlive();
+    } catch (Exception error) {
+      return !handle.isAlive();
+    }
   }
 
   /** 只保留诊断产物；绝不拷贝配置、token、stage 或私有数据目录。 */
@@ -509,22 +623,34 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  /** 停止本 Daemon 并等待确认结束；不 kill 父构建或随机 PID。 */
+  /** 停止本 Daemon；句柄保留到 exit 确认，失败返回 false 让 @AfterEach 显式 fail。 */
   private boolean terminateDaemon() {
     Process current = daemon;
     if (current == null) {
       return true;
     }
-    daemon = null;
     try {
-      current.destroy();
-      if (current.waitFor(30, TimeUnit.SECONDS)) {
-        return true;
-      }
-      current.destroyForcibly();
-      return current.waitFor(10, TimeUnit.SECONDS);
-    } catch (InterruptedException error) {
-      Thread.currentThread().interrupt();
+      stopProcessTree(current, "daemon");
+      daemon = null;
+      return true;
+    } catch (IOException error) {
+      log.error("daemon did not terminate: {}", error.getMessage());
+      return false;
+    }
+  }
+
+  /** 停止本次 Playwright/Chromium 树；失败返回 false 让 @AfterEach 显式 fail。 */
+  private boolean terminatePlaywright() {
+    Process current = playwright;
+    if (current == null) {
+      return true;
+    }
+    try {
+      stopProcessTree(current, "playwright");
+      playwright = null;
+      return true;
+    } catch (IOException error) {
+      log.error("playwright did not terminate: {}", error.getMessage());
       return false;
     }
   }
@@ -539,21 +665,41 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  private static void runCommand(List<String> command, Path cwd, Path log, long timeoutSeconds)
+  private static void runCommand(
+      List<String> command,
+      Path cwd,
+      Path log,
+      long timeoutSeconds,
+      Map<String, String> environment)
       throws Exception {
-    Process process =
-        new ProcessBuilder(command)
-            .directory(cwd.toFile())
-            .redirectErrorStream(true)
-            .redirectOutput(log.toFile())
-            .start();
-    if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-      process.destroyForcibly();
-      throw new IllegalStateException("command timed out: " + command + "\n" + tail(log));
+    ProcessBuilder builder = new ProcessBuilder(command).directory(cwd.toFile());
+    builder.environment().putAll(environment);
+    builder.redirectErrorStream(true);
+    builder.redirectOutput(log.toFile());
+    Process process = builder.start();
+    Throwable failure = null;
+    try {
+      if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+        failure = new IllegalStateException("command timed out: " + command + "\n" + tail(log));
+      } else if (process.exitValue() != 0) {
+        failure =
+            new IllegalStateException(
+                "command failed (" + process.exitValue() + "): " + command + "\n" + tail(log));
+      }
+    } catch (Throwable error) {
+      failure = error;
+    } finally {
+      try {
+        stopProcessTree(process, "command " + command.get(0));
+      } catch (IOException cleanupFailure) {
+        if (failure == null) {
+          throw cleanupFailure;
+        }
+        failure.addSuppressed(cleanupFailure);
+      }
     }
-    if (process.exitValue() != 0) {
-      throw new IllegalStateException(
-          "command failed (" + process.exitValue() + "): " + command + "\n" + tail(log));
+    if (failure != null) {
+      rethrow(failure);
     }
   }
 
