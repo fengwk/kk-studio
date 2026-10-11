@@ -39,8 +39,10 @@ case "$2" in
   --version) printf 'kk-studio-daemon %s\\n' "${{FAKE_NODE_VERSION:-{DAEMON_VERSION}}}" ;;
   --check-config)
     if [ ! -s "$3" ]; then exit 2; fi
-    if grep -q '"invalid"' "$3"; then
-      printf 'Invalid daemon configuration: daemon.studioUrl must be an https URL\\n' >&2
+    # 真实 daemon.json 是裸配置对象；这里同样拒绝非法取值与外层 "daemon" 包裹的假结构，
+    # 以免 fixture 接受真实入口会拒绝的配置而假绿。
+    if grep -q '"invalid"' "$3" || grep -q '"daemon"[[:space:]]*:' "$3"; then
+      printf 'Invalid daemon configuration: daemon.daemon: unknown field\\n' >&2
       exit 2
     fi
     printf 'Daemon configuration is valid\\n'
@@ -365,7 +367,7 @@ fi
 exit 0
 """
 
-    def make_inputs(self, config: str = '{"daemon":{"studioUrl":"https://studio.example.com"}}', token: str = "token-value") -> tuple[Path, Path]:
+    def make_inputs(self, config: str = '{"studioUrl":"https://studio.example.com"}', token: str = "token-value") -> tuple[Path, Path]:
         directory = self.root / "inputs"
         directory.mkdir(mode=0o700, exist_ok=True)
         config_file = directory / "daemon.json"
