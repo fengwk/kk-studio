@@ -15,7 +15,7 @@ const PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x0002_0002
 /**
  * 用可配置的假原生绑定驱动真实 `win32.ts` 的 Job 建立/收敛分支。
  *
- * <p>这些分支只有在 Windows 上才会自然发生（CreateProcessW 失败、Job 语义句柄缺失、DACL/句柄关闭失败等），
+ * 这些分支只有在 Windows 上才会自然发生（CreateProcessW 失败、Job 语义句柄缺失、DACL/句柄关闭失败等），
  * 但都属于「失败必须如实上报、绝不假装收敛」的安全性质。假绑定只提供调用序列，不断言任何真实 Windows 行为。
  */
 interface Control {
@@ -26,6 +26,8 @@ interface Control {
   updateJob: number
   createProcess: number
   processFields: boolean
+  /** 捕获 CreateProcessW 收到的 Unicode 环境块，用于断言被丢弃的条目确实没有进入。 */
+  capturedEnv: Buffer | null
   resumeThread: number
   wait: () => number
   getExit: number
@@ -53,6 +55,7 @@ function harness(): { control: Control; bindings: WindowsNativeBindings } {
     updateJob: 1,
     createProcess: 1,
     processFields: true,
+    capturedEnv: null,
     resumeThread: 1,
     wait: () => WAIT_OBJECT_0,
     getExit: 1,
@@ -74,7 +77,8 @@ function harness(): { control: Control; bindings: WindowsNativeBindings } {
   const kernel = {
     CreateJobObjectW: () => control.createJob,
     SetInformationJobObject: () => control.setJobInfo,
-    CreateProcessW: (_a: unknown, _c: unknown, _p: unknown, _t: unknown, _i: unknown, _f: unknown, _e: unknown, _d: unknown, _s: unknown, info: Record<string, unknown>) => {
+    CreateProcessW: (_a: unknown, _c: unknown, _p: unknown, _t: unknown, _i: unknown, _f: unknown, environment: unknown, _d: unknown, _s: unknown, info: Record<string, unknown>) => {
+      control.capturedEnv = (environment as Buffer | null) ?? null
       if (control.processFields) {
         info.hProcess = 1n
         info.hThread = 2n
@@ -219,9 +223,16 @@ describe('windows job establishment fail-closed branches (mocked native bindings
   })
 
   test('the environment block drops undefined, NUL and malformed entries', async () => {
-    const { bindings } = harness()
+    const { control, bindings } = harness()
     installWindowsNativeBindingsForTest(bindings)
     const scope = await createSuspendedJob('job', LAUNCH, { GOOD: 'ok', 'A=B': 'x', BAD: 'a\0b', EMPTY: undefined })
+    const environment = control.capturedEnv?.toString('utf16le') ?? ''
+    // 非法条目（含 '=' 的键、含 NUL 的值、undefined 值）绝不进入环境块。
+    expect(environment).not.toContain('A=B')
+    expect(environment).not.toContain('BAD')
+    expect(environment).not.toContain('EMPTY')
+    // 合法条目必须保留。
+    expect(environment).toContain('GOOD=ok')
     scope.close()
   })
 })

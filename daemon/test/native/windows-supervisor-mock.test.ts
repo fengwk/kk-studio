@@ -14,7 +14,7 @@ import * as state from '../../src/native/state.js'
 /**
  * 在非 Windows 主机上用假原生绑定驱动真实 `process-supervisor-windows.ts`。
  *
- * <p>覆盖 Windows 父进程侧状态机里只有真实 Windows 才会自然发生、却属于「收敛/清理必须如实上报」的分支：
+ * 覆盖 Windows 父进程侧状态机里只有真实 Windows 才会自然发生、却属于「收敛/清理必须如实上报」的分支：
  * Job 打开失败、收敛失败时保留证据、句柄关闭失败仍然上报、启动前 helper 已死等。假绑定只提供调用序列，
  * 不断言任何真实 Windows 行为；被管理的「helper」是一个受控的 Node 子进程，不涉及真实 Job 语义。
  */
@@ -95,21 +95,18 @@ function fakeHelper(lifetimeMillis = 400): ChildProcessWithoutNullStreams {
   return child
 }
 
-async function stateDir(): Promise<string> {
-  const dir = await state.createStateDir()
-  stateDirs.push(dir)
-  return dir
-}
-
 afterEach(async () => {
   for (const child of children.splice(0)) {
+    // 真正收敛：强杀之后必须等到子进程退出，绝不在进程还活着时就删除状态目录（那是假的已清理）。
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL')
+      await new Promise((resolve) => child.once('close', resolve))
     }
   }
   for (const dir of stateDirs.splice(0)) {
     state.removeStateDir(dir)
   }
+  // 恢复真实原生绑定：假绑定只在一个用例范围内生效。
   installWindowsNativeBindingsForTest(null)
 })
 
@@ -180,23 +177,26 @@ describe.skipIf(process.platform === 'win32')('windows process supervisor lifecy
 })
 
 describe('windows managed process failure branches (mocked native bindings)', () => {
-  function install(control: Control): void {
-    installWindowsNativeBindingsForTest(bindings(control))
-  }
-
   const okControl = (): Control => ({ openJob: 10n, activeProcesses: 0, queryJob: 1, closeHandle: 1, terminateJob: 1, getLastError: 5 })
+  let control: Control
+  let dir: string
+
+  beforeEach(async () => {
+    // 先用真实原生绑定创建真实私有状态目录（Windows 上走真实 owner-only DACL），随后才安装假绑定；
+    // 假绑定只覆盖 Job 端口，private FS 的权限调用绝不落到假 DACL 上。
+    dir = await state.createStateDir()
+    stateDirs.push(dir)
+    control = okControl()
+    installWindowsNativeBindingsForTest(bindings(control))
+  })
 
   test('establish rejects an invalid published scope id', async () => {
-    install(okControl())
-    const dir = await stateDir()
     state.publish(dir, state.SCOPE_FILE, 'not-a-number')
     const managed = new WindowsManagedProcess(dir, fakeHelper(), undefined)
     await expect(managed.establish()).rejects.toThrow(/invalid scope id/)
   })
 
   test('establish reports a helper that exited without an error file', async () => {
-    install(okControl())
-    const dir = await stateDir()
     const helper = fakeHelper(50)
     const managed = new WindowsManagedProcess(dir, helper, undefined)
     await new Promise((resolve) => helper.on('close', resolve))
@@ -204,8 +204,6 @@ describe('windows managed process failure branches (mocked native bindings)', ()
   })
 
   test('establish surfaces the fixed helper failure phase', async () => {
-    install(okControl())
-    const dir = await stateDir()
     state.publish(dir, state.ERROR_FILE, 'helper-windows-failure')
     const helper = fakeHelper(50)
     const managed = new WindowsManagedProcess(dir, helper, undefined)
@@ -214,8 +212,6 @@ describe('windows managed process failure branches (mocked native bindings)', ()
   })
 
   test('establish cancels before starting the command when the signal aborts after the scope', async () => {
-    install(okControl())
-    const dir = await stateDir()
     const helper = fakeHelper(400)
     state.publish(dir, state.SCOPE_FILE, String(helper.pid))
     const controller = new AbortController()
@@ -225,14 +221,11 @@ describe('windows managed process failure branches (mocked native bindings)', ()
   })
 
   test('confirmDescendant fails closed when no job is open', () => {
-    install(okControl())
-    const managed = new WindowsManagedProcess('/nonexistent', fakeHelper(), undefined)
+    const managed = new WindowsManagedProcess(dir, fakeHelper(), undefined)
     expect(() => managed.confirmDescendant(1)).toThrow(/job object is not open/)
   })
 
   test('terminate before the scope is established force-kills the helper', async () => {
-    install(okControl())
-    const dir = await stateDir()
     const helper = fakeHelper(5_000)
     const managed = new WindowsManagedProcess(dir, helper, undefined)
     await managed.terminate(50)
@@ -240,11 +233,8 @@ describe('windows managed process failure branches (mocked native bindings)', ()
   })
 
   test('terminate keeps the state directory when the job cannot be proven converged', async () => {
-    const control = okControl()
     control.activeProcesses = 1
     control.terminateJob = 0
-    install(control)
-    const dir = await stateDir()
     const helper = fakeHelper(400)
     state.publish(dir, state.SCOPE_FILE, String(helper.pid))
     const managed = new WindowsManagedProcess(dir, helper, undefined)
@@ -255,23 +245,18 @@ describe('windows managed process failure branches (mocked native bindings)', ()
   })
 
   test('a handle-close failure during natural completion is surfaced on terminate', async () => {
-    const control = okControl()
     control.closeHandle = 0
-    install(control)
-    const dir = await stateDir()
     const helper = fakeHelper(60)
     state.publish(dir, state.SCOPE_FILE, String(helper.pid))
     state.publish(dir, state.CLEANUP_FILE, 'true')
     const managed = new WindowsManagedProcess(dir, helper, undefined)
     await managed.establish()
-    // wait for the natural-completion path to run inside the helper 'close' handler.
+    // 等 helper 'close' 回调里的自然完成路径跑完。
     await new Promise((resolve) => setTimeout(resolve, 300))
     await expect(managed.terminate()).rejects.toThrow(/close the scope job handle/)
   })
 
   test('natural completion with cleanup=true settles and releases the state directory', async () => {
-    install(okControl())
-    const dir = await stateDir()
     const helper = fakeHelper(60)
     state.publish(dir, state.SCOPE_FILE, String(helper.pid))
     state.publish(dir, state.CLEANUP_FILE, 'true')
@@ -284,8 +269,6 @@ describe('windows managed process failure branches (mocked native bindings)', ()
   })
 
   test('the exit report is published from the state file before the helper closes', async () => {
-    install(okControl())
-    const dir = await stateDir()
     const helper = fakeHelper(200)
     state.publish(dir, state.SCOPE_FILE, String(helper.pid))
     state.publish(dir, state.EXIT_FILE, JSON.stringify({ exitCode: 9, signal: null }))

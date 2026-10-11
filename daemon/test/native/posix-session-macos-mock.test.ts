@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 /**
  * 用假 libc/libproc 在 Linux 主机上驱动 `posix-session.ts` 的 macOS 分支。
  *
- * <p>Linux 开发主机无法真实验收 macOS 的 libproc；但枚举算法（`proc_listpids` 枚举全部 pid，按
+ * Linux 开发主机无法真实验收 macOS 的 libproc；但枚举算法（`proc_listpids` 枚举全部 pid，按
  * `getsid` 归属，再用 `proc_pidinfo(PROC_PIDTBSDINFO)` 取状态与启动身份）是安全收敛的依据，
  * 必须能被廉价回归。这里只提供调用序列，绝不声称已在真实 Darwin 上运行。
  */
@@ -14,7 +14,7 @@ const h = vi.hoisted(() => {
     info: new Map<number, { status: number; ppid: number; sec: number; usec: number }>(),
     errno: 0,
     killResult: 0,
-    killCalls: [] as number[],
+    killCalls: [] as Array<{ pid: number; signal: number }>,
   }
   return { state }
 })
@@ -58,8 +58,8 @@ vi.mock('koffi', async (importOriginal) => {
         return () => 100
       }
       if (signature.includes('kill')) {
-        return (pid: number) => {
-          h.state.killCalls.push(pid)
+        return (pid: number, signal: number) => {
+          h.state.killCalls.push({ pid, signal })
           return h.state.killResult
         }
       }
@@ -198,7 +198,9 @@ describe('native posix session macOS enumeration (mocked libproc)', () => {
     h.state.info.set(12, { status: 0, ppid: 1, sec: 1, usec: 1 })
     asDarwin(() => {
       expect(signalMembers(7, 9, -1)).toBe(true)
-      expect(h.state.killCalls).toEqual([11, 12])
+      expect(h.state.killCalls.map((call) => call.pid)).toEqual([11, 12])
+      // SIGTERM(15) 之外的显式信号必须原样投递。
+      expect(h.state.killCalls.every((call) => call.signal === 9)).toBe(true)
     })
   })
 
@@ -208,8 +210,9 @@ describe('native posix session macOS enumeration (mocked libproc)', () => {
     h.state.info.set(11, { status: 0, ppid: 1, sec: 1, usec: 1 })
     const converged = await asDarwinAsync(() => convergeSession(7, -1, 30))
     expect(converged).toBe(false)
-    // 宽限之后必须升级到 SIGKILL：成员身份未变，无法证明收敛。
+    // 宽限之后必须升级到 SIGKILL(9)：成员身份未变，无法证明收敛。
     expect(h.state.killCalls.length).toBeGreaterThanOrEqual(2)
+    expect(h.state.killCalls.some((call) => call.signal === 9)).toBe(true)
   })
 
   test('isDescendantOf walks the parent chain via libproc', () => {

@@ -4,6 +4,7 @@ import {
   createProcessSupervisor,
   processScopeCapabilities,
 } from '../../src/native/index.js'
+import { WindowsProcessSupervisor } from '../../src/native/process-supervisor-windows.js'
 import {
   becomeChildSubreaper,
   convergeAdoptedChildren,
@@ -70,9 +71,11 @@ describe('native entry points fail closed on unsupported platforms', () => {
     expect(() => withPlatform('freebsd', () => createProcessSupervisor())).toThrow(/does not support freebsd/)
   })
 
-  test('win32 selects the Job-based supervisor', () => {
+  test('win32 selects the Job-based supervisor and closes cleanly with no processes', async () => {
     const supervisor = withPlatform('win32', () => createProcessSupervisor())
-    expect(supervisor).toBeInstanceOf(Object)
+    expect(supervisor).toBeInstanceOf(WindowsProcessSupervisor)
+    // 没有启动任何进程：真实 close 必须直接收敛，不需要任何假绑定。
+    await expect(supervisor.close()).resolves.toBeUndefined()
   })
 
   test('an unsupported platform cannot take a directory lock', async () => {
