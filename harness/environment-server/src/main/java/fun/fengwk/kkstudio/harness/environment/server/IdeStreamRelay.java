@@ -25,6 +25,13 @@ public final class IdeStreamRelay {
     void sendText(String frame);
 
     void sendBinary(byte[] frame);
+
+    /**
+     * 发送一个消费 credit 的 ACK 帧（窄出口）。
+     *
+     * <p>ACK 只是对已真实交付字节的消费反馈：传输已经断开时该反馈可以安全丢弃，适配层据此避免把它与数据发送混为一谈。
+     */
+    void sendAcknowledgement(byte[] encodedAck);
   }
 
   private final Sink sink;
@@ -130,7 +137,8 @@ public final class IdeStreamRelay {
       return;
     }
     fromDaemon.onAck(consumed);
-    sink.sendBinary(codec.encodeAck(consumed));
+    // ACK 只是消费反馈，经独立窄出口发送，传输已断开时适配层可丢弃而不影响已交付的数据。
+    sink.sendAcknowledgement(codec.encodeAck(consumed));
   }
 
   /** 关闭该流：此后任何收发都 fail-closed（取消/错误/关闭双向收尾后调用）。 */
