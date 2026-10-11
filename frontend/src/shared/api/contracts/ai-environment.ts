@@ -11,7 +11,6 @@ export interface DaemonLspServerConfiguration {
 
 export interface EnvironmentInstallConfigDTO {
   operatingSystem: InstallOperatingSystem
-  javaHome?: string | null
   daemon: {
     studioUrl: string
     note?: string | null

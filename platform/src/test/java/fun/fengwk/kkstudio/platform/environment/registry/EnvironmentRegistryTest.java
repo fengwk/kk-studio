@@ -15,6 +15,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -51,7 +52,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
               "dev",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              DaemonArchitecture.AMD64));
 
   private final UUID node1 = UUID.randomUUID();
   private final UUID node2 = UUID.randomUUID();

@@ -26,10 +26,13 @@ function repositoryRoot() {
 const REPOSITORY_ROOT = repositoryRoot()
 
 const WORKFLOWS = [
+  '.github/workflows/daemon-ci.yml',
   '.github/workflows/daemon-release.yml',
   '.github/workflows/docker-publish.yml',
-  '.github/workflows/process-scope.yml',
 ]
+
+/** 本地可复用工作流引用：不是第三方 action，不固定 SHA，但必须真实存在且不带版本注释。 */
+const LOCAL_REUSABLE_WORKFLOW = /^\.\/\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/u
 
 /**
  * 第三方 GitHub Action 的唯一事实源：每个 major tag 固定到它当前解析出的完整 commit SHA，
@@ -66,6 +69,18 @@ test('test intent: every third-party GitHub Action is pinned to a verified commi
     )
 
     for (const [, reference, versionComment] of references) {
+      if (LOCAL_REUSABLE_WORKFLOW.test(reference)) {
+        assert.ok(
+          existsSync(path.join(REPOSITORY_ROOT, reference)),
+          `${relativePath}: ${reference} does not exist`,
+        )
+        assert.equal(
+          versionComment,
+          undefined,
+          `${relativePath}: ${reference} must not carry a "# vN" comment`,
+        )
+        continue
+      }
       const separator = reference.lastIndexOf('@')
       assert.ok(separator > 0, `${relativePath}: ${reference} must be <owner>/<repo>@<ref>`)
       const action = reference.slice(0, separator)
@@ -92,6 +107,6 @@ test('test intent: every third-party GitHub Action is pinned to a verified commi
     }
   }
 
-  // 防止三条工作流被清空或 `uses:` 被整体移走后守卫静默通过。
+  // 防止工作流被清空或 `uses:` 被整体移走后守卫静默通过。
   assert.ok(pinnedCount > 0, 'at least one pinned action reference must be present')
 })

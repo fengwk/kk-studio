@@ -6,7 +6,7 @@ test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
 
 const token = 'browser-private-token'
 const initialConfig: EnvironmentInstallConfigDTO = {
-  operatingSystem: 'macos', javaHome: '/Library/Java/汉字',
+  operatingSystem: 'macos',
   daemon: { studioUrl: 'https://saved.example.com', note: 'saved note', bashExecutable: '/bin/bash',
     lsp: { servers: { ts: { command: ['~/ts-server', "quote'$`"], extensions: ['.ts'] } } } },
 }
@@ -64,7 +64,6 @@ for (const width of [1280, 390, 320]) {
     await expect(modal.getByText('不含路径或查询参数。')).toBeVisible()
     await expect(modal.locator('details, summary')).toHaveCount(0)
     await expect(modal.getByText(/可选：Java/)).toHaveCount(0)
-    await expect(modal.getByLabel('Java home (JDK 21)')).toHaveValue('/Library/Java/汉字')
     await expect(modal.getByLabel('Bash 可执行文件')).toHaveValue('/bin/bash')
     await expect(modal.getByLabel('备注')).toHaveValue('saved note')
     expect(await modal.getByLabel('LSP servers (JSON)').inputValue()).toContain('~/ts-server')
@@ -122,13 +121,10 @@ for (const width of [1280, 390, 320]) {
     await expect(modal.getByRole('button', { name: '保存并复制安装命令' })).toBeEnabled()
     await page.screenshot({ path: testInfo.outputPath(`install-initial-${width}.png`), animations: 'disabled' })
     await expect(modal.locator('details, summary')).toHaveCount(0)
-    await expect(modal.getByLabel('Java home (JDK 21)')).toBeVisible()
-    await expect(modal.getByLabel('Java home (JDK 21)')).toHaveValue('')
-    await expect(modal.getByLabel('Java home (JDK 21)')).toHaveAttribute('placeholder', '/usr/lib/jvm/java-21-openjdk')
     await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', '/bin/bash')
     await expect(modal.getByLabel('备注')).toHaveAttribute('placeholder', '例如：开发工作站')
     const gray = 'rgb(157, 168, 159)'
-    for (const label of ['Java home (JDK 21)', 'Bash 可执行文件', '备注']) {
+    for (const label of ['Bash 可执行文件', '备注']) {
       const field = modal.getByLabel(label)
       expect(await field.evaluate(element => element.matches(':placeholder-shown'))).toBe(true)
       expect(await field.evaluate(element => getComputedStyle(element, '::placeholder').color)).toBe(gray)
@@ -136,7 +132,7 @@ for (const width of [1280, 390, 320]) {
     // 字段只使用 modal-body 的统一 row-gap，不能再叠加相邻 margin。
     const spacing = await modal.evaluate(element => {
       const body = element.querySelector('.modal-body')!
-      const labels = ['Java home (JDK 21)', 'Bash 可执行文件', '备注']
+      const labels = ['Bash 可执行文件', '备注']
       const groups = labels.map(label => [...element.querySelectorAll('.form-group')]
         .find(group => group.querySelector(':scope > span')?.textContent === label)!)
       const gap = Number.parseFloat(getComputedStyle(body).rowGap)
@@ -147,7 +143,7 @@ for (const width of [1280, 390, 320]) {
       }
     })
     expect(spacing.gap).toBe(18)
-    expect(spacing.margins).toEqual([0, 0, 0])
+    expect(spacing.margins).toEqual([0, 0])
     expect(spacing.distances.every(distance => Math.abs(distance - spacing.gap) <= 1)).toBe(true)
     const lsp = modal.locator('label.ui-checkbox', { hasText: '启用 LSP servers' })
     await expect(lsp).toBeVisible()
@@ -173,17 +169,14 @@ for (const width of [1280, 390, 320]) {
     const os = modal.getByRole('button', { name: '操作系统' })
     await os.click()
     await page.getByRole('option', { name: 'Windows', exact: true }).click()
-    await expect(modal.getByLabel('Java home (JDK 21)')).toHaveAttribute('placeholder', 'C:\\Program Files\\Java\\jdk-21')
     await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', 'C:\\Program Files\\Git\\bin\\bash.exe')
-    await expect(modal.getByLabel('Java home (JDK 21)')).toHaveValue('')
-    await modal.getByLabel('Java home (JDK 21)').fill('D:\\custom\\jdk')
+    await expect(modal.getByLabel('Bash 可执行文件')).toHaveValue('')
+    await modal.getByLabel('Bash 可执行文件').fill('D:\\custom\\bash.exe')
     await modal.getByLabel('备注').fill('我的工作站')
     await os.click()
     await page.getByRole('option', { name: 'macOS', exact: true }).click()
-    await expect(modal.getByLabel('Java home (JDK 21)')).toHaveAttribute(
-      'placeholder', '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home')
     await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', '/bin/bash')
-    await expect(modal.getByLabel('Java home (JDK 21)')).toHaveValue('D:\\custom\\jdk')
+    await expect(modal.getByLabel('Bash 可执行文件')).toHaveValue('D:\\custom\\bash.exe')
     await expect(modal.getByLabel('备注')).toHaveValue('我的工作站')
     await editor.fill('{"jdtls":{"command":["/usr/bin/jdtls"],"extensions":[".java"]}}')
     await expect(editor).toHaveValue(/\/usr\/bin\/jdtls/)

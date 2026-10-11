@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -385,7 +386,8 @@ class DatabaseTurnResolverTest {
             "dev-user",
             "/home/dev",
             "Custom <Linux> & tools.",
-            "/tmp/kk-studio"));
+            "/tmp/kk-studio",
+            DaemonArchitecture.AMD64));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     String prompt = instructionText(requestSpec);
@@ -418,7 +420,8 @@ class DatabaseTurnResolverTest {
             "dev-user",
             "/home/dev",
             "Stable WSL environment.",
-            "/tmp/kk-studio");
+            "/tmp/kk-studio",
+            DaemonArchitecture.AMD64);
     Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready = instructionText(readyFixture.resolved(readyFixture.path(settings("default"))));
@@ -3405,7 +3408,8 @@ class DatabaseTurnResolverTest {
                       "dev-user",
                       "/home/dev",
                       "Retained note",
-                      "/tmp/kk-studio")),
+                      "/tmp/kk-studio",
+                      DaemonArchitecture.AMD64)),
               List.of(),
               List.of(),
               NOW,
@@ -3428,7 +3432,8 @@ class DatabaseTurnResolverTest {
               "dev-user",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              DaemonArchitecture.AMD64));
     }
 
     private void readyEnvironment(
@@ -3463,7 +3468,8 @@ class DatabaseTurnResolverTest {
                       "dev-user",
                       "/home/dev",
                       "Linux environment.",
-                      "/tmp/kk-studio")),
+                      "/tmp/kk-studio",
+                      DaemonArchitecture.AMD64)),
               skillState,
               List.of(),
               NOW,
@@ -3482,7 +3488,8 @@ class DatabaseTurnResolverTest {
               "dev-user",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              DaemonArchitecture.AMD64));
     }
 
     /** 只注册该 Environment 的路由身份，不涉及任何 Skill 事实（Skill 只来自全局目录）。 */
@@ -3495,7 +3502,8 @@ class DatabaseTurnResolverTest {
               "dev-user",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"),
+              "/tmp/kk-studio",
+              DaemonArchitecture.AMD64),
           NOW);
     }
 

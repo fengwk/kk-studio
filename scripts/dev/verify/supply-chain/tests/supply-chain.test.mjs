@@ -108,9 +108,22 @@ set -euo pipefail
 if [[ -n "\${FAKE_NPM_ARGS_FILE:-}" ]]; then
     printf '%s\\n' "$@" >>"$FAKE_NPM_ARGS_FILE"
 fi
+# 每个 npm 项目按 --prefix 区分：SBOM 与审计都按项目产出不同内容与不同结论。
+prefix=
+previous=
+for argument in "$@"; do
+    if [[ "$previous" == "--prefix" ]]; then
+        prefix="$argument"
+    fi
+    previous="$argument"
+done
+project=frontend
+if [[ "$prefix" == */daemon ]]; then
+    project=daemon
+fi
 case " $* " in
     *" sbom "*)
-        printf '%s\\n' '{"bomFormat":"CycloneDX","components":[{"name":"fake-frontend"}]}'
+        printf '{"bomFormat":"CycloneDX","components":[{"name":"fake-%s"}]}\\n' "$project\"
         ;;
     *" audit "*)
         registry=
@@ -125,7 +138,12 @@ case " $* " in
             printf '%s\\n' 'npm error audit 404 Not Found - POST https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk - [NOT_IMPLEMENTED]' >&2
             exit 1
         fi
-        if [[ "\${FAKE_NPM_REPORT_VULNERABILITY:-}" == true ]]; then
+        if [[ "$project" == "daemon" ]]; then
+            if [[ "\${FAKE_NPM_DAEMON_REPORT_VULNERABILITY:-}" == true ]]; then
+                printf '%s\\n' '{"auditReportVersion":2,"vulnerabilities":{"tar":{"name":"tar","severity":"high"}}}'
+                exit 1
+            fi
+        elif [[ "\${FAKE_NPM_REPORT_VULNERABILITY:-}" == true ]]; then
             printf '%s\\n' '{"auditReportVersion":2,"vulnerabilities":{"browserslist":{"name":"browserslist","severity":"high"}}}'
             exit 1
         fi
@@ -524,6 +542,93 @@ test('honors a custom report root and publishes timestamped and latest reports',
     }
 })
 
+
+test('generates a daemon CycloneDX SBOM alongside the frontend one', () => {
+    // Intent: Node Daemon 的 npm 依赖也必须进入 SBOM 门禁，并与前端按项目分别产出报告。
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'daemon-sbom-reports')
+    const npmArgsFile = path.join(toolchain.root, 'daemon-sbom-args.txt')
+    try {
+        const result = runScript(['sbom'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_NPM_ARGS_FILE: npmArgsFile,
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'PASS')
+        const daemon = summary.checks.find(check => check.name === 'daemon-sbom')
+        assert.equal(daemon.status, 'PASS')
+        assert.equal(daemon.artifact, 'daemon-sbom/bom.json')
+        assert.equal(summary.checks.find(check => check.name === 'frontend-sbom').status, 'PASS')
+
+        // 两个项目都必须真的被 npm 调用；daemon 的报告内容与前端不同，证明不是复用了前端的输出。
+        const argumentsList = readFileSync(npmArgsFile, 'utf8').split('\n').filter(Boolean)
+        assert.equal(argumentsList.includes(path.join(REPOSITORY_ROOT, 'daemon')), true)
+        assert.equal(argumentsList.includes(path.join(REPOSITORY_ROOT, 'frontend')), true)
+        const bom = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/daemon-sbom/bom.json'), 'utf8'),
+        )
+        assert.equal(bom.components[0].name, 'fake-daemon')
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('fails closed when the daemon npm audit reports a vulnerability', () => {
+    // Intent: daemon 自己的 npm 依赖命中漏洞必须让门禁失败，且不得污染前端项目的结论。
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'daemon-vulnerability-reports')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_NPM_DAEMON_REPORT_VULNERABILITY: 'true',
+        })
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'FAIL')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-audit').status, 'FAIL')
+        assert.equal(summary.checks.find(check => check.name === 'npm-audit').status, 'PASS')
+        assert.match(summary.failures.join('\n'), /daemon npm audit found vulnerabilities/)
+        assert.doesNotMatch(summary.failures.join('\n'), /frontend npm audit found vulnerabilities/)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('keeps every npm project audit report on its own artifact path', () => {
+    // Intent: 两个 npm 项目的审计报告必须分开落盘，任何一个项目缺报告都不能算通过。
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'npm-project-reports')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.checks.find(check => check.name === 'npm-audit').artifact, 'frontend-audit/audit.json')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-audit').artifact, 'daemon-audit/audit.json')
+        for (const artifact of ['frontend-audit/audit.json', 'daemon-audit/audit.json']) {
+            const report = JSON.parse(readFileSync(path.join(reportRoot, 'latest', artifact), 'utf8'))
+            assert.equal(report.auditReportVersion, 2)
+            assert.deepEqual(report.vulnerabilities, {})
+        }
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
 test('uses the official NVD feed without a server id when no key is set', () => {
     // Intent: the no-key path must not inherit a missing Maven server credential.
     const toolchain = createFakeToolchain()
@@ -660,18 +765,16 @@ test('does not expose an NVD key while using the protected settings path', () =>
         rmSync(toolchain.root, { recursive: true, force: true })
     }
 })
-test('builds both current images and constructs a pinned proxy-aware Trivy scan', () => {
-    // Intent: the image gate must build source images, pin the scanner and keep loopback proxy values out of scanner argv.
+test('builds the current app image and constructs a pinned proxy-aware Trivy scan', () => {
+    // Intent: the image gate must build the source image, pin the scanner and keep loopback proxy values out of scanner argv.
     const toolchain = createFakeDockerToolchain()
     const reportRoot = path.join(toolchain.root, 'image-reports')
     const appImage = 'example/kk-studio-app:test'
-    const daemonImage = 'example/kk-studio-daemon:test'
     try {
         const result = runScript(['image'], {
             ...toolchain.env,
             SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
             SUPPLY_CHAIN_APP_IMAGE: appImage,
-            SUPPLY_CHAIN_DAEMON_IMAGE: daemonImage,
             HTTP_PROXY: 'http://127.0.0.1:7890',
             HTTPS_PROXY: '',
             ALL_PROXY: '',
@@ -690,27 +793,16 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
 
         const calls = readFileSync(toolchain.callsFile, 'utf8')
         assert.match(calls, /build .*deploy\/local\/Dockerfile/)
-        assert.match(calls, /build .*deploy\/reliability\/daemon\.Dockerfile/)
         assert.match(calls, new RegExp(`--tag ${appImage}`))
-        assert.match(calls, new RegExp(`--tag ${daemonImage}`))
         assert.doesNotMatch(calls, /docker push| push /)
         assert.match(calls, /--entrypoint \/bin\/sh/)
-        assert.match(calls, /--entrypoint \/bin\/bash/)
         assert.match(calls, /test "\$uid" -ne 0/)
         assert.match(calls, /java -version/)
-        assert.match(calls, /node --version/)
-        assert.match(calls, /npm --version/)
         assert.match(calls, /command -v ffmpeg/)
         assert.match(calls, /command -v ffprobe/)
         assert.match(calls, /command -v curl/)
-        assert.match(calls, /command -v bash/)
-        assert.match(calls, /command -v git/)
-        assert.match(
-            calls,
-            /npm install --package-lock-only --ignore-scripts --no-audit --no-fund lodash@4\.17\.21/,
-        )
         assert.equal(
-            calls.indexOf('--entrypoint /bin/bash') <
+            calls.indexOf('--entrypoint /bin/sh') <
                 calls.indexOf('aquasec/trivy@sha256:'),
             true,
         )
@@ -738,15 +830,7 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
         )
         assert.equal(summary.status, 'PASS')
         assert.equal(summary.checks.find(check => check.name === 'app-image-smoke').status, 'PASS')
-        assert.equal(
-            summary.checks.find(check => check.name === 'daemon-image-smoke').status,
-            'PASS',
-        )
         assert.equal(summary.checks.find(check => check.name === 'app-image-scan').status, 'PASS')
-        assert.equal(
-            summary.checks.find(check => check.name === 'daemon-image-scan').status,
-            'PASS',
-        )
         const appScan = summary.checks.find(check => check.name === 'app-image-scan')
         assert.equal(appScan.image, appImage)
         assert.match(appScan.imageId, /^sha256:/)
@@ -754,26 +838,19 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
         assert.equal(appScan.scannerVersion, '0.74.0')
         assert.equal(appScan.scannerVersionStatus, 'PASS')
         assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
-        assert.equal(existsSync(path.join(reportRoot, 'latest/image/daemon.json')), true)
         assert.equal(
             existsSync(path.join(reportRoot, 'latest/logs/app-image-smoke.log')),
             true,
         )
-        assert.equal(
-            existsSync(path.join(reportRoot, 'latest/logs/daemon-image-smoke.log')),
-            true,
-        )
-        for (const smokeLog of ['app-image-smoke.log', 'daemon-image-smoke.log']) {
-            const content = readFileSync(path.join(reportRoot, 'latest/logs', smokeLog), 'utf8')
-            assert.doesNotMatch(content, /127\.0\.0\.1:7890/)
-            assert.match(content, /\[redacted-proxy\]/)
-        }
+        const content = readFileSync(path.join(reportRoot, 'latest/logs/app-image-smoke.log'), 'utf8')
+        assert.doesNotMatch(content, /127\.0\.0\.1:7890/)
+        assert.match(content, /\[redacted-proxy\]/)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
 })
 
-test('fails closed when the daemon smoke fails even though Trivy exits zero', () => {
+test('fails closed when the app smoke fails even though Trivy exits zero', () => {
     // Intent: runtime contract failures must block the image gate independently of a clean vulnerability report.
     const toolchain = createFakeDockerToolchain()
     const reportRoot = path.join(toolchain.root, 'smoke-failure-reports')
@@ -781,7 +858,7 @@ test('fails closed when the daemon smoke fails even though Trivy exits zero', ()
         const result = runScript(['image'], {
             ...toolchain.env,
             SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
-            FAKE_DOCKER_SMOKE_FAILURE: 'daemon',
+            FAKE_DOCKER_SMOKE_FAILURE: 'app',
             HTTP_PROXY: '',
             HTTPS_PROXY: '',
             ALL_PROXY: '',
@@ -797,23 +874,13 @@ test('fails closed when the daemon smoke fails even though Trivy exits zero', ()
             readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
         )
         assert.equal(summary.status, 'FAIL')
-        assert.equal(summary.checks.find(check => check.name === 'app-image-smoke').status, 'PASS')
-        assert.equal(
-            summary.checks.find(check => check.name === 'daemon-image-smoke').status,
-            'FAIL',
-        )
+        assert.equal(summary.checks.find(check => check.name === 'app-image-smoke').status, 'FAIL')
         assert.equal(summary.checks.find(check => check.name === 'app-image-scan').status, 'PASS')
-        assert.equal(
-            summary.checks.find(check => check.name === 'daemon-image-scan').status,
-            'PASS',
-        )
-        assert.match(summary.failures.join('\n'), /daemon image smoke failed/)
+        assert.match(summary.failures.join('\n'), /app image smoke failed/)
         assert.match(
-            readFileSync(path.join(reportRoot, 'latest/logs/daemon-image-smoke.log'), 'utf8'),
+            readFileSync(path.join(reportRoot, 'latest/logs/app-image-smoke.log'), 'utf8'),
             /simulated image smoke failure/,
         )
-        // Intent: a failed prerequisite must not run the independent cache probe.
-        assert.equal(existsSync(toolchain.env.FAKE_DOCKER_PROBE_STDIN_FILE), false)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
@@ -881,36 +948,31 @@ test('fails closed when Trivy exits zero but its JSON has a fixable vulnerabilit
         )
         assert.match(summary.failures.join('\n'), /HIGH\/CRITICAL vulnerabilities/)
         assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
-        assert.equal(existsSync(path.join(reportRoot, 'latest/image/daemon.json')), true)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
 })
 
-test('keeps runtime apt upgrade before install in both image Dockerfiles', () => {
-    // Intent: every runtime build must absorb Ubuntu security updates before adding runtime packages.
-    for (const dockerfile of [
-        path.join(REPOSITORY_ROOT, 'deploy/local/Dockerfile'),
-        path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile'),
-    ]) {
-        const source = readFileSync(dockerfile, 'utf8')
-        const runtime = source.slice(source.lastIndexOf('\nFROM '))
-        const updateIndex = runtime.indexOf('apt-get update')
-        const upgradeIndex = runtime.indexOf('DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes')
-        const installIndex = runtime.indexOf('apt-get install')
-        assert.notEqual(updateIndex, -1, dockerfile)
-        assert.notEqual(upgradeIndex, -1, dockerfile)
-        assert.notEqual(installIndex, -1, dockerfile)
-        assert.equal(upgradeIndex > updateIndex, true, dockerfile)
-        assert.equal(upgradeIndex < installIndex, true, dockerfile)
-        assert.match(runtime, /apt-get clean/)
-        assert.match(runtime, /rm -rf \/var\/lib\/apt\/lists\/\*/)
-        assert.match(runtime, /Ubuntu security updates/)
-    }
+test('keeps runtime apt upgrade before install in the app image Dockerfile', () => {
+    // Intent: the runtime build must absorb Ubuntu security updates before adding runtime packages.
+    const dockerfile = path.join(REPOSITORY_ROOT, 'deploy/local/Dockerfile')
+    const source = readFileSync(dockerfile, 'utf8')
+    const runtime = source.slice(source.lastIndexOf('\nFROM '))
+    const updateIndex = runtime.indexOf('apt-get update')
+    const upgradeIndex = runtime.indexOf('DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes')
+    const installIndex = runtime.indexOf('apt-get install')
+    assert.notEqual(updateIndex, -1, dockerfile)
+    assert.notEqual(upgradeIndex, -1, dockerfile)
+    assert.notEqual(installIndex, -1, dockerfile)
+    assert.equal(upgradeIndex > updateIndex, true, dockerfile)
+    assert.equal(upgradeIndex < installIndex, true, dockerfile)
+    assert.match(runtime, /apt-get clean/)
+    assert.match(runtime, /rm -rf \/var\/lib\/apt\/lists\/\*/)
+    assert.match(runtime, /Ubuntu security updates/)
 })
 
 test('supports explicit Trivy networks without exposing proxy credentials', () => {
-    // Intent: explicit networks override automatic selection for version and both scans, not image builds.
+    // Intent: explicit networks override automatic selection for version and scan, not image builds.
     for (const network of ['host', 'bridge', 'none', 'quality_net-1.2']) {
         const toolchain = createFakeDockerToolchain()
         try {
@@ -925,7 +987,7 @@ test('supports explicit Trivy networks without exposing proxy credentials', () =
             assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
             const calls = readFileSync(toolchain.callsFile, 'utf8')
             const scans = calls.split('\n').filter(line => line.includes('aquasec/trivy@'))
-            assert.equal(scans.length, 3)
+            assert.equal(scans.length, 2)
             for (const scan of scans) {
                 assert.ok(scan.includes(`--network ${network} `), scan)
                 assert.doesNotMatch(scan, /user:secret/)
@@ -971,140 +1033,18 @@ test('fails closed on an unfixed HIGH vulnerability', () => {
         })
         assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
         const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
-        for (const name of ['app-image-scan', 'daemon-image-scan']) {
-            assert.equal(summary.checks.find(check => check.name === name).status, 'FAIL')
-        }
-        assert.match(readFileSync(path.join(reportRoot, 'latest/logs/daemon-image-scan.log'), 'utf8'),
+        assert.equal(summary.checks.find(check => check.name === 'app-image-scan').status, 'FAIL')
+        assert.match(readFileSync(path.join(reportRoot, 'latest/logs/app-image-scan.log'), 'utf8'),
             /http-cache-semantics: CVE-2026-93748 \(no fixed version\)/)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
 })
 
-test('pins runtime versions and only overrides vulnerable npm bundles with upstream fixes', () => {
-    // Intent: keep Java21/Node22/Jammy and non-root identities while avoiding unnecessary or private patches.
+test('pins runtime versions and non-root identity in the app image Dockerfile', () => {
+    // Intent: keep Java21/Jammy and non-root identity in the app image.
     const app = readFileSync(path.join(REPOSITORY_ROOT, 'deploy/local/Dockerfile'), 'utf8')
-    const daemon = readFileSync(path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile'), 'utf8')
     assert.match(app, /FROM eclipse-temurin:21\.0\.12\.1_1-jre-jammy/)
     assert.match(app, /--uid 10001/)
-    assert.match(daemon, /FROM eclipse-temurin:21\.0\.12\.1_1-jdk-jammy/)
-    assert.match(daemon, /FROM node:22\.23\.3-bookworm-slim AS node-runtime/)
-    assert.match(daemon, /npm install --global npm@11\.21\.0/)
-    for (const dependency of ['brace-expansion@5.0.12', 'ip-address@10.7.3', 'undici@6.28.1']) {
-        assert.ok(daemon.includes(`npm pack ${dependency} `))
-    }
-    assert.doesNotMatch(daemon, /npm pack (tar|http-cache-semantics)@/)
-    assert.match(daemon, /USER 10001:10001/)
     assert.match(runScript(['help']).stdout, /SUPPLY_CHAIN_TRIVY_NETWORK/)
-})
-
-test('injects the real probe through stdin with no network, host mounts or user environment', () => {
-    // Intent: enforce the isolation contract and retain observations without granting vulnerability clearance.
-    // Intent: use actual npm bundle report data to validate integration, without simulating a cache implementation.
-    const toolchain = createFakeDockerToolchain()
-    const reportRoot = path.join(toolchain.root, 'reports')
-    try {
-        const result = runScript(['image'], {
-            ...toolchain.env,
-            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
-            HTTP_PROXY: 'http://synthetic-user:synthetic-password@127.0.0.1:7890',
-            NVD_API_KEY: 'synthetic-probe-must-not-inherit',
-        })
-        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
-        const calls = readFileSync(toolchain.callsFile, 'utf8')
-        const probeCalls = calls.split('\n')
-            .filter(line => line.startsWith('run ') && line.includes('--input-type=module'))
-        assert.deepEqual(probeCalls, [
-            'run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node kk-studio-daemon:supply-chain --input-type=module',
-        ])
-        assert.doesNotMatch(probeCalls[0], /--env|-e |--volume|-v |--mount|--user|--privileged/)
-        assert.equal(readFileSync(toolchain.env.FAKE_DOCKER_PROBE_STDIN_FILE, 'utf8'),
-            readFileSync(path.join(path.dirname(SCRIPT), 'npm-cache-probe.mjs'), 'utf8'))
-        assert.ok(calls.indexOf('--entrypoint /bin/bash') < calls.indexOf(probeCalls[0]))
-        assert.ok(calls.indexOf(probeCalls[0]) < calls.indexOf('aquasec/trivy@'))
-        const report = JSON.parse(readFileSync(path.join(reportRoot, 'latest/image/npm-cache-probe.json'), 'utf8'))
-        assert.equal(report.runtime.shared, false)
-        for (const id of ['auth-change-no-vary', 'no-cache-max-stale']) {
-            assert.equal(report.cases.find(item => item.id === id).status, 'OBSERVED')
-        }
-        assert.equal(readFileSync(path.join(reportRoot, 'latest/logs/npm-cache-probe.log'), 'utf8'), '')
-    } finally {
-        rmSync(toolchain.root, { recursive: true, force: true })
-    }
-})
-
-for (const mode of ['nonzero', 'empty', 'invalid', 'incomplete']) {
-    test(`fails daemon smoke on ${mode} probe output and still runs Trivy`, () => {
-        // Intent: neither a clean scan nor a zero exit with missing/invalid evidence may hide a failed probe.
-        const toolchain = createFakeDockerToolchain()
-        const reportRoot = path.join(toolchain.root, 'reports')
-        try {
-            const result = runScript(['image'], {
-                ...toolchain.env,
-                SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
-                FAKE_DOCKER_PROBE_MODE: mode,
-            })
-            assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
-            const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
-            assert.equal(summary.status, 'FAIL')
-            assert.equal(summary.checks.find(item => item.name === 'daemon-image-smoke').status, 'FAIL')
-            assert.equal(summary.checks.find(item => item.name === 'app-image-smoke').status, 'PASS')
-            for (const name of ['app-image-scan', 'daemon-image-scan']) {
-                assert.equal(summary.checks.find(item => item.name === name).status, 'PASS')
-            }
-            assert.match(summary.failures.join('\n'), /daemon npm cache probe/)
-            const log = readFileSync(path.join(reportRoot, 'latest/logs/npm-cache-probe.log'), 'utf8')
-            if (mode === 'nonzero') {
-                assert.match(log, /simulated probe failure/)
-                assert.match(summary.failures.join('\n'), /exit 19/)
-            } else {
-                assert.ok(log.length > 0, 'report validation failure must retain diagnostics')
-            }
-            const calls = readFileSync(toolchain.callsFile, 'utf8')
-            assert.equal(calls.split('\n').filter(line => line.includes('aquasec/trivy@')).length, 3)
-        } finally {
-            rmSync(toolchain.root, { recursive: true, force: true })
-        }
-    })
-}
-
-test('requires complete assertions but accepts either defect observation without suppressing Trivy', () => {
-    // Intent: valid JSON is not enough; required boundaries fail closed, while defect observations remain non-gating.
-    const variants = [
-        { name: 'shared-true', mutate: report => { report.runtime.shared = true }, exit: 1 },
-        { name: 'missing-case', mutate: report => { report.cases.pop() }, exit: 1 },
-        { name: 'failed-control', mutate: report => { report.cases[0].status = 'FAILED' }, exit: 1 },
-        { name: 'false-origin-claim', mutate: report => { report.cases[2].originHits = 1 }, exit: 1 },
-        { name: 'not-observed', mutate: report => {
-            for (const item of report.cases.filter(item => item.kind === 'observation')) {
-                item.status = 'NOT_OBSERVED'
-                item.originHits = 2
-                item.source = 'B'
-                item.secondBody = `SYNTHETIC_BODY_B_${item.id}`
-                item.cacheStatus.second = 'updated'
-            }
-        }, exit: 0 },
-    ]
-    for (const variant of variants) {
-        const toolchain = createFakeDockerToolchain()
-        const reportRoot = path.join(toolchain.root, 'reports')
-        try {
-            const fixture = JSON.parse(readFileSync(toolchain.env.FAKE_DOCKER_PROBE_FIXTURE, 'utf8'))
-            variant.mutate(fixture)
-            const fixtureFile = path.join(toolchain.root, 'mutated-probe.json')
-            writeFileSync(fixtureFile, JSON.stringify(fixture))
-            const result = runScript(['image'], {
-                ...toolchain.env,
-                SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
-                FAKE_DOCKER_PROBE_FIXTURE: fixtureFile,
-            })
-            assert.equal(result.status, variant.exit, `${variant.name}: ${result.stdout}\n${result.stderr}`)
-            const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
-            assert.equal(summary.checks.find(item => item.name === 'daemon-image-smoke').status,
-                variant.exit === 0 ? 'PASS' : 'FAIL')
-            assert.equal(summary.checks.find(item => item.name === 'daemon-image-scan').status, 'PASS')
-        } finally {
-            rmSync(toolchain.root, { recursive: true, force: true })
-        }
-    }
 })
