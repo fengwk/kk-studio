@@ -50,9 +50,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 final class IdeRemoteBrowserBridge {
 
-  /** 单跳到 owner 的固定失败收尾（1014 Bad Gateway）：只回通用原因，绝不泄漏内部地址、状态码或异常细节。 */
+  /**
+   * 单跳到 owner 的固定失败收尾：只回通用原因，绝不泄漏内部地址、状态码或异常细节。
+   *
+   * <p>只用 Jakarta 规范内合法的 1011（{@link CloseStatus#SERVER_ERROR}）承载固定原因：1014 虽在 WS 库中存在，但 Jakarta
+   * 实际关闭时会拒绝， 导致收尾退化为异常而不是一次干净关闭。
+   */
   private static final CloseStatus OWNER_UNAVAILABLE =
-      new CloseStatus(1014, "ide gateway unavailable");
+      CloseStatus.SERVER_ERROR.withReason("ide gateway unavailable");
 
   /** 一个浏览器分段：文本或二进制，{@code last} 是原生 FIN 标记。 */
   private sealed interface Frame {

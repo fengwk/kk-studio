@@ -60,6 +60,9 @@ final class IdeBrowserStreamSession {
   /** 入站队列的字节预算；超出即阻塞容器线程形成背压。 */
   private static final long MAX_INBOUND_BYTES = 512L * 1024L;
 
+  /** 零载荷分段同样占据队列预算。 */
+  static final int MAX_INBOUND_FRAMES = 1024;
+
   /** 容器线程最长阻塞时间；超过即 fail-closed，避免长期占用容器线程。 */
   private static final long MAX_INBOUND_BLOCK_MILLIS = 60_000L;
 
@@ -125,7 +128,8 @@ final class IdeBrowserStreamSession {
     long size = frame.payload().length;
     long deadline = System.currentTimeMillis() + MAX_INBOUND_BLOCK_MILLIS;
     synchronized (inboundLock) {
-      while (!stopped.get() && inboundBytes + size > MAX_INBOUND_BYTES) {
+      while (!stopped.get()
+          && (inboundBytes + size > MAX_INBOUND_BYTES || inbound.size() >= MAX_INBOUND_FRAMES)) {
         long remaining = deadline - System.currentTimeMillis();
         if (remaining <= 0L) {
           return false;

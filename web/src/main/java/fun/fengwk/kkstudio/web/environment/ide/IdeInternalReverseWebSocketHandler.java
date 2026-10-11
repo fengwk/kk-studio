@@ -55,6 +55,8 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+    session.setBinaryMessageSizeLimit(IdeStreamFrameBridge.MAX_BINARY_FRAME_BYTES);
+    session.setTextMessageSizeLimit(IdeStreamFrameBridge.MAX_TEXT_FRAME_BYTES);
     EnvironmentId environmentId = attribute(session);
     String ticket = ticketOf(session);
     if (environmentId == null || ticket == null) {
