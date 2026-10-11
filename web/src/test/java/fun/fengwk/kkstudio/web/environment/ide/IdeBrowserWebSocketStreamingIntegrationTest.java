@@ -174,41 +174,42 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
     byte[] compressed = gzip(plain);
     IdeSessionIdentity identity =
         new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    HttpFakeDaemon daemon = new HttpFakeDaemon(compressed);
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
-    when(endpoint.requestIde(eq(ENVIRONMENT), any()))
-        .thenAnswer(
-            invocation -> {
-              IdeCommand command = invocation.getArgument(1);
-              assertEquals(IdeAction.OPEN_STREAM, command.action());
-              assertEquals(IdeStreamMode.HTTP, command.mode());
-              daemon.dial(reverseUrl(command.ticket()));
-              CompletableFuture<IdeReply> reply = new CompletableFuture<>();
-              reply.complete(IdeReply.ok(null, null, null));
-              return new IdeRequest(identity, UUID.randomUUID(), reply);
-            });
-    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
+    try (HttpFakeDaemon daemon = new HttpFakeDaemon(compressed)) {
+      when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+      when(endpoint.requestIde(eq(ENVIRONMENT), any()))
+          .thenAnswer(
+              invocation -> {
+                IdeCommand command = invocation.getArgument(1);
+                assertEquals(IdeAction.OPEN_STREAM, command.action());
+                assertEquals(IdeStreamMode.HTTP, command.mode());
+                daemon.dial(reverseUrl(command.ticket()));
+                CompletableFuture<IdeReply> reply = new CompletableFuture<>();
+                reply.complete(IdeReply.ok(null, null, null));
+                return new IdeRequest(identity, UUID.randomUUID(), reply);
+              });
+      String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
-    OkHttpClient client =
-        new OkHttpClient.Builder()
-            .dns(hostname -> List.of(InetAddress.getByName("127.0.0.1")))
-            .build();
-    Request request =
-        new Request.Builder()
-            .url("http://" + ENVIRONMENT + ".ide.test:" + port + "/")
-            .header("Cookie", gatewayProperties.requireSessionCookieName() + "=" + cookie)
-            // 显式禁用 OkHttp 的透明 gzip，保留原始压缩字节用于断言。
-            .header("Accept-Encoding", "identity")
-            .build();
-    try (Response response = client.newCall(request).execute()) {
-      assertEquals(200, response.code());
-      assertEquals("gzip", response.header("Content-Encoding"));
-      byte[] body = response.body().bytes();
-      assertArrayEquals(compressed, body);
-      assertArrayEquals(plain, gunzip(body));
-    } finally {
-      client.dispatcher().executorService().shutdown();
-      client.connectionPool().evictAll();
+      OkHttpClient client =
+          new OkHttpClient.Builder()
+              .dns(hostname -> List.of(InetAddress.getByName("127.0.0.1")))
+              .build();
+      Request request =
+          new Request.Builder()
+              .url("http://" + ENVIRONMENT + ".ide.test:" + port + "/")
+              .header("Cookie", gatewayProperties.requireSessionCookieName() + "=" + cookie)
+              // 显式禁用 OkHttp 的透明 gzip，保留原始压缩字节用于断言。
+              .header("Accept-Encoding", "identity")
+              .build();
+      try (Response response = client.newCall(request).execute()) {
+        assertEquals(200, response.code());
+        assertEquals("gzip", response.header("Content-Encoding"));
+        byte[] body = response.body().bytes();
+        assertArrayEquals(compressed, body);
+        assertArrayEquals(plain, gunzip(body));
+      } finally {
+        client.dispatcher().executorService().shutdown();
+        client.connectionPool().evictAll();
+      }
     }
   }
 
@@ -428,23 +429,25 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
     }
   }
 
-  /** 反向 WS Daemon peer（HTTP 模式）：投递一条小型压缩响应后立即断开反向连接。 */
-  private final class HttpFakeDaemon extends WebSocketListener {
+  /** 反向 WS Daemon peer（HTTP 模式）：投递一条小型压缩响应后立即断开反向连接；持有自身 OkHttp 资源并在关闭时释放。 */
+  private final class HttpFakeDaemon extends WebSocketListener implements AutoCloseable {
 
     private final DaemonIdeStreamCodec codec = new DaemonIdeStreamCodec();
     private final byte[] compressedBody;
+    private final OkHttpClient client = new OkHttpClient();
+    private volatile WebSocket socket;
 
     private HttpFakeDaemon(byte[] compressedBody) {
       this.compressedBody = compressedBody;
     }
 
     void dial(String streamUrl) {
-      OkHttpClient client = new OkHttpClient();
-      client.newWebSocket(new Request.Builder().url(streamUrl).build(), this);
+      socket = client.newWebSocket(new Request.Builder().url(streamUrl).build(), this);
     }
 
     @Override
     public void onOpen(WebSocket webSocket, Response response) {
+      socket = webSocket;
       webSocket.send(
           codec.encodeHttpResponse(
               new IdeStreamControlFrame.HttpResponse(
@@ -453,6 +456,16 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
       webSocket.send(ByteString.of(codec.encodeHttpEnd()));
       // 完整响应已入队后立即断开：网关必须仍能交付，且关闭后的消费 ACK 不得中断交付。
       webSocket.close(1000, "done");
+    }
+
+    @Override
+    public void close() {
+      WebSocket current = socket;
+      if (current != null) {
+        current.close(1000, "done");
+      }
+      client.dispatcher().executorService().shutdown();
+      client.connectionPool().evictAll();
     }
   }
 

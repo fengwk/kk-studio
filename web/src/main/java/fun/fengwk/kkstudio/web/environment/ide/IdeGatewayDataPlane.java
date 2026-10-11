@@ -559,6 +559,11 @@ public final class IdeGatewayDataPlane {
     private void handleText(String json) {
       IdeStreamControlFrame frame = relay.receiveText(json);
       if (frame instanceof IdeStreamControlFrame.HttpResponse httpResponse) {
+        if (responseStarted) {
+          // 一条 exchange 只允许一个响应头：重复 HTTP_RESPONSE 是协议错误，绝不静默覆盖状态/headers。
+          failed = true;
+          return;
+        }
         applyResponse(httpResponse);
       } else {
         // ERROR 或 HTTP 模式下的 WS_READY 都属于不可继续的失败。
@@ -577,7 +582,14 @@ public final class IdeGatewayDataPlane {
           response.getOutputStream().write(body.bytes());
           relay.ackFromDaemon(body.bytes().length);
         }
-        case IdeStreamBinaryFrame.HttpEnd ignored -> done = true;
+        case IdeStreamBinaryFrame.HttpEnd ignored -> {
+          // HTTP_END 只在已收到 HTTP_RESPONSE 且尚未结束时有效；先于元数据的 END 不得默认成 200 空 body。
+          if (!responseStarted || done) {
+            failed = true;
+          } else {
+            done = true;
+          }
+        }
         case IdeStreamBinaryFrame.Ack ignored -> {
           // 仅用于释放发送 credit。
         }
