@@ -38,8 +38,10 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
@@ -1575,7 +1577,11 @@ class EnvironmentDaemonServerTest {
     String operationId = UUID.randomUUID().toString();
     DaemonUpdateCommand command =
         new DaemonUpdateCommand(
-            operationId, "1.0.9", DaemonUpdateArtifact.artifactUrl("1.0.9"), "a".repeat(64));
+            operationId,
+            "1.0.9",
+            DaemonUpdateArtifact.artifactUrl(
+                "1.0.9", DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64),
+            "a".repeat(64));
 
     assertThrows(
         EnvironmentCapabilityBusyException.class,

@@ -37,7 +37,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.11.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.12.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -101,9 +101,8 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 免费只表示不调用付费模型，不表示无副作用：E2E 会写测试数据，离线 smoke/性能入口会建镜像、
 启停容器并删除同名测试栈卷；供应链除离线 `test` 子命令外还可能下载依赖、漏洞库或镜像。
 
-内置工具的定向测试、平台条件与报告判断分别见
-[Read](builtin-read-tests.md)、[文件变更](builtin-mutation-tests.md)、[检索](builtin-search-tests.md)、
-[Bash](builtin-bash-tests.md)、[LSP](builtin-lsp-tests.md) 和 [Task/Thread Join](builtin-task-tests.md)。
+内置工具的定向测试、平台条件与报告判断见
+[Task/Thread Join](builtin-task-tests.md)。
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -125,6 +124,13 @@ Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；
 Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明确检查 Bash 3.2，
 不以 Homebrew Bash 的结果替代系统自带版本。Daemon Release 发布也依赖同一套三平台安装器门禁。
 
+`daemon-ci` 是 Node Daemon 的平台矩阵：在 Ubuntu、macOS、Windows 上装入 `daemon/package-lock.json`
+的依赖，依次执行 `npm run check`、`npm run build` 与 `npm run coverage`（构建先于测试与覆盖率）。
+三个平台都跑完整 Node 套件（native 进程范围、核心与能力层），平台特有用例由用例自身的条件决定
+是否执行，不整体跳过某个平台。它以 `push`（`main`/`dev`，按 `daemon/**` 等路径触发）与
+`pull_request` 作为独立门禁，等价于原来的 process-scope 矩阵；`daemon-release` 通过
+`workflow_call` 复用同一份定义，因此 tag 发布不会绕过平台矩阵。
+
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
 `psql`、`pg_dump`、`pg_restore`、`createdb`、`pg_isready` 必须来自同一主版本且不低于 17；
@@ -132,33 +138,31 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 
 ### Daemon 安装脚本回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与发布脚本契约。
-Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与暂存输入校验，验证 latest
-解析与 JAR 版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
-以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
-运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实 shaded JAR 由 Maven
-独立构建。测试不注册真实 systemd/launchd 服务。
-Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
+在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与打包脚本契约。
+Unix fixtures 用 shim 替代 curl/npm/uname/systemctl/launchctl，真实执行 SHA256 校验、release
+`--check-config` 预检、受管身份判定、程序目录整体替换与备份，以及卸载只移除受管服务与程序；
+`prepare-release.sh` fixtures 还验证按目标平台 `npm ci --os/--cpu` 只装入对应的 koffi 预编译产物
+（拒绝把 Linux node_modules 当作“假跨平台”），并核对归档内容、SHA 与元数据。安装器没有交互提示、
+from-source 与单独 upgrade 入口；从 checkout 运行安装脚本只是开发/CI fixture，不是用户安装路径，
+安装器自身从不构建。测试不注册真实 systemd/launchd 服务，也不下载真实 240MB 运行时。
+Windows 原生验收需要 host 上真实的 `node.exe`（fixture 用它构造归档），并分别运行两个 host：
 
 ```powershell
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
 pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
 ```
 
-该套件检查真实 ScheduledTasks 定义、ACL、Java argv 和进程捕获，但不注册任务。
-Windows 计划任务直接执行 Java，只以 UTF-8 Base64 传输唯一的 `--config` 参数；
-应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
-验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
+该套件用 stub 替代网络与 ScheduledTasks，真实校验 ACL、SHA256、`--check-config` 预检、受管任务
+身份、程序目录发布与卸载，但不注册真实任务、也不触碰真实用户目录。
+Windows 计划任务直接执行归档内冻结的 `node.exe`，只以 ASCII UTF-8 Base64 传输应用参数
+（`--base64-args`），验证中文、emoji、空参数、引号和尾随反斜杠保真。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
 验证实际生成脚本的 owner-only 暂存、凭据字节与失败清理。夹具不注册任务或访问网络。
 
-只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
-`pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
-Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植
-进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
-保留两个 Windows host 的完整门禁。
+Windows 原生验收只能在 Windows host 上运行；镜像与 Daemon 发布 CI 都在
+PowerShell 5.1 与 PowerShell 7 两个 host 上完整执行该套件，失败不跳过。
 
 ## Java 质量检查
 
@@ -605,20 +609,17 @@ XML 检查不是通用语法验证器，不能把这道门禁称为任意畸形 
 ### 隔离栈与真实 Agent 矩阵
 
 栈的 `up`/`status`/`logs`/`inspect`/`down` 生命周期与端口见
-[部署与运行](deployment.md#deployreliabilityapp--environment-daemon)。`up` 在有宿主
-`TEST_MINIMAX_*` 时同步该 credential pair；工具隔离由 `inspect` 断言。矩阵专用的准备命令是：
+[部署与运行](deployment.md#deployreliabilityapp)。`up` 在有宿主
+`TEST_MINIMAX_*` 时同步该 credential pair。矩阵专用的准备命令是：
 
 ```bash
 ./scripts/dev/verify/reliability/stack.sh snapshot
 ./scripts/dev/verify/reliability/stack.sh case-reset '<case-id>' pi
 ./scripts/dev/verify/reliability/stack.sh case-deps '<case-id>'
-./scripts/dev/verify/reliability/stack.sh tool-smoke
 ```
 
 先把 `<case-id>` 替换为 inventory 中的实际值；`case-reset` 最后一项可选 `pi` 或 `pi-base`。
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
-`tool-smoke` 把 [`NativeToolSmoke.java`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java) 经 stdin 送入
-Daemon 容器编译并运行 find/grep/bash assertions，不经过 Agent、Provider 或 App command batch。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 
@@ -695,8 +696,8 @@ TERM 都执行 `down --volumes --remove-orphans`。
 
 | 子命令 | 内容 |
 | --- | --- |
-| `sbom` | backend/frontend CycloneDX JSON SBOM，校验文件非空可解析 |
-| `audit` | frontend `npm audit` + Maven OWASP Dependency-Check |
+| `sbom` | backend/frontend/daemon CycloneDX JSON SBOM，校验文件非空可解析 |
+| `audit` | 每个 npm 项目（frontend、daemon）的 `npm audit` + Maven OWASP Dependency-Check |
 | `image` | 构建 App/Daemon，运行功能 smoke，再用 pinned Trivy 扫描 |
 | `all` | `sbom`、`audit`、`image` 的合取结果 |
 | `test` | [supply-chain.test.mjs](../../scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs)，不联网 |
@@ -720,6 +721,10 @@ Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声�
   log；无 key 时使用 NVD 官方 JSON 2.0 feed。
 - 在线源、Maven Central、npm registry、NVD 或 report generation 不可用时保持 `FAIL`；缺失数据
   不能生成 `PASS`。策略是零 suppression 与零漏洞，Dependency-Check 与 npm audit 都不配置白名单。
+- npm 生态按项目分别审计：frontend 与 daemon 各自产出 `frontend-audit/audit.json`、
+  `daemon-audit/audit.json` 与独立状态；任一项目命中漏洞都让整条门禁 `FAIL`，另一个项目的结论
+  不会被掩盖。Node Daemon 迁移后 daemon 依赖不再经过 Maven，因此它的 lockfile 必须由这里的
+  npm 审计与 SBOM 覆盖；App 镜像扫描只覆盖镜像内容，不等于发行归档里第三方运行时的漏洞结论。
 - Trivy image 固定为脚本中的 immutable digest，并校验版本 `0.74.0`；扫描过滤 `HIGH,CRITICAL`
   且包含无修复版本的条目，不使用 suppression 或 `--ignore-unfixed`。cache volume 默认 `kk-studio-trivy-cache`，可用
   `SUPPLY_CHAIN_TRIVY_CACHE_VOLUME` 覆盖；已有完整 cache 时设置 `TRIVY_SKIP_DB_UPDATE=true`，
@@ -736,39 +741,8 @@ Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声�
 | 镜像 | Dockerfile | 默认 tag | 覆盖变量 |
 | --- | --- | --- | --- |
 | App | [`deploy/local/Dockerfile`](../../deploy/local/Dockerfile) | `kk-studio-app:supply-chain` | `SUPPLY_CHAIN_APP_IMAGE` |
-| Daemon | [`deploy/reliability/daemon.Dockerfile`](../../deploy/reliability/daemon.Dockerfile) | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
 
-App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`；Daemon 额外检查 Node
-`v22.23.3`、npm `11.21.0`、bash、git，并用一次 `npm install --package-lock-only` 验证 npm 工具链。
-Daemon 使用 Java 21 / Jammy，并将 npm bundle 的 `brace-expansion`、`ip-address`、`undici`
-分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm 自带的 `7.5.22`。
-`http-cache-semantics<=4.2.0` 的 HIGH `CVE-2026-93748` 当前尚无上游补丁，保持原包并报告未解决风险，
-不能据此宣称镜像扫描通过。
-
-Daemon 原有 smoke 成功后，通过 stdin 注入
-[`npm-cache-probe.mjs`](../../scripts/dev/verify/supply-chain/npm-cache-probe.mjs)，无需重建镜像。
-它使用默认 UID `10001`、真实 npm bundle、loopback HTTP 与 synthetic marker，不挂载宿主目录、
-不传用户环境/代理/密钥；请求有界且无 retry，完整消费 body 后关闭 server、删除本次临时 cache：
-
-```bash
-docker run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node \
-  "$DAEMON_IMAGE" --input-type=module \
-  < scripts/dev/verify/supply-chain/npm-cache-probe.mjs
-```
-
-供应链报告保留 `image/npm-cache-probe.json` 与独立 stderr `logs/npm-cache-probe.log`。
-JSON 记录 runtime/shared、origin hits、第二次 body 来源、cache status 和 Set-Cookie 回放。7 个 case 分为：
-
-- 同认证 fresh cache 正对照；两个认证/Cookie 变更的 Vary case 与响应 no-store 必须回源。
-  这四项及 `shared=false` 断言失败均非零退出。
-- 无 Vary 的认证变更、响应 `no-cache` + `Age: 120` 后请求 `max-stale` 只记录
-  `OBSERVED` / `NOT_OBSERVED`；无 public 的 Set-Cookie case 观察头剥离，不证明 body 隔离。
-
-实测 `shared=false` 下无 Vary 仍复用 A body，`no-cache` 回源保护仍被 `max-stale` 绕过。
-`ASSERTIONS_SATISFIED` 不证明安全、漏洞修复或不受影响；同 OS 用户 cache 不是跨租户隔离，
-**不要跨互不信任主体共享 npm cache**，认证响应需正确配置 Vary，禁止存储用响应 no-store。
-退出非零、JSON 空/非法或预期报告缺失使 Daemon smoke 失败，随后仍运行 Trivy；
-观测不改变漏洞 gate、不提供 suppression，不能将 `shared=false` 视为修复。
+App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`。
 
 ## 本机 preview 与 NAS 自迭代
 
@@ -1082,13 +1056,14 @@ reports/reliability/
   LATEST_AGENT_RUN.txt
 
 reports/supply-chain/
-  <timestamp>-<pid>/{backend-sbom,frontend-sbom,frontend-audit,backend-audit,image,logs/,summary.md,summary.json}
+  <timestamp>-<pid>/{backend-sbom,frontend-sbom,daemon-sbom,frontend-audit,daemon-audit,backend-audit,image,logs/,summary.md,summary.json}
   latest/
   LATEST_RUN.txt
 ```
 
-`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend SBOM、npm audit、
-Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、smoke log 和 summary。
+`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend/daemon SBOM、
+两个 npm 项目的 audit、Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、
+smoke log 和 summary。
 
 分布式 E2E 在销毁栈前收集脱敏日志：`logs/distributed-<service>.log` 是容器标准输出，
 `logs/distributed-app-a/` 和 `logs/distributed-app-b/` 是容器 `/app/logs` 中的文本 `.log` 文件。

@@ -44,7 +44,6 @@ interface Props {
 /** 只携带字段路径，避免把英文内部错误直接展示给用户。 */
 function fieldMessage(t: Translate, field: string): string {
   if (field === 'daemon.studioUrl') return t('ai.environment.install.invalidOrigin')
-  if (field === 'installConfig.javaHome') return t('ai.environment.install.invalidJavaHome')
   if (field === 'daemon.note') return t('ai.environment.install.invalidNote')
   if (field === 'daemon.bashExecutable') return t('ai.environment.install.invalidBash')
   if (field.startsWith('daemon.lsp')) return t('ai.environment.install.invalidLsp')
@@ -59,7 +58,6 @@ function formFromConfig(config: EnvironmentInstallConfigDTO) {
   return {
     os: config.operatingSystem,
     studioUrl: config.daemon.studioUrl,
-    javaHome: config.javaHome ?? '',
     bashExecutable: config.daemon.bashExecutable ?? '',
     note: config.daemon.note ?? '',
     lspEnabled: config.daemon.lsp != null,
@@ -78,10 +76,10 @@ const LSP_EXAMPLE_TEXT = `{
 }`
 
 /** 路径示例只随所选操作系统变化，不检测本机、不写入表单值。 */
-const PATH_EXAMPLES: Record<InstallOperatingSystem, { javaHome: string; bash: string }> = {
-  linux: { javaHome: '/usr/lib/jvm/java-21-openjdk', bash: '/bin/bash' },
-  macos: { javaHome: '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home', bash: '/bin/bash' },
-  windows: { javaHome: 'C:\\Program Files\\Java\\jdk-21', bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
+const PATH_EXAMPLES: Record<InstallOperatingSystem, { bash: string }> = {
+  linux: { bash: '/bin/bash' },
+  macos: { bash: '/bin/bash' },
+  windows: { bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
 }
 
 export function EnvironmentInstallModal({ environment, uninstall = false, onClose }: Props) {
@@ -90,7 +88,6 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
   const savedOS = environment.installConfig?.operatingSystem
   const [os, setOS] = useState<InstallOperatingSystem>(savedOS ?? detectInstallOS(navigator.platform))
   const [studioUrl, setStudioUrl] = useState(window.location.origin)
-  const [javaHome, setJavaHome] = useState('')
   const [bashExecutable, setBashExecutable] = useState('')
   const [note, setNote] = useState('')
   const [lspEnabled, setLspEnabled] = useState(false)
@@ -130,7 +127,6 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             const form = formFromConfig(validateInstallConfig(config))
             setOS(form.os)
             setStudioUrl(form.studioUrl)
-            setJavaHome(form.javaHome)
             setBashExecutable(form.bashExecutable)
             setNote(form.note)
             setLspEnabled(form.lspEnabled)
@@ -173,7 +169,6 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
     const fallback = savedOS ?? detectInstallOS(navigator.platform)
     setOS(fallback)
     setStudioUrl(window.location.origin)
-    setJavaHome('')
     setBashExecutable('')
     setNote('')
     setLspEnabled(false)
@@ -205,7 +200,6 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
         }
         const installConfig = validateInstallConfig({
           operatingSystem: os,
-          javaHome: blankToNull(javaHome),
           daemon: {
             studioUrl,
             bashExecutable: blankToNull(bashExecutable),
@@ -328,15 +322,6 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                     {t('ai.environment.install.originHelp')}
                   </p>
                 </div>
-                <label className="form-group">
-                  <span>Java home (JDK 21)</span>
-                  <TextInput
-                    value={javaHome}
-                    onChange={event => setJavaHome(event.target.value)}
-                    placeholder={PATH_EXAMPLES[os].javaHome}
-                    disabled={disabled}
-                  />
-                </label>
                 <label className="form-group">
                   <span>{t('ai.environment.install.bash')}</span>
                   <TextInput

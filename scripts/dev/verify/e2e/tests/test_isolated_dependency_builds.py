@@ -25,7 +25,7 @@ CASES = (
     ("smoke/offline-chat.sh", ["--with-app"], 1),
     ("performance/run.sh", [], 1),
     ("performance/run.sh", ["--skip-build"], 0),
-    ("e2e/distributed.sh", ["up"], 2),
+    ("e2e/distributed.sh", ["up"], 1),
     ("e2e/distributed.sh", ["up", "--skip-build"], 0),
 )
 

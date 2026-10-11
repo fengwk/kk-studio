@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCode
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
@@ -37,18 +38,23 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -82,7 +88,7 @@ import java.util.function.Supplier;
  * <p>本类只依赖 JDK、Jackson、harness.common 与 harness.environment 契约，不含 Spring/JDBC/产品 DTO。
  */
 public final class EnvironmentDaemonServer
-    implements EnvironmentCapabilityTransport, DaemonEndpoint {
+    implements EnvironmentCapabilityTransport, DaemonEndpoint, IdeCommandTransport {
 
   private static final int MAX_INVOCATION_TOMBSTONES = 1024;
 
@@ -114,6 +120,7 @@ public final class EnvironmentDaemonServer
   private final DaemonResourceTransferCodec transferCodec = new DaemonResourceTransferCodec();
   private final DaemonUpdateCommandCodec updateCommandCodec = new DaemonUpdateCommandCodec();
   private final DaemonUpdateResultCodec updateResultCodec = new DaemonUpdateResultCodec();
+  private final DaemonIdeCodec ideCodec = new DaemonIdeCodec();
 
   /** 保护环境/连接目录与 invocation 目录；绝不在持有该锁时获取任何连接锁或访问外部端口。 */
   private final Object inventory = new Object();
@@ -123,6 +130,15 @@ public final class EnvironmentDaemonServer
   private final Map<EnvironmentId, LinkedHashMap<UUID, ActiveInvocation>> invocationsByEnvironment =
       new HashMap<>();
   private final Map<EnvironmentId, ArrayDeque<UUID>> invocationTombstones = new HashMap<>();
+
+  /**
+   * 在途 IDE 元数据命令：{@code invocationId -> pending}，守护于 {@code inventory}。
+   *
+   * <p>IDE 命令与 Agent capability 调用是两套独立通道：这里不使用 invocation journal，也不做重放——每个 pending 只接受 一条匹配的
+   * {@code IDE_RESULT}，断线/超时一律按结果不确定终结。
+   */
+  private final Map<UUID, PendingIdeCall> pendingIdeCalls = new HashMap<>();
+
   private final AtomicLong connectionGenerations = new AtomicLong();
 
   public EnvironmentDaemonServer(
@@ -373,6 +389,35 @@ public final class EnvironmentDaemonServer
     }
   }
 
+  /** 当前全部在途 IDE 元数据命令数量（诊断/测试；与 Agent 调用计数相互独立）。 */
+  public int activeIdeCount() {
+    synchronized (inventory) {
+      return pendingIdeCalls.size();
+    }
+  }
+
+  /**
+   * 返回该 Environment 当前 READY 连接的代际快照（Daemon 实例身份 + 路由租约）。
+   *
+   * <p>供 IDE 入口/反向流在建立凭据前冻结代际；无本地连接、未 READY 或身份未知时返回 empty。读取只持目录锁，不做外部 I/O。
+   */
+  public Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    synchronized (inventory) {
+      EnvironmentState environment = environments.get(environmentId);
+      ConnectionState state = environment == null ? null : environment.connection;
+      if (state == null || !state.isReady() || environment.daemonInstanceId == null) {
+        return Optional.empty();
+      }
+      UUID leaseToken = state.leaseToken;
+      if (leaseToken == null) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          new IdeSessionIdentity(environmentId, environment.daemonInstanceId, leaseToken));
+    }
+  }
+
   /**
    * 在专用管理通道上向目标 Environment 下发一次受管更新命令。
    *
@@ -411,6 +456,105 @@ public final class EnvironmentDaemonServer
           "daemon outbound queue is full for environment " + environmentId);
     }
     throw new EnvironmentCapabilityUnavailableException(environmentId + " is not ready for update");
+  }
+
+  /**
+   * 在 IDE 元数据通道上向目标 Environment 下发一条 IDE 控制命令，并返回等待 {@code IDE_RESULT} 的句柄。
+   *
+   * <p>准入与 {@link #invoke} / {@link #sendUpdate} 一致：本地 READY 连接存在、无更新在途、锁内二次复核并复核数据库侧 READY
+   * 租约围栏；命令未进入传输时按 BUSY/UNAVAILABLE 收敛，绝不重放。IDE 请求不进入 Agent journal：{@code invocationId} 由 Server
+   * 现生成，每个在途命令只接受一条匹配回执，断线或超时（调用方 {@link #abandonIde(UUID)} 后）一律按结果不确定终结。
+   *
+   * @throws EnvironmentCapabilityUnavailableException 目标当前不在本节点 READY，或租约不可用
+   * @throws EnvironmentCapabilityBusyException 目标正在更新或出站队列已满
+   * @throws EnvironmentCapabilitySendUncertainException 命令递交过程中传输失败，帧状态不确定
+   */
+  public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(command, "command");
+    ConnectionState state;
+    UUID leaseToken;
+    String daemonInstanceId;
+    synchronized (inventory) {
+      EnvironmentState environment = environments.get(environmentId);
+      state = environment == null ? null : environment.connection;
+      leaseToken = state == null ? null : state.leaseToken;
+      daemonInstanceId = environment == null ? null : environment.daemonInstanceId;
+      if (state != null && environment.updatingOperationId != null) {
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " is being updated");
+      }
+    }
+    if (state == null || leaseToken == null || daemonInstanceId == null || !state.isReady()) {
+      throw unavailable(environmentId, "ide");
+    }
+    boolean holdsReady;
+    try {
+      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
+    } catch (RuntimeException error) {
+      throw new EnvironmentCapabilityUnavailableException(
+          "database unavailable: " + error.getMessage(), error);
+    }
+    if (!holdsReady) {
+      throw unavailable(environmentId, "ide");
+    }
+    String payload = ideCodec.encodeCommand(command);
+    UUID invocationId = UUID.randomUUID();
+    PendingIdeCall pending = new PendingIdeCall(state, environmentId, invocationId);
+    DaemonOfferResult outcome = null;
+    RuntimeException sendFailure = null;
+    synchronized (state) {
+      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
+        throw unavailable(environmentId, "ide");
+      }
+      synchronized (inventory) {
+        if (updatingOperationIdOf(environmentId) != null) {
+          throw new EnvironmentCapabilityBusyException(
+              "environment " + environmentId + " is being updated");
+        }
+        pendingIdeCalls.put(invocationId, pending);
+      }
+      try {
+        outcome = state.offer(DaemonMessageType.IDE_COMMAND, invocationId.toString(), payload);
+      } catch (RuntimeException error) {
+        sendFailure = error;
+      }
+    }
+    if (sendFailure != null) {
+      // 递交过程中传输失败：帧状态不确定，按不确定终结且不重放；关闭连接由既有重连恢复。
+      abandonIdeCall(invocationId);
+      close(state.connection.connectionId());
+      throw new EnvironmentCapabilitySendUncertainException(
+          "IDE command delivery outcome is uncertain for environment " + environmentId);
+    }
+    if (outcome == DaemonOfferResult.ACCEPTED) {
+      return new IdeRequest(
+          new IdeSessionIdentity(environmentId, daemonInstanceId, leaseToken),
+          invocationId,
+          pending.reply);
+    }
+    abandonIdeCall(invocationId);
+    if (outcome == DaemonOfferResult.BUSY) {
+      throw new EnvironmentCapabilityBusyException(
+          "daemon outbound queue is full for environment " + environmentId);
+    }
+    throw unavailable(environmentId, "ide");
+  }
+
+  /**
+   * 放弃一条在途 IDE 命令（调用方超时/取消时调用）：移除在途登记，此后迟到的 {@code IDE_RESULT} 被安静忽略。
+   *
+   * <p>本方法不改变连接状态，也不重放；副作用是否已在 Daemon 生效由 Daemon 侧负责，Server 不再等待回执。
+   */
+  public void abandonIde(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    abandonIdeCall(invocationId);
+  }
+
+  private void abandonIdeCall(UUID invocationId) {
+    synchronized (inventory) {
+      pendingIdeCalls.remove(invocationId);
+    }
   }
 
   /** 调用方必须持有 {@code inventory}。 */
@@ -644,14 +788,64 @@ public final class EnvironmentDaemonServer
       case CANCELLED -> handleCancelled(state, envelope, deferred);
       case ERROR -> handleError(state, envelope);
       case UPDATE_RESULT -> handleUpdateResult(state, envelope, deferred);
+      case IDE_RESULT -> handleIdeResult(state, envelope, deferred);
       case RESOURCE_UPLOAD_REQUEST, RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
           "resource upload control is handled by the connection gate");
       case WELCOME,
           INVOKE,
           CANCEL,
           RESOURCE_UPLOAD_TICKET,
-          UPDATE -> throw new DaemonProtocolException(
+          UPDATE,
+          IDE_COMMAND -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to server");
+    }
+  }
+
+  /**
+   * 处理 Daemon 的 IDE 命令回执：只做协议校验后把匹配的在途命令收敛为终态。
+   *
+   * <p>迟到的/未知 {@code invocationId}（命令已 abandon、连接已被替代）被安静忽略，不视为协议错误：命令由 Server 单方面超时或取消是正常路径，Daemon
+   * 无法预知。
+   */
+  private void handleIdeResult(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    requireReady(state);
+    UUID invocationId = parseUuid(envelope.invocationId(), "IDE_RESULT invocationId");
+    IdeReply reply = ideCodec.decodeReply(envelope.payloadJson());
+    PendingIdeCall pending;
+    synchronized (inventory) {
+      PendingIdeCall candidate = pendingIdeCalls.get(invocationId);
+      if (candidate != null && candidate.connection == state) {
+        pendingIdeCalls.remove(invocationId);
+        pending = candidate;
+      } else {
+        pending = null;
+      }
+    }
+    if (pending != null) {
+      PendingIdeCall settled = pending;
+      deferred.add(() -> settled.reply.complete(reply));
+    }
+  }
+
+  /** 连接代际关闭时，把该连接仍在途的 IDE 命令一次性收敛为结果不确定；不重放、不留待重连。 */
+  private void failPendingIdeCalls(ConnectionState state) {
+    List<PendingIdeCall> abandoned = new ArrayList<>();
+    synchronized (inventory) {
+      Iterator<Map.Entry<UUID, PendingIdeCall>> iterator = pendingIdeCalls.entrySet().iterator();
+      while (iterator.hasNext()) {
+        PendingIdeCall pending = iterator.next().getValue();
+        if (pending.connection == state) {
+          iterator.remove();
+          abandoned.add(pending);
+        }
+      }
+    }
+    for (PendingIdeCall pending : abandoned) {
+      pending.reply.completeExceptionally(
+          new EnvironmentCapabilitySendUncertainException(
+              "environment connection closed before IDE reply; outcome is uncertain and will not be"
+                  + " replayed"));
     }
   }
 
@@ -1538,6 +1732,18 @@ public final class EnvironmentDaemonServer
       }
     } catch (RuntimeException ignored) {
     }
+    // IDE 元数据命令不重放：连接代际关闭（断线/接管/换代）后在途命令一律按结果不确定终结。
+    failPendingIdeCalls(state);
+    if (environmentId != null && leaseToken != null) {
+      notifyEnvironmentDisconnected(environmentId, leaseToken);
+    }
+  }
+
+  private void notifyEnvironmentDisconnected(EnvironmentId environmentId, UUID leaseToken) {
+    try {
+      sessionListener.onEnvironmentDisconnected(environmentId, leaseToken);
+    } catch (RuntimeException ignored) {
+    }
   }
 
   private void notifyEnvironmentReady(EnvironmentId environmentId) {
@@ -1759,6 +1965,27 @@ public final class EnvironmentDaemonServer
       if (generation > cancelDeliveredGeneration) {
         cancelDeliveredGeneration = generation;
       }
+    }
+  }
+
+  /**
+   * 在途 IDE 元数据命令：等待一条匹配的 {@code IDE_RESULT}。
+   *
+   * <p>与 Agent capability 调用不同，这里没有 journal/重放：{@code reply} 至多完成一次，连接代际关闭后由 {@link
+   * #failPendingIdeCalls} 以结果不确定终结。守护于 {@code inventory}。
+   */
+  private final class PendingIdeCall {
+
+    private final ConnectionState connection;
+    private final EnvironmentId environmentId;
+    private final UUID invocationId;
+    private final CompletableFuture<IdeReply> reply = new CompletableFuture<>();
+
+    private PendingIdeCall(
+        ConnectionState connection, EnvironmentId environmentId, UUID invocationId) {
+      this.connection = connection;
+      this.environmentId = environmentId;
+      this.invocationId = invocationId;
     }
   }
 

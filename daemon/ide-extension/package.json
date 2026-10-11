@@ -1,0 +1,20 @@
+{
+  "name": "kk-studio-ide-bridge",
+  "displayName": "KK Studio IDE Bridge",
+  "description": "Connects a managed code-server window to the KK Studio daemon for directory switching and terminal focus.",
+  "publisher": "kk-studio",
+  "version": "1.0.12",
+  "type": "commonjs",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./extension.cjs",
+  "activationEvents": ["*"],
+  "contributes": {
+    "commands": [
+      { "command": "kkStudio.changeDirectory", "title": "KK Studio: Change Workspace Directory" },
+      { "command": "kkStudio.focusTerminal", "title": "KK Studio: Focus Terminal" },
+      { "command": "kkStudio.closeView", "title": "KK Studio: Close View" }
+    ]
+  }
+}

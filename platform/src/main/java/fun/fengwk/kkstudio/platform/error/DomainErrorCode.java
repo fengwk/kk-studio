@@ -20,7 +20,10 @@ public enum DomainErrorCode {
   DUPLICATE("duplicate"),
 
   /** 资源仍被引用而无法移除。 */
-  IN_USE("in_use");
+  IN_USE("in_use"),
+
+  /** 目标 Environment 的 IDE 通道当前不可用（未就绪、更新中、排队拒绝或超时）。 */
+  IDE_UNAVAILABLE("ide_unavailable");
 
   private final String code;
 

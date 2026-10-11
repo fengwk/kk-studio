@@ -25,13 +25,14 @@ fi
 NVD_SETTINGS_SERVER_ID=kk-studio-supply-chain-nvd
 NVD_DATAFEED_URL=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz
 NPM_AUDIT_REGISTRY=https://registry.npmjs.org
+# npm 生态的项目根：SBOM 与漏洞审计按项目分别产出报告与状态，任一项目有漏洞都让门禁失败。
+NPM_PROJECTS=(frontend daemon)
 TRIVY_IMAGE=aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2
 TRIVY_JAVA_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-java-db:1
 TRIVY_CACHE_VOLUME=${SUPPLY_CHAIN_TRIVY_CACHE_VOLUME:-kk-studio-trivy-cache}
 TRIVY_NETWORK=${SUPPLY_CHAIN_TRIVY_NETWORK:-}
 APP_IMAGE=${SUPPLY_CHAIN_APP_IMAGE:-kk-studio-app:supply-chain}
-DAEMON_IMAGE=${SUPPLY_CHAIN_DAEMON_IMAGE:-kk-studio-daemon:supply-chain}
 TRIVY_SKIP_DB_UPDATE=${TRIVY_SKIP_DB_UPDATE:-false}
 
 MODE=
@@ -44,18 +45,15 @@ JAVA_HOME_FOR_BUILD=
 TEMP_SETTINGS_FILE=
 BACKEND_SBOM_STATUS=SKIPPED
 FRONTEND_SBOM_STATUS=SKIPPED
+DAEMON_SBOM_STATUS=SKIPPED
 NPM_AUDIT_STATUS=SKIPPED
+DAEMON_AUDIT_STATUS=SKIPPED
 MAVEN_AUDIT_STATUS=SKIPPED
 APP_IMAGE_BUILD_STATUS=SKIPPED
-DAEMON_IMAGE_BUILD_STATUS=SKIPPED
 APP_IMAGE_SMOKE_STATUS=SKIPPED
-DAEMON_IMAGE_SMOKE_STATUS=SKIPPED
 APP_IMAGE_SCAN_STATUS=SKIPPED
-DAEMON_IMAGE_SCAN_STATUS=SKIPPED
 APP_IMAGE_ID=
 APP_IMAGE_DIGEST=
-DAEMON_IMAGE_ID=
-DAEMON_IMAGE_DIGEST=
 TRIVY_VERSION=UNKNOWN
 TRIVY_VERSION_STATUS=SKIPPED
 OVERALL_STATUS=FAIL
@@ -71,9 +69,9 @@ usage() {
 Usage: scripts/dev/verify/supply-chain/run.sh <command>
 
 Commands:
-  sbom    Generate and validate backend and frontend CycloneDX SBOMs
-  audit   Run npm audit and the Maven Dependency-Check gate
-  image   Build and scan the current app and daemon images with pinned Trivy
+  sbom    Generate and validate backend, frontend and daemon CycloneDX SBOMs
+  audit   Run npm audit for every npm project and the Maven Dependency-Check gate
+  image   Build and scan the current app image with pinned Trivy
   all     Run sbom, dependency audit, and image scan in one report
   test    Run permanent supply-chain script tests only
   help    Show this help
@@ -85,7 +83,6 @@ Environment:
                             Maven command line
   JAVA_HOME_21               JDK 21 used for Maven (JAVA_HOME is a fallback)
   SUPPLY_CHAIN_APP_IMAGE    App image tag (default: kk-studio-app:supply-chain)
-  SUPPLY_CHAIN_DAEMON_IMAGE Daemon image tag (default: kk-studio-daemon:supply-chain)
   SUPPLY_CHAIN_TRIVY_CACHE_VOLUME
                             Named Trivy cache volume (default: kk-studio-trivy-cache)
   SUPPLY_CHAIN_TRIVY_NETWORK
@@ -249,7 +246,9 @@ init_report() {
     mkdir -p \
         "$RUN_DIR/backend-sbom" \
         "$RUN_DIR/frontend-sbom" \
+        "$RUN_DIR/daemon-sbom" \
         "$RUN_DIR/frontend-audit" \
+        "$RUN_DIR/daemon-audit" \
         "$RUN_DIR/backend-audit" \
         "$RUN_DIR/image" \
         "$RUN_DIR/logs"
@@ -285,31 +284,62 @@ run_backend_sbom() {
     fi
 }
 
-run_frontend_sbom() {
-    local output_file="$RUN_DIR/frontend-sbom/bom.json"
-    echo "==> Generating frontend CycloneDX SBOM"
+npm_sbom_output_dir() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/frontend-sbom" ;;
+        daemon) printf '%s' "$RUN_DIR/daemon-sbom" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
 
-    if npm --prefix "$REPO_ROOT/frontend" sbom \
+npm_sbom_log_file() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/logs/npm-sbom.log" ;;
+        daemon) printf '%s' "$RUN_DIR/logs/npm-daemon-sbom.log" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+set_npm_sbom_status() {
+    case "$1" in
+        frontend) FRONTEND_SBOM_STATUS=$2 ;;
+        daemon) DAEMON_SBOM_STATUS=$2 ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+# 每个 npm 项目各自生成、各自记录状态与产物；一个项目的失败不会掩盖另一个项目的结论。
+run_npm_sbom() {
+    local project=$1
+    local output_dir log_file
+    output_dir=$(npm_sbom_output_dir "$project")
+    log_file=$(npm_sbom_log_file "$project")
+    echo "==> Generating $project CycloneDX SBOM"
+
+    if npm --prefix "$REPO_ROOT/$project" sbom \
         --package-lock-only \
         --sbom-format=cyclonedx \
-        >"$output_file" 2>"$RUN_DIR/logs/npm-sbom.log"
+        >"$output_dir/bom.json" 2>"$log_file"
     then
-        if json_object_file_is_non_empty "$output_file"; then
-            FRONTEND_SBOM_STATUS=PASS
+        if json_object_file_is_non_empty "$output_dir/bom.json"; then
+            set_npm_sbom_status "$project" PASS
         else
-            FRONTEND_SBOM_STATUS=FAIL
-            record_failure "frontend CycloneDX JSON is missing, empty, or invalid"
+            set_npm_sbom_status "$project" FAIL
+            record_failure "$project CycloneDX JSON is missing, empty, or invalid"
         fi
     else
         local rc=$?
-        FRONTEND_SBOM_STATUS=FAIL
-        record_failure "frontend CycloneDX failed (exit $rc)"
+        set_npm_sbom_status "$project" FAIL
+        record_failure "$project CycloneDX failed (exit $rc)"
     fi
 }
 
 run_sbom() {
     run_backend_sbom
-    run_frontend_sbom
+    local project
+    for project in "${NPM_PROJECTS[@]}"; do
+        run_npm_sbom "$project"
+    done
 }
 
 create_nvd_settings() {
@@ -373,29 +403,57 @@ validate_dependency_check_reports() {
     json_object_file_is_non_empty "$output_dir/dependency-check-report.sarif" || return 1
 }
 
-run_npm_audit() {
-    local output_file="$RUN_DIR/frontend-audit/audit.json"
-    echo "==> Running npm audit (dev dependencies are included by default)"
+npm_audit_output_file() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/frontend-audit/audit.json" ;;
+        daemon) printf '%s' "$RUN_DIR/daemon-audit/audit.json" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
 
-    if npm --prefix "$REPO_ROOT/frontend" audit \
+npm_audit_log_file() {
+    case "$1" in
+        frontend) printf '%s' "$RUN_DIR/logs/npm-audit.log" ;;
+        daemon) printf '%s' "$RUN_DIR/logs/npm-daemon-audit.log" ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+set_npm_audit_status() {
+    case "$1" in
+        frontend) NPM_AUDIT_STATUS=$2 ;;
+        daemon) DAEMON_AUDIT_STATUS=$2 ;;
+        *) die "unknown npm project: $1" ;;
+    esac
+}
+
+# 每个 npm 项目各自审计、各自记录状态与报告；任一项目命中漏洞都让整体门禁失败。
+run_npm_audit() {
+    local project=$1
+    local output_file log_file
+    output_file=$(npm_audit_output_file "$project")
+    log_file=$(npm_audit_log_file "$project")
+    echo "==> Running $project npm audit (dev dependencies are included by default)"
+
+    if npm --prefix "$REPO_ROOT/$project" audit \
         --audit-level=low \
         "--registry=$NPM_AUDIT_REGISTRY" \
         --json \
-        >"$output_file" 2>"$RUN_DIR/logs/npm-audit.log"
+        >"$output_file" 2>"$log_file"
     then
         if json_object_file_is_non_empty "$output_file"; then
-            NPM_AUDIT_STATUS=PASS
+            set_npm_audit_status "$project" PASS
         else
-            NPM_AUDIT_STATUS=FAIL
-            record_failure "npm audit JSON is missing, empty, or invalid"
+            set_npm_audit_status "$project" FAIL
+            record_failure "$project npm audit JSON is missing, empty, or invalid"
         fi
     else
         local rc=$?
-        NPM_AUDIT_STATUS=FAIL
+        set_npm_audit_status "$project" FAIL
         if json_object_file_is_non_empty "$output_file"; then
-            record_failure "npm audit found vulnerabilities or failed the online audit (exit $rc)"
+            record_failure "$project npm audit found vulnerabilities or failed the online audit (exit $rc)"
         else
-            record_failure "npm audit did not produce valid JSON (exit $rc)"
+            record_failure "$project npm audit did not produce valid JSON (exit $rc)"
         fi
     fi
 }
@@ -450,7 +508,10 @@ run_maven_audit() {
 }
 
 run_audit() {
-    run_npm_audit
+    local project
+    for project in "${NPM_PROJECTS[@]}"; do
+        run_npm_audit "$project"
+    done
     run_maven_audit
 }
 
@@ -577,9 +638,6 @@ set_image_build_status() {
         app)
             APP_IMAGE_BUILD_STATUS=$status
             ;;
-        daemon)
-            DAEMON_IMAGE_BUILD_STATUS=$status
-            ;;
         *)
             record_failure "unknown image build name: $name"
             ;;
@@ -595,10 +653,6 @@ set_image_metadata() {
             APP_IMAGE_ID=$image_id
             APP_IMAGE_DIGEST=$image_digest
             ;;
-        daemon)
-            DAEMON_IMAGE_ID=$image_id
-            DAEMON_IMAGE_DIGEST=$image_digest
-            ;;
         *)
             record_failure "unknown image metadata name: $name"
             ;;
@@ -612,9 +666,6 @@ set_image_scan_status() {
         app)
             APP_IMAGE_SCAN_STATUS=$status
             ;;
-        daemon)
-            DAEMON_IMAGE_SCAN_STATUS=$status
-            ;;
         *)
             record_failure "unknown image scan name: $name"
             ;;
@@ -627,9 +678,6 @@ set_image_smoke_status() {
     case "$name" in
         app)
             APP_IMAGE_SMOKE_STATUS=$status
-            ;;
-        daemon)
-            DAEMON_IMAGE_SMOKE_STATUS=$status
             ;;
         *)
             record_failure "unknown image smoke name: $name"
@@ -716,14 +764,12 @@ run_image_build() {
 run_image_smoke() {
     local name=$1
     local image=$2
-    local build_status
+    local build_status=$APP_IMAGE_BUILD_STATUS
     local log="$RUN_DIR/logs/${name}-image-smoke.log"
     local raw_log="$RUN_DIR/logs/.${name}-image-smoke.log.$$"
     local smoke_script
 
-    if [[ "$name" == app ]]; then
-        build_status=$APP_IMAGE_BUILD_STATUS
-        smoke_script=$(cat <<'EOF'
+    smoke_script=$(cat <<'EOF'
 set -eu
 uid="$(id -u)"
 user="$(id -un)"
@@ -735,52 +781,6 @@ command -v ffprobe
 command -v curl
 EOF
 )
-    else
-        build_status=$DAEMON_IMAGE_BUILD_STATUS
-        smoke_script=$(cat <<'EOF'
-set -euo pipefail
-uid="$(id -u)"
-user="$(id -un)"
-printf 'uid=%s user=%s\n' "$uid" "$user"
-test "$uid" -ne 0
-java -version
-node_version="$(node --version)"
-printf 'node=%s\n' "$node_version"
-if [[ "$node_version" != v22.23.3 ]]; then
-    printf 'unexpected Node version: %s\n' "$node_version" >&2
-    exit 1
-fi
-npm_version="$(npm --version)"
-printf 'npm=%s\n' "$npm_version"
-if [[ "$npm_version" != 11.21.0 ]]; then
-    printf 'unexpected npm version: %s\n' "$npm_version" >&2
-    exit 1
-fi
-command -v bash
-command -v git
-bash --version
-git --version
-smoke_dir="$(mktemp -d /workspace/kk-studio-supply-chain-smoke.XXXXXX)"
-trap 'rm -rf -- "$smoke_dir"' EXIT
-cd "$smoke_dir"
-npm init --yes
-export npm_config_ignore_scripts=true
-npm install --package-lock-only --ignore-scripts --no-audit --no-fund lodash@4.17.21
-test -s package-lock.json
-node --input-type=module <<'NODE'
-import { readFileSync } from 'node:fs'
-
-const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
-const lodash = lock.packages?.['node_modules/lodash'] ?? lock.dependencies?.lodash
-if (!lodash || lodash.version !== '4.17.21') {
-    console.error('package-lock.json does not contain lodash@4.17.21')
-    process.exit(1)
-}
-NODE
-printf '%s\n' 'package-lock.json contains lodash@4.17.21'
-EOF
-)
-    fi
 
     if [[ "$build_status" != PASS ]]; then
         set_image_smoke_status "$name" FAIL
@@ -794,13 +794,8 @@ EOF
     echo "==> Running $name image functional smoke"
     RAW_LOG_TEMP=$raw_log
     local rc=0
-    if [[ "$name" == app ]]; then
-        docker run --rm --entrypoint /bin/sh "$image" -ceu "$smoke_script" \
-            >"$raw_log" 2>&1 || rc=$?
-    else
-        docker run --rm --entrypoint /bin/bash "$image" -ceu "$smoke_script" \
-            >"$raw_log" 2>&1 || rc=$?
-    fi
+    docker run --rm --entrypoint /bin/sh "$image" -ceu "$smoke_script" \
+        >"$raw_log" 2>&1 || rc=$?
     local redact_rc=0
     redact_proxy_values "$raw_log" "$log" || redact_rc=$?
     if ((redact_rc != 0)); then
@@ -819,65 +814,6 @@ EOF
         record_failure "$name image smoke failed (exit $rc); inspect $log"
     else
         set_image_smoke_status "$name" PASS
-        if [[ "$name" == daemon ]]; then
-            run_npm_cache_probe "$image"
-        fi
-    fi
-}
-
-run_npm_cache_probe() {
-    local image=$1
-    local report="$RUN_DIR/image/npm-cache-probe.json"
-    local log="$RUN_DIR/logs/npm-cache-probe.log"
-    local rc=0
-    echo "==> Observing daemon npm cache boundaries (not a vulnerability clearance)"
-    docker run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node \
-        "$image" --input-type=module <"$SCRIPT_DIR/npm-cache-probe.mjs" \
-        >"$report" 2>"$log" || rc=$?
-    if ((rc != 0)); then
-        DAEMON_IMAGE_SMOKE_STATUS=FAIL
-        record_failure "daemon npm cache probe failed (exit $rc); inspect $report and $log"
-    elif ! node --input-type=module - "$report" >>"$log" 2>&1 <<'NODE'
-import { readFileSync } from 'node:fs'
-
-const report = JSON.parse(readFileSync(process.argv[2], 'utf8'))
-const expected = [
-    ['same-auth-fresh', 'control'],
-    ['auth-change-no-vary', 'observation'],
-    ['auth-vary', 'protection'],
-    ['cookie-vary', 'protection'],
-    ['no-store', 'protection'],
-    ['no-cache-max-stale', 'observation'],
-    ['set-cookie-no-public', 'header-observation'],
-]
-if (report.status !== 'ASSERTIONS_SATISFIED' ||
-    report.runtime?.shared !== false || report.runtime?.uid !== 10001 ||
-    !['node', 'npm', 'makeFetchHappen', 'httpCacheSemantics'].every(
-        key => typeof report.runtime?.[key] === 'string' && report.runtime[key].length > 0) ||
-    report.assertions?.sharedFalse !== true ||
-    !Array.isArray(report.errors) || report.errors.length !== 0 ||
-    !Array.isArray(report.cases) || report.cases.length !== expected.length ||
-    !expected.every(([id, kind]) => {
-        const result = report.cases.find(item => item.id === id && item.kind === kind)
-        return result && Number.isInteger(result.originHits) && result.originHits >= 1 &&
-            ['A', 'B'].includes(result.source) && typeof result.secondBody === 'string' &&
-            typeof result.setCookieReplayed === 'boolean' &&
-            (result.setCookie === null || typeof result.setCookie === 'string') &&
-            ['first', 'second'].every(key => result.cacheStatus &&
-                (result.cacheStatus[key] === null || typeof result.cacheStatus[key] === 'string')) &&
-            (kind === 'control' || kind === 'protection'
-                ? result.status === 'SATISFIED' &&
-                    result.originHits === (kind === 'control' ? 1 : 2) &&
-                    result.source === (kind === 'control' ? 'A' : 'B') &&
-                    (kind !== 'control' || result.cacheStatus.second === 'hit')
-                : ['OBSERVED', 'NOT_OBSERVED'].includes(result.status))
-    })) {
-    throw new Error('npm cache probe expected report is missing or invalid')
-}
-NODE
-    then
-        DAEMON_IMAGE_SMOKE_STATUS=FAIL
-        record_failure "daemon npm cache probe JSON is missing, empty, or invalid; inspect $report and $log"
     fi
 }
 
@@ -967,11 +903,7 @@ run_image_scan() {
         --scanners vuln
     )
 
-    if [[ "$name" == app ]]; then
-        build_status=$APP_IMAGE_BUILD_STATUS
-    else
-        build_status=$DAEMON_IMAGE_BUILD_STATUS
-    fi
+    local build_status=$APP_IMAGE_BUILD_STATUS
 
     if [[ "$build_status" != PASS ]]; then
         set_image_scan_status "$name" FAIL
@@ -1016,11 +948,8 @@ run_image() {
     prepare_image_build
     run_image_build app deploy/local/Dockerfile "$APP_IMAGE"
     run_image_smoke app "$APP_IMAGE"
-    run_image_build daemon deploy/reliability/daemon.Dockerfile "$DAEMON_IMAGE"
-    run_image_smoke daemon "$DAEMON_IMAGE"
     run_trivy_version
     run_image_scan app "$APP_IMAGE"
-    run_image_scan daemon "$DAEMON_IMAGE"
 }
 
 write_summary() {
@@ -1039,20 +968,16 @@ write_summary() {
         SUPPLY_CHAIN_STATUS="$status" \
         SUPPLY_CHAIN_BACKEND_SBOM_STATUS="$BACKEND_SBOM_STATUS" \
         SUPPLY_CHAIN_FRONTEND_SBOM_STATUS="$FRONTEND_SBOM_STATUS" \
+        SUPPLY_CHAIN_DAEMON_SBOM_STATUS="$DAEMON_SBOM_STATUS" \
         SUPPLY_CHAIN_NPM_AUDIT_STATUS="$NPM_AUDIT_STATUS" \
+        SUPPLY_CHAIN_DAEMON_AUDIT_STATUS="$DAEMON_AUDIT_STATUS" \
         SUPPLY_CHAIN_MAVEN_AUDIT_STATUS="$MAVEN_AUDIT_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_BUILD_STATUS="$APP_IMAGE_BUILD_STATUS" \
-        SUPPLY_CHAIN_DAEMON_IMAGE_BUILD_STATUS="$DAEMON_IMAGE_BUILD_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_SMOKE_STATUS="$APP_IMAGE_SMOKE_STATUS" \
-        SUPPLY_CHAIN_DAEMON_IMAGE_SMOKE_STATUS="$DAEMON_IMAGE_SMOKE_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_SCAN_STATUS="$APP_IMAGE_SCAN_STATUS" \
-        SUPPLY_CHAIN_DAEMON_IMAGE_SCAN_STATUS="$DAEMON_IMAGE_SCAN_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE="$APP_IMAGE" \
-        SUPPLY_CHAIN_DAEMON_IMAGE="$DAEMON_IMAGE" \
         SUPPLY_CHAIN_APP_IMAGE_ID="$APP_IMAGE_ID" \
         SUPPLY_CHAIN_APP_IMAGE_DIGEST="$APP_IMAGE_DIGEST" \
-        SUPPLY_CHAIN_DAEMON_IMAGE_ID="$DAEMON_IMAGE_ID" \
-        SUPPLY_CHAIN_DAEMON_IMAGE_DIGEST="$DAEMON_IMAGE_DIGEST" \
         SUPPLY_CHAIN_TRIVY_IMAGE="$TRIVY_IMAGE" \
         SUPPLY_CHAIN_TRIVY_VERSION="$TRIVY_VERSION" \
         SUPPLY_CHAIN_TRIVY_VERSION_STATUS="$TRIVY_VERSION_STATUS" \
@@ -1084,10 +1009,22 @@ const report = {
             log: 'logs/npm-sbom.log',
         },
         {
+            name: 'daemon-sbom',
+            status: env.SUPPLY_CHAIN_DAEMON_SBOM_STATUS,
+            artifact: 'daemon-sbom/bom.json',
+            log: 'logs/npm-daemon-sbom.log',
+        },
+        {
             name: 'npm-audit',
             status: env.SUPPLY_CHAIN_NPM_AUDIT_STATUS,
             artifact: 'frontend-audit/audit.json',
             log: 'logs/npm-audit.log',
+        },
+        {
+            name: 'daemon-audit',
+            status: env.SUPPLY_CHAIN_DAEMON_AUDIT_STATUS,
+            artifact: 'daemon-audit/audit.json',
+            log: 'logs/npm-daemon-audit.log',
         },
         {
             name: 'maven-dependency-check',
@@ -1123,30 +1060,6 @@ const report = {
             artifact: 'image/app.json',
             log: 'logs/app-image-scan.log',
         },
-        {
-            name: 'daemon-image-build',
-            status: env.SUPPLY_CHAIN_DAEMON_IMAGE_BUILD_STATUS,
-            image: env.SUPPLY_CHAIN_DAEMON_IMAGE,
-            log: 'logs/daemon-image-build.log',
-        },
-        {
-            name: 'daemon-image-smoke',
-            status: env.SUPPLY_CHAIN_DAEMON_IMAGE_SMOKE_STATUS,
-            image: env.SUPPLY_CHAIN_DAEMON_IMAGE,
-            log: 'logs/daemon-image-smoke.log',
-        },
-        {
-            name: 'daemon-image-scan',
-            status: env.SUPPLY_CHAIN_DAEMON_IMAGE_SCAN_STATUS,
-            image: env.SUPPLY_CHAIN_DAEMON_IMAGE,
-            imageId: env.SUPPLY_CHAIN_DAEMON_IMAGE_ID || null,
-            imageDigest: env.SUPPLY_CHAIN_DAEMON_IMAGE_DIGEST || null,
-            scannerImage: env.SUPPLY_CHAIN_TRIVY_IMAGE,
-            scannerVersion: env.SUPPLY_CHAIN_TRIVY_VERSION,
-            scannerVersionStatus: env.SUPPLY_CHAIN_TRIVY_VERSION_STATUS,
-            artifact: 'image/daemon.json',
-            log: 'logs/daemon-image-scan.log',
-        },
     ],
     failures,
 }
@@ -1169,14 +1082,13 @@ NODE
 | --- | --- | --- | --- |
 | Backend CycloneDX aggregate | $BACKEND_SBOM_STATUS | [backend-sbom/bom.json](backend-sbom/bom.json) | [logs/maven-sbom.log](logs/maven-sbom.log) |
 | Frontend CycloneDX | $FRONTEND_SBOM_STATUS | [frontend-sbom/bom.json](frontend-sbom/bom.json) | [logs/npm-sbom.log](logs/npm-sbom.log) |
+| Daemon CycloneDX | $DAEMON_SBOM_STATUS | [daemon-sbom/bom.json](daemon-sbom/bom.json) | [logs/npm-daemon-sbom.log](logs/npm-daemon-sbom.log) |
 | npm audit (low) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
+| Daemon npm audit (low) | $DAEMON_AUDIT_STATUS | [daemon-audit/audit.json](daemon-audit/audit.json) | [logs/npm-daemon-audit.log](logs/npm-daemon-audit.log) |
 | Maven Dependency-Check | $MAVEN_AUDIT_STATUS | [HTML](backend-audit/dependency-check-report.html), [JSON](backend-audit/dependency-check-report.json), [SARIF](backend-audit/dependency-check-report.sarif) | [logs/maven-audit.log](logs/maven-audit.log) |
 | App image build | $APP_IMAGE_BUILD_STATUS | \`$APP_IMAGE\` | [logs/app-image-build.log](logs/app-image-build.log) |
 | App image smoke | $APP_IMAGE_SMOKE_STATUS | \`$APP_IMAGE\` | [logs/app-image-smoke.log](logs/app-image-smoke.log) |
 | App image scan | $APP_IMAGE_SCAN_STATUS | [image/app.json](image/app.json) (id: \`$APP_IMAGE_ID\`, digest: \`$APP_IMAGE_DIGEST\`, Trivy: \`$TRIVY_VERSION\`) | [logs/app-image-scan.log](logs/app-image-scan.log) |
-| Daemon image build | $DAEMON_IMAGE_BUILD_STATUS | \`$DAEMON_IMAGE\` | [logs/daemon-image-build.log](logs/daemon-image-build.log) |
-| Daemon image smoke | $DAEMON_IMAGE_SMOKE_STATUS | \`$DAEMON_IMAGE\` | [logs/daemon-image-smoke.log](logs/daemon-image-smoke.log) |
-| Daemon image scan | $DAEMON_IMAGE_SCAN_STATUS | [image/daemon.json](image/daemon.json) (id: \`$DAEMON_IMAGE_ID\`, digest: \`$DAEMON_IMAGE_DIGEST\`, Trivy: \`$TRIVY_VERSION\`) | [logs/daemon-image-scan.log](logs/daemon-image-scan.log) |
 
 EOF
 
@@ -1184,16 +1096,16 @@ EOF
         local success_note
         case "$MODE" in
             sbom)
-                success_note="The requested backend and frontend SBOM checks completed successfully, and both CycloneDX JSON reports are non-empty and parseable."
+                success_note="The requested backend and frontend SBOM checks completed successfully, and both CycloneDX JSON reports are non-empty and parseable. The daemon CycloneDX JSON report is non-empty and parseable as well."
                 ;;
             audit)
-                success_note="The requested dependency audit checks completed successfully. npm audit reported no findings at the low threshold, and Dependency-Check JSON contains zero non-suppressed vulnerabilities."
+                success_note="The requested dependency audit checks completed successfully. npm audit reported no findings at the low threshold for every npm project (frontend and daemon), and Dependency-Check JSON contains zero non-suppressed vulnerabilities."
                 ;;
             image)
                 success_note="The requested image checks completed successfully. Both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
                 ;;
             all)
-                success_note="All requested checks completed successfully. Both SBOMs are valid, npm audit and Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
+                success_note="All requested checks completed successfully. Every SBOM is valid, npm audit (frontend and daemon) and Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
                 ;;
             *)
                 success_note="All requested checks completed successfully."

@@ -6,7 +6,6 @@
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
 # - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 provider credentials
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
-# - daemon 是 shaded 单文件 JAR（reactor 依赖已内嵌），只能用 `java -jar` 启动，不存在 lib/ 或 classpath 文件
 
 set -euo pipefail
 
@@ -35,18 +34,11 @@ BACKEND_URL=${BACKEND_URL:-"http://$BACKEND_HOST:$BACKEND_PORT"}
 FRONTEND_URL=${FRONTEND_URL:-"http://$FRONTEND_HOST:$FRONTEND_PORT"}
 SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
 DAEMON_ENV_NAME=${DAEMON_ENV_NAME:-tool-e2e}
-DAEMON_REGISTRATION_TOKEN=${DAEMON_REGISTRATION_TOKEN:-e2e-token-host-tool}
 DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
-# DAEMON_ROOT 是本次 E2E 隔离的 Daemon 根：daemon.json 与同目录 daemon.token 都在这里，
-# 其父目录即 Daemon 运行数据目录。DAEMON_ENV_ROOT 只是 E2E case 使用的任务工作目录
-# （fixture 路径与 Tool 调用的 workdir 都由它派生），两者互不影响。
-DAEMON_ROOT=${DAEMON_ROOT:-"$WORK_DIR/daemon"}
-DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 
 export DAEMON_ENV_ROOT
 
-BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.11.jar"}
-DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}
+BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.12.jar"}
 
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -153,18 +145,6 @@ kill_port() {
   fi
 }
 
-kill_daemon() {
-  local pids
-  # daemon 是 `java -jar <DAEMON_JAR>`：进程命令行里不再出现 main class，因此按配置的 JAR 路径匹配。
-  pids=$(pgrep -f -- "$DAEMON_JAR" || true)
-  if [ -n "$pids" ]; then
-    step "Stopping daemon ($pids)"
-    # shellcheck disable=SC2086
-    kill $pids 2>/dev/null || true
-    sleep 0.4
-  fi
-}
-
 package_backend() {
   local java_home=$1
   step "Clean packaging backend (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
@@ -172,17 +152,6 @@ package_backend() {
     cd "$REPO_ROOT"
     run_maven "$java_home" -pl web -am -DskipTests clean package
   )
-}
-
-package_daemon() {
-  local java_home=$1
-  mkdir -p "$WORK_DIR"
-  step "Clean packaging daemon (shaded single-file JAR, Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
-  (
-    cd "$REPO_ROOT"
-    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package
-  )
-  [ -s "$DAEMON_JAR" ] || die "daemon jar missing: $DAEMON_JAR"
 }
 
 start_backend() {
@@ -259,49 +228,8 @@ start_frontend() {
 assert m and isinstance(m.get("config"), dict) and m["config"].get("defaultVariant"), m; print("frontend proxy model.config.defaultVariant=", m["config"]["defaultVariant"])'
 }
 
-start_daemon() {
-  local java_home=$1
-  mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
-  kill_daemon
-  package_daemon "$java_home"
-  : >"$WORK_DIR/daemon.log"
-  step "Starting daemon env=$DAEMON_ENV_NAME"
-  if [ -z "$DAEMON_REGISTRATION_TOKEN" ]; then
-    die "DAEMON_REGISTRATION_TOKEN is required to start the daemon"
-  fi
-  local -a test_env_unsets=()
-  mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
-  # 只有 bootstrap helper 物化 daemon.json/daemon.token；daemon 只接收 --config。
-  # 凭证经 assignment 前缀进入子进程环境（不出现在任何 argv），helper 在 exec 前 unset。
-  DAEMON_REGISTRATION_TOKEN="$DAEMON_REGISTRATION_TOKEN" nohup env \
-    "${test_env_unsets[@]}" \
-    JAVA_HOME="$java_home" \
-    DAEMON_ROOT="$DAEMON_ROOT" \
-    DAEMON_STUDIO_URL="http://$BACKEND_HOST:$BACKEND_PORT" \
-    DAEMON_NOTE="$DAEMON_NOTE" \
-    DAEMON_JAR="$DAEMON_JAR" \
-    bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
-    >"$WORK_DIR/daemon.log" 2>&1 &
-  echo $! >"$WORK_DIR/daemon.pid"
-  local _ env_status=""
-  # Disconnect retains the default 60s route grace lease; leave takeover headroom.
-  for _ in $(seq 1 180); do
-    env_status=$(curl -fsS "$BACKEND_URL/api/harness/environments" \
-      | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
-print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
-      2>/dev/null || true)
-    if [ "$env_status" = "READY" ]; then
-      step "Daemon READY"
-      return 0
-    fi
-    sleep 0.5
-  done
-  die "daemon not READY (last status='$env_status'); see $WORK_DIR/daemon.log"
-}
-
 ensure_stack() {
   local rebuild=${1:-false}
-  local with_daemon=${2:-false}
   local java_home
   require_cmd curl
   require_cmd python3
@@ -309,15 +237,12 @@ ensure_stack() {
   require_cmd mvn
   require_cmd npm
   java_home=$(resolve_java_home)
-  mkdir -p "$WORK_DIR"
+  mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
 
   if [ "$rebuild" = "true" ]; then
     package_backend "$java_home"
     start_backend "$java_home"
     start_frontend
-    if [ "$with_daemon" = "true" ]; then
-      start_daemon "$java_home"
-    fi
     return
   fi
 
@@ -348,18 +273,6 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
 raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
       step "Frontend proxy contract stale; restarting frontend with API_PROXY_TARGET"
       start_frontend
-    fi
-  fi
-
-  if [ "$with_daemon" = "true" ]; then
-    env_status=$(curl -fsS "$BACKEND_URL/api/harness/environments" \
-      | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
-print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
-      2>/dev/null || true)
-    if [ "$env_status" != "READY" ]; then
-      start_daemon "$java_home"
-    else
-      step "Reusing daemon env=$DAEMON_ENV_NAME status=READY"
     fi
   fi
 }
