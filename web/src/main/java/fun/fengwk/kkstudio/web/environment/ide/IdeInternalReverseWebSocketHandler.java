@@ -85,12 +85,13 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
   }
 
   @Override
-  protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+  protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
     offer(session, new IdeStreamPeer.Inbound.Text(message.getPayload()));
   }
 
   @Override
-  protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
+  protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message)
+      throws Exception {
     ByteBuffer payload = message.getPayload();
     byte[] frame = new byte[payload.remaining()];
     payload.get(frame);
@@ -116,10 +117,15 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
     return clusterNodeRegistry.route(environmentId).filter(ClusterIdeOwnerRoute::local).isPresent();
   }
 
-  private void offer(WebSocketSession session, IdeStreamPeer.Inbound frame) {
+  private void offer(WebSocketSession session, IdeStreamPeer.Inbound frame) throws Exception {
     WebSocketIdeStreamPeer peer = peers.get(session.getId());
-    if (peer != null) {
-      peer.offer(frame);
+    if (peer == null) {
+      return;
+    }
+    if (!peer.offer(frame)) {
+      // 超出有界入站预算：fail-closed 关闭连接，绝不无界缓冲。
+      detach(session);
+      session.close(CloseStatus.TOO_BIG_TO_PROCESS);
     }
   }
 

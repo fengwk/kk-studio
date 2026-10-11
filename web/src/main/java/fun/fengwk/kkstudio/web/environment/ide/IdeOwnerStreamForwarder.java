@@ -121,8 +121,9 @@ public final class IdeOwnerStreamForwarder {
 
   private static void offer(AtomicReference<IdeStreamPeer> ownerPeer, IdeStreamPeer.Inbound frame) {
     IdeStreamPeer peer = ownerPeer.get();
-    if (peer instanceof WebSocketIdeStreamPeer webSocketPeer) {
-      webSocketPeer.offer(frame);
+    if (peer instanceof WebSocketIdeStreamPeer webSocketPeer && !webSocketPeer.offer(frame)) {
+      // 超出有界入站预算：fail-closed 关闭连接，绝不无界缓冲。
+      webSocketPeer.close();
     }
   }
 
