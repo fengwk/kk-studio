@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { paneTargetViewKey, type ThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
@@ -15,6 +15,8 @@ import {
 import { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
 import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import { isBoundTarget, samePaneTarget } from '@/features/ai/runtime/agent-pane'
+import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
+import { IdeOverlayPanel, type IdeCommandAction, type ResolvedEnvironmentInfo } from '@/features/ai/ide/IdeOverlayPanel'
 import type {
   AgentPaneCapabilities,
   AgentPaneDefaults,
@@ -54,6 +56,7 @@ export function AgentPane({
   onRequestBranch,
   onReport,
   onPresentation,
+  onIdeMounted,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -72,9 +75,55 @@ export function AgentPane({
   /** 面板运行时摘要上报；只读路径由本组件按投影派生。 */
   onReport?: (report: PaneReport) => void
   onPresentation?: (report: ThreadPresentation | null) => void
+  onIdeMounted?: (mounted: boolean) => void
 }) {
   const paneSectionRef = useRef<HTMLElement | null>(null)
   const { t } = useI18n()
+
+  // 每个前端 pane 挂载分配随机 UUID viewId，不用固定 pane-1 作为跨 tab 身份
+  const [viewId] = useState(() => createUuid())
+
+  const [ideOpen, setIdeOpen] = useState(false)
+  const [ideAction, setIdeAction] = useState<IdeCommandAction | null>(null)
+  const ideActionIdRef = useRef(0)
+  const [layoutMode, setLayoutMode] = useState<'wide' | 'narrow'>('wide')
+
+  useEffect(() => {
+    const el = paneSectionRef.current
+    if (!el || typeof ResizeObserver === 'undefined') {
+      return
+    }
+    const updateSize = (width: number) => {
+      setLayoutMode(width < 640 ? 'narrow' : 'wide')
+    }
+    updateSize(el.clientWidth)
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) {
+        updateSize(entry.contentRect.width)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  const handleOpenIde = useCallback(
+    (options: { mode: 'files' | 'shell' }) => {
+      ideActionIdRef.current += 1
+      setIdeAction({ id: ideActionIdRef.current, mode: options.mode })
+      setIdeOpen(true)
+      onFocus?.()
+    },
+    [onFocus],
+  )
+
+  const handleIdeMountedChange = useCallback(
+    (mounted: boolean) => {
+      onIdeMounted?.(mounted)
+    },
+    [onIdeMounted],
+  )
+
   const { target, targetRef, setTarget } = usePaneTarget({ owner, paneId, initialTarget })
   const [focusTarget, setFocusTarget] = useState<PaneTarget | null>(initialTarget ?? null)
   const lastRoutedTarget = useRef(initialTarget)
@@ -168,6 +217,35 @@ export function AgentPane({
   }, [visiblePresentation])
   const openParent = isRoot === true ? navigation.openThread : undefined
 
+  // 各 thread layer 进入语义明确选择当前可操作环境，不从 toolarguments 猜 cwd；
+  // 准确解析 EnvironmentCard.id/name/ready/HOME，查不到不能用 name 冒充 UUID。
+  const activeChildThreadId = navigation.activeThreadId
+  const childProjection = useThreadProjection(activeChildThreadId ?? '')
+  const activeLayerEnvironmentName = activeChildThreadId
+    ? childProjection.thread?.branchSettings?.environmentName ?? null
+    : projection.thread?.branchSettings?.environmentName ?? defaults?.environmentName ?? null
+
+  const matchedEnvCard = activeLayerEnvironmentName
+    ? environments.find((env) => env.name === activeLayerEnvironmentName) ?? null
+    : null
+
+  const resolvedEnvironment: ResolvedEnvironmentInfo | null = useMemo(() => {
+    if (matchedEnvCard == null || !isCanonicalUuid(matchedEnvCard.id)) {
+      return null
+    }
+    return {
+      id: matchedEnvCard.id,
+      name: matchedEnvCard.name,
+      ready: matchedEnvCard.ready,
+      homeDirectory: matchedEnvCard.homeDirectory,
+    }
+  }, [matchedEnvCard])
+
+  const handleCloseIde = useCallback(() => {
+    setIdeOpen(false)
+    handleIdeMountedChange(false)
+  }, [handleIdeMountedChange])
+
   // 只有根面板能接管 pane 内导航；只读路径不提供接管者（ThreadLink 保留独立地址）。
   return (
     <ThreadNavigationContext.Provider value={isRoot === true ? navigation.openThread : null}>
@@ -176,6 +254,7 @@ export function AgentPane({
         tabIndex={-1}
         className={`chat-pane ${focused ? 'focused' : ''}`}
         data-pane-id={paneId}
+        data-pane-layout={layoutMode}
         hidden={hidden}
         inert={hidden}
         onMouseDown={onFocus}
@@ -224,6 +303,7 @@ export function AgentPane({
               onFocusTargetChange={setFocusTarget}
               presentationSelected={navigation.layers.length === 0}
               onPresentation={acceptPresentation}
+              onOpenIde={handleOpenIde}
             />
           ) : (
             <BoundThreadView
@@ -256,6 +336,21 @@ export function AgentPane({
             />
           </div>
         ))}
+        <IdeOverlayPanel
+          isOpen={ideOpen}
+          viewId={viewId}
+          paneId={paneId}
+          environment={resolvedEnvironment}
+          availableEnvironments={environments}
+          action={ideAction}
+          isNarrow={layoutMode === 'narrow'}
+          onCollapse={() => setIdeOpen(false)}
+          onClose={handleCloseIde}
+          onRestoreFocus={() => {
+            visiblePresentation?.act(visiblePresentation.viewKey, 'restore-focus')
+          }}
+          onIdeMountedChange={handleIdeMountedChange}
+        />
       </section>
     </ThreadNavigationContext.Provider>
   )
