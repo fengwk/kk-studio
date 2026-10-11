@@ -6,11 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.WebSocketSession;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -126,7 +128,7 @@ class WebSocketIdeStreamPeerTest {
   /** 发送失败即视为连接关闭（fail-closed）。 */
   @Test
   void sendFailureClosesPeer() throws Exception {
-    org.mockito.Mockito.doThrow(new java.io.IOException("boom")).when(session).sendMessage(any());
+    doThrow(new IOException("boom")).when(session).sendMessage(any());
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
     assertThrows(IllegalStateException.class, () -> peer.sendBinary(new byte[] {1}));
     assertTrue(peer.closed());
