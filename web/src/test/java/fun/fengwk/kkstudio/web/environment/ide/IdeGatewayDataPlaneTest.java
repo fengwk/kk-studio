@@ -270,6 +270,27 @@ class IdeGatewayDataPlaneTest {
     assertEquals(0, harness.transport.abandoned.size());
   }
 
+  /** 多面板：同一代际下另一个受管 workspace 请求必须放行，未授权的仍拒绝。 */
+  @Test
+  void allowsAuthorizedSiblingWorkspaceButRejectsUnknownOne() throws Exception {
+    Harness harness = new Harness();
+    harness.transport.peerFactory = () -> new ScriptedPeer(0, List.of());
+    // 第二个面板：同代际的另一个受管 workspace。
+    harness.sessions.open(harness.identity, "/managed/other");
+
+    MockHttpServletRequest allowed = harness.request("GET", "/");
+    allowed.setParameter("workspace", "/managed/other");
+    MockHttpServletResponse allowedResponse = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/", allowed, allowedResponse);
+    assertEquals(200, allowedResponse.getStatus());
+
+    MockHttpServletRequest rejected = harness.request("GET", "/");
+    rejected.setParameter("workspace", "/etc");
+    MockHttpServletResponse rejectedResponse = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/", rejected, rejectedResponse);
+    assertEquals(403, rejectedResponse.getStatus());
+  }
+
   @Test
   void rejectsRequestWithoutSessionCookie() throws Exception {
     Harness harness = new Harness();

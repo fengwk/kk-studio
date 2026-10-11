@@ -66,9 +66,11 @@ class IdeGatewayComponentsTest {
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(5));
     IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
 
+    // 未知 cookie 必须是「未命中」而不是 NPE。
+    assertTrue(sessions.lookup("unknown-cookie").isEmpty());
     String cookie = sessions.open(identity, "/managed/workspace");
-    assertEquals(
-        Optional.of("/managed/workspace"), sessions.lookup(cookie).map(s -> s.workspacePath()));
+    assertTrue(sessions.lookup(cookie).orElseThrow().authorizesWorkspace("/managed/workspace"));
+    assertFalse(sessions.lookup(cookie).orElseThrow().authorizesWorkspace("/other"));
 
     // 过期即失效。
     clock.advance(Duration.ofMinutes(6));
@@ -80,6 +82,31 @@ class IdeGatewayComponentsTest {
     assertFalse(sessions.lookup(other).isEmpty());
     sessions.closeGeneration(ENV, identity.leaseToken());
     assertTrue(sessions.lookup(other).isEmpty());
+  }
+
+  /** 多面板：同一代际下新授权的 workspace 对已存在的 cookie 立即可用，且按 TTL 淘汰。 */
+  @Test
+  void browserSessionAuthorizesSiblingViewsPerGeneration() {
+    MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+    IdeBrowserSessionRegistry sessions =
+        new IdeBrowserSessionRegistry(
+            new SecureRandom(), clock, Duration.ofMinutes(30), Duration.ofMinutes(5));
+    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+
+    String first = sessions.open(identity, "/managed/one");
+    String second = sessions.open(identity, "/managed/two");
+    assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/two"));
+    assertTrue(sessions.lookup(second).orElseThrow().authorizesWorkspace("/managed/one"));
+    // 别的代际不可见。
+    IdeSessionIdentity otherGeneration = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    String otherCookie = sessions.open(otherGeneration, "/managed/three");
+    assertFalse(sessions.lookup(otherCookie).orElseThrow().authorizesWorkspace("/managed/one"));
+
+    // 视图 TTL 到期后授权被淘汰（会话本身仍在有效期内）。
+    clock.advance(Duration.ofMinutes(6));
+    assertFalse(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/one"));
+    assertFalse(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/two"));
+    assertFalse(sessions.lookup(first).isEmpty());
   }
 
   @Test

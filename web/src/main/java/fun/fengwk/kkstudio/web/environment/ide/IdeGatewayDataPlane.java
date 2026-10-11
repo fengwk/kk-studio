@@ -251,12 +251,12 @@ public final class IdeGatewayDataPlane {
     return current.isPresent() && current.get().equals(session.identity());
   }
 
-  /** IDE 根路径上的 {@code workspace}/{@code folder} 只能指向 cookie 绑定的受管 workspace。 */
+  /** IDE 根路径上的 {@code workspace}/{@code folder} 只能指向本代际已授权的受管 workspace（支持多面板）。 */
   private static boolean workspaceQueryAllowed(
       IdeBrowserSessionRegistry.Session session, HttpServletRequest request) {
     for (String name : List.of("workspace", "folder")) {
       String value = request.getParameter(name);
-      if (value != null && !value.equals(session.workspacePath())) {
+      if (value != null && !session.authorizesWorkspace(value)) {
         return false;
       }
     }
