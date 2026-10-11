@@ -1,8 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { PassThrough } from 'node:stream'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { PosixManagedProcess, PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
 import * as state from '../../src/native/state.js'
 
@@ -78,6 +80,33 @@ describe.skipIf(process.platform === 'win32')('posix supervisor failure branches
     const scope = managed(stateDir, helper)
     await new Promise((resolve) => helper.on('close', resolve))
     await expect(scope.establish()).rejects.toThrow(/failed during its posix phase/)
+  })
+
+  test('a helper spawn error releases IPC ownership without discarding buffered output', async () => {
+    // 控制事件顺序，验证 error 终态释放父侧资源且不清空已经写入的输出。
+    const helper = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      connected: true,
+      disconnect: vi.fn(),
+      unref: vi.fn(),
+    })
+    helper.stdout.end('buffered stdout')
+    helper.stderr.end('buffered stderr')
+    const scope = managed(await dir(), helper as unknown as ChildProcessWithoutNullStreams)
+    helper.emit('error', new Error('opaque spawn detail'))
+    await expect(scope.establish()).rejects.toThrow(/before establishing the OS scope/)
+    await expect(scope.exit).resolves.toEqual({ exitCode: null, signal: null })
+    await scope.close()
+    await scope.settled
+    expect(helper.stdin.destroyed).toBe(true)
+    expect(helper.stdout.read().toString()).toBe('buffered stdout')
+    expect(helper.stderr.read().toString()).toBe('buffered stderr')
+    expect(helper.disconnect).toHaveBeenCalledOnce()
+    expect(helper.unref).toHaveBeenCalledOnce()
+    helper.stdout.destroy()
+    helper.stderr.destroy()
   })
 
   test('a launch spec that cannot be written fails closed before spawning the helper', async () => {

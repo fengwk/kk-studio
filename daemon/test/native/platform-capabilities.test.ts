@@ -38,15 +38,16 @@ afterEach(() => {
 })
 
 describe('native capabilities per platform', () => {
-  test('darwin declares no guarantee and names the missing strict confinement', () => {
+  test('darwin exposes session lifecycle without orphan adoption', () => {
     const capabilities = withPlatform('darwin', () => processScopeCapabilities())
     expect(capabilities.platform).toBe('darwin')
-    expect(capabilities.sessionConvergence).toBe(false)
+    expect(capabilities.sessionConvergence).toBe(true)
     expect(capabilities.orphanAdoption).toBe(false)
     expect(capabilities.jobMembership).toBe(false)
-    // macOS 无法证明未登记 setsid 后代的收敛：自述必须与生产拒绝一致，不声明任何保证。
+    // 没有收养者只限制未登记且故意脱离的后代，不取消会话生命周期。
     expect(capabilities.unverifiedLimits).toHaveLength(1)
     expect(capabilities.unverifiedLimits[0]).toContain('child subreaper')
+    expect(capabilities.unverifiedLimits[0]).not.toContain('strict')
   })
 
   test('win32 declares job membership only and no session convergence', () => {
@@ -73,12 +74,11 @@ describe('native entry points fail closed on unsupported platforms', () => {
     expect(() => withPlatform('freebsd', () => createProcessSupervisor())).toThrow(/does not support freebsd/)
   })
 
-  test('darwin cannot create a side-effecting supervisor', () => {
-    // macOS 无法证明未登记 setsid 后代的收敛：工厂必须拒绝创建，而不是给出覆盖不全的假保证。
-    expect(() => withPlatform('darwin', () => createProcessSupervisor())).toThrow(
-      /strict native process confinement is unavailable on darwin/,
-    )
-    expect(() => withPlatform('darwin', () => createProcessSupervisor())).toThrow(/setsid/)
+  test('darwin selects the POSIX supervisor without requiring a subreaper', async () => {
+    // 工厂在模拟的 darwin 上仍返回现有 POSIX 实现；缺少收养者不是拒绝创建的理由。
+    const supervisor = withPlatform('darwin', () => createProcessSupervisor())
+    expect(supervisor).toBeInstanceOf(PosixProcessSupervisor)
+    await expect(supervisor.close()).resolves.toBeUndefined()
   })
 
   test.runIf(process.platform === 'linux')('linux selects the POSIX supervisor with orphan adoption', async () => {
