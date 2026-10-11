@@ -1,7 +1,7 @@
 import { closeSync, existsSync, fsyncSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { ensurePrivateDirectory } from './private-fs.js'
 
 /**
  * 父进程与 scope helper 之间唯一的握手面：调用私有状态目录里的这几个文件。
@@ -9,8 +9,7 @@ import { fileURLToPath } from 'node:url'
  * <p>发布一律「先写同目录临时文件再原子改名」，读者要么看不到文件，要么看到完整内容。状态目录由父进程以 0700 独占创建，
  * 其中每个控制文件都是 0600；目录与文件都在调用收尾时删除。
  *
- * <p>本模块被父进程静态引用，也被 helper 通过路径探测动态载入，因此这里只依赖 Node 内建模块，不引用任何同目录模块：
- * helper 以 `.ts` 源码直接运行时（Node 类型剥离，见 helper.ts），相对 import 的 `.js` 后缀无法解析。
+ * <p>本模块被父进程与 helper 都以**编译产物**静态引用，因此同目录模块一律用静态 `.js` import，不做源码态扩展名探测。
  */
 
 /** helper 发布的范围渠道：POSIX 是会话 id，Windows 是首个进程 pid。 */
@@ -60,30 +59,7 @@ export interface ExitReport {
  */
 export async function createStateDir(): Promise<string> {
   const directory = mkdtempSync(join(tmpdir(), STATE_DIR_PREFIX))
-  const privateFs = await loadPrivateFs()
-  return privateFs.ensurePrivateDirectory(directory)
-}
-
-interface PrivateFsModule {
-  ensurePrivateDirectory(path: string): Promise<string>
-}
-
-let privateFsModule: Promise<PrivateFsModule> | null = null
-
-/** 探测同目录的 private-fs：编译产物是 `.js`，源码开发态是 `.ts`；它自己再按平台分发到 POSIX chmod 或 Windows DACL。 */
-function loadPrivateFs(): Promise<PrivateFsModule> {
-  if (privateFsModule === null) {
-    privateFsModule = (async () => {
-      for (const extension of ['js', 'ts']) {
-        const url = new URL(`./private-fs.${extension}`, import.meta.url)
-        if (existsSync(fileURLToPath(url))) {
-          return import(url.href) as Promise<PrivateFsModule>
-        }
-      }
-      throw new Error('the native private filesystem module is missing')
-    })()
-  }
-  return privateFsModule
+  return ensurePrivateDirectory(directory)
 }
 
 /** 原子发布状态文件；失败必须让调用方显式失败，绝不留下半个文件。 */

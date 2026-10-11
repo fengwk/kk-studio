@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import * as posix from './posix-session.js'
+import * as state from './state.js'
+import * as win from './win32.js'
 import type { ExitReport, LaunchSpec } from './state.js'
 
 /**
@@ -17,11 +19,9 @@ import type { ExitReport, LaunchSpec } from './state.js'
  * <p>「父进程确认之后才启动命令」是本文件的核心约定：许可之前失败（取消、超时、父进程退出）因此永远等价于「用户命令没有产生
  * 任何副作用」。命令自然退出时先把退出事实原子发布，再收敛整个范围并把收敛事实发布到 `cleanup`。
  *
- * <p>本入口以 `.ts` 源码交付（编译产物为同目录 `helper.js`），运行平台由父进程决定；Node 以类型剥离直接执行 `.ts` 时相对
- * import 的 `.js` 后缀无法解析，因此同目录模块一律按 `js`/`ts` 两种扩展名探测后动态载入。
+ * <p>本入口只以**编译产物** `helper.js` 运行（见 helper-path.ts）：同目录模块一律用静态 `.js` import，不再做源码态扩展名探测。
+ * `posix-session`/`win32` 的原生库都是惰性加载，因此非目标平台 import 本文件也不会触碰 kernel32/libc。
  */
-
-const HERE = new URL('./', import.meta.url)
 
 /** 等待父进程许可的预算；父进程的启动预算与它一致。 */
 const PERMIT_BUDGET_MILLIS = 20_000
@@ -35,58 +35,13 @@ const JOB_DRAIN_BUDGET_MILLIS = 2_000
 /** 轮询步长：足够细，使正常收敛不必白等整个预算。 */
 const POLL_INTERVAL_MILLIS = 5
 
-interface StateModule {
-  SCOPE_FILE: string
-  PERMIT_FILE: string
-  EXIT_FILE: string
-  ERROR_FILE: string
-  CLEANUP_FILE: string
-  DIAGNOSTICS_FILE: string
-  publish(stateDir: string, name: string, content: string): void
-  publishQuietly(stateDir: string, name: string, content: string): void
-  read(stateDir: string, name: string): string | null
-  readLaunch(stateDir: string): LaunchSpec | null
-}
-
-interface PosixModule {
-  establishSession(): number
-  becomeChildSubreaper(): boolean
-  convergeSession(session: number, excludedPid: number, graceMillis: number): Promise<boolean>
-  convergeAdoptedChildren(ownerPid: number, graceMillis: number, excludedPids: readonly number[]): Promise<boolean>
-  startOrphanReaper(intervalMillis?: number): () => void
-}
-
-interface Win32JobScope {
-  readonly processId: number
-  resume(): void
-  awaitExit(): Promise<ExitReport>
-  terminateAndDrain(budgetMillis: number): Promise<boolean>
-  close(): void
-}
-
-interface Win32Module {
-  jobNameFor(stateDir: string): string
-  createSuspendedJob(jobName: string, spec: LaunchSpec, env: NodeJS.ProcessEnv): Promise<Win32JobScope>
-}
-
-async function loadSibling(name: string): Promise<unknown> {
-  for (const extension of ['js', 'ts']) {
-    const url = new URL(`${name}.${extension}`, HERE)
-    if (existsSync(fileURLToPath(url))) {
-      return import(url.href)
-    }
-  }
-  throw new Error(`the native process scope helper could not locate the ${name} module`)
-}
-
 async function main(): Promise<void> {
   const stateDir = process.argv[2]
   if (stateDir === undefined) {
     process.exit(2)
     return
   }
-  const state = (await loadSibling('state')) as unknown as StateModule
-  installDiagnostics(stateDir, state)
+  installDiagnostics(stateDir)
   let phase = 'launch'
   try {
     const spec = state.readLaunch(stateDir)
@@ -94,12 +49,12 @@ async function main(): Promise<void> {
       throw new Error('the process scope helper launch spec is missing')
     }
     phase = process.platform === 'win32' ? 'windows' : 'posix'
-    const code = process.platform === 'win32' ? await runWindows(stateDir, spec, state) : await runPosix(stateDir, spec, state)
+    const code = process.platform === 'win32' ? await runWindows(stateDir, spec) : await runPosix(stateDir, spec)
     process.exit(code)
   } catch (error) {
     // 对外只发布**固定阶段代码**：命令路径、参数与环境一律不进入父进程可见的失败说明。
     state.publishQuietly(stateDir, state.ERROR_FILE, `helper-${phase}-failure`)
-    recordDiagnostics(stateDir, state, `${phase}: ${describe(error)}`)
+    recordDiagnostics(stateDir, `${phase}: ${describe(error)}`)
     process.exit(1)
   }
 }
@@ -116,8 +71,7 @@ function installParentGoneHook(onParentGone: () => void): void {
 }
 
 /** POSIX：先建立 session/进程组并公开范围，等父进程确认，然后启动用户命令。 */
-async function runPosix(stateDir: string, spec: LaunchSpec, state: StateModule): Promise<number> {
-  const posix = (await loadSibling('posix-session')) as unknown as PosixModule
+async function runPosix(stateDir: string, spec: LaunchSpec): Promise<number> {
   const sessionId = posix.establishSession()
   posix.becomeChildSubreaper()
 
@@ -158,7 +112,7 @@ async function runPosix(stateDir: string, spec: LaunchSpec, state: StateModule):
 
   // hook 必须在范围发布之前注册：发布之后父进程随时可能对会话广播温和信号。
   state.publish(stateDir, state.SCOPE_FILE, String(sessionId))
-  await awaitPermit(stateDir, state)
+  await awaitPermit(stateDir)
   if (stopping) {
     return shutdown()
   }
@@ -183,8 +137,7 @@ async function runPosix(stateDir: string, spec: LaunchSpec, state: StateModule):
 }
 
 /** Windows：建立命名 Job 并让首个进程保持挂起，等父进程持有同一个 Job 的句柄之后再恢复执行。 */
-async function runWindows(stateDir: string, spec: LaunchSpec, state: StateModule): Promise<number> {
-  const win = (await loadSibling('win32')) as unknown as Win32Module
+async function runWindows(stateDir: string, spec: LaunchSpec): Promise<number> {
   const job = await win.createSuspendedJob(win.jobNameFor(stateDir), spec, commandEnvironment())
   let stopping = false
   let shutdownPromise: Promise<number> | null = null
@@ -211,7 +164,7 @@ async function runWindows(stateDir: string, spec: LaunchSpec, state: StateModule
   })
   try {
     state.publish(stateDir, state.SCOPE_FILE, String(job.processId))
-    await awaitPermit(stateDir, state)
+    await awaitPermit(stateDir)
     if (stopping) {
       return shutdown()
     }
@@ -251,7 +204,7 @@ function commandEnvironment(): NodeJS.ProcessEnv {
  *
  * <p>许可之前不启动任何进程，因此取消或超时总能赶在用户命令产生副作用之前生效；父进程若放弃本次调用，会直接结束 helper。
  */
-async function awaitPermit(stateDir: string, state: StateModule): Promise<void> {
+async function awaitPermit(stateDir: string): Promise<void> {
   const deadline = Date.now() + PERMIT_BUDGET_MILLIS
   while (state.read(stateDir, state.PERMIT_FILE) === null) {
     if (Date.now() >= deadline) {
@@ -277,19 +230,19 @@ function waitForExit(child: ChildProcess): Promise<ExitReport> {
  * <p>诊断文件以 **0600** 创建（`appendFileSync` 的默认 0666 会把内容暴露给同机其它用户）。记录内容只保留阶段与错误**类型名**，
  * 不写原始消息：截断无法去掉消息里的令牌或路径，因此这里从源头就不落敏感原文。
  */
-function installDiagnostics(stateDir: string, state: StateModule): void {
+function installDiagnostics(stateDir: string): void {
   process.on('uncaughtException', (error) => {
-    recordDiagnostics(stateDir, state, `uncaught: ${describe(error)}`)
+    recordDiagnostics(stateDir, `uncaught: ${describe(error)}`)
     process.exit(1)
   })
   process.on('unhandledRejection', (reason) => {
-    recordDiagnostics(stateDir, state, `rejection: ${describe(reason)}`)
+    recordDiagnostics(stateDir, `rejection: ${describe(reason)}`)
     process.exit(1)
   })
 }
 
 /** 追加一行严格私有诊断；失败只影响可见性，不改变退出码与状态文件结论。 */
-function recordDiagnostics(stateDir: string, state: StateModule, value: string): void {
+function recordDiagnostics(stateDir: string, value: string): void {
   try {
     appendFileSync(join(stateDir, state.DIAGNOSTICS_FILE), `${value}\n`, { mode: 0o600 })
   } catch {
