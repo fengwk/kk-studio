@@ -218,6 +218,7 @@ async function clearAllDirtyBuffers(page, report, label) {
   }
   await page.waitForFunction(
     () => document.querySelectorAll('.tabs-container .tab.dirty').length === 0,
+    undefined,
     { timeout: 15_000 },
   )
   return hadDialog
