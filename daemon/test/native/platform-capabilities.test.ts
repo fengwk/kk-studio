@@ -82,7 +82,7 @@ describe('native entry points fail closed on unsupported platforms', () => {
   })
 
   test.runIf(process.platform === 'linux')('linux selects the POSIX supervisor with orphan adoption', async () => {
-    // 真实 Linux 主机上工厂不降级：仍返回 POSIX 实现（子进程收养由构造函数启用）。
+    // 工厂在受支持平台上不降级：仍返回 POSIX 实现（子进程收养由构造函数启用）。
     const supervisor = createProcessSupervisor()
     expect(supervisor).toBeInstanceOf(PosixProcessSupervisor)
     // 没有启动任何进程：真实 close 必须直接收敛，不需要任何假绑定。
