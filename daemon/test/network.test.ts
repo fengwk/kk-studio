@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { Agent } from 'undici'
 import { WebSocketServer } from 'ws'
 
 import type { SystemProxyResolver } from '../src/contracts.js'
@@ -586,6 +587,142 @@ describe('outbound network lifecycle and connect deadlines', () => {
       expect(Date.now() - startedAt).toBeLessThan(650)
     } finally {
       await installed.close()
+    }
+  })
+
+  it('rejects immediately when the transport closes during the TCP handshake', async () => {
+    let accepted = 0
+    const blackholeSockets: net.Socket[] = []
+    const blackhole = net.createServer((socket) => {
+      accepted += 1
+      blackholeSockets.push(socket)
+    })
+    await new Promise<void>((resolve) => blackhole.listen(0, '127.0.0.1', () => resolve()))
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve) => {
+          for (const socket of blackholeSockets) {
+            socket.destroy()
+          }
+          blackhole.close(() => resolve())
+        }),
+    )
+    const port = (blackhole.address() as net.AddressInfo).port
+    const transport = createWebSocketTransport(`ws://127.0.0.1:${port}`, { connectTimeoutMillis: 30_000 })
+    const connected = transport.connect({ onMessage() {}, onDisconnected() {} })
+    await waitFor(() => accepted >= 1)
+    const startedAt = Date.now()
+    transport.close()
+    await expect(connected).rejects.toThrow(/cancelled|aborted/i)
+    expect(Date.now() - startedAt).toBeLessThan(1000)
+  })
+
+  it('keeps an established connection open after the connect deadline elapses', async () => {
+    const server = new WebSocketServer({ port: 0, perMessageDeflate: true })
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()))
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve) => {
+          for (const client of server.clients) {
+            client.terminate()
+          }
+          server.close(() => resolve())
+        }),
+    )
+    server.on('connection', (socket) => {
+      socket.on('message', (data) => socket.send(data.toString()))
+    })
+    const port = (server.address() as net.AddressInfo).port
+    const received: string[] = []
+    const transport = createWebSocketTransport(`ws://127.0.0.1:${port}`, { connectTimeoutMillis: 200 })
+    const connection = await transport.connect({
+      onMessage(message) {
+        received.push(message)
+      },
+      onDisconnected() {},
+    })
+    expect(connection.isOpen()).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    // deadline 到点后已建立连接必须仍存活并可发送，绝不能被连接超时终止。
+    expect(connection.isOpen()).toBe(true)
+    await connection.sendText('alive')
+    await waitFor(() => received.length === 1)
+    expect(received[0]).toBe('alive')
+    connection.close()
+  })
+
+  it('waits for an in-flight retire and shares its failure across close callers', async () => {
+    const origin = await startOrigin()
+    cleanups.push(origin.close)
+    const installed = await installOutboundNetwork({}, systemDirect)
+    const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
+    expect(response.statusCode).toBe(200)
+    const failure = new Error('retire failed')
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const spy = vi.spyOn(Agent.prototype, 'destroy').mockImplementation(() =>
+      gate.then(() => {
+        throw failure
+      }),
+    )
+    try {
+      const first = installed.close()
+      const second = installed.close()
+      let settled = false
+      void first.then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        },
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(settled).toBe(false)
+      release()
+      await expect(first).rejects.toBe(failure)
+      await expect(second).rejects.toBe(failure)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('records an immediately rejected system close without an unhandled rejection', async () => {
+    const origin = await startOrigin()
+    cleanups.push(origin.close)
+    const systemFailure = new Error('system close failed')
+    const system: SystemProxyResolver = {
+      async resolve(): Promise<string | null> {
+        return null
+      },
+      close(): Promise<void> {
+        return Promise.reject(systemFailure)
+      },
+    }
+    const installed = await installOutboundNetwork({}, system)
+    await installed.network.openResponse(origin.url, {}, new AbortController().signal)
+    const events: unknown[] = []
+    const listener = (reason: unknown): void => {
+      events.push(reason)
+    }
+    process.on('unhandledRejection', listener)
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const spy = vi.spyOn(Agent.prototype, 'destroy').mockImplementation(() => gate)
+    try {
+      const closure = installed.close()
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      expect(events).toHaveLength(0)
+      release()
+      await expect(closure).rejects.toBe(systemFailure)
+      expect(events).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+      process.off('unhandledRejection', listener)
     }
   })
 

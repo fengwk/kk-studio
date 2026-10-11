@@ -496,6 +496,8 @@ const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 
 class DefaultOutboundNetwork implements OutboundNetwork {
   private readonly dispatchers = new Set<Dispatcher>()
+  private readonly retires = new Map<Dispatcher, Promise<unknown>>()
+  private readonly retired = new WeakSet<Dispatcher>()
   private readonly agents = new Set<http.Agent | https.Agent>()
   private readonly inflight = new Set<Promise<unknown>>()
   private readonly lifetime = new AbortController()
@@ -514,7 +516,8 @@ class DefaultOutboundNetwork implements OutboundNetwork {
     this.ensureOpen()
     const dispatcher = createDispatcher(choice, init.connectTimeout)
     this.dispatchers.add(dispatcher)
-    return this.dispatch(dispatcher, url, init, this.combine(signal))
+    // header 阶段也纳入 pending：关闭时必须等这次 dispatch 真正 settle。
+    return this.track(this.dispatch(dispatcher, url, init, this.combine(signal)))
   }
 
   async withResponse<T>(
@@ -658,40 +661,72 @@ class DefaultOutboundNetwork implements OutboundNetwork {
     return promise
   }
 
-  /** 移出活跃集合后关闭/销毁；返回失败而非抛出，便于与主错误一并保留。 */
-  private async retire(dispatcher: Dispatcher, force: boolean): Promise<unknown> {
-    this.dispatchers.delete(dispatcher)
-    try {
-      if (force) {
-        await dispatcher.destroy()
-      } else {
-        await dispatcher.close()
-      }
-      return undefined
-    } catch (error) {
-      return error
+  /**
+   * 移出活跃集合后关闭/销毁；每个 dispatcher 只 retire 一次，并发调用共享同一 Promise。
+   * 返回失败而非抛出；由 lifeAbort 触发的 expected request abort 不算 cleanup failure。
+   */
+  private retire(dispatcher: Dispatcher, force: boolean): Promise<unknown> {
+    const existing = this.retires.get(dispatcher)
+    if (existing !== undefined) {
+      return existing
     }
+    if (this.retired.has(dispatcher)) {
+      return Promise.resolve(undefined)
+    }
+    this.retired.add(dispatcher)
+    const promise = (async (): Promise<unknown> => {
+      this.dispatchers.delete(dispatcher)
+      try {
+        if (force) {
+          await dispatcher.destroy()
+        } else {
+          await dispatcher.close()
+        }
+        return undefined
+      } catch (error) {
+        return isExpectedAbort(error, this.lifetime.signal.aborted) ? undefined : error
+      }
+    })()
+    this.retires.set(dispatcher, promise)
+    const settle = (): void => {
+      this.retires.delete(dispatcher)
+    }
+    promise.then(settle, settle)
+    return promise
   }
 
   private async dispose(): Promise<void> {
     this.closed = true
     this.lifetime.abort()
-    await Promise.allSettled([...this.inflight])
-    const dispatchers = [...this.dispatchers]
-    this.dispatchers.clear()
+    // 立即强制回收所有 owned dispatcher，取消仍处于 header/body 阶段的交换，避免等待死锁。
+    for (const dispatcher of [...this.dispatchers]) {
+      void this.retire(dispatcher, true)
+    }
     const agents = [...this.agents]
     this.agents.clear()
-    const results = await Promise.allSettled([
-      ...dispatchers.map((dispatcher) => dispatcher.destroy()),
-      ...agents.map((agent) =>
-        Promise.resolve().then(() => {
-          agent.destroy()
-        }),
-      ),
-    ])
-    throwFailures(
-      results.filter((result) => result.status === 'rejected').map((result) => (result as PromiseRejectedResult).reason),
+    const destructions = agents.map((agent) =>
+      Promise.resolve().then(() => {
+        agent.destroy()
+      }),
     )
+    // 等待所有 in-flight retire 真正 settle，再汇总其保留的 cleanup failure。
+    const retireResults = await Promise.allSettled([...this.retires.values()])
+    const destructionResults = await Promise.allSettled(destructions)
+    await Promise.allSettled([...this.inflight])
+    const failures: unknown[] = []
+    for (const result of retireResults) {
+      if (result.status === 'rejected') {
+        failures.push(result.reason)
+      } else if (result.value !== undefined) {
+        failures.push(result.value)
+      }
+    }
+    for (const result of destructionResults) {
+      if (result.status === 'rejected') {
+        failures.push(result.reason)
+      }
+    }
+    throwFailures(failures)
   }
 }
 
@@ -719,6 +754,18 @@ function combineFailures(primary: unknown, cleanup: unknown): unknown {
     return cleanup
   }
   return new AggregateError([primary, cleanup], 'outbound request and cleanup both failed')
+}
+
+/** 由 lifeAbort 触发的取消属于预期请求中止，不是 cleanup failure；其它错误仍要保留。 */
+function isExpectedAbort(error: unknown, lifetimeAborted: boolean): boolean {
+  if (!lifetimeAborted || typeof error !== 'object' || error === null) {
+    return false
+  }
+  const candidate = error as { name?: string; code?: string; message?: string }
+  if (candidate.name === 'AbortError' || candidate.code === 'UND_ERR_ABORTED') {
+    return true
+  }
+  return candidate.message === 'Operation cancelled' || candidate.message?.includes('aborted') === true
 }
 
 /** 关闭阶段的失败汇总：单个直接抛出，多个用固定安全摘要聚合。 */
@@ -767,23 +814,24 @@ export async function installOutboundNetwork(
             currentNetwork = previous
           }
           const failures: unknown[] = []
-          // 先请求 system.close，使仍在等待 native 查询的 resolve 退出；再中止并等待自身 pending。
-          let systemClosed: Promise<void>
-          try {
-            systemClosed = system.close()
-          } catch (error) {
-            failures.push(error)
-            systemClosed = Promise.resolve()
-          }
+          // 立即为 system.close 挂成功/失败记录，避免它在 network 释放期间成为 unhandledRejection；
+          // 先请求 system.close 使仍在等待 native 查询的 resolve 退出，再中止并等待自身 pending。
+          let systemFailure: unknown
+          const systemClosed = (async (): Promise<void> => {
+            try {
+              await system.close()
+            } catch (error) {
+              systemFailure = error
+            }
+          })()
           try {
             await network.close()
           } catch (error) {
             failures.push(error)
           }
-          try {
-            await systemClosed
-          } catch (error) {
-            failures.push(error)
+          await systemClosed
+          if (systemFailure !== undefined) {
+            failures.push(systemFailure)
           }
           throwFailures(failures)
         })()
