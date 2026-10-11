@@ -70,9 +70,7 @@ Commands:
       Run npm ci for one case in an ephemeral egress-enabled helper container.
   inspect
       Fail-closed isolation, runtime-tooling, and Environment READY checks.
-  tool-smoke
-      Compile and run direct Java find/grep/bash smoke assertions inside Daemon.
-  logs [postgres|app|workspace-init|daemon ...]
+  logs [postgres|app ...]
       Print the last RELIABILITY_LOG_TAIL lines (default 200).
   status
       Print service state and the public Environment status without commands/env.
@@ -453,24 +451,6 @@ bash --version | head -n 1
   step "isolation inspection passed"
 }
 
-smoke_tools() {
-  require_cmd docker
-  local container_id
-  container_id=$(daemon_container_id)
-  step "running direct Java coding-tool smoke inside the Daemon image"
-  # Daemon 是 shaded 单文件 JAR：smoke 只用它作为编译与运行 classpath。
-  docker exec --interactive --user 10001:10001 "$container_id" bash -c '
-set -euo pipefail
-tmp=$(mktemp -d)
-trap '"'"'rm -rf "$tmp"'"'"' EXIT
-source_file="$tmp/NativeToolSmoke.java"
-cat >"$source_file"
-javac -cp /opt/kk-studio/daemon.jar -d "$tmp" "$source_file"
-java -cp "$tmp:/opt/kk-studio/daemon.jar" \
-  fun.fengwk.kkstudio.harness.daemon.coding.NativeToolSmoke
-' <"$REPO_ROOT/scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java"
-}
-
 safe_status() {
   compose ps --format json | python3 -c '
 import json
@@ -506,7 +486,7 @@ logs_stack() {
   local service
   for service in "$@"; do
     case "$service" in
-      postgres | app | workspace-init | daemon) ;;
+      postgres | app) ;;
       *) die "invalid service '$service'" ;;
     esac
   done
@@ -553,10 +533,6 @@ case "$command" in
   inspect)
     [ "$#" -eq 0 ] || die "inspect accepts no arguments"
     inspect_stack
-    ;;
-  tool-smoke)
-    [ "$#" -eq 0 ] || die "tool-smoke accepts no arguments"
-    smoke_tools
     ;;
   logs)
     logs_stack "$@"

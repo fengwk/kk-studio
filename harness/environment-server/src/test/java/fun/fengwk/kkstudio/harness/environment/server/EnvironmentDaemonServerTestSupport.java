@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
@@ -75,7 +76,8 @@ final class EnvironmentDaemonServerTestSupport {
               "dev",
               "/home/dev",
               "note",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              DaemonArchitecture.AMD64));
 
   /** 测试用单条/聚合资源字节预算：与生产 16 MiB 业务上限一致。 */
   static final long MAX_RESOURCE_BYTES = 16L * 1024 * 1024;
@@ -158,6 +160,8 @@ final class EnvironmentDaemonServerTestSupport {
     final FakeLeaseStore leaseStore = new FakeLeaseStore();
     final FakeTicketService ticketService = new FakeTicketService();
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
+    final List<EnvironmentId> disconnectedEnvironments = new ArrayList<>();
+    final List<UUID> disconnectedLeaseTokens = new ArrayList<>();
     final List<EnvironmentId> updateResultEnvironments = new ArrayList<>();
     final List<DaemonUpdateResult> updateResults = new ArrayList<>();
     final AtomicReference<EnvironmentServerSettings> settings =
@@ -181,7 +185,19 @@ final class EnvironmentDaemonServerTestSupport {
                 }
                 return Optional.empty();
               },
-              readyNotifications::add,
+              new EnvironmentSessionListener() {
+                @Override
+                public void onEnvironmentReady(EnvironmentId environmentId) {
+                  readyNotifications.add(environmentId);
+                }
+
+                @Override
+                public void onEnvironmentDisconnected(
+                    EnvironmentId environmentId, UUID leaseToken) {
+                  disconnectedEnvironments.add(environmentId);
+                  disconnectedLeaseTokens.add(leaseToken);
+                }
+              },
               (environmentId, result) -> {
                 updateResultEnvironments.add(environmentId);
                 updateResults.add(result);

@@ -24,6 +24,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -218,7 +219,8 @@ class EnvironmentServiceImplTest {
                     "dev",
                     "/home/dev",
                     "Note",
-                    "/tmp/kk-studio")),
+                    "/tmp/kk-studio",
+                    DaemonArchitecture.AMD64)),
             List.of(),
             List.of(),
             NOW,
@@ -319,7 +321,8 @@ class EnvironmentServiceImplTest {
                     "dev",
                     "/home/dev",
                     "Retained note",
-                    "/tmp/kk-studio")),
+                    "/tmp/kk-studio",
+                    DaemonArchitecture.AMD64)),
             List.of(),
             List.of(),
             NOW,
@@ -1126,7 +1129,8 @@ class EnvironmentServiceImplTest {
                 "dev",
                 "/home/dev",
                 "Note",
-                "/tmp/kk-studio")),
+                "/tmp/kk-studio",
+                DaemonArchitecture.AMD64)),
         List.of(),
         events,
         NOW,
@@ -1149,7 +1153,8 @@ class EnvironmentServiceImplTest {
                 "dev",
                 "/home/dev",
                 "Note",
-                "/tmp/kk-studio")),
+                "/tmp/kk-studio",
+                DaemonArchitecture.AMD64)),
         List.of(),
         List.of(),
         lastSeenAt,

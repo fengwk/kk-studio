@@ -29,17 +29,12 @@ EXPECTED_SERVICE_NETWORKS = {
     "minio": {"node-a-db", "node-b-db"},
     "http-mock": {"node-a-db", "node-b-db"},
     "minio-init": {"node-a-db"},
-    "workspace-init": {"daemon-a"},
-    "app-a": {"node-a-db", "daemon-a", "app-ingress-a"},
-    "app-b": {"node-b-db", "daemon-b", "app-ingress-b"},
-    "daemon-a": {"daemon-a"},
-    "daemon-b": {"daemon-b"},
+    "app-a": {"node-a-db", "app-ingress-a"},
+    "app-b": {"node-b-db", "app-ingress-b"},
 }
 EXPECTED_NETWORKS = {
     "node-a-db",
     "node-b-db",
-    "daemon-a",
-    "daemon-b",
     "app-ingress-a",
     "app-ingress-b",
 }

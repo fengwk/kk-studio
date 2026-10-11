@@ -11,7 +11,6 @@ export interface DaemonLspServerConfiguration {
 
 export interface EnvironmentInstallConfigDTO {
   operatingSystem: InstallOperatingSystem
-  javaHome?: string | null
   daemon: {
     studioUrl: string
     note?: string | null
@@ -144,4 +143,20 @@ export interface EnvironmentInstallCodeDTO {
 
 export interface EnvironmentCreateDTO {
   name: string
+}
+
+export interface CreateIdeViewDTO {
+  viewId: string
+  directory?: string | null
+}
+
+export interface ChangeIdeViewDirectoryDTO {
+  directory: string
+}
+
+export interface IdeViewDTO {
+  viewId: string
+  environmentId: string
+  directory: string
+  entryUrl: string | null
 }

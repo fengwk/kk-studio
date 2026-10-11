@@ -13,7 +13,9 @@ class DaemonUpdateCommandCodecTest {
 
   private static final String OP = "11111111-1111-1111-1111-111111111111";
   private static final String VERSION = "1.0.9";
-  private static final String URL = DaemonUpdateArtifact.artifactUrl(VERSION);
+  private static final String URL =
+      DaemonUpdateArtifact.artifactUrl(
+          VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64);
   private static final String SHA = "a".repeat(64);
 
   private final DaemonUpdateCommandCodec codec = new DaemonUpdateCommandCodec();
@@ -83,11 +85,37 @@ class DaemonUpdateCommandCodecTest {
             + OP
             + "\",\"targetVersion\":\""
             + VERSION
-            + "\",\"artifactUrl\":\"https://evil.example/kk-studio-daemon-v1.0.9.jar\","
+            + "\",\"artifactUrl\":\"https://evil.example/kk-studio-daemon-v1.0.9-linux-amd64.tar.gz\","
             + "\"artifactSha256\":\""
             + SHA
             + "\"}";
     assertThrows(DaemonProtocolException.class, () -> codec.decode(payload));
+  }
+
+  /** 旧 JAR 兼容形状必须被彻底拒绝：官方仓库地址上的 {@code .jar} 制品不再是合法目标。 */
+  @Test
+  void rejectsLegacyJarArtifactUrl() {
+    String payload =
+        "{\"operationId\":\""
+            + OP
+            + "\",\"targetVersion\":\""
+            + VERSION
+            + "\",\"artifactUrl\":\"https://github.com/fengwk/kk-studio/releases/download/v1.0.9/kk-studio-daemon-v1.0.9.jar\","
+            + "\"artifactSha256\":\""
+            + SHA
+            + "\"}";
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(payload));
+  }
+
+  /** 官方归档 URL 必须是 Platform 与 Daemon 共享的确定性形状。 */
+  @Test
+  void buildsOfficialPerPlatformArtifactUrl() {
+    assertEquals(
+        "https://github.com/fengwk/kk-studio/releases/download/v1.0.9/"
+            + "kk-studio-daemon-v1.0.9-linux-amd64.tar.gz",
+        DaemonUpdateArtifact.artifactUrl(
+            VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64));
+    assertEquals(URL, DaemonUpdateCommand.validateArtifactUrl(URL));
   }
 
   @Test

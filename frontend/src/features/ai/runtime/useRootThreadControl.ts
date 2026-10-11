@@ -169,6 +169,7 @@ export interface UseRootThreadControlOptions {
   setTarget: (next: PaneTarget) => void
   /** 父面板已持有的该目标 Thread 只读投影；不重复查询与订阅。 */
   projection: ThreadProjection
+  onOpenIde?: (options: { mode: 'files' | 'shell' }) => void
 }
 
 export function useRootThreadControl({
@@ -191,6 +192,7 @@ export function useRootThreadControl({
   onRequestBranch,
   onReport,
   onValidateDraftName,
+  onOpenIde,
 }: UseRootThreadControlOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -1169,6 +1171,12 @@ export function useRootThreadControl({
       case 'stop':
         controller.runCommand(command)
         return
+      case 'files':
+        onOpenIde?.({ mode: 'files' })
+        return
+      case 'shell':
+        onOpenIde?.({ mode: 'shell' })
+        return
       case 'models':
       case 'upload':
         return
@@ -1473,7 +1481,7 @@ export function useRootThreadControl({
     : null
   const boundEnvironment = activeDraftEnvironmentName
     ? {
-        id: boundEnvCard?.id ?? activeDraftEnvironmentName,
+        id: boundEnvCard?.id ?? '',
         name: activeDraftEnvironmentName,
       }
     : null

@@ -45,7 +45,7 @@ grep/find 共享仓库忽略解析：从搜索位置解析祖先 .gitignore、�
 
 ## 命令执行
 
-bash 在显式 workdir 中执行一次命令。成功、非零退出、超时和取消都收尾并保留已捕获输出；大输出保存本地日志，结果区分捕获限制和保存失败。取消或失败后已发生的副作用仍需核查。终止先温和停止再强制收敛，平台差异见 [Daemon 进程执行范围](harness-daemon.md#进程执行范围)。
+bash 在显式 workdir 中执行一次命令。成功、非零退出、超时和取消都收尾并保留已捕获输出；大输出保存本地日志，结果区分捕获限制和保存失败。取消或失败后已发生的副作用仍需核查。终止先温和停止再强制收敛。
 
 ## LSP 生命周期
 
@@ -95,8 +95,8 @@ Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢�
 
 ## 测试入口
 
-逐用例的来源、适用性与对应测试维护在 [内置 Read 测试映射](../operations/builtin-read-tests.md)、[内置 Bash 测试映射](../operations/builtin-bash-tests.md)、[内置检索测试映射](../operations/builtin-search-tests.md)、[内置 LSP 测试映射](../operations/builtin-lsp-tests.md)、[内置 Task 测试映射](../operations/builtin-task-tests.md) 与 [内置文件变更测试映射](../operations/builtin-mutation-tests.md)。
+逐用例的来源、适用性与对应测试维护在 [内置 Task 测试映射](../operations/builtin-task-tests.md)。
 
 测试映射按读取、修改、检索、命令、LSP 与 task 分组，覆盖分页边界、失败后的文件/进程状态、协议生命周期及委派接受与交付。自动化入口与覆盖率门禁见 [开发与测试](../operations/development-and-testing.md)。
 
-技术实现和验证分别参考 [Daemon](harness-daemon.md)、[Builtin](harness-builtin.md)、[Runtime](harness-runtime.md) 和 [开发与测试](../operations/development-and-testing.md)。
+技术实现和验证分别参考 [Builtin](harness-builtin.md)、[Runtime](harness-runtime.md) 和 [开发与测试](../operations/development-and-testing.md)。

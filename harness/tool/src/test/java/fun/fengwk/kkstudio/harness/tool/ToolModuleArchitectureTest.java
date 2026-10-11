@@ -25,7 +25,6 @@ class ToolModuleArchitectureTest {
       List.of(
           "fun.fengwk.kkstudio.harness.environment.",
           "fun.fengwk.kkstudio.harness.runtime.",
-          "fun.fengwk.kkstudio.harness.daemon.",
           "fun.fengwk.kkstudio.harness.kernel.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",

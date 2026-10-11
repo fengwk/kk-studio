@@ -47,6 +47,10 @@ mybatis:
 
 server:
   port: 8080
+  tomcat:
+    # 请求读取阶段的 connector socket 读超时。内部 metadata controller 以 readNBytes 有界读取并先认证/核对 owner，
+    # 但持有共享秘密的节点仍可能以 <16KiB 慢速滴流拖住读取线程；本切片不引入线程框架，靠容器读超时兜底（与内部客户端 30s 预算一致）。
+    connection-timeout: 30s
   # Compression
   compression:
     # 启用gzip压缩
@@ -112,6 +116,29 @@ kk-studio:
       max-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES:16777216}
       # 单帧发送超时；慢连接按传输失败关闭，不阻塞 Gateway。
       send-timeout: ${KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT:10s}
+    ide:
+      # IDE 独立 Origin 模板，必须含 {environmentId} 占位符；留空表示本部署不提供 IDE 视图能力，不回退 Studio 同源。
+      origin-template: ${KK_STUDIO_IDE_ORIGIN_TEMPLATE:}
+      # IDE bootstrap 入口路径（受控 endpoint，不接受浏览器提供的任意 proxy 地址）。
+      bootstrap-path: ${KK_STUDIO_IDE_BOOTSTRAP_PATH:/__ide/bootstrap}
+    ide-gateway:
+      # Daemon 可达的受控反向 stream endpoint 基址（ws/wss），ticket 追加为最后一段；留空表示本部署不提供 IDE 数据面。
+      stream-url-template: ${KK_STUDIO_IDE_GATEWAY_STREAM_URL_TEMPLATE:}
+      # 等待 Daemon 反向连接的超时；超时即关闭浏览器侧并放弃在途 OPEN_STREAM。
+      pairing-timeout: ${KK_STUDIO_IDE_GATEWAY_PAIRING_TIMEOUT:10s}
+      # 单条浏览器 exchange 的整体上限（含请求体与响应体转发）。
+      request-timeout: ${KK_STUDIO_IDE_GATEWAY_REQUEST_TIMEOUT:5m}
+      # 浏览器 IDE 会话 cookie 的有效期与名称（host-only、HttpOnly、SameSite=Strict）。
+      session-ttl: ${KK_STUDIO_IDE_GATEWAY_SESSION_TTL:12h}
+      session-cookie-name: ${KK_STUDIO_IDE_GATEWAY_SESSION_COOKIE_NAME:kk_ide_session}
+  cluster:
+    # 本实例对其他节点可达的 HTTP(S) origin；留空表示单节点部署，只做本地交付，不注册也不接受跨节点路由。
+    internal-url: ${KK_STUDIO_CLUSTER_INTERNAL_URL:}
+    # 内部认证的共享 HMAC 秘密；留空表示不参与跨节点认证，绝不写入 URL、日志或 DTO。
+    secret: ${KK_STUDIO_CLUSTER_SECRET:}
+    # 本节点注册行租约与心跳间隔；心跳必须明显小于租约。
+    node-lease: ${KK_STUDIO_CLUSTER_NODE_LEASE:45s}
+    heartbeat-interval: ${KK_STUDIO_CLUSTER_HEARTBEAT_INTERVAL:15s}
   canvas:
     function:
       runtime:
