@@ -592,6 +592,42 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 栈的手工命令、端口、故障注入与清理语义见
 [部署与运行](deployment.md#deploydistributed双节点零-app-to-app-网络栈)。
 
+### 真实浏览器 IDE 验收（opt-in）
+
+[`IdeRealBrowserAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeRealBrowserAcceptanceTest.java)
+在单个 Spring 进程里拉起真实链路：真实 Java IDE Gateway + 真实 Node Daemon（真实 WebSocket HELLO/WELCOME/READY）
++ 冻结 code-server 发行包 + 真实 Playwright Chromium。默认跳过，只有同时设置两个变量时才启用：
+
+```bash
+env JAVA_HOME=$JAVA_HOME_21 \
+  KK_STUDIO_IDE_ACCEPTANCE_DIR=<code-server 解包目录（含随包 lib/node）> \
+  KK_STUDIO_PLAYWRIGHT_MODULE_DIR=<@playwright/test 包目录> \
+  mvn -pl web test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+Daemon 以真实 `node dist/main.js --config <私有 0600 配置>` 启动（缺产物时先在 `daemon/` 下 `npm ci --offline`
+并用随包 Node24 `tsc` 构建）；浏览器用 `--host-resolver-rules 'MAP *.browser.localhost 127.0.0.1'` 访问独立 IDE
+Origin；视图由真实 `EnvironmentIdeService.OPEN_VIEW` 铸一次性 bootstrap 入口。Origin、303 Location、host-only
+cookie 与反向流 WS 全部以运行期 `@LocalServerPort` 为准（测试体内覆盖同一单例 `IdeOriginProperties` /
+`IdeGatewayProperties`），不使用端口无关模板以外的假设，也不加预热或重试。
+
+必过断言（缺一即失败）：两个 UUID 视图各自加载 workbench；A 编辑保存落盘；B 在同盘观察到 A 的外部改动；每个
+视图的真实终端由浏览器 shell 回写真实 OS pid；dirty 时目录切换被 Daemon 以 `save or discard unsaved changes`
+原因拒绝（400 且错误体含该原因，不接受无关 4xx）；两窗口保存同一文件出现真实 newer 冲突提示且新版本不被静默
+覆盖；外部删除后保存按原生编辑器行为重建文件；dirty 视图关闭被同一原因拒绝；随后仅通过真实 UI（Command
+Palette `Close All Editors` → `Don't Save`）清空未保存缓冲，再分别关闭 B（B 终端进程消失且 A 仍存活）与 A
+（A 终端消失）；Daemon 停机后进程 scope 收敛。注意 `page.reload` 不是丢弃：VS Code Hot Exit 会恢复 dirty
+buffer 与终端，不能拿 reload 冒充清稿。
+
+共享盘外变与删除的用户可见行为（非实时协作）：两个窗口在同一环境共享同一 code-server 与同一磁盘，一个窗口保存
+后，另一窗口对同名文件的未保存改动在保存时得到 `The content of the file is newer ...` 的新版本冲突提示，而不是
+静默覆盖；当磁盘上的打开文件被外部删除后，对仍 dirty 的缓冲区保存，冻结版 code-server/VS Code 的原生行为是
+**直接重建该文件**、不弹提示——这是产品行为，验收按此强断言，不为测试去改 VS Code 或伪造 toast。
+
+失败或超时会把脱敏诊断保留到 [reports/e2e/ide-browser/<timestamp>](../../reports/e2e/)（`report.json`、
+`playwright.log`、`daemon.log`、`screenshots/`）；URL query（bootstrap 与连接 token）一律 `<redacted>`，不
+拷贝私有配置、token、暂存目录或 entry URL 原文。
+
 ## 可靠性
 
 ### 确定性回归
