@@ -268,9 +268,16 @@ export function createCodeServerManager(
   let session: CodeServerSession | undefined
   let managed: ManagedProcess | undefined
   let starting: Promise<CodeServerSession> | undefined
+  let closing: Promise<void> | undefined
+  let ipcDirectory: string | undefined
   let closed = false
 
   const start = async (signal: AbortSignal): Promise<CodeServerSession> => {
+    // An exited root may still own descendants; converge its scope before restarting.
+    if (managed) {
+      await managed.terminate(5000)
+      managed = undefined
+    }
     const launch = resolveCodeServerLaunch(config.distributionDir)
     await ensurePrivateDirectory(paths.codeServerDir)
     await ensurePrivateDirectory(paths.userDataDir)
@@ -278,6 +285,12 @@ export function createCodeServerManager(
     await ensurePrivateDirectory(paths.viewsDir)
     await installBridgeExtension(config.distributionDir, paths.extensionsDir)
 
+    // Linux sun_path is bounded in bytes. Persistent data paths and TMPDIR are not.
+    // The private short directory also protects the unauthenticated session IPC endpoint.
+    if (process.platform !== 'win32' && ipcDirectory === undefined) {
+      ipcDirectory = await ensurePrivateDirectory(join('/tmp', `kk-studio-ide-${randomUUID()}`))
+    }
+    const ipcArgs = ipcDirectory === undefined ? [] : ['--session-socket', join(ipcDirectory, 'session.sock')]
     const port = await allocateLoopbackPort()
     const secret = randomBytes(32).toString('base64url')
     await writePrivateFile(
@@ -289,6 +302,7 @@ export function createCodeServerManager(
       executable: launch.executable,
       args: [
         ...launch.args,
+        ...ipcArgs,
         '--config',
         paths.configFile,
         '--bind-addr',
@@ -318,7 +332,6 @@ export function createCodeServerManager(
     // If the process dies after startup, forget the session so the next OPEN_VIEW restarts it.
     void process_.exit.then(() => {
       if (managed === process_) {
-        managed = undefined
         session = undefined
       }
     })
@@ -335,7 +348,7 @@ export function createCodeServerManager(
       } catch (terminateError) {
         terminateFailure = terminateError
       }
-      if (managed === process_) {
+      if (managed === process_ && terminateFailure === undefined) {
         managed = undefined
         session = undefined
       }
@@ -390,21 +403,29 @@ export function createCodeServerManager(
     session() {
       return session
     },
-    async close() {
-      closed = true
-      startup.abort()
-      const pending = starting
-      if (pending) {
-        // The aborted startup terminates its own process; ignore only its abort/failure here.
-        await pending.catch(() => undefined)
+    close() {
+      if (closing === undefined) {
+        closed = true
+        startup.abort()
+        closing = (async () => {
+          const pending = starting
+          if (pending) {
+            // Startup may fail normally; retained scopes still require convergence below.
+            await pending.catch(() => undefined)
+          }
+          session = undefined
+          if (managed) {
+            await managed.terminate(5000)
+            managed = undefined
+          }
+          // Never remove IPC state before proving the whole process scope converged.
+          if (ipcDirectory !== undefined) {
+            await rm(ipcDirectory, { recursive: true, force: true })
+            ipcDirectory = undefined
+          }
+        })()
       }
-      session = undefined
-      const current = managed
-      managed = undefined
-      if (current) {
-        // A confinement failure must surface instead of being swallowed.
-        await current.terminate(5000)
-      }
+      return closing
     },
     diagnostics() {
       return diagnostics.value()
