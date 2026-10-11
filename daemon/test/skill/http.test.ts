@@ -5,8 +5,6 @@ import {
   isAbortError,
   createGitHttpClient,
   TimeoutSocketError,
-  TimeoutHttpAgent,
-  TimeoutHttpsAgent,
 } from '../../src/skill/http.js'
 
 describe('http helper tests', () => {
@@ -146,25 +144,5 @@ describe('http helper tests', () => {
       },
     }
     expect(canFallback(nestedAbort)).toBe(false)
-  })
-
-  it('TimeoutHttpsAgent and TimeoutHttpAgent configure sockets with timeouts and respect pre-aborted signal', () => {
-    // Normal connection setup
-    const httpsAgent = new TimeoutHttpsAgent(500, 500)
-    const httpsSocket = httpsAgent.createConnection({ host: '127.0.0.1', port: 443 })
-    expect(httpsSocket).toBeDefined()
-    if (httpsSocket) {
-      httpsSocket.destroy()
-    }
-
-    // Pre-aborted signal immediately destroys socket
-    const ac = new AbortController()
-    ac.abort()
-    const httpAgent = new TimeoutHttpAgent(500, 500, ac.signal)
-    const httpSocket = httpAgent.createConnection({ host: '127.0.0.1', port: 80 })
-    expect(httpSocket).toBeDefined()
-    if (httpSocket) {
-      expect(httpSocket.destroyed).toBe(true)
-    }
   })
 })

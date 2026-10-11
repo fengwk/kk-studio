@@ -2,10 +2,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { lstat, open, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { Readable, Transform } from 'node:stream'
+import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { DaemonConfig, ManagedProcess, ProcessSpec, ProcessSupervisor } from './contracts.js'
 import { extractArchive as extractArchiveSafely, MAX_ARCHIVE_BYTES, MAX_CHECKSUM_BYTES, MAX_MANIFEST_BYTES } from './archive.js'
+import { getOutboundNetwork } from './network.js'
 import { ensurePrivateDirectory, verifyPrivateFile, writePrivateFile } from './native/index.js'
 import { UNIX_UPDATE_SCRIPT, WINDOWS_UPDATE_SCRIPT } from './update-scripts.js'
 
@@ -34,6 +35,10 @@ export const WINDOWS_UPDATE_SCRIPT_NAME = 'kk-studio-daemon-update.ps1'
 export const STREAM_LIMIT_BYTES = 64 * 1024
 /** 归档下载固定超时：300 秒。 */
 export const DOWNLOAD_TIMEOUT_MILLIS = 300_000
+/** 官方下载重定向上限：标准有界 20 跳，每跳按 URL 重新选择代理。 */
+export const MAX_DOWNLOAD_REDIRECTS = 20
+
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 
 const CHECK_CONFIG_SUCCESS = 'Daemon configuration is valid'
 const EXTRACT_DIRECTORY = 'extract'
@@ -781,33 +786,48 @@ export function productionDependencies(processes: ProcessSupervisor): UpdateDepe
     id: () => randomUUID(),
     async fetchTo(url, destination, signal, maxBytes) {
       const effective = AbortSignal.any([signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLIS)])
-      const response = await fetch(url, { signal: effective, redirect: 'follow' })
-      if (!response.ok || response.body === null) {
-        throw new UpdateFailure('official artifact download failed')
-      }
-      let received = 0
-      const counter = new Transform({
-        transform(chunk: Buffer, _encoding, callback) {
-          received += chunk.length
-          if (received > maxBytes) {
-            callback(new UpdateFailure('official artifact download exceeds the size budget'))
-            return
+      const network = getOutboundNetwork()
+      let current = url
+      for (let hop = 0; ; hop += 1) {
+        const response = await network.openResponse(current, { method: 'GET', redirect: 'manual' }, effective)
+        try {
+          if (REDIRECT_STATUS.has(response.statusCode)) {
+            const location = response.headers.location
+            if (typeof location !== 'string' || hop >= MAX_DOWNLOAD_REDIRECTS) {
+              throw new UpdateFailure('official artifact download failed')
+            }
+            // 逐跳按新 URL 重新选择代理；GET 不携带任何凭证或 body 到重定向目标。
+            current = new URL(location, current).toString()
+            continue
           }
-          callback(null, chunk)
-        },
-      })
-      try {
-        await pipeline(
-          Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
-          counter,
-          createWriteStream(destination, { mode: 0o600 }),
-        )
-      } catch (error) {
-        await rm(destination, { force: true }).catch(() => undefined)
-        if (effective.aborted) {
-          throw new UpdateFailure('official artifact download was aborted')
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            throw new UpdateFailure('official artifact download failed')
+          }
+          let received = 0
+          const counter = new Transform({
+            transform(chunk: Buffer, _encoding, callback) {
+              received += chunk.length
+              if (received > maxBytes) {
+                callback(new UpdateFailure('official artifact download exceeds the size budget'))
+                return
+              }
+              callback(null, chunk)
+            },
+          })
+          try {
+            await pipeline(response.body, counter, createWriteStream(destination, { mode: 0o600 }))
+          } catch (error) {
+            await rm(destination, { force: true }).catch(() => undefined)
+            if (effective.aborted) {
+              throw new UpdateFailure('official artifact download was aborted')
+            }
+            throw error
+          }
+          return
+        } finally {
+          // dispose 先取消/释放可能未消费的 body，再关闭独占 dispatcher，绝不在 header 返回后就 await close。
+          await response.dispose()
         }
-        throw error
       }
     },
     async extractArchive(archive, destination, signal) {
