@@ -204,4 +204,18 @@ class EnvironmentDaemonServerIdeTest {
   private static String requestId() {
     return "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
   }
+
+  @Test
+  void disconnectSignalsLeaseGenerationForCredentialAndStreamCleanup() {
+    EnvironmentDaemonServerTestSupport.Fixture fixture =
+        new EnvironmentDaemonServerTestSupport.Fixture();
+    EnvironmentDaemonServerTestSupport.FakeChannel channel = fixture.connectReady("c1");
+    IdeRequest request = fixture.server.requestIde(ENVIRONMENT_ID, openView());
+
+    fixture.server.close(channel.connectionId());
+
+    // 代际关闭必须通知宿主，使其关闭绑定该 (environment, lease) 的 IDE 流与入口凭据，而非只撤销票据。
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
+    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
+  }
 }
