@@ -70,8 +70,8 @@ if (argv[0] === "--check-config") {
   const path = argv[1]
   if (!path || !fs.existsSync(path)) { process.exit(2) }
   const body = fs.readFileSync(path, "utf8")
-  if (body.includes("INVALID")) {
-    process.stderr.write("Invalid daemon configuration: daemon.studioUrl must be an https URL\n")
+  if (body.includes("INVALID") || /"daemon"\s*:/.test(body)) {
+    process.stderr.write("Invalid daemon configuration: daemon.daemon: unknown field\n")
     process.exit(2)
   }
   process.stdout.write("Daemon configuration is valid\n")
@@ -173,7 +173,7 @@ $env:USERPROFILE = $profileDir
 
 function New-Inputs {
     param(
-        [string] $Config = '{"daemon":{"studioUrl":"https://studio.example.com"}}',
+        [string] $Config = '{"studioUrl":"https://studio.example.com"}',
         [string] $Token = "token-value"
     )
     $directory = Join-Path $sandbox ("inputs-" + [Guid]::NewGuid().ToString("N"))
@@ -210,6 +210,17 @@ try {
         $rejected = $true
     }
     Assert-True -Condition $rejected -Message "unknown -JavaHome option is rejected"
+
+    # The real daemon.json is the bare config object; a wrapped "daemon" object must fail preflight.
+    $wrapped = New-Inputs -Config '{"daemon":{"studioUrl":"https://studio.example.com"}}'
+    $wrappedRejected = $false
+    try {
+        Invoke-Installer -Arguments @("install", "-ConfigFile", $wrapped[0], "-TokenFile", $wrapped[1]) | Out-Null
+    }
+    catch {
+        $wrappedRejected = $true
+    }
+    Assert-True -Condition $wrappedRejected -Message "wrapped daemon object is rejected by preflight"
 
     # Full install through stubs.
     $pairs = New-Inputs

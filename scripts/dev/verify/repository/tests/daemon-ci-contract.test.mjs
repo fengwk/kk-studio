@@ -144,6 +144,37 @@ test('the coverage step matches the daemon package scripts and provider', () => 
     )
 })
 
+test('the release pipeline smoke-tests the staged Linux archive with its own runtime', () => {
+    // 发布前必须用刚暂存的真实归档自证可跑：门禁在 Stage 之后、Publish 之前，且不可跳过。
+    const steps = stepsOf(jobBlock(RELEASE, 'publish'))
+    const smoke = stepNamed(RELEASE, 'publish', 'Smoke-test the staged Linux archive with its own runtime')
+    assert.equal(stepField(smoke, 'if'), undefined, 'the archive smoke must not be conditional')
+    assert.doesNotMatch(smoke, /continue-on-error:/u)
+
+    const stageIndex = steps.findIndex((step) => step.includes('scripts/daemon/prepare-release.sh'))
+    const smokeIndex = steps.indexOf(smoke)
+    const publishIndex = steps.findIndex((step) => stepField(step, 'name') === 'Publish GitHub Release')
+    assert.ok(stageIndex >= 0, 'missing the asset staging step')
+    assert.ok(stageIndex < smokeIndex && smokeIndex < publishIndex, 'the smoke must run between staging and publishing')
+
+    const run = stepRun(smoke)
+    assert.match(run, /scripts\/daemon\/smoke-archive\.sh/u)
+    assert.match(run, /linux-amd64/u)
+    assert.match(run, /GITHUB_REF_NAME/u)
+
+    // 烟测入口必须真实使用归档自带的冻结运行时，并在不含用户 Node/Java 的 PATH 下调用。
+    const smokeScript = readFileSync(path.join(ROOT, 'scripts/daemon/smoke-archive.sh'), 'utf8')
+    assert.match(smokeScript, /runtime\/code-server\/lib\/node/u)
+    assert.match(smokeScript, /env -i PATH=/u)
+    assert.match(smokeScript, /command -v node/u)
+    assert.match(smokeScript, /command -v java/u)
+    for (const marker of ['--version', '--help', '--check-config']) {
+        assert.ok(smokeScript.includes(marker), `the smoke must exercise ${marker}`)
+    }
+    assert.match(smokeScript, /koffi/u)
+    assert.match(smokeScript, /acquireDirectoryLock/u)
+})
+
 test('the release pipeline reuses the same matrix and cannot publish without it', () => {
     const jobs = [...RELEASE.matchAll(/^ {2}([A-Za-z0-9_]+):\n([\s\S]*?)(?=^ {2}\w+:|$(?![\s\S]))/gm)]
         .map(([, name, block]) => ({ name, block }))

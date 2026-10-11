@@ -267,6 +267,15 @@ jobs:
             scripts/daemon/prepare-release.sh "${GITHUB_REF_NAME}" "${platform%-*}" "${platform#*-}"
           done
 
+      # 真实发行档烟测：直接解开刚暂存的 Linux 归档，用归档自带的冻结运行时（而非 runner
+      # 上的 Node）验证 --version/--help/--check-config、目标平台 koffi 与内核目录锁。这里
+      # 不新增下载，也不放宽任何门禁；归档与本机平台不匹配时显式失败而不是跳过。
+      - name: Smoke-test the staged Linux archive with its own runtime
+        run: |
+          set -euo pipefail
+          scripts/daemon/smoke-archive.sh \
+            "${RELEASE_ROOT}/linux-amd64/kk-studio-daemon-${GITHUB_REF_NAME}-linux-amd64.tar.gz"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
