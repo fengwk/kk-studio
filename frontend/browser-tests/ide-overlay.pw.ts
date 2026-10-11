@@ -9,6 +9,7 @@ const REPORTS_DIR = process.env.KK_LAYOUT_REPORTS_DIR ?? path.resolve(__dirname,
 const HARNESS_URL = '/browser-tests/ide-overlay-harness.html'
 
 const HARNESS_ENV_ID = 'e1000000-0000-4000-8000-000000000001'
+const HARNESS_DIRECTORY = '/workspace/projects/shared-environment/long-project-directory/packages/frontend/src/features/workspace'
 const PANE_1_VIEW_ID = 'c1000000-0000-4000-8000-000000000001'
 const PANE_2_VIEW_ID = 'c2000000-0000-4000-8000-000000000002'
 
@@ -60,7 +61,7 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
         data: {
           viewId,
           environmentId: HARNESS_ENV_ID,
-          directory: '/workspace/project',
+          directory: HARNESS_DIRECTORY,
           entryUrl,
         },
       }),
@@ -169,6 +170,13 @@ test.describe('Chat IDE Overlay Responsive & Iframe Identity Durability', () => 
     // 靠右贴齐
     expect(Math.abs((overlayBox.x + overlayBox.width) - (paneBox.x + paneBox.width))).toBeLessThanOrEqual(2)
 
+    const toolbar = overlay.getByTestId('ide-toolbar')
+    const directory = toolbar.getByRole('button', { name: '打开目录' })
+    await expect(directory).toHaveText(HARNESS_DIRECTORY)
+    await expect(directory).toHaveAttribute('title', `Isolated Dev Node · ${HARNESS_DIRECTORY}`)
+    expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(34)
+    await expect(toolbar.getByRole('button')).toHaveCount(4)
+
     await expect(composerInput).toBeVisible()
     await composerInput.fill('message draft after wide ide open')
     expect(await composerInput.inputValue()).toBe('message draft after wide ide open')
@@ -183,6 +191,14 @@ test.describe('Chat IDE Overlay Responsive & Iframe Identity Durability', () => 
     expect(Math.abs(narrowPaneBox.width - 360)).toBeLessThanOrEqual(2)
     expect(Math.abs(narrowOverlayBox.width - 360)).toBeLessThanOrEqual(2)
     expect(Math.abs(narrowOverlayBox.width - narrowPaneBox.width)).toBeLessThanOrEqual(2)
+
+    expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(34)
+    expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    const directoryLabel = toolbar.getByTestId('ide-directory-badge')
+    expect(await directoryLabel.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+    await directory.click()
+    await expect(page.getByTestId('ide-directory-input')).toHaveValue(HARNESS_DIRECTORY)
+    await page.getByRole('button', { name: '取消', exact: true }).click()
 
     // 原 pane composer 仍保持 attached
     await expect(composerInput).toBeAttached()

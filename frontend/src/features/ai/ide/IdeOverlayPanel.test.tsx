@@ -1,5 +1,5 @@
 import { createContext, StrictMode, useContext, useState, type ReactNode } from 'react'
-import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -120,6 +120,71 @@ describe('IdeOverlayPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('uses the directory as its compact open action and labels icon-only controls', async () => {
+    const user = userEvent.setup()
+    const onCollapse = vi.fn()
+    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+      viewId: 'v-toolbar',
+      environmentId: readyEnv.id,
+      directory: '/home/user/project',
+      entryUrl: 'https://ide.example.com/?workspace=toolbar',
+    })
+    render(
+      <IdeOverlayPanel
+        isOpen
+        viewId="v-toolbar"
+        environment={readyEnv}
+        availableEnvironments={availableEnvironments}
+        action={{ id: 1, mode: 'files' }}
+        onCollapse={onCollapse}
+        onClose={vi.fn()}
+      />,
+    )
+    await screen.findByTestId('ide-iframe')
+    const toolbar = within(screen.getByTestId('ide-toolbar'))
+    expect(toolbar.getAllByRole('button')).toHaveLength(4)
+    const directory = toolbar.getByRole('button', { name: '打开目录' })
+    expect(directory).toHaveTextContent('/home/user/project')
+    expect(directory).toHaveAttribute('title', 'local-node · /home/user/project')
+    for (const name of ['打开终端', '收起', '关闭']) {
+      const button = toolbar.getByRole('button', { name })
+      expect(button.textContent).toBe('')
+      expect(button).toHaveAttribute('title', name)
+    }
+    await user.click(directory)
+    expect(screen.getByTestId('ide-directory-input')).toHaveValue('/home/user/project')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await user.click(toolbar.getByRole('button', { name: '打开终端' }))
+    expect(environmentService.openIdeViewTerminal).toHaveBeenCalledWith(readyEnv.id, 'v-toolbar')
+    await user.click(toolbar.getByRole('button', { name: '收起' }))
+    expect(onCollapse).toHaveBeenCalledOnce()
+    expect(environmentService.closeIdeView).not.toHaveBeenCalled()
+  })
+
+  it('keeps the tooltip bound to the open view when the thread environment changes', async () => {
+    vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+      viewId: 'v-env-label',
+      environmentId: readyEnv.id,
+      directory: '/home/user/project',
+      entryUrl: 'https://ide.example.com/?workspace=env-label',
+    })
+    const props = {
+      isOpen: true,
+      viewId: 'v-env-label',
+      availableEnvironments,
+      action: { id: 1, mode: 'files' } as const,
+      onCollapse: vi.fn(),
+      onClose: vi.fn(),
+    }
+    const { rerender } = render(<IdeOverlayPanel {...props} environment={readyEnv} />)
+    const iframe = await screen.findByTestId('ide-iframe')
+    rerender(<IdeOverlayPanel {...props} environment={offlineEnv} />)
+    expect(screen.getByTestId('ide-open-directory-btn'))
+      .toHaveAttribute('title', 'local-node · /home/user/project')
+    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+    expect(environmentService.createIdeView).toHaveBeenCalledOnce()
   })
 
   it('handles React StrictMode double effect without duplicate requests and becomes ready', async () => {
@@ -446,7 +511,7 @@ describe('IdeOverlayPanel', () => {
     )
 
     await screen.findByTestId('ide-iframe')
-    await user.click(screen.getByTestId('ide-new-terminal-btn'))
+    await user.click(screen.getByTestId('ide-terminal-btn'))
 
     const err = await screen.findByTestId('ide-terminal-error')
     expect(err).toHaveTextContent('PTY spawn failed')

@@ -1472,9 +1472,9 @@ export const aiCatalog = {
     'en-US': 'Close',
     'zh-CN': '关闭',
   },
-  'ai.ide.newTerminal': {
-    'en-US': 'New Terminal',
-    'zh-CN': '新终端',
+  'ai.ide.openTerminal': {
+    'en-US': 'Open Terminal',
+    'zh-CN': '打开终端',
   },
   'ai.ide.openDirectory': {
     'en-US': 'Open Directory',
