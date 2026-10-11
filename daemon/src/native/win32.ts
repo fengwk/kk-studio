@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
 import type { ExitReport, LaunchSpec } from './state.js'
 import { joinCommandLine } from './windows-command-line.js'
@@ -126,6 +126,7 @@ export interface Kernel32 {
   DeleteProcThreadAttributeList(attributeList: Buffer): void
   GetLastError(): number
   GetFileAttributesW(fileName: string): number
+  LocalFree(memory: Pointer): Pointer | null
   CreateFileW(fileName: string, desiredAccess: number, shareMode: number, securityAttributes: Pointer | null, creationDisposition: number, flagsAndAttributes: number, template: Pointer | null): Pointer | null
   LockFileEx(file: Pointer, flags: number, reserved: number, low: number, high: number, overlapped: Record<string, unknown>): number
   UnlockFileEx(file: Pointer, reserved: number, low: number, high: number, overlapped: Record<string, unknown>): number
@@ -141,7 +142,6 @@ export interface Advapi32 {
   GetAce(acl: Pointer, index: number, ace: Pointer[]): number
   GetLengthSid(sid: Pointer): number
   EqualSid(first: Pointer, second: Pointer): number
-  LocalFree(memory: Pointer): Pointer | null
 }
 
 export interface WindowsTypes {
@@ -301,6 +301,8 @@ async function kernel(): Promise<Kernel32> {
       DeleteProcThreadAttributeList: library.func('void DeleteProcThreadAttributeList(void *attributeList)'),
       GetLastError: library.func('unsigned int GetLastError()'),
       GetFileAttributesW: library.func('unsigned int GetFileAttributesW(const char16_t *fileName)'),
+      // LocalFree 由 kernel32.dll 导出（见 winbase.h requirements）；从 advapi32 绑定会在加载时直接失败。
+      LocalFree: library.func('void *LocalFree(void *memory)'),
       CreateFileW: library.func('void *CreateFileW(const char16_t *fileName, unsigned int desiredAccess, unsigned int shareMode, void *securityAttributes, unsigned int creationDisposition, unsigned int flagsAndAttributes, void *template)'),
       LockFileEx: library.func('int LockFileEx(void *file, unsigned int flags, unsigned int reserved, unsigned int low, unsigned int high, OVERLAPPED *overlapped)'),
       UnlockFileEx: library.func('int UnlockFileEx(void *file, unsigned int reserved, unsigned int low, unsigned int high, OVERLAPPED *overlapped)'),
@@ -323,7 +325,6 @@ async function advapi(): Promise<Advapi32> {
       GetAce: library.func('int GetAce(void *acl, unsigned int index, _Out_ void **ace)'),
       GetLengthSid: library.func('unsigned int GetLengthSid(void *sid)'),
       EqualSid: library.func('int EqualSid(void *first, void *second)'),
-      LocalFree: library.func('void *LocalFree(void *memory)'),
     }
   }
   return advapiCache
@@ -378,6 +379,7 @@ class JobScope implements WindowsJobScope {
   private process: Pointer | null = null
   private resumed = false
   private closed = false
+  private drainDetail: string | null = null
   private readonly job: Pointer
 
   constructor(job: Pointer, private readonly owner: boolean, processId: number) {
@@ -547,9 +549,20 @@ class JobScope implements WindowsJobScope {
     return { exitCode: exitCode[0] ?? null, signal: null }
   }
 
+  /**
+   * 终止整个 Job 并证明它已经空掉。
+   *
+   * <p>唯一判据是 `ActiveProcesses == 0`：`TerminateJobObject` 返回 0 也不代表整组已经结束，因此它只被当作诊断信息；
+   * 但若迟迟不为 0，失败里必须带上这次调用状态与最后一次读回错误，绝不静默返回一个「看起来收敛」的结论。
+   */
   async terminateAndDrain(budgetMillis: number): Promise<boolean> {
-    loadedKernel().TerminateJobObject(this.job, 1)
-    return this.awaitEmpty(budgetMillis)
+    const kernel32 = await kernel()
+    const terminated = kernel32.TerminateJobObject(this.job, 1)
+    const terminateDetail = terminated === 0 ? `terminate the scope job failed with ${kernel32.GetLastError()}` : null
+    if (await this.awaitEmpty(budgetMillis)) {
+      return true
+    }
+    throw new Error(`the process scope job could not be proven converged${terminateDetail === null ? '' : ` (${terminateDetail})`}; ${this.drainDetail ?? 'active processes remained'}`)
   }
 
   async awaitEmpty(budgetMillis: number): Promise<boolean> {
@@ -559,6 +572,8 @@ class JobScope implements WindowsJobScope {
       if (active === 0) {
         return true
       }
+      // 读回失败与「仍有活动进程」都要留痕：收敛失败时据此给出可复核的原因。
+      this.drainDetail = active === null ? 'the scope job accounting could not be read' : `the scope job still reports ${active} active process(es)`
       if (Date.now() >= deadline) {
         return false
       }
@@ -591,23 +606,41 @@ class JobScope implements WindowsJobScope {
     }
   }
 
+  /**
+   * 关闭 Job 范围持有的全部句柄。
+   *
+   * <p>绝不忽略任何一次调用结果：即使某一步失败也继续尝试关闭其余句柄（句柄泄漏比单步失败更严重），最后把所有失败聚合上报。
+   * 从未恢复运行的挂起进程会先被结束，并核验结束调用的返回。
+   */
   close(): void {
     if (this.closed) {
       return
     }
     this.closed = true
     const kernel32 = loadedKernel()
+    const failures: string[] = []
     if (this.owner && this.process !== null) {
       if (!this.resumed) {
         // 从未运行过的挂起进程：helper 失败关闭时必须自己结束它，而不是把它留给句柄语义。
-        kernel32.TerminateProcess(this.process, 1)
+        if (kernel32.TerminateProcess(this.process, 1) === 0) {
+          failures.push(`terminate the suspended command process (${kernel32.GetLastError()})`)
+        }
       }
-      kernel32.CloseHandle(this.process)
+      if (kernel32.CloseHandle(this.process) === 0) {
+        failures.push(`close the command process handle (${kernel32.GetLastError()})`)
+      }
     }
     if (this.owner && this.thread !== null) {
-      kernel32.CloseHandle(this.thread)
+      if (kernel32.CloseHandle(this.thread) === 0) {
+        failures.push(`close the command thread handle (${kernel32.GetLastError()})`)
+      }
     }
-    kernel32.CloseHandle(this.job)
+    if (kernel32.CloseHandle(this.job) === 0) {
+      failures.push(`close the scope job handle (${kernel32.GetLastError()})`)
+    }
+    if (failures.length > 0) {
+      throw new Error(`cannot ${failures.join('; cannot ')}`)
+    }
   }
 
   private async activeProcesses(): Promise<number | null> {
@@ -704,7 +737,7 @@ export async function lockDirectory(path: string): Promise<WindowsDirectoryLock>
     // 收紧锁文件 DACL 之前先确认它属于当前用户：既有锁文件若是外部属主，绝不改写。
     await assertOwnedByCurrentUser(lockPath)
     await applyOwnerOnlyDacl(lockPath, false)
-    await verifyPrivatePath(lockPath)
+    await verifyPrivatePath(lockPath, 'file')
   } catch (error) {
     kernel32.CloseHandle(handle)
     throw error
@@ -762,7 +795,7 @@ export async function ensurePrivateDirectory(path: string): Promise<string> {
   }
   fs.mkdirSync(path, { recursive: true })
   await applyOwnerOnlyDacl(path, true)
-  await verifyPrivatePath(path)
+  await verifyPrivatePath(path, 'directory')
   return path
 }
 
@@ -782,48 +815,78 @@ export async function writePrivateFile(path: string, data: string | Uint8Array):
     if (!existing.isFile()) {
       throw new Error(`the private path must be a regular file: ${path}`)
     }
-    await verifyPrivatePath(path)
+    await verifyPrivatePath(path, 'file')
   }
-  const temporary = pathModule.join(pathModule.dirname(path), `.${pathModule.basename(path)}.${process.pid}.${Date.now().toString(36)}.tmp`)
+  // 父目录必须已经是属主独占的私有目录（只读核验，绝不 chmod 调用方的工作目录）：临时文件才落在一个私有根里。
+  await verifyPrivatePath(pathModule.dirname(path), 'directory')
+  // 临时名唯一：两个并发调用绝不会撞名，因此任何一次失败清理都不可能删掉别人仍在用的临时文件。
+  const temporary = pathModule.join(pathModule.dirname(path), `.${pathModule.basename(path)}.${randomUUID()}.tmp`)
+  let created = false
   try {
     // 空文件：此刻即使权限还没收紧也没有任何敏感内容可泄露。
     fs.writeFileSync(temporary, new Uint8Array(0), { flag: 'wx', mode: 0o600 })
+    created = true
     await applyOwnerOnlyDacl(temporary, false)
-    await verifyPrivatePath(temporary)
-    // `O_NOFOLLOW` 在 Windows 上未定义：只有 POSIX 需要它，缺省按 0 处理（临时文件刚由本进程独占创建并核验过）。
-    const noFollow = fs.constants.O_NOFOLLOW ?? 0
-    const handle = fs.openSync(temporary, fs.constants.O_WRONLY | noFollow)
-    try {
-      writeAllSync(fs, handle, typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data))
-      fs.fsyncSync(handle)
-    } finally {
-      fs.closeSync(handle)
-    }
-    fs.renameSync(temporary, path)
+    await verifyPrivatePath(temporary, 'file')
+    const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data)
+    commitPrivateFile(fs, temporary, path, bytes)
   } catch (error) {
-    fs.rmSync(temporary, { force: true })
+    if (created) {
+      // 只删除本次确证创建的那一个临时文件：绝不动别人（或并发调用）的临时文件。
+      fs.rmSync(temporary, { force: true })
+    }
     throw error
   }
-  await verifyPrivatePath(path)
+  await verifyPrivatePath(path, 'file')
 }
 
-/** 读回 DACL：必须存在、至少一个 ACE，且属主与全部 allow ACE 都是当前登录用户。 */
+/**
+ * 写满 + `fsync` + 原子改名。
+ *
+ * <p>只有整份内容真正写满并落盘后才 `rename`：短写（含返回 0）直接失败，目标文件因此保持原样。导出以便用假 fs 验证
+ * 「短写为 0 时绝不改名」。
+ */
+export function commitPrivateFile(
+  fs: Pick<typeof import('node:fs'), 'openSync' | 'writeSync' | 'fsyncSync' | 'closeSync' | 'renameSync' | 'constants'>,
+  temporary: string,
+  path: string,
+  data: Buffer,
+): void {
+  // `O_NOFOLLOW` 在 Windows 上未定义：只有 POSIX 需要它，缺省按 0 处理（临时文件刚由本进程独占创建并核验过）。
+  const noFollow = fs.constants.O_NOFOLLOW ?? 0
+  const handle = fs.openSync(temporary, fs.constants.O_WRONLY | noFollow)
+  try {
+    writeAllSync(fs, handle, data)
+    fs.fsyncSync(handle)
+  } finally {
+    fs.closeSync(handle)
+  }
+  fs.renameSync(temporary, path)
+}
+
+/** 读回 DACL：必须是普通文件、至少一个 ACE，且属主与全部 allow ACE 都是当前登录用户。 */
 export async function verifyPrivateFile(path: string): Promise<void> {
-  await verifyPrivatePath(path)
+  await verifyPrivatePath(path, 'file')
 }
 
 /**
  * 读回核验一个私有路径。
  *
  * <p>判定基准是**当前进程令牌的用户 SID**，不是「文件当前的属主」：否则一个外部用户拥有的文件只要 DACL 全部等于它自己的属主，
- * 就会被误判为「正确」。这里同时要求：属主就是当前用户，且 DACL 里每个 allow ACE 的 SID 也都是当前用户。
+ * 就会被误判为「正确」。这里同时要求：路径不是符号链接/reparse 点、类型与期望一致（普通文件或目录）、属主就是当前用户，
+ * 且 DACL 里每个 allow ACE 的 SID 也都是当前用户。
  */
-async function verifyPrivatePath(path: string): Promise<void> {
+async function verifyPrivatePath(path: string, kind: 'file' | 'directory'): Promise<void> {
+  await rejectReparsePoint(path)
   const fs = await import('node:fs')
-  if (fs.lstatSync(path).isSymbolicLink()) {
-    throw new Error(`the private path must not be a symbolic link: ${path}`)
+  const stats = fs.lstatSync(path)
+  if (kind === 'file' ? !stats.isFile() : !stats.isDirectory()) {
+    // 目录不能靠 DACL 通过「文件」校验：类型必须先对上，否则替换式写入可能把目录当目标。
+    throw new Error(`the private path is not a ${kind}: ${path}`)
   }
   const advapi32 = await advapi()
+  const kernel32 = await kernel()
+  const koffi = await koffiModule()
   const windowsTypes = await types()
   const currentSid = await currentUserSid()
   const owner: Pointer[] = [null as unknown as Pointer]
@@ -835,7 +898,7 @@ async function verifyPrivatePath(path: string): Promise<void> {
   if (status !== 0) {
     throw new Error(`cannot read the private path security descriptor: ${status}`)
   }
-  try {
+  return withSecurityDescriptor(kernel32, descriptor, () => {
     const ownerSid = owner[0]
     const acl = dacl[0]
     if (ownerSid == null) {
@@ -847,7 +910,6 @@ async function verifyPrivatePath(path: string): Promise<void> {
     if (acl == null) {
       throw new Error(`the private path has a null DACL (everyone has access): ${path}`)
     }
-    const koffi = await koffiModule()
     const header = koffi.decode(acl, windowsTypes.acl as never) as unknown as { AceCount: number }
     if (header.AceCount === 0) {
       throw new Error(`the private path has an empty DACL: ${path}`)
@@ -867,16 +929,13 @@ async function verifyPrivatePath(path: string): Promise<void> {
         throw new Error(`the private path DACL grants access to a foreign principal: ${path}`)
       }
     }
-  } finally {
-    if (descriptor[0] != null) {
-      advapi32.LocalFree(descriptor[0])
-    }
-  }
+  })
 }
 
 /** 确认路径属主就是当前登录用户：覆盖/收紧任何既有路径之前的第一道门。 */
 async function assertOwnedByCurrentUser(path: string): Promise<void> {
   const advapi32 = await advapi()
+  const kernel32 = await kernel()
   const currentSid = await currentUserSid()
   const owner: Pointer[] = [null as unknown as Pointer]
   const group: Pointer[] = [null as unknown as Pointer]
@@ -887,16 +946,49 @@ async function assertOwnedByCurrentUser(path: string): Promise<void> {
   if (status !== 0) {
     throw new Error(`cannot read the private path owner: ${status}`)
   }
-  try {
+  return withSecurityDescriptor(kernel32, descriptor, () => {
     const ownerSid = owner[0]
     if (ownerSid == null || advapi32.EqualSid(ownerSid, currentSid) === 0) {
       throw new Error(`the private path is not owned by the current user: ${path}`)
     }
-  } finally {
-    if (descriptor[0] != null) {
-      advapi32.LocalFree(descriptor[0])
-    }
+  })
+}
+
+/**
+ * 运行一段依赖安全描述符的逻辑，并在结束后释放它。
+ *
+ * <p>`LocalFree` 成功返回 NULL；返回非 NULL 表示释放失败。释放失败绝不静默吞掉：它会与调用方原有的失败**聚合**上报，
+ * 既不让原始错误被遮蔽，也不把「描述符没释放」当成成功。
+ */
+function withSecurityDescriptor<T>(kernel32: Kernel32, descriptor: Pointer[], body: () => T): T {
+  let primary: unknown = null
+  let result: T | undefined
+  let succeeded = false
+  try {
+    result = body()
+    succeeded = true
+  } catch (error) {
+    primary = error
   }
+  const allocated = descriptor[0]
+  let cleanupFailure: string | null = null
+  if (allocated != null && kernel32.LocalFree(allocated) !== null) {
+    cleanupFailure = `cannot free the private path security descriptor (${kernel32.GetLastError()})`
+  }
+  if (!succeeded) {
+    if (cleanupFailure !== null) {
+      throw new Error(`${describeError(primary)}; additionally ${cleanupFailure}`)
+    }
+    throw primary
+  }
+  if (cleanupFailure !== null) {
+    throw new Error(cleanupFailure)
+  }
+  return result as T
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 let currentUserSidState: { sid: Pointer; buffer: Buffer } | null = null
@@ -961,7 +1053,10 @@ async function applyOwnerOnlyDacl(path: string, directory: boolean): Promise<voi
     throw new Error(`cannot read the current user SID length: ${path}`)
   }
   const aclLength = 8 + 8 + sidLength
-  const acl = koffi.alloc('char', aclLength)
+  // 用 Buffer 承载 ACL 内存并取稳定指针：同步调用期间 Buffer 一直在作用域内，无需 koffi.alloc/free 的生存期管理。
+  const aclBuffer = Buffer.alloc(aclLength)
+  // `koffi.as` 返回 Koffi 的指针视图（保持对 Buffer 的引用），按本模块的 `void *` = Pointer 约定使用。
+  const acl = koffi.as(aclBuffer, 'void *') as unknown as Pointer
   if (advapi32.InitializeAcl(acl, aclLength, ACL_REVISION) === 0) {
     throw new Error(`cannot initialize the private path ACL: ${path}`)
   }
@@ -997,10 +1092,19 @@ function lstatOrNull(fs: typeof import('node:fs'), path: string): Stats | null {
 }
 
 /** 写满整个缓冲区：`writeSync` 允许短写，循环直到全部写完。 */
-function writeAllSync(fs: typeof import('node:fs'), handle: number, data: Buffer): void {
+export function writeAllSync(
+  fs: Pick<typeof import('node:fs'), 'writeSync'>,
+  handle: number,
+  data: Buffer,
+): void {
   let offset = 0
   while (offset < data.length) {
-    offset += fs.writeSync(handle, data, offset, data.length - offset)
+    const written = fs.writeSync(handle, data, offset, data.length - offset)
+    if (written <= 0) {
+      // 短写为 0（或异常负值）必须失败：否则会无限循环，且目标可能只落了一半内容。
+      throw new Error('the private file could not be written completely')
+    }
+    offset += written
   }
 }
 

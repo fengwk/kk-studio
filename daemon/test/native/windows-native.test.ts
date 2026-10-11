@@ -23,7 +23,8 @@ describe.runIf(process.platform === 'win32')('windows native primitives', () => 
   })
 
   test('writePrivateFile round-trips content and passes DACL read-back', async () => {
-    const file = join(workdir, 'secret')
+    const data = await ensurePrivateDirectory(join(workdir, 'data'))
+    const file = join(data, 'secret')
     await writePrivateFile(file, 'token-value')
     expect(readFileSync(file, 'utf8')).toBe('token-value')
     await expect(verifyPrivateFile(file)).resolves.toBeUndefined()
@@ -37,20 +38,25 @@ describe.runIf(process.platform === 'win32')('windows native primitives', () => 
   })
 
   test('writePrivateFile fails closed instead of overwriting a loosely permissioned file', async () => {
-    const file = join(workdir, 'loose')
+    const data = join(workdir, 'data')
+    mkdirSync(data, { recursive: true })
+    const file = join(data, 'loose')
+    // 先在宽松父目录下创建（继承宽松 DACL），再把父目录收紧；既有目标本身仍是宽松 ACL。
     writeFileSync(file, 'original')
+    await ensurePrivateDirectory(data)
     // 既有目标 DACL 宽松：必须在写入前失败关闭，绝不先截断改写再收紧。
     await expect(writePrivateFile(file, 'attacker')).rejects.toThrow()
     expect(readFileSync(file, 'utf8')).toBe('original')
   })
 
   test('writePrivateFile atomically replaces an existing private file and leaves no temp file', async () => {
-    const file = join(workdir, 'secret')
+    const data = await ensurePrivateDirectory(join(workdir, 'data'))
+    const file = join(data, 'secret')
     await writePrivateFile(file, 'first')
     await writePrivateFile(file, 'second')
     expect(readFileSync(file, 'utf8')).toBe('second')
     await expect(verifyPrivateFile(file)).resolves.toBeUndefined()
-    expect(readdirSync(workdir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    expect(readdirSync(data).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
 
   test('a reparse-point lock path fails closed', async () => {
@@ -61,6 +67,26 @@ describe.runIf(process.platform === 'win32')('windows native primitives', () => 
     // junction 也是 reparse 点：只查 isSymbolicLink 会漏掉，必须由 GetFileAttributesW 一并拒绝。
     symlinkSync(elsewhere, join(data, 'daemon.lock'), 'junction')
     await expect(acquireDirectoryLock(data)).rejects.toThrow(/must not be a (symbolic link|reparse point)/)
+  })
+
+  test('verifyPrivateFile rejects a directory even with a correct DACL', async () => {
+    const dir = join(workdir, 'adir')
+    await ensurePrivateDirectory(dir)
+    // 目录即使 owner-only DACL 正确也不是普通文件：类型必须先对上。
+    await expect(verifyPrivateFile(dir)).rejects.toThrow(/not a file/)
+  })
+
+  test('writePrivateFile rejects a directory target', async () => {
+    const dir = join(workdir, 'target-dir')
+    mkdirSync(dir, { recursive: true })
+    await expect(writePrivateFile(dir, 'x')).rejects.toThrow(/must be a regular file/)
+  })
+
+  test('writePrivateFile fails closed when the parent directory is not private', async () => {
+    const loose = join(workdir, 'loose-parent')
+    mkdirSync(loose, { recursive: true })
+    // 父目录不是属主独占：写入前失败关闭，且绝不 chmod 调用方的工作目录。
+    await expect(writePrivateFile(join(loose, 'secret'), 'x')).rejects.toThrow()
   })
 
   test('a second acquisition of the same directory fails until released', async () => {

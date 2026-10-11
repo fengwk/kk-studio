@@ -1,23 +1,31 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
+  commitPrivateFile,
   createSuspendedJob,
   installWindowsNativeBindingsForTest,
   releaseDirectoryLock,
+  verifyPrivateFile,
+  writeAllSync,
   type WindowsNativeBindings,
 } from '../../src/native/win32.js'
 
 /**
- * 用假原生绑定在**非 Windows 主机**上驱动真实 `JobScope` 代码路径。
+ * 用假原生绑定在**非 Windows 主机**上驱动真实 `win32.ts` 代码路径。
  *
- * <p>这是本轮唯一能在 Linux 上回归的核心性质：`awaitExit` 绝不能把 helper 的 Node 事件循环同步阻塞住。若它仍以
- * `WaitForSingleObject(handle, INFINITE)` 等待，父进程被强杀时内核关闭 IPC 通道产生的 `disconnect` 永远无法被派发，
- * 收尾就永远不会发生。断言两点：(1) 传给 `WaitForSingleObject` 的等待毫秒数始终是有限小值（不是 `INFINITE`）；
- * (2) 等待期间定时器仍在跑（事件循环未被阻塞）。
+ * <p>覆盖三类只有在 Linux 上才能廉价回归、却属于 Windows 真实安全/正确性的性质：
+ * (1) `awaitExit` 绝不把 helper 的 Node 事件循环同步阻塞住（否则父进程消失的 IPC 收尾永远收不到）；
+ * (2) Job 成员只核验不劫持、收敛失败如实抛出、句柄关闭失败如实聚合；
+ * (3) DACL 读回与 `LocalFree`（**由 kernel32.dll 导出**）失败聚合、短写为 0 时绝不改名。
  */
 const WAIT_OBJECT_0 = 0
 const WAIT_TIMEOUT = 0x102
 const WAIT_FAILED = 0xffff_ffff
 const INFINITE = 0xffff_ffff
+const SID_POINTER = 0x1000n
+const DESCRIPTOR_POINTER = 0x2000n
 
 interface Harness {
   bindings: WindowsNativeBindings
@@ -25,6 +33,11 @@ interface Harness {
   inJob: { value: number }
   closed: number[]
   ticks: { value: number }
+  activeProcesses: { value: number }
+  terminateResult: { value: number }
+  closeResult: { value: number }
+  equalSid: { value: number }
+  localFreeResult: { value: bigint | null }
 }
 
 function harness(): Harness {
@@ -32,6 +45,11 @@ function harness(): Harness {
   const inJob = { value: 1 }
   const closed: number[] = []
   const ticks = { value: 0 }
+  const activeProcesses = { value: 0 }
+  const terminateResult = { value: 1 }
+  const closeResult = { value: 1 }
+  const equalSid = { value: 1 }
+  const localFreeResult = { value: null as bigint | null }
   let waitCalls = 0
   const kernel = {
     CreateJobObjectW: () => 10n,
@@ -53,9 +71,9 @@ function harness(): Harness {
       exitCode[0] = 7
       return 1
     },
-    TerminateJobObject: () => 1,
+    TerminateJobObject: () => terminateResult.value,
     QueryInformationJobObject: (_job: unknown, _c: unknown, buffer: Record<string, number>) => {
-      buffer.ActiveProcesses = 0
+      buffer.ActiveProcesses = activeProcesses.value
       return 1
     },
     OpenJobObjectW: () => 10n,
@@ -66,7 +84,7 @@ function harness(): Harness {
     OpenProcess: () => 3n,
     CloseHandle: (handle: bigint) => {
       closed.push(Number(handle))
-      return 1
+      return closeResult.value
     },
     TerminateProcess: () => 1,
     SetHandleInformation: () => 1,
@@ -78,8 +96,9 @@ function harness(): Harness {
     },
     UpdateProcThreadAttribute: () => 1,
     DeleteProcThreadAttributeList: () => undefined,
-    GetLastError: () => 0,
+    GetLastError: () => 5,
     GetFileAttributesW: () => 0x80,
+    LocalFree: () => localFreeResult.value,
     CreateFileW: () => 6n,
     LockFileEx: () => 1,
     UnlockFileEx: () => 1,
@@ -93,8 +112,7 @@ function harness(): Harness {
     AddAccessAllowedAceEx: () => 1,
     GetAce: () => 1,
     GetLengthSid: () => 12,
-    EqualSid: () => 1,
-    LocalFree: () => null,
+    EqualSid: () => equalSid.value,
   }
   const types = {
     startupInfoEx: { size: 112 },
@@ -105,7 +123,18 @@ function harness(): Harness {
     aceHeader: { size: 4 },
     tokenUser: { size: 16 },
   }
-  return { bindings: { kernel, advapi, types } as unknown as WindowsNativeBindings, waits, inJob, closed, ticks }
+  return {
+    bindings: { kernel, advapi, types } as unknown as WindowsNativeBindings,
+    waits,
+    inJob,
+    closed,
+    ticks,
+    activeProcesses,
+    terminateResult,
+    closeResult,
+    equalSid,
+    localFreeResult,
+  }
 }
 
 afterEach(() => {
@@ -151,6 +180,93 @@ describe('windows job scope (mocked native bindings)', () => {
     }
   })
 
+  test('terminateAndDrain throws with the call status when the job never empties', async () => {
+    const fake = harness()
+    fake.activeProcesses.value = 1
+    fake.terminateResult.value = 0
+    installWindowsNativeBindingsForTest(fake.bindings)
+    const scope = await createSuspendedJob('kk-studio-test-job', { cwd: process.cwd(), args: ['fake-command'] }, {})
+    try {
+      await expect(scope.terminateAndDrain(30)).rejects.toThrow(/could not be proven converged.*terminate the scope job failed with 5.*active process/)
+    } finally {
+      scope.close()
+    }
+  })
+
+  test('terminateAndDrain succeeds purely on ActiveProcesses == 0', async () => {
+    const fake = harness()
+    fake.activeProcesses.value = 0
+    fake.terminateResult.value = 0 // 即使 TerminateJobObject 报错，只要整组确实空了就算收敛。
+    installWindowsNativeBindingsForTest(fake.bindings)
+    const scope = await createSuspendedJob('kk-studio-test-job', { cwd: process.cwd(), args: ['fake-command'] }, {})
+    try {
+      await expect(scope.terminateAndDrain(30)).resolves.toBe(true)
+    } finally {
+      scope.close()
+    }
+  })
+
+  test('close attempts every handle and aggregates failures', async () => {
+    const fake = harness()
+    fake.closeResult.value = 0
+    installWindowsNativeBindingsForTest(fake.bindings)
+    const scope = await createSuspendedJob('kk-studio-test-job', { cwd: process.cwd(), args: ['fake-command'] }, {})
+    expect(() => scope.close()).toThrow(/close the command process handle/)
+    // 一个句柄失败后仍然尝试了其余句柄（进程、线程、Job）。
+    expect(fake.closed.length).toBeGreaterThanOrEqual(3)
+    expect(() => scope.close()).not.toThrow() // 幂等：第二次直接返回。
+  })
+
+  test('writeAllSync fails closed on a zero-length short write', () => {
+    const written: number[] = []
+    const zero = {
+      writeSync: () => {
+        written.push(0)
+        return 0
+      },
+    }
+    expect(() => writeAllSync(zero, 1, Buffer.from('abc'))).toThrow(/could not be written completely/)
+
+    // 部分写入后补满：必须逐次推进 offset，而不是重写开头。
+    const offsets: number[] = []
+    const partial = {
+      writeSync: (_handle: number, _data: Buffer, offset: number, length: number) => {
+        offsets.push(offset)
+        return Math.min(2, length)
+      },
+    }
+    writeAllSync(partial, 1, Buffer.from('abcde'))
+    expect(offsets).toEqual([0, 2, 4])
+  })
+
+  test('commitPrivateFile never renames when the write makes no progress', () => {
+    const events: string[] = []
+    const fakeFs = {
+      constants: { O_WRONLY: 1, O_NOFOLLOW: 0 },
+      openSync: () => {
+        events.push('open')
+        return 9
+      },
+      writeSync: () => {
+        events.push('write')
+        return 0
+      },
+      fsyncSync: () => {
+        events.push('fsync')
+      },
+      closeSync: () => {
+        events.push('close')
+      },
+      renameSync: () => {
+        events.push('rename')
+      },
+    }
+    expect(() => commitPrivateFile(fakeFs, 'temp', 'target', Buffer.from('secret'))).toThrow(/could not be written completely/)
+    // 目标保持不变：从未发生 rename。
+    expect(events).not.toContain('rename')
+    expect(events).toContain('close')
+  })
+
   test('releaseDirectoryLock always closes the handle and aggregates unlock failures', () => {
     const calls: string[] = []
     const base = {
@@ -181,5 +297,88 @@ describe('windows job scope (mocked native bindings)', () => {
       CloseHandle: () => 1,
     }
     expect(() => releaseDirectoryLock(ok, 6n, {})).not.toThrow()
+  })
+})
+
+describe('windows private path DACL read-back (mocked native bindings)', () => {
+  test('LocalFree is bound from kernel32 and its failure is aggregated without masking the original error', async () => {
+    const koffi = await import('koffi')
+    // 真实的 Koffi 结构布局：`koffi.decode` 需要按类型读取 ACL / ACE / TOKEN_USER。
+    const aclType = koffi.struct('KK_TEST_ACL', { AclRevision: 'uint8_t', Sbz1: 'uint8_t', AclSize: 'uint16_t', AceCount: 'uint16_t', Sbz2: 'uint16_t' })
+    const aceHeaderType = koffi.struct('KK_TEST_ACE_HEADER', { AceType: 'uint8_t', AceFlags: 'uint8_t', AceSize: 'uint16_t' })
+    const sidAndAttributesType = koffi.struct('KK_TEST_SID_AND_ATTRIBUTES', { Sid: 'void *', Attributes: 'uint32_t' })
+    const tokenUserType = koffi.struct('KK_TEST_TOKEN_USER', { User: sidAndAttributesType })
+
+    // 真实原生内存（Koffi 分配）承载 ACL 与 ACE：`GetAce` 返回的必须是真正的指针（bigint），
+    // 生产代码会对它做指针运算（`entry + 8n`），不能用 Buffer 视图冒充。
+    const aclPointer = koffi.alloc('char', 8) as bigint
+    koffi.encode(aclPointer, aclType, { AclRevision: 2, Sbz1: 0, AclSize: 8, AceCount: 1, Sbz2: 0 })
+    const acePointer = koffi.alloc('char', 16) as bigint // 零初始化：AceType = ACCESS_ALLOWED_ACE_TYPE(0)
+
+    const equalSid = { value: 1 }
+    const localFreeResult = { value: null as bigint | null }
+    const kernel = {
+      GetFileAttributesW: () => 0x80,
+      LocalFree: () => localFreeResult.value,
+      GetLastError: () => 5,
+      GetCurrentProcess: () => 9n,
+      CloseHandle: () => 1,
+    }
+    const advapi = {
+      GetNamedSecurityInfoW: (_name: string, _type: number, _info: number, owner: bigint[], _g: unknown, dacl: bigint[], _s: unknown, descriptor: bigint[]) => {
+        owner[0] = SID_POINTER
+        dacl[0] = aclPointer
+        descriptor[0] = DESCRIPTOR_POINTER
+        return 0
+      },
+      OpenProcessToken: (_process: unknown, _access: number, token: bigint[]) => {
+        token[0] = 0x4000n
+        return 1
+      },
+      GetTokenInformation: (_token: unknown, _cls: number, info: Buffer | null, _len: number, required: number[]) => {
+        required[0] = 16
+        if (info === null) {
+          return 0
+        }
+        info.writeBigUInt64LE(SID_POINTER, 0)
+        return 1
+      },
+      GetLengthSid: () => 12,
+      EqualSid: () => equalSid.value,
+      GetAce: (_acl: unknown, _index: number, ace: bigint[]) => {
+        ace[0] = acePointer
+        return 1
+      },
+    }
+    const types = {
+      startupInfoEx: { size: 112 },
+      jobExtendedLimit: { size: 144 },
+      jobBasicAccounting: { size: 48 },
+      sizeBox: { size: 8 },
+      acl: aclType,
+      aceHeader: aceHeaderType,
+      tokenUser: tokenUserType,
+    }
+    installWindowsNativeBindingsForTest({ kernel, advapi, types } as unknown as WindowsNativeBindings)
+
+    const workdir = mkdtempSync(join(tmpdir(), 'kk-studio-native-dacl-'))
+    const file = join(workdir, 'secret')
+    writeFileSync(file, 'x')
+    try {
+      // 全部 ACE 都是当前用户、LocalFree 成功 → 读回通过。
+      await expect(verifyPrivateFile(file)).resolves.toBeUndefined()
+
+      // LocalFree 返回非 NULL（释放失败）：必须报错，绝不当作成功。
+      localFreeResult.value = 0x1n
+      await expect(verifyPrivateFile(file)).rejects.toThrow(/cannot free the private path security descriptor/)
+
+      // 原始失败（非当前用户）与释放失败必须一起上报，原始错误不被遮蔽。
+      equalSid.value = 0
+      await expect(verifyPrivateFile(file)).rejects.toThrow(/not owned by the current user.*additionally cannot free/)
+    } finally {
+      rmSync(workdir, { recursive: true, force: true })
+      koffi.free(aclPointer)
+      koffi.free(acePointer)
+    }
   })
 })
