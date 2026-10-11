@@ -4,7 +4,7 @@
  * <p>这是跨切片唯一允许直接引用 Node 原生能力的地方：能力/运行时/IDE 切片只从这里取 supervisor、私有文件与锁，不自己
  * `spawn` 或自行放宽权限。具体平台实现分别在同目录的 POSIX / Windows 模块内。
  */
-export { createProcessSupervisor } from './process-supervisor.js'
+export { createProcessSupervisor, UnsupportedPlatformError, unsupportedPlatformDiagnostic } from './process-supervisor.js'
 export { ensurePrivateDirectory, writePrivateFile, verifyPrivateFile } from './private-fs.js'
 export { acquireDirectoryLock, type DirectoryLock } from './lock.js'
 export { processScopeCapabilities, type ProcessScopeCapabilities } from './capabilities.js'

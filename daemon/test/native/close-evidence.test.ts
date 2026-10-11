@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test, vi } from 'vitest'
-import { createProcessSupervisor } from '../../src/native/index.js'
+import { PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
 import { fixtureCommand, waitForPid } from './process-test-util.js'
 
 // 会话成员枚举「不可判定」时收敛无法被证明。这里把该判定固定为不可判定，验证收敛失败不会顺带删掉状态目录：
@@ -12,11 +12,11 @@ vi.mock('../../src/native/posix-session.js', async (importOriginal) => {
   return { ...actual, membersSnapshot: () => null }
 })
 
-// 仅 POSIX：Windows 走 Job 收敛，不经过会话枚举。
+// 仅 POSIX：Windows 走 Job 收敛，不经会话枚举。这里直接构造 POSIX 实现，不经工厂（工厂按契约拒绝 darwin）。
 describe.skipIf(process.platform === 'win32')('native close evidence', () => {
   test('an unprovable convergence keeps the state directory', async () => {
     const workdir = mkdtempSync(join(tmpdir(), 'kk-studio-native-evidence-'))
-    const supervisor = createProcessSupervisor()
+    const supervisor = new PosixProcessSupervisor()
     const command = fixtureCommand('hold.mjs', join(workdir, 'root.pid'))
     const managed = await supervisor.start({ executable: command.executable, args: command.args, cwd: workdir })
     await waitForPid(join(workdir, 'root.pid'))

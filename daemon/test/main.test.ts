@@ -2,12 +2,13 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { main } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
 import type { Envelope } from '../src/protocol.js'
 import * as native from '../src/native/index.js'
+import { PosixProcessSupervisor } from '../src/native/posix-supervisor.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
 import { awaitGone, isAlive } from './native/process-test-util.js'
@@ -252,7 +253,18 @@ describe('daemon main information commands', () => {
   })
 })
 
+// 冻结契约下 native 工厂拒绝在 darwin 创建 supervisor，但装配/释放本身与平台无关：macOS 上注入平台自身的真实 POSIX
+// 实现来验证装配、在途收敛与释放；生产 darwin 拒绝路径由下方 strict-confinement 围栏用例单独覆盖。
 describe('daemon main real assembly', () => {
+  beforeEach(() => {
+    if (process.platform === 'darwin') {
+      vi.spyOn(native, 'createProcessSupervisor').mockImplementation(() => new PosixProcessSupervisor())
+    }
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it(
     'runs real capabilities, cancels an in-flight process and stops on a signal event releasing the lock',
     async () => {
@@ -434,7 +446,8 @@ describe('daemon main real assembly', () => {
 describe('daemon main cleanup fault injection', () => {
   /** 包装真实 supervisor：close 先真正收敛，再按注入标记抛错。 */
   function spySupervisor(injectCloseFailure: () => boolean): void {
-    const real = native.createProcessSupervisor()
+    // macOS 上生产工厂按契约拒绝 darwin：这里注入平台自身的真实 POSIX 实现，只验证释放/装配聚合，不冒充生产拒绝。
+    const real = process.platform === 'darwin' ? new PosixProcessSupervisor() : native.createProcessSupervisor()
     const wrapper: ProcessSupervisor = {
       start: (spec: ProcessSpec) => real.start(spec),
       trackDescendant: real.trackDescendant?.bind(real),
@@ -504,4 +517,70 @@ describe('daemon main cleanup fault injection', () => {
     await lock.close()
     harness.assertSignalListenersRestored()
   }, 60_000)
+})
+
+/**
+ * macOS 严格收敛围栏：native 工厂拒绝 darwin 时，Daemon 必须 fail-closed——在任何 mkdir/lock 之前失败、不发 READY、
+ * 不建立 control 连接、不启动任何用户进程；operator 还必须看到严格的平台原因（strict confinement/setsid 不可用）。
+ *
+ * <p>HELLO 是控制连接建立后的第一帧，control server 一个 envelope 都没收到即证明没有建立 control 会话。这里在
+ * Linux 主机上把平台固定为 darwin 驱动控制流，只验证拒绝路径，不冒充真实 macOS 原生验收。
+ */
+describe('daemon main strict-confinement fence (macOS)', () => {
+  it(
+    'refuses darwin before creating the data lock and surfaces the fixed platform diagnostic',
+    async () => {
+      const fixture = await createControlServer()
+      cleans.push(() => fixture.dispose())
+      await writeConfig(fixture)
+
+      const beforeInt = new Set<Listener>(process.listeners('SIGINT') as Listener[])
+      const beforeTerm = new Set<Listener>(process.listeners('SIGTERM') as Listener[])
+      // 调用穿透：真实工厂在 darwin 下必须抛出严格收敛诊断；spy 只用来证明 wiring 确实走到了工厂。
+      const supervisorSpy = vi.spyOn(native, 'createProcessSupervisor')
+      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+      const captured = capture()
+      let code: number
+      // mock 历史会在 restore 时被清空，必须在 finally 还原之前抓取。
+      let supervisorCalls = 0
+      let supervisorResults: Array<{ type: string; value?: unknown }> = []
+      try {
+        code = await main(['--config', fixture.configPath])
+        supervisorCalls = supervisorSpy.mock.calls.length
+        supervisorResults = supervisorSpy.mock.results.map((result) => ({ type: result.type, value: result.value }))
+      } finally {
+        captured.restore()
+        platformSpy.mockRestore()
+        supervisorSpy.mockRestore()
+      }
+
+      // 启动阶段立即失败：非零退出，且不产生任何业务输出。
+      expect(code).toBe(1)
+      expect(captured.out.join('')).toBe('')
+      // 拒绝发生在 runDaemon 最前的 native 工厂：真实到达工厂并抛出 UnsupportedPlatformError，而不是任意早期失败。
+      expect(supervisorCalls).toBe(1)
+      expect(supervisorResults[0]?.type).toBe('throw')
+      const rejection = supervisorResults[0]?.value as Error | undefined
+      expect(rejection?.name).toBe('UnsupportedPlatformError')
+      expect(rejection?.message).toContain('strict native process confinement is unavailable on darwin')
+      expect(rejection?.message).toContain('setsid')
+      // 没有 HELLO/READY：control 连接从未建立，也就没有任何用户进程被启动。
+      expect(fixture.received).toHaveLength(0)
+      // operator 必须看到真实平台原因（同一固定文案），且绝不泄漏原始异常、路径或注册凭证。
+      const stderr = captured.err.join('')
+      expect(stderr).toContain('Invalid daemon configuration:')
+      expect(stderr).toContain('strict native process confinement is unavailable on darwin')
+      expect(stderr).toContain('setsid')
+      expect(stderr).not.toContain(TOKEN)
+      expect(stderr).not.toContain(fixture.root)
+      // 拒绝路径没有留下信号监听。
+      expect(new Set(process.listeners('SIGINT'))).toEqual(beforeInt)
+      expect(new Set(process.listeners('SIGTERM'))).toEqual(beforeTerm)
+      // 围栏在 mkdir/lock 之前：没有创建目录锁文件，锁也随时可取得。
+      expect(existsSync(join(fixture.dataDir, 'daemon.lock'))).toBe(false)
+      const lock = await native.acquireDirectoryLock(fixture.dataDir)
+      await lock.close()
+    },
+    60_000,
+  )
 })
