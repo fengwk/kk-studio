@@ -119,7 +119,7 @@ public final class IdeBrowserWebSocketGateway {
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
-    if (!IdeGatewayDataPlane.csrfAllowed(request)) {
+    if (!IdeOriginPolicy.webSocketHandshakeAllowed(request)) {
       response.sendError(HttpServletResponse.SC_FORBIDDEN);
       return;
     }

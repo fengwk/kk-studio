@@ -28,8 +28,6 @@ import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -115,7 +113,7 @@ public final class IdeGatewayDataPlane {
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
-    if (!csrfAllowed(request)) {
+    if (!IdeOriginPolicy.httpRequestAllowed(request)) {
       response.sendError(HttpServletResponse.SC_FORBIDDEN);
       return;
     }
@@ -263,42 +261,6 @@ public final class IdeGatewayDataPlane {
       }
     }
     return true;
-  }
-
-  /** 状态变更请求必须来自同源：{@code Sec-Fetch-Site}/{@code Origin} 都不能指示跨站。 */
-  static boolean csrfAllowed(HttpServletRequest request) {
-    String method = request.getMethod();
-    if ("GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method)) {
-      return true;
-    }
-    String site = request.getHeader("Sec-Fetch-Site");
-    if (site != null && !site.equalsIgnoreCase("same-origin") && !site.equalsIgnoreCase("none")) {
-      return false;
-    }
-    String origin = request.getHeader("Origin");
-    return origin == null || sameOrigin(origin, request);
-  }
-
-  private static boolean sameOrigin(String origin, HttpServletRequest request) {
-    try {
-      URI uri = new URI(origin);
-      String host = uri.getHost();
-      if (host == null) {
-        return false;
-      }
-      int port = uri.getPort();
-      String requestHost = request.getServerName();
-      int requestPort = request.getServerPort();
-      boolean hostMatches = host.equalsIgnoreCase(requestHost);
-      boolean portMatches =
-          port == -1
-              || port == requestPort
-              || (port == 443 && "https".equalsIgnoreCase(request.getScheme()))
-              || (port == 80 && "http".equalsIgnoreCase(request.getScheme()));
-      return hostMatches && portMatches;
-    } catch (URISyntaxException error) {
-      return false;
-    }
   }
 
   static List<IdeHeader> forwardRequestHeaders(HttpServletRequest request) {
