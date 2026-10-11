@@ -195,9 +195,9 @@ COMMIT: transferId / uploadId
 二进制字节不进入 WebSocket：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。所有能力统一通过通用 INVOKE 与结果协议交互。
 
 内部 `skill.sync` 与模型可见环境工具复用同一 INVOKE/STARTED/PROGRESS/终态协议。其
-arguments 只携带 Package、repository URL 与 Platform 当前确认的 exact commit；branch
-只能作为 fetch hint，Daemon 必须以 commit 校验安装结果。该 capability 不注册为模型
-Tool，READY 与 Package 发布后的同步由 Platform 发起。
+arguments 只携带 Package、repository URL 与 Platform 当前确认的 exact commit（40 位小写
+SHA-1，本地 Git 后端不支持 SHA-256）；branch 只能作为 fetch hint，Daemon 必须以 commit
+校验安装结果。该 capability 不注册为模型 Tool，READY 与 Package 发布后的同步由 Platform 发起。
 
 技能远程仓库只支持 HTTP/HTTPS；`file:` 保留本地仓库读取，不经代理。Git 连接超时 60 秒、
 网络读取空闲超时 180 秒；持续收到数据时不因累计时长终止。`skill.sync` 的 timeout 为 0，

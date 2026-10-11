@@ -137,41 +137,6 @@ describe('http helper tests', () => {
     ).rejects.toThrow()
   })
 
-  it('loadNativePrivateFs fails closed when native module is missing', async () => {
-    const { loadNativePrivateFs } = await import('../../src/skill/private-fs.js')
-    await expect(loadNativePrivateFs()).rejects.toThrow(
-      /native private filesystem module is unavailable/,
-    )
-  })
-
-  it('loadNativePrivateFs validates required exports via testability seam', async () => {
-    const { loadNativePrivateFs } = await import('../../src/skill/private-fs.js')
-
-    // Throws if missing required functions
-    await expect(
-      loadNativePrivateFs(async () => ({ ensurePrivateDirectory: null })),
-    ).rejects.toThrow(/native private filesystem module is missing required exports/)
-
-    await expect(
-      loadNativePrivateFs(async () => ({ ensurePrivateDirectory: async () => '' })),
-    ).rejects.toThrow(/native private filesystem module is missing required exports/)
-
-    // Resolves when both functions are present
-    const validFs = await loadNativePrivateFs(async () => ({
-      ensurePrivateDirectory: async (p: string) => p,
-      writePrivateFile: async () => {},
-    }))
-    expect(typeof validFs.ensurePrivateDirectory).toBe('function')
-    expect(typeof validFs.writePrivateFile).toBe('function')
-
-    // Surfaces unavailable error when importer throws
-    await expect(
-      loadNativePrivateFs(async () => {
-        throw new Error('custom import error')
-      }),
-    ).rejects.toThrow(/native private filesystem module is unavailable: custom import error/)
-  })
-
   it('canFallback returns false when error has nested AbortError', () => {
     const nestedAbort = {
       message: 'fetch failed',

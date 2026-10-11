@@ -15,6 +15,7 @@ import {
   validateRepositoryUrl,
 } from '../../src/skill/installer.js'
 import { SkillSyncException } from '../../src/skill/types.js'
+import { ensurePrivateDirectory, verifyPrivateFile } from '../../src/native/index.js'
 import { createTestPrivateFs } from './test-private-fs.js'
 
 describe('SkillPackageInstaller', () => {
@@ -88,6 +89,52 @@ describe('SkillPackageInstaller', () => {
     const commitFile = path.join(expectedPackageRoot, '.kkstudio-commit')
     expect(fs.existsSync(commitFile)).toBe(true)
     expect(fs.readFileSync(commitFile, 'utf8')).toBe(`${commit1}\n`)
+  })
+
+  it('default installer wires the native private FS: owner-only paths and external-link refusal', async () => {
+    const { commit1 } = await createFixtureRepo()
+    const remoteUrl = pathToFileURL(remoteRepoDir).toString()
+
+    // No privateFs injected: the installer must default to the native owner-only primitives.
+    const defaultInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot)
+    const installed = await defaultInstaller.install('owner-only-pkg', remoteUrl, 'main', commit1)
+
+    // Platform-agnostic owner-only proof through the native port: directories re-verify as
+    // owner-only, files re-verify as owner-only (POSIX 0600 / Windows DACL). This runs on every
+    // platform, so the installer core is never skipped and Windows is never asserted with a fake mode.
+    const skillDir = path.join(installed.localPath, 'weather-skill')
+    const skillFile = path.join(skillDir, 'SKILL.md')
+    const commitFile = path.join(installed.localPath, '.kkstudio-commit')
+    await expect(ensurePrivateDirectory(installed.localPath)).resolves.toBe(installed.localPath)
+    await expect(ensurePrivateDirectory(skillDir)).resolves.toBe(skillDir)
+    await expect(verifyPrivateFile(skillFile)).resolves.toBeUndefined()
+    await expect(verifyPrivateFile(commitFile)).resolves.toBeUndefined()
+
+    if (process.platform !== 'win32') {
+      const mode = (p: string): number => fs.lstatSync(p).mode & 0o777
+      expect(mode(skillsRoot)).toBe(0o700)
+      expect(mode(stagingRoot)).toBe(0o700)
+      expect(mode(backupRoot)).toBe(0o700)
+      expect(mode(installed.localPath)).toBe(0o700)
+      expect(mode(skillDir)).toBe(0o700)
+      expect(mode(skillFile)).toBe(0o600)
+      expect(mode(commitFile)).toBe(0o600)
+    }
+
+    // External link: a symlinked skills root must be refused, never followed or chmod-ed.
+    const linkedSkillsRoot = path.join(tempDir, 'linked-skills')
+    const externalDir = path.join(tempDir, 'external-dir')
+    fs.mkdirSync(externalDir, { recursive: true })
+    fs.symlinkSync(externalDir, linkedSkillsRoot)
+    const linkedInstaller = new SkillPackageInstaller(
+      linkedSkillsRoot,
+      path.join(tempDir, 'linked-staging'),
+      path.join(tempDir, 'linked-backup'),
+    )
+    await expect(linkedInstaller.install('link-pkg', remoteUrl, 'main', commit1)).rejects.toThrow(
+      /symbolic link/,
+    )
+    expect(fs.readdirSync(externalDir)).toEqual([])
   })
 
   it('installing newer commit replaces existing tree', async () => {
