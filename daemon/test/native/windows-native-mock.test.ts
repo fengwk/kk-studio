@@ -300,6 +300,17 @@ describe('windows job scope (mocked native bindings)', () => {
   })
 })
 
+describe('windows compiled entry (build output)', () => {
+  test('the compiled win32.js imports on this platform without touching the lazy kernel bindings', async () => {
+    // 编译产物的语法与路径必须在非 Windows 上也可加载：源码态 .ts 含 parameter property，Node 类型剥离无法直接执行，
+    // 这正是「helper 只运行编译产物」的动机。这里直接加载 dist 产物，证明编译后的 ESM 在本平台成立。
+    const module = await import(new URL('../../dist/native/win32.js', import.meta.url).href)
+    expect(typeof module.createSuspendedJob).toBe('function')
+    expect(typeof module.verifyPrivateFile).toBe('function')
+    expect(typeof module.lockDirectory).toBe('function')
+  })
+})
+
 describe('windows private path DACL read-back (mocked native bindings)', () => {
   test('LocalFree is bound from kernel32 and its failure is aggregated without masking the original error', async () => {
     const koffi = await import('koffi')

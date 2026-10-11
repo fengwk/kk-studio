@@ -364,11 +364,19 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
     await expect(local.start({ executable: command.executable, args: command.args, cwd: workdir })).rejects.toThrow(/closed/)
   })
 
-  test('helper-path resolves to an existing helper module', async () => {
+  test('helper-path resolves only to the compiled helper build output', async () => {
     const { resolveHelperPath } = await import('../../src/native/helper-path.js')
     const path = resolveHelperPath()
-    expect(path.endsWith('helper.js') || path.endsWith('helper.ts')).toBe(true)
+    // helper 只运行编译产物：源码开发态也必须解析到 daemon/dist/native/helper.js，绝不回退 .ts。
+    expect(path.endsWith('helper.js')).toBe(true)
+    expect(path).toMatch(/dist[/\\]native[/\\]helper\.js$/)
     expect((await import('node:fs')).existsSync(path)).toBe(true)
+  })
+
+  test('helper-path fails closed when no compiled helper exists', async () => {
+    const { resolveHelperPath } = await import('../../src/native/helper-path.js')
+    // 既没有同目录 helper.js，也没有 dist 构建产物：显式失败并提示先构建，绝不退回源码态执行。
+    expect(() => resolveHelperPath(new URL('./__missing_helper_dir__/', import.meta.url))).toThrow(/build output is missing/)
   })
 
   test('a scope helper that dies before publishing the scope fails closed', async () => {
