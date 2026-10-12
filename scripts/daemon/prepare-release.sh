@@ -53,7 +53,6 @@ fi
 
 DAEMON_DIR="$REPO_ROOT/daemon"
 DIST_DIR="$DAEMON_DIR/dist"
-NODE_MODULES="$DAEMON_DIR/node_modules"
 IDE_EXTENSION_DIR="$DAEMON_DIR/ide-extension"
 RUNTIME_MANIFEST="$DAEMON_DIR/runtime-manifest.json"
 LICENSE_FILE="$REPO_ROOT/LICENSE"
@@ -153,61 +152,6 @@ koffi_optional_name() {
   echo "@koromix/koffi-${npm_os}-${npm_cpu}"
 }
 
-# 只保留目标平台的 koffi 预编译目录。npm --os/--cpu 负责选择安装；这里清掉其它平台目录，
-# 防止宿主 node_modules 里已经存在的可选包进入发行归档。
-prune_foreign_koffi() {
-  local keep=$1 directory name
-  [ -d "$NODE_MODULES/@koromix" ] || return 0
-  for directory in "$NODE_MODULES/@koromix"/koffi-*; do
-    [ -e "$directory" ] || continue
-    name=${directory##*/}
-    if [ "$name" != "${keep##*/}" ]; then
-      rm -rf -- "$directory"
-    fi
-  done
-}
-
-# 解包前拒绝绝对路径、盘符和 `..`。归档内指向解包根之内的符号链接保留（官方 code-server
-# 的 bin 与 node_modules 依赖它），指向根外的链接拒绝。只做一次列表，没有第二套解包实现。
-# GNU 与 BSD tar 的详细列表都以类型字符开头，路径从第 6 列开始。
-assert_archive_paths() {
-  local archive=$1 listing line type path target
-  listing=$(tar -tvzf "$archive") || die "cannot list the frozen code-server archive"
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    type=${line%% *}
-    # GNU/BSD 详细列表：权限 用户/组 大小 日期 时间 路径。符号链接在路径后带 " -> target"。
-    path=$(printf '%s\n' "$line" | awk '{ for (i = 6; i <= NF; i++) printf "%s%s", $i, (i < NF ? " " : "") }')
-    target=
-    case "$type" in
-      l*)
-        target=${path#*" -> "}
-        path=${path%%" -> "*}
-        ;;
-    esac
-    case "$path" in
-      /* | ./*..* | *"/../"* | *"/.." | ".." | "../"* | *":"* | *\\*)
-        die "frozen code-server archive contains an unsafe path"
-        ;;
-    esac
-    if [ -n "$target" ]; then
-      case "$target" in
-        /* | *":"* | *\\*) die "frozen code-server archive contains a link that escapes the extraction root" ;;
-      esac
-      python3 - "$path" "$target" <<'PY' || die "frozen code-server archive contains a link that escapes the extraction root"
-import os, sys
-link, target = sys.argv[1], sys.argv[2]
-# prepare-release strips the archive's top-level directory before judging the link.
-stripped = link.split("/", 1)[1] if "/" in link else link
-base = os.path.dirname(stripped)
-resolved = os.path.normpath(os.path.join(base, target))
-if resolved == ".." or resolved.startswith("../") or os.path.isabs(resolved):
-    raise SystemExit(1)
-PY
-    fi
-  done <<<"$listing"
-}
-
 manifest_field() {
   local key=$1 field=$2
   "$NODE_BIN" -e '
@@ -227,14 +171,22 @@ daemon_version() {
 }
 
 install_platform_dependencies() {
-  local npm_os=$1 npm_cpu=$2 koffi_optional
-  # 目标平台的生产依赖：--omit=dev 去掉构建期依赖，--os/--cpu 只选目标平台的 optional 预编译产物。
-  "$NPM_BIN" --prefix "$DAEMON_DIR" ci --omit=dev --no-audit --no-fund \
+  local prefix=$1 npm_os=$2 npm_cpu=$3 koffi_optional directory name
+  mkdir -p "$prefix"
+  cp -- "$DAEMON_DIR/package.json" "$DAEMON_DIR/package-lock.json" "$prefix/"
+  # 目标平台的生产依赖装进临时前缀，不改写 daemon/node_modules。
+  "$NPM_BIN" --prefix "$prefix" ci --omit=dev --no-audit --no-fund \
     --os="$npm_os" --cpu="$npm_cpu" ||
     die "cannot install production dependencies for $npm_os-$npm_cpu"
   koffi_optional=$(koffi_optional_name "$npm_os" "$npm_cpu")
-  prune_foreign_koffi "$koffi_optional"
-  [ -d "$NODE_MODULES/$koffi_optional" ] ||
+  if [ -d "$prefix/node_modules/@koromix" ]; then
+    for directory in "$prefix/node_modules/@koromix"/koffi-*; do
+      [ -e "$directory" ] || continue
+      name=${directory##*/}
+      if [ "$name" != "${koffi_optional##*/}" ]; then rm -rf -- "$directory"; fi
+    done
+  fi
+  [ -d "$prefix/node_modules/$koffi_optional" ] ||
     die "target platform prebuilt is missing: $koffi_optional (refusing a fake cross-platform archive)"
 }
 
@@ -281,6 +233,24 @@ main() {
     die "release tag must equal the daemon version: expected v$version, got $release_tag"
   fi
 
+  local code_server_version code_server_url code_server_sha
+  code_server_version=$("$NODE_BIN" -e '
+    const manifest = require(process.argv[1]);
+    if (typeof manifest.codeServerVersion !== "string") process.exit(1);
+    process.stdout.write(manifest.codeServerVersion);
+  ' "$RUNTIME_MANIFEST") || die "runtime manifest code-server version is missing"
+  [[ $code_server_version =~ $PROJECT_VERSION_PATTERN ]] ||
+    die "runtime manifest code-server version is malformed"
+  code_server_url=$(manifest_field "$os-$arch" url)
+  code_server_sha=$(manifest_field "$os-$arch" sha256)
+  case "$code_server_url" in
+    "https://github.com/fengwk/code-server/releases/download/v$code_server_version/code-server-$code_server_version-$os-$arch.tar.gz")
+      ;;
+    *) die "runtime manifest URL for $os-$arch is not the frozen fork release asset" ;;
+  esac
+  [[ $code_server_sha =~ ^[0-9a-f]{64}$ ]] ||
+    die "runtime manifest sha256 for $os-$arch is not frozen yet"
+
   # 归档入口必须可执行且版本一致：只有真正启动一次才能证明入口与内嵌依赖可用。
   local version_output
   if ! version_output=$("$NODE_BIN" "$DIST_DIR/$ENTRYPOINT" --version 2>&1); then
@@ -294,18 +264,6 @@ main() {
   npm_platform=$(npm_target_platform "$os-$arch")
   npm_os=${npm_platform% *}
   npm_cpu=${npm_platform#* }
-  install_platform_dependencies "$npm_os" "$npm_cpu"
-
-  local code_server_url code_server_sha
-  code_server_url=$(manifest_field "$os-$arch" url)
-  code_server_sha=$(manifest_field "$os-$arch" sha256)
-  case "$code_server_url" in
-    https://github.com/fengwk/code-server/releases/download/v4.141.0-kk.1/code-server-4.141.0-kk.1-"$os"-"$arch".tar.gz)
-      ;;
-    *) die "runtime manifest URL for $os-$arch is not the frozen fork release asset" ;;
-  esac
-  [[ $code_server_sha =~ ^[0-9a-f]{64}$ ]] ||
-    die "runtime manifest sha256 for $os-$arch is not frozen yet"
 
   local commit source_date_epoch
   if ! commit=$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}' 2>/dev/null); then
@@ -330,13 +288,68 @@ main() {
   actual_sha=$(sha256_of "$code_server_tar")
   [ "$actual_sha" = "$code_server_sha" ] ||
     die "code-server runtime SHA256 does not match the frozen manifest for $os-$arch"
-  assert_archive_paths "$code_server_tar"
+  install_platform_dependencies "$WORK_DIR/deps" "$npm_os" "$npm_cpu"
+  KK_ARCHIVE="$code_server_tar" KK_TAR_PACKAGE="$WORK_DIR/deps/package.json" \
+    "$NODE_BIN" --input-type=module <<'JS'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+const require = createRequire(pathToFileURL(process.env.KK_TAR_PACKAGE))
+const { list } = require('tar')
+const FILE = new Set(['File', 'OldFile', 'ContiguousFile'])
+const DIRECTORY = new Set(['Directory', 'GNUDumpDir'])
+function inside(linkPath, target) {
+  if (target.includes('\0') || target.includes('\\') || target.startsWith('/') || /^[A-Za-z]:/.test(target)) return false
+  const relative = linkPath.includes('/') ? linkPath.slice(linkPath.indexOf('/') + 1) : ''
+  const base = relative.includes('/') ? relative.slice(0, relative.lastIndexOf('/')) : ''
+  const combined = base === '' ? target : `${base}/${target}`
+  let depth = 0
+  for (const segment of combined.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      depth -= 1
+      if (depth < 0) return false
+      continue
+    }
+    depth += 1
+  }
+  return true
+}
+const seen = new Set()
+await list({
+  file: process.env.KK_ARCHIVE,
+  strict: true,
+  onReadEntry(entry) {
+    if (entry.meta) return
+    let value = entry.path.replace(/\/+$/, '').replace(/^\.\//, '')
+    if (value === '.' || value === '') return
+    if (value.startsWith('/') || value.includes('\\') || value.includes('\0') || /^[A-Za-z]:/.test(value)) {
+      throw new Error('unsafe path')
+    }
+    const stripped = value.includes('/') ? value.slice(value.indexOf('/') + 1) : value
+    for (const segment of stripped.split('/')) {
+      if (segment === '' || segment === '.' || segment === '..') throw new Error('unsafe path')
+    }
+    if (entry.type === 'SymbolicLink') {
+      if (!inside(value, entry.linkpath ?? '')) throw new Error('frozen code-server archive contains a link that escapes the extraction root')
+      return
+    }
+    if (entry.type === 'Link' || (!FILE.has(entry.type) && !DIRECTORY.has(entry.type))) {
+      throw new Error('unsupported entry')
+    }
+    if (!DIRECTORY.has(entry.type)) {
+      if (seen.has(stripped)) throw new Error('duplicate')
+      seen.add(stripped)
+    }
+  },
+})
+JS
+  [ "$?" -eq 0 ] || die "frozen code-server archive contains an unsafe path or entry"
 
   STAGING_DIR=$(mktemp -d "$(dirname "$RELEASE_DIR")/.kk-studio-daemon-release.XXXXXX")
   mkdir -p "$STAGING_DIR/node_modules" "$STAGING_DIR/runtime/code-server"
   # 编译产物位于归档根，入口固定为 main.js。
   cp -R "$DIST_DIR/." "$STAGING_DIR/"
-  cp -R "$NODE_MODULES/." "$STAGING_DIR/node_modules/"
+  cp -R "$WORK_DIR/deps/node_modules/." "$STAGING_DIR/node_modules/"
   tar -xzf "$code_server_tar" -C "$STAGING_DIR/runtime/code-server" --strip-components=1
   local node_name=node
   if [ "$os" = windows ]; then node_name=node.exe; fi

@@ -74,11 +74,12 @@ function harness(
       const manifest: Record<string, unknown> = {
         schemaVersion: 1,
         daemonVersion: options.manifestVersion ?? VERSION,
+        codeServerVersion: '9.9.9-kk.2',
       }
       if (options.manifestPlatform !== false) {
         manifest.codeServer = {
           [`${os}-${arch}`]: {
-            url: `https://github.com/fengwk/code-server/releases/download/v4.141.0-kk.1/code-server-4.141.0-kk.1-${os}-${arch}.tar.gz`,
+            url: `https://github.com/fengwk/code-server/releases/download/v9.9.9-kk.2/code-server-9.9.9-kk.2-${os}-${arch}.tar.gz`,
             sha256: 'a'.repeat(64),
           },
         }
@@ -290,7 +291,7 @@ describe('update handler', () => {
           codeServer: Record<string, { url: string }>
         }
         manifest.codeServer['macos-arm64'].url =
-          'https://github.com/coder/code-server/releases/download/v4.141.0/code-server-4.141.0-macos-arm64.tar.gz'
+          'https://github.com/coder/code-server/releases/download/v9.9.9-kk.2/code-server-9.9.9-kk.2-macos-arm64.tar.gz'
         await writeFile(manifestPath, JSON.stringify(manifest))
       },
     })

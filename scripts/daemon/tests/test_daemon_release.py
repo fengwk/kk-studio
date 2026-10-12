@@ -1,9 +1,8 @@
 """Contract tests for ``scripts/daemon/prepare-release.sh``.
 
-The fixtures build a tiny repository and shim only curl/npm: the script still performs its
-real tag/version checks, real per-platform ``npm ci --os/--cpu`` dependency selection, real
-SHA256 verification and real tar staging. This proves the archive is genuinely
-platform-specific instead of a Linux ``node_modules`` relabelled as another platform.
+The fixtures shim curl/npm while retaining real tag/version checks, SHA256 verification,
+archive parsing and staging. They verify selection arguments and archive layout, not
+native ABI compatibility; the host-matched CI smoke tests cover runnable platform binaries.
 """
 
 from __future__ import annotations
@@ -49,6 +48,17 @@ class PrepareReleaseTest(TempDirTestCase):
         self.assertEqual(metadata["arch"], "amd64")
         self.assertEqual(metadata["artifactSha256"], sha256_of(archive))
         self.assertEqual(metadata["entrypoint"], "main.js")
+
+    def test_rejects_an_asset_version_that_differs_from_the_manifest(self) -> None:
+        # 运行时版本来自清单；URL 版本不同必须在下载和安装依赖前拒绝。
+        manifest = self.fixture.repo / "daemon" / "runtime-manifest.json"
+        value = json.loads(manifest.read_text())
+        value["codeServerVersion"] = "9.9.9-kk.2"
+        manifest.write_text(json.dumps(value))
+        result = self.fixture.run(RELEASE_TAG, "linux", "amd64")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not the frozen fork release asset", result.stderr)
+        self.assertFalse(self.fixture.release_dir("linux-amd64").exists())
 
     def test_archive_contains_platform_prebuilt_runtime_and_extension(self) -> None:
         self.assertEqual(self.fixture.run(RELEASE_TAG, "linux", "amd64").returncode, 0)
