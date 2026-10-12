@@ -212,7 +212,7 @@ function Import-Installer {
 function Invoke-Installer {
     param([string[]] $Arguments)
     # Tasks survive across install, status, and uninstall. Dot-sourcing reinstalls the sandbox wrapper.
-    Import-Installer -Arguments $Arguments
+    . Import-Installer -Arguments $Arguments
     return (Invoke-Main)
 }
 
@@ -272,7 +272,7 @@ try {
     # Load function definitions before the probe or ACL helper; help does not call Invoke-Main.
     # The original initializer resolves the real SID and does not write files; the wrapper then
     # redirects every managed path into the sandbox before any input ACL or installation work.
-    Import-Installer -Arguments @("help")
+    . Import-Installer -Arguments @("help")
     Initialize-HostContext
     Assert-True -Condition ($script:CurrentSid -match "^S-") -Message "fixture keeps the real current SID"
     Assert-True -Condition ($script:InstallRoot.StartsWith($profileDir, [StringComparison]::Ordinal)) `
