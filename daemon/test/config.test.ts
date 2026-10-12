@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -200,8 +201,12 @@ describe('executable and distribution resolution', () => {
   })
 
   it('treats a dist directory as the compiled program parent', () => {
-    expect(resolveDistributionDir('file:///opt/kk-studio/dist/main.js')).toBe('/opt/kk-studio')
-    expect(resolveDistributionDir('file:///opt/kk-studio/src/main.ts')).toBe('/opt/kk-studio/src')
+    // file URL 必须带当前平台的绝对路径；file:///opt/... 在 Windows 上没有盘符，fileURLToPath 会直接拒绝。
+    const root = resolve(tmpdir(), 'kk-distribution-root')
+    const distModule = pathToFileURL(join(root, 'dist', 'main.js')).href
+    const sourceModule = pathToFileURL(join(root, 'src', 'main.ts')).href
+    expect(resolveDistributionDir(distModule)).toBe(root)
+    expect(resolveDistributionDir(sourceModule)).toBe(dirname(join(root, 'src', 'main.ts')))
   })
 })
 

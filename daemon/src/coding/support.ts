@@ -1,5 +1,5 @@
 import { lstat, realpath, stat } from 'node:fs/promises'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, posix, relative, win32 } from 'node:path'
 import type { CapabilityResult } from '../contracts.js'
 import { errorResult } from '../contracts.js'
 
@@ -216,27 +216,24 @@ export function isAbsolute(path: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')
 }
 
-/** 词法归一：折叠 '.' 与 '..' 段，不触碰文件系统。 */
+/**
+ * 词法归一：折叠 '.' 与 '..' 段，不触碰文件系统。
+ *
+ * <p>显式 Windows 盘符、反斜杠 UNC，以及带反斜杠的相对路径走 {@code win32.normalize}，避免把盘符再拼到根分隔符后面；
+ * Windows 宿主上的正斜杠 UNC 同样按 Windows 处理。其余 POSIX 形式走 {@code posix.normalize}，不依赖当前宿主。
+ */
 export function normalize(path: string): string {
-  const absolute = isAbsolute(path)
-  const separator = path.includes('\\') && !path.startsWith('/') ? '\\' : '/'
-  const parts = path.split(/[\\/]+/)
-  const stack: string[] = []
-  for (const part of parts) {
-    if (part === '' || part === '.') {
-      continue
-    }
-    if (part === '..' && stack.length > 0 && stack[stack.length - 1] !== '..') {
-      stack.pop()
-      continue
-    }
-    stack.push(part)
+  return usesWindowsNormalize(path) ? win32.normalize(path) : posix.normalize(path)
+}
+
+function usesWindowsNormalize(path: string): boolean {
+  if (/^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\')) {
+    return true
   }
-  const joined = stack.join(separator)
-  if (absolute) {
-    return path.startsWith('\\\\') ? `\\\\${joined}` : separator + joined
+  if (process.platform === 'win32' && path.startsWith('//')) {
+    return true
   }
-  return joined
+  return path.includes('\\') && !path.startsWith('/')
 }
 
 /** 转成 '/' 分隔的展示路径。 */
