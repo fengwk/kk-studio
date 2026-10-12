@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import type { Kernel32, WindowsNativeBindings } from '../../src/native/win32.js'
-import { installWindowsNativeBindingsForTest } from '../../src/native/win32.js'
+import { installWindowsNativeBindingsForTest, loadWindowsNativeTypes } from '../../src/native/win32.js'
 import {
   WindowsManagedProcess,
   WindowsProcessSupervisor,
@@ -182,6 +182,14 @@ describe('windows managed process failure branches (mocked native bindings)', ()
   let dir: string
 
   beforeEach(async () => {
+    // 先建真实 Koffi 类型（不加载 Windows DLL，Linux 也能完成），再复位并重复构造。
+    // 真实绑定与 mock reset 共用进程级类型表；具名结构若被重新注册会抛 Duplicate type name。
+    const first = await loadWindowsNativeTypes()
+    installWindowsNativeBindingsForTest(null)
+    const rebuilt = await loadWindowsNativeTypes()
+    expect(rebuilt).toBe(first)
+    expect(rebuilt.startupInfoEx.size).toBeGreaterThan(0)
+    installWindowsNativeBindingsForTest(null)
     // 先用真实原生绑定创建真实私有状态目录（Windows 上走真实 owner-only DACL），随后才安装假绑定；
     // 假绑定只覆盖 Job 端口，private FS 的权限调用绝不落到假 DACL 上。
     dir = await state.createStateDir()
