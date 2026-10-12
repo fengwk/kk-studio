@@ -14,4 +14,10 @@ const testSystemDirect: SystemProxyResolver = {
   async close(): Promise<void> {},
 }
 
+if (process.platform === 'win32') {
+  // 必须早于任何测试临时文件：只改本进程 TokenOwner，查询或修改失败直接中止，不吞异常。
+  const { alignCurrentProcessTokenOwner } = await import('./windows-token-owner-setup.js')
+  await alignCurrentProcessTokenOwner()
+}
+
 await installOutboundNetwork({}, testSystemDirect)
