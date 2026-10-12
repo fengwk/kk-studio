@@ -125,6 +125,8 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     fs.writeFileSync(file, 'class App {}\n')
 
     const pendingLease = pool.lease(file)
+    // 立即挂上拒绝观察：close 取消 boot 时（进程启动后）不能留下未处理的 rejection。
+    const leaseRejected = expect(pendingLease).rejects.toThrow(/closed|cancelled/)
 
     // Wait until process starts
     const startEvent = await awaitEvent(transcript, (e) => e.event === 'start')
@@ -132,7 +134,7 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
 
     await pool.close()
 
-    await expect(pendingLease).rejects.toThrow(/closed|cancelled/)
+    await leaseRejected
     expect(pool.activeCount()).toBe(0)
     await awaitProcessGone(pid)
   })
