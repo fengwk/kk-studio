@@ -15,7 +15,8 @@ import { joinCommandLine } from './windows-command-line.js'
  * 交给它，helper 里其它可继承句柄不会漏进用户命令。
  *
  * <p>权限与锁同样走内核：私有路径用显式 DACL（只有属主一个 allow ACE，目录额外带可继承标志），目录锁用 `LockFileEx`
- * （独占、立即失败），二者都由内核在句柄关闭或进程崩溃时释放。
+ * （独占、立即失败），二者都由内核在句柄关闭或进程崩溃时释放。新建对象的默认属主来自进程 `TokenOwner`，不保证等于
+ * `TokenUser`，因此只有本次确证新建的对象才会把属主显式设为当前用户 SID；既有路径在任何权限变更前仍必须已经属于当前用户。
  *
  * <p>本模块只在 Windows 上被调用；所有原生库与结构体都是惰性加载，非 Windows 平台引入本模块不会触碰 kernel32/advapi32。
  */
@@ -56,10 +57,12 @@ const PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002_000D
 const SE_FILE_OBJECT = 1
 const OWNER_SECURITY_INFORMATION = 0x0000_0001
 const DACL_SECURITY_INFORMATION = 0x0000_0004
-/** 让新 DACL 取代继承来的 ACE：既切掉外部主体，又不触碰属主 SID、不提升权限。 */
+/** 让新 DACL 取代继承来的 ACE，切掉外部主体；不提升权限。属主 SID 只在本次确证新建时另行设置。 */
 const PROTECTED_DACL_SECURITY_INFORMATION = 0x8000_0000
 const TOKEN_QUERY = 0x0000_0008
 const TOKEN_USER_INFORMATION_CLASS = 1
+/** `CreateFileW(OPEN_ALWAYS)` 打开既有文件后，`GetLastError` 必须立刻读到这个值；否则视为本次新建。 */
+const ERROR_ALREADY_EXISTS = 183
 const ACL_REVISION = 2
 const ACCESS_ALLOWED_ACE_TYPE = 0
 const FILE_ALL_ACCESS = 0x001F_01FF
@@ -169,6 +172,7 @@ export interface WindowsNativeBindings {
 let kernelCache: Kernel32 | null = null
 let advapiCache: Advapi32 | null = null
 let typesCache: WindowsTypes | null = null
+let currentUserSidState: { sid: Pointer; buffer: Buffer } | null = null
 
 async function koffiModule(): Promise<Koffi> {
   return import('koffi')
@@ -672,6 +676,8 @@ export function installWindowsNativeBindingsForTest(bindings: WindowsNativeBindi
   kernelCache = bindings?.kernel ?? null
   advapiCache = bindings?.advapi ?? null
   typesCache = bindings?.types ?? null
+  // 假绑定换掉后，上一次解码出的用户 SID 不再指向当前令牌缓冲。
+  currentUserSidState = null
 }
 
 function inheritStandardHandle(kernel32: Kernel32, stdHandle: number): Pointer {
@@ -713,8 +719,9 @@ function createEnvironmentBlock(env: NodeJS.ProcessEnv): Buffer {
 /**
  * 目录锁：先把目录收紧为属主独占，再创建/打开锁文件并读回核验其 DACL，最后用 `LockFileEx` 取得独占锁。
  *
- * <p>锁文件与目录都走同一套真实私有原语：不跟随 reparse 点（`GetFileAttributesW` 判定 + `FILE_FLAG_OPEN_REPARSE_POINT`），
- * 打开后按 owner-only DACL 收紧并读回。释放时无论解锁是否成功都会继续关闭句柄，并把两者的失败一起上报。
+ * <p>锁文件与目录都走同一套真实私有原语：不跟随 reparse 点（`GetFileAttributesW` 判定 + `FILE_FLAG_OPEN_REPARSE_POINT`）。
+ * `OPEN_ALWAYS` 之后必须立刻读 `GetLastError`：只有 `ERROR_ALREADY_EXISTS` 才是既有锁文件，先确认当前用户属主再只改 DACL；
+ * 本次新建的锁文件才显式设置当前用户属主。释放时无论解锁是否成功都会继续关闭句柄，并把两者的失败一起上报。
  */
 export async function lockDirectory(path: string): Promise<WindowsDirectoryLock> {
   const kernel32 = await kernel()
@@ -730,13 +737,20 @@ export async function lockDirectory(path: string): Promise<WindowsDirectoryLock>
     FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
     null,
   )
+  // CreateFileW 会改写线程错误码：成功与否都必须在任何后续调用之前读出。
+  const openStatus = kernel32.GetLastError()
   if (handle === null || isInvalidHandle(handle)) {
-    throw new Error(`cannot open the directory lock file: ${kernel32.GetLastError()}`)
+    throw new Error(`cannot open the directory lock file: ${openStatus}`)
   }
   try {
-    // 收紧锁文件 DACL 之前先确认它属于当前用户：既有锁文件若是外部属主，绝不改写。
-    await assertOwnedByCurrentUser(lockPath)
-    await applyOwnerOnlyDacl(lockPath, false)
+    if (openStatus === ERROR_ALREADY_EXISTS) {
+      // 既有锁文件若是外部属主，绝不改写属主或 DACL。
+      await assertOwnedByCurrentUser(lockPath)
+      await applyOwnerOnlyDacl(lockPath, false)
+    } else {
+      // 非 ERROR_ALREADY_EXISTS 表示本次 OPEN_ALWAYS 新建：默认 TokenOwner 可能不是当前用户。
+      await applyOwnerOnlyDacl(lockPath, false, true)
+    }
     await verifyPrivatePath(lockPath, 'file')
   } catch (error) {
     kernel32.CloseHandle(handle)
@@ -781,20 +795,45 @@ export function releaseDirectoryLock(
   }
 }
 
-/** 独占创建或确认一个只有属主可访问的私有目录，并读回验证 DACL。 */
+/**
+ * 独占创建或确认一个只有属主可访问的私有目录，并读回验证属主与 DACL。
+ *
+ * <p>已经存在且通过类型、reparse 与属主校验的目录只收紧 DACL，不再创建。缺失时先递归补齐父级，再用非递归 `mkdir` 确认叶子是
+ * 本次新建并显式设置当前用户属主。`EEXIST` 表示创建间隙里出现了对象：重新拒绝 reparse、核对类型与属主后只改 DACL。
+ */
 export async function ensurePrivateDirectory(path: string): Promise<string> {
   const fs = await import('node:fs')
+  const pathModule = await import('node:path')
   await rejectReparsePoint(path)
   const existing = lstatOrNull(fs, path)
+  let created = false
   if (existing !== null) {
     if (!existing.isDirectory()) {
       throw new Error(`the private path must be a directory: ${path}`)
     }
     // 已存在的目录在改动其 DACL 之前先确认属主：绝不对别人的目录收紧权限。
     await assertOwnedByCurrentUser(path)
+  } else {
+    const parent = pathModule.win32.dirname(path)
+    if (parent !== path) {
+      fs.mkdirSync(parent, { recursive: true })
+    }
+    try {
+      fs.mkdirSync(path)
+      created = true
+    } catch (error) {
+      if (!isErrno(error, 'EEXIST')) {
+        throw error
+      }
+      await rejectReparsePoint(path)
+      const raced = lstatOrNull(fs, path)
+      if (raced === null || !raced.isDirectory()) {
+        throw new Error(`the private path must be a directory: ${path}`)
+      }
+      await assertOwnedByCurrentUser(path)
+    }
   }
-  fs.mkdirSync(path, { recursive: true })
-  await applyOwnerOnlyDacl(path, true)
+  await applyOwnerOnlyDacl(path, true, created)
   await verifyPrivatePath(path, 'directory')
   return path
 }
@@ -803,8 +842,9 @@ export async function ensurePrivateDirectory(path: string): Promise<string> {
  * 以 owner-only DACL **原子**写入敏感文件。
  *
  * <p>绝不对目标做「先写内容再收紧 DACL」：那会先把明文落进继承来的宽松权限文件里。这里改为在同一个私有父目录里独占创建
- * **空**临时文件，先把它的 DACL 收紧成 owner-only 并读回，再写满、`fsync`，最后原子 `rename` 覆盖目标并读回验证。
- * 覆盖既有目标之前先核验它是属主自己的、已经收紧的普通文件；任何外部属主/宽松 ACL 都在写入前失败关闭，绝不截断改写。
+ * **空**临时文件，先把它的属主显式设为当前用户并把 DACL 收紧成 owner-only、读回通过，再写满、`fsync`，最后原子 `rename`
+ * 覆盖目标并读回验证。覆盖既有目标之前先核验它是属主自己的、已经收紧的普通文件；任何外部属主/宽松 ACL 都在写入前失败关闭，
+ * 绝不截断改写，也绝不改写未知路径的属主。
  */
 export async function writePrivateFile(path: string, data: string | Uint8Array): Promise<void> {
   const fs = await import('node:fs')
@@ -826,7 +866,8 @@ export async function writePrivateFile(path: string, data: string | Uint8Array):
     // 空文件：此刻即使权限还没收紧也没有任何敏感内容可泄露。
     fs.writeFileSync(temporary, new Uint8Array(0), { flag: 'wx', mode: 0o600 })
     created = true
-    await applyOwnerOnlyDacl(temporary, false)
+    // `wx` 成功才是本次新建：在写入任何敏感字节之前显式当前用户属主并读回。
+    await applyOwnerOnlyDacl(temporary, false, true)
     await verifyPrivatePath(temporary, 'file')
     const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data)
     commitPrivateFile(fs, temporary, path, bytes)
@@ -991,8 +1032,6 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-let currentUserSidState: { sid: Pointer; buffer: Buffer } | null = null
-
 /**
  * 当前进程令牌的用户 SID。
  *
@@ -1042,9 +1081,10 @@ async function currentUserSid(): Promise<Pointer> {
 /**
  * 用**当前登录用户 SID** 重建 DACL：目录额外带可继承标志，使新建子项默认同样只有属主可访问。
  *
- * <p>`PROTECTED_DACL_SECURITY_INFORMATION` 让新 DACL 取代继承来的 ACE，切掉外部主体；只传 DACL，不改属主 SID、不提升权限。
+ * <p>`PROTECTED_DACL_SECURITY_INFORMATION` 让新 DACL 取代继承来的 ACE，切掉外部主体。只有 `assignOwner` 为真（本次确证新建）
+ * 才同时设置 `OWNER_SECURITY_INFORMATION`；既有路径只改 DACL，不碰属主 SID、不提升权限。
  */
-async function applyOwnerOnlyDacl(path: string, directory: boolean): Promise<void> {
+async function applyOwnerOnlyDacl(path: string, directory: boolean, assignOwner = false): Promise<void> {
   const advapi32 = await advapi()
   const koffi = await koffiModule()
   const currentSid = await currentUserSid()
@@ -1064,9 +1104,14 @@ async function applyOwnerOnlyDacl(path: string, directory: boolean): Promise<voi
   if (advapi32.AddAccessAllowedAceEx(acl, ACL_REVISION, aceFlags, FILE_ALL_ACCESS, currentSid) === 0) {
     throw new Error(`cannot add the private path owner ACE: ${path}`)
   }
-  if (advapi32.SetNamedSecurityInfoW(path, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, null, null, acl, null) !== 0) {
+  const securityInfo = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION | (assignOwner ? OWNER_SECURITY_INFORMATION : 0)
+  if (advapi32.SetNamedSecurityInfoW(path, SE_FILE_OBJECT, securityInfo, assignOwner ? currentSid : null, null, acl, null) !== 0) {
     throw new Error(`cannot set the private path owner-only DACL: ${path}`)
   }
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === code
 }
 
 /** Windows 路径拼接：只补一个分隔符，不改变已有语义。 */
