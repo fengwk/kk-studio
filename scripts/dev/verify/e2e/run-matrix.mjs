@@ -594,10 +594,14 @@ async function main(argv) {
 // keep import for potential dynamic loaders
 void pathToFileURL
 
+// 只设置 exitCode 并交回事件循环自然退出：process.exit 会丢弃管道上尚未 drain 的异步
+// stdout/stderr 写入（--docs 等大输出会被截断），自然退出会等待 pending 写入完成后按 exitCode 结束。
 main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
+  (code) => {
+    process.exitCode = code
+  },
   (err) => {
     console.error(err)
-    process.exit(2)
+    process.exitCode = 2
   },
 )
