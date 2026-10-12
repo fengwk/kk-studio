@@ -42,6 +42,11 @@ function Assert-Contains {
     Assert-True -Condition ($Haystack -like "*$Needle*") -Message $Message
 }
 
+function Assert-Equal {
+    param([AllowEmptyString()][string] $Actual, [AllowEmptyString()][string] $Expected, [Parameter(Mandatory = $true)][string] $Message)
+    Assert-True -Condition ($Actual -ceq $Expected) -Message $Message
+}
+
 # --- sandbox and fixtures -------------------------------------------------------------------
 
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-ps-test-" + [Guid]::NewGuid().ToString("N"))
@@ -56,11 +61,7 @@ if ($null -eq $nodeCommand) {
 }
 
 $stubMain = @'
-const args = process.argv.slice(2)
-let argv = args
-if (args[0] === "--base64-args") {
-  argv = args.slice(1).map((value) => Buffer.from(value, "base64").toString("utf8"))
-}
+const argv = process.argv.slice(2)
 if (argv[0] === "--version") {
   process.stdout.write("kk-studio-daemon 1.0.12\n")
   process.exit(0)
@@ -192,7 +193,46 @@ function Invoke-Installer {
     return (Invoke-Main)
 }
 
+function Assert-DirectArgumentRoundTrip {
+    # Real Node receives the Unicode vector directly. The installer always quotes, and the
+    # existing backslash/quote escaping must survive CommandLineToArgvW unchanged.
+    $probe = @'
+const fs = require("fs")
+fs.writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)), "utf8")
+'@
+    $probePath = Join-Path $sandbox "argv-probe.js"
+    $outputPath = Join-Path $sandbox "argv-probe.json"
+    Set-Content -LiteralPath $probePath -Value $probe -Encoding UTF8
+    $arguments = @(
+        '环境',
+        '',
+        'say "hi"',
+        'C:\尾随\',
+        '😀',
+        'plain'
+    )
+    $serialized = ConvertTo-WindowsCommandLine -Arguments (@($outputPath) + $arguments)
+    $probeInfo = [Diagnostics.ProcessStartInfo]::new()
+    $probeInfo.FileName = $nodeCommand.Source
+    $probeInfo.Arguments = '"' + $probePath + '" ' + $serialized
+    $probeInfo.UseShellExecute = $false
+    $probeInfo.RedirectStandardOutput = $true
+    $probeInfo.RedirectStandardError = $true
+    $probeProcess = [Diagnostics.Process]::new()
+    $probeProcess.StartInfo = $probeInfo
+    [void] $probeProcess.Start()
+    $probeProcess.WaitForExit()
+    Assert-True -Condition ($probeProcess.ExitCode -eq 0) -Message "real node accepts the direct argument vector"
+    $received = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-True -Condition ($received.Count -eq $arguments.Count) -Message "direct argument count is preserved"
+    for ($index = 0; $index -lt $arguments.Count; $index++) {
+        Assert-Equal -Actual ([string] $received[$index]) -Expected $arguments[$index] `
+            -Message "direct argument $index round-trips through node"
+    }
+}
+
 try {
+    Assert-DirectArgumentRoundTrip
     Set-Content -LiteralPath (Join-Path $profileDir ".keep") -Value "keep" -Encoding ASCII
 
     # Pure contract checks that do not touch the filesystem.
@@ -236,7 +276,10 @@ try {
     Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "scheduled task registered"
 
     $registered = @($script:Tasks.Values)[0]
-    Assert-Contains -Haystack $registered.Action.Argument -Needle "--base64-args" -Message "task passes base64 args"
+    $expectedConfig = Join-Path $installRoot "daemon.json"
+    $expectedArguments = '"main.js" "--config" "' + $expectedConfig + '"'
+    Assert-True -Condition ($registered.Action.Argument -ceq $expectedArguments) `
+        -Message "task arguments are the quoted direct argv"
     Assert-Contains -Haystack $registered.Action.Execute -Needle "node.exe" -Message "task runs node.exe"
 
     # status is read-only and reports Running.

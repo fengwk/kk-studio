@@ -224,14 +224,20 @@ describe('daemon main information commands', () => {
     expect(version.out.join('')).toContain(`kk-studio-daemon ${DAEMON_VERSION}`)
   })
 
-  it('rejects a malformed base64 argument transport without leaking values', async () => {
-    const captured = capture()
+  it('rejects illegal external arguments and the removed encoding flag without leaking values', async () => {
+    const secret = 'secret-argument-value'
+    const illegal = capture()
     try {
-      expect(await main(['--base64-args', 'not base64!!'])).toBe(2)
+      expect(await main(['--config', `${secret}\0leak`])).toBe(2)
+      expect(await main(['--base64-args', secret])).toBe(1)
     } finally {
-      captured.restore()
+      illegal.restore()
     }
-    expect(captured.err.join('')).toContain('invalid daemon argument transport')
+    const stderr = illegal.err.join('')
+    expect(stderr).toContain('invalid daemon argument transport')
+    expect(stderr).toContain('Invalid daemon configuration:')
+    expect(stderr).not.toContain(secret)
+    expect(stderr).not.toContain('--base64-args')
   })
 
   it('validates --check-config success and failure with safe diagnostics', async () => {

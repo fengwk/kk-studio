@@ -60,7 +60,7 @@ Usage: .\install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <abso
 Only the latest official fengwk/kk-studio GitHub release is installed.
 Inputs must be sibling, nonempty regular files with current-user-only protected ACLs.
 Token bytes are copied only; they never enter task arguments or environment variables.
-No JDK or user Node is required: the release archive bundles a frozen node.exe runtime.
+No user Node is required: the release archive bundles a frozen node.exe runtime.
 
 Fixed layout: %USERPROFILE%\.kk-studio\daemon.json, daemon.token, lib, logs, backups.
 Task: kk-studio-environment-daemon-<current-user-SID>
@@ -71,8 +71,8 @@ Uninstall is idempotent and preserves config/token/data/backups.
 After install, return to Studio and confirm the environment reports READY.
 Status exits 0 when Running, 1 when absent, 3 otherwise.
 
-The task executes the frozen runtime node.exe directly with only main.js and --config
-(UTF-8 Base64 machine encoding). It uses AtLogOn, Interactive logon and Limited run level:
+The task executes the frozen runtime node.exe directly with only main.js and --config.
+It uses AtLogOn, Interactive logon and Limited run level:
 only while this user is logged in. Task Scheduler does not capture daemon stdout/stderr.
 Task state is not connection health.
 RestartCount/RestartInterval are best effort settings, not Windows Service/systemd supervision.
@@ -487,7 +487,7 @@ function Assert-DownloadedArchive {
         (Get-Item -LiteralPath $script:DownloadedArchive).Length -le 0) {
         Throw-Failure "downloaded daemon archive not found or empty: $($script:DownloadedArchive)"
     }
-    # Windows 10/11 ship tar.exe; it unpacks the release archive without a user JDK or Node.
+    # Windows 10/11 ship tar.exe; it unpacks the release archive without a user Node.
     $tar = Get-Command "tar.exe" -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($null -eq $tar) {
@@ -509,9 +509,9 @@ function Assert-DownloadedArchive {
     }
     # Probe the archive's own frozen runtime exactly as the task runs it: the ASCII leaf
     # main.js is resolved against the working directory, so a non-ASCII install path can
-    # never corrupt the argument.
+    # never corrupt the argument. Node receives the Unicode argv directly.
     $result = Invoke-NativeProcess -Executable $node `
-        -Arguments (ConvertTo-DaemonEncodedArguments -Arguments @("--version")) `
+        -Arguments @("--version") `
         -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -ne 0) {
         Throw-Failure "downloaded daemon archive failed its --version check (exit code $($result.ExitCode))"
@@ -580,7 +580,7 @@ function Prepare-StagedArchive {
     Copy-PrivateFile -Source $TokenFile -Destination (Join-Path $script:DownloadDirectory "daemon.token")
     $stagedConfig = Join-Path $script:DownloadDirectory "daemon.json"
     $node = Join-Path $script:StagedLib "runtime\code-server\lib\node.exe"
-    $arguments = (ConvertTo-DaemonEncodedArguments -Arguments @("--check-config", $stagedConfig))
+    $arguments = @("--check-config", $stagedConfig)
     $result = Invoke-NativeProcess -Executable $node -Arguments $arguments `
         -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -eq 0 -and
@@ -668,10 +668,8 @@ function ConvertTo-WindowsCommandLineArgument {
         [AllowEmptyString()]
         [string] $Argument
     )
-    if ($Argument.Length -gt 0 -and $Argument -notmatch '[\s"]') {
-        return $Argument
-    }
-
+    # Always quote. The Scheduled Task argument string and the independently generated update
+    # script must match exactly, and an unquoted bypass would diverge on spaces or metacharacters.
     $builder = [Text.StringBuilder]::new()
     [void] $builder.Append('"')
     $backslashes = 0
@@ -715,27 +713,11 @@ function ConvertTo-WindowsCommandLine {
     return ($serialized -join " ")
 }
 
-function ConvertTo-DaemonEncodedArguments {
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyCollection()]
-        [AllowEmptyString()]
-        [string[]] $Arguments
-    )
-    # Windows JDK 21 converts the Unicode command line through the system ANSI code page,
-    # losing characters before Java sees argv. Each application value therefore travels as
-    # an ASCII UTF-8 Base64 token, decoded once by the daemon (encoding, not encryption).
-    $encoded = foreach ($argument in $Arguments) {
-        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argument))
-    }
-    return @("--base64-args") + $encoded
-}
-
 function New-DaemonArgumentList {
-    # The task runs `node.exe main.js --base64-args ...`; main.js is an ASCII leaf resolved
+    # The task runs `node.exe main.js --config <path>`; main.js is an ASCII leaf resolved
     # against the working directory, so a non-ASCII install path never enters argv.
-    return @("main.js") +
-        (ConvertTo-DaemonEncodedArguments -Arguments @("--config", $script:InstalledConfig))
+    # Node receives Unicode arguments directly; no pre-encoding is applied.
+    return @("main.js", "--config", $script:InstalledConfig)
 }
 
 function New-DaemonScheduledTaskDefinition {
