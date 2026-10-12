@@ -47,6 +47,7 @@ function evaluate(expression, branch, event, validateOnly, status = {}) {
       validate: { result: status.repository ?? 'success' },
       validate_windows_daemon: { result: status.windows ?? 'success' },
       validate_unix_daemon: { result: status.unix ?? 'success' },
+      daemon_ci: { result: status.native ?? 'success' },
     },
     always: () => true,
     cancelled: () => status.cancelled ?? false,
@@ -72,21 +73,33 @@ test('push gates stay main-only; explicit manual validation runs all gates on an
 })
 
 test('validation-only never publishes; failed or cancelled gates cannot publish', () => {
-  // A success-only happy path is insufficient: preserve the failure/cancellation barrier.
+  // A success-only happy path is insufficient: each native, Unix, and Windows gate
+  // must independently block publish on failure or cancellation.
   const expression = jobCondition('publish')
+  const results = ['success', 'failure', 'cancelled', 'skipped']
   for (const branch of ['main', 'dev']) {
-    for (const repository of ['success', 'failure', 'cancelled', 'skipped']) {
-      for (const windows of ['success', 'failure', 'cancelled', 'skipped']) {
-        for (const unix of ['success', 'failure', 'cancelled', 'skipped']) {
-          for (const cancelled of [false, true]) {
-            const state = { repository, windows, unix, cancelled }
-            assert.equal(evaluate(expression, branch, 'workflow_dispatch', true, state), false)
-            assert.equal(
-              evaluate(expression, branch, 'push', false, state),
-              !cancelled && ['success', 'skipped'].includes(repository)
+    for (const repository of results) {
+      for (const windows of results) {
+        for (const unix of results) {
+          for (const native of results) {
+            for (const cancelled of [false, true]) {
+              const state = { repository, windows, unix, native, cancelled }
+              const publishable = !cancelled
+                && ['success', 'skipped'].includes(repository)
                 && ['success', 'skipped'].includes(windows)
-                && ['success', 'skipped'].includes(unix),
-            )
+                && ['success', 'skipped'].includes(unix)
+                && ['success', 'skipped'].includes(native)
+              assert.equal(
+                evaluate(expression, branch, 'workflow_dispatch', true, state),
+                false,
+                `validate_only must not publish ${JSON.stringify(state)}`,
+              )
+              assert.equal(
+                evaluate(expression, branch, 'push', false, state),
+                publishable,
+                `push publish gate for ${JSON.stringify(state)}`,
+              )
+            }
           }
         }
       }
