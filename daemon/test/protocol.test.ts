@@ -156,27 +156,27 @@ describe('READY capabilities codec', () => {
   }
 
   it('round-trips capabilities', () => {
-    const text = encodeCapabilities({ version: 5, daemonVersion: '1.0.13', environment })
+    const text = encodeCapabilities({ version: 5, daemonVersion: '1.0.14', environment })
     const decoded = decodeCapabilities(text)
     expect(decoded.version).toBe(5)
-    expect(decoded.daemonVersion).toBe('1.0.13')
+    expect(decoded.daemonVersion).toBe('1.0.14')
     expect(decoded.environment).toEqual(environment)
   })
 
   it('rejects unknown fields, wrong version and invalid OS/daemonVersion', () => {
-    expect(() => decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.13', environment, x: 1 }))).toThrow(
+    expect(() => decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.14', environment, x: 1 }))).toThrow(
       /unexpected|unknown/,
     )
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 4, daemonVersion: '1.0.13', environment })),
+      decodeCapabilities(JSON.stringify({ version: 4, daemonVersion: '1.0.14', environment })),
     ).toThrow(/unsupported READY capabilities version/)
     expect(() =>
       decodeCapabilities(
-        JSON.stringify({ version: 5, daemonVersion: '1.0.13', environment: { ...environment, operatingSystem: 'plan9' } }),
+        JSON.stringify({ version: 5, daemonVersion: '1.0.14', environment: { ...environment, operatingSystem: 'plan9' } }),
       ),
     ).toThrow(/unsupported daemon operating system/)
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.13', environment: { ...environment, architecture: 'ia32' } })),
+      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.14', environment: { ...environment, architecture: 'ia32' } })),
     ).toThrow(/unsupported daemon architecture/)
     expect(() =>
       decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: 'bad version', environment })),

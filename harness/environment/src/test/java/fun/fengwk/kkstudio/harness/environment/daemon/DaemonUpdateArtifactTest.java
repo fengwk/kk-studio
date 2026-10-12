@@ -13,30 +13,30 @@ import org.junit.jupiter.api.Test;
  */
 class DaemonUpdateArtifactTest {
 
-  private static final String VERSION = "1.0.13";
+  private static final String VERSION = "1.0.14";
   private static final String BASE =
-      "https://github.com/fengwk/kk-studio/releases/download/v1.0.13/";
+      "https://github.com/fengwk/kk-studio/releases/download/v1.0.14/";
 
   @Test
   void namesMatchTheReleaseMatrix() {
     assertEquals(
-        "kk-studio-daemon-v1.0.13-linux-amd64.tar.gz",
+        "kk-studio-daemon-v1.0.14-linux-amd64.tar.gz",
         DaemonUpdateArtifact.artifactName(
             VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64));
     assertEquals(
-        "kk-studio-daemon-v1.0.13-linux-arm64.tar.gz",
+        "kk-studio-daemon-v1.0.14-linux-arm64.tar.gz",
         DaemonUpdateArtifact.artifactName(
             VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.ARM64));
     assertEquals(
-        "kk-studio-daemon-v1.0.13-macos-amd64.tar.gz",
+        "kk-studio-daemon-v1.0.14-macos-amd64.tar.gz",
         DaemonUpdateArtifact.artifactName(
             VERSION, DaemonOperatingSystem.MACOS, DaemonArchitecture.AMD64));
     assertEquals(
-        "kk-studio-daemon-v1.0.13-macos-arm64.tar.gz",
+        "kk-studio-daemon-v1.0.14-macos-arm64.tar.gz",
         DaemonUpdateArtifact.artifactName(
             VERSION, DaemonOperatingSystem.MACOS, DaemonArchitecture.ARM64));
     assertEquals(
-        "kk-studio-daemon-v1.0.13-windows-amd64.tar.gz",
+        "kk-studio-daemon-v1.0.14-windows-amd64.tar.gz",
         DaemonUpdateArtifact.artifactName(
             VERSION, DaemonOperatingSystem.WINDOWS, DaemonArchitecture.AMD64));
   }
@@ -56,15 +56,15 @@ class DaemonUpdateArtifactTest {
   @Test
   void urlsAndMetadataMatchThePublishedLayout() {
     assertEquals(
-        BASE + "kk-studio-daemon-v1.0.13-linux-arm64.tar.gz",
+        BASE + "kk-studio-daemon-v1.0.14-linux-arm64.tar.gz",
         DaemonUpdateArtifact.artifactUrl(
             VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.ARM64));
     assertEquals(
-        BASE + "kk-studio-daemon-v1.0.13-linux-arm64.tar.gz.sha256",
+        BASE + "kk-studio-daemon-v1.0.14-linux-arm64.tar.gz.sha256",
         DaemonUpdateArtifact.checksumUrl(
             VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.ARM64));
     assertEquals(
-        "kk-studio-daemon-v1.0.13-linux-arm64.json",
+        "kk-studio-daemon-v1.0.14-linux-arm64.json",
         DaemonUpdateArtifact.metadataName(
             VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.ARM64));
   }
@@ -87,23 +87,23 @@ class DaemonUpdateArtifactTest {
         new String[] {
           "linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64"
         }) {
-      String url = BASE + "kk-studio-daemon-v1.0.13-" + platform + ".tar.gz";
+      String url = BASE + "kk-studio-daemon-v1.0.14-" + platform + ".tar.gz";
       assertTrue(DaemonUpdateArtifact.ARTIFACT_URL_PATTERN.matcher(url).matches(), url);
     }
     for (String rejected : new String[] {"windows-arm64", "linux", "plan9-amd64"}) {
       assertFalse(
           DaemonUpdateArtifact.ARTIFACT_URL_PATTERN
-              .matcher(BASE + "kk-studio-daemon-v1.0.13-" + rejected + ".tar.gz")
+              .matcher(BASE + "kk-studio-daemon-v1.0.14-" + rejected + ".tar.gz")
               .matches(),
           rejected);
     }
     assertFalse(
         DaemonUpdateArtifact.ARTIFACT_URL_PATTERN
-            .matcher(BASE + "kk-studio-daemon-v1.0.13.jar")
+            .matcher(BASE + "kk-studio-daemon-v1.0.14.jar")
             .matches());
     assertFalse(
         DaemonUpdateArtifact.ARTIFACT_URL_PATTERN
-            .matcher("https://evil.example/kk-studio-daemon-v1.0.13-linux-amd64.tar.gz")
+            .matcher("https://evil.example/kk-studio-daemon-v1.0.14-linux-amd64.tar.gz")
             .matches());
   }
 }
