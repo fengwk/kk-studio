@@ -172,14 +172,32 @@ export interface WindowsNativeBindings {
 let kernelCache: Kernel32 | null = null
 let advapiCache: Advapi32 | null = null
 let typesCache: WindowsTypes | null = null
+/**
+ * Koffi 具名结构注册在进程级类型表，同名再定义会直接抛 `Duplicate type name`。
+ * `kernel().func` 的字符串原型只能按这个名字解析，所以这些结构必须具名且只定义一次；
+ * 测试把 `typesCache` 换成假类型或复位成 `null` 时，下一次真实加载复用这里，不再重新注册。
+ */
+let registeredWindowsTypes: WindowsTypes | null = null
 let currentUserSidState: { sid: Pointer; buffer: Buffer } | null = null
 
 async function koffiModule(): Promise<Koffi> {
   return import('koffi')
 }
 
+/**
+ * 只构造（并在进程内复用）Koffi 结构体，不加载 kernel32/advapi32。
+ * 测试在非 Windows 上用它先注册真实类型，再反复 reset，覆盖「类型表已有同名结构」的路径。
+ */
+export async function loadWindowsNativeTypes(): Promise<WindowsTypes> {
+  return types()
+}
+
 async function types(): Promise<WindowsTypes> {
   if (typesCache === null) {
+    if (registeredWindowsTypes !== null) {
+      typesCache = registeredWindowsTypes
+      return typesCache
+    }
     const koffi = await koffiModule()
     const startupInfo = koffi.struct('STARTUPINFOW', {
       cb: 'uint32_t',
@@ -271,7 +289,8 @@ async function types(): Promise<WindowsTypes> {
     // TOKEN_USER：`SID_AND_ATTRIBUTES.User.Sid` 是缓冲区内的 SID 指针；Koffi 按类型解码，不做字节猜测。
     const sidAndAttributes = koffi.struct('SID_AND_ATTRIBUTES', { Sid: 'void *', Attributes: 'uint32_t' })
     const tokenUser = koffi.struct('TOKEN_USER', { User: sidAndAttributes })
-    typesCache = { startupInfoEx, jobExtendedLimit, jobBasicAccounting, sizeBox, acl, aceHeader, tokenUser }
+    registeredWindowsTypes = { startupInfoEx, jobExtendedLimit, jobBasicAccounting, sizeBox, acl, aceHeader, tokenUser }
+    typesCache = registeredWindowsTypes
   }
   return typesCache
 }
