@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,23 @@ import {
   type GrepOptions,
   type SearchReply,
 } from '../../src/coding/search-core.js'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...original,
+    async readdir(...args: Parameters<typeof original.readdir>) {
+      const target = args[0]
+      const blocked = (globalThis as { __kkSearchBlockedReads?: Set<string> }).__kkSearchBlockedReads
+      if (typeof target === 'string' && blocked?.has(target)) {
+        const error = new Error('EACCES') as NodeJS.ErrnoException
+        error.code = 'EACCES'
+        throw error
+      }
+      return original.readdir(...args)
+    },
+  }
+})
 
 /**
  * search-core 直接单元测试：核心逻辑在 Worker 内执行，其覆盖率无法从主进程收集，
@@ -83,13 +100,17 @@ describe('findFiles', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'a.txt'), '')
-    await chmod(blocked, 0o000)
+    const holder = globalThis as { __kkSearchBlockedReads?: Set<string> }
+    const blockedReads = holder.__kkSearchBlockedReads ?? new Set<string>()
+    holder.__kkSearchBlockedReads = blockedReads
+    blockedReads.add(blocked)
     try {
+      // readdir 对这个目录返回 EACCES，不能依赖 Windows 上无效的 mode 000。
       const outcome = await findFiles('*.none', dir, 100, noTimeout())
       expect(outcome.matches).toEqual([])
       expect(outcome.skipped.length).toBe(1)
     } finally {
-      await chmod(blocked, 0o755)
+      blockedReads.delete(blocked)
     }
   })
 
@@ -150,7 +171,8 @@ describe('grepFiles', () => {
       { ...defaultGrep, multiline: true },
       noTimeout('grep'),
     )
-    expect(outcome.lines.map((line) => line.split(':')[2])).toEqual(['a', 'b'])
+    // Drive letters contain a colon, so the match text is the field after path and line number.
+    expect(outcome.lines.map((line) => line.split(':').slice(2).join(':'))).toEqual(['a', 'b'])
   })
 
   it('multiline 空匹配推进 lastIndex', async () => {
@@ -195,12 +217,15 @@ describe('grepFiles', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'a.txt'), 'x\n')
-    await chmod(blocked, 0o000)
+    const holder = globalThis as { __kkSearchBlockedReads?: Set<string> }
+    const blockedReads = holder.__kkSearchBlockedReads ?? new Set<string>()
+    holder.__kkSearchBlockedReads = blockedReads
+    blockedReads.add(blocked)
     try {
       const outcome = await grepFiles('zzz', dir, 100, defaultGrep, noTimeout('grep'))
       expect(outcome.skipped.length).toBe(1)
     } finally {
-      await chmod(blocked, 0o755)
+      blockedReads.delete(blocked)
     }
   })
 

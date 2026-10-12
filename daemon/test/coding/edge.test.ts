@@ -194,16 +194,31 @@ describe('fs.write / commit 边界', () => {
     const dir = await tempDir()
     const file = join(dir, 'ro.txt')
     await writeFile(file, 'old')
-    await chmod(file, 0o444)
-    const result = await callCapability(
-      write,
-      'fs.write',
-      { path: file, content: 'new' },
-      makeContext(dir),
-    )
-    expect(result.error).toBe(false)
-    expect(await readFile(file, 'utf8')).toBe('new')
-    expect((await stat(file)).mode & 0o777).toBe(0o444)
+    const { markReadOnly, clearReadOnly } = await import('../support/fs-permissions.js')
+    await markReadOnly(file)
+    try {
+      const result = await callCapability(
+        write,
+        'fs.write',
+        { path: file, content: 'new' },
+        makeContext(dir),
+      )
+      if (process.platform === 'win32') {
+        // Windows 没有 POSIX mode；只读属性必须挡住覆盖，原内容和属性都保持。
+        expect(result.error).toBe(true)
+        expect(await readFile(file, 'utf8')).toBe('old')
+        const { execFile } = await import('node:child_process')
+        const { promisify } = await import('node:util')
+        const { stdout } = await promisify(execFile)('attrib', [file], { windowsHide: true })
+        expect(String(stdout)).toMatch(/(^|\s)R(\s|$)/)
+      } else {
+        expect(result.error).toBe(false)
+        expect(await readFile(file, 'utf8')).toBe('new')
+        expect((await stat(file)).mode & 0o777).toBe(0o444)
+      }
+    } finally {
+      await clearReadOnly(file)
+    }
   })
 
   it('自动创建缺失的父目录', async () => {
@@ -329,7 +344,8 @@ describe('fs.find / fs.grep 边界', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'b.txt'), '')
-    await chmod(blocked, 0o000)
+    const { denyRead, restoreRead } = await import('../support/fs-permissions.js')
+    await denyRead(blocked)
     try {
       const result = await callCapability(
         find,
@@ -339,7 +355,7 @@ describe('fs.find / fs.grep 边界', () => {
       )
       expect(textOf(result)).toContain('could not be searched')
     } finally {
-      await chmod(blocked, 0o755)
+      await restoreRead(blocked)
     }
   })
 

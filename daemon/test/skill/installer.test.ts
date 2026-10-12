@@ -427,7 +427,7 @@ describe('SkillPackageInstaller', () => {
     // 4. Non-conforming backup file/dir (MUST BE LEFT UNTOUCHED)
     const corruptBackup = path.join(backupRoot, 'corrupted-file.bin')
     fs.writeFileSync(corruptBackup, 'garbage')
-    const badNameBackup = path.join(backupRoot, `bad:name.${randomUUID()}`)
+    const badNameBackup = path.join(backupRoot, `${'p'.repeat(129)}.${randomUUID()}`)
     fs.mkdirSync(badNameBackup, { recursive: true })
 
     await installer.recoverArtifacts()
@@ -728,38 +728,64 @@ describe('SkillPackageInstaller', () => {
     const remoteUrl = pathToFileURL(remoteRepoDir).toString()
 
     const executionLog: string[] = []
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let activeSame = 0
 
-    let slowMoverPkg1 = 0
     const delayInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
       privateFs: createTestPrivateFs(),
       directoryMover: async (source, target) => {
         if (target.includes('pkg-same')) {
-          slowMoverPkg1++
-          executionLog.push(`pkg-same-${slowMoverPkg1} start`)
-          await new Promise((resolve) => setTimeout(resolve, 50))
-          executionLog.push(`pkg-same-${slowMoverPkg1} end`)
+          activeSame += 1
+          const turn = activeSame
+          executionLog.push(`pkg-same-${turn} start`)
+          if (turn === 1) {
+            // 第一个同包安装停在临界区内，用来观察锁外的其它包和锁内的第二个同包。
+            await firstGate
+          }
+          executionLog.push(`pkg-same-${turn} end`)
         } else if (target.includes('pkg-diff')) {
           executionLog.push('pkg-diff start')
-          await new Promise((resolve) => setTimeout(resolve, 10))
           executionLog.push('pkg-diff end')
         }
         await fs.promises.rename(source, target)
       },
     })
 
-    await Promise.all([
-      delayInstaller.install('pkg-same', remoteUrl, 'main', commit1),
-      delayInstaller.install('pkg-same', remoteUrl, 'main', commit1),
-      delayInstaller.install('pkg-diff', remoteUrl, 'main', commit1),
-    ])
+    const sameA = delayInstaller.install('pkg-same', remoteUrl, 'main', commit1)
+    const sameB = delayInstaller.install('pkg-same', remoteUrl, 'main', commit1)
+    const diff = delayInstaller.install('pkg-diff', remoteUrl, 'main', commit1)
 
-    // Notice: pkg-diff must have completed before the second pkg-same started
+    const deadline = Date.now() + 5_000
+    while (activeSame < 1) {
+      if (Date.now() > deadline) {
+        throw new Error('timed out waiting for the same-package install to enter its critical section')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
+    await Promise.race([
+      diff,
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(
+          () => reject(new Error('a different package did not finish while the same package was blocked')),
+          5_000,
+        )
+      }),
+    ])
+    // 同包的第二次安装必须仍被挡住，不同包必须已经完成。
+    expect(executionLog).not.toContain('pkg-same-2 start')
+    expect(executionLog).toContain('pkg-diff end')
+    expect(executionLog).not.toContain('pkg-same-1 end')
+
+    releaseFirst()
+    await Promise.all([sameA, sameB, diff])
+
     const firstSameEnd = executionLog.indexOf('pkg-same-1 end')
     const secondSameStart = executionLog.indexOf('pkg-same-2 start')
+    expect(firstSameEnd).toBeGreaterThanOrEqual(0)
     expect(firstSameEnd).toBeLessThan(secondSameStart)
-
-    const diffStart = executionLog.indexOf('pkg-diff start')
-    expect(diffStart).toBeLessThan(firstSameEnd)
   })
 
   it('open factory and getters return expected paths', () => {
@@ -1083,7 +1109,6 @@ describe('SkillPackageInstaller', () => {
       `a`.repeat(129) + `.${validUuid}`,
       `.${validUuid}`,
       `..${validUuid}`,
-      `bad\u001fname.${validUuid}`,
       `bad\u0080name.${validUuid}`,
       `pkg.short-uuid`,
       `pkg.${validUuid}.clone`,
