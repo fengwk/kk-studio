@@ -166,12 +166,7 @@ export function unixPath(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
-/**
- * 长进程内联脚本：先把真实 PID 写入 `<pidFile>.tmp`，再 rename 原子替换到目标文件。
- *
- * <p>直接 writeFileSync 目标会让消费者在「文件已建但尚未写完」的窗口里读到空文件（`Number('') === 0`）；
- * 先写临时文件再 rename 保证消费者只可能看到完整 PID。回归测试用同一常量做真实 spawn 观察。
- */
+/** 长进程内联脚本：先写 `<pidFile>.tmp` 再 rename 原子发布，消费者不会读到空 PID（`Number('') === 0`）。 */
 export const LONG_RUNNING_PID_SCRIPT =
   'const fs=require("fs");fs.writeFileSync(process.argv[1]+".tmp",String(process.pid));fs.renameSync(process.argv[1]+".tmp",process.argv[1]);setInterval(function(){},1000)'
 
