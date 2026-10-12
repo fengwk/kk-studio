@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { recordPid } from './_util.mjs'
 
 // 用独立实现持有目标目录的内核 LockFileEx：验证父进程的锁是真实内核锁，且崩溃时由内核释放。
 const koffi = (await import('koffi')).default
@@ -26,5 +27,5 @@ if (LockFileEx(handle, 2 | 1, 0, 1, 0, overlapped) === 0) {
   CloseHandle(handle)
   process.exit(3)
 }
-writeFileSync(readyFile, String(process.pid))
+await recordPid(readyFile)
 setInterval(() => {}, 1 << 30)

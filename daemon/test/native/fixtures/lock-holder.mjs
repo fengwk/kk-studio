@@ -1,7 +1,7 @@
 import { constants, closeSync, openSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { libc } from './_libc.mjs'
-import { holdForever } from './_util.mjs'
+import { holdForever, recordPid } from './_util.mjs'
 
 // 用独立实现持有目标目录的内核 flock：验证父进程的锁是真实内核锁，且崩溃时由内核释放。
 const lockDir = process.argv[2]
@@ -15,5 +15,5 @@ if (flock(descriptor, LOCK_EX | LOCK_NB) !== 0) {
   closeSync(descriptor)
   process.exit(3)
 }
-writeFileSync(readyFile, String(process.pid))
+await recordPid(readyFile)
 holdForever()
