@@ -38,7 +38,14 @@ $root = Join-Path ([System.IO.Path]::GetTempPath()) ("kk-studio-daemon-smoke-" +
 New-Item -ItemType Directory -Path $root | Out-Null
 $previousPath = $env:PATH
 try {
-    tar -xzf $Archive -C $root
+    # 本脚本经 bash 启动，继承的 PATH 会先命中 Git 的 GNU tar，它把 C:\ 当作远程主机路径。
+    # 因此显式用系统自带 tar.exe 的绝对路径，不做 PATH 回退。
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { Fail 'SystemRoot is not defined' }
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
+        Fail "the Windows system tar is not available: $tar"
+    }
+    & $tar -xzf $Archive -C $root
     if ($LASTEXITCODE -ne 0) { Fail 'cannot extract the archive' }
     $node = Join-Path $root 'runtime\code-server\lib\node.exe'
     $entry = Join-Path $root 'runtime\code-server\out\node\entry.js'

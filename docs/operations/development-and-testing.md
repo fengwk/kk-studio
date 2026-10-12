@@ -157,6 +157,17 @@ Unix fixtures 用 shim 替代 curl/npm/uname/systemctl/launchctl，真实执行 
 打包直接失败，不使用官方 coder 归档，也不编造摘要。发行流水线先暂存五个平台的归档，再分别在
 对应主机执行 `smoke-archive.sh`（Linux/macOS）或 `smoke-archive.ps1`（Windows），加载随包运行时、
 code-server 原生模块与私有目录锁；全部通过后才发布，不能用 Linux fixture 代替其它平台验收。
+
+正式推 tag 之前可以先手动验收同一批归档：
+
+```bash
+gh workflow run daemon-release.yml --ref main -f tag=v<当前版本>
+```
+
+它完整跑 stage 与五平台归档烟测，`publish` 被跳过，因此既不创建标签也不发布 Release；全绿后再推
+`v<当前版本>` tag 正式发布。linux-amd64 烟测宿主会补装 WebKitGTK/libsecret 等 MSAL native broker
+宿主库，这只是烟测宿主依赖，不代表 Daemon 用户需要安装桌面环境。
+
 安装器没有交互提示、
 from-source 与单独 upgrade 入口；从 checkout 运行安装脚本只是开发/CI fixture，不是用户安装路径，
 安装器自身从不构建。测试不注册真实 systemd/launchd 服务，也不下载真实 240MB 运行时。
