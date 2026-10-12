@@ -190,9 +190,12 @@ function New-Inputs {
 }
 
 function Import-Installer {
-    param([string[]] $Arguments)
+    param([hashtable] $Parameters)
+    # install.ps1 disables positional binding, so a string[] splat cannot turn "-ConfigFile"
+    # into a named parameter. Callers pass a hashtable of the installer's real parameter names,
+    # including Unicode paths. Unknown keys stay unbound so the installer itself rejects them.
     # help defines the installer functions without Invoke-Main and without touching an installation.
-    . $installer @Arguments
+    . $installer @Parameters
     $script:InstallerInitializeHostContext = ${function:Initialize-HostContext}
     function Initialize-HostContext {
         & $script:InstallerInitializeHostContext
@@ -208,9 +211,10 @@ function Import-Installer {
 }
 
 function Invoke-Installer {
-    param([string[]] $Arguments)
+    param([hashtable] $Parameters)
     # Tasks survive across install, status, and uninstall. Dot-sourcing reinstalls the sandbox wrapper.
-    . Import-Installer -Arguments $Arguments
+    # The hashtable is the installer's named-parameter set, not a string[] of flag text.
+    . Import-Installer -Parameters $Parameters
     return (Invoke-Main)
 }
 
@@ -270,7 +274,7 @@ try {
     # Load function definitions before the probe or ACL helper; help does not call Invoke-Main.
     # The original initializer resolves the real SID and does not write files; the wrapper then
     # redirects every managed path into the sandbox before any input ACL or installation work.
-    . Import-Installer -Arguments @("help")
+    . Import-Installer -Parameters @{ Command = "help" }
     Initialize-HostContext
     Assert-True -Condition ($script:CurrentSid -match "^S-") -Message "fixture keeps the real current SID"
     Assert-True -Condition ($script:InstallRoot.StartsWith($profileDir, [StringComparison]::Ordinal)) `
@@ -282,12 +286,14 @@ try {
     Assert-True -Condition ($installer -and (Test-Path -LiteralPath $installer)) -Message "installer exists"
 
     $pairs = New-Inputs
-    $exit = Invoke-Installer -Arguments @("help")
+    $exit = Invoke-Installer -Parameters @{ Command = "help" }
     Assert-True -Condition ($exit -eq 0) -Message "help exits 0"
 
     $rejected = $false
     try {
-        Invoke-Installer -Arguments @("install", "-ConfigFile", $pairs[0], "-TokenFile", $pairs[1], "-JavaHome", "/opt/jdk") | Out-Null
+        Invoke-Installer -Parameters @{
+            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; JavaHome = "/opt/jdk"
+        } | Out-Null
     }
     catch {
         $rejected = $true
@@ -298,7 +304,9 @@ try {
     $wrapped = New-Inputs -Config '{"daemon":{"studioUrl":"https://studio.example.com"}}'
     $wrappedRejected = $false
     try {
-        Invoke-Installer -Arguments @("install", "-ConfigFile", $wrapped[0], "-TokenFile", $wrapped[1]) | Out-Null
+        Invoke-Installer -Parameters @{
+            Command = "install"; ConfigFile = $wrapped[0]; TokenFile = $wrapped[1]
+        } | Out-Null
     }
     catch {
         $wrappedRejected = $true
@@ -307,7 +315,9 @@ try {
 
     # Full install through stubs.
     $pairs = New-Inputs
-    $exit = Invoke-Installer -Arguments @("install", "-ConfigFile", $pairs[0], "-TokenFile", $pairs[1])
+    $exit = Invoke-Installer -Parameters @{
+        Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]
+    }
     Assert-True -Condition ($exit -eq 0) -Message "install exits 0"
 
     $installRoot = Join-Path $profileDir ".kk-studio"
@@ -326,12 +336,12 @@ try {
     Assert-Contains -Haystack $registered.Action.Execute -Needle "node.exe" -Message "task runs node.exe"
 
     # status is read-only and reports Running. It must use the same sandbox wrapper as install.
-    $exit = Invoke-Installer -Arguments @("status")
+    $exit = Invoke-Installer -Parameters @{ Command = "status" }
     Assert-True -Condition ($exit -eq 0) -Message "status exits 0 when Running"
     Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "status preserves the registered task"
 
     # uninstall removes the program and task but keeps config/token.
-    $exit = Invoke-Installer -Arguments @("uninstall")
+    $exit = Invoke-Installer -Parameters @{ Command = "uninstall" }
     Assert-True -Condition ($exit -eq 0) -Message "uninstall exits 0"
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $installRoot "lib"))) -Message "lib removed"
     Assert-True -Condition ($script:Tasks.Count -eq 0) -Message "task removed"
