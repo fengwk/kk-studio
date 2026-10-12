@@ -551,10 +551,7 @@ class JdkHttpSseTransportTest {
     }
   }
 
-  /**
-   * 回归：取消中断阻塞中的 send，且响应体已在 send 返回前交付时，必须关闭实际 body subscriber， 而不是仅把 future 标记 cancelled。基线实现只在
-   * send 返回后登记 activeInputStream，此窗口内的流 无人接管而泄漏（对端无法观测到连接关闭）。
-   */
+  /** send 返回前已交付响应体时，取消须关闭真实 subscriber，而不只是取消 worker future。 */
   @Test
   void cancelling_during_body_handoff_closes_the_handed_off_subscriber() throws Exception {
     BodyHandoffFakeHttpClient fakeClient = new BodyHandoffFakeHttpClient();
