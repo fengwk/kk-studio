@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -21,12 +21,13 @@ import {
   forEachLine,
 } from '../../src/coding/text.js'
 import { searchCapabilities } from '../../src/coding/search.js'
+import { toPosix } from '../../src/coding/support.js'
 import { callCapability, makeContext, openTestStore, textOf } from './helpers.js'
 
 const tempDirs: string[] = []
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'kk-helpers-'))
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-helpers-')))
   tempDirs.push(dir)
   return dir
 }
@@ -228,6 +229,7 @@ describe('search 忽略与多行', () => {
       { pattern: 'x\\ny\\nz', path: file, multiline: true },
       makeContext(dir),
     )
-    expect(textOf(result)).toBe(`${file}:1:x\n${file}:2:y\n${file}:3:z`)
+    const shown = toPosix(file)
+    expect(textOf(result)).toBe(`${shown}:1:x\n${shown}:2:y\n${shown}:3:z`)
   })
 })

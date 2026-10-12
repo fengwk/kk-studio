@@ -61,7 +61,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   }
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-cap-test-'))
+    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-cap-test-')))
     supervisor = new TestProcessSupervisor()
   })
 

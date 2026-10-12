@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { chmod, mkdir, mkdtemp, open, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { textResult } from '../../src/contracts.js'
@@ -21,13 +21,14 @@ import {
   encodeText,
   forEachLine,
 } from '../../src/coding/text.js'
+import { toPosix } from '../../src/coding/support.js'
 import { callCapability, makeContext, openTestStore, textOf } from './helpers.js'
 import { ensurePrivateDirectory } from '../../src/native/index.js'
 
 const tempDirs: string[] = []
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'kk-edge-'))
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-edge-')))
   tempDirs.push(dir)
   return dir
 }
@@ -372,7 +373,7 @@ describe('fs.find / fs.grep 边界', () => {
       { pattern: 'x', path: dir, include: 'sub/*.ts' },
       makeContext(dir),
     )
-    expect(textOf(result)).toBe(`${join(dir, 'sub', 'a.ts')}:1:x`)
+    expect(textOf(result)).toBe(`${toPosix(join(dir, 'sub', 'a.ts'))}:1:x`)
   })
 
   it('grep 多行模式对超大文件显式失败', async () => {
