@@ -11,12 +11,18 @@ daemon it started before deleting its temporary directory.
 The fake runtime is a shim that only satisfies the harness's own call shapes; it does not
 prove product behaviour. The real archive smoke (built by ``prepare-release.sh`` and run in
 the release pipeline) is what proves the product.
+
+``CodeServerNativeProbeTest`` closes the gap where the shim never executes JavaScript: it
+extracts the smoke's exact native-probe heredoc into a temporary ``.mjs`` and runs it with a
+real Node interpreter against a real (koffi) native module, so the Windows-helper exclusion
+and the root-relative foreign check are exercised for real instead of being simulated.
 """
 
 from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -49,6 +55,59 @@ _KOFFI = {
     ("macos", "amd64"): "koffi-darwin-x64",
     ("macos", "arm64"): "koffi-darwin-arm64",
 }
+
+# Repository root and the installed koffi prebuilt paths. The real-probe regression copies one
+# loadable host native from here; CI runs ``npm --prefix daemon ci`` before these tests, so the
+# prebuilt is always present and a missing dependency must fail rather than skip the test.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_KOFFI_PREBUILT = {
+    ("linux", "amd64"): ("koffi-linux-x64", "linux_x64"),
+    ("linux", "arm64"): ("koffi-linux-arm64", "linux_arm64"),
+    ("macos", "amd64"): ("koffi-darwin-x64", "darwin_x64"),
+    ("macos", "arm64"): ("koffi-darwin-arm64", "darwin_arm64"),
+}
+
+# One platform marker foreign to each host, used to prove the probe judges a stable root-relative
+# path instead of the absolute temporary path.
+_FOREIGN_MARKER = {
+    "linux-amd64": "darwin-x64",
+    "linux-arm64": "darwin-arm64",
+    "macos-amd64": "linux-x64",
+    "macos-arm64": "linux-arm64",
+}
+
+# The smoke's native probe is a heredoc; extract exactly that block so the tests run the real JS.
+_NATIVE_PROBE_HEREDOC = re.compile(
+    r"native_probe=\"\$tmp/probe-code-server-native\.mjs\"\n"
+    r"cat >\"\$native_probe\" <<'PROBE'\n"
+    r"(?P<body>.*?)\n"
+    r"PROBE\n",
+    re.DOTALL,
+)
+
+
+def _node_binary() -> str:
+    node = shutil.which("node")
+    if node is None:
+        raise AssertionError("the native probe regression needs a real Node interpreter on PATH")
+    return node
+
+
+def _host_native_bytes() -> bytes:
+    package, libdir = _KOFFI_PREBUILT[(_host_os(), _host_arch())]
+    native = _REPO_ROOT / "daemon" / "node_modules" / "@koromix" / package / libdir / "koffi.node"
+    if not native.is_file():
+        raise AssertionError(
+            f"missing loadable host native {native}; run `npm --prefix daemon ci` first"
+        )
+    return native.read_bytes()
+
+
+def _extract_native_probe() -> str:
+    match = _NATIVE_PROBE_HEREDOC.search(_SMOKE.read_text(encoding="utf-8"))
+    if match is None:
+        raise AssertionError("could not extract the native probe heredoc from smoke-archive.sh")
+    return match.group("body") + "\n"
 
 
 def _host_arch() -> str:
@@ -392,6 +451,97 @@ class SmokeArchiveTest(unittest.TestCase):
                 return
             time.sleep(0.1)
         self.fail(f"the daemon process {pid} was not terminated")
+
+
+class CodeServerNativeProbeTest(unittest.TestCase):
+    """Execute the smoke's real native-probe JS with a real Node and a real host native.
+
+    The shim-based ``SmokeArchiveTest`` never runs JavaScript, so it cannot prove the probe's
+    Windows-helper exclusion or its root-relative foreign check. Here the exact heredoc from
+    ``smoke-archive.sh`` is written to a temporary ``.mjs`` and run against a fixture code-server
+    tree whose only loadable native is the repository's installed koffi prebuilt.
+    """
+
+    def setUp(self) -> None:
+        if platform.system() not in ("Linux", "Darwin"):
+            self.skipTest("smoke-archive.sh runs on Linux and macOS")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.node = _node_binary()
+        self.native_bytes = _host_native_bytes()
+        self.host = f"{_host_os()}-{_host_arch()}"
+        self.probe = self.root / "probe-code-server-native.mjs"
+        self.probe.write_text(_extract_native_probe(), encoding="utf-8")
+        self.code_server = self.root / "code-server"
+
+    def _write_native(
+        self, relative: str, data: bytes | None = None, *, root: Path | None = None
+    ) -> Path:
+        target = (root or self.code_server) / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(self.native_bytes if data is None else data)
+        return target
+
+    def _write_windows_helpers(self, root: Path | None = None) -> None:
+        vendor = (root or self.code_server) / "lib/vscode/extensions/ms-vscode.js-debug/src"
+        vendor.mkdir(parents=True, exist_ok=True)
+        # Both universal js-debug Windows helpers, deliberately with empty contents: on a Unix
+        # host they are never required, so their payload must not matter.
+        for name in (
+            "win32-app-container-tokens.win32-x64-msvc-VCQE7GJP.node",
+            "win32-app-container-tokens.win32-arm64-msvc-4ZJZ3U55.node",
+        ):
+            (vendor / name).write_bytes(b"")
+
+    def _run_probe(self, root: Path | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [self.node, str(self.probe), str(root or self.code_server), self.host],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    def test_ignores_both_windows_helpers_next_to_a_host_native(self) -> None:
+        self._write_native("lib/vscode/node_modules/node-pty/build/Release/pty.node")
+        self._write_windows_helpers()
+        result = self._run_probe()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Only the host native is counted; the two excluded helpers are not loaded.
+        self.assertEqual(result.stdout.strip(), "code-server native modules ok 1")
+
+    def test_rejects_a_windows_stem_outside_the_vendor_path(self) -> None:
+        self._write_native("lib/vscode/node_modules/node-pty/build/Release/pty.node")
+        # Same Windows stem as a helper, but not the exact vendored js-debug path: still foreign.
+        self._write_native(
+            "lib/vscode/win32-app-container-tokens.win32-x64-msvc-OTHER.node", b"\x7fELF"
+        )
+        result = self._run_probe()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not for", result.stderr)
+
+    def test_fails_when_only_the_excluded_helpers_exist(self) -> None:
+        self._write_windows_helpers()
+        result = self._run_probe()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("code-server native modules are missing", result.stderr)
+
+    def test_fails_when_the_host_native_cannot_load(self) -> None:
+        self._write_native(
+            "lib/vscode/node_modules/node-pty/build/Release/pty.node", b"not a native module"
+        )
+        result = self._run_probe()
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_foreign_marker_in_the_absolute_path_does_not_false_fail(self) -> None:
+        # The fixture root's absolute path contains a marker foreign to this host; the probe
+        # must decide on the root-relative path, so a valid host native still passes.
+        carrier = self.root / f"carrier-{_FOREIGN_MARKER[self.host]}"
+        root = carrier / "code-server"
+        self._write_native("lib/vscode/node_modules/node-pty/build/Release/pty.node", root=root)
+        result = self._run_probe(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "code-server native modules ok 1")
 
 
 if __name__ == "__main__":
