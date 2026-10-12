@@ -16,10 +16,20 @@ the release pipeline) is what proves the product.
 extracts the smoke's exact native-probe heredoc into a temporary ``.mjs`` and runs it with a
 real Node interpreter against a real (koffi) native module, so the Windows-helper exclusion
 and the root-relative foreign check are exercised for real instead of being simulated.
+
+``WindowsSmokeArchiveContractTest`` and ``WindowsSmokeNativeProbeTest`` cover the sibling
+``scripts/daemon/smoke-archive.ps1``, which cannot run on Linux/macOS runners. The structural
+tests pin the contract that broke on windows-latest (``run38285546691``): the real Git Bash is
+resolved with ``Get-Command bash.exe`` and captured as an absolute path *before* PATH is
+emptied, and a missing shell fails instead of being faked. The probe test then executes the
+smoke's real native-probe JS (with a faithful stub of the archive's native module) to prove the
+captured path actually reaches ``daemon.json``. The authoritative end-to-end Windows proof
+stays on the windows-latest smoke job.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
@@ -46,6 +56,7 @@ def _host_os() -> str:
 ARCHIVE_NAME = f"kk-studio-daemon-v{DAEMON_VERSION}-{_host_os()}-{{arch}}.tar.gz"
 
 _SMOKE = Path(__file__).resolve().parent.parent / "smoke-archive.sh"
+_WINDOWS_SMOKE = Path(__file__).resolve().parent.parent / "smoke-archive.ps1"
 _SHIM_TEMPLATE = Path(__file__).resolve().parent / "fixtures" / "fake-frozen-runtime.sh.in"
 
 # Host npm/koffi naming: the archive must carry the prebuilt for this host's architecture.
@@ -85,6 +96,39 @@ _NATIVE_PROBE_HEREDOC = re.compile(
     re.DOTALL,
 )
 
+# The Windows smoke embeds its native probe as a PowerShell here-string; extract exactly that
+# block so the tests run the real JS rather than matching its text.
+_WINDOWS_NATIVE_PROBE_HERESTRING = re.compile(
+    r"\[System\.IO\.File\]::WriteAllText\(\$probe, @'\n"
+    r"(?P<body>.*?)\n"
+    r"'@, \$utf8\)\n",
+    re.DOTALL,
+)
+
+# A faithful stub for the archive's Windows ``native`` module: the call shapes the probe relies
+# on (private dir/file creation and an exclusive directory lock) without any koffi dependency.
+_WINDOWS_PROBE_NATIVE_STUB = """\
+import { mkdirSync, writeFileSync } from 'node:fs'
+
+export async function ensurePrivateDirectory(directory) {
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+}
+
+export async function writePrivateFile(file, content) {
+  writeFileSync(file, content, { mode: 0o600 })
+}
+
+let held = false
+
+export async function acquireDirectoryLock() {
+  if (held) {
+    throw new Error('the directory is already locked')
+  }
+  held = true
+  return { close: async () => { held = false } }
+}
+"""
+
 
 def _node_binary() -> str:
     node = shutil.which("node")
@@ -107,6 +151,17 @@ def _extract_native_probe() -> str:
     match = _NATIVE_PROBE_HEREDOC.search(_SMOKE.read_text(encoding="utf-8"))
     if match is None:
         raise AssertionError("could not extract the native probe heredoc from smoke-archive.sh")
+    return match.group("body") + "\n"
+
+
+def _windows_smoke() -> str:
+    return _WINDOWS_SMOKE.read_text(encoding="utf-8")
+
+
+def _extract_windows_native_probe() -> str:
+    match = _WINDOWS_NATIVE_PROBE_HERESTRING.search(_windows_smoke())
+    if match is None:
+        raise AssertionError("could not extract the native probe here-string from smoke-archive.ps1")
     return match.group("body") + "\n"
 
 
@@ -542,6 +597,94 @@ class CodeServerNativeProbeTest(unittest.TestCase):
         result = self._run_probe(root)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "code-server native modules ok 1")
+
+
+class WindowsSmokeArchiveContractTest(unittest.TestCase):
+    """Pin the ``smoke-archive.ps1`` contract that broke on the windows-latest smoke job.
+
+    The failure (``run38285546691``) was ``--check-config`` rejecting a valid configuration: the
+    daemon resolves its bash executable through PATH, which the smoke deliberately empties. The
+    fix captures the real Git Bash as an absolute path first and feeds it to the config, so these
+    tests assert both the capture ordering and that the frozen empty-PATH checks are untouched.
+    """
+
+    def setUp(self) -> None:
+        self.smoke = _windows_smoke()
+
+    def test_captures_real_git_bash_before_emptying_the_path(self) -> None:
+        # 修复契约：清空 PATH 之前用 Get-Command 解析真实 bash.exe，取 .Source 绝对路径并校验 leaf。
+        capture = self.smoke.index("$bashCommand = Get-Command bash.exe -CommandType Application")
+        empty_path = self.smoke.index("$env:PATH = Join-Path $root 'empty-path'")
+        self.assertLess(capture, empty_path, "bash must be captured while the real PATH is intact")
+        self.assertIn("$bashExecutable = $bashCommand.Source", self.smoke)
+        self.assertIn("(Split-Path -Leaf $bashExecutable) -ne 'bash.exe'", self.smoke)
+        # 缺 Git Bash 必须显式失败；不接受伪 shell 或 PATH 回退。
+        self.assertIn(
+            "Fail 'Git Bash is required for the archive smoke but bash.exe was not found on PATH'",
+            self.smoke,
+        )
+        self.assertIn("Test-Path -LiteralPath $bashExecutable -PathType Leaf", self.smoke)
+
+    def test_the_captured_bash_reaches_the_native_probe_config(self) -> None:
+        # 捕获的绝对路径必须真的经 native probe 写进 daemon.json，而不是只被赋值后忽略。
+        self.assertIn("& $node $probe $root $bashExecutable", self.smoke)
+        probe = _extract_windows_native_probe()
+        self.assertIn("const [root, bashExecutable] = process.argv.slice(2)", probe)
+        self.assertIn("bashExecutable })", probe)
+
+    def test_frozen_checks_still_run_under_the_empty_path(self) -> None:
+        # 收紧：--check-config 必须在空 PATH 下运行，通过显式 bashExecutable 通过，而不是把真实 PATH 还回来。
+        empty_path = self.smoke.index("$env:PATH = Join-Path $root 'empty-path'")
+        valid_check = self.smoke.index("& $node $main --check-config $config\n")
+        restore = self.smoke.index("$env:PATH = $previousPath")
+        self.assertLess(empty_path, valid_check, "the frozen checks must run after PATH is emptied")
+        self.assertLess(valid_check, restore, "the real PATH must only be restored in the finally block")
+        for marker in ("--version", "--help", "--check-config"):
+            self.assertIn(marker, self.smoke)
+        # 无效配置的断言保留，不得为修复而放宽。
+        for document in ('{"studioUrl":"not-a-url"}', '{"daemon":{"studioUrl":"http://127.0.0.1:59999"}}'):
+            self.assertIn(document, self.smoke)
+
+
+class WindowsSmokeNativeProbeTest(unittest.TestCase):
+    """Execute the Windows smoke's real native-probe JS with a faithful stub native module.
+
+    The Windows archive's koffi native cannot load on a Unix runner, so ``native/index.js`` is
+    stubbed with the same call shapes. Running the extracted probe proves the captured absolute
+    bash path is serialized into ``daemon.json`` verbatim; the windows-latest smoke job remains
+    the authoritative end-to-end proof.
+    """
+
+    def setUp(self) -> None:
+        if platform.system() not in ("Linux", "Darwin"):
+            self.skipTest("this probe regression runs on Linux and macOS")
+        self.node = _node_binary()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        native = self.root / "native"
+        native.mkdir()
+        (native / "index.js").write_text(_WINDOWS_PROBE_NATIVE_STUB, encoding="utf-8")
+        self.probe = self.root / "native-probe.mjs"
+        self.probe.write_text(_extract_windows_native_probe(), encoding="utf-8")
+
+    def test_probe_writes_the_captured_bash_path_into_the_config(self) -> None:
+        # Windows Git Bash 路径含反斜杠，必须原样往返，不能被 probe 丢失或改写。
+        for bash in ("/usr/bin/bash", r"C:\Program Files\Git\usr\bin\bash.exe"):
+            with self.subTest(bash=bash):
+                result = subprocess.run(
+                    [self.node, str(self.probe), str(self.root), bash],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "native directory lock ok")
+                config = json.loads((self.root / "config" / "daemon.json").read_text(encoding="utf-8"))
+                self.assertEqual(
+                    config,
+                    {"studioUrl": "http://127.0.0.1:59999", "bashExecutable": bash},
+                )
 
 
 if __name__ == "__main__":
