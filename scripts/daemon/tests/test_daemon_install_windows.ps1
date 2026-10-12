@@ -18,7 +18,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 $installer = Join-Path $repoRoot "scripts\daemon\install.ps1"
 $releaseTag = "v1.0.12"
 $daemonVersion = "1.0.12"
@@ -51,7 +51,8 @@ function Assert-Equal {
 
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-ps-test-" + [Guid]::NewGuid().ToString("N"))
 $httpDir = Join-Path $sandbox "http"
-$profileDir = Join-Path $sandbox "profile"
+$profileMarker = [string] [char] 0x73AF + [string] [char] 0x5883 + [char]::ConvertFromUtf32(0x1F600)
+$profileDir = Join-Path $sandbox ("profile-" + $profileMarker)
 New-Item -ItemType Directory -Path $httpDir, $profileDir -Force | Out-Null
 
 $nodeCommand = Get-Command "node.exe" -CommandType Application -ErrorAction SilentlyContinue |
@@ -61,13 +62,13 @@ if ($null -eq $nodeCommand) {
 }
 
 $stubMain = @'
+import fs from "node:fs"
 const argv = process.argv.slice(2)
 if (argv[0] === "--version") {
   process.stdout.write("kk-studio-daemon 1.0.12\n")
   process.exit(0)
 }
 if (argv[0] === "--check-config") {
-  const fs = require("fs")
   const path = argv[1]
   if (!path || !fs.existsSync(path)) { process.exit(2) }
   const body = fs.readFileSync(path, "utf8")
@@ -194,22 +195,27 @@ function Invoke-Installer {
 }
 
 function Assert-DirectArgumentRoundTrip {
-    # Real Node receives the Unicode vector directly. The installer always quotes, and the
-    # existing backslash/quote escaping must survive CommandLineToArgvW unchanged.
+    # Real Node receives the Unicode vector directly. Code points stay in the script as ASCII,
+    # so Windows PowerShell 5.1 cannot misread this file through the ANSI code page.
     $probe = @'
-const fs = require("fs")
+import fs from "node:fs"
 fs.writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)), "utf8")
 '@
-    $probePath = Join-Path $sandbox "argv-probe.js"
-    $outputPath = Join-Path $sandbox "argv-probe.json"
-    Set-Content -LiteralPath $probePath -Value $probe -Encoding UTF8
+    $probeDir = Join-Path $sandbox "argv-probe"
+    New-Item -ItemType Directory -Path $probeDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $probeDir "package.json") -Value '{"type":"module"}' -Encoding ASCII
+    $probePath = Join-Path $probeDir "argv-probe.js"
+    $outputPath = Join-Path $probeDir "argv-probe.json"
+    Set-Content -LiteralPath $probePath -Value $probe -Encoding ASCII
+    $environment = [string] [char] 0x73AF + [string] [char] 0x5883
+    $trailing = "C:\" + [string] [char] 0x5C3E + [string] [char] 0x968F + "\"
     $arguments = @(
-        '环境',
-        '',
+        $environment,
+        "",
         'say "hi"',
-        'C:\尾随\',
-        '😀',
-        'plain'
+        $trailing,
+        [char]::ConvertFromUtf32(0x1F600),
+        "plain"
     )
     $serialized = ConvertTo-WindowsCommandLine -Arguments (@($outputPath) + $arguments)
     $probeInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -220,9 +226,18 @@ fs.writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)), "utf8")
     $probeInfo.RedirectStandardError = $true
     $probeProcess = [Diagnostics.Process]::new()
     $probeProcess.StartInfo = $probeInfo
-    [void] $probeProcess.Start()
-    $probeProcess.WaitForExit()
-    Assert-True -Condition ($probeProcess.ExitCode -eq 0) -Message "real node accepts the direct argument vector"
+    try {
+        [void] $probeProcess.Start()
+        if (-not $probeProcess.WaitForExit(15000)) {
+            $probeProcess.Kill()
+            [void] $probeProcess.WaitForExit(5000)
+            throw "direct argument probe timed out"
+        }
+        Assert-True -Condition ($probeProcess.ExitCode -eq 0) -Message "real node accepts the direct argument vector"
+    }
+    finally {
+        $probeProcess.Dispose()
+    }
     $received = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True -Condition ($received.Count -eq $arguments.Count) -Message "direct argument count is preserved"
     for ($index = 0; $index -lt $arguments.Count; $index++) {

@@ -335,3 +335,45 @@ test('the release version gate reads real project files and fails on any drift',
         rmSync(aligned, { recursive: true, force: true })
     }
 })
+
+test('the Windows installer fixture resolves the repository root and its ESM stub accepts direct argv', () => {
+    // 只执行 fixture 中的 Node stub，不启动 PowerShell，也不注册计划任务。
+    const fixture = readFileSync(path.join(ROOT, 'scripts/daemon/tests/test_daemon_install_windows.ps1'), 'utf8')
+    assert.match(
+        fixture,
+        /\$repoRoot = Split-Path -Parent \(Split-Path -Parent \(Split-Path -Parent \$PSScriptRoot\)\)/u,
+        'repoRoot must climb tests -> daemon -> scripts -> repository root',
+    )
+    const heredoc = fixture.match(/\$stubMain = @'\r?\n([\s\S]*?)\r?\n'@/u)
+    assert.ok(heredoc, 'missing stubMain heredoc')
+    const stub = heredoc[1]
+    assert.match(stub, /import fs from "node:fs"/u)
+    assert.doesNotMatch(stub, /\brequire\(/u)
+
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-windows-stub-'))
+    try {
+        writeFileSync(path.join(directory, 'package.json'), '{"type":"module"}\n')
+        writeFileSync(path.join(directory, 'main.js'), `${stub}\n`)
+        writeFileSync(path.join(directory, 'daemon.json'), '{"studioUrl":"https://studio.example.com"}\n')
+        const entry = path.join(directory, 'main.js')
+        const version = spawnSync(process.execPath, [entry, '--version'], { encoding: 'utf8' })
+        assert.equal(version.status, 0, version.stderr)
+        assert.equal(version.stdout, 'kk-studio-daemon 1.0.12\n')
+        const config = spawnSync(process.execPath, [entry, '--check-config', path.join(directory, 'daemon.json')], {
+            encoding: 'utf8',
+        })
+        assert.equal(config.status, 0, config.stderr)
+        assert.equal(config.stdout, 'Daemon configuration is valid\n')
+        const invalid = spawnSync(process.execPath, [entry, '--check-config', path.join(directory, 'missing.json')], {
+            encoding: 'utf8',
+        })
+        assert.equal(invalid.status, 2)
+        const wrappedPath = path.join(directory, 'wrapped.json')
+        writeFileSync(wrappedPath, '{"daemon":{"studioUrl":"https://studio.example.com"}}\n')
+        const wrapped = spawnSync(process.execPath, [entry, '--check-config', wrappedPath], { encoding: 'utf8' })
+        assert.equal(wrapped.status, 2)
+        assert.match(wrapped.stderr, /Invalid daemon configuration: daemon\.daemon: unknown field/u)
+    } finally {
+        rmSync(directory, { recursive: true, force: true })
+    }
+})
