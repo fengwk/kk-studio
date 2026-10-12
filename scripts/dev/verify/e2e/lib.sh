@@ -38,7 +38,7 @@ DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
 
 export DAEMON_ENV_ROOT
 
-BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.12.jar"}
+BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.13.jar"}
 
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }

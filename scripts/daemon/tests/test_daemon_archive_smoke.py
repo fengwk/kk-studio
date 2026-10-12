@@ -283,7 +283,7 @@ class SmokeArchiveTest(unittest.TestCase):
         self.assertIn("readable non-empty file", absent.stderr)
 
     def test_rejects_windows_archive_name(self) -> None:
-        archive = self.root / "kk-studio-daemon-v1.0.12-windows-amd64.tar.gz"
+        archive = self.root / "kk-studio-daemon-v1.0.13-windows-amd64.tar.gz"
         archive.write_bytes(b"present but not a unix archive")
         result = self._run(archive)
         self.assertNotEqual(result.returncode, 0)
@@ -336,7 +336,7 @@ class SmokeArchiveTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--version mismatch", result.stderr)
 
-        bad_help = self._archive(name=f"kk-studio-daemon-v1.0.12-help-{_host_os()}-{self.arch}.tar.gz", help_ok=False)
+        bad_help = self._archive(name=f"kk-studio-daemon-v1.0.13-help-{_host_os()}-{self.arch}.tar.gz", help_ok=False)
         result = self._run(bad_help)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--help", result.stderr)

@@ -100,7 +100,7 @@ describe('runtime handshake', () => {
     expect(hello?.environmentId).toBeNull()
     expect(hello?.payload.protocolVersion).toBe(4)
     expect(hello?.payload.capabilityCatalogVersion).toBe('2')
-    expect(hello?.payload.daemonVersion).toBe('1.0.12')
+    expect(hello?.payload.daemonVersion).toBe('1.0.13')
     expect(hello?.payload.registrationToken).toBe('test-registration-token')
     expect(typeof hello?.payload.daemonInstanceId).toBe('string')
     setup.runtime.close()

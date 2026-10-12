@@ -49,7 +49,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   }
 })
 
-const VERSION = '1.0.12'
+const VERSION = '1.0.13'
 const OPERATION_ID = '11111111-1111-4111-8111-111111111111'
 const ARCHIVE = Buffer.from('verified-distribution-archive-bytes')
 const ARCHIVE_SHA = createHash('sha256').update(ARCHIVE).digest('hex')
