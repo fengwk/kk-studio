@@ -311,9 +311,7 @@ const foreignMarkers = {
   'macos-amd64': ['linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64', 'darwin-arm64'],
   'macos-arm64': ['linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64', 'darwin-x64'],
 }[host] ?? []
-// 通用 VSCode js-debug 扩展自带的 Windows 专用 helper：其平台前缀名只在 Windows 上被
-// 延迟 require（包在 try/catch 里），在 Unix 主机上从不加载。因此它既不是本机原生模块，
-// 也不是异常的外部核心原生模块，只按归档内稳定的相对路径精确豁免，不做扩展级或后缀级跳过。
+// 通用 js-debug 扩展携带的 Windows 专用 helper 不属于 Unix 运行时原生模块。
 const jsDebugWindowsHelper =
   /^lib\/vscode\/extensions\/ms-vscode\.js-debug\/src\/win32-app-container-tokens\.win32-(x64|arm64)-msvc-[A-Za-z0-9]+\.node$/
 function walk(directory) {
@@ -329,8 +327,7 @@ function walk(directory) {
     if (entry.isDirectory()) {
       walk(target)
     } else if (entry.isFile() && entry.name.endsWith('.node')) {
-      // 只在归档内稳定的相对路径上判定：既避免 TMPDIR 等宿主路径里的外部标记造成误判，
-      // 也只豁免上面精确的 Windows helper 相对路径。
+      // 用归档相对路径判定，避免 TMPDIR 名称干扰平台识别。
       const relativePath = relative(root, target).split(sep).join('/')
       if (jsDebugWindowsHelper.test(relativePath)) {
         continue
