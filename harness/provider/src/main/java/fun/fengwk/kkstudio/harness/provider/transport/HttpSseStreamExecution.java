@@ -36,6 +36,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>检测并安全拒绝 direct / caller-runs executor 的 inline execution，防止流死锁。
  *   <li>所有生命周期回调严格串行化，且仅在权威状态 RUNNING 下派发；终态后任何非终态回调为零。
  *   <li>支持从回调内部安全重入 {@link #cancel()} 而不死锁。
+ *   <li>响应体所有权在交付时登记，与终态关闭互斥，避免取消/超时后 body 交付窗口内的流泄漏。
  *   <li>竞态安全的 Future 挂接：任何 future 一经挂接若已处于终态必须立即 cancel。
  *   <li>非显式 cancel 导致的 {@link InterruptedException} 按基础 transport I/O 语义分类并保留中断标志。
  *   <li>单调时钟 deadline 一次性调度；timer 仅负责排期，不执行阻塞清理或回调。
@@ -302,7 +303,7 @@ final class HttpSseStreamExecution implements ProviderStream {
 
     HttpResponse<InputStream> response;
     try {
-      response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+      response = httpClient.send(request, bodyHandler());
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       if (state.get() != STATE_CANCELLED) {
@@ -324,8 +325,9 @@ final class HttpSseStreamExecution implements ProviderStream {
 
     int statusCode = response.statusCode();
     Map<String, List<String>> headers = response.headers().map();
-    InputStream responseBodyStream = response.body();
-    this.activeInputStream = responseBodyStream;
+    // JDK 在 send 返回前就可能交付响应体（bodyHandler 已登记所有权）；对忽略 body handler 的
+    // 客户端（如测试替身）则在此补登记，二者共用同一登记点，绝不重复复写。
+    InputStream responseBodyStream = captureBodyStream(response.body());
 
     // 确认权威状态仍为 RUNNING（若在 send 期间发生超时或取消，立即关闭流并退出）
     if (state.get() != STATE_RUNNING) {
@@ -410,6 +412,35 @@ final class HttpSseStreamExecution implements ProviderStream {
       }
     } finally {
       closeResources();
+    }
+  }
+
+  // JDK 可能在 send() 返回前完成响应体交付（例如工作线程随后被中断、send 永不返回 HttpResponse）。
+  // 通过 BodySubscribers.mapping 在 body 可用时立即登记所有权，使 cancel/timeout 能关闭该流。
+  private HttpResponse.BodyHandler<InputStream> bodyHandler() {
+    return responseInfo ->
+        HttpResponse.BodySubscribers.mapping(
+            HttpResponse.BodySubscribers.ofInputStream(), this::captureBodyStream);
+  }
+
+  /**
+   * 登记响应体所有权：与 {@link #closeActiveStream()} 通过 {@code futureLock} 互斥，保证 body 交付与终态
+   * 关闭的竞态下流不被泄漏。终态已获胜则立即关闭；已有其他流在管则保留原有所有权并关闭新流；绝不复写已有资源。 该方法运行在 body 交付线程上，绝不派发任何用户回调。
+   */
+  InputStream captureBodyStream(InputStream stream) {
+    if (stream == null) {
+      return null;
+    }
+    synchronized (futureLock) {
+      if (stream == activeInputStream) {
+        return stream;
+      }
+      if (isTerminal() || activeInputStream != null) {
+        closeInputStream(stream);
+        return stream;
+      }
+      activeInputStream = stream;
+      return stream;
     }
   }
 
@@ -622,10 +653,12 @@ final class HttpSseStreamExecution implements ProviderStream {
   }
 
   private void closeActiveStream() {
-    InputStream stream = activeInputStream;
-    if (stream != null) {
-      activeInputStream = null;
-      closeInputStream(stream);
+    synchronized (futureLock) {
+      InputStream stream = activeInputStream;
+      if (stream != null) {
+        activeInputStream = null;
+        closeInputStream(stream);
+      }
     }
   }
 
