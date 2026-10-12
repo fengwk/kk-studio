@@ -1,10 +1,10 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 
-/** 写出本进程 pid；每个夹具都先登记自己，测试据此用原生 pid 观察存活。 */
-export function recordPid(file) {
+/** 原子发布夹具 pid，默认为当前进程；读者只会看到完整的 pid。 */
+export function recordPid(file, pid = process.pid) {
   return import('node:fs').then((fs) => {
     const temporary = `${file}.tmp`
-    fs.writeFileSync(temporary, String(process.pid))
+    fs.writeFileSync(temporary, String(pid))
     fs.renameSync(temporary, file)
   })
 }
