@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
 
 setLocale('zh-CN')
@@ -32,16 +34,27 @@ const queryClient = new QueryClient({
  */
 export function ChatBranchHarnessApp() {
   const scenario = new URLSearchParams(window.location.search).get('scenario') ?? 'tree'
+  const [router] = useState(() =>
+    createMemoryRouter(
+      [
+        {
+          path: '/chats/:chatId',
+          element: (
+            <IdeLifecycleProvider>
+              <div className="chat-branch-harness-frame" data-testid="scenario" data-scenario={scenario}>
+                <ChatWorkspacePage />
+              </div>
+            </IdeLifecycleProvider>
+          ),
+        },
+      ],
+      { initialEntries: [`/chats/${HARNESS_CHAT_ID}`] },
+    ),
+  )
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <MemoryRouter initialEntries={[`/chats/${HARNESS_CHAT_ID}`]}>
-          <div className="chat-branch-harness-frame" data-testid="scenario" data-scenario={scenario}>
-            <Routes>
-              <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
-            </Routes>
-          </div>
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ApplicationEventProvider>
     </QueryClientProvider>
   )
