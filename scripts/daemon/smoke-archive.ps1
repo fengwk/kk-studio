@@ -71,6 +71,25 @@ try {
     if ($manifest.daemonVersion -ne $package.version -or $null -eq $manifest.codeServer.'windows-amd64') {
         Fail 'runtime manifest must match the package version and host platform'
     }
+    # The daemon resolves the configured bash executable (default `bash`) through PATH, so the
+    # controlled empty PATH below (which deliberately hides user Node/Java) would make
+    # --check-config reject a valid configuration. Capture the real Git Bash as an absolute path
+    # *before* emptying PATH and pass it explicitly through the config instead of faking a shell.
+    $bashCommand = Get-Command bash.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $bashCommand) {
+        Fail 'Git Bash is required for the archive smoke but bash.exe was not found on PATH'
+    }
+    $bashExecutable = $bashCommand.Source
+    if ([string]::IsNullOrWhiteSpace($bashExecutable) -or -not [System.IO.Path]::IsPathRooted($bashExecutable)) {
+        Fail "bash.exe did not resolve to an absolute executable path: $bashExecutable"
+    }
+    if ((Split-Path -Leaf $bashExecutable) -ne 'bash.exe') {
+        Fail "bash.exe resolved to an unexpected executable: $bashExecutable"
+    }
+    if (-not (Test-Path -LiteralPath $bashExecutable -PathType Leaf)) {
+        Fail "the resolved bash.exe is not a readable file: $bashExecutable"
+    }
     # All daemon checks below use the bundled runtime without an installed Java/Node on PATH.
     $env:PATH = Join-Path $root 'empty-path'
     New-Item -ItemType Directory -Path $env:PATH | Out-Null
@@ -91,12 +110,12 @@ try {
     [System.IO.File]::WriteAllText($probe, @'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-const [root] = process.argv.slice(2)
+const [root, bashExecutable] = process.argv.slice(2)
 const native = await import(pathToFileURL(join(root, 'native', 'index.js')).href)
 const configRoot = join(root, 'config')
 await native.ensurePrivateDirectory(configRoot)
 await native.writePrivateFile(join(configRoot, 'daemon.token'), 'smoke-token')
-await native.writePrivateFile(join(configRoot, 'daemon.json'), '{"studioUrl":"http://127.0.0.1:59999"}')
+await native.writePrivateFile(join(configRoot, 'daemon.json'), JSON.stringify({ studioUrl: 'http://127.0.0.1:59999', bashExecutable }))
 const directory = join(root, 'private-data')
 await native.ensurePrivateDirectory(directory)
 const lock = await native.acquireDirectoryLock(directory)
@@ -114,7 +133,7 @@ try {
 }
 process.stdout.write('native directory lock ok')
 '@, $utf8)
-    $nativeResult = & $node $probe $root
+    $nativeResult = & $node $probe $root $bashExecutable
     if ($LASTEXITCODE -ne 0 -or $nativeResult -ne 'native directory lock ok') {
         Fail 'Windows directory lock probe failed'
     }
