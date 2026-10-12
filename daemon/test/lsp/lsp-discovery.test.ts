@@ -242,11 +242,12 @@ describe('LspDiscovery & ExecutableResolver', () => {
     const posixCmd = path.join(binDir, 'mycmd')
     fs.writeFileSync(posixCmd, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
 
-    // POSIX path resolution
+    // POSIX path resolution uses the real platform delimiter, including when Windows is simulated.
+    const delimiter = process.platform === 'win32' ? ';' : ':'
     expect(
       ExecutableResolver.resolve('mycmd', {
         windows: false,
-        pathVariable: `${tempDir}/nope:${binDir}`,
+        pathVariable: `${path.join(tempDir, 'nope')}${delimiter}${binDir}`,
       }),
     ).toBe(posixCmd)
 

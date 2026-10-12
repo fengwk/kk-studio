@@ -427,7 +427,7 @@ describe('SkillPackageInstaller', () => {
     // 4. Non-conforming backup file/dir (MUST BE LEFT UNTOUCHED)
     const corruptBackup = path.join(backupRoot, 'corrupted-file.bin')
     fs.writeFileSync(corruptBackup, 'garbage')
-    const badNameBackup = path.join(backupRoot, `bad:name.${randomUUID()}`)
+    const badNameBackup = path.join(backupRoot, `${'p'.repeat(129)}.${randomUUID()}`)
     fs.mkdirSync(badNameBackup, { recursive: true })
 
     await installer.recoverArtifacts()
@@ -728,38 +728,64 @@ describe('SkillPackageInstaller', () => {
     const remoteUrl = pathToFileURL(remoteRepoDir).toString()
 
     const executionLog: string[] = []
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let markEntered!: () => void
+    const firstEntered = new Promise<void>((resolve) => {
+      markEntered = resolve
+    })
+    let activeSame = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('timed out waiting for the package lock')), 5_000)
+    })
 
-    let slowMoverPkg1 = 0
     const delayInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
       privateFs: createTestPrivateFs(),
       directoryMover: async (source, target) => {
         if (target.includes('pkg-same')) {
-          slowMoverPkg1++
-          executionLog.push(`pkg-same-${slowMoverPkg1} start`)
-          await new Promise((resolve) => setTimeout(resolve, 50))
-          executionLog.push(`pkg-same-${slowMoverPkg1} end`)
+          activeSame += 1
+          const turn = activeSame
+          executionLog.push(`pkg-same-${turn} start`)
+          if (turn === 1) {
+            // 先标记已进入临界区，再等待释放，第二个同包安装因此不能进入。
+            markEntered()
+            await firstGate
+          }
+          executionLog.push(`pkg-same-${turn} end`)
         } else if (target.includes('pkg-diff')) {
           executionLog.push('pkg-diff start')
-          await new Promise((resolve) => setTimeout(resolve, 10))
           executionLog.push('pkg-diff end')
         }
         await fs.promises.rename(source, target)
       },
     })
 
-    await Promise.all([
-      delayInstaller.install('pkg-same', remoteUrl, 'main', commit1),
-      delayInstaller.install('pkg-same', remoteUrl, 'main', commit1),
-      delayInstaller.install('pkg-diff', remoteUrl, 'main', commit1),
-    ])
+    const sameA = delayInstaller.install('pkg-same', remoteUrl, 'main', commit1)
+    const sameB = delayInstaller.install('pkg-same', remoteUrl, 'main', commit1)
+    const diff = delayInstaller.install('pkg-diff', remoteUrl, 'main', commit1)
+    try {
+      await Promise.race([firstEntered, timedOut])
+      await Promise.race([diff, timedOut])
+      // 同包的第二次安装必须仍被挡住，不同包必须已经完成。
+      expect(executionLog).not.toContain('pkg-same-2 start')
+      expect(executionLog).toContain('pkg-diff end')
+      expect(executionLog).not.toContain('pkg-same-1 end')
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+      releaseFirst()
+      await Promise.allSettled([sameA, sameB, diff])
+    }
+    await Promise.all([sameA, sameB, diff])
 
-    // Notice: pkg-diff must have completed before the second pkg-same started
     const firstSameEnd = executionLog.indexOf('pkg-same-1 end')
     const secondSameStart = executionLog.indexOf('pkg-same-2 start')
+    expect(firstSameEnd).toBeGreaterThanOrEqual(0)
     expect(firstSameEnd).toBeLessThan(secondSameStart)
-
-    const diffStart = executionLog.indexOf('pkg-diff start')
-    expect(diffStart).toBeLessThan(firstSameEnd)
   })
 
   it('open factory and getters return expected paths', () => {
@@ -1083,7 +1109,6 @@ describe('SkillPackageInstaller', () => {
       `a`.repeat(129) + `.${validUuid}`,
       `.${validUuid}`,
       `..${validUuid}`,
-      `bad\u001fname.${validUuid}`,
       `bad\u0080name.${validUuid}`,
       `pkg.short-uuid`,
       `pkg.${validUuid}.clone`,
