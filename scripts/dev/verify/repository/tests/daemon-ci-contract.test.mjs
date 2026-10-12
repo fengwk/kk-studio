@@ -202,6 +202,172 @@ test('the release pipeline smoke-tests every staged archive on its own host', ()
     assert.doesNotMatch(smokeScript, /only runs on Linux;/u)
 })
 
+test('the release workflow can dry-run every platform without ever publishing', () => {
+    // 手动触发只做候选验收：完整跑 stage 与五平台烟测，但 publish 必须被跳过。
+    const triggers = topLevelSection(RELEASE, 'on')
+    assert.match(triggers, /^ {2}workflow_dispatch:$/m)
+    const input = triggers.match(/^ {6}tag:\n((?: {8}.*\n)+)/m)?.[1]
+    assert.ok(input, 'missing workflow_dispatch tag input')
+    assert.match(input, /^ {8}type: string$/m)
+    assert.match(input, /^ {8}required: true$/m)
+
+    // input 只经全局 env 传递，绝不直接拼进 shell。
+    assert.match(
+        topLevelSection(RELEASE, 'env'),
+        /^ {2}RELEASE_TAG: \$\{\{ inputs\.tag \|\| github\.ref_name \}\}$/m,
+    )
+
+    assert.match(
+        jobBlock(RELEASE, 'publish'),
+        /^ {4}if: \$\{\{ github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\) \}\}$/m,
+    )
+    // stage 与烟测矩阵不因手动触发而被 if 跳过。
+    for (const job of ['stage', 'smoke_archives']) {
+        assert.equal(jobBlock(RELEASE, job).match(/^ {4}if:/m), null, `${job} must not be conditional`)
+    }
+})
+
+test('the release workflow is read-only except for the publishing job', () => {
+    // 默认最小权限；只有真正写 Release 的 job 才要 contents: write。
+    assert.match(topLevelSection(RELEASE, 'permissions'), /^ {2}contents: read$/m)
+    assert.match(jobBlock(RELEASE, 'publish'), /^ {4}permissions:\n {6}contents: write$/m)
+    for (const job of ['stage', 'smoke_archives', 'validate_daemon', 'validate_windows_daemon']) {
+        assert.doesNotMatch(jobBlock(RELEASE, job), /^ {4}permissions:\n {6}contents: write$/m, `${job} must not gain write access`)
+    }
+})
+
+test('the release commit gate keeps the tag ancestry rule and rejects other events', () => {
+    const run = stepRun(stepNamed(RELEASE, 'stage', 'Require a safe release tag on an approved commit'))
+    assert.match(run, /^ {10}tag="\$\{RELEASE_TAG\}"$/m)
+    assert.match(run, /\^v\[0-9A-Za-z\._-\]\+\$/u)
+    assert.match(run, /case "\$\{GITHUB_EVENT_NAME\}" in/u)
+    // 正式 tag push 仍要求提交在 origin/main 上。
+    assert.match(run, /push\)[\s\S]*?git merge-base --is-ancestor "\$\{commit\}" refs\/remotes\/origin\/main/u)
+    // 手动 dry run 只要求候选提交包含 origin/main。
+    assert.match(run, /workflow_dispatch\)[\s\S]*?git merge-base --is-ancestor refs\/remotes\/origin\/main "\$\{commit\}"/u)
+    // 其它事件显式失败。
+    assert.match(run, /\*\)\n {14}echo "unsupported release event/u)
+})
+
+test('the release commit gate really enforces main lineage and safe tags when executed', () => {
+    // 在临时 git 仓库里真实执行嵌入 stage 的 gate 脚本：观察退出码，而不是只匹配字符串。
+    const script = dedent(
+        stepRun(stepNamed(RELEASE, 'stage', 'Require a safe release tag on an approved commit')),
+        10,
+    )
+    const repo = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-release-gate-'))
+    const git = (...args) => {
+        const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
+        assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr}`)
+        return result.stdout.trim()
+    }
+    const commit = (file, content, message) => {
+        writeFileSync(path.join(repo, file), content)
+        git('add', file)
+        git('commit', '-q', '-m', message)
+        return git('rev-parse', 'HEAD')
+    }
+    try {
+        git('init', '-q')
+        git('config', 'user.name', 'release-gate')
+        git('config', 'user.email', 'release-gate@example.com')
+        // origin/main 指向 main 的 tip；gate 只读这个远程跟踪 ref。
+        const base = commit('f.txt', 'base\n', 'base')
+        const mainTip = commit('f.txt', 'main\n', 'main')
+        git('update-ref', 'refs/remotes/origin/main', mainTip)
+        // 已合入 main 之后的候选提交：包含 origin/main，但自身不在 main 上。
+        const ahead = commit('f.txt', 'ahead\n', 'ahead')
+        // 与 main 分叉的提交：从 base 分出，既不包含 main tip，也不在其上。
+        git('checkout', '-q', '-f', '--detach', base)
+        const divergent = commit('g.txt', 'divergent\n', 'divergent')
+        // 孤立提交：与 main 没有共同祖先。
+        git('checkout', '-q', '--orphan', 'orphan')
+        git('rm', '-r', '-q', '--cached', '.')
+        git('commit', '-q', '--allow-empty', '-m', 'orphan')
+        const orphan = git('rev-parse', 'HEAD')
+
+        const gate = (event, tag, head) => {
+            git('checkout', '-q', '-f', '--detach', head)
+            const output = path.join(repo, 'github-output')
+            writeFileSync(output, '')
+            const result = spawnSync('bash', ['-s'], {
+                input: `${script}\n`,
+                cwd: repo,
+                env: {
+                    ...process.env,
+                    GITHUB_EVENT_NAME: event,
+                    RELEASE_TAG: tag,
+                    GITHUB_OUTPUT: output,
+                },
+                encoding: 'utf8',
+            })
+            return {
+                status: result.status,
+                stderr: result.stderr,
+                output: readFileSync(output, 'utf8'),
+            }
+        }
+
+        // push：提交必须在 origin/main 上；main tip 通过，未合入/分叉/孤立都被拒绝。
+        const onMain = gate('push', 'v1.2.3', mainTip)
+        assert.equal(onMain.status, 0, onMain.stderr)
+        assert.match(onMain.output, /^commit=[0-9a-f]{40}$/m)
+        assert.match(onMain.output, /^source_date_epoch=\d+$/m)
+        for (const [label, head] of [['ahead', ahead], ['divergent', divergent], ['orphan', orphan]]) {
+            const rejected = gate('push', 'v1.2.3', head)
+            assert.notEqual(rejected.status, 0, `push must reject a ${label} commit`)
+            assert.match(rejected.stderr, /not an ancestor of origin\/main/u)
+        }
+
+        // workflow_dispatch：候选必须包含 origin/main；包含它的候选通过，分叉/孤立被拒绝。
+        const manual = gate('workflow_dispatch', 'v1.2.3', ahead)
+        assert.equal(manual.status, 0, manual.stderr)
+        assert.match(manual.output, /^commit=[0-9a-f]{40}$/m)
+        for (const [label, head] of [['divergent', divergent], ['orphan', orphan]]) {
+            const rejected = gate('workflow_dispatch', 'v1.2.3', head)
+            assert.notEqual(rejected.status, 0, `manual dry run must reject a ${label} commit`)
+            assert.match(rejected.stderr, /does not contain origin\/main/u)
+        }
+
+        // 不安全 tag 与未知事件即使提交合法也必须显式失败。
+        assert.notEqual(gate('push', 'v1.2.3;rm -rf /', mainTip).status, 0, 'an unsafe tag must be rejected')
+        assert.notEqual(gate('push', 'v1.2.3$(id)', mainTip).status, 0, 'shell metacharacters must be rejected')
+        assert.notEqual(gate('pull_request', 'v1.2.3', mainTip).status, 0, 'an unsupported event must be rejected')
+    } finally {
+        rmSync(repo, { recursive: true, force: true })
+    }
+})
+
+test('linux-amd64 smoke installs native broker host libraries without skipping native modules', () => {
+    // headless runner 缺 MSAL native broker 依赖的宿主库，只在 linux-amd64 补装。
+    const step = stepNamed(RELEASE, 'smoke_archives', 'Install Linux native broker host libraries')
+    assert.equal(stepField(step, 'if'), "matrix.platform == 'linux-amd64'")
+    const run = stepRun(step)
+    assert.match(run, /apt-get install --yes --no-install-recommends libwebkit2gtk-4\.1-0 libsecret-1-0/u)
+
+    // 这些宿主库不是跳过原生模块的借口：.node 仍被逐个 require，没有认证/MSAL 豁免。
+    const smokeScript = readFileSync(path.join(ROOT, 'scripts/daemon/smoke-archive.sh'), 'utf8')
+    assert.match(smokeScript, /for \(const modulePath of found\) \{\n {2}require\(modulePath\)\n/u)
+    assert.doesNotMatch(smokeScript, /msal|microsoft-authentication/iu)
+
+    // 依赖安装必须发生在烟测步骤之前。
+    const steps = stepsOf(jobBlock(RELEASE, 'smoke_archives'))
+    const install = steps.findIndex((candidate) => stepField(candidate, 'name') === 'Install Linux native broker host libraries')
+    const smoke = steps.findIndex((candidate) => stepField(candidate, 'name') === 'Smoke-test this host archive')
+    assert.ok(install >= 0 && smoke > install, 'native host libraries must be installed before the smoke')
+})
+
+test('the Windows archive smoke extracts with the absolute system tar', () => {
+    // 经 bash 启动时继承的 PATH 会命中 Git 的 GNU tar，它把 C:\ 当成远程主机路径。
+    const smoke = readFileSync(path.join(ROOT, 'scripts/daemon/smoke-archive.ps1'), 'utf8')
+    assert.match(smoke, /\$tar = Join-Path \$env:SystemRoot 'System32\\tar\.exe'/u)
+    assert.match(smoke, /if \(-not \(Test-Path -LiteralPath \$tar -PathType Leaf\)\)/u)
+    assert.match(smoke, /& \$tar -xzf \$Archive -C \$root/u)
+    const extraction = smoke.split('\n').filter((line) => line.includes('-xzf'))
+    assert.equal(extraction.length, 1, 'there must be exactly one extraction invocation')
+    assert.equal(extraction[0].trim(), '& $tar -xzf $Archive -C $root', 'extraction must not fall back to a bare PATH tar')
+})
+
 test('daemon-ci runs the installer and archive smoke on the macOS runner', () => {
     const step = stepNamed(CI, 'node_daemon', 'Test the macOS installer and archive smoke with system Bash')
     assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
@@ -253,13 +419,13 @@ test('the release version gate reads real project files and fails on any drift',
     // 版本来自真实文件：pom.xml 的元素与属性、daemon/package.json 与 tag；不写死任何版本字面量。
     assert.match(python, /xml\.etree\.ElementTree/u)
     assert.match(python, /daemon\/package\.json/u)
-    assert.match(python, /GITHUB_REF_NAME/u)
+    assert.match(python, /RELEASE_TAG/u)
     assert.doesNotMatch(python, /["']\d+\.\d+\.\d+["']/u, 'the gate must not hardcode a version')
 
     const runGate = (fixturePath, tag) => spawnSync('bash', ['-s'], {
         input: `${script}\n`,
         cwd: fixturePath,
-        env: { ...process.env, GITHUB_REF_NAME: tag },
+        env: { ...process.env, RELEASE_TAG: tag },
         encoding: 'utf8',
     })
 

@@ -13,6 +13,14 @@ on:
   push:
     tags:
       - 'v*'
+  # 手动触发只做候选验收：完整跑 stage 与五平台归档烟测，但 publish job 永不执行，
+  # 因此可以在正式打 tag 之前用真实归档验收宿主环境。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 待验收版本标识（例如 v1.2.3）；只暂存与烟测，不创建标签或发布。
+        type: string
+        required: true
 
 # 发布不可并发：取消正在上传的 workflow 会留下半套资产。同一 ref 的重跑排队执行。
 # 已发布 Release 的资产不重写：校验和完全一致则跳过，否则失败。只有草稿可以补齐资产。
@@ -20,13 +28,17 @@ concurrency:
   group: daemon-release-${{ github.ref }}
   cancel-in-progress: false
 
+# 默认只读；只有真正写 Release 的 publish job 需要 contents: write。
 permissions:
-  contents: write
+  contents: read
 
 env:
   JAVA_VERSION: '21'
   NODE_VERSION: '24.14.0'
   POSTGRES_VERSION: '17'
+  # push tag 用真实 tag，workflow_dispatch 用输入 tag 做候选验收。资产名、版本门禁与
+  # Release 命令都只通过它取值，input 绝不直接拼进 shell。
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
   # 每个平台在 daemon/release/<os>-<arch> 下产出一套资产；工作流的资产校验与上传只读这些目录。
   RELEASE_ROOT: daemon/release
   # 官方 Daemon 发行归档覆盖的平台矩阵（windows 只支持 amd64）。
@@ -121,23 +133,40 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      # tag 名会进入资产文件名，因此只接受只含安全字符的版本 tag；tag 提交必须是
-      # origin/main 的祖先，未合入 main 的 tag 不能发布。
-      - name: Require a safe version tag on a main commit
+      # tag 名会进入资产文件名，因此只接受只含安全字符的版本 tag。提交约束分事件：
+      # tag push 必须在 origin/main 上（正式发布）；手动 dry run 的候选 HEAD 必须包含
+      # origin/main，但绝不发布。其它事件一律拒绝。
+      - name: Require a safe release tag on an approved commit
         id: tag
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${RELEASE_TAG}"
           if ! [[ "${tag}" =~ ^v[0-9A-Za-z._-]+$ ]]; then
             echo "unsupported release tag (expected ^v[0-9A-Za-z._-]+$): ${tag}" >&2
             exit 1
           fi
           commit=$(git rev-parse --verify 'HEAD^{commit}')
           git show-ref --verify --quiet refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "${commit}" refs/remotes/origin/main; then
-            echo "release tag ${tag} (${commit}) is not an ancestor of origin/main" >&2
-            exit 1
-          fi
+          case "${GITHUB_EVENT_NAME}" in
+            push)
+              # 正式发布：tag 提交必须在 main 上，未合入 main 的 tag 不能发布。
+              if ! git merge-base --is-ancestor "${commit}" refs/remotes/origin/main; then
+                echo "release tag ${tag} (${commit}) is not an ancestor of origin/main" >&2
+                exit 1
+              fi
+              ;;
+            workflow_dispatch)
+              # 候选验收：不发布，但候选提交必须包含当前的 origin/main。
+              if ! git merge-base --is-ancestor refs/remotes/origin/main "${commit}"; then
+                echo "manual release dry run (${commit}) does not contain origin/main" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "unsupported release event: ${GITHUB_EVENT_NAME}" >&2
+              exit 1
+              ;;
+          esac
           source_date_epoch=$(git show -s --format=%ct "${commit}")
           echo "commit=${commit}" >>"${GITHUB_OUTPUT}"
           echo "source_date_epoch=${source_date_epoch}" >>"${GITHUB_OUTPUT}"
@@ -181,7 +210,7 @@ jobs:
           )
           package = json.loads(pathlib.Path('daemon/package.json').read_text(encoding='utf-8'))
           daemon_version = required_string(package.get('version'), 'the daemon package version')
-          tag = os.environ.get('GITHUB_REF_NAME', '')
+          tag = os.environ.get('RELEASE_TAG', '')
           tag_version = tag[1:] if tag.startswith('v') else tag
           sources = {
               'pom.xml <version>': expected,
@@ -266,7 +295,7 @@ jobs:
         run: |
           set -euo pipefail
           for platform in ${RELEASE_PLATFORMS}; do
-            scripts/daemon/prepare-release.sh "${GITHUB_REF_NAME}" "${platform%-*}" "${platform#*-}"
+            scripts/daemon/prepare-release.sh "${RELEASE_TAG}" "${platform%-*}" "${platform#*-}"
           done
 
       - name: Upload staged release archives
@@ -304,11 +333,21 @@ jobs:
         with:
           name: daemon-release-archives
           path: daemon/release
+      # code-server 的 MSAL native broker (microsoft-authentication/dist/msal-node-runtime.node)
+      # 链接 libmsalruntime.so，后者需要 WebKitGTK/libsecret 等宿主库；headless runner 默认缺少这些库。
+      # 这些只是本烟测宿主的依赖，不是 Daemon 启动的通用要求，因此只在 linux-amd64 安装，
+      # 且不因此缩小 .node 加载断言。
+      - name: Install Linux native broker host libraries
+        if: matrix.platform == 'linux-amd64'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-0 libsecret-1-0
       - name: Smoke-test this host archive
         shell: bash
         run: |
           set -euo pipefail
-          archive="daemon/release/${{ matrix.platform }}/kk-studio-daemon-${GITHUB_REF_NAME}-${{ matrix.platform }}.tar.gz"
+          archive="daemon/release/${{ matrix.platform }}/kk-studio-daemon-${RELEASE_TAG}-${{ matrix.platform }}.tar.gz"
           test -f "${archive}"
           case "${{ matrix.platform }}" in
             windows-*)
@@ -321,10 +360,15 @@ jobs:
 
   publish:
     name: publish daemon release
+    # 只有正式 tag push 才发布：workflow_dispatch 的候选验收必须跳过本 job。
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
     needs:
       - stage
       - smoke_archives
     runs-on: ubuntu-latest
+    # 唯一需要写 Release 的 job；其它 job 继承工作流默认的只读权限。
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -359,9 +403,9 @@ jobs:
             os=${platform%-*}
             arch=${platform#*-}
             platform_expected=$(printf '%s\n' \
-              "kk-studio-daemon-${GITHUB_REF_NAME}-${os}-${arch}.tar.gz" \
-              "kk-studio-daemon-${GITHUB_REF_NAME}-${os}-${arch}.tar.gz.sha256" \
-              "kk-studio-daemon-${GITHUB_REF_NAME}-${os}-${arch}.json" \
+              "kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}.tar.gz" \
+              "kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}.tar.gz.sha256" \
+              "kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}.json" \
               LICENSE THIRD_PARTY_NOTICES | LC_ALL=C sort)
             if [ "${actual}" != "${platform_expected}" ]; then
               echo "staged assets for ${platform} do not match the release contract" >&2
@@ -379,7 +423,7 @@ jobs:
             os=${platform%-*}
             arch=${platform#*-}
             for suffix in ".tar.gz" ".tar.gz.sha256" ".json"; do
-              name="kk-studio-daemon-${GITHUB_REF_NAME}-${os}-${arch}${suffix}"
+              name="kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}${suffix}"
               expected_names+=("${name}")
               assets+=("${RELEASE_ROOT}/${platform}/${name}")
             done
@@ -399,9 +443,9 @@ jobs:
             done
           done
 
-          if gh release view "${GITHUB_REF_NAME}" --json isDraft,assets >/dev/null 2>&1; then
-            draft=$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft')
-            remote_names=$(gh release view "${GITHUB_REF_NAME}" --json assets \
+          if gh release view "${RELEASE_TAG}" --json isDraft,assets >/dev/null 2>&1; then
+            draft=$(gh release view "${RELEASE_TAG}" --json isDraft --jq '.isDraft')
+            remote_names=$(gh release view "${RELEASE_TAG}" --json assets \
               --jq '.assets[].name' | LC_ALL=C sort)
             compare_remote=true
             upload_names=()
@@ -450,7 +494,7 @@ jobs:
                   done
                 )
                 [ -n "${asset_path}" ] || { echo "cannot locate staged asset ${name}" >&2; exit 1; }
-                url=$(gh release view "${GITHUB_REF_NAME}" --json assets \
+                url=$(gh release view "${RELEASE_TAG}" --json assets \
                   --jq ".assets[] | select(.name == \"${name}\") | .url")
                 [ -n "${url}" ] || { echo "cannot read release asset ${name}" >&2; exit 1; }
                 checksum=$(mktemp)
@@ -479,15 +523,15 @@ jobs:
                   case "${path}" in */"${name}") pending+=("${path}"); break ;; esac
                 done
               done
-              gh release upload "${GITHUB_REF_NAME}" "${pending[@]}"
+              gh release upload "${RELEASE_TAG}" "${pending[@]}"
             fi
-            gh release edit "${GITHUB_REF_NAME}" --draft=false
+            gh release edit "${RELEASE_TAG}" --draft=false
           else
-            gh release create "${GITHUB_REF_NAME}" \
+            gh release create "${RELEASE_TAG}" \
               --draft \
               --verify-tag \
-              --title "${GITHUB_REF_NAME}" \
+              --title "${RELEASE_TAG}" \
               --generate-notes \
               "${assets[@]}"
-            gh release edit "${GITHUB_REF_NAME}" --draft=false
+            gh release edit "${RELEASE_TAG}" --draft=false
           fi
