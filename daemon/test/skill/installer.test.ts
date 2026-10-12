@@ -780,6 +780,7 @@ describe('SkillPackageInstaller', () => {
       releaseFirst()
       await Promise.allSettled([sameA, sameB, diff])
     }
+    await Promise.all([sameA, sameB, diff])
 
     const firstSameEnd = executionLog.indexOf('pkg-same-1 end')
     const secondSameStart = executionLog.indexOf('pkg-same-2 start')
