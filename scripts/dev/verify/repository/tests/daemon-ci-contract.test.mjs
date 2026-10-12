@@ -336,7 +336,20 @@ test('the release version gate reads real project files and fails on any drift',
     }
 })
 
-test('the Windows installer fixture resolves the repository root and its ESM stub accepts direct argv', () => {
+test('the Windows installer launches main.js directly and its fixture stays inside the sandbox', () => {
+    const installer = readFileSync(path.join(ROOT, 'scripts/daemon/install.ps1'), 'utf8')
+    assert.match(
+        installer,
+        /Invoke-NativeProcess -Executable \$node `\r?\n\s+-Arguments @\("main\.js", "--version"\) `\r?\n\s+-WorkingDirectory \$script:StagedLib/u,
+    )
+    assert.match(installer, /\$arguments = @\("main\.js", "--check-config", \$stagedConfig\)/u)
+    assert.match(
+        installer,
+        /\$script:HomePath =\r?\n\s+\[Environment\]::GetFolderPath\(\[Environment\+SpecialFolder\]::UserProfile\)/u,
+        'production host resolution must not accept a USERPROFILE bypass',
+    )
+    assert.match(installer, /\[System\.Security\.Principal\.WindowsIdentity\]::GetCurrent\(\)/u)
+
     // 只执行 fixture 中的 Node stub，不启动 PowerShell，也不注册计划任务。
     const fixture = readFileSync(path.join(ROOT, 'scripts/daemon/tests/test_daemon_install_windows.ps1'), 'utf8')
     assert.match(
@@ -349,6 +362,16 @@ test('the Windows installer fixture resolves the repository root and its ESM stu
     const stub = heredoc[1]
     assert.match(stub, /import fs from "node:fs"/u)
     assert.doesNotMatch(stub, /\brequire\(/u)
+    assert.match(
+        fixture,
+        /Import-Installer -Arguments @\("help"\)\r?\n\s+Initialize-HostContext\r?\n[\s\S]*?\r?\n\s+Assert-DirectArgumentRoundTrip/u,
+    )
+    assert.match(fixture, /\$acl = New-PrivateAcl\r?\n\s+Set-Acl -LiteralPath \$configPath -AclObject \$acl/u)
+    assert.match(fixture, /\$script:HomePath = \$profileDir/u)
+    const invokeInstaller = fixture.match(/function Invoke-Installer \{[\s\S]*?\n\}/u)?.[0] ?? ''
+    assert.doesNotMatch(invokeInstaller, /\$script:Tasks = @\{\}/u)
+    assert.match(fixture, /Invoke-Installer -Arguments @\("status"\)/u)
+    assert.doesNotMatch(fixture, /\. \$installer status/u)
 
     const directory = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-windows-stub-'))
     try {

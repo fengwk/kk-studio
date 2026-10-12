@@ -184,13 +184,35 @@ function New-Inputs {
     $tokenPath = Join-Path $directory "daemon.token"
     Set-Content -LiteralPath $configPath -Value $Config -Encoding UTF8
     Set-Content -LiteralPath $tokenPath -Value $Token -Encoding UTF8
+    # Real protected ACLs: the installer rejects inherited access, and this fixture must not mock that check.
+    $acl = New-PrivateAcl
+    Set-Acl -LiteralPath $configPath -AclObject $acl
+    Set-Acl -LiteralPath $tokenPath -AclObject $acl
     return @($configPath, $tokenPath)
+}
+
+function Import-Installer {
+    param([string[]] $Arguments)
+    # help defines the installer functions without Invoke-Main and without touching an installation.
+    . $installer @Arguments
+    $script:InstallerInitializeHostContext = ${function:Initialize-HostContext}
+    function Initialize-HostContext {
+        & $script:InstallerInitializeHostContext
+        # GetFolderPath(UserProfile) ignores USERPROFILE. Keep the real SID from the original
+        # initializer, then confine every managed path to this fixture sandbox.
+        $script:HomePath = $profileDir
+        $script:InstallRoot = Join-Path $profileDir ".kk-studio"
+        $script:InstalledLib = Join-Path $script:InstallRoot "lib"
+        $script:InstalledNode = Join-Path $script:InstalledLib "runtime\code-server\lib\node.exe"
+        $script:InstalledConfig = Join-Path $script:InstallRoot "daemon.json"
+        $script:InstalledToken = Join-Path $script:InstallRoot "daemon.token"
+    }
 }
 
 function Invoke-Installer {
     param([string[]] $Arguments)
-    $script:Tasks = @{}
-    . $installer @Arguments
+    # Tasks survive across install, status, and uninstall. Dot-sourcing reinstalls the sandbox wrapper.
+    Import-Installer -Arguments $Arguments
     return (Invoke-Main)
 }
 
@@ -247,6 +269,14 @@ fs.writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)), "utf8")
 }
 
 try {
+    # Load function definitions before the probe or ACL helper; help does not call Invoke-Main.
+    # The original initializer resolves the real SID and does not write files; the wrapper then
+    # redirects every managed path into the sandbox before any input ACL or installation work.
+    Import-Installer -Arguments @("help")
+    Initialize-HostContext
+    Assert-True -Condition ($script:CurrentSid -match "^S-") -Message "fixture keeps the real current SID"
+    Assert-True -Condition ($script:InstallRoot.StartsWith($profileDir, [StringComparison]::Ordinal)) `
+        -Message "managed installation root stays inside the sandbox"
     Assert-DirectArgumentRoundTrip
     Set-Content -LiteralPath (Join-Path $profileDir ".keep") -Value "keep" -Encoding ASCII
 
@@ -297,10 +327,10 @@ try {
         -Message "task arguments are the quoted direct argv"
     Assert-Contains -Haystack $registered.Action.Execute -Needle "node.exe" -Message "task runs node.exe"
 
-    # status is read-only and reports Running.
-    . $installer status | Out-Null
-    $exit = Invoke-Main
+    # status is read-only and reports Running. It must use the same sandbox wrapper as install.
+    $exit = Invoke-Installer -Arguments @("status")
     Assert-True -Condition ($exit -eq 0) -Message "status exits 0 when Running"
+    Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "status preserves the registered task"
 
     # uninstall removes the program and task but keeps config/token.
     $exit = Invoke-Installer -Arguments @("uninstall")
