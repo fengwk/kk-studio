@@ -325,8 +325,7 @@ final class HttpSseStreamExecution implements ProviderStream {
 
     int statusCode = response.statusCode();
     Map<String, List<String>> headers = response.headers().map();
-    // JDK 在 send 返回前就可能交付响应体（bodyHandler 已登记所有权）；对忽略 body handler 的
-    // 客户端（如测试替身）则在此补登记，二者共用同一登记点，绝不重复复写。
+    // 交付与响应返回共用幂等的登记点；终态获胜后返回的响应体也必须关闭。
     InputStream responseBodyStream = captureBodyStream(response.body());
 
     // 确认权威状态仍为 RUNNING（若在 send 期间发生超时或取消，立即关闭流并退出）
