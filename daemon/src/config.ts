@@ -423,14 +423,12 @@ export function validateDirectArgs(args: string[]): string[] {
   if (!Array.isArray(args)) {
     throw new Error(INVALID_ARGUMENT_TRANSPORT)
   }
-  const validated: string[] = []
   for (const value of args) {
     if (typeof value !== 'string' || value.includes('\0')) {
       throw new Error(INVALID_ARGUMENT_TRANSPORT)
     }
-    validated.push(value)
   }
-  return validated
+  return args
 }
 
 /** {@code --help} / {@code -h} 的完整用法文本。 */

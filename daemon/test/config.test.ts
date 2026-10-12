@@ -164,8 +164,7 @@ describe('checkConfig and token reading', () => {
 describe('direct CLI arguments', () => {
   it('keeps unicode, empty, quoted and trailing-backslash arguments unchanged', () => {
     const args = ['--config', 'C:\\用户\\环境\\daemon.json', '', 'say "hi"', 'C:\\tail\\', '😀']
-    expect(validateDirectArgs(args)).toEqual(args)
-    expect(validateDirectArgs(args)).not.toBe(args)
+    expect(validateDirectArgs(args)).toBe(args)
   })
 
   it('rejects a non-array, a non-string element, and NUL without echoing the value', () => {
