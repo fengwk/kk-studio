@@ -1019,6 +1019,7 @@ describe('managed code-server IDE service', () => {
       const supervisor = new FakeSupervisor()
       cleanups.push(() => supervisor.close())
       const service = await createIdeService(makeConfig(distribution, '127.0.0.1:1'), supervisor)
+      cleanups.push(() => service.close())
 
       const launcher = join(distribution, 'runtime', 'code-server', 'lib', 'node.exe')
       // The bundled launcher resolves to the current Node, proving nothing was copied into the fixture.
