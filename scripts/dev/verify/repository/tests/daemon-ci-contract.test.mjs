@@ -365,15 +365,24 @@ test('the Windows installer launches main.js directly and its fixture stays insi
     assert.doesNotMatch(stub, /\brequire\(/u)
     assert.match(
         fixture,
-        /\. Import-Installer -Arguments @\("help"\)\r?\n\s+Initialize-HostContext\r?\n[\s\S]*?\r?\n\s+Assert-DirectArgumentRoundTrip/u,
+        /\. Import-Installer -Parameters @\{ Command = "help" \}\r?\n\s+Initialize-HostContext\r?\n[\s\S]*?\r?\n\s+Assert-DirectArgumentRoundTrip/u,
     )
     assert.match(fixture, /\$acl = New-PrivateAcl\r?\n\s+Set-Acl -LiteralPath \$configPath -AclObject \$acl/u)
     assert.match(fixture, /\$script:HomePath = \$profileDir/u)
+    const importInstaller = fixture.match(/function Import-Installer \{[\s\S]*?\n\}/u)?.[0] ?? ''
+    assert.match(importInstaller, /param\(\[hashtable\] \$Parameters\)/u)
+    assert.match(importInstaller, /\. \$installer @Parameters/u)
     const invokeInstaller = fixture.match(/function Invoke-Installer \{[\s\S]*?\n\}/u)?.[0] ?? ''
     assert.doesNotMatch(invokeInstaller, /\$script:Tasks = @\{\}/u)
-    assert.match(invokeInstaller, /\. Import-Installer -Arguments \$Arguments/u)
-    assert.match(fixture, /Invoke-Installer -Arguments @\("status"\)/u)
+    assert.match(invokeInstaller, /param\(\[hashtable\] \$Parameters\)/u)
+    assert.match(invokeInstaller, /\. Import-Installer -Parameters \$Parameters/u)
+    assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "status" \}/u)
+    assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "help" \}/u)
+    assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "uninstall" \}/u)
+    assert.match(fixture, /ConfigFile = \$pairs\[0\]; TokenFile = \$pairs\[1\]/u)
+    assert.match(fixture, /JavaHome = "\/opt\/jdk"/u)
     assert.doesNotMatch(fixture, /\. \$installer status/u)
+    assert.doesNotMatch(fixture, /@Arguments/u)
 
     const directory = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-windows-stub-'))
     try {
