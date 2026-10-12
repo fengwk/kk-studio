@@ -1,6 +1,6 @@
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { AddressInfo } from 'node:net'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createWebSocketTransport,
@@ -99,11 +99,9 @@ describe('frame policy', () => {
     await createWebSocketTransport(url).connect(record)
     const socket = await firstSocket(server)
     socket.send('hello')
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    expect(record.messages).toEqual(['hello'])
+    await vi.waitFor(() => expect(record.messages).toEqual(['hello']))
     socket.close()
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    expect(record.disconnects.length).toBe(1)
+    await vi.waitFor(() => expect(record.disconnects.length).toBe(1))
   })
 })
 

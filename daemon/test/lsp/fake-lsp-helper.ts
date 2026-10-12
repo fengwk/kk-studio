@@ -52,7 +52,8 @@ export function createJdtlsWrapper(
   transcriptPath: string,
 ): ResolvedServerConfig {
   // A real executable exercises JDTLS detection without requiring a POSIX shell on Windows.
-  const wrapperPath = path.join(directory, process.platform === 'win32' ? 'jdtls.exe' : 'jdtls')
+  const executableDir = fs.mkdtempSync(path.join(directory, 'jdtls-'))
+  const wrapperPath = path.join(executableDir, process.platform === 'win32' ? 'jdtls.exe' : 'jdtls')
   fs.copyFileSync(process.execPath, wrapperPath)
   fs.chmodSync(wrapperPath, 0o755)
   return {
