@@ -134,10 +134,7 @@ class GitHttpConnectionFactoryTest {
     assertThrows(IllegalArgumentException.class, () -> new GitHttpConnectionFactory(1, 0));
   }
 
-  /**
-   * 意图：鉴权分类只看 JGit 的真实鉴权短语，绝不因 URL/端口里恰好出现 401/403 数字而误判； 显式鉴权仍为 AUTH，无关 HTTP 500 不是
-   * AUTH。原实现的裸数字启发式会让本用例的断言失败（负向对照）。
-   */
+  /** URL/端口中的 401/403 不能冒充鉴权状态；真实鉴权短语仍须保留分类。 */
   @Test
   void classifiesAuthenticationByJGitPhraseNotStatusCodeDigits() throws Exception {
     TransportException idleTimeoutWithPortLikeDigits =
