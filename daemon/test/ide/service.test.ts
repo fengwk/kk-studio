@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -150,10 +150,15 @@ async function createDistribution(script: string = FAKE_CODE_SERVER): Promise<st
   const codeServerRoot = join(root, 'runtime', 'code-server')
   await mkdir(join(codeServerRoot, 'lib'), { recursive: true })
   await mkdir(join(codeServerRoot, 'out', 'node'), { recursive: true })
-  // Mirror the frozen distribution: the bundled Node launcher runs out/node/entry.js.
-  const launcher = join(codeServerRoot, 'lib', 'node')
-  await writeFile(launcher, '#!/bin/sh\nexec node "$@"\n')
-  await chmod(launcher, 0o755)
+  // Windows launches lib/node.exe. Unix keeps the shell launcher named lib/node.
+  const launcher = join(codeServerRoot, 'lib', process.platform === 'win32' ? 'node.exe' : 'node')
+  if (process.platform === 'win32') {
+    await copyFile(process.execPath, launcher)
+  } else {
+    await writeFile(launcher, '#!/bin/sh\nexec node "$@"\n')
+    const { chmod } = await import('node:fs/promises')
+    await chmod(launcher, 0o755)
+  }
   await writeFile(join(codeServerRoot, 'out', 'node', 'entry.js'), script)
   const extensionDir = join(root, 'ide-extension')
   await mkdir(extensionDir, { recursive: true })

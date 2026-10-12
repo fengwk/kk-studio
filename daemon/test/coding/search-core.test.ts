@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,25 @@ import {
   type GrepOptions,
   type SearchReply,
 } from '../../src/coding/search-core.js'
+import { toPosix } from '../../src/coding/support.js'
+
+const blockedReads = vi.hoisted(() => new Set<string>())
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...original,
+    async readdir(...args: Parameters<typeof original.readdir>) {
+      const target = args[0]
+      if (typeof target === 'string' && blockedReads.has(target)) {
+        const error = new Error('EACCES') as NodeJS.ErrnoException
+        error.code = 'EACCES'
+        throw error
+      }
+      return original.readdir(...args)
+    },
+  }
+})
 
 /**
  * search-core 直接单元测试：核心逻辑在 Worker 内执行，其覆盖率无法从主进程收集，
@@ -83,13 +102,14 @@ describe('findFiles', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'a.txt'), '')
-    await chmod(blocked, 0o000)
+    blockedReads.add(blocked)
     try {
+      // readdir 对这个目录返回 EACCES，不能依赖 Windows 上无效的 mode 000。
       const outcome = await findFiles('*.none', dir, 100, noTimeout())
       expect(outcome.matches).toEqual([])
       expect(outcome.skipped.length).toBe(1)
     } finally {
-      await chmod(blocked, 0o755)
+      blockedReads.delete(blocked)
     }
   })
 
@@ -142,15 +162,16 @@ describe('grepFiles', () => {
 
   it('multiline 跨行匹配整段输出', async () => {
     const dir = await tempDir()
-    await writeFile(join(dir, 'm.txt'), 'a\nb\nc\n')
+    const file = join(dir, 'm.txt')
+    await writeFile(file, 'a\nb\nc\n')
     const outcome = await grepFiles(
       'a\\nb',
-      join(dir, 'm.txt'),
+      file,
       100,
       { ...defaultGrep, multiline: true },
       noTimeout('grep'),
     )
-    expect(outcome.lines.map((line) => line.split(':')[2])).toEqual(['a', 'b'])
+    expect(outcome.lines).toEqual([`${toPosix(file)}:1:a`, `${toPosix(file)}:2:b`])
   })
 
   it('multiline 空匹配推进 lastIndex', async () => {
@@ -195,12 +216,12 @@ describe('grepFiles', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'a.txt'), 'x\n')
-    await chmod(blocked, 0o000)
+    blockedReads.add(blocked)
     try {
       const outcome = await grepFiles('zzz', dir, 100, defaultGrep, noTimeout('grep'))
       expect(outcome.skipped.length).toBe(1)
     } finally {
-      await chmod(blocked, 0o755)
+      blockedReads.delete(blocked)
     }
   })
 

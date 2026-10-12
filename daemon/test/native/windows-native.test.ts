@@ -19,7 +19,8 @@ describe.runIf(process.platform === 'win32')('windows native primitives', () => 
   test('ensurePrivateDirectory creates a verified owner-only directory', async () => {
     const target = join(workdir, 'data')
     expect(await ensurePrivateDirectory(target)).toBe(target)
-    await expect(verifyPrivateFile(target)).resolves.toBeUndefined()
+    // verifyPrivateFile rejects directories; idempotent ensure is the directory read-back.
+    expect(await ensurePrivateDirectory(target)).toBe(target)
   })
 
   test('writePrivateFile round-trips content and passes DACL read-back', async () => {
@@ -43,9 +44,11 @@ describe.runIf(process.platform === 'win32')('windows native primitives', () => 
     const file = join(data, 'loose')
     // 先在宽松父目录下创建（继承宽松 DACL），再把父目录收紧；既有目标本身仍是宽松 ACL。
     writeFileSync(file, 'original')
+    const { grantEveryoneRead } = await import('../support/fs-permissions.js')
+    await grantEveryoneRead(file)
     await ensurePrivateDirectory(data)
-    // 既有目标 DACL 宽松：必须在写入前失败关闭，绝不先截断改写再收紧。
-    await expect(writePrivateFile(file, 'attacker')).rejects.toThrow()
+    // 既有目标显式包含外部读取 ACE：必须在写入前失败关闭，绝不先截断改写再收紧。
+    await expect(writePrivateFile(file, 'attacker')).rejects.toThrow(/foreign principal/)
     expect(readFileSync(file, 'utf8')).toBe('original')
   })
 

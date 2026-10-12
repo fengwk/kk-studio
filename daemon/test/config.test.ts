@@ -130,11 +130,20 @@ describe('loadDaemonConfig', () => {
     ).toThrow(/traversal/)
   })
 
-  it('requires an owner-only sibling token file', () => {
+  it('requires an owner-only sibling token file', async () => {
     const { root, configPath } = createDaemonRoot()
-    chmodSync(tokenPath(root), 0o644)
-    expect(() => loadDaemonConfig(configPath)).toThrow(/group\/other permissions/)
-    chmodSync(tokenPath(root), 0o600)
+    if (process.platform === 'win32') {
+      // Windows 配置加载不解释 POSIX mode；外部读取必须由真实 DACL 读回拒绝。
+      const { grantEveryoneRead } = await import('./support/fs-permissions.js')
+      await grantEveryoneRead(tokenPath(root))
+      const loaded = loadDaemonConfig(configPath)
+      const { verifyPrivateFile } = await import('../src/native/index.js')
+      await expect(verifyPrivateFile(loaded.tokenPath)).rejects.toThrow(/foreign principal/)
+    } else {
+      chmodSync(tokenPath(root), 0o644)
+      expect(() => loadDaemonConfig(configPath)).toThrow(/group\/other permissions/)
+      chmodSync(tokenPath(root), 0o600)
+    }
     const otherRoot = mkdtempSync(join(tmpdir(), 'kk-daemon-test-'))
     const otherConfig = writeConfig(otherRoot, { studioUrl: 'https://a.example.com' })
     expect(() => loadDaemonConfig(otherConfig)).toThrow(/existing regular file/)
@@ -300,17 +309,25 @@ describe('config field validation branches', () => {
     expect(() => loadDaemonConfig(lsp({ command: [''], extensions: ['.java'] }))).toThrow(/nonblank string/)
   })
 
-  it('requires a regular token file readable by its owner', () => {
+  it('requires a regular token file readable by its owner', async () => {
     // 用目录替换凭证文件：lstat 成功但不是普通文件。
     const { root: dirRoot } = createDaemonRoot()
     rmSync(tokenPath(dirRoot), { recursive: true, force: true })
     mkdirSync(tokenPath(dirRoot))
     expect(() => loadDaemonConfig(join(dirRoot, 'daemon.json'))).toThrow(/not a link or directory/)
 
-    // 把 token 换成 write-only（owner 不可读）。
     const { root: modeRoot } = createDaemonRoot()
-    chmodSync(tokenPath(modeRoot), 0o200)
-    expect(() => loadDaemonConfig(join(modeRoot, 'daemon.json'))).toThrow(/readable by its owner/)
+    if (process.platform === 'win32') {
+      // 拒绝当前用户读取是 Windows 上对应的不可读凭证，读取时必须失败。
+      const { denyRead } = await import('./support/fs-permissions.js')
+      await denyRead(tokenPath(modeRoot))
+      const config = loadDaemonConfig(join(modeRoot, 'daemon.json'))
+      expect(() => readRegistrationToken(config)).toThrow(/cannot read/)
+    } else {
+      // 把 token 换成 write-only（owner 不可读）。
+      chmodSync(tokenPath(modeRoot), 0o200)
+      expect(() => loadDaemonConfig(join(modeRoot, 'daemon.json'))).toThrow(/readable by its owner/)
+    }
   })
 
   it('rejects a directory or non-executable as the resolved executable', () => {
