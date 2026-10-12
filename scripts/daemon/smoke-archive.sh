@@ -295,7 +295,7 @@ native_probe="$tmp/probe-code-server-native.mjs"
 cat >"$native_probe" <<'PROBE'
 import { readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const root = resolve(process.argv[2])
 const host = process.argv[3]
@@ -311,6 +311,11 @@ const foreignMarkers = {
   'macos-amd64': ['linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64', 'darwin-arm64'],
   'macos-arm64': ['linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64', 'darwin-x64'],
 }[host] ?? []
+// 通用 VSCode js-debug 扩展自带的 Windows 专用 helper：其平台前缀名只在 Windows 上被
+// 延迟 require（包在 try/catch 里），在 Unix 主机上从不加载。因此它既不是本机原生模块，
+// 也不是异常的外部核心原生模块，只按归档内稳定的相对路径精确豁免，不做扩展级或后缀级跳过。
+const jsDebugWindowsHelper =
+  /^lib\/vscode\/extensions\/ms-vscode\.js-debug\/src\/win32-app-container-tokens\.win32-(x64|arm64)-msvc-[A-Za-z0-9]+\.node$/
 function walk(directory) {
   if (!isAbsolute(directory) || relative(root, directory).startsWith('..')) {
     console.error('native walk escaped the code-server root')
@@ -324,7 +329,13 @@ function walk(directory) {
     if (entry.isDirectory()) {
       walk(target)
     } else if (entry.isFile() && entry.name.endsWith('.node')) {
-      const folded = target.toLowerCase()
+      // 只在归档内稳定的相对路径上判定：既避免 TMPDIR 等宿主路径里的外部标记造成误判，
+      // 也只豁免上面精确的 Windows helper 相对路径。
+      const relativePath = relative(root, target).split(sep).join('/')
+      if (jsDebugWindowsHelper.test(relativePath)) {
+        continue
+      }
+      const folded = relativePath.toLowerCase()
       if (foreignMarkers.some((marker) => folded.includes(marker))) {
         console.error(`code-server native module is not for ${host}`)
         process.exit(5)
