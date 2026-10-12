@@ -277,44 +277,19 @@ recheck_inputs() {
   [ "${CONFIG_FILE%/*}" = "${TOKEN_FILE%/*}" ] ||
     fail "staged inputs must remain sibling daemon.json and daemon.token"
 }
-# 解包前拒绝绝对路径、盘符和 `..`。根内相对链接保留，根外链接拒绝。失败即停止。
-assert_archive_paths() {
-  local archive=$1 listing line type path target
-  listing=$(tar -tvzf "$archive") || fail "校验失败：发行归档无法列出。"
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    type=${line%% *}
-    path=$(printf '%s\n' "$line" | awk '{ for (i = 6; i <= NF; i++) printf "%s%s", $i, (i < NF ? " " : "") }')
-    target=
-    case "$type" in
-      l*)
-        target=${path#*" -> "}
-        path=${path%%" -> "*}
-        ;;
-    esac
-    case "$path" in
-      /* | ./*..* | *"/../"* | *"/.." | ".." | "../"* | *":"* | *\\*)
-        fail "校验失败：发行归档包含不安全路径。"
-        ;;
-    esac
-    if [ -n "$target" ]; then
-      case "$target" in
-        /* | *":"* | *\\*) fail "校验失败：发行归档包含逃出解包根的链接。" ;;
-      esac
-      python3 - "$path" "$target" <<'PY' || fail "校验失败：发行归档包含逃出解包根的链接。"
-import os, sys
-link, target = sys.argv[1], sys.argv[2]
-resolved = os.path.normpath(os.path.join(os.path.dirname(link), target))
-if resolved == ".." or resolved.startswith("../") or os.path.isabs(resolved):
-    raise SystemExit(1)
-PY
-    fi
-  done <<<"$listing"
-}
 preflight() {
   local output detail extract="$DOWNLOAD_DIR/extract" version manifest_platform
   [ -s "$DOWNLOADED_ARCHIVE" ] || fail "校验失败：下载的发行归档为空。"
-  assert_archive_paths "$DOWNLOADED_ARCHIVE"
+  # 已验证官方 SHA 的归档仍检查文件名；不解析 GNU/BSD 不同的详细列表，不依赖额外运行时。
+  local paths path
+  paths=$(tar -tzf "$DOWNLOADED_ARCHIVE") || fail "校验失败：发行归档无法列出。"
+  while IFS= read -r path; do
+    case "$path" in
+      /* | ../* | .. | */../* | */.. | *\\* | *:*)
+        fail "校验失败：发行归档包含不安全路径。"
+        ;;
+    esac
+  done <<<"$paths"
   mkdir -p "$extract"
   tar -xzf "$DOWNLOADED_ARCHIVE" -C "$extract" || fail "校验失败：发行归档无法解包。"
   STAGED_NODE="$extract/runtime/code-server/lib/node"
@@ -446,8 +421,8 @@ backup_current() {
     fi
   done
 }
-# 发布新的发行目录：先停服务，再把旧目录整体改名进备份（同文件系统，快速），最后把已解包的
-# 新目录改名到受管位置。任何一步失败都保留备份，不自动回滚。
+# 发布新的发行目录：先把旧目录改名进备份，再把已解包的新目录改名到受管位置。
+# 新目录落盘失败时尝试把旧目录放回；放回失败必须明确报告，不能当成已恢复。
 publish_program() {
   if [ -e "$INSTALLED_LIB" ]; then
     [ -n "$BACKUP_DIR" ] || fail "无法备份现有发行目录，未替换任何文件。"
@@ -455,7 +430,12 @@ publish_program() {
   fi
   if ! mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB"; then
     if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/lib" ] && [ ! -e "$INSTALLED_LIB" ]; then
-      mv "$BACKUP_DIR/lib" "$INSTALLED_LIB" || true
+      restore_ok=false
+      if mv "$BACKUP_DIR/lib" "$INSTALLED_LIB"; then restore_ok=true; fi
+      if [ "$restore_ok" = true ]; then
+        fail "无法发布新发行目录。已恢复上一版程序。"
+      fi
+      fail "无法发布新发行目录，且上一版程序未能恢复。请使用报告的备份手动恢复。"
     fi
     fail "无法发布新发行目录。"
   fi

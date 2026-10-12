@@ -26,6 +26,7 @@ import unittest
 from pathlib import Path
 
 DAEMON_VERSION = "1.0.12"
+CODE_SERVER_VERSION = "4.141.0-kk.1"
 RELEASE_TAG = "v" + DAEMON_VERSION
 RELEASE_BASE = "https://github.com/fengwk/kk-studio/releases"
 PLATFORMS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64")
@@ -80,7 +81,7 @@ def code_server_tar(path: Path, platform: str) -> None:
     """Build a minimal stand-in for one frozen fork code-server archive."""
     work = path.parent / f"cs-src-{platform}"
     node_name = "node.exe" if platform.startswith("windows-") else "node"
-    root = work / f"code-server-4.141.0-kk.1-{platform}"
+    root = work / f"code-server-{CODE_SERVER_VERSION}-{platform}"
     write_executable(root / "lib" / node_name, _FAKE_NODE)
     write_text(root / "out" / "node" / "entry.js", "// frozen entry\n", 0o644)
     bin_dir = root / "bin"
@@ -134,7 +135,9 @@ shutil.copyfile(src, output)
 
 
 def _npm_shim() -> str:
-    return r"""#!/usr/bin/env python3
+    # The archive validator uses the real parser; only npm selection and native payloads are fixtures.
+    parser = Path(__file__).resolve().parents[3] / "daemon" / "node_modules" / "tar"
+    return "#!/usr/bin/env python3\nTAR_PARSER = " + repr(str(parser)) + "\n" + r"""
 import os
 import sys
 
@@ -159,6 +162,7 @@ while i < len(args):
 if prefix is None:
     sys.exit(1)
 os.makedirs(os.path.join(prefix, "node_modules"), exist_ok=True)
+os.symlink(TAR_PARSER, os.path.join(prefix, "node_modules", "tar"), target_is_directory=True)
 if os.environ.get("FAKE_NPM_OMIT_PREBUILT") == "1" or target_os is None or target_cpu is None:
     sys.exit(0)
 prebuilt = os.path.join(prefix, "node_modules", "@koromix", "koffi-%s-%s" % (target_os, target_cpu))
@@ -198,18 +202,18 @@ class ReleaseFixture:
 
         code_server = {}
         for platform in PLATFORMS:
-            name = f"code-server-4.141.0-kk.1-{platform}.tar.gz"
+            name = f"code-server-{CODE_SERVER_VERSION}-{platform}.tar.gz"
             runtime_tar = self.http_dir / name
             code_server_tar(runtime_tar, platform)
             code_server[platform] = {
-                "url": f"https://github.com/fengwk/code-server/releases/download/v4.141.0-kk.1/{name}",
+                "url": f"https://github.com/fengwk/code-server/releases/download/v{CODE_SERVER_VERSION}/{name}",
                 "sha256": sha256_of(runtime_tar),
             }
         import json
 
         write_text(
             daemon / "runtime-manifest.json",
-            json.dumps({"schemaVersion": 1, "codeServerVersion": "4.141.0", "codeServer": code_server}, indent=2)
+            json.dumps({"schemaVersion": 1, "codeServerVersion": CODE_SERVER_VERSION, "codeServer": code_server}, indent=2)
             + "\n",
             0o644,
         )

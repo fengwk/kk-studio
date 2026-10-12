@@ -740,11 +740,15 @@ async function verifyStagedManifest(
     throw new UpdateFailure('staged distribution platform runtime is malformed')
   }
   const record = asset as Record<string, unknown>
+  const runtimeVersion = manifest.codeServerVersion
   const url = record.url
-  const expectedName = `code-server-4.141.0-kk.1-${platformKey}.tar.gz`
-  const expectedPrefix = 'https://github.com/fengwk/code-server/releases/download/v4.141.0-kk.1/'
+  const versionText = typeof runtimeVersion === 'string' ? runtimeVersion : ''
+  const expectedName = `code-server-${versionText}-${platformKey}.tar.gz`
+  const expectedPrefix = `https://github.com/fengwk/code-server/releases/download/v${versionText}/`
   const frozenFork =
-    typeof url === 'string' && url.startsWith(expectedPrefix) && url.endsWith(`/${expectedName}`)
+    /^[0-9A-Za-z._+-]+$/.test(versionText) &&
+    typeof url === 'string' &&
+    url === `${expectedPrefix}${expectedName}`
   if (!frozenFork) {
     throw new UpdateFailure('staged distribution runtime is not the frozen fork release')
   }

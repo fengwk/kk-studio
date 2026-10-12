@@ -46,6 +46,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Node 24
+        # The Python release fixture loads the real daemon tar parser from node_modules.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - name: Install daemon dependencies
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        run: npm --prefix daemon ci
       - name: Test installer with system Bash
         # macOS /bin/bash is 3.2; neither the runner default nor Homebrew Bash is acceptable.
         # Fixtures record service operations without registering systemd/launchd services.
@@ -66,18 +76,19 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
       # PowerShell 5.1 is the minimum supported host; PowerShell 7 catches modern-host drift.
-      # The test constructs a real ScheduledTasks definition and probes Java argv without
-      # registering a task or changing the runner's service state.
-      - name: Test generated Windows scripts with native ACLs
-        shell: bash
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
+      # The test constructs a real ScheduledTasks definition and probes the frozen node.exe argv
+      # without registering a task or changing the runner's service state.
       - name: Set up Node 24
         # The Windows fixture uses a real node.exe from the runner to build its archive.
+        # EnvironmentInstallScriptsTest needs that executable, so Node is installed first.
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Test generated Windows scripts with native ACLs
+        shell: bash
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
       - name: Test installer with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
@@ -111,7 +122,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            daemon/package-lock.json
       - name: Set up PostgreSQL client tools
         run: |
           set -euo pipefail
@@ -133,6 +146,8 @@ jobs:
           sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
           # Match the real PostgreSQL fixture; runner defaults may point pg_dump at an older major.
           echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"
+      - name: Install daemon dependencies
+        run: npm --prefix daemon ci
       - name: Verify PostgreSQL client selection
         run: |
           set -euo pipefail
@@ -195,12 +210,18 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  daemon_ci:
+    name: node daemon matrix
+    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
+    uses: ./.github/workflows/daemon-ci.yml
+
   publish:
     name: build and push image
     needs:
       - validate
       - validate_windows_daemon
       - validate_unix_daemon
+      - daemon_ci
     # `main` 只能在全量门禁成功后发布；`dev` 的 validate job 按设计为 skipped，
     # 仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
     if: >-
@@ -217,6 +238,7 @@ jobs:
           needs.validate_unix_daemon.result == 'success'
           || needs.validate_unix_daemon.result == 'skipped'
         )
+        && (needs.daemon_ci.result == 'success' || needs.daemon_ci.result == 'skipped')
       }}
     runs-on: ubuntu-latest
     steps:
