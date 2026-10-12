@@ -7,13 +7,9 @@ Contract tests for scripts/daemon/install.ps1 on Windows PowerShell 5.1 and Powe
 The tests never download a real release, never register a real Scheduled Task and never
 touch the real user profile. They build a tiny archive from a real node.exe (already on the
 runner) plus a stub daemon main.js, stub the network and the ScheduledTasks cmdlets, and
-point USERPROFILE at a private sandbox so install.ps1 exercises its real ownership/ACL,
+redirect managed paths to a private sandbox so install.ps1 exercises its real ownership/ACL,
 SHA256, --check-config preflight and atomic program-publication logic end to end.
 #>
-[CmdletBinding()]
-param(
-    [switch] $ProcessOnly
-)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"

@@ -352,6 +352,7 @@ test('the Windows installer launches main.js directly and its fixture stays insi
 
     // 只执行 fixture 中的 Node stub，不启动 PowerShell，也不注册计划任务。
     const fixture = readFileSync(path.join(ROOT, 'scripts/daemon/tests/test_daemon_install_windows.ps1'), 'utf8')
+    assert.doesNotMatch(fixture, /\$ProcessOnly/u)
     assert.match(
         fixture,
         /\$repoRoot = Split-Path -Parent \(Split-Path -Parent \(Split-Path -Parent \$PSScriptRoot\)\)/u,
