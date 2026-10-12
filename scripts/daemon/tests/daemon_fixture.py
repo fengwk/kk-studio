@@ -8,7 +8,9 @@ faithful to the contracts the scripts rely on:
 * ``curl`` maps the official URLs onto local fixture files and reports ``--write-out`` for
   ``/latest``.
 * ``npm`` honours ``--os`` / ``--cpu`` by materialising only the matching
-  ``@koromix/koffi-<os>-<cpu>`` optional prebuilt.
+  ``@koromix/koffi-<os>-<cpu>`` optional prebuilt, and — like the real koffi install script,
+  which cannot load a foreign prebuilt on this host and would fall back to a source build —
+  refuses any install that would run target lifecycle scripts without ``--ignore-scripts``.
 * the daemon entrypoint and the frozen ``lib/node`` are real executables with a controlled
   ``--version`` / ``--check-config`` contract.
 """
@@ -138,6 +140,7 @@ def _npm_shim() -> str:
     # The archive validator uses the real parser; only npm selection and native payloads are fixtures.
     parser = Path(__file__).resolve().parents[3] / "daemon" / "node_modules" / "tar"
     return "#!/usr/bin/env python3\nTAR_PARSER = " + repr(str(parser)) + "\n" + r"""
+import json
 import os
 import sys
 
@@ -145,6 +148,7 @@ args = sys.argv[1:]
 prefix = None
 target_os = None
 target_cpu = None
+ignore_scripts = False
 i = 0
 while i < len(args):
     arg = args[i]
@@ -157,9 +161,26 @@ while i < len(args):
         target_os = arg.split("=", 1)[1]
     elif arg.startswith("--cpu="):
         target_cpu = arg.split("=", 1)[1]
+    elif arg == "--ignore-scripts":
+        ignore_scripts = True
     i += 1
 
+log = os.environ.get("FAKE_NPM_LOG")
+if log:
+    with open(log, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(args) + "\n")
+
 if prefix is None:
+    sys.exit(1)
+# Real npm runs the target package's lifecycle scripts here. koffi's install script loads the
+# target prebuilt in the host process and falls back to a source build; cross-platform staging
+# only ever ships the locked prebuilt, so an install without --ignore-scripts must fail.
+if not ignore_scripts:
+    sys.stderr.write("fake npm: refusing to run target lifecycle scripts without --ignore-scripts\n")
+    sys.stderr.write(
+        "fake npm: koffi install script cannot load @koromix/koffi-%s-%s on this host and failed to rebuild from source\n"
+        % (target_os, target_cpu)
+    )
     sys.exit(1)
 os.makedirs(os.path.join(prefix, "node_modules"), exist_ok=True)
 os.symlink(TAR_PARSER, os.path.join(prefix, "node_modules", "tar"), target_is_directory=True)
@@ -186,6 +207,8 @@ class ReleaseFixture:
         self.bindir = root / "bin"
         self.http_dir = root / "http"
         self.repo = root / "repo"
+        # 每次 npm 调用的原始参数追加写入这里，供测试断言选择器与 --ignore-scripts。
+        self.npm_log = root / "npm-args.log"
         self.bindir.mkdir(parents=True, exist_ok=True)
         self.http_dir.mkdir(parents=True, exist_ok=True)
 
@@ -242,6 +265,7 @@ class ReleaseFixture:
             "FAKE_RELEASE_BASE": RELEASE_BASE,
             "FAKE_TAG": RELEASE_TAG,
             "FAKE_HTTP_DIR": str(self.http_dir),
+            "FAKE_NPM_LOG": str(self.npm_log),
             "NODE_BIN": shutil.which("node") or "node",
             "NPM_BIN": str(self.bindir / "npm"),
             **(extra_env or {}),

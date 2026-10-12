@@ -16,10 +16,16 @@
 #   npm --prefix daemon ci && npm --prefix daemon run build
 # 使 `daemon/dist/main.js`（编译产物）存在。生产依赖由本脚本按目标平台重新安装。
 #
-# 跨平台正确性：脚本用 `npm ci --omit=dev --os=<npmOs> --cpu=<npmCpu>` 为目标平台安装依赖，
-# 因此只会装入对应平台的 optional 预编译产物（例如 koffi 的 `@koromix/koffi-<os>-<arch>`），
-# 而不是把 Linux 上装出的 node_modules 原样打包成“假跨平台”。缺失对应预编译产物即失败，
-# 不静默降级。暂存前再删除其它平台的 `@koromix/koffi-*`，避免宿主上已有的可选包被复制进归档。
+# 跨平台正确性：脚本用 `npm ci --omit=dev --ignore-scripts --os=<npmOs> --cpu=<npmCpu>` 为目标
+# 平台安装依赖，因此只会装入锁定清单里对应平台的 optional 预编译产物（例如 koffi 的
+# `@koromix/koffi-<os>-<arch>`），而不是把 Linux 上装出的 node_modules 原样打包成“假跨平台”。
+# 缺失对应预编译产物即失败，不静默降级。暂存前再删除其它平台的 `@koromix/koffi-*`，避免宿主上
+# 已有的可选包被复制进归档。
+#
+# 必须 `--ignore-scripts`：koffi 等原生包的 install script 是“宿主自检 + 源码编译回退”，在 x64
+# 宿主上为 arm64 目标安装时会加载异架构预编译模块失败，再尝试源码构建而失败。发行契约只打包
+# 锁定清单里的预编译成品（koffi 运行时直接 require `@koromix/koffi-<os>-<arch>`，不依赖脚本
+# 产物），所以目标平台的生命周期脚本一律不在构建宿主上执行。
 #
 # code-server 只来自 `runtime-manifest.json` 里冻结的 GitHub Release（fengwk/code-server 的
 # `v4.141.0-kk.1`）。清单里的 URL 与 SHA256 在构建期原样使用；本脚本不查询 latest、不回退官方
@@ -94,8 +100,9 @@ Staged assets:
 
 Requires a compiled daemon (`npm --prefix daemon ci && npm --prefix daemon run build`), a Git
 checkout, curl, tar, a SHA256 tool, npm and Node on PATH (or NPM_BIN / NODE_BIN). Production
-dependencies are reinstalled for the target platform via `npm ci --os/--cpu`, so each archive
-carries only the target's prebuilt native modules. The tag must equal
+dependencies are reinstalled for the target platform via
+`npm ci --ignore-scripts --os/--cpu`, so each archive carries only the target's prebuilt
+native modules and never runs a target lifecycle script on the build host. The tag must equal
 v<daemon/package.json version>.
 
 Assets are always staged under daemon/release/<os>-<arch>. Each run first removes and
@@ -174,8 +181,11 @@ install_platform_dependencies() {
   local prefix=$1 npm_os=$2 npm_cpu=$3 koffi_optional directory name
   mkdir -p "$prefix"
   cp -- "$DAEMON_DIR/package.json" "$DAEMON_DIR/package-lock.json" "$prefix/"
-  # 目标平台的生产依赖装进临时前缀，不改写 daemon/node_modules。
-  "$NPM_BIN" --prefix "$prefix" ci --omit=dev --no-audit --no-fund \
+  # 目标平台的生产依赖装进临时前缀，不改写 daemon/node_modules；且只取锁定清单里的预编译
+  # 成品：安装阶段不得执行目标平台的生命周期脚本。koffi 的 install script 会在宿主上加载
+  # 目标预编译模块并在失败时回退源码编译（异架构打包必然走到这一步），而它的运行时直接
+  # require `@koromix/koffi-<os>-<arch>`，不需要任何脚本产物。
+  "$NPM_BIN" --prefix "$prefix" ci --omit=dev --ignore-scripts --no-audit --no-fund \
     --os="$npm_os" --cpu="$npm_cpu" ||
     die "cannot install production dependencies for $npm_os-$npm_cpu"
   koffi_optional=$(koffi_optional_name "$npm_os" "$npm_cpu")
