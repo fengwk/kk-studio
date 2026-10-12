@@ -87,7 +87,7 @@ process.on('SIGINT', shutdown)
 `
 
 class FakeSupervisor implements ProcessSupervisor {
-  readonly started: { spec: ProcessSpec; child: ChildProcess }[] = []
+  readonly started: { spec: ProcessSpec; child: ChildProcess; closed: Promise<void> }[] = []
   readonly descendants: [number, number][] = []
 
   async start(spec: ProcessSpec): Promise<ManagedProcess> {
@@ -96,10 +96,15 @@ class FakeSupervisor implements ProcessSupervisor {
       env: spec.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
-    this.started.push({ spec, child })
     const exit = new Promise<ProcessExit>((resolve) => {
       child.on('exit', (code, signal) => resolve({ exitCode: code, signal }))
     })
+    // Registered at spawn time: cleanup can only prove the fixture is fully released (stdio torn
+    // down) by awaiting 'close', and a listener attached later could miss an already-emitted event.
+    const closed = new Promise<void>((resolve) => {
+      child.on('close', () => resolve())
+    })
+    this.started.push({ spec, child, closed })
     return {
       pid: child.pid as number,
       stdin: child.stdin as ManagedProcess['stdin'],
@@ -108,13 +113,18 @@ class FakeSupervisor implements ProcessSupervisor {
       exit,
       terminate: async (graceMillis = 2000) => {
         if (child.exitCode !== null || child.signalCode !== null) {
-          await exit
+          await closed
           return
         }
         child.kill('SIGTERM')
         const killer = setTimeout(() => child.kill('SIGKILL'), graceMillis)
-        await exit
-        clearTimeout(killer)
+        try {
+          await exit
+        } finally {
+          clearTimeout(killer)
+        }
+        // 'exit' fires before stdio teardown; Windows keeps the copied node.exe busy until 'close'.
+        await closed
       },
     }
   }
@@ -124,11 +134,15 @@ class FakeSupervisor implements ProcessSupervisor {
   }
 
   async close(): Promise<void> {
-    for (const { child } of this.started) {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill('SIGKILL')
-      }
-    }
+    await Promise.all(
+      this.started.map(async ({ child, closed }) => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL')
+        }
+        // Await every registered close, including children that exited but are still tearing down.
+        await closed
+      }),
+    )
   }
 }
 
@@ -927,5 +941,68 @@ describe('managed code-server IDE service', () => {
     await service.close()
     await waitFor(() => child !== undefined && (child.exitCode !== null || child.signalCode !== null))
     expect(child?.exitCode !== null || child?.signalCode !== null).toBe(true)
+  })
+
+  // Regression for the Windows EBUSY cleanup race: both closing entrances must prove stdio
+  // teardown ('close'), not merely process exit, before the fixture directory is removed.
+  describe('process fixture lifecycle', () => {
+    const spawnSpec = (): ProcessSpec => ({
+      executable: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      cwd: tmpdir(),
+    })
+
+    it('awaits stdio close before terminate resolves for a running child', async () => {
+      const supervisor = new FakeSupervisor()
+      const managed = await supervisor.start(spawnSpec())
+      const child = supervisor.started[0]!.child
+      let closed = false
+      child.on('close', () => {
+        closed = true
+      })
+
+      await managed.terminate(50)
+
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+      expect(closed).toBe(true)
+    })
+
+    it('awaits stdio close before terminate resolves for an already exited child', async () => {
+      const supervisor = new FakeSupervisor()
+      const managed = await supervisor.start({ ...spawnSpec(), args: ['-e', 'process.exit(0)'] })
+      const child = supervisor.started[0]!.child
+      let closed = false
+      child.on('close', () => {
+        closed = true
+      })
+      await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+
+      await managed.terminate(50)
+
+      expect(closed).toBe(true)
+    })
+
+    it('awaits stdio close for running and exited children before supervisor close resolves', async () => {
+      const supervisor = new FakeSupervisor()
+      await supervisor.start(spawnSpec())
+      await supervisor.start(spawnSpec())
+      const running = supervisor.started[0]!.child
+      const exited = supervisor.started[1]!.child
+      let runningClosed = false
+      let exitedClosed = false
+      running.on('close', () => {
+        runningClosed = true
+      })
+      exited.on('close', () => {
+        exitedClosed = true
+      })
+      exited.kill('SIGKILL')
+      await new Promise<void>((resolve) => exited.once('exit', () => resolve()))
+
+      await supervisor.close()
+
+      expect(runningClosed).toBe(true)
+      expect(exitedClosed).toBe(true)
+    })
   })
 })
