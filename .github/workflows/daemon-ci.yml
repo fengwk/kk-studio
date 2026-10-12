@@ -36,7 +36,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: daemon-ci-${{ github.ref }}
+  # caller workflow 也纳入分组：daemon-ci 既被 daemon-release/docker-publish 复用，也独立运行。
+  # 只用 ref 会让两个 caller 在同一个 main 上互相取消共享矩阵；加上 caller 使不同工作流互不干扰，
+  # 同 caller 的新 revision 仍以 cancel-in-progress 覆盖旧 run。
+  group: ${{ github.workflow }}-daemon-ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
