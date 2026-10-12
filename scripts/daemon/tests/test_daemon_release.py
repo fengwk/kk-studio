@@ -8,6 +8,7 @@ native ABI compatibility; the host-matched CI smoke tests cover runnable platfor
 from __future__ import annotations
 
 import json
+import subprocess
 import tarfile
 import unittest
 
@@ -102,6 +103,52 @@ class PrepareReleaseTest(TempDirTestCase):
                 node_name = "node.exe" if os_name == "windows" else "node"
                 self.assertIn(f"runtime/code-server/lib/{node_name}", names)
                 self.assertFalse(any("koffi-freebsd" in name for name in names))
+
+    def test_installs_each_platform_lockfile_without_running_lifecycle_scripts(self) -> None:
+        # 跨平台暂存只安装锁定清单里的预编译成品：每个平台都必须按目标 --os/--cpu 选择 optional
+        # 包并忽略生命周期脚本，否则异架构 install script 会在宿主上失败（旧实现即由此回归捕获）。
+        expected = {
+            ("linux", "amd64"): ("linux", "x64"),
+            ("linux", "arm64"): ("linux", "arm64"),
+            ("macos", "amd64"): ("darwin", "x64"),
+            ("macos", "arm64"): ("darwin", "arm64"),
+            ("windows", "amd64"): ("win32", "x64"),
+        }
+        for (os_name, arch), (npm_os, npm_cpu) in expected.items():
+            with self.subTest(platform=f"{os_name}-{arch}"):
+                self.fixture.npm_log.unlink(missing_ok=True)
+                result = self.fixture.run(RELEASE_TAG, os_name, arch)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                invocations = [json.loads(line) for line in self.fixture.npm_log.read_text().splitlines()]
+                self.assertEqual(len(invocations), 1)
+                args = invocations[0]
+                self.assertIn("ci", args)
+                self.assertIn("--prefix", args)
+                self.assertIn("--omit=dev", args)
+                self.assertIn("--ignore-scripts", args)
+                self.assertIn(f"--os={npm_os}", args)
+                self.assertIn(f"--cpu={npm_cpu}", args)
+
+    def test_fake_npm_rejects_installs_that_would_run_lifecycle_scripts(self) -> None:
+        # fixture 自身必须真的拒绝缺失 --ignore-scripts 的安装，否则跨平台回归无法捕获旧实现。
+        prefix = self.tmp / "deps"
+        prefix.mkdir()
+        result = subprocess.run(
+            [
+                str(self.fixture.bindir / "npm"),
+                "--prefix",
+                str(prefix),
+                "ci",
+                "--omit=dev",
+                "--os=linux",
+                "--cpu=arm64",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--ignore-scripts", result.stderr)
+        self.assertFalse((prefix / "node_modules").exists())
 
     def test_prunes_foreign_koffi_prebuilts(self) -> None:
         result = self.fixture.run(RELEASE_TAG, "linux", "amd64", extra_env={"FAKE_NPM_FOREIGN_PREBUILT": "1"})
