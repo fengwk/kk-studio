@@ -11,6 +11,8 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
@@ -57,27 +59,31 @@ class JGitSkillCacheNetworkTest {
       SkillGitException resolve =
           assertThrows(
               SkillGitException.class, () -> cache.resolveBranchHead(server.url(), "main", null));
-      assertTrue(resolve.getMessage().contains("GIT_READ_TIMEOUT"));
+      assertTrue(resolve.getMessage().contains("GIT_READ_TIMEOUT"), resolve::getMessage);
       assertEquals(1, server.requests.get());
       SkillGitException fetch =
           assertThrows(
               SkillGitException.class,
               () -> cache.ensureCommit("pkg", server.url(), "a".repeat(40), null));
-      assertTrue(fetch.getMessage().contains("GIT_READ_TIMEOUT"));
+      assertTrue(fetch.getMessage().contains("GIT_READ_TIMEOUT"), fetch::getMessage);
       assertEquals(2, server.requests.get());
       assertFalse(Files.exists(directory.resolve("cache/pkg")));
     }
   }
 
-  /** 意图：仓库鉴权失败明确收敛为 CODE_AUTHENTICATION_FAILED，无静默兜底且不泄露令牌。 */
-  @Test
-  void authenticationFailureClassifiedCorrectly(@TempDir Path directory) throws Exception {
+  /** 意图：真实 401 与 403 都收敛为 CODE_AUTHENTICATION_FAILED，无静默兜底且不泄露令牌。 */
+  @ParameterizedTest
+  @ValueSource(ints = {401, 403})
+  void authenticationFailureClassifiedCorrectly(int status, @TempDir Path directory)
+      throws Exception {
     HttpServer authServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     authServer.createContext(
         "/",
         exchange -> {
-          exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=\"Git\"");
-          exchange.sendResponseHeaders(401, -1);
+          if (status == 401) {
+            exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=\"Git\"");
+          }
+          exchange.sendResponseHeaders(status, -1);
           exchange.close();
         });
     authServer.start();

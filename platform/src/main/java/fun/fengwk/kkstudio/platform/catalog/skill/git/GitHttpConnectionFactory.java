@@ -176,11 +176,13 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
         continue;
       }
       String lower = message.toLowerCase(Locale.ROOT);
+      // 仅匹配 JGit 的真实鉴权短语（7.7.1）：401 的 notAuthorized / noCredentialsProvider /
+      // authenticationNotSupported 与 403 的 serviceNotPermitted。绝不匹配裸数字状态码，
+      // 否则 URL/端口里恰好出现的 401/403 会把 socket 超时误判为鉴权失败。
       if (lower.contains("not authorized")
           || lower.contains("authentication is required")
-          || lower.contains("not permitted")
-          || lower.contains("401")
-          || lower.contains("403")) {
+          || lower.contains("authentication not supported")
+          || lower.contains("not permitted")) {
         return true;
       }
     }
