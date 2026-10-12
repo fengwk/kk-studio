@@ -26,10 +26,10 @@ async function icacls(target: string, action: '/deny' | '/grant' | '/reset', ent
   }
 }
 
-/** 让目标对当前用户不可读：POSIX 为 000，Windows 为拒绝读取的 ACE。 */
+/** 只拒绝读数据或列目录，保留 lstat 所需的属性读取。POSIX 仍是 mode 000。 */
 export async function denyRead(target: string): Promise<void> {
   if (process.platform === 'win32') {
-    await icacls(target, '/deny', `${currentUser()}:(R)`)
+    await icacls(target, '/deny', `${currentUser()}:(RD)`)
     return
   }
   await chmod(target, 0o000)
@@ -44,12 +44,12 @@ export async function restoreRead(target: string): Promise<void> {
   await chmod(target, 0o755)
 }
 
-/** 给 Windows 对象显式加上 Everyone 读取，形成可被私有文件校验拒绝的外部 ACE。 */
+/** 给 Windows 对象加上内置 World SID 的读取权限，形成外部 ACE。 */
 export async function grantEveryoneRead(target: string): Promise<void> {
   if (process.platform !== 'win32') {
     throw new Error('foreign ACE fixtures are Windows-only')
   }
-  await icacls(target, '/grant', 'Everyone:(R)')
+  await icacls(target, '/grant', '*S-1-1-0:(R)')
 }
 
 /** 标记只读：POSIX 精确到 0444，Windows 使用文件只读属性。 */
