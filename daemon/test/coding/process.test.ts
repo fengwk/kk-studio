@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
@@ -10,7 +10,7 @@ import { callCapability, makeContext, textOf } from './helpers.js'
 const tempDirs: string[] = []
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'kk-proc-'))
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-proc-')))
   tempDirs.push(dir)
   return dir
 }

@@ -1,16 +1,22 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { searchCapabilities } from '../../src/coding/search.js'
+import { toPosix } from '../../src/coding/support.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
 
 const tempDirs: string[] = []
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'kk-search-'))
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-search-')))
   tempDirs.push(dir)
   return dir
+}
+
+/** find/grep 文本始终用 POSIX 分隔符展示已解析路径。 */
+function displayed(file: string): string {
+  return toPosix(file)
 }
 
 afterEach(async () => {
@@ -31,7 +37,7 @@ describe('fs.find', () => {
     await writeFile(join(dir, 'sub', 'c.ts'), '')
     const result = await callCapability(find, 'fs.find', { pattern: '*.ts', path: dir }, makeContext(dir))
     const lines = textOf(result).split('\n').sort()
-    expect(lines).toEqual([join(dir, 'a.ts'), join(dir, 'sub', 'c.ts')].sort())
+    expect(lines).toEqual([displayed(join(dir, 'a.ts')), displayed(join(dir, 'sub', 'c.ts'))].sort())
   })
 
   it('内层 .gitignore 的否定规则可重新包含', async () => {
@@ -43,7 +49,7 @@ describe('fs.find', () => {
     await writeFile(join(dir, 'drop.log'), '')
     await writeFile(join(dir, 'sub', 'keep.log'), '')
     const result = await callCapability(find, 'fs.find', { pattern: '*.log', path: dir }, makeContext(dir))
-    expect(textOf(result)).toBe(join(dir, 'sub', 'keep.log'))
+    expect(textOf(result)).toBe(displayed(join(dir, 'sub', 'keep.log')))
   })
 
   it('无匹配时返回明确文案', async () => {
@@ -73,9 +79,9 @@ describe('fs.grep', () => {
       { pattern: 'world', path: file, literal: true },
       makeContext(dir),
     )
-    expect(textOf(literal)).toBe(`${file}:2:world`)
+    expect(textOf(literal)).toBe(`${displayed(file)}:2:world`)
     const regex = await callCapability(grep, 'fs.grep', { pattern: 'w.rld', path: file }, makeContext(dir))
-    expect(textOf(regex)).toBe(`${file}:2:world`)
+    expect(textOf(regex)).toBe(`${displayed(file)}:2:world`)
   })
 
   it('ignore_case 生效', async () => {
@@ -88,7 +94,7 @@ describe('fs.grep', () => {
       { pattern: 'hello', path: file, ignore_case: true },
       makeContext(dir),
     )
-    expect(textOf(result)).toBe(`${file}:1:Hello`)
+    expect(textOf(result)).toBe(`${displayed(file)}:1:Hello`)
   })
 
   it('include 过滤目录扫描', async () => {
@@ -101,7 +107,7 @@ describe('fs.grep', () => {
       { pattern: 'x', path: dir, include: '*.ts' },
       makeContext(dir),
     )
-    expect(textOf(result)).toBe(`${join(dir, 'a.ts')}:1:x`)
+    expect(textOf(result)).toBe(`${displayed(join(dir, 'a.ts'))}:1:x`)
   })
 
   it('multiline 跨行匹配并整段输出', async () => {
@@ -114,7 +120,7 @@ describe('fs.grep', () => {
       { pattern: 'a\\nb', path: file, multiline: true },
       makeContext(dir),
     )
-    expect(textOf(result)).toBe(`${file}:1:a\n${file}:2:b`)
+    expect(textOf(result)).toBe(`${displayed(file)}:1:a\n${displayed(file)}:2:b`)
   })
 
   it('limit 达到时明确标注结果不完整', async () => {
