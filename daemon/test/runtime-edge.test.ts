@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isAbsolute } from 'node:path'
 
 import type { CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
 import { encodeInvoke, decodeEnvelope } from '../src/protocol.js'
@@ -428,7 +429,7 @@ describe('runtime resource upload control plane', () => {
 describe('environment detection helpers', () => {
   it('collects host facts and stable notes', () => {
     const info = detectEnvironmentInfo(testConfig())
-    expect(info.homeDirectory.startsWith('/')).toBe(true)
+    expect(isAbsolute(info.homeDirectory)).toBe(true)
     expect(info.tempDirectory).toContain('tmp')
     expect(['windows', 'wsl', 'linux', 'macos']).toContain(info.operatingSystem)
     expect(defaultNote('windows')).toContain('Windows')
@@ -440,10 +441,13 @@ describe('environment detection helpers', () => {
 
   it('detects WSL from the environment marker', () => {
     const previous = process.env.WSL_DISTRO_NAME
+    const previousPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
     process.env.WSL_DISTRO_NAME = 'Ubuntu'
     try {
       expect(detectEnvironmentInfo(testConfig()).operatingSystem).toBe('wsl')
     } finally {
+      Object.defineProperty(process, 'platform', previousPlatform)
       if (previous === undefined) {
         delete process.env.WSL_DISTRO_NAME
       } else {

@@ -174,6 +174,8 @@ function New-Inputs {
         [string] $Config = '{"studioUrl":"https://studio.example.com"}',
         [string] $Token = "token-value"
     )
+    # Dot-sourcing help resets installer state; resolve the real SID again before input ACLs.
+    Initialize-HostContext
     $directory = Join-Path $sandbox ("inputs-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
     $configPath = Join-Path $directory "daemon.json"

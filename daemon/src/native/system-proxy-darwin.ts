@@ -419,7 +419,7 @@ function bindDarwinNative(): DarwinNative {
     urlString: (target) => urlString(target) as bigint | null,
     defaultMode: () => coreMode(core),
     key,
-    callback: (handler) => koffi.register(handler, callbackType),
+    callback: (handler) => koffi.register(handler, koffi.pointer(callbackType)),
     unregister: (callback) => {
       koffi.unregister(callback)
     },

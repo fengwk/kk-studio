@@ -506,6 +506,7 @@ vi.mock('koffi', () => {
     },
     struct: (name: unknown) => ({ name: typeof name === 'string' ? name : 'anonymous' }),
     proto: (name: unknown) => ({ name: typeof name === 'string' ? name : 'anonymous' }),
+    pointer: (type: unknown) => ({ pointerTo: type }),
     alloc: () => state.allocPtr(),
     encode: () => undefined,
     free: (ptr: bigint) => {
@@ -517,7 +518,10 @@ vi.mock('koffi', () => {
       }
       return null
     },
-    register: (cb: any) => {
+    register: (cb: any, type: { pointerTo?: unknown }) => {
+      if (type.pointerTo === undefined) {
+        throw new Error('expected callback pointer type')
+      }
       const token = state.allocPtr()
       state.registeredCallbacks.set(token, cb)
       return token
