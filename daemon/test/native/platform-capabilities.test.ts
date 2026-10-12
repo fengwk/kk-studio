@@ -38,6 +38,18 @@ afterEach(() => {
 })
 
 describe('native capabilities per platform', () => {
+  test('linux declares session lifecycle with orphan adoption and no limits', () => {
+    // Linux 分支是纯能力自述（无 native 调用）：在任何主机上都必须如实且精确。
+    const capabilities = withPlatform('linux', () => processScopeCapabilities())
+    expect(capabilities).toEqual({
+      platform: 'linux',
+      sessionConvergence: true,
+      jobMembership: false,
+      orphanAdoption: true,
+      unverifiedLimits: [],
+    })
+  })
+
   test('darwin exposes session lifecycle without orphan adoption', () => {
     const capabilities = withPlatform('darwin', () => processScopeCapabilities())
     expect(capabilities.platform).toBe('darwin')
