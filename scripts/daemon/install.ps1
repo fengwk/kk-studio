@@ -511,7 +511,7 @@ function Assert-DownloadedArchive {
     # main.js is resolved against the working directory, so a non-ASCII install path can
     # never corrupt the argument. Node receives the Unicode argv directly.
     $result = Invoke-NativeProcess -Executable $node `
-        -Arguments @("--version") `
+        -Arguments @("main.js", "--version") `
         -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -ne 0) {
         Throw-Failure "downloaded daemon archive failed its --version check (exit code $($result.ExitCode))"
@@ -580,7 +580,7 @@ function Prepare-StagedArchive {
     Copy-PrivateFile -Source $TokenFile -Destination (Join-Path $script:DownloadDirectory "daemon.token")
     $stagedConfig = Join-Path $script:DownloadDirectory "daemon.json"
     $node = Join-Path $script:StagedLib "runtime\code-server\lib\node.exe"
-    $arguments = @("--check-config", $stagedConfig)
+    $arguments = @("main.js", "--check-config", $stagedConfig)
     $result = Invoke-NativeProcess -Executable $node -Arguments $arguments `
         -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -eq 0 -and
