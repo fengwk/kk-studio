@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LspClient, isJdtlsCommand } from '../../src/coding/lsp-client.js'
 import { LspError } from '../../src/coding/lsp-error.js'
 import {
@@ -254,6 +254,13 @@ describe('LspClient Protocol & Handshake', () => {
   it('dead server fails fast at launch with exit code', async () => {
     const transcript = path.join(tempDir, 'dead-transcript.jsonl')
     const config = fakeServerConfig('dead', 'dead', transcript)
+    const start = supervisor.start.bind(supervisor)
+    // 固定真实子进程的退出在启动探针之前，不依赖宿主调度速度。
+    vi.spyOn(supervisor, 'start').mockImplementation(async (spec) => {
+      const managed = await start(spec)
+      await managed.exit
+      return managed
+    })
     await expect(
       LspClient.launch(config, tempDir, config.command[0]!, supervisor),
     ).rejects.toThrow(/exited before initialization \(exit code 7\)/)

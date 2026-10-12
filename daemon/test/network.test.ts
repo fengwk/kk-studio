@@ -42,6 +42,11 @@ async function startProxy(): Promise<ForwardProxy> {
   const requests: string[] = []
   const connects: string[] = []
   const upgrades: string[] = []
+  const sockets = new Set<net.Socket>()
+  const track = (socket: net.Socket): void => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+  }
   const server = http.createServer((request, response) => {
     requests.push(request.url ?? '')
     const target = new URL(request.url ?? '/')
@@ -64,6 +69,7 @@ async function startProxy(): Promise<ForwardProxy> {
     })
     request.pipe(upstream)
   })
+  server.on('connection', track)
   server.on('connect', (request, clientSocket, head) => {
     connects.push(request.url ?? '')
     const [host, port] = (request.url ?? '').split(':')
@@ -75,6 +81,7 @@ async function startProxy(): Promise<ForwardProxy> {
       upstream.pipe(clientSocket)
       clientSocket.pipe(upstream)
     })
+    track(upstream)
     upstream.on('error', () => clientSocket.destroy())
     clientSocket.on('error', () => upstream.destroy())
   })
@@ -89,6 +96,8 @@ async function startProxy(): Promise<ForwardProxy> {
       headers: { ...request.headers, host: target.host },
     })
     upstream.on('upgrade', (upResponse, upSocket, upHead) => {
+      track(upSocket)
+      upSocket.on('error', () => clientSocket.destroy())
       let raw = `HTTP/1.1 ${upResponse.statusCode} ${upResponse.statusMessage}\r\n`
       for (let index = 0; index < upResponse.rawHeaders.length; index += 2) {
         raw += `${upResponse.rawHeaders[index]}: ${upResponse.rawHeaders[index + 1]}\r\n`
@@ -117,7 +126,10 @@ async function startProxy(): Promise<ForwardProxy> {
     upgrades,
     close: () =>
       new Promise<void>((resolve) => {
-        server.closeAllConnections?.()
+        // HTTP 的 closeAllConnections 不包含 Upgrade/CONNECT 后的裸 socket。
+        for (const socket of sockets) {
+          socket.destroy()
+        }
         server.close(() => resolve())
       }),
   }
