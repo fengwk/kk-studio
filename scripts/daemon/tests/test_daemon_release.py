@@ -186,7 +186,7 @@ class PrepareReleaseTest(TempDirTestCase):
         self.assertIn("must equal the daemon version", result.stderr)
 
     def test_rejects_unsafe_tag_and_platform(self) -> None:
-        self.assertNotEqual(self.fixture.run("1.0.12", "linux", "amd64").returncode, 0)
+        self.assertNotEqual(self.fixture.run("1.0.13", "linux", "amd64").returncode, 0)
         self.assertNotEqual(self.fixture.run(RELEASE_TAG, "plan9", "amd64").returncode, 0)
         self.assertNotEqual(self.fixture.run(RELEASE_TAG, "linux", "sparc").returncode, 0)
 

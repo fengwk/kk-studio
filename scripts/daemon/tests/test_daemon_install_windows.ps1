@@ -16,8 +16,8 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 $installer = Join-Path $repoRoot "scripts\daemon\install.ps1"
-$releaseTag = "v1.0.12"
-$daemonVersion = "1.0.12"
+$releaseTag = "v1.0.13"
+$daemonVersion = "1.0.13"
 $asset = "kk-studio-daemon-$releaseTag-windows-amd64.tar.gz"
 $platform = "windows-amd64"
 
@@ -61,7 +61,7 @@ $stubMain = @'
 import fs from "node:fs"
 const argv = process.argv.slice(2)
 if (argv[0] === "--version") {
-  process.stdout.write("kk-studio-daemon 1.0.12\n")
+  process.stdout.write("kk-studio-daemon 1.0.13\n")
   process.exit(0)
 }
 if (argv[0] === "--check-config") {

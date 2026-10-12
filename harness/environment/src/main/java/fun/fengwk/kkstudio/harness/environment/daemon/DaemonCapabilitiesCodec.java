@@ -14,7 +14,7 @@ import java.util.Set;
  * Daemon READY 宿主 metadata payload 的严格 codec：版本化、类型化，拒绝未知字段、重复键、尾随内容与缺失字段。
  *
  * <p>wire shape：{@code
- * {"version":5,"daemonVersion":"1.0.12","environment":{"operatingSystem":...,"architecture":...,"timeZone":...,"userName":...,"homeDirectory":...,"note":...,"tempDirectory":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
+ * {"version":5,"daemonVersion":"1.0.13","environment":{"operatingSystem":...,"architecture":...,"timeZone":...,"userName":...,"homeDirectory":...,"note":...,"tempDirectory":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
  */
 public final class DaemonCapabilitiesCodec {
 
