@@ -28,13 +28,27 @@ from pathlib import Path
 
 from daemon_fixture import DAEMON_VERSION
 
-ARCHIVE_NAME = f"kk-studio-daemon-v{DAEMON_VERSION}-linux-{{arch}}.tar.gz"
+def _host_os() -> str:
+    system = platform.system()
+    if system == "Linux":
+        return "linux"
+    if system == "Darwin":
+        return "macos"
+    return system.lower()
+
+
+ARCHIVE_NAME = f"kk-studio-daemon-v{DAEMON_VERSION}-{_host_os()}-{{arch}}.tar.gz"
 
 _SMOKE = Path(__file__).resolve().parent.parent / "smoke-archive.sh"
 _SHIM_TEMPLATE = Path(__file__).resolve().parent / "fixtures" / "fake-frozen-runtime.sh.in"
 
 # Host npm/koffi naming: the archive must carry the prebuilt for this host's architecture.
-_KOFFI_BY_ARCH = {"amd64": "koffi-linux-x64", "arm64": "koffi-linux-arm64"}
+_KOFFI = {
+    ("linux", "amd64"): "koffi-linux-x64",
+    ("linux", "arm64"): "koffi-linux-arm64",
+    ("macos", "amd64"): "koffi-darwin-x64",
+    ("macos", "arm64"): "koffi-darwin-arm64",
+}
 
 
 def _host_arch() -> str:
@@ -65,6 +79,8 @@ def _shim(
     wrapped_rejected: bool = True,
     probe_out: str = "koffi directory lock ok",
     probe_exit: int = 0,
+    native_ok: bool = True,
+    native_foreign: bool = False,
     config_mode: str = "hold",
     pid_file: str = "",
 ) -> str:
@@ -84,6 +100,8 @@ def _shim(
         "@WRAPPED_REJECTED@": "1" if wrapped_rejected else "0",
         "@PROBE_OUT@": probe_out,
         "@PROBE_EXIT@": str(probe_exit),
+        "@NATIVE_OK@": "1" if native_ok else "0",
+        "@NATIVE_FOREIGN@": "1" if native_foreign else "0",
         "@CONFIG_MODE@": config_mode,
         "@PID_FILE@": pid_file,
         "@SLEEP@": sleep,
@@ -106,11 +124,13 @@ def _build_archive(
     include_main: bool = True,
     include_koffi: bool = True,
     include_ide: bool = True,
+    include_entry: bool = True,
+    include_native: bool = True,
 ) -> Path:
     build = path.parent / "build"
     if build.exists():
         shutil.rmtree(build)
-    koffi_dir = build / "node_modules" / "@koromix" / _KOFFI_BY_ARCH[_host_arch()]
+    koffi_dir = build / "node_modules" / "@koromix" / _KOFFI[(_host_os(), _host_arch())]
     koffi_dir.mkdir(parents=True)
     (koffi_dir / "index.js").write_text("module.exports = {}\n")
     if include_ide:
@@ -121,6 +141,14 @@ def _build_archive(
         runtime.parent.mkdir(parents=True)
         runtime.write_text(node)
         runtime.chmod(0o755)
+        if include_entry:
+            entry = build / "runtime" / "code-server" / "out" / "node" / "entry.js"
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            entry.write_text("// frozen entry\n")
+        if include_native:
+            native = build / "runtime" / "code-server" / "lib" / "vscode" / "pty.node"
+            native.parent.mkdir(parents=True, exist_ok=True)
+            native.write_bytes(b"\x7fELF")
     if include_main:
         (build / "main.js").write_text("export {}\n")
     if not include_koffi:
@@ -143,8 +171,8 @@ def _build_archive(
 
 class SmokeArchiveTest(unittest.TestCase):
     def setUp(self) -> None:
-        if platform.system() != "Linux":
-            self.skipTest("smoke-archive.sh is Linux-only")
+        if platform.system() not in ("Linux", "Darwin"):
+            self.skipTest("smoke-archive.sh runs on Linux and macOS")
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
@@ -171,6 +199,8 @@ class SmokeArchiveTest(unittest.TestCase):
         include_main: bool = True,
         include_koffi: bool = True,
         include_ide: bool = True,
+        include_entry: bool = True,
+        include_native: bool = True,
         **shim_kwargs,
     ) -> Path:
         name = name or ARCHIVE_NAME.format(arch=self.arch)
@@ -181,6 +211,8 @@ class SmokeArchiveTest(unittest.TestCase):
             include_main=include_main,
             include_koffi=include_koffi,
             include_ide=include_ide,
+            include_entry=include_entry,
+            include_native=include_native,
         )
 
     def test_rejects_wrong_arguments(self) -> None:
@@ -191,12 +223,12 @@ class SmokeArchiveTest(unittest.TestCase):
         self.assertNotEqual(absent.returncode, 0)
         self.assertIn("readable non-empty file", absent.stderr)
 
-    def test_rejects_non_linux_archive_name(self) -> None:
-        archive = self.root / "kk-studio-daemon-v1.0.12-macos-arm64.tar.gz"
-        archive.write_bytes(b"present but not a linux archive")
+    def test_rejects_windows_archive_name(self) -> None:
+        archive = self.root / "kk-studio-daemon-v1.0.12-windows-amd64.tar.gz"
+        archive.write_bytes(b"present but not a unix archive")
         result = self._run(archive)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("only runs a linux archive", result.stderr)
+        self.assertIn("linux or macos archive", result.stderr)
 
     def test_rejects_cross_arch_archive(self) -> None:
         archive = self._archive(name=ARCHIVE_NAME.format(arch=self.other_arch))
@@ -217,6 +249,7 @@ class SmokeArchiveTest(unittest.TestCase):
             "missing entrypoint": {"include_main": False},
             "missing koffi": {"include_koffi": False},
             "missing IDE extension": {"include_ide": False},
+            "missing code-server entry": {"include_entry": False},
         }
         for label, flags in cases.items():
             with self.subTest(label=label):
@@ -244,7 +277,7 @@ class SmokeArchiveTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--version mismatch", result.stderr)
 
-        bad_help = self._archive(name="kk-studio-daemon-v1.0.12-help-linux-amd64.tar.gz", help_ok=False)
+        bad_help = self._archive(name=f"kk-studio-daemon-v1.0.12-help-{_host_os()}-{self.arch}.tar.gz", help_ok=False)
         result = self._run(bad_help)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--help", result.stderr)
@@ -264,6 +297,18 @@ class SmokeArchiveTest(unittest.TestCase):
         result = self._run(accepted_wrapped)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("wrapped daemon object must be rejected", result.stderr)
+
+    def test_rejects_a_native_module_built_for_another_platform(self) -> None:
+        archive = self._archive(native_foreign=True)
+        result = self._run(archive)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("native modules failed to load", result.stderr)
+
+    def test_rejects_code_server_native_module_that_does_not_load(self) -> None:
+        archive = self._archive(native_ok=False)
+        result = self._run(archive)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("native modules failed to load", result.stderr)
 
     def test_rejects_failing_koffi_probe(self) -> None:
         archive = self._archive(probe_exit=4, probe_out="boom")

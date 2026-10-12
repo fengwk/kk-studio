@@ -27,6 +27,7 @@ function repositoryRoot() {
 const ROOT = repositoryRoot()
 const CI = readFileSync(path.join(ROOT, '.github/workflows/daemon-ci.yml'), 'utf8')
 const RELEASE = readFileSync(path.join(ROOT, '.github/workflows/daemon-release.yml'), 'utf8')
+const DOCKER = readFileSync(path.join(ROOT, '.github/workflows/docker-publish.yml'), 'utf8')
 const PACKAGE = JSON.parse(readFileSync(path.join(ROOT, 'daemon/package.json'), 'utf8'))
 
 /**
@@ -53,6 +54,7 @@ function stepField(step, field, indent = 8) {
     // 一个 step 块的第一行来自 `- ` 之后，因此既可能在 8 空格缩进，也可能在行首。
     return step.match(new RegExp(`^ {${indent}}${field}: (.+)$`, 'm'))?.[1]
         ?? step.match(new RegExp(`^${field}: (.+)$`, 'm'))?.[1]
+        ?? step.match(new RegExp(`^ +${field}: (.+)$`, 'm'))?.[1]
 }
 
 function stepRun(step) {
@@ -84,11 +86,18 @@ function pythonHeredoc(script) {
     return lines.slice(start + 1, end).join('\n')
 }
 
-test('daemon-ci runs the full Node daemon suite on all three platforms', () => {
-    // 平台条件用例由各用例自己决定是否执行；矩阵本身必须覆盖三个平台，并且不整体跳过任何一步。
+test('daemon-ci runs the full Node daemon suite on the five release targets', () => {
+    // 平台条件用例由各用例自己决定是否执行；矩阵必须覆盖五个发行目标，并且不整体跳过 native 套件。
     const job = jobBlock(CI, 'node_daemon')
-    const runners = job.match(/^ {8}os: \[(.+)\]$/m)?.[1]?.split(',').map((value) => value.trim())
-    assert.deepEqual(runners, ['ubuntu-latest', 'macos-latest', 'windows-latest'])
+    const runners = [...job.matchAll(/^ {10}- os: (\S+)\n {12}platform: (\S+)$/gm)]
+        .map((match) => `${match[2]}@${match[1]}`)
+    assert.deepEqual(runners, [
+        'linux-amd64@ubuntu-latest',
+        'linux-arm64@ubuntu-24.04-arm',
+        'macos-arm64@macos-14',
+        'macos-amd64@macos-15-intel',
+        'windows-amd64@windows-latest',
+    ])
     assert.doesNotMatch(job, /fail-fast: true/u)
 
     const steps = stepsOf(job)
@@ -107,8 +116,13 @@ test('daemon-ci runs the full Node daemon suite on all three platforms', () => {
         assert.equal(stepField(step, 'if'), undefined, `${command} must not be conditional`)
         assert.doesNotMatch(step, /continue-on-error:|--passWithNoTests/u)
     }
-    // 覆盖率步骤是矩阵的最后一道 daemon 门禁，构建必须先于它完成。
-    assert.equal(runs.at(-1), 'npm --prefix daemon run coverage')
+    // 构建必须先于覆盖率。macOS 安装器烟测可以跟在覆盖率之后，但不能插到构建之前。
+    const coverage = runs.indexOf('npm --prefix daemon run coverage')
+    assert.ok(coverage > runs.indexOf('npm --prefix daemon run build'))
+    const trailing = steps.slice(coverage + 1)
+    for (const step of trailing) {
+        assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
+    }
 })
 
 test('daemon-ci pins the daemon lockfile cache and stays a read-only push/pull-request gate', () => {
@@ -144,23 +158,31 @@ test('the coverage step matches the daemon package scripts and provider', () => 
     )
 })
 
-test('the release pipeline smoke-tests the staged Linux archive with its own runtime', () => {
-    // 发布前必须用刚暂存的真实归档自证可跑：门禁在 Stage 之后、Publish 之前，且不可跳过。
-    const steps = stepsOf(jobBlock(RELEASE, 'publish'))
-    const smoke = stepNamed(RELEASE, 'publish', 'Smoke-test the staged Linux archive with its own runtime')
-    assert.equal(stepField(smoke, 'if'), undefined, 'the archive smoke must not be conditional')
-    assert.doesNotMatch(smoke, /continue-on-error:/u)
-
-    const stageIndex = steps.findIndex((step) => step.includes('scripts/daemon/prepare-release.sh'))
-    const smokeIndex = steps.indexOf(smoke)
-    const publishIndex = steps.findIndex((step) => stepField(step, 'name') === 'Publish GitHub Release')
-    assert.ok(stageIndex >= 0, 'missing the asset staging step')
-    assert.ok(stageIndex < smokeIndex && smokeIndex < publishIndex, 'the smoke must run between staging and publishing')
-
+test('the release pipeline smoke-tests every staged archive on its own host', () => {
+    // 五个归档必须在对应主机加载，发布 job 不能在 Linux 上代替其它平台验收。
+    const smokeJob = jobBlock(RELEASE, 'smoke_archives')
+    const targets = [...smokeJob.matchAll(/^ {10}- os: (\S+)\n {12}platform: (\S+)$/gm)]
+        .map((match) => `${match[2]}@${match[1]}`)
+    assert.deepEqual(targets, [
+        'linux-amd64@ubuntu-latest',
+        'linux-arm64@ubuntu-24.04-arm',
+        'macos-arm64@macos-14',
+        'macos-amd64@macos-15-intel',
+        'windows-amd64@windows-latest',
+    ])
+    const smoke = stepNamed(RELEASE, 'smoke_archives', 'Smoke-test this host archive')
+    assert.equal(stepField(smoke, 'if'), undefined)
     const run = stepRun(smoke)
     assert.match(run, /scripts\/daemon\/smoke-archive\.sh/u)
-    assert.match(run, /linux-amd64/u)
-    assert.match(run, /GITHUB_REF_NAME/u)
+    assert.match(run, /scripts\/daemon\/smoke-archive\.ps1/u)
+    assert.match(run, /matrix\.platform/u)
+    const publishNeeds = jobBlock(RELEASE, 'publish').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
+    assert.match(publishNeeds, /^ {6}- smoke_archives$/m)
+    assert.match(publishNeeds, /^ {6}- stage$/m)
+    const stageNeeds = jobBlock(RELEASE, 'stage').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
+    assert.match(stageNeeds, /^ {6}- daemon_ci$/m)
+    assert.match(stageNeeds, /^ {6}- validate_daemon$/m)
+    assert.match(stageNeeds, /^ {6}- validate_windows_daemon$/m)
 
     // 烟测入口必须真实使用归档自带的冻结运行时，并在不含用户 Node/Java 的 PATH 下调用。
     const smokeScript = readFileSync(path.join(ROOT, 'scripts/daemon/smoke-archive.sh'), 'utf8')
@@ -173,6 +195,20 @@ test('the release pipeline smoke-tests the staged Linux archive with its own run
     }
     assert.match(smokeScript, /koffi/u)
     assert.match(smokeScript, /acquireDirectoryLock/u)
+    assert.match(smokeScript, /Darwin/u)
+    assert.match(smokeScript, /out\/node\/entry\.js/u)
+    assert.match(smokeScript, /\.node/u)
+    assert.match(smokeScript, /only runs on Linux or macOS/u)
+    assert.doesNotMatch(smokeScript, /only runs on Linux;/u)
+})
+
+test('daemon-ci runs the installer and archive smoke on the macOS runner', () => {
+    const step = stepNamed(CI, 'node_daemon', 'Test the macOS installer and archive smoke with system Bash')
+    assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
+    assert.match(step, /\/bin\/bash --noprofile --norc/u)
+    const run = stepRun(step)
+    assert.match(run, /python3 -m unittest discover -s scripts\/daemon\/tests/u)
+    assert.match(run, /\/bin\/bash --version/u)
 })
 
 test('the release pipeline reuses the same matrix and cannot publish without it', () => {
@@ -181,16 +217,36 @@ test('the release pipeline reuses the same matrix and cannot publish without it'
     const reused = jobs.find((job) => /^ {4}uses: \.\/\.github\/workflows\/daemon-ci\.yml$/m.test(job.block))
     assert.ok(reused, 'daemon-release must reuse the daemon-ci matrix')
 
-    const needs = jobBlock(RELEASE, 'publish').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
-    assert.ok(needs, 'missing publish needs')
+    const needs = jobBlock(RELEASE, 'stage').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
+    assert.ok(needs, 'missing stage needs')
     for (const required of [reused.name, 'validate_daemon', 'validate_windows_daemon']) {
         assert.match(needs, new RegExp(`^ {6}- ${required}$`, 'm'))
     }
+    const publishNeeds = jobBlock(RELEASE, 'publish').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
+    assert.match(publishNeeds, /^ {6}- smoke_archives$/m)
     assert.match(topLevelSection(RELEASE, 'on'), /^ {4}tags:$/m)
 })
 
+test('full repository validation reuses the daemon matrix and installs archive parsing dependencies first', () => {
+    // 候选分支 validate_only 必须真实调用五平台矩阵，不能仅在输入描述里承诺。
+    const matrix = jobBlock(DOCKER, 'daemon_ci')
+    assert.match(matrix, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/u)
+    assert.match(matrix, /inputs\.validate_only/u)
+    const publish = jobBlock(DOCKER, 'publish')
+    assert.match(publish, /^ {6}- daemon_ci$/m)
+    assert.match(publish, /needs\.daemon_ci\.result == 'success'/u)
+    for (const [source, job] of [[DOCKER, 'validate'], [DOCKER, 'validate_unix_daemon'], [RELEASE, 'stage']]) {
+        const steps = stepsOf(jobBlock(source, job))
+        const install = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix daemon ci')
+        const scriptTests = steps.findIndex((step) => stepField(step, 'name') === (
+            job === 'validate_unix_daemon' ? 'Test installer with system Bash' : 'Run repository script tests'
+        ))
+        assert.ok(install >= 0 && scriptTests > install, `${job} must install the real tar parser before fixtures`)
+    }
+})
+
 test('the release version gate reads real project files and fails on any drift', () => {
-    const step = stepNamed(RELEASE, 'publish', 'Verify the repository version alignment')
+    const step = stepNamed(RELEASE, 'stage', 'Verify the repository version alignment')
     assert.doesNotMatch(stepField(step, 'name'), /\d+\.\d+\.\d+/u, 'the gate must not pin a version in its name')
     const script = dedent(stepRun(step), 10)
     const python = pythonHeredoc(script)

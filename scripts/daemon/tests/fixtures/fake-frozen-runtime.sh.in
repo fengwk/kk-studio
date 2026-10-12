@@ -16,6 +16,8 @@ INVALID_REJECTED='@INVALID_REJECTED@'
 WRAPPED_REJECTED='@WRAPPED_REJECTED@'
 PROBE_OUT='@PROBE_OUT@'
 PROBE_EXIT='@PROBE_EXIT@'
+NATIVE_OK='@NATIVE_OK@'
+NATIVE_FOREIGN='@NATIVE_FOREIGN@'
 CONFIG_MODE='@CONFIG_MODE@'
 PID_FILE='@PID_FILE@'
 
@@ -96,6 +98,21 @@ case "$1" in
     esac
     ;;
   *.mjs)
+    case "$1" in
+      *probe-code-server-native.mjs)
+        case "$2" in
+          /*) ;;
+          *) printf 'code-server root must be absolute\n' >&2; exit 2 ;;
+        esac
+        if [ "$NATIVE_FOREIGN" = 1 ]; then
+          printf 'code-server native module is not for this host\n' >&2
+          exit 5
+        fi
+        if [ "$NATIVE_OK" = 1 ]; then printf 'code-server native modules ok 1\n'; exit 0; fi
+        printf 'code-server native modules are missing\n' >&2
+        exit 2
+        ;;
+    esac
     if [ "$PROBE_EXIT" = 0 ]; then printf '%s\n' "$PROBE_OUT"; exit 0; fi
     printf 'probe failure\n' >&2
     exit "$PROBE_EXIT"

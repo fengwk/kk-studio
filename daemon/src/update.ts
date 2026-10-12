@@ -731,8 +731,35 @@ async function verifyStagedManifest(
   if (typeof codeServer !== 'object' || codeServer === null || Array.isArray(codeServer)) {
     throw new UpdateFailure('staged distribution manifest has no platform runtime')
   }
-  if (!Object.prototype.hasOwnProperty.call(codeServer, `${os}-${arch}`)) {
+  const platformKey = `${os}-${arch}`
+  if (!Object.prototype.hasOwnProperty.call(codeServer, platformKey)) {
     throw new UpdateFailure('staged distribution does not contain this platform runtime')
+  }
+  const asset = (codeServer as Record<string, unknown>)[platformKey]
+  if (typeof asset !== 'object' || asset === null || Array.isArray(asset)) {
+    throw new UpdateFailure('staged distribution platform runtime is malformed')
+  }
+  const record = asset as Record<string, unknown>
+  const runtimeVersion = manifest.codeServerVersion
+  const url = record.url
+  const versionText = typeof runtimeVersion === 'string' ? runtimeVersion : ''
+  const expectedName = `code-server-${versionText}-${platformKey}.tar.gz`
+  const expectedPrefix = `https://github.com/fengwk/code-server/releases/download/v${versionText}/`
+  const frozenFork =
+    /^[0-9A-Za-z._+-]+$/.test(versionText) &&
+    typeof url === 'string' &&
+    url === `${expectedPrefix}${expectedName}`
+  if (!frozenFork) {
+    throw new UpdateFailure('staged distribution runtime is not the frozen fork release')
+  }
+  if (typeof record.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(record.sha256)) {
+    throw new UpdateFailure('staged distribution runtime checksum is not frozen')
+  }
+  const nodeName = nodeExecutable(os)
+  const node = path.join(extractDir, 'runtime', 'code-server', 'lib', nodeName)
+  const entry = path.join(extractDir, 'runtime', 'code-server', 'out', 'node', 'entry.js')
+  if (!(await isRealRegularFile(node)) || !(await isRealRegularFile(entry))) {
+    throw new UpdateFailure('staged distribution is missing the frozen code-server runtime')
   }
 }
 

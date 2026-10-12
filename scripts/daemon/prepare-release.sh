@@ -19,7 +19,11 @@
 # 跨平台正确性：脚本用 `npm ci --omit=dev --os=<npmOs> --cpu=<npmCpu>` 为目标平台安装依赖，
 # 因此只会装入对应平台的 optional 预编译产物（例如 koffi 的 `@koromix/koffi-<os>-<arch>`），
 # 而不是把 Linux 上装出的 node_modules 原样打包成“假跨平台”。缺失对应预编译产物即失败，
-# 不静默降级。
+# 不静默降级。暂存前再删除其它平台的 `@koromix/koffi-*`，避免宿主上已有的可选包被复制进归档。
+#
+# code-server 只来自 `runtime-manifest.json` 里冻结的 GitHub Release（fengwk/code-server 的
+# `v4.141.0-kk.1`）。清单里的 URL 与 SHA256 在构建期原样使用；本脚本不查询 latest、不回退官方
+# coder/code-server 归档，也不在缺少正式摘要时编造哈希。
 #
 # 暂存资产（输出目录每次整体重建，因此每次恰好只包含下列五个文件）：
 #   kk-studio-daemon-<tag>-<os>-<arch>.tar.gz          可运行发行归档
@@ -49,7 +53,6 @@ fi
 
 DAEMON_DIR="$REPO_ROOT/daemon"
 DIST_DIR="$DAEMON_DIR/dist"
-NODE_MODULES="$DAEMON_DIR/node_modules"
 IDE_EXTENSION_DIR="$DAEMON_DIR/ide-extension"
 RUNTIME_MANIFEST="$DAEMON_DIR/runtime-manifest.json"
 LICENSE_FILE="$REPO_ROOT/LICENSE"
@@ -154,9 +157,10 @@ manifest_field() {
   "$NODE_BIN" -e '
     const fs = require("fs");
     const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const asset = manifest.codeServer[process.argv[2]];
-    if (!asset) { process.exit(2); }
-    process.stdout.write(String(asset[process.argv[3]] ?? ""));
+    const asset = manifest.codeServer && manifest.codeServer[process.argv[2]];
+    if (!asset || typeof asset !== "object") { process.exit(2); }
+    const value = asset[process.argv[3]];
+    process.stdout.write(value === undefined || value === null ? "" : String(value));
   ' "$RUNTIME_MANIFEST" "$key" "$field" 2>/dev/null || die "runtime manifest has no asset for $key"
 }
 
@@ -167,13 +171,22 @@ daemon_version() {
 }
 
 install_platform_dependencies() {
-  local npm_os=$1 npm_cpu=$2 koffi_optional
-  # 目标平台的生产依赖：--omit=dev 去掉构建期依赖，--os/--cpu 只选目标平台的 optional 预编译产物。
-  "$NPM_BIN" --prefix "$DAEMON_DIR" ci --omit=dev --no-audit --no-fund \
+  local prefix=$1 npm_os=$2 npm_cpu=$3 koffi_optional directory name
+  mkdir -p "$prefix"
+  cp -- "$DAEMON_DIR/package.json" "$DAEMON_DIR/package-lock.json" "$prefix/"
+  # 目标平台的生产依赖装进临时前缀，不改写 daemon/node_modules。
+  "$NPM_BIN" --prefix "$prefix" ci --omit=dev --no-audit --no-fund \
     --os="$npm_os" --cpu="$npm_cpu" ||
     die "cannot install production dependencies for $npm_os-$npm_cpu"
   koffi_optional=$(koffi_optional_name "$npm_os" "$npm_cpu")
-  [ -d "$NODE_MODULES/$koffi_optional" ] ||
+  if [ -d "$prefix/node_modules/@koromix" ]; then
+    for directory in "$prefix/node_modules/@koromix"/koffi-*; do
+      [ -e "$directory" ] || continue
+      name=${directory##*/}
+      if [ "$name" != "${koffi_optional##*/}" ]; then rm -rf -- "$directory"; fi
+    done
+  fi
+  [ -d "$prefix/node_modules/$koffi_optional" ] ||
     die "target platform prebuilt is missing: $koffi_optional (refusing a fake cross-platform archive)"
 }
 
@@ -220,6 +233,24 @@ main() {
     die "release tag must equal the daemon version: expected v$version, got $release_tag"
   fi
 
+  local code_server_version code_server_url code_server_sha
+  code_server_version=$("$NODE_BIN" -e '
+    const manifest = require(process.argv[1]);
+    if (typeof manifest.codeServerVersion !== "string") process.exit(1);
+    process.stdout.write(manifest.codeServerVersion);
+  ' "$RUNTIME_MANIFEST") || die "runtime manifest code-server version is missing"
+  [[ $code_server_version =~ $PROJECT_VERSION_PATTERN ]] ||
+    die "runtime manifest code-server version is malformed"
+  code_server_url=$(manifest_field "$os-$arch" url)
+  code_server_sha=$(manifest_field "$os-$arch" sha256)
+  case "$code_server_url" in
+    "https://github.com/fengwk/code-server/releases/download/v$code_server_version/code-server-$code_server_version-$os-$arch.tar.gz")
+      ;;
+    *) die "runtime manifest URL for $os-$arch is not the frozen fork release asset" ;;
+  esac
+  [[ $code_server_sha =~ ^[0-9a-f]{64}$ ]] ||
+    die "runtime manifest sha256 for $os-$arch is not frozen yet"
+
   # 归档入口必须可执行且版本一致：只有真正启动一次才能证明入口与内嵌依赖可用。
   local version_output
   if ! version_output=$("$NODE_BIN" "$DIST_DIR/$ENTRYPOINT" --version 2>&1); then
@@ -233,13 +264,6 @@ main() {
   npm_platform=$(npm_target_platform "$os-$arch")
   npm_os=${npm_platform% *}
   npm_cpu=${npm_platform#* }
-  install_platform_dependencies "$npm_os" "$npm_cpu"
-
-  local code_server_url code_server_sha
-  code_server_url=$(manifest_field "$os-$arch" url)
-  code_server_sha=$(manifest_field "$os-$arch" sha256)
-  [[ $code_server_sha =~ ^[0-9a-f]{64}$ ]] ||
-    die "runtime manifest sha256 for $os-$arch is not 64 hex characters"
 
   local commit source_date_epoch
   if ! commit=$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}' 2>/dev/null); then
@@ -264,15 +288,79 @@ main() {
   actual_sha=$(sha256_of "$code_server_tar")
   [ "$actual_sha" = "$code_server_sha" ] ||
     die "code-server runtime SHA256 does not match the frozen manifest for $os-$arch"
+  install_platform_dependencies "$WORK_DIR/deps" "$npm_os" "$npm_cpu"
+  KK_ARCHIVE="$code_server_tar" KK_TAR_PACKAGE="$WORK_DIR/deps/package.json" \
+    "$NODE_BIN" --input-type=module <<'JS'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+const require = createRequire(pathToFileURL(process.env.KK_TAR_PACKAGE))
+const { list } = require('tar')
+const FILE = new Set(['File', 'OldFile', 'ContiguousFile'])
+const DIRECTORY = new Set(['Directory', 'GNUDumpDir'])
+function inside(linkPath, target) {
+  if (target.includes('\0') || target.includes('\\') || target.startsWith('/') || /^[A-Za-z]:/.test(target)) return false
+  const relative = linkPath.includes('/') ? linkPath.slice(linkPath.indexOf('/') + 1) : ''
+  const base = relative.includes('/') ? relative.slice(0, relative.lastIndexOf('/')) : ''
+  const combined = base === '' ? target : `${base}/${target}`
+  let depth = 0
+  for (const segment of combined.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      depth -= 1
+      if (depth < 0) return false
+      continue
+    }
+    depth += 1
+  }
+  return true
+}
+const seen = new Set()
+await list({
+  file: process.env.KK_ARCHIVE,
+  strict: true,
+  onReadEntry(entry) {
+    if (entry.meta) return
+    let value = entry.path.replace(/\/+$/, '').replace(/^\.\//, '')
+    if (value === '.' || value === '') return
+    if (value.startsWith('/') || value.includes('\\') || value.includes('\0') || /^[A-Za-z]:/.test(value)) {
+      throw new Error('unsafe path')
+    }
+    const stripped = value.includes('/') ? value.slice(value.indexOf('/') + 1) : value
+    for (const segment of stripped.split('/')) {
+      if (segment === '' || segment === '.' || segment === '..') throw new Error('unsafe path')
+    }
+    if (entry.type === 'SymbolicLink') {
+      if (!inside(value, entry.linkpath ?? '')) throw new Error('frozen code-server archive contains a link that escapes the extraction root')
+      return
+    }
+    if (entry.type === 'Link' || (!FILE.has(entry.type) && !DIRECTORY.has(entry.type))) {
+      throw new Error('unsupported entry')
+    }
+    if (!DIRECTORY.has(entry.type)) {
+      if (seen.has(stripped)) throw new Error('duplicate')
+      seen.add(stripped)
+    }
+  },
+})
+JS
+  [ "$?" -eq 0 ] || die "frozen code-server archive contains an unsafe path or entry"
 
   STAGING_DIR=$(mktemp -d "$(dirname "$RELEASE_DIR")/.kk-studio-daemon-release.XXXXXX")
   mkdir -p "$STAGING_DIR/node_modules" "$STAGING_DIR/runtime/code-server"
   # 编译产物位于归档根，入口固定为 main.js。
   cp -R "$DIST_DIR/." "$STAGING_DIR/"
-  cp -R "$NODE_MODULES/." "$STAGING_DIR/node_modules/"
+  cp -R "$WORK_DIR/deps/node_modules/." "$STAGING_DIR/node_modules/"
   tar -xzf "$code_server_tar" -C "$STAGING_DIR/runtime/code-server" --strip-components=1
-  [ -x "$STAGING_DIR/runtime/code-server/lib/node" ] ||
-    die "code-server runtime does not provide lib/node for $os-$arch"
+  local node_name=node
+  if [ "$os" = windows ]; then node_name=node.exe; fi
+  [ -f "$STAGING_DIR/runtime/code-server/lib/$node_name" ] ||
+    die "code-server runtime does not provide lib/$node_name for $os-$arch"
+  if [ "$os" != windows ]; then
+    [ -x "$STAGING_DIR/runtime/code-server/lib/$node_name" ] ||
+      die "code-server runtime lib/$node_name is not executable for $os-$arch"
+  fi
+  [ -f "$STAGING_DIR/runtime/code-server/out/node/entry.js" ] ||
+    die "code-server runtime does not provide out/node/entry.js for $os-$arch"
   # IDE 扩展源码随发行包一起复制；缺失时跳过（扩展尚未提供的平台/阶段不伪造）。
   if [ -d "$IDE_EXTENSION_DIR" ]; then
     mkdir -p "$STAGING_DIR/ide-extension"
