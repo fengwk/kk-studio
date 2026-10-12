@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -39,9 +40,12 @@ class ConfigSyncParserTest {
     for (String invalid :
         List.of(
             valid.replace("linux", "wsl"),
-            valid.replace("/opt/jdk21", "${JAVA_HOME}"),
+            // bashExecutable 只接受非空白字符串：即使条目另含未知字段，空白值也必须硬错。
+            valid.replace("bashExecutable: /bin/bash", "bashExecutable: \"  \""),
             valid.replace("\"pom.xml\"", "\"../outside\""),
             valid.replace("https://studio.example.com/", "https://studio.example.com/private"))) {
+      // 每个 mutation 都必须真正改动 fixture，否则断言会退化为对同一份合法文档的重复解析。
+      assertNotEquals(valid, invalid, () -> "mutation must change the fixture: " + invalid);
       assertThrows(
           AiValidationException.class,
           () ->
