@@ -210,6 +210,56 @@ describe('archive entry validation', () => {
     )
   })
 
+  it('inspects archive entries through controlled ReadEntry shapes', () => {
+    // meta（pax 全局头）条目只承载元数据：接受且不进入 seen 字节预算。
+    const metaScan = { seen: new Set<string>(), files: new Set<string>(), total: 0 }
+    expect(inspectArchiveEntry(fakeEntry({ path: './pax', size: 0, meta: true }), metaScan)).toBeNull()
+    expect(metaScan.seen.size).toBe(0)
+    expect(metaScan.total).toBe(0)
+
+    // 不支持的平台/非规范条目必须在预算前 fail closed。
+    const unsupportedScan = { seen: new Set<string>(), files: new Set<string>(), total: 0 }
+    expect(inspectArchiveEntry(fakeEntry({ path: './dev', size: 0, unsupported: true }), unsupportedScan)).toBe(
+      'distribution archive contains an unsupported entry',
+    )
+    expect(inspectArchiveEntry(fakeEntry({ path: './dev', size: 0, invalid: true }), unsupportedScan)).toBe(
+      'distribution archive contains an unsupported entry',
+    )
+
+    // 含 NUL 的路径不可接受。
+    expect(normalizeArchivePath('safe\0evil')).toBeNull()
+    const nulScan = { seen: new Set<string>(), files: new Set<string>(), total: 0 }
+    expect(inspectArchiveEntry(fakeEntry({ path: 'safe\0evil', size: 0 }), nulScan)).toBe(
+      'distribution archive contains an unsafe path',
+    )
+  })
+
+  it('rejects a symlink whose relative target walks below the extraction root', () => {
+    const scan = { seen: new Set<string>(), files: new Set<string>(), total: 0 }
+    // base=lib，combined=lib/../../etc/passwd：深度在解析中跌到 -1，必须拒绝。
+    expect(
+      inspectArchiveEntry(
+        fakeEntry({ path: './lib/link.js', size: 0, type: 'SymbolicLink', linkpath: '../../etc/passwd' }),
+        scan,
+      ),
+    ).toBe('distribution archive contains a link that escapes the extraction root')
+  })
+
+  it('rejects a duplicate symlink path', () => {
+    const scan = { seen: new Set<string>(), files: new Set<string>(), total: 0 }
+    const link = { path: './lib/link.js', size: 0, type: 'SymbolicLink' as const, linkpath: './main.js' }
+    expect(inspectArchiveEntry(fakeEntry(link), scan)).toBeNull()
+    expect(inspectArchiveEntry(fakeEntry(link), scan)).toBe('distribution archive contains a duplicate entry')
+  })
+
+  it('fails closed when the archive stream cannot be parsed', async () => {
+    const corrupt = path.join(dir, 'corrupt.tar.gz')
+    await writeFile(corrupt, Buffer.from('this is not a tar or gzip stream at all'))
+    await expect(validateArchive(corrupt, new AbortController().signal)).rejects.toThrow(
+      'distribution archive could not be processed',
+    )
+  })
+
   it('keeps a real sha256 stable while processing a benign archive', async () => {
     const archive = await archiveOf([{ name: './main.js', body: Buffer.from('entry') }])
     const digest = createHash('sha256').update(await readFile(archive)).digest('hex')
