@@ -762,6 +762,41 @@ describe('HTTP exchanges over the reverse stream', () => {
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
+
+  it('reports cancellation while the gateway upgrade is still pending', async () => {
+    const upstream = await startHttpUpstream(() => undefined)
+    const server = createServer()
+    const sockets = new Set<Socket>()
+    let markUpgrade!: () => void
+    const upgrading = new Promise<void>((resolve) => {
+      markUpgrade = resolve
+    })
+    server.on('upgrade', (_request, socket) => {
+      sockets.add(socket)
+      socket.on('error', () => undefined)
+      socket.on('close', () => sockets.delete(socket))
+      markUpgrade()
+      // Keep the HTTP upgrade pending so cancellation cannot depend on a fast local handshake.
+    })
+    const port = await listen(server)
+    cleanups.push(async () => {
+      for (const socket of sockets) {
+        socket.destroy()
+      }
+      await closeServer(server)
+    })
+    const controller = new AbortController()
+    const pending = openStreamExchange({
+      streamUrl: `ws://127.0.0.1:${port}`,
+      request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: controller.signal,
+    })
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await upgrading
+    controller.abort()
+    await rejected
+  })
 })
 
 describe('WebSocket exchanges over the reverse stream', () => {
