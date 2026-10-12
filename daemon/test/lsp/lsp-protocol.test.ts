@@ -56,8 +56,9 @@ describe('LspClient Protocol & Handshake', () => {
     expect(initMsg.params.capabilities.textDocument.definition.linkSupport).toBe(true)
     expect(initMsg.params.capabilities.textDocument.synchronization.didSave).toBe(true)
 
-    const initializedNotif = receivedMessages(transcript, 'initialized')[0]
-    expect(initializedNotif).toBeDefined()
+    // Flushing the notification does not mean the server has consumed and recorded it yet.
+    const initialized = await awaitEvent(transcript, (event) => event.event === 'recv' && event.message?.method === 'initialized')
+    expect(initialized.message.params).toEqual({})
   })
 
   it('formats definition results with Location and LocationLink and empty fallback', async () => {
