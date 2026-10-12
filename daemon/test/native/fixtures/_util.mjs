@@ -2,7 +2,11 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 /** 写出本进程 pid；每个夹具都先登记自己，测试据此用原生 pid 观察存活。 */
 export function recordPid(file) {
-  return import('node:fs').then((fs) => fs.writeFileSync(file, String(process.pid)))
+  return import('node:fs').then((fs) => {
+    const temporary = `${file}.tmp`
+    fs.writeFileSync(temporary, String(process.pid))
+    fs.renameSync(temporary, file)
+  })
 }
 
 /** 有界等待一个文件出现（或抛出），避免夹具无限阻塞。 */

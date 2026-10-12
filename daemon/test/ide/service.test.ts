@@ -332,10 +332,17 @@ describe('managed code-server IDE service', () => {
     expect(supervisor.started).toHaveLength(1)
     const content = JSON.parse(await readFile(reply.workspacePath as string, 'utf8'))
     expect(content).toEqual({ folders: [{ path: directory }] })
-    expect((await stat(reply.workspacePath as string)).mode & 0o077).toBe(0)
     const ideDir = join(distribution, 'data', 'ide')
-    expect((await stat(ideDir)).mode & 0o777).toBe(0o700)
-    expect((await stat(join(ideDir, 'views'))).mode & 0o777).toBe(0o700)
+    if (process.platform === 'win32') {
+      const { verifyPrivateFile, ensurePrivateDirectory } = await import('../../src/native/index.js')
+      await expect(verifyPrivateFile(reply.workspacePath as string)).resolves.toBeUndefined()
+      await expect(ensurePrivateDirectory(ideDir)).resolves.toBe(ideDir)
+      await expect(ensurePrivateDirectory(join(ideDir, 'views'))).resolves.toBe(join(ideDir, 'views'))
+    } else {
+      expect((await stat(reply.workspacePath as string)).mode & 0o077).toBe(0)
+      expect((await stat(ideDir)).mode & 0o777).toBe(0o700)
+      expect((await stat(join(ideDir, 'views'))).mode & 0o777).toBe(0o700)
+    }
 
     // Re-opening the same view reuses the already running service.
     const second = await service.handle({ action: 'OPEN_VIEW', viewId, directory }, signal())

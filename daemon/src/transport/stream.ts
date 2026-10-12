@@ -285,7 +285,7 @@ function remainingMillis(timeoutMillis: number, startedAt: number): number {
   return Math.max(1, timeoutMillis - (Date.now() - startedAt))
 }
 
-function waitForOpen(socket: WebSocket, timeoutMillis: number): Promise<void> {
+function waitForOpen(socket: WebSocket, timeoutMillis: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const cleanup = (): void => {
       clearTimeout(timer)
@@ -299,11 +299,11 @@ function waitForOpen(socket: WebSocket, timeoutMillis: number): Promise<void> {
     }
     const onError = (error: Error): void => {
       cleanup()
-      reject(new WireError(`stream socket error: ${error.message}`))
+      reject(signal.aborted ? abortError() : new WireError(`stream socket error: ${error.message}`))
     }
     const onClose = (): void => {
       cleanup()
-      reject(new WireError('stream socket closed before opening'))
+      reject(signal.aborted ? abortError() : new WireError('stream socket closed before opening'))
     }
     const timer = setTimeout(() => {
       cleanup()
@@ -729,7 +729,7 @@ export async function openStreamExchange(options: StreamExchangeOptions): Promis
   const onAbort = (): void => exchange.fail(abortError())
   options.signal.addEventListener('abort', onAbort, { once: true })
   try {
-    await waitForOpen(gateway, remainingMillis(timeout, startedAt))
+    await waitForOpen(gateway, remainingMillis(timeout, startedAt), options.signal)
     exchange.start()
     await exchange.done
   } catch (error) {

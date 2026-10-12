@@ -242,14 +242,15 @@ describe('LspDiscovery & ExecutableResolver', () => {
     const posixCmd = path.join(binDir, 'mycmd')
     fs.writeFileSync(posixCmd, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
 
-    // POSIX path resolution uses the real platform delimiter, including when Windows is simulated.
-    const delimiter = process.platform === 'win32' ? ';' : ':'
-    expect(
-      ExecutableResolver.resolve('mycmd', {
-        windows: false,
-        pathVariable: `${path.join(tempDir, 'nope')}${delimiter}${binDir}`,
-      }),
-    ).toBe(posixCmd)
+    // A POSIX PATH cannot represent a Windows drive colon. Its host lookup is checked on Unix.
+    if (process.platform !== 'win32') {
+      expect(
+        ExecutableResolver.resolve('mycmd', {
+          windows: false,
+          pathVariable: `${path.join(tempDir, 'nope')}:${binDir}`,
+        }),
+      ).toBe(posixCmd)
+    }
 
     // Windows PATHEXT simulation
     const winCmd = path.join(binDir, 'mytool.cmd')
@@ -257,7 +258,7 @@ describe('LspDiscovery & ExecutableResolver', () => {
     expect(
       ExecutableResolver.resolve('mytool', {
         windows: true,
-        pathVariable: binDir,
+        pathVariable: `${path.join(tempDir, 'nope')};${binDir}`,
         pathext: '.CMD;.EXE',
       }),
     ).toBe(winCmd)
