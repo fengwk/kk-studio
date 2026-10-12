@@ -392,7 +392,7 @@ test('the Windows installer launches main.js directly and its fixture stays insi
         const entry = path.join(directory, 'main.js')
         const version = spawnSync(process.execPath, [entry, '--version'], { encoding: 'utf8' })
         assert.equal(version.status, 0, version.stderr)
-        assert.equal(version.stdout, 'kk-studio-daemon 1.0.13\n')
+        assert.equal(version.stdout, 'kk-studio-daemon 1.0.14\n')
         const config = spawnSync(process.execPath, [entry, '--check-config', path.join(directory, 'daemon.json')], {
             encoding: 'utf8',
         })

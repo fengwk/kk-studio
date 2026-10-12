@@ -27,7 +27,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-DAEMON_VERSION = "1.0.13"
+DAEMON_VERSION = "1.0.14"
 CODE_SERVER_VERSION = "4.141.0-kk.1"
 RELEASE_TAG = "v" + DAEMON_VERSION
 RELEASE_BASE = "https://github.com/fengwk/kk-studio/releases"

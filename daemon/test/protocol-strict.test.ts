@@ -105,7 +105,7 @@ describe('READY capabilities validation branches', () => {
 
   it('rejects a non-integer version and an invalid daemonVersion', () => {
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 'four', daemonVersion: '1.0.13', environment })),
+      decodeCapabilities(JSON.stringify({ version: 'four', daemonVersion: '1.0.14', environment })),
     ).toThrow(/version must be an integer/)
     expect(() =>
       decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: 'bad version', environment })),
