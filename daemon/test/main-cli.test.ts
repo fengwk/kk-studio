@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { once } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -25,7 +26,8 @@ import {
  * `ERROR/REGISTRATION_REJECTED` 触发正常停机（Node 的 `kill('SIGTERM')` 在 Windows 上是强制 `TerminateProcess`）。
  * macOS 缺少子进程收养者不阻止这次启动。
  */
-const MAIN_ENTRY = fileURLToPath(new URL('../dist/main.js', import.meta.url))
+const DIST_DIR = fileURLToPath(new URL('../dist', import.meta.url))
+const MAIN_ENTRY = join(DIST_DIR, 'main.js')
 
 const cleans: Array<() => void | Promise<void>> = []
 afterEach(async () => {
@@ -42,9 +44,14 @@ interface CliResult {
 }
 
 /** 运行真实编译产物并完整收敛：成功退出或真实信号结束都必须被等待到。 */
-async function runCli(args: string[]): Promise<CliResult> {
-  expect(existsSync(MAIN_ENTRY), `build the daemon first: ${MAIN_ENTRY}`).toBe(true)
-  const child = spawn(process.execPath, [MAIN_ENTRY, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+async function runCli(args: string[], entry: string = MAIN_ENTRY): Promise<CliResult> {
+  expect(existsSync(entry), `build the daemon first: ${entry}`).toBe(true)
+  return runChild([entry, ...args])
+}
+
+/** 以真实子进程运行给定 argv（argv[0] 由调用方提供），完整收集输出并等待退出。 */
+async function runChild(argv: string[]): Promise<CliResult> {
+  const child = spawn(process.execPath, argv, { stdio: ['ignore', 'pipe', 'pipe'] })
   const stdout: string[] = []
   const stderr: string[] = []
   child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk.toString('utf8')))
@@ -78,6 +85,68 @@ describe('daemon compiled CLI information commands', () => {
     expect(bad.code).toBe(1)
     expect(bad.stderr).toContain('Invalid daemon configuration:')
     expect(bad.stderr).not.toContain(TOKEN)
+  })
+})
+
+/** 在带空格名字的临时目录里放一个指向编译产物目录的 symlink，返回其 lexical 入口路径。 */
+function linkedEntryUnderSpaceDir(): { entry: string; cleanup: () => void } {
+  const root = mkdtempSync(join(tmpdir(), 'daemon symlink entry '))
+  const link = join(root, 'linked dist')
+  // junction 在 Windows 上创建目录链接无需特权；POSIX 用目录 symlink。
+  symlinkSync(DIST_DIR, link, process.platform === 'win32' ? 'junction' : 'dir')
+  return {
+    entry: join(link, 'main.js'),
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  }
+}
+
+/**
+ * 经符号链接目录执行编译产物的回归。
+ *
+ * `process.argv[1]` 保留调用方给出的 lexical 路径，而 `import.meta.url` 是 Node 解析 symlink 后的 canonical 路径；
+ * 入口判定必须把两侧归一化到同一 realpath，否则会静默 `exit 0` 且 stdout 为空。这里让 lexical 与 canonical 必然不同
+ * （带空格的链接目录名），用真实子进程覆盖 `--version` / `--help` 两个信息入口。
+ */
+describe('daemon compiled CLI through a symlinked entry directory', () => {
+  it('runs information commands when invoked via a symlinked directory path', async () => {
+    expect(existsSync(MAIN_ENTRY), `build the daemon first: ${MAIN_ENTRY}`).toBe(true)
+    const linked = linkedEntryUnderSpaceDir()
+    cleans.push(linked.cleanup)
+
+    // 前提：传入的 lexical 入口与 Node 解析出的真实路径确实不同，否则本用例无法证明入口判定已归一化。
+    expect(linked.entry).not.toBe(realpathSync(linked.entry))
+    expect(realpathSync(linked.entry)).toBe(realpathSync(MAIN_ENTRY))
+
+    const version = await runCli(['--version'], linked.entry)
+    expect(version.code).toBe(0)
+    expect(version.stdout).toContain(`kk-studio-daemon ${DAEMON_VERSION}`)
+
+    const help = await runCli(['--help'], linked.entry)
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('Usage: kk-studio-daemon --config')
+  })
+})
+
+/**
+ * import 编译入口不产生副作用：以真实子进程加载 dist/main.js，而 `process.argv[1]` 是另一个存在的启动脚本，
+ * 入口判定必须为假、不得执行 main。
+ */
+describe('daemon compiled entry import side effects', () => {
+  it('does not run main when the entry module is imported by another script', async () => {
+    expect(existsSync(MAIN_ENTRY), `build the daemon first: ${MAIN_ENTRY}`).toBe(true)
+    const root = mkdtempSync(join(tmpdir(), 'daemon entry import '))
+    cleans.push(() => rmSync(root, { recursive: true, force: true }))
+    const launcher = join(root, 'launcher.mjs')
+    writeFileSync(
+      launcher,
+      `await import(${JSON.stringify(pathToFileURL(MAIN_ENTRY).href)})\nprocess.stdout.write('imported\\n')\n`,
+      'utf8',
+    )
+
+    const result = await runChild([launcher])
+    expect(result.code).toBe(0)
+    expect(result.stdout).toBe('imported\n')
+    expect(result.stderr).toBe('')
   })
 })
 
