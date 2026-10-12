@@ -71,10 +71,8 @@ try {
     if ($manifest.daemonVersion -ne $package.version -or $null -eq $manifest.codeServer.'windows-amd64') {
         Fail 'runtime manifest must match the package version and host platform'
     }
-    # The daemon resolves the configured bash executable (default `bash`) through PATH, so the
-    # controlled empty PATH below (which deliberately hides user Node/Java) would make
-    # --check-config reject a valid configuration. Capture the real Git Bash as an absolute path
-    # *before* emptying PATH and pass it explicitly through the config instead of faking a shell.
+    # Capture Git Bash as an absolute path before the empty PATH below hides Node/Java, so the
+    # daemon can still resolve its bash executable while running --check-config.
     $bashCommand = Get-Command bash.exe -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($null -eq $bashCommand) {
