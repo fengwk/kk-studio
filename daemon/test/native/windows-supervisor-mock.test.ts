@@ -1,8 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { PassThrough } from 'node:stream'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { Kernel32, WindowsNativeBindings } from '../../src/native/win32.js'
 import { installWindowsNativeBindingsForTest, loadWindowsNativeTypes } from '../../src/native/win32.js'
 import {
@@ -93,6 +95,24 @@ function fakeHelper(lifetimeMillis = 400): ChildProcessWithoutNullStreams {
   }) as ChildProcessWithoutNullStreams
   children.push(child)
   return child
+}
+
+/**
+ * 只在「操作系统进程可观察边界」上做假的 helper：不产生真实子进程，也不吞掉任何信号。
+ *
+ * <p>被测的仍是真实的 `WindowsManagedProcess` 控制流；这里只替代内核在父进程侧可见的那部分行为——
+ * `kill` 不生效（真实 SIGKILL 无法在测试里模拟「进程无视强杀」）、也不主动派发 `close`，
+ * 用来驱动「强杀后仍未收敛」这类只有内核异常时才出现的失败路径。
+ */
+function fakeChild(): ChildProcessWithoutNullStreams {
+  const child = Object.assign(new EventEmitter(), {
+    pid: 424_242,
+    kill: () => false,
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+  })
+  return child as unknown as ChildProcessWithoutNullStreams
 }
 
 afterEach(async () => {
@@ -283,6 +303,86 @@ describe('windows managed process failure branches (mocked native bindings)', ()
     const managed = new WindowsManagedProcess(dir, helper, undefined)
     await managed.establish()
     await expect(managed.exit).resolves.toEqual({ exitCode: 9, signal: null })
+    await managed.terminate(50)
+  })
+
+  test('the managed process exposes the helper process streams and pid', () => {
+    const helper = fakeHelper()
+    const managed = new WindowsManagedProcess(dir, helper, undefined)
+    // 父进程侧只转发 helper 的 stdio：命令继承的是这三条管道，绝不另开通道。
+    expect(managed.pid).toBe(helper.pid)
+    expect(managed.stdin).toBe(helper.stdin)
+    expect(managed.stdout).toBe(helper.stdout)
+    expect(managed.stderr).toBe(helper.stderr)
+  })
+
+  test('a helper process error settles the exit with a null code and is not re-killed on terminate', async () => {
+    const helper = fakeHelper(5_000)
+    state.publish(dir, state.SCOPE_FILE, String(helper.pid))
+    const managed = new WindowsManagedProcess(dir, helper, undefined)
+    await managed.establish()
+    // 在操作系统进程可观察边界上报告错误：helperExited 必须立即置位并把 exit 落定为 null（没有真实退出码）。
+    helper.emit('error', new Error('spawn failed'))
+    await expect(managed.exit).resolves.toEqual({ exitCode: null, signal: null })
+    // 退出事实已落定：terminate 必须直接复用，不再等待或强杀一个仍被标记为已退出的 helper。
+    await managed.terminate(50)
+    expect(helper.exitCode === null && helper.signalCode === null).toBe(true)
+  })
+
+  test('concurrent close calls share one termination and complete the scope once', async () => {
+    const helper = fakeHelper(400)
+    state.publish(dir, state.SCOPE_FILE, String(helper.pid))
+    const managed = new WindowsManagedProcess(dir, helper, undefined)
+    await managed.establish()
+    // 两次并发收尾必须共用同一次 termination：complete 只生效一次，第二次是幂等短路。
+    await Promise.all([managed.close(), managed.close()])
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  test('terminate reports one combined failure when the job cannot converge and its handle cannot close', async () => {
+    control.activeProcesses = 1
+    control.terminateJob = 0
+    control.closeHandle = 0
+    const helper = fakeHelper(400)
+    state.publish(dir, state.SCOPE_FILE, String(helper.pid))
+    const managed = new WindowsManagedProcess(dir, helper, undefined)
+    await managed.establish()
+    // 收敛失败与句柄关闭失败必须合并上报：绝不因为句柄已释放就丢掉收敛失败。
+    await expect(managed.terminate(50)).rejects.toThrow(/additionally/)
+    // 收敛失败必须保留状态目录作为唯一可复核的证据。
+    expect(existsSync(dir)).toBe(true)
+  })
+
+  test('establish times out when the helper never publishes the scope', async () => {
+    const helper = fakeHelper(60_000)
+    const managed = new WindowsManagedProcess(dir, helper, undefined)
+    // 预算基于 Date.now 与轮询定时器：用假时钟推进到 20s 预算之外，无需真实等待。
+    vi.useFakeTimers()
+    try {
+      const pending = managed.establish()
+      const asserted = expect(pending).rejects.toThrow(/did not establish the OS scope/)
+      await vi.advanceTimersByTimeAsync(20_001)
+      await asserted
+    } finally {
+      vi.useRealTimers()
+    }
+    await managed.terminate(50)
+  }, 30_000)
+
+  test('terminate fails closed when the helper survives a force kill', async () => {
+    const managed = new WindowsManagedProcess(dir, fakeChild(), undefined)
+    // helper 无视强杀（内核级异常）：收敛无法证明，必须如实抛出而不是假装已清理。
+    await expect(managed.terminate(50)).rejects.toThrow(/could not be terminated/)
+  }, 30_000)
+
+  test('a malformed exit report is ignored and the helper close code is used', async () => {
+    const helper = fakeHelper(60)
+    state.publish(dir, state.SCOPE_FILE, String(helper.pid))
+    state.publish(dir, state.EXIT_FILE, 'not-json')
+    const managed = new WindowsManagedProcess(dir, helper, undefined)
+    await managed.establish()
+    // 退出报告损坏时不得抛出或猜测：回退到 helper 的真实退出码。
+    await expect(managed.exit).resolves.toEqual({ exitCode: 0, signal: null })
     await managed.terminate(50)
   })
 })
