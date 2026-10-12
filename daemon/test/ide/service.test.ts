@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { WebSocketServer, WebSocket } from 'ws'
 import type {
   DaemonConfig,
@@ -162,13 +162,16 @@ async function createDistribution(script: string = FAKE_CODE_SERVER): Promise<st
   const root = await realpath(await mkdtemp(join(tmpdir(), 'kk-ide-')))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const codeServerRoot = join(root, 'runtime', 'code-server')
-  await mkdir(join(codeServerRoot, 'lib'), { recursive: true })
   await mkdir(join(codeServerRoot, 'out', 'node'), { recursive: true })
-  // Windows launches lib/node.exe. Unix keeps the shell launcher named lib/node.
-  const launcher = join(codeServerRoot, 'lib', process.platform === 'win32' ? 'node.exe' : 'node')
   if (process.platform === 'win32') {
-    await copyFile(process.execPath, launcher)
+    // Windows launches lib/node.exe. A junction to the Node install directory keeps the launcher a
+    // live reference to the current Node, so fixture removal deletes only the link instead of a
+    // copied image that the running process still holds open (the Windows EBUSY cleanup race).
+    await symlink(dirname(process.execPath), join(codeServerRoot, 'lib'), 'junction')
   } else {
+    // Unix keeps the shell launcher named lib/node, which needs no executable image at all.
+    const launcher = join(codeServerRoot, 'lib', 'node')
+    await mkdir(dirname(launcher), { recursive: true })
     await writeFile(launcher, '#!/bin/sh\nexec node "$@"\n')
     const { chmod } = await import('node:fs/promises')
     await chmod(launcher, 0o755)
@@ -1005,4 +1008,46 @@ describe('managed code-server IDE service', () => {
       expect(exitedClosed).toBe(true)
     })
   })
+
+  // Regression for the Windows EBUSY cleanup race: the fixture must expose lib/node.exe as a
+  // junction to the installed Node, so removing the fixture deletes only the link rather than a
+  // copied image the (now closed) process once held open.
+  it.runIf(process.platform === 'win32')(
+    'keeps the installed Node usable after the fixture launcher junction is removed',
+    async () => {
+      const distribution = await createDistribution()
+      const supervisor = new FakeSupervisor()
+      cleanups.push(() => supervisor.close())
+      const service = await createIdeService(makeConfig(distribution, '127.0.0.1:1'), supervisor)
+
+      const launcher = join(distribution, 'runtime', 'code-server', 'lib', 'node.exe')
+      // The bundled launcher resolves to the current Node, proving nothing was copied into the fixture.
+      expect(await realpath(launcher)).toBe(await realpath(process.execPath))
+
+      const directory = join(distribution, 'project')
+      await mkdir(directory, { recursive: true })
+      const viewId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+      const reply = await service.handle({ action: 'OPEN_VIEW', viewId, directory }, signal())
+      expect(reply.ok).toBe(true)
+      // code-server really booted through the junctioned launcher instead of a bypassed executable.
+      expect(supervisor.started).toHaveLength(1)
+      expect(supervisor.started[0]!.spec.executable).toBe(launcher)
+      const child = supervisor.started[0]!.child
+      expect(child.pid).toBeGreaterThan(0)
+
+      // The fixed terminate/close await proves stdio teardown before removal.
+      await service.close()
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+
+      // Removing the whole fixture, including the lib junction, must leave the installed Node intact.
+      await rm(distribution, { recursive: true, force: true })
+      await expect(realpath(process.execPath)).resolves.toBeTruthy()
+      const version = await new Promise<number>((resolve, reject) => {
+        const probe = spawn(process.execPath, ['--version'], { stdio: ['ignore', 'ignore', 'inherit'] })
+        probe.on('error', reject)
+        probe.on('close', (code) => resolve(code ?? -1))
+      })
+      expect(version).toBe(0)
+    },
+  )
 })

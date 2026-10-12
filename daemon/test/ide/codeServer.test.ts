@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFile, mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -147,10 +147,16 @@ async function distribution(script: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'kk-ide-manager-'))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const codeServerRoot = join(root, 'runtime', 'code-server')
-  await mkdir(join(codeServerRoot, 'lib'), { recursive: true })
   await mkdir(join(codeServerRoot, 'out', 'node'), { recursive: true })
-  const launcher = join(codeServerRoot, 'lib', process.platform === 'win32' ? 'node.exe' : 'node')
-  await copyFile(process.execPath, launcher)
+  if (process.platform === 'win32') {
+    // Windows launches lib/node.exe through a junction to the installed Node, so removing the
+    // fixture deletes only the link instead of a copied image the running process holds open.
+    await symlink(dirname(process.execPath), join(codeServerRoot, 'lib'), 'junction')
+  } else {
+    const launcher = join(codeServerRoot, 'lib', 'node')
+    await mkdir(dirname(launcher), { recursive: true })
+    await copyFile(process.execPath, launcher)
+  }
   await writeFile(join(codeServerRoot, 'out', 'node', 'entry.js'), script)
   const extensionDir = join(root, 'ide-extension')
   await mkdir(extensionDir, { recursive: true })
