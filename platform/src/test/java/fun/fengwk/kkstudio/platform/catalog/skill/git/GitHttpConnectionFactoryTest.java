@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.sun.net.httpserver.HttpServer;
+import org.eclipse.jgit.errors.TransportException;
 import org.eclipse.jgit.transport.Transport;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.transport.http.HttpConnection;
@@ -131,6 +132,42 @@ class GitHttpConnectionFactoryTest {
     }
     assertThrows(IllegalArgumentException.class, () -> new GitHttpConnectionFactory(0, 1));
     assertThrows(IllegalArgumentException.class, () -> new GitHttpConnectionFactory(1, 0));
+  }
+
+  /**
+   * 意图：鉴权分类只看 JGit 的真实鉴权短语，绝不因 URL/端口里恰好出现 401/403 数字而误判； 显式鉴权仍为 AUTH，无关 HTTP 500 不是
+   * AUTH。原实现的裸数字启发式会让本用例的断言失败（负向对照）。
+   */
+  @Test
+  void classifiesAuthenticationByJGitPhraseNotStatusCodeDigits() throws Exception {
+    TransportException idleTimeoutWithPortLikeDigits =
+        new TransportException(
+            "http://127.0.0.1:40319/repo401.git: read timed out",
+            new SocketTimeoutException("GIT_READ_TIMEOUT"));
+    assertFalse(GitHttpConnectionFactory.isAuthenticationFailure(idleTimeoutWithPortLikeDigits));
+    assertEquals(
+        "GIT_READ_TIMEOUT", GitHttpConnectionFactory.failureCode(idleTimeoutWithPortLikeDigits));
+
+    TransportException unexpectedServerError =
+        new TransportException(
+            new URIish("http://127.0.0.1:50000/repo.git"), "500 Internal Server Error");
+    assertFalse(GitHttpConnectionFactory.isAuthenticationFailure(unexpectedServerError));
+    assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(unexpectedServerError));
+
+    TransportException forbiddenService =
+        new TransportException(
+            new URIish("http://127.0.0.1:80/repo.git"),
+            "git-upload-pack not permitted on 'http://127.0.0.1:80/repo.git/'");
+    assertTrue(GitHttpConnectionFactory.isAuthenticationFailure(forbiddenService));
+
+    TransportException unauthorizedWithChallenge =
+        new TransportException(new URIish("http://127.0.0.1:80/repo.git"), "not authorized");
+    assertTrue(GitHttpConnectionFactory.isAuthenticationFailure(unauthorizedWithChallenge));
+
+    TransportException unauthorizedWithoutChallenge =
+        new TransportException(
+            new URIish("http://127.0.0.1:80/repo.git"), "authentication not supported");
+    assertTrue(GitHttpConnectionFactory.isAuthenticationFailure(unauthorizedWithoutChallenge));
   }
 
   /** 意图：真实 HTTP socket 无数据时停止；持续数据超过 read budget 仍完成，不依赖进度文本。 */
