@@ -28,6 +28,7 @@ import {
   type ReleaseOs,
   type UpdateDependencies,
 } from '../src/update.js'
+import { WINDOWS_UPDATE_SCRIPT } from '../src/update-scripts.js'
 import { createNativeSupervisorFixture } from './support/native-supervisor.js'
 
 const VERSION = '1.0.12'
@@ -246,6 +247,28 @@ describe('update handler', () => {
     const outcome = await handler(command(), config(dataDir), new AbortController().signal)
     expect(outcome.phase).toBe('FAILED')
     await expect(stat(path.join(dataDir, 'updates', OPERATION_ID, HANDOFF_FILE))).rejects.toThrow()
+  })
+
+  it('matches the installer quoted direct argv exactly in the Windows ownership check', () => {
+    // 配置路径是真实 Windows 路径且以 daemon.json 结尾，不含双引号或尾随反斜杠。
+    const installedDir = 'C:\\Users\\环境\\用户\\.kk-studio\\lib'
+    const configPath = 'C:\\Users\\环境\\用户\\.kk-studio\\daemon.json'
+    const expected = `"main.js" "--config" "${configPath}"`
+    expect(WINDOWS_UPDATE_SCRIPT).toContain(`$expectedArguments = '"main.js" "--config" "' + $configPath + '"'`)
+    expect(WINDOWS_UPDATE_SCRIPT).toContain(
+      "if ($task.Description -ne $TaskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }",
+    )
+    expect(WINDOWS_UPDATE_SCRIPT).toContain(
+      "if ($action.Execute -ne $expectedNode) { Fail-Closed 'managed scheduled task does not run the managed runtime' }",
+    )
+    expect(WINDOWS_UPDATE_SCRIPT).toContain(
+      "if ($action.Arguments -ne $expectedArguments) { Fail-Closed 'managed scheduled task arguments do not match the managed configuration' }",
+    )
+    expect(installedDir.endsWith('\\lib')).toBe(true)
+    expect(configPath.endsWith('daemon.json')).toBe(true)
+    expect(configPath.includes('"')).toBe(false)
+    expect(configPath.endsWith('\\')).toBe(false)
+    expect(expected).toBe('"main.js" "--config" "C:\\Users\\环境\\用户\\.kk-studio\\daemon.json"')
   })
 
   it('uses the Windows script and scheduled-task launcher on Windows', async () => {

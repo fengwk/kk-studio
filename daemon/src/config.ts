@@ -412,48 +412,23 @@ function isExecutableFile(path: string): boolean {
 // CLI 参数与信息命令（纯逻辑，便于定向测试）
 // ---------------------------------------------------------------------------
 
-const BASE64_ARGS_FLAG = '--base64-args'
 const INVALID_ARGUMENT_TRANSPORT = 'invalid daemon argument transport'
-const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/
 
 /**
- * 机器启动入口的参数传输：绕过 Windows launcher 把 Unicode 命令行转为 ANSI 时的有损转换。
+ * 外部 argv 边界：Node 直接接收 Unicode 参数，不经过二次编码。
  *
- * <p>只有首位 {@code --base64-args} 触发一次解码，其后每个 token 都是一个原始应用参数的 UTF-8 Base64。这只是编码
- * 而非加密；非法 Base64、非法 UTF-8、null 与 NUL 一律拒绝，不泄露原值。
+ * <p>参数必须是字符串数组，且每个元素都是不含 NUL 的字符串。类型错误、非字符串与 NUL 一律拒绝，固定错误不回显原值。
  */
-export function decodeBase64Args(args: string[]): string[] {
+export function validateDirectArgs(args: string[]): string[] {
   if (!Array.isArray(args)) {
     throw new Error(INVALID_ARGUMENT_TRANSPORT)
   }
-  const encoded = args.length > 0 && args[0] === BASE64_ARGS_FLAG
-  const decoded: string[] = []
-  for (let index = encoded ? 1 : 0; index < args.length; index++) {
-    let value = args[index]
-    if (typeof value !== 'string') {
+  for (const value of args) {
+    if (typeof value !== 'string' || value.includes('\0')) {
       throw new Error(INVALID_ARGUMENT_TRANSPORT)
     }
-    if (encoded) {
-      value = decodeBase64Token(value)
-    }
-    if (value.includes('\0')) {
-      throw new Error(INVALID_ARGUMENT_TRANSPORT)
-    }
-    decoded.push(value)
   }
-  return decoded
-}
-
-function decodeBase64Token(value: string): string {
-  if (value.length % 4 !== 0 || !BASE64_PATTERN.test(value)) {
-    throw new Error(INVALID_ARGUMENT_TRANSPORT)
-  }
-  try {
-    const bytes = Buffer.from(value, 'base64')
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch {
-    throw new Error(INVALID_ARGUMENT_TRANSPORT)
-  }
+  return args
 }
 
 /** {@code --help} / {@code -h} 的完整用法文本。 */
@@ -472,11 +447,6 @@ Configuration:
 Information:
   --help, -h                       Print this help and exit
   --version                        Print the daemon version and exit
-
-Machine launch:
-  --base64-args <tokens...>         First argument only: each token is one application
-                                   argument encoded as UTF-8 Base64 (not encryption).
-                                   Decoded arguments follow the same CLI rules.
 
 Runtime heartbeat/reconnect intervals are fixed at PT15S/PT1S/PT30S.
 The default bash executable is bash. Unknown or extra arguments fail closed.
