@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import type { CapabilityResult } from '../../src/contracts.js'
 import {
   CancelledError,
@@ -114,6 +114,21 @@ describe('路径工具', () => {
     expect(isAbsolute('rel')).toBe(false)
     expect(normalize('a/./b/../c')).toBe('a/c')
     expect(normalize('/a/b/../c')).toBe('/a/c')
+    // 盘符不能再被根分隔符前缀；'..' 停在盘根，两种分隔符都折成 win32 形式。
+    expect(normalize('C:\\a')).toBe('C:\\a')
+    expect(normalize('C:/a')).toBe('C:\\a')
+    expect(normalize('C:\\a\\.\\b\\..\\c')).toBe('C:\\a\\c')
+    expect(normalize('C:/a/./b/../c')).toBe('C:\\a\\c')
+    expect(normalize('C:/..')).toBe('C:\\')
+    expect(normalize('C:\\a\\..\\..')).toBe('C:\\')
+    // UNC 的 server/share 必须留在路径里，不能被当成可上溯的普通段。
+    expect(normalize('\\\\server\\share\\a\\..\\b')).toBe('\\\\server\\share\\b')
+    expect(normalize('/..')).toBe('/')
+    expect(normalize('a/../../b')).toBe('../b')
+    expect(normalize('')).toBe('.')
+    expect(normalize('.')).toBe('.')
+    expect(normalize('rel\\a\\..\\b')).toBe(win32.normalize('rel\\a\\..\\b'))
+    expect(normalize('/a/b/../c')).toBe(posix.normalize('/a/b/../c'))
     expect(toPosix('a\\b')).toBe('a/b')
     expect(displayPath('/real', '/raw/./x')).toBe('/raw/x')
     expect(displayPath('/real', 'rel')).toBe('/real')
