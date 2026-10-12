@@ -394,9 +394,11 @@ EOF
   ' "$RUNTIME_MANIFEST" "$os-$arch" "$version" "$STAGING_DIR/runtime-manifest.json"
 
   (cd "$STAGING_DIR" && tar -czf "$WORK_DIR/$artifact" .)
-  (cd "$WORK_DIR" && sha256sum "$artifact" >"$checksum" && sha256sum -c --status "$checksum")
   local artifact_sha
-  artifact_sha=$(cut -d' ' -f1 <"$WORK_DIR/$checksum")
+  artifact_sha=$(sha256_of "$WORK_DIR/$artifact")
+  printf '%s  %s\n' "$artifact_sha" "$artifact" >"$WORK_DIR/$checksum"
+  [[ "$(sha256_of "$WORK_DIR/$artifact")" == "$(cut -d' ' -f1 <"$WORK_DIR/$checksum")" ]] ||
+    die "archive checksum verification failed: $artifact"
 
   cat >"$WORK_DIR/$metadata" <<EOF
 {
