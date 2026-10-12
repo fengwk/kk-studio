@@ -167,8 +167,9 @@ pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_w
 
 该套件用 stub 替代网络与 ScheduledTasks，真实校验 ACL、SHA256、`--check-config` 预检、受管任务
 身份、程序目录发布与卸载，但不注册真实任务、也不触碰真实用户目录。
-Windows 计划任务直接执行归档内冻结的 `node.exe`，只以 ASCII UTF-8 Base64 传输应用参数
-（`--base64-args`），验证中文、emoji、空参数、引号和尾随反斜杠保真。
+Windows 计划任务直接执行归档内冻结的 `node.exe`，应用参数以 Unicode 原生 argv 传递。
+命令行按 Windows 规则为每个参数加双引号，并保留反斜杠与嵌入引号的转义，使中文、emoji、
+空参数、引号和尾随反斜杠在 `CommandLineToArgvW` 切分后与原始向量一致。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中

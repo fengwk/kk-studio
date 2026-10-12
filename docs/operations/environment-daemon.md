@@ -475,17 +475,16 @@ SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` �
   "$HOME/.kk-studio/lib/main.js" --config "$HOME/.kk-studio/daemon.json"
 ```
 
-Windows 路径可能含 Unicode，使用机器启动入口保留编码；它把完整的 `--config <路径>` 参数对
-逐个编码为 UTF-8 Base64：
+Windows 同样直接把参数交给归档内的 Node；路径中的 Unicode 由 Node 的原生 argv 保留，不预编码：
 
 ```powershell
-$encoded = @("--config", "$env:USERPROFILE\.kk-studio\daemon.json") |
-    ForEach-Object { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) }
-& "$env:USERPROFILE\.kk-studio\lib\runtime\code-server\lib\node.exe" "$env:USERPROFILE\.kk-studio\lib\main.js" --base64-args @encoded
+& "$env:USERPROFILE\.kk-studio\lib\runtime\code-server\lib\node.exe" `
+  "$env:USERPROFILE\.kk-studio\lib\main.js" `
+  --config "$env:USERPROFILE\.kk-studio\daemon.json"
 ```
 
 Daemon 自身 CLI 只有 `--config <绝对路径>`（及 `--check-config <绝对路径>` 预检、`--help`/`-h`、
-`--version` 与机器入口 `--base64-args`）。心跳、重连与最大退避固定为 `PT15S` / `PT1S` / `PT30S`，
+`--version`）。心跳、重连与最大退避固定为 `PT15S` / `PT1S` / `PT30S`，
 没有公开开关；工具执行超时由调用方提供，不是 Daemon 安装配置。
 
 上级：[系统设计](../system-design.md)。协议与执行实现：[Harness Environment](../modules/harness-environment.md)、

@@ -4,10 +4,10 @@ import { pathToFileURL } from 'node:url'
 import type { CapabilityExecutor, DaemonConfig } from './contracts.js'
 import {
   checkConfig,
-  decodeBase64Args,
   invalidConfigurationLine,
   loadDaemonConfig,
   printInfoCommand,
+  validateDirectArgs,
 } from './config.js'
 import { Runtime, detectEnvironmentInfo } from './runtime.js'
 import { createWebSocketTransport } from './transport/control.js'
@@ -49,7 +49,7 @@ const SKILL_SYNC_ID = 'skill.sync'
 export async function main(argv: string[]): Promise<number> {
   let args: string[]
   try {
-    args = decodeBase64Args(argv)
+    args = validateDirectArgs(argv)
   } catch {
     process.stderr.write('invalid daemon argument transport\n')
     return 2

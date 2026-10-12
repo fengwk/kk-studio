@@ -18,7 +18,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 $installer = Join-Path $repoRoot "scripts\daemon\install.ps1"
 $releaseTag = "v1.0.12"
 $daemonVersion = "1.0.12"
@@ -42,11 +42,17 @@ function Assert-Contains {
     Assert-True -Condition ($Haystack -like "*$Needle*") -Message $Message
 }
 
+function Assert-Equal {
+    param([AllowEmptyString()][string] $Actual, [AllowEmptyString()][string] $Expected, [Parameter(Mandatory = $true)][string] $Message)
+    Assert-True -Condition ($Actual -ceq $Expected) -Message $Message
+}
+
 # --- sandbox and fixtures -------------------------------------------------------------------
 
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-ps-test-" + [Guid]::NewGuid().ToString("N"))
 $httpDir = Join-Path $sandbox "http"
-$profileDir = Join-Path $sandbox "profile"
+$profileMarker = [string] [char] 0x73AF + [string] [char] 0x5883 + [char]::ConvertFromUtf32(0x1F600)
+$profileDir = Join-Path $sandbox ("profile-" + $profileMarker)
 New-Item -ItemType Directory -Path $httpDir, $profileDir -Force | Out-Null
 
 $nodeCommand = Get-Command "node.exe" -CommandType Application -ErrorAction SilentlyContinue |
@@ -56,17 +62,13 @@ if ($null -eq $nodeCommand) {
 }
 
 $stubMain = @'
-const args = process.argv.slice(2)
-let argv = args
-if (args[0] === "--base64-args") {
-  argv = args.slice(1).map((value) => Buffer.from(value, "base64").toString("utf8"))
-}
+import fs from "node:fs"
+const argv = process.argv.slice(2)
 if (argv[0] === "--version") {
   process.stdout.write("kk-studio-daemon 1.0.12\n")
   process.exit(0)
 }
 if (argv[0] === "--check-config") {
-  const fs = require("fs")
   const path = argv[1]
   if (!path || !fs.existsSync(path)) { process.exit(2) }
   const body = fs.readFileSync(path, "utf8")
@@ -182,17 +184,100 @@ function New-Inputs {
     $tokenPath = Join-Path $directory "daemon.token"
     Set-Content -LiteralPath $configPath -Value $Config -Encoding UTF8
     Set-Content -LiteralPath $tokenPath -Value $Token -Encoding UTF8
+    # Real protected ACLs: the installer rejects inherited access, and this fixture must not mock that check.
+    $acl = New-PrivateAcl
+    Set-Acl -LiteralPath $configPath -AclObject $acl
+    Set-Acl -LiteralPath $tokenPath -AclObject $acl
     return @($configPath, $tokenPath)
+}
+
+function Import-Installer {
+    param([string[]] $Arguments)
+    # help defines the installer functions without Invoke-Main and without touching an installation.
+    . $installer @Arguments
+    $script:InstallerInitializeHostContext = ${function:Initialize-HostContext}
+    function Initialize-HostContext {
+        & $script:InstallerInitializeHostContext
+        # GetFolderPath(UserProfile) ignores USERPROFILE. Keep the real SID from the original
+        # initializer, then confine every managed path to this fixture sandbox.
+        $script:HomePath = $profileDir
+        $script:InstallRoot = Join-Path $profileDir ".kk-studio"
+        $script:InstalledLib = Join-Path $script:InstallRoot "lib"
+        $script:InstalledNode = Join-Path $script:InstalledLib "runtime\code-server\lib\node.exe"
+        $script:InstalledConfig = Join-Path $script:InstallRoot "daemon.json"
+        $script:InstalledToken = Join-Path $script:InstallRoot "daemon.token"
+    }
 }
 
 function Invoke-Installer {
     param([string[]] $Arguments)
-    $script:Tasks = @{}
-    . $installer @Arguments
+    # Tasks survive across install, status, and uninstall. Dot-sourcing reinstalls the sandbox wrapper.
+    . Import-Installer -Arguments $Arguments
     return (Invoke-Main)
 }
 
+function Assert-DirectArgumentRoundTrip {
+    # Real Node receives the Unicode vector directly. Code points stay in the script as ASCII,
+    # so Windows PowerShell 5.1 cannot misread this file through the ANSI code page.
+    $probe = @'
+import fs from "node:fs"
+fs.writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)), "utf8")
+'@
+    $probeDir = Join-Path $sandbox "argv-probe"
+    New-Item -ItemType Directory -Path $probeDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $probeDir "package.json") -Value '{"type":"module"}' -Encoding ASCII
+    $probePath = Join-Path $probeDir "argv-probe.js"
+    $outputPath = Join-Path $probeDir "argv-probe.json"
+    Set-Content -LiteralPath $probePath -Value $probe -Encoding ASCII
+    $environment = [string] [char] 0x73AF + [string] [char] 0x5883
+    $trailing = "C:\" + [string] [char] 0x5C3E + [string] [char] 0x968F + "\"
+    $arguments = @(
+        $environment,
+        "",
+        'say "hi"',
+        $trailing,
+        [char]::ConvertFromUtf32(0x1F600),
+        "plain"
+    )
+    $serialized = ConvertTo-WindowsCommandLine -Arguments (@($outputPath) + $arguments)
+    $probeInfo = [Diagnostics.ProcessStartInfo]::new()
+    $probeInfo.FileName = $nodeCommand.Source
+    $probeInfo.Arguments = '"' + $probePath + '" ' + $serialized
+    $probeInfo.UseShellExecute = $false
+    $probeInfo.RedirectStandardOutput = $true
+    $probeInfo.RedirectStandardError = $true
+    $probeProcess = [Diagnostics.Process]::new()
+    $probeProcess.StartInfo = $probeInfo
+    try {
+        [void] $probeProcess.Start()
+        if (-not $probeProcess.WaitForExit(15000)) {
+            $probeProcess.Kill()
+            [void] $probeProcess.WaitForExit(5000)
+            throw "direct argument probe timed out"
+        }
+        Assert-True -Condition ($probeProcess.ExitCode -eq 0) -Message "real node accepts the direct argument vector"
+    }
+    finally {
+        $probeProcess.Dispose()
+    }
+    $received = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-True -Condition ($received.Count -eq $arguments.Count) -Message "direct argument count is preserved"
+    for ($index = 0; $index -lt $arguments.Count; $index++) {
+        Assert-Equal -Actual ([string] $received[$index]) -Expected $arguments[$index] `
+            -Message "direct argument $index round-trips through node"
+    }
+}
+
 try {
+    # Load function definitions before the probe or ACL helper; help does not call Invoke-Main.
+    # The original initializer resolves the real SID and does not write files; the wrapper then
+    # redirects every managed path into the sandbox before any input ACL or installation work.
+    . Import-Installer -Arguments @("help")
+    Initialize-HostContext
+    Assert-True -Condition ($script:CurrentSid -match "^S-") -Message "fixture keeps the real current SID"
+    Assert-True -Condition ($script:InstallRoot.StartsWith($profileDir, [StringComparison]::Ordinal)) `
+        -Message "managed installation root stays inside the sandbox"
+    Assert-DirectArgumentRoundTrip
     Set-Content -LiteralPath (Join-Path $profileDir ".keep") -Value "keep" -Encoding ASCII
 
     # Pure contract checks that do not touch the filesystem.
@@ -236,13 +321,16 @@ try {
     Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "scheduled task registered"
 
     $registered = @($script:Tasks.Values)[0]
-    Assert-Contains -Haystack $registered.Action.Argument -Needle "--base64-args" -Message "task passes base64 args"
+    $expectedConfig = Join-Path $installRoot "daemon.json"
+    $expectedArguments = '"main.js" "--config" "' + $expectedConfig + '"'
+    Assert-True -Condition ($registered.Action.Argument -ceq $expectedArguments) `
+        -Message "task arguments are the quoted direct argv"
     Assert-Contains -Haystack $registered.Action.Execute -Needle "node.exe" -Message "task runs node.exe"
 
-    # status is read-only and reports Running.
-    . $installer status | Out-Null
-    $exit = Invoke-Main
+    # status is read-only and reports Running. It must use the same sandbox wrapper as install.
+    $exit = Invoke-Installer -Arguments @("status")
     Assert-True -Condition ($exit -eq 0) -Message "status exits 0 when Running"
+    Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "status preserves the registered task"
 
     # uninstall removes the program and task but keeps config/token.
     $exit = Invoke-Installer -Arguments @("uninstall")
