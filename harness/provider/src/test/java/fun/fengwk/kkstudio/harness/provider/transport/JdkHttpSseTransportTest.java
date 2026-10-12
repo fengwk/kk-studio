@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,6 +57,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Flow;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -66,6 +68,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -546,6 +549,138 @@ class JdkHttpSseTransportTest {
         peerClosed.cancel(true);
       }
     }
+  }
+
+  /**
+   * 回归：取消中断阻塞中的 send，且响应体已在 send 返回前交付时，必须关闭实际 body subscriber， 而不是仅把 future 标记 cancelled。基线实现只在
+   * send 返回后登记 activeInputStream，此窗口内的流 无人接管而泄漏（对端无法观测到连接关闭）。
+   */
+  @Test
+  void cancelling_during_body_handoff_closes_the_handed_off_subscriber() throws Exception {
+    BodyHandoffFakeHttpClient fakeClient = new BodyHandoffFakeHttpClient();
+    RecordingCallback callback = new RecordingCallback();
+    JdkHttpSseTransport localTransport =
+        new JdkHttpSseTransport(fakeClient, workerExecutor, scheduler);
+
+    ProviderStream stream =
+        localTransport.stream(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
+                .GET()
+                .build(),
+            ModelCallTimeoutPolicy.DEFAULT,
+            HttpSseLimits.DEFAULT,
+            callback);
+
+    // 等待 body 已在 send 返回前交付（登记完成），随后取消
+    assertTrue(fakeClient.bodyHandoffDone.await(5, TimeUnit.SECONDS));
+    stream.cancel();
+
+    assertTrue(
+        fakeClient.subscription.cancelled.await(5, TimeUnit.SECONDS),
+        "cancel must close the handed-off response body, not only mark the future cancelled");
+    assertEquals(
+        1,
+        fakeClient.subscription.cancelCount.get(),
+        "handed-off subscription must be cancelled exactly once");
+    assertTrue(stream.isCancelled());
+    assertFalse(callback.opened, "no onOpen callback on cancel during body handoff");
+    assertFalse(callback.completed, "no onComplete callback on cancel during body handoff");
+    assertNull(callback.error, "no onFailure callback on explicit cancel");
+    assertTrue(callback.events.isEmpty(), "no onEvent callback on cancel during body handoff");
+  }
+
+  /** 回归：总超时在 body 交付后、send 返回前获胜时，同样必须关闭已登记的响应体。 */
+  @Test
+  void timeout_during_body_handoff_closes_the_handed_off_subscriber() throws Exception {
+    BodyHandoffFakeHttpClient fakeClient = new BodyHandoffFakeHttpClient();
+    RecordingCallback callback = new RecordingCallback();
+    JdkHttpSseTransport localTransport =
+        new JdkHttpSseTransport(fakeClient, workerExecutor, scheduler);
+
+    localTransport.stream(
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
+            .GET()
+            .build(),
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(2), Duration.ofSeconds(2)),
+        HttpSseLimits.DEFAULT,
+        callback);
+
+    assertTrue(fakeClient.bodyHandoffDone.await(5, TimeUnit.SECONDS));
+    assertTrue(
+        fakeClient.subscription.cancelled.await(5, TimeUnit.SECONDS),
+        "timeout must close the handed-off response body");
+    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
+    assertNotNull(callback.error);
+    assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
+    assertFalse(callback.opened, "onOpen must not be called when timeout wins body handoff");
+    assertFalse(callback.completed, "onComplete must not be called when timeout wins body handoff");
+  }
+
+  /** 终态先于 body 交付获胜时，晚到的响应体必须被立即关闭且不被登记。 */
+  @Test
+  void late_body_handoff_after_terminal_state_is_closed_immediately() {
+    AtomicInteger closeCount = new AtomicInteger();
+    InputStream lateBody = countingStream(closeCount);
+
+    HttpSseStreamExecution execution = newExecution(new RecordingCallback());
+    execution.triggerTimeout("simulated timeout before body handoff");
+    assertEquals(HttpSseStreamExecution.STATE_FAILED, execution.currentState());
+
+    assertNull(execution.captureBodyStream(null));
+    assertSame(lateBody, execution.captureBodyStream(lateBody));
+    assertEquals(1, closeCount.get(), "late body must be closed exactly once");
+
+    // 已进入终态的执行再次取消不得重复关闭晚到流
+    execution.cancel();
+    assertEquals(1, closeCount.get(), "late body must not be closed twice");
+  }
+
+  /** 已有 body 在管时，重复交付的流不得复写并泄漏原有所有权。 */
+  @Test
+  void body_handoff_never_overwrites_an_owned_stream() {
+    AtomicInteger firstClose = new AtomicInteger();
+    AtomicInteger secondClose = new AtomicInteger();
+    InputStream first = countingStream(firstClose);
+    InputStream second = countingStream(secondClose);
+
+    HttpSseStreamExecution execution = newExecution(new RecordingCallback());
+
+    assertSame(first, execution.captureBodyStream(first));
+    assertSame(second, execution.captureBodyStream(second));
+    assertEquals(0, firstClose.get(), "owned stream must not be closed by a later handoff");
+    assertEquals(1, secondClose.get(), "unowned duplicate stream must be closed and never leak");
+
+    // 取消只关闭真正在管的流一次
+    execution.cancel();
+    assertEquals(1, firstClose.get(), "owned stream must be closed exactly once on cancel");
+    assertEquals(1, secondClose.get());
+  }
+
+  private HttpSseStreamExecution newExecution(RecordingCallback callback) {
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
+            .GET()
+            .build();
+    return new HttpSseStreamExecution(
+        httpClient, request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
+  }
+
+  private static HttpHeaders eventStreamHeaders() {
+    return HttpHeaders.of(Map.of("Content-Type", List.of("text/event-stream")), (k, v) -> true);
+  }
+
+  private static InputStream countingStream(AtomicInteger closeCount) {
+    return new InputStream() {
+      @Override
+      public int read() {
+        return -1;
+      }
+
+      @Override
+      public void close() {
+        closeCount.incrementAndGet();
+      }
+    };
   }
 
   /** 对应上游 should_timeout_on_read_async：验证在接收响应头前发生超时，生命周期仅触发一次 onError(TIMEOUT)。 */
@@ -2855,6 +2990,76 @@ class JdkHttpSseTransportTest {
         HttpResponse.BodyHandler<T> responseHandler,
         HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
       throw new UnsupportedOperationException();
+    }
+  }
+
+  /**
+   * 模拟 JDK 在 send() 返回前完成响应体交付：先 apply body handler 并调用 getBody 使 body 生效 （等价于 JDK 交付响应时登记所有权），再交付
+   * onSubscribe，随后阻塞直到工作线程被中断， 并以 InterruptedException 抛出而不返回 HttpResponse——正是取消中断 send 时的泄漏窗口。
+   */
+  private static final class BodyHandoffFakeHttpClient extends ControllableFakeHttpClient {
+    final CountDownLatch bodyHandoffDone = new CountDownLatch(1);
+    final TrackingSubscription subscription = new TrackingSubscription();
+
+    BodyHandoffFakeHttpClient() {
+      super(new FakeHttpResponse<>(200, eventStreamHeaders(), null));
+    }
+
+    @Override
+    public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
+        throws IOException, InterruptedException {
+      HttpResponse.BodySubscriber<T> subscriber =
+          bodyHandler.apply(new FakeResponseInfo(200, eventStreamHeaders()));
+      // 触发 body 生效：JDK 通过 getBody 交付响应体，mapping 在此登记所有权
+      subscriber.getBody();
+      subscriber.onSubscribe(subscription);
+      bodyHandoffDone.countDown();
+      // 阻塞直到工作线程被取消中断；绝不返回 HttpResponse，模拟 send 被中断的竞态
+      new CountDownLatch(1).await();
+      throw new AssertionError("send must not return after body handoff cancellation");
+    }
+  }
+
+  /** 记录 cancel 信号的订阅，用于验证 body 交付后的实际资源所有权回收。 */
+  private static final class TrackingSubscription implements Flow.Subscription {
+    final AtomicInteger cancelCount = new AtomicInteger();
+    final CountDownLatch cancelled = new CountDownLatch(1);
+    final AtomicLong requested = new AtomicLong();
+
+    @Override
+    public void request(long n) {
+      requested.addAndGet(n);
+    }
+
+    @Override
+    public void cancel() {
+      cancelCount.incrementAndGet();
+      cancelled.countDown();
+    }
+  }
+
+  private static final class FakeResponseInfo implements HttpResponse.ResponseInfo {
+    private final int statusCode;
+    private final HttpHeaders headers;
+
+    FakeResponseInfo(int statusCode, HttpHeaders headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    }
+
+    @Override
+    public int statusCode() {
+      return statusCode;
+    }
+
+    @Override
+    public HttpHeaders headers() {
+      return headers;
+    }
+
+    @Override
+    public Version version() {
+      return Version.HTTP_1_1;
     }
   }
 
