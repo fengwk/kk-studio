@@ -166,11 +166,13 @@ export function unixPath(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
-/** 经 bash 引号保护地运行真实 Node：跳过 PID 文件后持续存活，供取消/停机收敛断言使用。 */
+/** 长进程内联脚本：先写 `<pidFile>.tmp` 再 rename 原子发布，消费者不会读到空 PID（`Number('') === 0`）。 */
+export const LONG_RUNNING_PID_SCRIPT =
+  'const fs=require("fs");fs.writeFileSync(process.argv[1]+".tmp",String(process.pid));fs.renameSync(process.argv[1]+".tmp",process.argv[1]);setInterval(function(){},1000)'
+
+/** 经 bash 引号保护地运行真实 Node：发布 PID 文件后持续存活，供取消/停机收敛断言使用。 */
 export function longRunningNodeCommand(pidFile: string): string {
-  const script =
-    'require("fs").writeFileSync(process.argv[1],String(process.pid));setInterval(function(){},1000)'
-  return `${shellQuote(process.execPath)} -e '${script}' ${shellQuote(unixPath(pidFile))}`
+  return `${shellQuote(process.execPath)} -e '${LONG_RUNNING_PID_SCRIPT}' ${shellQuote(unixPath(pidFile))}`
 }
 
 /** 短命令同样用真实 Node 执行，不依赖宿主 echo/sleep 的实现差异。 */
