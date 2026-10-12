@@ -364,12 +364,13 @@ test('the Windows installer launches main.js directly and its fixture stays insi
     assert.doesNotMatch(stub, /\brequire\(/u)
     assert.match(
         fixture,
-        /Import-Installer -Arguments @\("help"\)\r?\n\s+Initialize-HostContext\r?\n[\s\S]*?\r?\n\s+Assert-DirectArgumentRoundTrip/u,
+        /\. Import-Installer -Arguments @\("help"\)\r?\n\s+Initialize-HostContext\r?\n[\s\S]*?\r?\n\s+Assert-DirectArgumentRoundTrip/u,
     )
     assert.match(fixture, /\$acl = New-PrivateAcl\r?\n\s+Set-Acl -LiteralPath \$configPath -AclObject \$acl/u)
     assert.match(fixture, /\$script:HomePath = \$profileDir/u)
     const invokeInstaller = fixture.match(/function Invoke-Installer \{[\s\S]*?\n\}/u)?.[0] ?? ''
     assert.doesNotMatch(invokeInstaller, /\$script:Tasks = @\{\}/u)
+    assert.match(invokeInstaller, /\. Import-Installer -Arguments \$Arguments/u)
     assert.match(fixture, /Invoke-Installer -Arguments @\("status"\)/u)
     assert.doesNotMatch(fixture, /\. \$installer status/u)
 
