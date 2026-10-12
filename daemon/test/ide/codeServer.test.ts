@@ -83,6 +83,7 @@ function delay(millis: number): Promise<void> {
 
 class TestSupervisor implements ProcessSupervisor {
   readonly children: ChildProcess[] = []
+  private readonly childCloses: Promise<void>[] = []
   readonly specs: ProcessSpec[] = []
   readonly terminatedPids: number[] = []
   readonly options: { terminateError?: Error } = {}
@@ -94,6 +95,12 @@ class TestSupervisor implements ProcessSupervisor {
     const exit = new Promise<ProcessExit>((resolve) => {
       child.on('exit', (code, signal) => resolve({ exitCode: code, signal }))
     })
+    // Registered at spawn time: close() can only prove stdio teardown by awaiting 'close', and a
+    // listener attached later could miss an event that already fired.
+    const closed = new Promise<void>((resolve) => {
+      child.on('close', () => resolve())
+    })
+    this.childCloses.push(closed)
     return {
       pid: child.pid as number,
       stdin: child.stdin as ManagedProcess['stdin'],
@@ -109,7 +116,8 @@ class TestSupervisor implements ProcessSupervisor {
         if (child.exitCode === null && child.signalCode === null) {
           child.kill('SIGKILL')
         }
-        await exit
+        // 'exit' precedes stdio teardown; wait for 'close' so a deleted fixture is not still busy.
+        await closed
       },
     }
   }
@@ -117,12 +125,15 @@ class TestSupervisor implements ProcessSupervisor {
   async trackDescendant(): Promise<void> {}
 
   async close(): Promise<void> {
-    for (const child of this.children) {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill('SIGKILL')
-        await new Promise<void>((resolve) => child.once('exit', () => resolve()))
-      }
-    }
+    await Promise.all(
+      this.children.map(async (child, index) => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL')
+        }
+        // Await every registered close, including children that exited but are still tearing down.
+        await this.childCloses[index]!
+      }),
+    )
     for (const spec of this.specs) {
       const index = spec.args.indexOf('--session-socket')
       if (index >= 0) {
@@ -330,5 +341,35 @@ describe('code-server process manager', () => {
     if (process.platform !== 'win32') {
       expect(existsSync(dirname(args[args.indexOf('--session-socket') + 1]!))).toBe(true)
     }
+  })
+
+  // Regression for the Windows EBUSY cleanup race: the fixture must prove stdio teardown before a
+  // deleted distribution can be reported released.
+  it('awaits stdio close before termination and supervisor close resolve', async () => {
+    const supervisor = new TestSupervisor()
+    const spawnSpec = (): ProcessSpec => ({
+      executable: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      cwd: tmpdir(),
+    })
+
+    const terminated = await supervisor.start(spawnSpec())
+    const terminatedChild = supervisor.children[0]!
+    let terminatedClosed = false
+    terminatedChild.on('close', () => {
+      terminatedClosed = true
+    })
+    await terminated.terminate()
+    expect(terminatedChild.exitCode !== null || terminatedChild.signalCode !== null).toBe(true)
+    expect(terminatedClosed).toBe(true)
+
+    await supervisor.start(spawnSpec())
+    const closedChild = supervisor.children[1]!
+    let closed = false
+    closedChild.on('close', () => {
+      closed = true
+    })
+    await supervisor.close()
+    expect(closed).toBe(true)
   })
 })
