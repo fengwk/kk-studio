@@ -6,11 +6,11 @@ import { describe, expect, it } from 'vitest'
 import {
   DAEMON_VERSION,
   checkConfig,
-  decodeBase64Args,
   invalidConfigurationLine,
   loadDaemonConfig,
   printInfoCommand,
   readRegistrationToken,
+  validateDirectArgs,
   resolveDistributionDir,
   resolveExecutable,
 } from '../src/config.js'
@@ -161,21 +161,17 @@ describe('checkConfig and token reading', () => {
   })
 })
 
-describe('CLI argument transport', () => {
-  it('decodes base64 tokens when --base64-args leads', () => {
-    const args = ['--config', '/tmp/daemon.json']
-    const encoded = ['--base64-args', ...args.map((arg) => Buffer.from(arg, 'utf8').toString('base64'))]
-    expect(decodeBase64Args(encoded)).toEqual(args)
+describe('direct CLI arguments', () => {
+  it('keeps unicode, empty, quoted and trailing-backslash arguments unchanged', () => {
+    const args = ['--config', 'C:\\用户\\环境\\daemon.json', '', 'say "hi"', 'C:\\tail\\', '😀']
+    expect(validateDirectArgs(args)).toEqual(args)
+    expect(validateDirectArgs(args)).not.toBe(args)
   })
 
-  it('passes through plain arguments unchanged', () => {
-    expect(decodeBase64Args(['--version'])).toEqual(['--version'])
-  })
-
-  it('rejects invalid base64, invalid utf-8, and NUL', () => {
-    expect(() => decodeBase64Args(['--base64-args', 'not base64!'])).toThrow(/invalid daemon argument transport/)
-    expect(() => decodeBase64Args(['--base64-args', Buffer.from([0xff, 0xfe]).toString('base64')])).toThrow()
-    expect(() => decodeBase64Args(['--config', 'a\0b'])).toThrow()
+  it('rejects a non-array, a non-string element, and NUL without echoing the value', () => {
+    expect(() => validateDirectArgs('x' as unknown as string[])).toThrow(/^invalid daemon argument transport$/)
+    expect(() => validateDirectArgs(['--config', 5 as unknown as string])).toThrow(/^invalid daemon argument transport$/)
+    expect(() => validateDirectArgs(['--config', 'a\0b'])).toThrow(/^invalid daemon argument transport$/)
   })
 
   it('prints info commands only for a single known flag', () => {
@@ -325,11 +321,7 @@ describe('config field validation branches', () => {
     }
   })
 
-  it('rejects non-array and non-string argument transports and unknown info flags', () => {
-    expect(() => decodeBase64Args('x' as unknown as string[])).toThrow(/invalid daemon argument transport/)
-    expect(() => decodeBase64Args(['--base64-args', 5 as unknown as string])).toThrow(
-      /invalid daemon argument transport/,
-    )
+  it('rejects unknown info flags', () => {
     expect(printInfoCommand(['--unknown']).handled).toBe(false)
   })
 })

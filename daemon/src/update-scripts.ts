@@ -163,7 +163,7 @@ while (-not (Test-Path -LiteralPath $PermitPath -PathType Leaf)) {
     Start-Sleep -Seconds 1
 }
 
-# 受托 owner identity + Description + Action(Exec 与含 base64 配置路径的 Arguments) 全部匹配才可停止任务。
+# 受托 owner identity + Description + Action(Exec 与直接 argv 配置路径的 Arguments) 全部匹配才可停止任务。
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -eq $task) { Fail-Closed 'managed scheduled task is missing' }
 if ($task.Description -ne $TaskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }
@@ -171,9 +171,9 @@ $action = $task.Actions | Select-Object -First 1
 if ($null -eq $action) { Fail-Closed 'managed scheduled task has no action' }
 $expectedNode = Join-Path $InstalledDir 'runtime\\code-server\\lib\\node.exe'
 $configPath = Join-Path (Split-Path -Parent $InstalledDir) 'daemon.json'
-$expectedArguments = 'main.js --base64-args ' +
-    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('--config')) + ' ' +
-    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($configPath))
+# 与安装器同一条 Windows 命令行规则：每个参数都加双引号。配置路径是真实 Windows 路径且以 daemon.json 结尾，
+# 不含双引号或尾随反斜杠，因此转义后仍是两侧各一个引号。
+$expectedArguments = '"main.js" "--config" "' + $configPath + '"'
 if ($action.Execute -ne $expectedNode) { Fail-Closed 'managed scheduled task does not run the managed runtime' }
 if ($action.Arguments -ne $expectedArguments) { Fail-Closed 'managed scheduled task arguments do not match the managed configuration' }
 Stop-ScheduledTask -TaskName $TaskName
