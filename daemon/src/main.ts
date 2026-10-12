@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -236,8 +237,10 @@ function aggregateFailure(primary: unknown, cleanupErrors: unknown[]): Error {
   return new AggregateError(errors, 'daemon could not release every resource')
 }
 
+// 入口判定必须与 ESM 加载器的真实路径对齐：`process.argv[1]` 是调用方给出的 lexical 路径，而 `import.meta.url`
+// 是 Node 解析符号链接后的 canonical 路径。经 symlink 目录启动时二者不一致，若直接比较会让 main 静默不执行。
 const entry = process.argv[1]
-if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+if (entry !== undefined && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
   main(process.argv.slice(2)).then(
     (code) => {
       process.exitCode = code
