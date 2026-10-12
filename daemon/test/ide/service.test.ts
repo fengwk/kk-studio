@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -145,7 +145,7 @@ http.createServer((req, res) => {
 `
 
 async function createDistribution(script: string = FAKE_CODE_SERVER): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'kk-ide-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'kk-ide-')))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const codeServerRoot = join(root, 'runtime', 'code-server')
   await mkdir(join(codeServerRoot, 'lib'), { recursive: true })
@@ -386,7 +386,7 @@ describe('managed code-server IDE service', () => {
     // CHANGE_DIRECTORY accepted; the window reports the applied directory.
     const changePending = service.handle({ action: 'CHANGE_DIRECTORY', viewId, directory: other }, signal())
     const changeCommand = await extension.nextCommand()
-    await extension.reply({ id: changeCommand.id, ok: true, directory: other })
+    await extension.reply({ id: changeCommand.id, ok: true, directory: await realpath(other) })
     const changeReply = await changePending
     expect(changeReply.ok).toBe(true)
     expect(changeReply.directory).toBe(other)
