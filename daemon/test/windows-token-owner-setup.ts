@@ -37,15 +37,14 @@ export async function alignCurrentProcessTokenOwner(): Promise<void> {
     const user = readTokenSid(getTokenInformation, getLastError, koffi, tokenUser, handle, TOKEN_USER, 'user')
     const owner = readTokenSid(getTokenInformation, getLastError, koffi, tokenOwner, handle, TOKEN_OWNER, 'owner')
     retained.push(user.buffer, owner.buffer)
-    if (equalSid(user.sid, owner.sid) !== 0) {
-      return
-    }
-    // user.buffer 持有 SID 字节，指针必须活过 SetTokenInformation。
-    const ownerValue = Buffer.alloc(tokenOwner.size)
-    retained.push(ownerValue)
-    koffi.encode(ownerValue, tokenOwner, { Owner: user.sid })
-    if (setTokenInformation(handle, TOKEN_OWNER, ownerValue, ownerValue.length) === 0) {
-      throw new Error(`cannot set the current test process token owner: ${getLastError()}`)
+    if (equalSid(user.sid, owner.sid) === 0) {
+      // user.buffer 持有 SID 字节，指针必须活过 SetTokenInformation。
+      const ownerValue = Buffer.alloc(tokenOwner.size)
+      retained.push(ownerValue)
+      koffi.encode(ownerValue, tokenOwner, { Owner: user.sid })
+      if (setTokenInformation(handle, TOKEN_OWNER, ownerValue, ownerValue.length) === 0) {
+        throw new Error(`cannot set the current test process token owner: ${getLastError()}`)
+      }
     }
   } catch (error) {
     throw withTokenClose(closeHandle, getLastError, handle, error)

@@ -465,7 +465,11 @@ describe('windows private path DACL read-back (mocked native bindings)', () => {
     const realMkdir = actualFs.mkdirSync
     vi.mocked(mkdirSync).mockImplementation(((target: unknown, options: unknown) => {
       if (typeof target === 'string' && raced.has(target) && options === undefined) {
-        realMkdir(target)
+        if (target.endsWith('raced-file')) {
+          writeFileSync(target, 'x')
+        } else {
+          realMkdir(target)
+        }
         const error = new Error('exists') as NodeJS.ErrnoException
         error.code = 'EEXIST'
         throw error
@@ -489,7 +493,6 @@ describe('windows private path DACL read-back (mocked native bindings)', () => {
       world.calls.length = 0
       const file = join(workdir, 'raced-file')
       raced.add(file)
-      writeFileSync(file, 'x')
       await expect(ensurePrivateDirectory(file)).rejects.toThrow(/must be a directory/)
       expect(world.calls).toEqual([])
       expect(lstatSync(file).isFile()).toBe(true)
