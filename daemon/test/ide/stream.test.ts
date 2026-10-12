@@ -1206,11 +1206,17 @@ describe('WebSocket exchanges over the reverse stream', () => {
       const size = 20 * 1024 * 1024
       const payload = Buffer.alloc(size, 0x5a)
       let upstreamFlushed = false
-      const upstream = await startWsUpstream((socket) => {
-        // One huge frame: a whole-message client would have to hold all 20MiB before forwarding.
-        socket.send(payload, () => {
-          upstreamFlushed = true
-        })
+      let releaseRemainder: (() => void) | undefined
+      const upstream = await startRawWsUpstream((socket) => {
+        const frame = serverFrame(0x2, payload)
+        const prefixLength = 10 + INITIAL_CREDIT + MAX_PAYLOAD
+        // The rest of this single frame is withheld: whole-message buffering cannot forward it.
+        socket.write(frame.subarray(0, prefixLength))
+        releaseRemainder = () => {
+          socket.write(frame.subarray(prefixLength), () => {
+            upstreamFlushed = true
+          })
+        }
       })
 
       let received = 0
@@ -1253,16 +1259,18 @@ describe('WebSocket exchanges over the reverse stream', () => {
         signal: newSignal().signal,
       })
 
-      // While the browser withholds credit the daemon must stop draining the local socket: the
-      // upstream write is still blocked, proving nothing close to 20MiB was buffered.
+      // Receiving bytes before the rest of the frame is sent proves incremental forwarding,
+      // independently of platform-specific TCP send/receive buffer sizes.
       await waitFor(() => received > 0, 20_000)
       await delay(300)
       expect(upstreamFlushed).toBe(false)
+      expect(lastSeen).toBe(false)
       expect(received).toBeLessThan(size)
       expect(peakUnacked).toBeLessThanOrEqual(INITIAL_CREDIT + MAX_PAYLOAD)
 
       ackEnabled = true
       flushAck?.()
+      releaseRemainder!()
       await waitFor(() => received === size && lastSeen, 60_000)
       expect(lastSeen).toBe(true)
       expect(peakUnacked).toBeLessThanOrEqual(INITIAL_CREDIT + MAX_PAYLOAD)
