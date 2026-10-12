@@ -147,6 +147,26 @@ test('daemon-ci pins the daemon lockfile cache and stays a read-only push/pull-r
     assert.equal(stepField(setup, 'cache-dependency-path', 10), 'daemon/package-lock.json')
 })
 
+test('the daemon matrix concurrency group isolates the calling workflow', () => {
+    // group 必须同时绑定 caller workflow 与 ref：daemon-ci 既独立运行，也被 daemon-release /
+    // docker-publish 复用，只按 ref 分组会让两个 caller 在同一个 main 上互相取消共享矩阵。
+    // 同一 caller 的相同 ref 必须稳定落入同一组，cancel-in-progress 才能覆盖旧 revision。
+    const group = topLevelSection(CI, 'concurrency').match(/^ {2}group: (.+)$/m)?.[1]
+    assert.ok(group, 'missing concurrency group')
+    assert.match(group, /\$\{\{ github\.workflow \}\}/u, 'the group must bind the caller workflow')
+    const resolve = (workflow, ref) => group
+        .replace('${{ github.workflow }}', workflow)
+        .replace('${{ github.ref }}', ref)
+
+    const ref = 'refs/heads/main'
+    const callers = ['daemon-ci', 'daemon-release', 'docker-publish']
+    const groups = callers.map((workflow) => resolve(workflow, ref))
+    assert.equal(new Set(groups).size, 3, 'each calling workflow must occupy a distinct group')
+
+    assert.equal(resolve('daemon-release', ref), resolve('daemon-release', ref))
+    assert.notEqual(resolve('daemon-release', ref), resolve('daemon-release', 'refs/heads/dev'))
+})
+
 test('the coverage step matches the daemon package scripts and provider', () => {
     // 覆盖率必须是仓库里真实配置的能力：脚本自身启用 --coverage，provider 是已安装的 devDependency。
     assert.match(PACKAGE.scripts.coverage, /vitest run --coverage/u)
