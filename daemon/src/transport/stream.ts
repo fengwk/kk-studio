@@ -140,8 +140,8 @@ function abortError(): Error {
 /** Resolves or rejects exactly once. */
 class Completion {
   readonly promise: Promise<void>
-  private resolveFn: () => void = () => undefined
-  private rejectFn: (error: unknown) => void = () => undefined
+  private resolveFn!: () => void
+  private rejectFn!: (error: unknown) => void
   private settled = false
 
   constructor() {
