@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chmod, mkdir, mkdtemp, open, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { textResult } from '../../src/contracts.js'
 import { fileCapabilities, setFileCapabilityHooks } from '../../src/coding/files.js'
 import { searchCapabilities, matchCenteredExcerpt } from '../../src/coding/search.js'
@@ -33,7 +34,21 @@ async function tempDir(): Promise<string> {
   return dir
 }
 
+/** Worker 超时用例硬终止真实 Worker：teardown 先 await terminate 完成（真实 Worker exit），再清理临时资源。 */
+const pendingTerminations: Array<Promise<number>> = []
+
+beforeEach(() => {
+  const realTerminate = Worker.prototype.terminate
+  vi.spyOn(Worker.prototype, 'terminate').mockImplementation(function (this: Worker) {
+    const termination = realTerminate.call(this)
+    pendingTerminations.push(termination)
+    return termination
+  })
+})
+
 afterEach(async () => {
+  vi.restoreAllMocks()
+  await Promise.all(pendingTerminations.splice(0))
   await Promise.all(
     tempDirs.splice(0).map(async (dir) => {
       try {

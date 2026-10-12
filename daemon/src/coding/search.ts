@@ -26,7 +26,8 @@ import {
  * 搜索能力（fs.find / fs.grep）。
  *
  * <p>真实搜索在 Worker 线程执行（RE2/picomatch/ignore 的同步扫描不会阻塞主线程的事件循环），因此 AbortSignal、超时与心跳始终可响应；取消或超时对
- * Worker 执行硬终止（{@code terminate()}），返回稳定的 cancelled/timeout 结果。Worker 只读文件并回传纯数据，输出 spool 与持久化状态只在主线程共享一份。
+ * Worker 执行硬终止（{@code terminate()}），返回稳定的 cancelled/timeout 结果。正常完成也要等 Worker 线程退出后再交付结果，确保搜索线程已释放。Worker
+ * 只读文件并回传纯数据，输出 spool 与持久化状态只在主线程共享一份。
  */
 
 export { matchCenteredExcerpt, MAX_SKIP_DETAIL } from './search-core.js'
@@ -177,7 +178,7 @@ function describeSkipped(skipped: SkippedEntry[]): string {
 /**
  * 在 Worker 线程执行搜索作业。
  *
- * <p>取消与超时都不等待同步扫描自行让出：直接终止 Worker，因此结果是稳定的 cancelled/timeout，而不是“未找到匹配”。成功时 Worker 只回传纯数据。
+ * <p>取消与超时都不等待同步扫描自行让出：直接终止 Worker，因此结果是稳定的 cancelled/timeout，而不是“未找到匹配”。正常完成时等待 Worker 退出后再交付结果。
  */
 function runSearchInWorker(
   job: SearchJob,
@@ -203,13 +204,13 @@ function runSearchInWorker(
       }
       signal.removeEventListener('abort', onAbort)
       if (hard) {
-        // 取消/超时/异常：对 Worker 执行硬终止。
+        // 取消/超时/异常：立即交付结果，不等待可能被同步 FS 阻塞的 terminate。
         void worker.terminate()
-      } else {
-        // 正常回传：Worker 会自行退出，unref 避免其持有进程。
-        worker.unref()
+        action()
+        return
       }
-      action()
+      // 正常完成：扫描已结束，等 Worker 退出后再交付结果。
+      worker.once('exit', action)
     }
     const onAbort = (): void => finish(() => reject(new CancelledError()), true)
     worker.once('message', (reply: SearchReply) => finish(() => resolve(reply), false))
