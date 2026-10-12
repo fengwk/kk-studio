@@ -130,11 +130,11 @@ Windows amd64 各自装入 `daemon/package-lock.json` 的依赖，依次执行 `
 （native 进程范围、核心与能力层），平台特有用例由用例自身的条件决定是否执行，不整体跳过某个目标。
 macOS runner 额外用系统 Bash 跑安装器与归档烟测 fixture；这只证明脚本在 Darwin 上的契约，
 不代替真实 code-server 归档加载，也不把 Linux fixture 称为 macOS 验收。它以 `push`（`main`/`dev`，按 `daemon/**` 等路径触发）与
-`pull_request` 作为独立门禁，等价于原来的 process-scope 矩阵；`daemon-release` 通过
-`workflow_call` 复用同一份定义，因此 tag 发布不会绕过平台矩阵。
+`pull_request` 作为独立门禁；全量 `validate_only` 与 `daemon-release` 通过
+`workflow_call` 复用同一份定义，因此候选验证与 tag 发布不会绕过平台矩阵。
 
 针对真实冻结 code-server 的 IDE 验收默认跳过，不进入 `daemon-ci`，也不联网下载运行时。本机已解压
-4.141.0 发行包（含随包 Node）时，先 `npm run build`（native 进程范围 helper 与搜索 Worker 只运行编译产物），
+清单固定的 `fengwk/code-server` 发行包（含随包 Node）时，先 `npm run build`（native 进程范围 helper 与搜索 Worker 只运行编译产物），
 再在 `daemon/` 下用
 `env KK_STUDIO_IDE_ACCEPTANCE_DIR=<解压目录> npx vitest run test/ide` 显式开启：
 `acceptance.test.ts` 验证真实 HTTP/WS 反向数据面与扩展安装，`native-acceptance.test.ts` 用真实原生
@@ -147,15 +147,17 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 
 ### Daemon 安装脚本回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与打包脚本契约。
+先用 Node 24 执行 `npm --prefix daemon ci` 安装真实归档解析器，再在仓库根运行
+`python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与打包脚本契约。
 Unix fixtures 用 shim 替代 curl/npm/uname/systemctl/launchctl，真实执行 SHA256 校验、release
 `--check-config` 预检、受管身份判定、程序目录整体替换与备份，以及卸载只移除受管服务与程序；
 `prepare-release.sh` fixtures 还验证按目标平台 `npm ci --os/--cpu` 只装入对应的 koffi 预编译产物
 （拒绝把 Linux node_modules 当作“假跨平台”，并裁掉其它平台的 koffi），核对归档内容、SHA 与元数据。
 冻结 code-server 只来自 `fengwk/code-server` 的 `v4.141.0-kk.1` 资产；清单尚未写入正式 SHA256 时
-打包直接失败，不使用官方 coder 归档，也不编造摘要。`smoke-archive.sh` 在 Linux 与 macOS 上运行
-与本机匹配的归档，加载归档内的 code-server 原生模块；Windows 归档显式失败而不是跳过。
-Linux 上的 fixture 不能代替真实 macOS 验收。安装器没有交互提示、
+打包直接失败，不使用官方 coder 归档，也不编造摘要。发行流水线先暂存五个平台的归档，再分别在
+对应主机执行 `smoke-archive.sh`（Linux/macOS）或 `smoke-archive.ps1`（Windows），加载随包运行时、
+code-server 原生模块与私有目录锁；全部通过后才发布，不能用 Linux fixture 代替其它平台验收。
+安装器没有交互提示、
 from-source 与单独 upgrade 入口；从 checkout 运行安装脚本只是开发/CI fixture，不是用户安装路径，
 安装器自身从不构建。测试不注册真实 systemd/launchd 服务，也不下载真实 240MB 运行时。
 Windows 原生验收需要 host 上真实的 `node.exe`（fixture 用它构造归档），并分别运行两个 host：

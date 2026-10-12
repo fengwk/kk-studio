@@ -15,10 +15,9 @@ OS 用户只运行**一个受管 Daemon**，固定根目录 `~/.kk-studio`（Win
 LSP client 已内嵌在 Daemon 发行归档中。Studio 没有内置登录鉴权，入口须配置外部认证，只有可信的
 用户与 Agent 才应取得 Environment 的宿主权限。
 
-正式支持 Linux amd64/arm64、macOS amd64/arm64 与 Windows amd64。发行包自带受管 Node 与
+支持 Linux amd64/arm64、macOS amd64/arm64 与 Windows amd64。发行包自带受管 Node 与
 code-server，用户机器不需要安装 Node、JRE 或编译器。进程管理是生命周期管理，不是安全沙箱：
 macOS 没有 Linux 的子进程收养者，不能证明任意故意脱离会话的后代都被收敛；这不拒绝启动普通进程。
-本页不把尚未在真实 macOS/Windows 上跑过的 CI fixture 写成平台验收。
 
 | 平台 | 额外条件 | 常驻方式 |
 | --- | --- | --- |
@@ -317,11 +316,17 @@ IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`�
 环境代理地址只接受无认证的 `http://host:port`；HTTPS/WSS 通过 CONNECT，
 不支持 SOCKS、代理认证或 TLS 到代理，非法配置在启动时拒绝。
 
-Linux 通过宿主的 GLib/GIO 读取桌面代理，运行环境须提供相应共享库；服务器/容器通常应显式
-传入环境变量。Windows 通过 WinHTTP 读取当前运行用户的手动代理与 PAC/自动发现设置，不是
-`netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。系统解析失败或返回不支持的
-代理类型时请求失败，不静默改为直连。macOS 是受支持的安装与运行平台：进程管理是生命周期
-管理，不是安全沙箱，不能证明任意故意脱离会话的后代都被收敛。系统代理的平台适配不在发行切片内。
+系统代理按请求解析，不在 Daemon 启动时加载原生代理组件：
+
+- Linux 通过宿主 GLib/GIO 读取桌面代理；需要系统代理的请求依赖对应共享库。服务器或容器可显式
+  设置环境代理或直连，不依赖桌面代理组件。
+- Windows 通过 WinHTTP 读取当前运行用户的手动代理与 PAC/自动发现设置，不是
+  `netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。
+- macOS 通过 CFNetwork 读取系统代理与解析 PAC；系统 HTTPS 代理按 HTTP CONNECT 隧道使用，
+  不表示支持 TLS 到代理。
+
+系统解析失败或返回不支持的代理类型时，只使需要该解析的请求失败，不静默改为直连，
+也不禁用 Environment 的其它本机能力。
 
 私有 code-server 的探活、登录与 IDE loopback HTTP 通道使用显式直连；环境或系统代理不会收到
 这些请求中的私有凭据。
