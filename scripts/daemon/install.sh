@@ -278,14 +278,39 @@ recheck_inputs() {
     fail "staged inputs must remain sibling daemon.json and daemon.token"
 }
 preflight() {
-  local output detail extract="$DOWNLOAD_DIR/extract" version
+  local output detail extract="$DOWNLOAD_DIR/extract" version manifest_platform
   [ -s "$DOWNLOADED_ARCHIVE" ] || fail "校验失败：下载的发行归档为空。"
+  # 已验证官方 SHA 的归档仍检查文件名；不解析 GNU/BSD 不同的详细列表，不依赖额外运行时。
+  local paths path
+  paths=$(tar -tzf "$DOWNLOADED_ARCHIVE") || fail "校验失败：发行归档无法列出。"
+  while IFS= read -r path; do
+    case "$path" in
+      /* | ../* | .. | */../* | */.. | *\\* | *:*)
+        fail "校验失败：发行归档包含不安全路径。"
+        ;;
+    esac
+  done <<<"$paths"
   mkdir -p "$extract"
   tar -xzf "$DOWNLOADED_ARCHIVE" -C "$extract" || fail "校验失败：发行归档无法解包。"
   STAGED_NODE="$extract/runtime/code-server/lib/node"
   STAGED_MAIN="$extract/main.js"
   [ -x "$STAGED_NODE" ] || fail "校验失败：发行归档缺少运行时。"
+  [ -f "$extract/runtime/code-server/out/node/entry.js" ] ||
+    fail "校验失败：发行归档缺少 code-server 入口。"
   [ -f "$STAGED_MAIN" ] || fail "校验失败：发行归档缺少程序入口。"
+  [ -f "$extract/runtime-manifest.json" ] || fail "校验失败：发行归档缺少运行时清单。"
+  manifest_platform=$(
+    "$STAGED_NODE" -e '
+      const fs = require("fs");
+      const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const key = process.argv[2];
+      const asset = manifest.codeServer && manifest.codeServer[key];
+      if (!asset || typeof asset !== "object") { process.exit(2); }
+      process.stdout.write(key);
+    ' "$extract/runtime-manifest.json" "$RELEASE_OS-$RELEASE_ARCH" 2>/dev/null
+  ) || fail "校验失败：发行清单不是本机平台。"
+  [ "$manifest_platform" = "$RELEASE_OS-$RELEASE_ARCH" ] ||
+    fail "校验失败：发行清单不是本机平台。"
   version=$("$STAGED_NODE" "$STAGED_MAIN" --version 2>&1) ||
     fail "校验失败：下载的发行归档无法执行。"
   [ "$version" = "kk-studio-daemon ${RELEASE_TAG#v}" ] ||
@@ -396,13 +421,24 @@ backup_current() {
     fi
   done
 }
-# 发布新的发行目录：先停服务，再把旧目录整体改名进备份（同文件系统，快速），最后把已解包的
-# 新目录改名到受管位置。任何一步失败都保留备份，不自动回滚。
+# 发布新的发行目录：先把旧目录改名进备份，再把已解包的新目录改名到受管位置。
+# 新目录落盘失败时尝试把旧目录放回；放回失败必须明确报告，不能当成已恢复。
 publish_program() {
   if [ -e "$INSTALLED_LIB" ]; then
+    [ -n "$BACKUP_DIR" ] || fail "无法备份现有发行目录，未替换任何文件。"
     mv "$INSTALLED_LIB" "$BACKUP_DIR/lib" || fail "无法备份现有发行目录，未替换任何文件。"
   fi
-  mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB" || fail "无法发布新发行目录。"
+  if ! mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB"; then
+    if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/lib" ] && [ ! -e "$INSTALLED_LIB" ]; then
+      restore_ok=false
+      if mv "$BACKUP_DIR/lib" "$INSTALLED_LIB"; then restore_ok=true; fi
+      if [ "$restore_ok" = true ]; then
+        fail "无法发布新发行目录。已恢复上一版程序。"
+      fi
+      fail "无法发布新发行目录，且上一版程序未能恢复。请使用报告的备份手动恢复。"
+    fi
+    fail "无法发布新发行目录。"
+  fi
 }
 verify_running() {
   local attempt stable pid active

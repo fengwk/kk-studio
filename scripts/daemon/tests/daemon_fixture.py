@@ -26,15 +26,22 @@ import unittest
 from pathlib import Path
 
 DAEMON_VERSION = "1.0.12"
+CODE_SERVER_VERSION = "4.141.0-kk.1"
 RELEASE_TAG = "v" + DAEMON_VERSION
 RELEASE_BASE = "https://github.com/fengwk/kk-studio/releases"
 PLATFORMS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64")
 
 _MAIN_JS = f'console.log("kk-studio-daemon {DAEMON_VERSION}")\n'
 
-# The frozen runtime's lib/node is invoked as `lib/node <main.js> --version|--check-config <cfg>`.
+# The frozen runtime's lib/node is invoked as `lib/node -e ...` or
+# `lib/node <main.js> --version|--check-config <cfg>`.
 _FAKE_NODE = f"""#!/bin/sh
 # Frozen runtime Node shim used only by tests.
+if [ "$1" = -e ]; then
+  # 安装器调用是 `node -e <script> <manifest> <platform>`。
+  if grep -q "\\"$4\\"" "$3"; then printf '%s' "$4"; exit 0; fi
+  exit 2
+fi
 case "$2" in
   --version) printf 'kk-studio-daemon %s\\n' "${{FAKE_NODE_VERSION:-{DAEMON_VERSION}}}" ;;
   --check-config)
@@ -70,13 +77,18 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def code_server_tar(path: Path) -> None:
-    """Build a minimal stand-in for the code-server standalone archive."""
-    work = path.parent / "cs-src"
-    root = work / "code-server-4.141.0-linux-amd64"
-    write_executable(root / "lib" / "node", _FAKE_NODE)
+def code_server_tar(path: Path, platform: str) -> None:
+    """Build a minimal stand-in for one frozen fork code-server archive."""
+    work = path.parent / f"cs-src-{platform}"
+    node_name = "node.exe" if platform.startswith("windows-") else "node"
+    root = work / f"code-server-{CODE_SERVER_VERSION}-{platform}"
+    write_executable(root / "lib" / node_name, _FAKE_NODE)
+    write_text(root / "out" / "node" / "entry.js", "// frozen entry\n", 0o644)
+    bin_dir = root / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "code-server").symlink_to(Path("..") / "out" / "node" / "entry.js")
     with tarfile.open(path, "w:gz") as archive:
-        archive.add(root, arcname="code-server-4.141.0-linux-amd64")
+        archive.add(root, arcname=root.name)
     shutil.rmtree(work)
 
 
@@ -123,7 +135,9 @@ shutil.copyfile(src, output)
 
 
 def _npm_shim() -> str:
-    return r"""#!/usr/bin/env python3
+    # The archive validator uses the real parser; only npm selection and native payloads are fixtures.
+    parser = Path(__file__).resolve().parents[3] / "daemon" / "node_modules" / "tar"
+    return "#!/usr/bin/env python3\nTAR_PARSER = " + repr(str(parser)) + "\n" + r"""
 import os
 import sys
 
@@ -148,12 +162,18 @@ while i < len(args):
 if prefix is None:
     sys.exit(1)
 os.makedirs(os.path.join(prefix, "node_modules"), exist_ok=True)
+os.symlink(TAR_PARSER, os.path.join(prefix, "node_modules", "tar"), target_is_directory=True)
 if os.environ.get("FAKE_NPM_OMIT_PREBUILT") == "1" or target_os is None or target_cpu is None:
     sys.exit(0)
 prebuilt = os.path.join(prefix, "node_modules", "@koromix", "koffi-%s-%s" % (target_os, target_cpu))
 os.makedirs(prebuilt, exist_ok=True)
 with open(os.path.join(prebuilt, "index.js"), "w", encoding="utf-8") as handle:
     handle.write("module.exports = {}\n")
+if os.environ.get("FAKE_NPM_FOREIGN_PREBUILT") == "1":
+    foreign = os.path.join(prefix, "node_modules", "@koromix", "koffi-freebsd-x64")
+    os.makedirs(foreign, exist_ok=True)
+    with open(os.path.join(foreign, "index.js"), "w", encoding="utf-8") as handle:
+        handle.write("module.exports = {}\n")
 """
 
 
@@ -180,22 +200,20 @@ class ReleaseFixture:
         write_text(daemon / "dist" / "main.js", _MAIN_JS, 0o644)
         write_executable(daemon / "ide-extension" / "extension.js", "module.exports = {}\n")
 
-        runtime_tar = self.http_dir / "code-server.tar.gz"
-        code_server_tar(runtime_tar)
-        digest = sha256_of(runtime_tar)
         code_server = {}
         for platform in PLATFORMS:
-            name = f"code-server-4.141.0-{platform}.tar.gz"
-            shutil.copyfile(runtime_tar, self.http_dir / name)
+            name = f"code-server-{CODE_SERVER_VERSION}-{platform}.tar.gz"
+            runtime_tar = self.http_dir / name
+            code_server_tar(runtime_tar, platform)
             code_server[platform] = {
-                "url": f"https://example.invalid/{name}",
-                "sha256": digest,
+                "url": f"https://github.com/fengwk/code-server/releases/download/v{CODE_SERVER_VERSION}/{name}",
+                "sha256": sha256_of(runtime_tar),
             }
         import json
 
         write_text(
             daemon / "runtime-manifest.json",
-            json.dumps({"schemaVersion": 1, "codeServerVersion": "4.141.0", "codeServer": code_server}, indent=2)
+            json.dumps({"schemaVersion": 1, "codeServerVersion": CODE_SERVER_VERSION, "codeServer": code_server}, indent=2)
             + "\n",
             0o644,
         )
@@ -282,11 +300,17 @@ class InstallFixture:
     def release_arch(self) -> str:
         return "amd64" if self.machine in ("x86_64", "amd64") else "arm64"
 
-    def _build_archive(self, path: Path) -> None:
+    def _build_archive(self, path: Path, platform: str | None = None) -> None:
         work = self.root / "archive-src"
         write_executable(work / "runtime" / "code-server" / "lib" / "node", _FAKE_NODE)
+        write_text(work / "runtime" / "code-server" / "out" / "node" / "entry.js", "// frozen entry\n", 0o644)
         write_text(work / "main.js", _MAIN_JS, 0o644)
-        write_text(work / "runtime-manifest.json", f'{{"schemaVersion":1,"daemonVersion":"{DAEMON_VERSION}"}}\n', 0o644)
+        key = platform or f"{self.release_os}-{self.release_arch}"
+        write_text(
+            work / "runtime-manifest.json",
+            f'{{"schemaVersion":1,"daemonVersion":"{DAEMON_VERSION}","codeServer":{{"{key}":{{"url":"https://example.invalid"}}}}}}\n',
+            0o644,
+        )
         with tarfile.open(path, "w:gz") as archive:
             for item in sorted(work.rglob("*")):
                 archive.add(item, arcname=str(item.relative_to(work)))

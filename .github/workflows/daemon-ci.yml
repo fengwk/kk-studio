@@ -1,9 +1,12 @@
 # kk-studio Node daemon platform matrix.
 #
-# Node Daemon 的平台行为不能只在一台 runner 上验证：Linux 覆盖 POSIX session/进程组收尾，macOS
-# 覆盖同一套代码在另一种 POSIX 实现上的分歧，Windows 覆盖 Win32 Job Object、计划任务与命令行
-# 拼装。三个平台都必须真跑完整 Node 套件（native 进程范围、核心与能力层都包含在内），平台特有
-# 用例由各用例自己的条件决定是否执行，不做整体跳过。
+# Node Daemon 的平台行为不能只在一台 runner 上验证。矩阵覆盖：
+#   linux amd64（ubuntu-latest）、linux arm64（ubuntu-24.04-arm）、
+#   macOS arm64（macos-14）、macOS Intel（macos-15-intel）、
+#   windows amd64（windows-latest）。
+# 每个目标都真跑完整 Node 套件（native 进程范围、核心与能力层），平台特有用例由用例自己决定
+# 是否执行，不做整体跳过。安装器 Python fixture 与 shell 替换只证明脚本契约，不是真实
+# code-server 归档或真实 launchd/systemd 验收。
 #
 # 本工作流既是 `push`/`pull_request` 上的独立门禁（等价于原来的 process-scope 矩阵），也以
 # `workflow_call` 被 daemon-release 复用，保证 tag 发布与分支推送上跑的是同一套门禁。
@@ -46,7 +49,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-14
+            platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-amd64
+          - os: windows-latest
+            platform: windows-amd64
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -66,3 +79,11 @@ jobs:
         run: npm --prefix daemon run build
       - name: Test the daemon with coverage
         run: npm --prefix daemon run coverage
+      # macOS 上的安装器/归档测试只用系统 Bash 跑 fixture：不注册 launchd，也不把 Linux 归档
+      # 当成 macOS 验收。真实 code-server 原生模块由发布作业在暂存归档上加载。
+      - name: Test the macOS installer and archive smoke with system Bash
+        if: runner.os == 'macOS'
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          /bin/bash --version
+          python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'
