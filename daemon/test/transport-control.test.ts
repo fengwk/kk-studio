@@ -86,9 +86,9 @@ describe('frame policy', () => {
     const socket = await firstSocket(server)
     socket.send(Buffer.from([1, 2, 3]))
     socket.send('late-text')
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    // 等待真实的 policy close 被观测到；固定 sleep 在 macOS 上会先于 close 返回而误判 0。
+    await vi.waitFor(() => expect(record.disconnects.length).toBe(1))
     expect(record.messages).toEqual([])
-    expect(record.disconnects.length).toBe(1)
     expect(connection.isOpen()).toBe(false)
     expect(POLICY_VIOLATION).toBe(1008)
   })
