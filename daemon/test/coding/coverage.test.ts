@@ -264,24 +264,26 @@ describe('files/search 覆盖补充', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'x.txt'), 'x\n')
-    await chmod(blocked, 0o000)
+    const { denyRead, restoreRead } = await import('../support/fs-permissions.js')
+    await denyRead(blocked)
     try {
       const grep = searchCapabilities['fs.grep']!
       const result = await callCapability(grep, 'fs.grep', { pattern: 'zzz', path: dir }, makeContext(dir))
       expect(result.error).toBe(true)
       expect(textOf(result)).toContain('could not be searched')
     } finally {
-      await chmod(blocked, 0o755)
+      await restoreRead(blocked)
     }
   })
 
   it('find 摘要对超过 10 条未搜索路径折叠', async () => {
     const dir = await tempDir()
+    const { denyRead, restoreRead } = await import('../support/fs-permissions.js')
     for (let index = 0; index < 12; index++) {
       const blocked = join(dir, `blocked${index}`)
       await mkdir(blocked)
       await writeFile(join(blocked, 'x.txt'), '')
-      await chmod(blocked, 0o000)
+      await denyRead(blocked)
     }
     try {
       const find = searchCapabilities['fs.find']!
@@ -295,7 +297,7 @@ describe('files/search 覆盖补充', () => {
       expect(textOf(result)).toContain('...')
     } finally {
       for (let index = 0; index < 12; index++) {
-        await chmod(join(dir, `blocked${index}`), 0o755)
+        await restoreRead(join(dir, `blocked${index}`))
       }
     }
   })
