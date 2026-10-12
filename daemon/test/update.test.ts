@@ -31,14 +31,15 @@ import {
 import { WINDOWS_UPDATE_SCRIPT } from '../src/update-scripts.js'
 import { createNativeSupervisorFixture } from './support/native-supervisor.js'
 
+const inspectionFailures = vi.hoisted(() => new Set<string>())
+
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>()
   return {
     ...original,
     async lstat(...args: Parameters<typeof original.lstat>) {
       const target = args[0]
-      const blocked = (globalThis as { __kkUpdateInspectionFailures?: Set<string> }).__kkUpdateInspectionFailures
-      if (typeof target === 'string' && blocked?.has(target)) {
+      if (typeof target === 'string' && inspectionFailures.has(target)) {
         const error = new Error('EACCES') as NodeJS.ErrnoException
         error.code = 'EACCES'
         throw error
@@ -357,11 +358,8 @@ describe('update handler', () => {
   it('surfaces a non-ENOENT inspection failure instead of treating it as missing', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'kk-update-'))
     const dataDir = path.join(root, 'inspected')
-    const holder = globalThis as { __kkUpdateInspectionFailures?: Set<string> }
-    const blocked = holder.__kkUpdateInspectionFailures ?? new Set<string>()
-    holder.__kkUpdateInspectionFailures = blocked
     const inspected = path.resolve(dataDir)
-    blocked.add(inspected)
+    inspectionFailures.add(inspected)
     try {
       // 真实的非 ENOENT 故障：只让目标路径的 lstat 返回 EACCES，不能靠“文件的子路径”在 Windows 上变成 ENOTDIR。
       const outcome = await createUpdateHandler(harness().deps)(
@@ -372,7 +370,7 @@ describe('update handler', () => {
       expect(outcome.phase).toBe('FAILED')
       expect(outcome.message).toContain('could not be inspected')
     } finally {
-      blocked.delete(inspected)
+      inspectionFailures.delete(inspected)
       await rm(root, { recursive: true, force: true })
     }
   })

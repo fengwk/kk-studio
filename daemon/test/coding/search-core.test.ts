@@ -11,6 +11,9 @@ import {
   type GrepOptions,
   type SearchReply,
 } from '../../src/coding/search-core.js'
+import { toPosix } from '../../src/coding/support.js'
+
+const blockedReads = vi.hoisted(() => new Set<string>())
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>()
@@ -18,8 +21,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     ...original,
     async readdir(...args: Parameters<typeof original.readdir>) {
       const target = args[0]
-      const blocked = (globalThis as { __kkSearchBlockedReads?: Set<string> }).__kkSearchBlockedReads
-      if (typeof target === 'string' && blocked?.has(target)) {
+      if (typeof target === 'string' && blockedReads.has(target)) {
         const error = new Error('EACCES') as NodeJS.ErrnoException
         error.code = 'EACCES'
         throw error
@@ -100,9 +102,6 @@ describe('findFiles', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'a.txt'), '')
-    const holder = globalThis as { __kkSearchBlockedReads?: Set<string> }
-    const blockedReads = holder.__kkSearchBlockedReads ?? new Set<string>()
-    holder.__kkSearchBlockedReads = blockedReads
     blockedReads.add(blocked)
     try {
       // readdir 对这个目录返回 EACCES，不能依赖 Windows 上无效的 mode 000。
@@ -163,16 +162,16 @@ describe('grepFiles', () => {
 
   it('multiline 跨行匹配整段输出', async () => {
     const dir = await tempDir()
-    await writeFile(join(dir, 'm.txt'), 'a\nb\nc\n')
+    const file = join(dir, 'm.txt')
+    await writeFile(file, 'a\nb\nc\n')
     const outcome = await grepFiles(
       'a\\nb',
-      join(dir, 'm.txt'),
+      file,
       100,
       { ...defaultGrep, multiline: true },
       noTimeout('grep'),
     )
-    // Drive letters contain a colon, so the match text is the field after path and line number.
-    expect(outcome.lines.map((line) => line.split(':').slice(2).join(':'))).toEqual(['a', 'b'])
+    expect(outcome.lines).toEqual([`${toPosix(file)}:1:a`, `${toPosix(file)}:2:b`])
   })
 
   it('multiline 空匹配推进 lastIndex', async () => {
@@ -217,9 +216,6 @@ describe('grepFiles', () => {
     const blocked = join(dir, 'blocked')
     await mkdir(blocked)
     await writeFile(join(blocked, 'a.txt'), 'x\n')
-    const holder = globalThis as { __kkSearchBlockedReads?: Set<string> }
-    const blockedReads = holder.__kkSearchBlockedReads ?? new Set<string>()
-    holder.__kkSearchBlockedReads = blockedReads
     blockedReads.add(blocked)
     try {
       const outcome = await grepFiles('zzz', dir, 100, defaultGrep, noTimeout('grep'))

@@ -732,7 +732,15 @@ describe('SkillPackageInstaller', () => {
     const firstGate = new Promise<void>((resolve) => {
       releaseFirst = resolve
     })
+    let markEntered!: () => void
+    const firstEntered = new Promise<void>((resolve) => {
+      markEntered = resolve
+    })
     let activeSame = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('timed out waiting for the package lock')), 5_000)
+    })
 
     const delayInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
       privateFs: createTestPrivateFs(),
@@ -742,7 +750,8 @@ describe('SkillPackageInstaller', () => {
           const turn = activeSame
           executionLog.push(`pkg-same-${turn} start`)
           if (turn === 1) {
-            // 第一个同包安装停在临界区内，用来观察锁外的其它包和锁内的第二个同包。
+            // 先标记已进入临界区，再等待释放，第二个同包安装因此不能进入。
+            markEntered()
             await firstGate
           }
           executionLog.push(`pkg-same-${turn} end`)
@@ -757,30 +766,20 @@ describe('SkillPackageInstaller', () => {
     const sameA = delayInstaller.install('pkg-same', remoteUrl, 'main', commit1)
     const sameB = delayInstaller.install('pkg-same', remoteUrl, 'main', commit1)
     const diff = delayInstaller.install('pkg-diff', remoteUrl, 'main', commit1)
-
-    const deadline = Date.now() + 5_000
-    while (activeSame < 1) {
-      if (Date.now() > deadline) {
-        throw new Error('timed out waiting for the same-package install to enter its critical section')
+    try {
+      await Promise.race([firstEntered, timedOut])
+      await Promise.race([diff, timedOut])
+      // 同包的第二次安装必须仍被挡住，不同包必须已经完成。
+      expect(executionLog).not.toContain('pkg-same-2 start')
+      expect(executionLog).toContain('pkg-diff end')
+      expect(executionLog).not.toContain('pkg-same-1 end')
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer)
       }
-      await new Promise((resolve) => setTimeout(resolve, 1))
+      releaseFirst()
+      await Promise.allSettled([sameA, sameB, diff])
     }
-    await Promise.race([
-      diff,
-      new Promise<never>((_resolve, reject) => {
-        setTimeout(
-          () => reject(new Error('a different package did not finish while the same package was blocked')),
-          5_000,
-        )
-      }),
-    ])
-    // 同包的第二次安装必须仍被挡住，不同包必须已经完成。
-    expect(executionLog).not.toContain('pkg-same-2 start')
-    expect(executionLog).toContain('pkg-diff end')
-    expect(executionLog).not.toContain('pkg-same-1 end')
-
-    releaseFirst()
-    await Promise.all([sameA, sameB, diff])
 
     const firstSameEnd = executionLog.indexOf('pkg-same-1 end')
     const secondSameStart = executionLog.indexOf('pkg-same-2 start')
