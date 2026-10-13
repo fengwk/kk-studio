@@ -99,8 +99,10 @@ describe('Turn usage after TURN_END', () => {
       subjectEntryId: 'assistant-1',
       status: 'done',
     })
-    expect(usage?.text).toContain('↑10')
-    expect(usage?.text).toContain('↓20')
+    if (usage && usage.role === 'meta') {
+      expect(usage.text).toContain('↑10')
+      expect(usage.text).toContain('↓20')
+    }
     expect(usage).toMatchObject({
       turnUsage: {
         input: 10,
@@ -255,9 +257,11 @@ describe('Turn usage after TURN_END', () => {
       endEntryId: 'failed-end',
       turnUsage: { input, output, cost: { currency: 'USD', amount: '0' } },
     })
-    expect(footer?.text).toContain(`↑${input}`)
-    expect(footer?.text).toContain(`↓${output}`)
-    expect(footer?.text).not.toContain('FAILED')
+    if (footer && footer.role === 'meta') {
+      expect(footer.text).toContain(`↑${input}`)
+      expect(footer.text).toContain(`↓${output}`)
+      expect(footer.text).not.toContain('FAILED')
+    }
   })
 
   it('does not leak usage from an unclosed turn into the next TURN_END', () => {

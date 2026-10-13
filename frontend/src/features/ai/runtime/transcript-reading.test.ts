@@ -4,7 +4,11 @@ import {
   announceTranscriptReading,
   transcriptStreamRevision,
 } from '@/features/ai/runtime/transcript-reading'
-import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  DialogueMessage,
+  ToolContent,
+  ToolDialogueMessage,
+} from '@/features/ai/runtime/thread-timeline-types'
 
 function assistant(id: string, text: string, status: DialogueMessage['status']): DialogueMessage {
   return { id, role: 'assistant', subjectEntryId: id, text, createdAt: '2026-07-28T10:00:00Z', status }
@@ -12,12 +16,14 @@ function assistant(id: string, text: string, status: DialogueMessage['status']):
 
 function tool(
   id: string,
-  partialContents: DialogueMessage['partialContents'],
+  partialContents: ToolDialogueMessage['partialContents'],
   status: DialogueMessage['status'],
-): DialogueMessage {
+): ToolDialogueMessage {
   return {
     id,
     role: 'tool',
+    rendererKey: 'bash',
+    phase: 'call',
     subjectEntryId: id,
     toolCallId: `call-${id}`,
     toolName: 'bash',
@@ -49,15 +55,15 @@ describe('transcriptStreamRevision', () => {
   })
 
   it('ignores media and thinking-only updates (no revision, no auto-scroll)', () => {
-    const resource: DialogueMessage['partialContents'] = [
-      { type: 'resource', uri: 'blob://img', mediaType: 'image/png', name: 'shot.png' },
-      { type: 'resource', uri: 'blob://clip', mediaType: 'video/mp4' },
+    const resource: ToolContent[] = [
+      { type: 'resource', attachment: { type: 'image', name: 'shot.png', mime: 'image/png', data: 'blob://img' } },
+      { type: 'resource', attachment: { type: 'video', name: 'clip.mp4', mime: 'video/mp4', data: 'blob://clip' } },
     ]
     const withMedia = transcriptStreamRevision([tool('t1', resource, 'streaming')])
     const withMoreMedia = transcriptStreamRevision([
       tool('t1', [
         ...resource,
-        { type: 'resource', uri: 'blob://big', mediaType: 'image/png', sizeBytes: 10_240 },
+        { type: 'resource', attachment: { type: 'image', name: 'big.png', mime: 'image/png', data: 'blob://big', size: 10_240 } },
       ], 'streaming'),
     ])
     // 只有媒体（异步加载/解码）变化时签名不变。
