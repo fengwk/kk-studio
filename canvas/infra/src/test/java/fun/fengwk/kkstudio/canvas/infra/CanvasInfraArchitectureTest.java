@@ -26,20 +26,21 @@ class CanvasInfraArchitectureTest {
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.canvas.infra";
   private static final Set<String> PRODUCTION_DEPENDENCIES =
       Set.of(
-          "com.fasterxml.jackson.core:jackson-databind",
           "fun.fengwk.convention4j:convention4j-spring-boot-starter",
           "fun.fengwk.kk-studio:kk-studio-canvas-core",
           "org.springframework.boot:spring-boot-starter-aspectj",
-          "org.springframework.boot:spring-boot-starter-jdbc");
+          "org.springframework.boot:spring-boot-starter-jdbc",
+          "tools.jackson.core:jackson-databind");
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
-          "com.fasterxml.jackson.",
+          "com.fasterxml.jackson.annotation.",
           "fun.fengwk.convention4j.",
           "fun.fengwk.kkstudio.canvas.",
           "java.",
           "javax.",
           "lombok.",
-          "org.springframework.");
+          "org.springframework.",
+          "tools.jackson.");
 
   /** 生产源码必须留在 infra 包内，且不能反向依赖 Platform/Harness/Web。 */
   @Test
