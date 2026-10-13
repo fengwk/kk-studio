@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.Objects;
 import java.util.Set;
@@ -19,9 +20,10 @@ import java.util.Set;
 public final class DaemonCapabilitiesCodec {
 
   private static final ObjectMapper MAPPER =
-      new ObjectMapper()
-          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private static final Set<String> ROOT_FIELDS = Set.of("version", "daemonVersion", "environment");
   private static final Set<String> ENVIRONMENT_FIELDS =
@@ -41,7 +43,7 @@ public final class DaemonCapabilitiesCodec {
     environment.put("tempDirectory", capabilities.environment().tempDirectory());
     try {
       return MAPPER.writeValueAsString(root);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("cannot encode READY capabilities payload", error);
     }
   }
@@ -50,14 +52,14 @@ public final class DaemonCapabilitiesCodec {
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("malformed READY payload", error);
     }
     if (!(value instanceof ObjectNode root)) {
       throw new DaemonProtocolException("READY payload must be an object");
     }
-    root.fieldNames()
-        .forEachRemaining(
+    root.propertyNames()
+        .forEach(
             field -> {
               if (!ROOT_FIELDS.contains(field)) {
                 throw new DaemonProtocolException("unexpected READY field: " + field);
@@ -95,8 +97,8 @@ public final class DaemonCapabilitiesCodec {
   }
 
   private static DaemonEnvironmentInfo decodeEnvironment(ObjectNode node) {
-    node.fieldNames()
-        .forEachRemaining(
+    node.propertyNames()
+        .forEach(
             field -> {
               if (!ENVIRONMENT_FIELDS.contains(field)) {
                 throw new DaemonProtocolException("unexpected READY environment field: " + field);
@@ -124,9 +126,9 @@ public final class DaemonCapabilitiesCodec {
 
   private static String text(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new DaemonProtocolException(context + "." + field + " must be non-blank text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 }

@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -136,11 +136,11 @@ class OutputSpoolTest {
       assertFalse(textOutput.path("captureTruncated").asBoolean());
       assertFalse(textOutput.path("captureFailed").asBoolean());
 
-      Path published = Path.of(textOutput.path("path").asText());
+      Path published = Path.of(textOutput.path("path").asString());
       assertTrue(published.isAbsolute(), "必须给出绝对路径，模型才能直接 read/grep");
       assertTrue(published.toString().endsWith(".log"));
       assertTrue(preview.contains(published.toString()), "预览必须内联该绝对路径：" + preview);
-      assertTrue(textOutput.path("readHint").asText().contains("read"));
+      assertTrue(textOutput.path("readHint").asString().contains("read"));
       assertEquals("1234567890abcdef", Files.readString(published), "durable 全文必须是完整内容");
       assertTrue(Files.isRegularFile(published, LinkOption.NOFOLLOW_LINKS));
 
@@ -168,7 +168,7 @@ class OutputSpoolTest {
       assertEquals(3, textOutput.path("totalLines").asLong());
       assertEquals(
           "line 1\nline 2\nline 3\n",
-          Files.readString(Path.of(textOutput.path("path").asText())),
+          Files.readString(Path.of(textOutput.path("path").asString())),
           "durable 全文必须保留全部行");
     }
   }
@@ -205,7 +205,7 @@ class OutputSpoolTest {
       assertEquals(25, textOutput.path("capturedBytes").asLong());
       assertEquals(
           "1234567890123456789012345",
-          Files.readString(Path.of(textOutput.path("path").asText())),
+          Files.readString(Path.of(textOutput.path("path").asString())),
           "已捕获的前缀仍必须作为可读文件发布");
     }
   }
@@ -328,7 +328,7 @@ class OutputSpoolTest {
       EnvironmentCapabilityResult result = spool.finish(false);
       JsonNode textOutput =
           AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
-      assertEquals(payload, Files.readString(Path.of(textOutput.path("path").asText())));
+      assertEquals(payload, Files.readString(Path.of(textOutput.path("path").asString())));
       // 解码后的预览不得出现替换字符（说明没有切断多字节序列）。
       assertFalse(text(result).contains("\uFFFD"));
     }
@@ -398,7 +398,7 @@ class OutputSpoolTest {
           AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
       assertEquals(
           payload,
-          Files.readString(Path.of(textOutput.path("path").asText())),
+          Files.readString(Path.of(textOutput.path("path").asString())),
           "durable 全文必须逐字节完整，不受预览裁剪影响");
       assertEquals(
           payload.getBytes(StandardCharsets.UTF_8).length, textOutput.path("totalBytes").asLong());

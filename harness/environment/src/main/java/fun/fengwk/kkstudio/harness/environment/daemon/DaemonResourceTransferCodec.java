@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.StreamReadConstraints;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -51,7 +52,7 @@ public final class DaemonResourceTransferCodec {
   private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
 
   private static final ObjectMapper MAPPER =
-      new ObjectMapper(
+      JsonMapper.builder(
               JsonFactory.builder()
                   .streamReadConstraints(
                       StreamReadConstraints.builder()
@@ -61,8 +62,9 @@ public final class DaemonResourceTransferCodec {
                           .maxDocumentLength(MAX_PAYLOAD_CHARS)
                           .build())
                   .build())
-          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private static final Set<String> REQUEST_FIELDS =
       Set.of(FIELD_TRANSFER_ID, "mediaType", "name", "size", "sha256");
@@ -286,14 +288,14 @@ public final class DaemonResourceTransferCodec {
     }
     Map<String, String> headers = new LinkedHashMap<>();
     headersNode
-        .fields()
-        .forEachRemaining(
+        .properties()
+        .forEach(
             entry -> {
-              if (!entry.getValue().isTextual()) {
+              if (!entry.getValue().isString()) {
                 throw new DaemonProtocolException(
                     "upload ticket presignedPut header values must be strings");
               }
-              headers.put(entry.getKey(), entry.getValue().textValue());
+              headers.put(entry.getKey(), entry.getValue().stringValue());
             });
     Instant expiresAt = requiredInstant(presigned, "expiresAt", "upload ticket presignedPut");
     try {
@@ -317,7 +319,7 @@ public final class DaemonResourceTransferCodec {
         throw new DaemonProtocolException(context + " payload must be a JSON object");
       }
       return object;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException(context + " payload must be valid JSON", error);
     }
   }
@@ -325,15 +327,15 @@ public final class DaemonResourceTransferCodec {
   private String write(ObjectNode root, String context) {
     try {
       return MAPPER.writeValueAsString(root);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("cannot encode " + context + " payload", error);
     }
   }
 
   private static void rejectUnknownFields(ObjectNode node, Set<String> allowed, String context) {
     List<String> unknown = new ArrayList<>();
-    node.fieldNames()
-        .forEachRemaining(
+    node.propertyNames()
+        .forEach(
             field -> {
               if (!allowed.contains(field)) {
                 unknown.add(field);
@@ -346,10 +348,10 @@ public final class DaemonResourceTransferCodec {
 
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new DaemonProtocolException(context + "." + field + " must be non-blank text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String requiredNullableText(ObjectNode node, String field, String context) {
@@ -360,10 +362,10 @@ public final class DaemonResourceTransferCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual() || value.textValue().isBlank()) {
+    if (!value.isString() || value.stringValue().isBlank()) {
       throw new DaemonProtocolException(context + "." + field + " must be non-blank text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static long requiredNonNegativeLong(ObjectNode node, String field, String context) {

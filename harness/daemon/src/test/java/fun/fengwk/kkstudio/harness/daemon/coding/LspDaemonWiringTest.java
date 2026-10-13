@@ -111,9 +111,9 @@ class LspDaemonWiringTest {
     // 服务器进程目录就是自动发现的项目根。
     assertEquals(
         repo.toRealPath().toString(),
-        FakeLspServers.await(transcript, event -> event.path("event").asText().equals("start"))
+        FakeLspServers.await(transcript, event -> event.path("event").asString().equals("start"))
             .path("cwd")
-            .asText(),
+            .asString(),
         "LSP 进程必须运行在发现到的项目根");
 
     // .py 没有声明的服务器：能力给出可操作错误，而不是尝试启动别的程序。

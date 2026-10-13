@@ -52,7 +52,7 @@ class LspServiceLifecycleTest {
       Future<String> pending =
           caller.submit(() -> service.gotoDefinition(file, 1, 0, Duration.ofSeconds(30)));
       // 等待服务器真的启动（初始化尚未返回）后再关闭。
-      FakeLspServers.await(transcript, event -> event.path("event").asText().equals("start"));
+      FakeLspServers.await(transcript, event -> event.path("event").asString().equals("start"));
       service.close();
 
       Exception error = assertThrows(Exception.class, pending::get);
@@ -225,7 +225,7 @@ class LspServiceLifecycleTest {
   private static int startedProcesses(Path transcript) {
     int started = 0;
     for (var event : FakeLspServers.events(transcript)) {
-      if (event.path("event").asText().equals("start")) {
+      if (event.path("event").asString().equals("start")) {
         started++;
       }
     }

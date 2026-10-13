@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfigurationCodec;
 
@@ -178,7 +178,8 @@ class LspDiscoveryTest {
   void readsServersFromJsonConfiguration() throws IOException {
     var config =
         DaemonConfigurationCodec.parseLsp(
-            new ObjectMapper()
+            JsonMapper.builder()
+                .build()
                 .readTree(
                     """
             {"servers":{
