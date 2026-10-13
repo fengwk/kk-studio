@@ -350,11 +350,12 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 
 ## 严格 JSON 契约
 
-本模块的 durable 列与 wire 载荷各由自己的 codec 承担，共享同一条契约。mapper 一律是不可变 `JsonMapper`（`JsonMapper.builder()`），显式开启 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`；未知、缺失、重复与尾随内容都在边界 fail-closed 拒绝。
+本模块的 durable 列与 wire 载荷在各自的 codec 边界统一为严格 JSON：不可变 `JsonMapper`（`JsonMapper.builder()`）显式开启 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`，未知、缺失、重复与尾随内容都在边界 fail-closed 拒绝；按树读写的自由 JSON（含 Tool permission 的 settings 与 arguments）由 [`JsonValues`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java) 承担严格读取与写出，不依赖调用方注入的 mapper。
 
 - 真正按树搬运自由 JSON 的 mapper 开启 `USE_BIG_DECIMAL_FOR_FLOATS`，以 `BigDecimal` 读回：`variant.protocolOptions`（`InvocationJsonSupport`、`ProviderRequestJsonCodec`、`ModelDescriptorJsonCodec`）、`SET_CONTRIBUTOR_STATE.state.data`、replay state、工具诊断、`argumentsJson` / `detailsJson` / `rawUsageJson`、历史 CUSTOM payload 与压缩摘要里的 tool-call arguments。`1e309`、`1e-324` 与高精度小数不会在 double 中退化成 `Infinity` / `0` 或被重新格式化；按原始文本搬运的字符串字段（如 `json` 内容块）则逐字保留。
-- 厂商原生选项与 `ModelDescriptor` 的 canonical 文本额外开启 `STRIP_TRAILING_BIGDECIMAL_ZEROES`，只移除无语义意义的尾零，保持既有 canonical golden 稳定。
-- durable 与 wire codec 的 `readTree` 入口把 Jackson 3 的空/纯空白输入（`MissingNode`，Jackson 2 为 `null`）判为缺失文档并拒绝，与畸形文档同样 fail-closed。[`ThreadCreationRequestHash`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadCreationRequestHash.java) 只重解析本模块自己产出的 canonical ROOT payload（仅含 id、枚举与文本，没有任何自由数值），因此不声明数值 profile。
+- 厂商原生选项与 `ModelDescriptor` 的 canonical 文本额外开启 `STRIP_TRAILING_BIGDECIMAL_ZEROES`，只移除无语义意义的尾零，使 canonical 文本稳定。
+- 空或纯空白输入不是合法文档：读取入口一律判为缺失并拒绝，与畸形文档同样 fail-closed。
+- 只服务于本模块内部用途的 mapper（`CompactionFileSections`、`CompactionPrompts`、`ThreadCreationRequestHash`）按各自输出需要配置，不在上述严格读取契约内；其中 [`ThreadCreationRequestHash`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadCreationRequestHash.java) 只重解析本模块自己产出的 canonical ROOT payload（仅含 id、枚举与文本，没有任何自由数值），因此不声明数值 profile。
 - 无法映射为 JSON 的输入（例如 `ProviderProtocolOptions.of` 收到无属性的任意对象）在构造期以 `IllegalArgumentException` 明确失败，不静默丢弃或降级；只有编码阶段的不可恢复失败才是 `IllegalStateException`。
 
 ## 源码与测试

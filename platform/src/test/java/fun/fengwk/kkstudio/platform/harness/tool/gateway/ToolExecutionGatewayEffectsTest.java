@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
@@ -269,7 +268,7 @@ class ToolExecutionGatewayEffectsTest {
             catalog,
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
@@ -359,7 +358,7 @@ class ToolExecutionGatewayEffectsTest {
             catalog,
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
@@ -458,7 +457,7 @@ class ToolExecutionGatewayEffectsTest {
             catalog,
             loader,
             new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,

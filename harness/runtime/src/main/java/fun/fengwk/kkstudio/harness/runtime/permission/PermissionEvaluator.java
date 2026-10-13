@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
+
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
 import java.util.List;
 import java.util.Objects;
@@ -19,12 +19,10 @@ import java.util.regex.Pattern;
 public final class PermissionEvaluator {
   private static final int ARGUMENT_PREVIEW_LENGTH = 120;
 
-  private final ObjectMapper objectMapper;
   private final BashSurfaceAnalyzer bashAnalyzer;
   private final PermissionPathMatcher pathMatcher;
 
-  public PermissionEvaluator(ObjectMapper objectMapper, BashSurfaceAnalyzer bashAnalyzer) {
-    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+  public PermissionEvaluator(BashSurfaceAnalyzer bashAnalyzer) {
     this.bashAnalyzer = Objects.requireNonNull(bashAnalyzer, "bashAnalyzer");
     this.pathMatcher = new PermissionPathMatcher();
   }
@@ -139,28 +137,15 @@ public final class PermissionEvaluator {
       workdir = singleLine(workdirNode.asText());
     }
     return new PermissionPromptPreview(
-        context.toolName(), workdir, truncate(singleLine(writeArguments(input))));
+        context.toolName(), workdir, truncate(singleLine(JsonValues.write(input))));
   }
 
-  private String writeArguments(JsonNode input) {
-    try {
-      return objectMapper.writeValueAsString(input);
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException(
-          "cannot encode tool arguments for permission preview", error);
+  private static JsonNode readArguments(String argumentsJson) {
+    JsonNode node = JsonValues.readTree(argumentsJson);
+    if (!node.isObject()) {
+      throw new IllegalArgumentException("tool arguments must be a JSON object");
     }
-  }
-
-  private JsonNode readArguments(String argumentsJson) {
-    try {
-      JsonNode node = objectMapper.readTree(argumentsJson);
-      if (!node.isObject()) {
-        throw new IllegalArgumentException("tool arguments must be a JSON object");
-      }
-      return node;
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("tool arguments must be valid JSON", error);
-    }
+    return node;
   }
 
   private boolean wildcardMatches(String pattern, String candidate) {
