@@ -13,6 +13,7 @@ import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+import fun.fengwk.kkstudio.harness.provider.ProviderTestFixtures;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -49,11 +50,9 @@ class AnthropicPrecisionRegressionTest {
       JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private static final String FREE_FORM_SCHEMA =
-      "{\"type\":\"object\",\"properties\":{"
-          + "\"big\":{\"type\":\"number\",\"const\":1e309},"
-          + "\"tiny\":{\"type\":\"number\",\"const\":1e-324},"
-          + "\"exact\":{\"type\":\"number\",\"const\":0.1234567890123456789012345678},"
-          + "\"ratio\":{\"type\":\"number\",\"const\":1.10}}}";
+      ProviderTestFixtures.read(
+          AnthropicPrecisionRegressionTest.class,
+          "/fun/fengwk/kkstudio/harness/provider/fixtures/precision/free-form-schema.json");
 
   private final ProviderDescriptor descriptor =
       new ProviderDescriptor(
