@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.environment.server;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
@@ -1479,7 +1479,7 @@ public final class EnvironmentDaemonServer
     }
     try {
       DaemonWorkdirSyntax.requireAbsolute(
-          workdir == null || !workdir.isTextual() ? null : workdir.textValue(), operatingSystem);
+          workdir == null || !workdir.isString() ? null : workdir.stringValue(), operatingSystem);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           "invalid workdir for capability " + descriptor.id().value() + ": " + error.getMessage(),
@@ -1598,10 +1598,10 @@ public final class EnvironmentDaemonServer
 
   private static String requiredText(ObjectNode payload, String name, String context) {
     JsonNode value = payload.get(name);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new DaemonProtocolException(context + "." + name + " must be a non-blank string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static long requiredLong(ObjectNode payload, String name, String context) {
@@ -1616,8 +1616,8 @@ public final class EnvironmentDaemonServer
       ObjectNode payload, Set<String> expected, String context) {
     List<String> unexpected = new ArrayList<>();
     payload
-        .fieldNames()
-        .forEachRemaining(
+        .propertyNames()
+        .forEach(
             field -> {
               if (!expected.contains(field)) {
                 unexpected.add(field);

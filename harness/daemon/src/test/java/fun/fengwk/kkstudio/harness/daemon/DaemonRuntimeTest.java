@@ -14,10 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
@@ -324,11 +324,11 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> handshake = transport.takeMessages(2);
     assertMessageTypes(handshake, HELLO, READY);
     JsonNode hello = codec.readPayload(handshake.get(0));
-    assertEquals(REGISTRATION_TOKEN, hello.path("registrationToken").asText());
+    assertEquals(REGISTRATION_TOKEN, hello.path("registrationToken").asString());
     assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
-        EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
-    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, hello.path("daemonVersion").asText());
+        EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asString());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, hello.path("daemonVersion").asString());
     assertTrue(hello.path("toolCatalogVersion").isMissingNode());
     DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
     DaemonEnvironmentInfo firstEnvironment =
@@ -337,10 +337,10 @@ class DaemonRuntimeTest {
     JsonNode ready = codec.readPayload(handshake.get(1));
     assertEquals(3, ready.size());
     assertEquals(DaemonCapabilities.VERSION, ready.path("version").asInt());
-    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, ready.path("daemonVersion").asText());
-    assertEquals(expectedProcessUserName(), ready.path("environment").path("userName").asText());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, ready.path("daemonVersion").asString());
+    assertEquals(expectedProcessUserName(), ready.path("environment").path("userName").asString());
     assertEquals(
-        expectedProcessHomeDirectory(), ready.path("environment").path("homeDirectory").asText());
+        expectedProcessHomeDirectory(), ready.path("environment").path("homeDirectory").asString());
 
     transport.disconnect();
     transport.awaitConnections(1);
@@ -1640,11 +1640,11 @@ class DaemonRuntimeTest {
       DaemonEnvelope terminal = transport.takeNextMessage();
       assertMessageTypes(List.of(terminal), COMPLETED);
       JsonNode content = codec.readPayload(terminal).get("result").get("contents").get(0);
-      assertEquals("resource", content.get("type").asText());
-      assertEquals(uploadId.toString(), content.get("uploadId").asText());
-      assertEquals("application/octet-stream", content.get("mediaType").asText());
+      assertEquals("resource", content.get("type").asString());
+      assertEquals(uploadId.toString(), content.get("uploadId").asString());
+      assertEquals("application/octet-stream", content.get("mediaType").asString());
       assertEquals(data.length, content.get("size").asLong());
-      assertEquals(storage.sha256Hex(data), content.get("sha256").asText());
+      assertEquals(storage.sha256Hex(data), content.get("sha256").asString());
       // 终态绝不承载本地地址或任何字节表示。
       assertFalse(content.has("uri"));
       assertFalse(terminal.payloadJson().contains("file://"));
@@ -2073,15 +2073,15 @@ class DaemonRuntimeTest {
     assertFalse(payload.has("sourceSetVersion"));
     assertFalse(payload.has("mcpServers"));
     assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
-    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, payload.path("daemonVersion").asText());
+    assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, payload.path("daemonVersion").asString());
     JsonNode environment = payload.path("environment");
     assertEquals(6, environment.size());
-    assertTrue(environment.path("operatingSystem").isTextual());
-    assertTrue(environment.path("timeZone").isTextual());
-    assertTrue(environment.path("userName").isTextual());
-    assertTrue(environment.path("homeDirectory").isTextual());
-    assertTrue(environment.path("note").isTextual());
-    assertTrue(environment.path("tempDirectory").isTextual());
+    assertTrue(environment.path("operatingSystem").isString());
+    assertTrue(environment.path("timeZone").isString());
+    assertTrue(environment.path("userName").isString());
+    assertTrue(environment.path("homeDirectory").isString());
+    assertTrue(environment.path("note").isString());
+    assertTrue(environment.path("tempDirectory").isString());
     assertTrue(environment.path("rootPath").isMissingNode());
     assertTrue(environment.path("workingDirectory").isMissingNode());
     // 严格 wire 形状：必须能被共享 codec 往返解码。
@@ -3014,7 +3014,7 @@ class DaemonRuntimeTest {
 
   private List<String> jsonTexts(JsonNode array) {
     List<String> values = new ArrayList<>();
-    array.forEach(value -> values.add(value.asText()));
+    array.forEach(value -> values.add(value.asString()));
     return values;
   }
 

@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
@@ -24,7 +25,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
   private static final String VERIFY_EFFECT_NEXT_ACTION =
       "Verify whether the intended effect already took place before deciding what to do next";
 
-  static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
   final CodingToolsConfig config;
   private final ExecutorService executor;
@@ -133,7 +134,7 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
   static JsonNode arguments(EnvironmentCapabilityExecutionRequest request) throws Exception {
     try {
       return OBJECT_MAPPER.readTree(request.call().argumentsJson());
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       // Jackson 的解析异常 message 会内联原始 arguments 片段（可能含凭据），绝不能外发；这里只保留固定文案。
       throw new ToolInputRejectedException("tool arguments could not be parsed as JSON");
     }
@@ -141,15 +142,15 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
 
   static String string(JsonNode args, String name) {
     JsonNode value = args.get(name);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new ToolInputRejectedException(name + " is required and must be a string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   static String optionalString(JsonNode args, String name) {
     JsonNode value = args.get(name);
-    return value == null ? null : value.textValue();
+    return value == null || !value.isString() ? null : value.stringValue();
   }
 
   static int optionalPositiveInt(JsonNode args, String name, int defaultValue, int maximum) {

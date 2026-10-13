@@ -67,8 +67,7 @@ class EnvironmentModuleArchitectureTest {
     List<String> violations = new ArrayList<>();
     Set<String> allowed =
         Set.of(
-            "fun.fengwk.kk-studio:kk-studio-harness-common",
-            "com.fasterxml.jackson.core:jackson-databind");
+            "fun.fengwk.kk-studio:kk-studio-harness-common", "tools.jackson.core:jackson-databind");
     while (matcher.find()) {
       String dependency = matcher.group(1);
       String scope = optionalTag(dependency, "scope");
@@ -122,7 +121,8 @@ class EnvironmentModuleArchitectureTest {
   private static boolean isAllowedImport(String imported) {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
-        || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("com.fasterxml.jackson.annotation.")
+        || imported.startsWith("tools.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.");
   }

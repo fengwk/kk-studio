@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.Objects;
 import java.util.Set;
@@ -20,9 +21,10 @@ import java.util.Set;
 public final class DaemonUpdateResultCodec {
 
   private static final ObjectMapper MAPPER =
-      new ObjectMapper()
-          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private static final Set<String> FIELDS = Set.of("operationId", "phase", "message");
 
@@ -36,7 +38,7 @@ public final class DaemonUpdateResultCodec {
     }
     try {
       return MAPPER.writeValueAsString(root);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("cannot encode update result payload", error);
     }
   }
@@ -45,14 +47,14 @@ public final class DaemonUpdateResultCodec {
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("malformed update result payload", error);
     }
     if (!(value instanceof ObjectNode root)) {
       throw new DaemonProtocolException("update result payload must be an object");
     }
-    root.fieldNames()
-        .forEachRemaining(
+    root.propertyNames()
+        .forEach(
             field -> {
               if (!FIELDS.contains(field)) {
                 throw new DaemonProtocolException("unexpected update result field: " + field);
@@ -88,9 +90,9 @@ public final class DaemonUpdateResultCodec {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new DaemonProtocolException("update result." + field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 }

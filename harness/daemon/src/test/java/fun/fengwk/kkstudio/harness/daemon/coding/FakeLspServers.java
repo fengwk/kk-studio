@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,7 +27,7 @@ final class FakeLspServers {
 
   static final Duration WAIT = Duration.ofSeconds(20);
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
   private static final AtomicInteger TRANSCRIPTS = new AtomicInteger();
 
   private FakeLspServers() {}
@@ -137,8 +137,8 @@ final class FakeLspServers {
   static List<JsonNode> received(Path transcript, String method) {
     List<JsonNode> matched = new ArrayList<>();
     for (JsonNode event : events(transcript)) {
-      if (event.path("event").asText().equals("recv")
-          && method.equals(event.path("message").path("method").asText())) {
+      if (event.path("event").asString().equals("recv")
+          && method.equals(event.path("message").path("method").asString())) {
         matched.add(event.path("message"));
       }
     }
@@ -149,7 +149,7 @@ final class FakeLspServers {
   static List<JsonNode> responses(Path transcript) {
     List<JsonNode> matched = new ArrayList<>();
     for (JsonNode event : events(transcript)) {
-      if (event.path("event").asText().equals("recv")
+      if (event.path("event").asString().equals("recv")
           && event.path("message").path("method").isMissingNode()) {
         matched.add(event.path("message"));
       }
@@ -158,7 +158,7 @@ final class FakeLspServers {
   }
 
   static long startedPid(Path transcript) {
-    return await(transcript, event -> event.path("event").asText().equals("start"))
+    return await(transcript, event -> event.path("event").asString().equals("start"))
         .path("pid")
         .asLong();
   }

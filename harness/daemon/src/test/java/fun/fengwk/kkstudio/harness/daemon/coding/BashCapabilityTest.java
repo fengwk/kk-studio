@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -121,7 +121,7 @@ class BashCapabilityTest {
     assertTrue(text.contains("not rolled back"), "取消或失败不得假称副作用回滚：" + text);
 
     JsonNode process = details(result).path("process");
-    assertEquals("TIMED_OUT", process.path("outcome").asText(), details(result).toString());
+    assertEquals("TIMED_OUT", process.path("outcome").asString(), details(result).toString());
     assertTrue(process.path("exitCode").isMissingNode(), "被杀进程的退出码不是命令的事实:" + process);
 
     assertEquals(1, listener.completions, "每次调用只能有一个终态回调");
@@ -160,11 +160,11 @@ class BashCapabilityTest {
     assertTrue(result.error(), text(result));
 
     JsonNode textOutput = details(result).path("textOutput");
-    assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asText());
+    assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asString());
     assertFalse(textOutput.path("captureTruncated").asBoolean(), textOutput.toString());
     assertEquals(5000, textOutput.path("totalLines").asLong(), "终态说明不得计入捕获总量：" + textOutput);
 
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(published.isAbsolute());
     assertTrue(Files.isRegularFile(published), "唯一的中转文件必须被发布为该路径");
     List<String> lines = Files.readAllLines(published);
@@ -201,7 +201,7 @@ class BashCapabilityTest {
     assertTrue(text.contains("Operation cancelled"), text);
     assertTrue(text.contains("not rolled back"), text);
     JsonNode process = details(result).path("process");
-    assertEquals("CANCELLED", process.path("outcome").asText());
+    assertEquals("CANCELLED", process.path("outcome").asString());
     assertTrue(process.path("exitCode").isMissingNode(), "取消不是命令退出：" + process);
     assertEquals(1, listener.completions, "重复取消仍只能有一个终态回调");
   }
@@ -227,8 +227,8 @@ class BashCapabilityTest {
     EnvironmentCapabilityResult result = listener.result;
     assertTrue(result.error(), text(result));
     JsonNode textOutput = details(result).path("textOutput");
-    assertEquals("CANCELLED", details(result).path("process").path("outcome").asText());
-    Path published = Path.of(textOutput.path("path").asText());
+    assertEquals("CANCELLED", details(result).path("process").path("outcome").asString());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(Files.isRegularFile(published), "取消也必须发布已捕获的 durable 全文");
     assertEquals(5000, Files.readAllLines(published).size());
   }
@@ -242,7 +242,7 @@ class BashCapabilityTest {
             "{\"command\":\"echo ok\",\"workdir\":" + json(workspaceRoot) + "}",
             Duration.ZERO);
     assertFalse(success.error(), text(success));
-    assertEquals("EXITED", details(success).path("process").path("outcome").asText());
+    assertEquals("EXITED", details(success).path("process").path("outcome").asString());
     assertEquals(0, details(success).path("process").path("exitCode").asInt());
     assertEquals("ok\n", text(success), "成功输出不含任何合成说明");
 
@@ -252,7 +252,7 @@ class BashCapabilityTest {
             "{\"command\":\"echo failure; exit 9\",\"workdir\":" + json(workspaceRoot) + "}",
             Duration.ZERO);
     assertTrue(nonZero.error());
-    assertEquals("EXITED", details(nonZero).path("process").path("outcome").asText());
+    assertEquals("EXITED", details(nonZero).path("process").path("outcome").asString());
     assertEquals(9, details(nonZero).path("process").path("exitCode").asInt());
     assertTrue(text(nonZero).contains("Command exited with code 9"), text(nonZero));
   }
@@ -288,7 +288,7 @@ class BashCapabilityTest {
     assertTrue(text.contains("runtime-timeout-output"), "超时收尾不得丢弃已捕获输出：" + text);
     assertTrue(text.contains("Command timed out"), text);
     assertFalse(text.contains("Operation cancelled"), "超时不得被报告成调用方取消：" + text);
-    assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asText(), text);
+    assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asString(), text);
   }
 
   /** 运行时的取消收尾必须报告为取消：原因显式传递后能力仍按取消语义产出说明。 */
@@ -315,7 +315,7 @@ class BashCapabilityTest {
     assertTrue(text.contains("runtime-cancel-output"), text);
     assertTrue(text.contains("Operation cancelled"), text);
     assertFalse(text.contains("Command timed out"), text);
-    assertEquals("CANCELLED", details(result).path("process").path("outcome").asText(), text);
+    assertEquals("CANCELLED", details(result).path("process").path("outcome").asString(), text);
   }
 
   /** 无法启动 shell 时必须 fail closed 且不留下任何中转文件：没有进程就没有可发布的输出。 */
@@ -367,7 +367,7 @@ class BashCapabilityTest {
       assertTrue(result.error());
       assertTrue(text(result).contains("Operation cancelled"), text(result));
       assertEquals(
-          "CANCELLED", details(result).path("process").path("outcome").asText(), text(result));
+          "CANCELLED", details(result).path("process").path("outcome").asString(), text(result));
       assertEquals(1, listener.completions, "启动前的收尾同样只能有一个终态回调");
       assertFalse(Files.exists(marker), "已取消的调用不得执行命令，也不得留下命令副作用");
       assertTrue(config.textOutputStore().partialFiles().isEmpty(), "不得创建中转文件");
@@ -407,7 +407,7 @@ class BashCapabilityTest {
       String text = text(result);
       assertTrue(text.contains("Command timed out"), text);
       assertFalse(text.contains("Operation cancelled"), "超时不得被报告成取消：" + text);
-      assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asText(), text);
+      assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asString(), text);
       assertFalse(Files.exists(marker), "超时收尾不得执行命令副作用");
       assertTrue(config.textOutputStore().partialFiles().isEmpty());
     } finally {
@@ -432,7 +432,7 @@ class BashCapabilityTest {
 
     assertFalse(readUntilEof.error(), "等待 EOF 的命令必须以成功退出收尾：" + text(readUntilEof));
     JsonNode process = details(readUntilEof).path("process");
-    assertEquals("EXITED", process.path("outcome").asText());
+    assertEquals("EXITED", process.path("outcome").asString());
     assertEquals(0, process.path("exitCode").asInt());
     assertEquals("", text(readUntilEof));
 
@@ -465,7 +465,7 @@ class BashCapabilityTest {
     JsonNode textOutput = details(result).path("textOutput");
     assertEquals(bytes, textOutput.path("totalBytes").asLong(), "捕获总量必须等于进程输出字节数");
     assertEquals(bytes / 2, textOutput.path("totalLines").asLong(), "每行两字节");
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertEquals(bytes, Files.size(published), "durable 全文必须与进程输出等长");
   }
 
@@ -552,7 +552,7 @@ class BashCapabilityTest {
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
     assertTrue(result.error(), text(result));
-    assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asText());
+    assertEquals("TIMED_OUT", details(result).path("process").path("outcome").asString());
     long ticksAtTermination = lineCount(marker);
     assertTrue(ticksAtTermination > 0, "超时前进程树必须已经在产出输出");
     Thread.sleep(700);
@@ -583,7 +583,7 @@ class BashCapabilityTest {
     EnvironmentCapabilityResult result = listener.result;
     assertTrue(result.error(), text(result));
     JsonNode process = details(result).path("process");
-    assertEquals("CANCELLED", process.path("outcome").asText(), text(result));
+    assertEquals("CANCELLED", process.path("outcome").asString(), text(result));
     assertTrue(process.path("exitCode").isMissingNode(), "取消不是命令退出：" + process);
     long ticksAtTermination = lineCount(marker);
     Thread.sleep(500);
@@ -699,7 +699,7 @@ class BashCapabilityTest {
     assertTrue(result.error(), text(result));
     String text = text(result);
     assertTrue(text.contains("listener exploded"), "失败原因必须随终态返回：" + text);
-    Path published = Path.of(details(result).path("textOutput").path("path").asText());
+    Path published = Path.of(details(result).path("textOutput").path("path").asString());
     assertTrue(Files.isRegularFile(published), "已捕获输出必须被发布，不能随异常丢弃");
     assertTrue(Files.size(published) > 0, "已捕获输出不得为空");
     assertEquals(List.of(), aliveAtCompletion.get(), "终态通知时整棵进程树必须已经收敛：" + tree.get());
@@ -733,7 +733,8 @@ class BashCapabilityTest {
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
     assertFalse(result.error(), text(result));
-    assertEquals("EXITED", details(result).path("process").path("outcome").asText(), text(result));
+    assertEquals(
+        "EXITED", details(result).path("process").path("outcome").asString(), text(result));
     assertEquals(0, details(result).path("process").path("exitCode").asInt());
     assertEquals(List.of(), aliveAtCompletion.get(), "自然退出后终态通知时整棵进程树必须已收敛：" + tree);
   }
@@ -780,7 +781,8 @@ class BashCapabilityTest {
             Duration.ofSeconds(30));
 
     assertTrue(result.error());
-    assertEquals("EXITED", details(result).path("process").path("outcome").asText(), text(result));
+    assertEquals(
+        "EXITED", details(result).path("process").path("outcome").asString(), text(result));
     assertEquals(42, details(result).path("process").path("exitCode").asInt());
     assertTrue(text(result).contains("trap-ran"), text(result));
     assertTrue(text(result).contains("Command exited with code 42"), text(result));
@@ -797,7 +799,7 @@ class BashCapabilityTest {
 
     assertTrue(result.error());
     assertEquals(7, details(result).path("process").path("exitCode").asInt());
-    assertEquals("EXITED", details(result).path("process").path("outcome").asText());
+    assertEquals("EXITED", details(result).path("process").path("outcome").asString());
   }
 
   /** {@code disown} 只从 shell 的作业表里摘掉作业，进程组不受影响：自然退出必须照样收敛它。 */
@@ -875,7 +877,7 @@ class BashCapabilityTest {
     EnvironmentCapabilityResult result = listener.result;
     assertTrue(result.error(), text(result));
     assertEquals(
-        "TIMED_OUT", details(result).path("process").path("outcome").asText(), text(result));
+        "TIMED_OUT", details(result).path("process").path("outcome").asString(), text(result));
     long ticksAtTermination = lineCount(marker);
     assertTrue(ticksAtTermination > 0, "超时前忽略 TERM 的后代必须已经在产出输出");
     Thread.sleep(500);

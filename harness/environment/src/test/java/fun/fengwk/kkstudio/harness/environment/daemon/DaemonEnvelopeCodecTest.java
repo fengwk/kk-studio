@@ -166,4 +166,22 @@ class DaemonEnvelopeCodecTest {
   private void assertProtocolError(String json) {
     assertThrows(DaemonProtocolException.class, () -> codec.decode(json));
   }
+
+  /** payload 中的自由 JSON number 以 BigDecimal 保留树内精度，1e309/1e-324 不得退化为 "Infinity"/0.0。 */
+  @Test
+  void preservesArbitraryPayloadNumberPrecision() {
+    DaemonEnvelope envelope =
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION,
+            DaemonMessageType.INVOKE,
+            ID,
+            "invocation",
+            "{\"big\":1e309,\"tiny\":1e-324}");
+
+    String json = codec.encode(envelope);
+
+    assertTrue(json.contains("\"big\":1E+309"));
+    assertTrue(json.contains("\"tiny\":1E-324"));
+    assertEquals("{\"big\":1E+309,\"tiny\":1E-324}", codec.decode(json).payloadJson());
+  }
 }

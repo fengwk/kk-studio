@@ -1,15 +1,16 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
-import java.util.Iterator;
 import java.util.Set;
 
 /**
@@ -21,12 +22,13 @@ import java.util.Set;
  */
 public final class DaemonEnvelopeCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // JSON number 以 BigDecimal 保留树内精度，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的 wire 失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private static final Set<String> ENVELOPE_FIELDS =
       Set.of("protocolVersion", "messageType", "environmentId", "invocationId", "payload");
@@ -45,7 +47,7 @@ public final class DaemonEnvelopeCodec {
     root.set("payload", readPayload(envelope.payloadJson()));
     try {
       return OBJECT_MAPPER.writeValueAsString(root);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("cannot encode daemon envelope", error);
     }
   }
@@ -93,11 +95,11 @@ public final class DaemonEnvelopeCodec {
   public JsonNode readJson(String json) {
     try {
       JsonNode value = OBJECT_MAPPER.readTree(json);
-      if (value == null) {
+      if (value == null || value.isMissingNode()) {
         throw new DaemonProtocolException("json must not be null");
       }
       return value;
-    } catch (JsonProcessingException | IllegalArgumentException error) {
+    } catch (JacksonException | IllegalArgumentException error) {
       throw new DaemonProtocolException("json must be valid JSON", error);
     }
   }
@@ -106,7 +108,7 @@ public final class DaemonEnvelopeCodec {
   public String writeJson(JsonNode node) {
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("cannot encode daemon payload", error);
     }
   }
@@ -124,14 +126,14 @@ public final class DaemonEnvelopeCodec {
       // WELCOME/READY/HEARTBEAT/调用消息必须携带 scope；握手前 ERROR 可空，由 record 校验。
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new DaemonProtocolException("environmentId must be a canonical UUID string");
     }
     try {
-      return EnvironmentId.parse(value.textValue());
+      return EnvironmentId.parse(value.stringValue());
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
-          "environmentId must be a canonical UUID string: " + value.textValue(), error);
+          "environmentId must be a canonical UUID string: " + value.stringValue(), error);
     }
   }
 
@@ -146,15 +148,13 @@ public final class DaemonEnvelopeCodec {
         throw new DaemonProtocolException(fieldName + " must be a JSON object");
       }
       return value;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException(fieldName + " must be valid JSON", error);
     }
   }
 
   private void rejectUnknownFields(JsonNode root) {
-    Iterator<String> fields = root.fieldNames();
-    while (fields.hasNext()) {
-      String field = fields.next();
+    for (String field : root.propertyNames()) {
       if (!ENVELOPE_FIELDS.contains(field)) {
         throw new DaemonProtocolException("envelope has unknown field: " + field);
       }
@@ -182,9 +182,9 @@ public final class DaemonEnvelopeCodec {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new DaemonProtocolException(fieldName + " must be a string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 }

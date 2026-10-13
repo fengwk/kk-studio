@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
@@ -617,11 +617,12 @@ class DaemonCapabilityResultCodecTest {
   /** 解析一条 COMPLETED payload 中第一个 resource content 的字段名集合，用于断言精确的 wire 形状。 */
   private static Set<String> resourceWireFields(String payload) {
     try {
-      JsonNode contents = new ObjectMapper().readTree(payload).path("result").path("contents");
+      JsonNode contents =
+          JsonMapper.builder().build().readTree(payload).path("result").path("contents");
       for (JsonNode content : contents) {
-        if ("resource".equals(content.path("type").asText())) {
+        if ("resource".equals(content.path("type").asString())) {
           Set<String> fields = new HashSet<>();
-          content.fieldNames().forEachRemaining(fields::add);
+          content.propertyNames().forEach(fields::add);
           return fields;
         }
       }
@@ -699,5 +700,147 @@ class DaemonCapabilityResultCodecTest {
     public ResourceRef upload(String invocationId, String mediaType, String name, byte[] bytes) {
       throw new AssertionError("uploader must not be called");
     }
+  }
+
+  /** details 与 json content 中的自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */
+  @Test
+  void preservesArbitraryJsonNumberPrecision() {
+    String payload =
+        "{\"result\":{\"callId\":\"call-num\",\"error\":false,"
+            + "\"details\":{\"big\":1e309,\"tiny\":1e-324},"
+            + "\"contents\":[{\"type\":\"json\",\"json\":{\"n\":1e309}}]}}";
+
+    EnvironmentCapabilityResult decoded = codec.decodeResult(payload);
+
+    assertEquals("{\"big\":1E+309,\"tiny\":1E-324}", decoded.detailsJson());
+    assertEquals("{\"n\":1E+309}", ((JsonResultContent) decoded.contents().get(0)).json());
+
+    String reencoded = codec.encodeCompleted(decoded, 1024, NoopUploader.INSTANCE);
+    assertTrue(reencoded.contains("\"big\":1E+309"));
+    assertTrue(reencoded.contains("\"tiny\":1E-324"));
+    assertTrue(reencoded.contains("\"n\":1E+309"));
+    assertFalse(reencoded.contains("Infinity"));
+  }
+
+  /** 共享的畸形 payload 清单：同一批原始输入必须在通用与完成态入口都被拒绝。 */
+  @Test
+  void rejectsMalformedPayloadsAcrossDecodeEntryPoints() {
+    for (String payload : malformedPayloads()) {
+      assertThrows(
+          DaemonProtocolException.class,
+          () -> codec.decodeResult(payload),
+          () -> "decodeResult must reject: " + payload);
+      assertThrows(
+          DaemonProtocolException.class,
+          () -> codec.decodeCompletedForInvocation(payload, "c", 1024),
+          () -> "decodeCompletedForInvocation must reject: " + payload);
+    }
+  }
+
+  /** 畸形 result 外壳、contents 元素与 details 预算的原始输入。 */
+  private static List<String> malformedPayloads() {
+    String sha = sha256Hex(new byte[] {0x61});
+    String uploadId = UUID.randomUUID().toString();
+    List<String> payloads = new ArrayList<>();
+    payloads.add("{}");
+    payloads.add("[]");
+    payloads.add("not-json");
+    payloads.add("{\"result\":[]}");
+    payloads.add("{\"result\":null}");
+    payloads.add("{\"result\":{\"callId\":\"c\",\"error\":false,\"contents\":[]}}");
+    payloads.add("{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":1,\"contents\":[]}}");
+    payloads.add("{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{}}}");
+    payloads.add("{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":{}}}");
+    payloads.add("{\"result\":{\"callId\":\"\",\"error\":false,\"details\":{},\"contents\":[]}}");
+    payloads.add("{\"result\":{\"callId\":\"c\",\"details\":{},\"contents\":[]}}");
+    payloads.add(
+        "{\"result\":{\"callId\":\"c\",\"error\":\"yes\",\"details\":{},\"contents\":[]}}");
+    payloads.add(contents("[null]"));
+    payloads.add(contents("[{\"type\":\"weird\"}]"));
+    payloads.add(contents("[{\"type\":\"json\"}]"));
+    payloads.add(contents("[{\"type\":\"text\"}]"));
+    payloads.add(contents("[{\"type\":\"text\",\"text\":123}]"));
+    payloads.add(contents("[{\"type\":\"text\",\"text\":\"ok\",\"extra\":1}]"));
+    payloads.add(
+        contents(
+            "[{\"type\":\"resource\",\"uploadId\":\""
+                + uploadId
+                + "\",\"mediaType\":\"text/plain\",\"name\":123,\"size\":1,\"sha256\":\""
+                + sha
+                + "\"}]"));
+    payloads.add(
+        contents(
+            "[{\"type\":\"resource\",\"uploadId\":\""
+                + uploadId
+                + "\",\"mediaType\":\"text/plain\",\"name\":null,\"size\":1.5,\"sha256\":\""
+                + sha
+                + "\"}]"));
+    payloads.add(
+        contents(
+            "[{\"type\":\"resource\",\"uploadId\":\""
+                + uploadId
+                + "\",\"mediaType\":\"text/plain\",\"name\":null,\"size\":1,\"sha256\":\""
+                + sha
+                + "\",\"preview\":123}]"));
+    payloads.add(
+        contents("[{\"type\":\"json\",\"json\":\"" + "a".repeat(1024 * 1024 + 8) + "\"}]"));
+    payloads.add(
+        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{\"k\":\""
+            + "a".repeat(1024 * 1024 + 16)
+            + "\"},\"contents\":[]}}");
+    return payloads;
+  }
+
+  private static String contents(String arrayLiteral) {
+    return "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":"
+        + arrayLiteral
+        + "}}";
+  }
+
+  /** 原始 payload 的 UTF-8/Unicode 预算在解析前生效，资源预算不能为负。 */
+  @Test
+  void rejectsPayloadBeyondUtf8BudgetInvalidUnicodeOrNegativeBudget() {
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeResult(
+                "\"" + "x".repeat(DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES + 1) + "\""));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeResult(
+                "{\"result\":{\"callId\":\"\ud800\",\"error\":false,\"details\":{},\"contents\":[]}}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeCompletedForInvocation("{}", "c", -1));
+  }
+
+  /** 编码侧失败路径：上传器未配置、抛运行时异常与抛协议异常都必须收敛为协议错误。 */
+  @Test
+  void encodeFailurePathsConvergeToProtocolError() {
+    EnvironmentCapabilityResult binary =
+        new EnvironmentCapabilityResult(
+            "c", List.of(new BinaryResultContent("text/plain", new byte[] {1})), false, "{}");
+    assertThrows(DaemonProtocolException.class, () -> codec.encodeCompleted(binary, 1024, null));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.encodeCompleted(
+                binary,
+                1024,
+                (invocationId, mediaType, name, bytes) -> {
+                  throw new IllegalStateException("boom");
+                }));
+    DaemonProtocolException protocol = new DaemonProtocolException("upload rejected");
+    DaemonProtocolException propagated =
+        assertThrows(
+            DaemonProtocolException.class,
+            () ->
+                codec.encodeCompleted(
+                    binary,
+                    1024,
+                    (invocationId, mediaType, name, bytes) -> {
+                      throw protocol;
+                    }));
+    assertEquals(protocol, propagated);
   }
 }

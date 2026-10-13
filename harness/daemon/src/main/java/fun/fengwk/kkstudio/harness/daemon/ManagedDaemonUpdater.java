@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
@@ -101,7 +102,7 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
   private final Path dataDir;
   private final ArtifactFetcher fetcher;
   private final ConfigPreflight preflight;
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper = JsonMapper.builder().build();
 
   public ManagedDaemonUpdater(Path dataDir) {
     this(dataDir, new HttpArtifactFetcher(), new ProcessConfigPreflight());
@@ -218,7 +219,7 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
 
   private static String text(JsonNode root, String field) {
     JsonNode value = root == null ? null : root.get(field);
-    return value != null && value.isTextual() ? value.textValue() : null;
+    return value != null && value.isString() ? value.stringValue() : null;
   }
 
   private void extractUpdateScript(Path updateScript) throws IOException {

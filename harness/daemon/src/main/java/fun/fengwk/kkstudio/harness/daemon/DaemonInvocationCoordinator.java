@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
@@ -342,7 +342,7 @@ final class DaemonInvocationCoordinator {
     try {
       JsonNode payload = envelopeCodec.readJson(payloadJson);
       JsonNode value = payload.isObject() ? payload.get(field) : null;
-      return value == null || !value.isTextual() ? "" : value.textValue();
+      return value == null || !value.isString() ? "" : value.stringValue();
     } catch (RuntimeException error) {
       // 运行时自己的终态正文必定可解析；解析失败时退化为只携带能力文本，绝不因此丢终态。
       return "";
