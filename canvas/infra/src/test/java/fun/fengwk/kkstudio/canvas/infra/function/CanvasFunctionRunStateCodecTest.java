@@ -1,11 +1,17 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -294,6 +300,68 @@ class CanvasFunctionRunStateCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(deepArgs, definition));
 
     assertThrows(IllegalArgumentException.class, () -> codec.functionName("{"));
+  }
+
+  /**
+   * 高精度与极值数字 args 必须在 encode/decode 与 checkpoint 后保持 Core 的 BigDecimal 语义：不因 double 化而丢精度、 下溢或变成
+   * Infinity，长整数也不退化成 double。
+   */
+  @Test
+  void preservesBigDecimalArgsAcrossEncodeDecodeAndCheckpoint() {
+    JsonObject args =
+        CanvasJson.parseObject(
+            """
+            {
+              "precise": 1.23456789012345678901234567890123456789,
+              "hugeFraction": 1e309,
+              "tiny": 1e-324,
+              "hugeInteger": 1e10000,
+              "negativeScale": 1e-10000
+            }
+            """);
+    CanvasFunctionFrozenRun bigDecimalRun =
+        new CanvasFunctionFrozenRun(
+            run.canvasId(),
+            run.nodeId(),
+            run.nodeName(),
+            run.requestId(),
+            run.definition(),
+            args,
+            run.manifest(),
+            run.outputs(),
+            run.submitState(),
+            run.stage(),
+            run.adapterState());
+
+    String state = codec.encode(bigDecimalRun);
+    // 线文本保持完整精度：高精度小数逐位保留，10001 位整数既未被截断也未被 double 吞掉。
+    assertTrue(state.contains("1.23456789012345678901234567890123456789"));
+    assertTrue(state.contains("1" + "0".repeat(10000)));
+    assertFalse(state.contains("Infinity"));
+    assertFalse(state.contains("NaN"));
+
+    // decode 与 checkpoint 必须还原完全相等的 Core args（BigDecimal 值语义），而不是被改写的近似值。
+    assertEquals(args, codec.decode(state, definition).args());
+    assertEquals(args, codec.checkpoint(bigDecimalRun, "POLLING", Map.of()).args());
+
+    // state.plan.args 的数值节点必须仍是 BigDecimal/BigInteger，而不是 DoubleNode。
+    JsonNode argsNode = ((ObjectNode) profileMapper().readTree(state)).get("plan").get("args");
+    assertTrue(argsNode.get("precise").isBigDecimal());
+    assertTrue(argsNode.get("hugeFraction").isBigInteger());
+    assertTrue(argsNode.get("tiny").isBigDecimal());
+    assertTrue(argsNode.get("hugeInteger").isBigInteger());
+    assertTrue(argsNode.get("negativeScale").isBigDecimal());
+  }
+
+  /** 与生产 codec 相同的数字读取 profile：BigDecimal 浮点并把 number 预算对齐 CanvasJson。 */
+  private static ObjectMapper profileMapper() {
+    return JsonMapper.builder(
+            JsonFactory.builder()
+                .streamReadConstraints(
+                    StreamReadConstraints.builder().maxNumberLength(CanvasJson.MAX_LENGTH).build())
+                .build())
+        .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        .build();
   }
 
   private ObjectNode encodedRoot() {
