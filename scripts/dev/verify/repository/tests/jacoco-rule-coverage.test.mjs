@@ -362,7 +362,7 @@ test('BUNDLE rule must match the module bundle name', () => {
 })
 
 test('BUNDLE rule with a package pattern is rejected instead of silently skipped', () => {
-  // 反向：BUNDLE 只匹配 bundle 名，包模式（如 project 曾经的 ...domain.*）必须被拒绝。
+  // 反向：BUNDLE 只匹配 bundle 名，因此包模式 include 必须被拒绝。
   withFixture({ rulesXml: ruleOf('BUNDLE', 'demo.*') }, (root) => {
     const { violations } = analyzeJacocoRules(root)
     assert.equal(violations.length, 1)
