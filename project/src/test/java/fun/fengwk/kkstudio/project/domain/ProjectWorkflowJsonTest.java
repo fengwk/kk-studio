@@ -90,6 +90,7 @@ class ProjectWorkflowJsonTest {
     assertThrows(NullPointerException.class, () -> codec.decode(null));
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(IllegalArgumentException.class, () -> codec.decode(""));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("   "));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("null"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("{"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
