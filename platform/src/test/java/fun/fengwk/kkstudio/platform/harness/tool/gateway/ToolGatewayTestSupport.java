@@ -4,8 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
@@ -319,7 +317,7 @@ final class ToolGatewayTestSupport {
         catalog,
         DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
-        new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+        new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
         store,
@@ -342,7 +340,7 @@ final class ToolGatewayTestSupport {
         catalog,
         DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
-        new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+        new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
         store,

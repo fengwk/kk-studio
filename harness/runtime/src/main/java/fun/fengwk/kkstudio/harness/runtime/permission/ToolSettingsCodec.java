@@ -1,24 +1,20 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /** Tool settings 规范 JSON 编解码器，解析并校验严格的 permission 规则。 */
 public final class ToolSettingsCodec {
-  private final ObjectMapper objectMapper;
-
-  public ToolSettingsCodec(ObjectMapper objectMapper) {
-    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-  }
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   public ToolSettings decode(String settingsJson) {
     ObjectNode root = readRoot(settingsJson);
@@ -30,24 +26,17 @@ public final class ToolSettingsCodec {
     ObjectNode root = readRoot(settingsJson);
     ToolSettings settings = new ToolSettings(decodePermission(root.get("permission")));
     root.set("permission", encodePermission(settings.permission()));
-    try {
-      return objectMapper.writeValueAsString(root);
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("cannot encode tool settings", error);
-    }
+    return JsonValues.write(root);
   }
 
-  private ObjectNode readRoot(String settingsJson) {
+  /** null 或空白输入规范化为 {@code {}}，其余输入必须是严格 JSON object：未知设置原样保留，不认识的数值既不丢失也不改写。 */
+  private static ObjectNode readRoot(String settingsJson) {
     String input = settingsJson == null || settingsJson.isBlank() ? "{}" : settingsJson;
-    try {
-      JsonNode node = objectMapper.readTree(input);
-      if (!(node instanceof ObjectNode object)) {
-        throw new IllegalArgumentException("settingsJson must be a JSON object");
-      }
-      return object.deepCopy();
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("settingsJson must be valid JSON", error);
+    JsonNode node = JsonValues.readTree(input);
+    if (!(node instanceof ObjectNode object)) {
+      throw new IllegalArgumentException("settingsJson must be a JSON object");
     }
+    return object;
   }
 
   private Map<String, List<PermissionRule>> decodePermission(JsonNode permissionNode) {
@@ -87,8 +76,8 @@ public final class ToolSettingsCodec {
     return List.copyOf(rules);
   }
 
-  private ObjectNode encodePermission(Map<String, List<PermissionRule>> permission) {
-    ObjectNode result = objectMapper.createObjectNode();
+  private static ObjectNode encodePermission(Map<String, List<PermissionRule>> permission) {
+    ObjectNode result = NODES.objectNode();
     permission.forEach(
         (key, rules) -> {
           ArrayNode array = result.putArray(key);
