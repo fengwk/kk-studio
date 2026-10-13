@@ -6,7 +6,6 @@ import type {
   ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import {
   buildThreadEventTimeline,
   eventStatusText,
@@ -63,12 +62,7 @@ function modelInvocation(status: string, attempt: number, overrides: Partial<Mod
   }
 }
 
-function attemptFailure(
-  overrides: Omit<Partial<ModelAttemptFailureDTO>, 'failedAt' | 'retryAt'> & {
-    failedAt?: InstantTimestamp | number[]
-    retryAt?: InstantTimestamp | number[]
-  } = {},
-): ModelAttemptFailureDTO {
+function attemptFailure(overrides: Partial<ModelAttemptFailureDTO> = {}): ModelAttemptFailureDTO {
   return {
     modelInvocationId: 'model-1',
     turnStartEntryId: 'turn-1',
@@ -82,7 +76,7 @@ function attemptFailure(
     failedAt: '2026-07-28T10:00:00Z',
     retryAt: '2026-07-28T10:00:05Z',
     ...overrides,
-  } as ModelAttemptFailureDTO
+  }
 }
 
 function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
@@ -767,17 +761,21 @@ describe('buildThreadEventTimeline', () => {
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
     ]
+    // 数组不属于当前 Instant wire 契约；仅在运行时边界注入以验证旧数据容错。
+    const legacyFailure = attemptFailure({ attempt: 2, sequence: '7' })
+    Reflect.set(legacyFailure, 'failedAt', [2026, 7, 28, 10, 0, 0])
+    Reflect.set(legacyFailure, 'retryAt', [2026, 7, 28])
     const failures = [
       // 数字时间戳（epoch millis）：走得比字符串/数组都小（L745 数字分支）。
       attemptFailure({ attempt: 2, sequence: '5', failedAt: 1, retryAt: 2 }),
       // 字符串时间戳：数值上排在数字之后。
       attemptFailure({ attempt: 2, sequence: '6', failedAt: '2026-07-28T10:00:00Z' }),
       // 数组时间戳（[y,m,d,...]）：按数组首元素数值参与比较（L751-753）。
-      attemptFailure({ attempt: 2, sequence: '7', failedAt: [2026, 7, 28, 10, 0, 0], retryAt: [2026, 7, 28] }),
+      legacyFailure,
       // 无法解析的字符串：按 0 参与比较，始终排最前（L754 fallback）。
       attemptFailure({ attempt: 2, sequence: '8', failedAt: 'not-a-date' }),
       // null 时间戳：同样按 0 处理（L754 fallback），与无法解析的字符串并列。
-      attemptFailure({ attempt: 2, sequence: '9', failedAt: null as never, retryAt: null as never }),
+      attemptFailure({ attempt: 2, sequence: '9', failedAt: null, retryAt: null }),
     ]
     const events = build(entries, {
       modelAttemptFailures: failures,

@@ -48,9 +48,10 @@ describe('ASSISTANT_ABORTED entry projection', () => {
       status: 'done',
       aborted: true,
     })
-    if (msg.role === 'assistant') {
-      expect(msg.thinking).toBe('thinking')
+    if (msg.role !== 'assistant') {
+      throw new Error('Expected assistant message')
     }
+    expect(msg.thinking).toBe('thinking')
   })
 
   it('renders aborted assistant thinking-only content', () => {
@@ -59,8 +60,9 @@ describe('ASSISTANT_ABORTED entry projection', () => {
     expect(messages).toHaveLength(1)
     const msg = messages[0]
     expect(msg).toMatchObject({ text: '', aborted: true })
-    if (msg.role === 'assistant') {
-      expect(msg.thinking).toBe('reasoning')
+    if (msg.role !== 'assistant') {
+      throw new Error('Expected assistant message')
     }
+    expect(msg.thinking).toBe('reasoning')
   })
 })
