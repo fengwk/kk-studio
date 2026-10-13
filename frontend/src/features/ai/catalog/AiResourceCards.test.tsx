@@ -50,7 +50,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     config: {
       inheritParentEnvironment: true,
       tools: ['read', 'bash', 'grep'],
-      skills: ['dev'],
+      skills: [{ packageName: 'default', name: 'dev' }],
       subagents: ['writer'],
     },
     version: '1',
@@ -233,10 +233,13 @@ describe('AI resource cards', () => {
     expect(screen.getByText('prompt')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除 assistant' })).toBeDisabled()
 
+    // 在运行时边界注入非法 providerName，验证回退展示。
+    const orphanedModel = model()
+    Reflect.set(orphanedModel, 'providerName', null)
     rerender(
       <AgentResourceCard
         agent={agent({ description: null, systemPrompt: null })}
-        models={[model({ providerName: null })]}
+        models={[orphanedModel]}
         onEdit={() => undefined}
         onDelete={() => undefined}
         deletePending={false}
@@ -262,19 +265,21 @@ describe('AI resource cards', () => {
     expect(screen.getAllByText('quality')).toHaveLength(2)
     expect(screen.getByText('+1')).toBeInTheDocument()
 
+    const orphanedModel = model({
+      description: null,
+      config: {
+        ...model().config,
+        limit: { context: 0, output: 0 },
+        abilities: { tools: false, reasoning: false, inputModalities: [] },
+        defaultVariant: '',
+        variants: [],
+      },
+    })
+    // 在运行时边界注入非法 providerName，验证空值展示。
+    Reflect.set(orphanedModel, 'providerName', null)
     rerender(
       <ModelResourceCard
-        model={model({
-          providerName: null,
-          description: null,
-          config: {
-            ...model().config,
-            limit: { context: 0, output: 0 },
-            abilities: { tools: false, reasoning: false, inputModalities: [] },
-            defaultVariant: '',
-            variants: [],
-          },
-        })}
+        model={orphanedModel}
         onEdit={() => undefined}
         onDelete={() => undefined}
         deletePending={false}

@@ -80,7 +80,7 @@ function snapshot(overrides: Partial<CanvasSnapshot> = {}): CanvasSnapshot {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: '0',
+      revision: '0',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },

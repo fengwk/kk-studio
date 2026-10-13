@@ -46,6 +46,7 @@ function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
   return {
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
+    modelId: 'minimax-m2.7',
     description: null,
     config: modelConfig(),
     version: '1',
@@ -55,9 +56,8 @@ function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
   }
 }
 
-function provider(id: string, name: string): AgentProviderDTO {
+function provider(name: string): AgentProviderDTO {
   return {
-    id,
     name,
     description: null,
     providerType: 'openai',
@@ -190,7 +190,7 @@ describe('ai-draft-normalizers', () => {
   /** 新建模式下的 provider 标准化在现有草稿的 provider 匹配时予以保留。 */
   it('preserves a valid existing provider on the draft', () => {
     const draft = { ...emptyModelDraft(), providerName: 'minimax' }
-    const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
+    const providers = [provider('minimax'), provider('anthropic')]
     const result = normalizeCreateModelDraftProvider(draft, providers)
     expect(result).toBe(draft)
   })
@@ -198,7 +198,7 @@ describe('ai-draft-normalizers', () => {
   /** 新建模式可回退到首选名称，再回退到 providers[0]。 */
   it('falls back to preferred provider name, then to first provider', () => {
     const draft = { ...emptyModelDraft(), providerName: '' }
-    const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
+    const providers = [provider('minimax'), provider('anthropic')]
 
     const withPreferred = normalizeCreateModelDraftProvider(draft, providers, 'anthropic')
     expect(withPreferred.providerName).toBe('anthropic')

@@ -384,13 +384,13 @@ describe('ai-model-draft-codec', () => {
     expect(extractDefaultVariantFromModel(undefined)).toBe('')
   })
 
-  /** 不完整的 wire model 不得让列表/过滤投影崩溃。 */
+  /** 缺失 config 的不可信模型输入不得让投影崩溃。 */
   it('tolerates models whose structured config is missing', () => {
-    const incomplete = { id: '1', name: 'broken' } as AgentModelDTO
-    expect(extractVariantIdsFromModel(incomplete)).toEqual([])
-    expect(extractDefaultVariantFromModel(incomplete)).toBe('')
-    expect(extractContextWindow(incomplete)).toBeUndefined()
-    expect(extractMaxOutputTokens(incomplete)).toBeUndefined()
+    const incomplete = { name: 'broken', providerName: 'broken' }
+    expect(Reflect.apply(extractVariantIdsFromModel, undefined, [incomplete])).toEqual([])
+    expect(Reflect.apply(extractDefaultVariantFromModel, undefined, [incomplete])).toBe('')
+    expect(Reflect.apply(extractContextWindow, undefined, [incomplete])).toBeUndefined()
+    expect(Reflect.apply(extractMaxOutputTokens, undefined, [incomplete])).toBeUndefined()
   })
 
   /** emptyModelDraft 在未提供 model 或 provider 时，保留空的 providerName 且仅 TEXT。 */

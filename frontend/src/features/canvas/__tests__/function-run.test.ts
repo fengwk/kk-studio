@@ -10,9 +10,11 @@ import {
   patchSnapshotRun,
   savePendingFunctionRun,
   useCanvasFunctionRun,
+  type PendingFunctionRunAttempt,
 } from '@/features/canvas/function-run'
 import type {
   CanvasFunctionRunDTO,
+  CanvasFunctionRunRequestDTO,
   CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -32,7 +34,7 @@ function snapshot(run: CanvasFunctionRunDTO | null): CanvasSnapshotDTO {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: '4',
+      revision: '4',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
@@ -71,7 +73,7 @@ describe('patchSnapshotRun basis-CAS', () => {
     const next = patchSnapshotRun(snapshot(null), run(REQUEST_B, 'RUNNING', 'QUEUED'), null)
 
     expect(next?.nodes[0]?.run).toEqual(run(REQUEST_B, 'RUNNING', 'QUEUED'))
-    expect(next?.document.version).toBe('4')
+    expect(next?.document.revision).toBe('4')
   })
 
   it('replaces a terminal run A with a fresh start B response (basis was A)', () => {
@@ -242,7 +244,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('未知错误/网络中断重试：重试必须采用原冻结 requestId 与 requestDTO，绝不生成新 key', async () => {
     cleanupTestStorage()
-    const calls: studioService.CanvasFunctionRunRequestDTO[] = []
+    const calls: CanvasFunctionRunRequestDTO[] = []
 
     vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
       calls.push(req)
@@ -317,11 +319,11 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('并发连点防御：同一节点并发 start 请求互斥锁生效', async () => {
     cleanupTestStorage()
-    let resolveFirst: ((val: CanvasFunctionRunDTO) => void) | null = null
+    let resolveFirst!: (val: CanvasFunctionRunDTO) => void
     const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
     startSpy.mockReset()
     startSpy.mockImplementation(() => (
-      new Promise((res) => {
+      new Promise<CanvasFunctionRunDTO>((res) => {
         resolveFirst = res
       })
     ))
@@ -573,7 +575,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     const basisB = crypto.randomUUID() as UUIDString
     const timeA = 1000000
 
-    const initialAttempt: studioService.PendingFunctionRunAttempt = {
+    const initialAttempt: PendingFunctionRunAttempt = {
       canvasId,
       nodeId,
       request: { requestId: reqA },

@@ -96,8 +96,12 @@ function localIdOf(file: File, sequence = 0): string {
   return `${file.name}:${file.lastModified}:${file.size}:${sequence}`
 }
 
-function resourceNodeCommands(executeCommands: ReturnType<typeof vi.fn>): CanvasCommandDTO[] {
-  return executeCommands.mock.calls.map(([commands]) => commands[0] as CanvasCommandDTO)
+function resourceNodeCommands(
+  executeCommands: ReturnType<typeof createHarness>['executeCommands'],
+): Extract<CanvasCommandDTO, { type: 'CREATE_NODE' }>[] {
+  return executeCommands.mock.calls
+    .map(([commands]) => commands[0])
+    .filter((cmd): cmd is Extract<CanvasCommandDTO, { type: 'CREATE_NODE' }> => cmd?.type === 'CREATE_NODE')
 }
 
 describe('useCanvasUploadPipeline', () => {
