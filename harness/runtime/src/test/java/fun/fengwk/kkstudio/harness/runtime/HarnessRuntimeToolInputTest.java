@@ -30,9 +30,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
@@ -440,7 +440,7 @@ class HarnessRuntimeToolInputTest {
                 .transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow())
                 .result()
                 .detailsJson());
-    assertEquals("fast", details.get("answers").get(0).get(0).textValue());
+    assertEquals("fast", details.get("answers").get(0).get(0).stringValue());
     assertNotEquals(0, details.get("answers").size());
   }
 

@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.realtime;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -44,7 +46,14 @@ import java.util.UUID;
  */
 public final class RealtimeEventJsonCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // 自由 JSON number 以 BigDecimal 读回，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的精度/类型失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> TOOL_EVENT_FIELDS =
@@ -82,11 +91,6 @@ public final class RealtimeEventJsonCodec {
   private static final String THINKING_DELTA = "THINKING_DELTA";
   private static final String TOOL_CALL_DELTA = "TOOL_CALL_DELTA";
 
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
-
   public RealtimeEventJsonCodec() {}
 
   /** 把 {@link RealtimeEvent} 编码为 canonical JSON 文本。 */
@@ -113,7 +117,7 @@ public final class RealtimeEventJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed realtime event JSON", error);
     }
     return decodeNode(root);
@@ -236,10 +240,10 @@ public final class RealtimeEventJsonCodec {
 
   private static ProviderStreamEvent decodePayload(ObjectNode node) {
     JsonNode kindNode = node.get("kind");
-    if (kindNode == null || !kindNode.isTextual()) {
+    if (kindNode == null || !kindNode.isString()) {
       throw new IllegalArgumentException("realtimeEvent.payload.kind must be text");
     }
-    String kind = kindNode.textValue();
+    String kind = kindNode.stringValue();
     return switch (kind) {
       case TEXT_DELTA -> {
         requireExactFields(node, TEXT_PAYLOAD_FIELDS, "realtimeEvent.payload");
@@ -272,7 +276,7 @@ public final class RealtimeEventJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode realtime event JSON", error);
     }
   }
@@ -286,29 +290,29 @@ public final class RealtimeEventJsonCodec {
 
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String decodeNullableText(JsonNode value, String field, String context) {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static UUID requiredCanonicalUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string");
     }
-    String text = value.textValue();
+    String text = value.stringValue();
     UUID uuid;
     try {
       uuid = UUID.fromString(text);
@@ -378,7 +382,7 @@ public final class RealtimeEventJsonCodec {
 
   private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
     Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.fieldNames();
+    Iterator<String> names = node.propertyNames().iterator();
     while (names.hasNext()) {
       actual.add(names.next());
     }

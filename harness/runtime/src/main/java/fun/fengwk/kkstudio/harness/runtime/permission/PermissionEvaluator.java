@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Objects;
@@ -33,7 +33,7 @@ public final class PermissionEvaluator {
   public Evaluation evaluate(PermissionEvaluationContext context) {
     JsonNode input = readArguments(context.argumentsJson());
     PermissionAction action;
-    if (input.path("command").isTextual()) {
+    if (input.path("command").isString()) {
       action = evaluateBash(input.path("command").asText(), context.settings(), context.toolName());
     } else if (isAbsolutePathTarget(input.path("path"))) {
       PathTarget target = describePathTarget(input.path("path").asText());
@@ -51,7 +51,7 @@ public final class PermissionEvaluator {
 
   /** 只有绝对 {@code path} 才是文件系统路径目标；URI scheme 与相对文本一律不作为 path 坐标。 */
   private static boolean isAbsolutePathTarget(JsonNode pathNode) {
-    return pathNode.isTextual()
+    return pathNode.isString()
         && !pathNode.asText().trim().isEmpty()
         && LexicalTargetPath.isAbsolute(pathNode.asText());
   }
@@ -66,7 +66,7 @@ public final class PermissionEvaluator {
   }
 
   List<String> describeCandidates(JsonNode input) {
-    if (input.path("command").isTextual()) {
+    if (input.path("command").isString()) {
       String command = input.path("command").asText().trim();
       return List.of(command.isEmpty() ? "<missing-command>" : command);
     }
@@ -133,7 +133,7 @@ public final class PermissionEvaluator {
     String workdir;
     if (workdirNode == null || workdirNode.isNull()) {
       workdir = null;
-    } else if (!workdirNode.isTextual() || workdirNode.asText().trim().isEmpty()) {
+    } else if (!workdirNode.isString() || workdirNode.asText().trim().isEmpty()) {
       workdir = "<invalid-workdir>";
     } else {
       workdir = singleLine(workdirNode.asText());
@@ -145,7 +145,7 @@ public final class PermissionEvaluator {
   private String writeArguments(JsonNode input) {
     try {
       return objectMapper.writeValueAsString(input);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException(
           "cannot encode tool arguments for permission preview", error);
     }
@@ -158,7 +158,7 @@ public final class PermissionEvaluator {
         throw new IllegalArgumentException("tool arguments must be a JSON object");
       }
       return node;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("tool arguments must be valid JSON", error);
     }
   }

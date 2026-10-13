@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate;
 import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplateLoader;
@@ -34,7 +35,7 @@ public final class CompactionPrompts {
 
   private static final String ROOT = "fun/fengwk/kkstudio/harness/runtime/compaction/prompts/";
   private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   /** 序列化 Tool result 的字符上限。 */
   static final int TOOL_RESULT_MAX_CHARS = 2_000;
@@ -148,7 +149,7 @@ public final class CompactionPrompts {
     JsonNode node;
     try {
       node = MAPPER.readTree(call.argumentsJson());
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       node = null;
     }
     if (node != null && node.isObject()) {

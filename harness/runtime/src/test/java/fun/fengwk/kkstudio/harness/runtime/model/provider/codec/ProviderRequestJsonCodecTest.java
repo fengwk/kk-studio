@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -208,7 +208,7 @@ class ProviderRequestJsonCodecTest {
         root -> model(root).remove("modelName"),
         root -> model(root).put("tools", "true"));
     assertStrictLayer(
-        root -> model(root).set("inputModalities", NODES.textNode("TEXT")),
+        root -> model(root).set("inputModalities", NODES.stringNode("TEXT")),
         root -> model(root).remove("inputModalities"),
         root -> ((ArrayNode) model(root).path("inputModalities")).add(1));
     assertStrictLayer(
@@ -239,7 +239,7 @@ class ProviderRequestJsonCodecTest {
             "frequencyPenalty",
             "presencePenalty",
             "stopSequences")) {
-      assertRejected(root -> variant(root).put(removed, NODES.textNode("legacy")));
+      assertRejected(root -> variant(root).set(removed, NODES.stringNode("legacy")));
     }
     assertStrictLayer(
         root -> cacheControl(root).put("extra", true),
@@ -275,7 +275,7 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> cacheControl(root).put("key", true));
     assertRejected(
         root ->
-            ((ArrayNode) model(root).path("inputModalities")).set(0, NODES.textNode("FOREVER")));
+            ((ArrayNode) model(root).path("inputModalities")).set(0, NODES.stringNode("FOREVER")));
     assertRejected(root -> content(root, 0, 0).put("type", "markdown"));
     assertRejected(root -> content(root, 0, 0).remove("type"));
   }
@@ -558,7 +558,7 @@ class ProviderRequestJsonCodecTest {
   private static ObjectNode canonicalNode() {
     try {
       return (ObjectNode) OBJECT_MAPPER.readTree(readResource(CANONICAL_RESOURCE));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("invalid canonical provider request fixture", exception);
     }
   }
@@ -574,7 +574,7 @@ class ProviderRequestJsonCodecTest {
   }
 
   private static List<String> textValues(ArrayNode array) {
-    return array.valueStream().map(node -> node.textValue()).toList();
+    return array.valueStream().map(node -> node.stringValue()).toList();
   }
 
   private static ObjectNode model(ObjectNode root) {
@@ -607,5 +607,22 @@ class ProviderRequestJsonCodecTest {
 
   private static ObjectNode toolResult(ObjectNode root) {
     return content(root, 2, 0);
+  }
+
+  /** 自由 JSON 字段（argumentsJson/detailsJson/inputSchemaJson）按原始文本搬运，不经过 double。 */
+  @Test
+  void preservesRawFreeFormJsonNumberTextWithoutDoubleCoercion() {
+    ObjectNode root = canonicalNode();
+    toolCall(root).put("argumentsJson", "{\"big\":1e309,\"tiny\":1e-324}");
+    toolResult(root).put("detailsJson", "{\"big\":1e309,\"tiny\":1e-324}");
+    toolDefinition(root).put("inputSchemaJson", "{\"big\":1e309}");
+
+    ProviderRequest decoded = codec.decodeNode(root);
+    String encoded = codec.encode(decoded);
+
+    assertTrue(encoded.contains("1e309"), encoded);
+    assertTrue(encoded.contains("1e-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(encoded, codec.encode(codec.decode(encoded)));
   }
 }

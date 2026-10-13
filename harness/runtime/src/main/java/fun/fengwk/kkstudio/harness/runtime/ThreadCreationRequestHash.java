@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
@@ -31,7 +32,7 @@ import java.util.UUID;
  */
 public final class ThreadCreationRequestHash {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private ThreadCreationRequestHash() {}
@@ -124,7 +125,7 @@ public final class ThreadCreationRequestHash {
     String canonical = new HistoryEntryPayloadJsonCodec().encode(root);
     try {
       return MAPPER.readTree(canonical);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot parse canonical root payload", error);
     }
   }

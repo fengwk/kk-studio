@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.input;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
@@ -102,10 +102,10 @@ public final class HumanInputJsonCodec {
   }
 
   private static String requireText(JsonNode value, String context) {
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(context + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String requireNullableText(JsonNode value, String context) {
@@ -129,7 +129,7 @@ public final class HumanInputJsonCodec {
   private static void requireFields(
       ObjectNode node, Set<String> allowed, Set<String> required, String context) {
     Set<String> names = new LinkedHashSet<>();
-    node.fieldNames().forEachRemaining(names::add);
+    node.propertyNames().forEach(names::add);
     for (String name : names) {
       if (!allowed.contains(name)) {
         throw new IllegalArgumentException(context + " must not declare " + name);

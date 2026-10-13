@@ -2,7 +2,7 @@
 
 `harness-infra` 将 Runtime 的 Entry、命令、Invocation 与 Work 端口适配到 PostgreSQL。行锁协调写入，lease token/deadline 限定执行所有权，Work 行支持重启后的认领恢复；LISTEN/NOTIFY 降低发现延迟。
 
-模块把 Runtime 的强类型事务原语、Realtime 端口与 `ResourceStore` 端口适配到 PostgreSQL、PostgreSQL 通知通道与本地文件系统；生产依赖为 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC 与 PostgreSQL driver，测试通过 Flyway 与 Testcontainers 起真实数据库。边界见 [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)，表结构统一由 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 管理。
+模块把 Runtime 的强类型事务原语、Realtime 端口与 `ResourceStore` 端口适配到 PostgreSQL、PostgreSQL 通知通道与本地文件系统；生产依赖为 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Jackson 3（`tools.jackson`，经 `harness-runtime` 传递）、Spring JDBC 与 PostgreSQL driver，测试通过 Flyway 与 Testcontainers 起真实数据库。边界见 [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)，表结构统一由 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 管理。
 
 多节点部署中的 App 实例互为对等体，只通过同一 PostgreSQL 里的持久化状态、行锁、租约与 NOTIFY 协调；进程内没有任何跨节点共享的内存协调器。
 
@@ -113,7 +113,7 @@ NOTIFY RESYNC    = 提示重读快照
 
 [`PostgresqlRealtimeEventSink`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSink.java) 向 `harness_realtime` 通道投递实时事件：单条 `append` 用参数化 `pg_notify` 发送编码后的 canonical envelope，UTF-8 载荷超过 `7900` 字节时只把这一个事件降级为紧凑 RESYNC 并把原因记为 `EVENT_TOO_LARGE`。批量 `appendAll` 把已提交批次压缩为「每分块一次往返」，分块同时受 `256` 个事件与 `256KiB` 编码载荷双重上界约束，用 `select pg_notify(?, payload) from unnest(?::text[]) with ordinality ... order by ord` 按输入顺序发出，因此投递顺序与逐条 `append` 完全一致、SQL 往返数等于分块数而不是事件数；每个事件仍各自独立降级。JDBC `Array` 在成功与异常路径都必须释放，数据库异常直接向上传播，由 Runtime 既有的实时事件边界隔离。
 
-[`RealtimeNotificationCodec`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodec.java) 是唯一的编解码入口，对字段集合、重复字段、尾随字符与 JSON 形状做确定性严格校验。[`PostgresqlRealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSource.java) 实现 [`RealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/RealtimeEventSource.java)：可靠的长连接与 `LISTEN` 由全应用共享的通知循环维护，收到的载荷经 `onNotification` 投递、重连成功后经 `onResync` 触发同步；合法 EVENT 按所属 Thread 精确分发给本地订阅方，畸变、未知消息与重连一律触发全部订阅方重读快照。并发由全局生命周期锁、Source 级完成围栏与 Subscriber 级独立围栏三层保证，关闭后不再产生任何回调，用户业务回调始终在全局锁之外执行。
+[`RealtimeNotificationCodec`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodec.java) 是唯一的编解码入口，用不可变 `JsonMapper`（Jackson 3）对字段集合、重复字段、尾随字符与 JSON 形状做确定性严格校验；Jackson 3 把空白输入解析为 `MissingNode`，因此空白与畸形载荷一样被拒绝。`PostgresqlHarnessRows` 的 `cancelled_inputs` 等 JSON 列复用同一严格 mapper。[`PostgresqlRealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSource.java) 实现 [`RealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/RealtimeEventSource.java)：可靠的长连接与 `LISTEN` 由全应用共享的通知循环维护，收到的载荷经 `onNotification` 投递、重连成功后经 `onResync` 触发同步；合法 EVENT 按所属 Thread 精确分发给本地订阅方，畸变、未知消息与重连一律触发全部订阅方重读快照。并发由全局生命周期锁、Source 级完成围栏与 Subscriber 级独立围栏三层保证，关闭后不再产生任何回调，用户业务回调始终在全局锁之外执行。
 
 通知的丢失、乱序或重复都不会改变最终状态：固定周期 poll、重连后的重读与租约过期重认领共同构成收敛路径。
 

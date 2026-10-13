@@ -1,10 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -43,7 +46,7 @@ public record ProviderProtocolOptions(String canonicalJson) {
     }
     try {
       return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("protocolOptions must contain JSON values only");
     }
   }
@@ -61,7 +64,7 @@ public record ProviderProtocolOptions(String canonicalJson) {
     JsonNode node;
     try {
       node = STRICT_MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("protocolOptions must be a strict JSON object");
     }
     if (!node.isObject()) {
@@ -69,7 +72,7 @@ public record ProviderProtocolOptions(String canonicalJson) {
     }
     try {
       return STRICT_MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("protocolOptions must be a strict JSON object");
     }
   }
@@ -84,10 +87,14 @@ public record ProviderProtocolOptions(String canonicalJson) {
   }
 
   private static ObjectMapper newStrictMapper() {
-    ObjectMapper mapper = new ObjectMapper();
-    mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    mapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    mapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-    return mapper;
+    return JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+        // 厂商原生数值先按 BigDecimal 读回（保留 1e309/1e-324 精度），canonical 文本再移除无语义意义的尾零。
+        .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+        // 无法映射为 JSON 的值（如无属性的任意对象）必须明确失败，而不是静默序列化为空 object。
+        .enable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
+        .build();
   }
 }

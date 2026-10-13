@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 
