@@ -115,7 +115,7 @@ class TestWindowsUpdateCleanup(unittest.TestCase):
     def test_finally_reports_then_unregisters_independently(self):
         body = finally_body()
         self.assertIn("if ($null -ne $failure) {", body)
-        self.assertIn("try {\n      Write-UpdateResult 'FAILED' $failure\n    } catch {", body)
+        self.assertIn("try {\n        Write-UpdateResult 'FAILED' $failure\n      } catch {", body)
         self.assertIn('Write-UpdateWarning "could not write the failure receipt', body)
         self.assertIn("Write-FailureDiagnostic $failure", body)
         assert_in_order(
@@ -125,6 +125,17 @@ class TestWindowsUpdateCleanup(unittest.TestCase):
             "Write-FailureDiagnostic $failure",
             "Unregister-ScheduledTask",
         )
+
+    def test_failure_report_is_guarded_by_a_cleanup_finally(self):
+        # The failure receipt and the stderr diagnostic can both throw (an unwritable receipt,
+        # an unavailable stderr). They therefore sit in one try whose finally unregisters the
+        # one-shot task, so a failing report can never skip the cleanup.
+        body = finally_body()
+        report = body.index("if ($null -ne $failure) {")
+        diagnostic = body.index("Write-FailureDiagnostic $failure")
+        self.assertIn("} finally {\n    try {\n      Unregister-ScheduledTask", body[diagnostic:],
+                      "the one-shot cleanup must run in the finally of the failure report")
+        self.assertLess(report, diagnostic)
 
     def test_one_shot_task_cleanup_never_depends_on_the_outcome(self):
         body = finally_body()

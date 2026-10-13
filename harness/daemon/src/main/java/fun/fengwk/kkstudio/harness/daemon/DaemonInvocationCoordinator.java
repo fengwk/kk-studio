@@ -155,11 +155,7 @@ final class DaemonInvocationCoordinator {
         EnvironmentCapabilityTerminationCause.CANCELLED);
   }
 
-  /**
-   * 关闭：取消全部在途调用并为其记录可重放的 CANCELLED，绝不留下无终态的本地执行。
-   *
-   * <p>单个调用的收尾失败（RuntimeException）不得中断其余调用：每个调用独立收尾、独立写 journal 终态，失败只记录异常类型；进程级 Error 仍向上传播。
-   */
+  /** 关闭：取消全部在途调用并各写可重放的 CANCELLED；单个调用收尾失败（RuntimeException）只记录类型，不中断其余调用，Error 仍向上传播。 */
   void shutdown() {
     for (DaemonRunningInvocation invocation : running.values()) {
       try {
