@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 
@@ -26,12 +27,11 @@ final class GoalProgressCodec {
   static final int SCHEMA_VERSION = 1;
 
   private static final Set<String> FIELDS = Set.of("goalId", "status", "reason", "reportedAt");
-  private static final ObjectMapper MAPPER = new ObjectMapper();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   String encode(GoalProgress progress) {
     return write(encodeNode(progress));
@@ -76,11 +76,12 @@ final class GoalProgressCodec {
     Objects.requireNonNull(json, "json");
     try {
       JsonNode value = MAPPER.readTree(json);
-      if (value == null) {
+      // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 empty。
+      if (value == null || value.isMissingNode()) {
         throw new IllegalArgumentException(context + " must not be empty");
       }
       return value;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed " + context + " JSON", error);
     }
   }
@@ -98,10 +99,10 @@ final class GoalProgressCodec {
 
   private static String requiredText(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException("goal progress." + field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static Instant instant(ObjectNode node, String field) {
@@ -116,7 +117,7 @@ final class GoalProgressCodec {
   private static String write(JsonNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode goal progress JSON", error);
     }
   }

@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.harness.infra.postgresql;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
@@ -20,15 +22,17 @@ import java.util.UUID;
 /** PostgreSQL realtime NOTIFY envelope 的严格 deterministic JSON codec。 */
 public final class RealtimeNotificationCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // 自由 JSON number 以 BigDecimal 读回，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的精度/类型失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Set<String> EVENT_FIELDS = orderedSet("kind", "event");
   private static final Set<String> RESYNC_FIELDS = orderedSet("kind", "threadId", "reason");
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private final RealtimeEventJsonCodec eventCodec;
 
@@ -65,7 +69,7 @@ public final class RealtimeNotificationCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(payload);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed realtime notification JSON", error);
     }
     ObjectNode node = requireObject(root, "notification");
@@ -111,10 +115,10 @@ public final class RealtimeNotificationCodec {
 
   private static String requiredText(ObjectNode node, String field, String path) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(path + "." + field + " must be a string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static UUID requiredCanonicalUuid(ObjectNode node, String field, String path) {
@@ -141,7 +145,7 @@ public final class RealtimeNotificationCodec {
 
   private static void requireExactFields(ObjectNode node, Set<String> expected, String objectName) {
     Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.fieldNames();
+    Iterator<String> names = node.propertyNames().iterator();
     names.forEachRemaining(actual::add);
     if (!actual.equals(expected)) {
       throw new IllegalArgumentException(
@@ -156,7 +160,7 @@ public final class RealtimeNotificationCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("cannot encode realtime notification JSON", error);
     }
   }

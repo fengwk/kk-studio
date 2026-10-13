@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
@@ -26,13 +28,15 @@ import java.util.UUID;
  */
 public final class ProviderReplayStateJsonCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // 自由 JSON number 以 BigDecimal 读回，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的精度/类型失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> ROOT_FIELDS = orderedSet("format", "affinity", "payload");
   private static final Set<String> AFFINITY_FIELDS =
@@ -110,11 +114,12 @@ public final class ProviderReplayStateJsonCodec {
   private static JsonNode parse(String json) {
     try {
       JsonNode node = OBJECT_MAPPER.readTree(json);
-      if (node == null) {
+      // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 empty document。
+      if (node == null || node.isMissingNode()) {
         throw new IllegalArgumentException("empty JSON document");
       }
       return node;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed provider replay state JSON");
     }
   }
@@ -122,7 +127,7 @@ public final class ProviderReplayStateJsonCodec {
   private static String write(JsonNode node) {
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode provider replay state JSON");
     }
   }
@@ -136,10 +141,10 @@ public final class ProviderReplayStateJsonCodec {
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static void requireFields(ObjectNode node, Set<String> expected, String context) {

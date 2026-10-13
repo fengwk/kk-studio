@@ -561,4 +561,47 @@ class AgentMessageJsonCodecTest {
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"contents\":{},"
                     + "\"error\":false,\"detailsJson\":\"{}\"}]}"));
   }
+
+  /** json content 是自由 JSON 文本，按原始文本搬运：1e309/1e-324 不得经过 double 归一化。 */
+  @Test
+  void preservesJsonContentRawNumberTextWithoutDoubleCoercion() {
+    AgentMessage message =
+        new AgentMessage(
+            AgentMessageRole.USER,
+            List.of(new JsonMessageContent("{\"big\":1e309,\"tiny\":1e-324}")));
+
+    String encoded = codec.encode(message);
+
+    assertTrue(encoded.contains("1e309"), encoded);
+    assertTrue(encoded.contains("1e-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(message, codec.decode(encoded));
+  }
+
+  /**
+   * 测试意图：raw JSON 内容必须是单一严格 JSON 值，缺失文档（空白 / 纯空白）必须在 codec 边界被拒绝；Jackson 3 的 MissingNode 与 Jackson
+   * 2 的 null 一样视为缺失，绝不能被当作合法 JSON 值接受。
+   */
+  @Test
+  void rejectsBlankRawJsonDocumentsAtCodecBoundary() {
+    for (String raw : List.of("", "   ")) {
+      String jsonContent =
+          "{\"role\":\"USER\",\"contents\":[{\"type\":\"json\",\"json\":\"" + raw + "\"}]}";
+      IllegalArgumentException jsonError =
+          assertThrows(IllegalArgumentException.class, () -> codec.decode(jsonContent));
+      assertTrue(jsonError.getMessage().contains("content.json"), jsonError.getMessage());
+
+      String toolCall =
+          "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\","
+              + "\"toolCallId\":\"c\",\"toolName\":\"read\",\"rendererKey\":\"read\","
+              + "\"argumentsJson\":\""
+              + raw
+              + "\",\"historyAction\":null,\"environmentName\":null}]}";
+      IllegalArgumentException argumentsError =
+          assertThrows(IllegalArgumentException.class, () -> codec.decode(toolCall));
+      assertTrue(
+          argumentsError.getMessage().contains("content.argumentsJson"),
+          argumentsError.getMessage());
+    }
+  }
 }

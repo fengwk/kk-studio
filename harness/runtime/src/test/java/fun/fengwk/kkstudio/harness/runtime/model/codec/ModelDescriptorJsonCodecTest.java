@@ -4,13 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -173,7 +173,7 @@ class ModelDescriptorJsonCodecTest {
   void descriptorFieldsAreInFixedOrder() throws Exception {
     JsonNode root = OBJECT_MAPPER.readTree(codec.encodeDescriptor(canonicalDescriptor()));
     ArrayNode names = NODES.arrayNode();
-    root.fieldNames().forEachRemaining(names::add);
+    root.propertyNames().forEach(names::add);
     assertEquals(
         List.of("providerName", "modelName", "modelId", "inputModalities", "tools", "reasoning"),
         List.of(
@@ -282,7 +282,7 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(empty));
 
     ObjectNode wrongType = canonicalDescriptorNode();
-    wrongType.set("inputModalities", NODES.textNode("TEXT"));
+    wrongType.set("inputModalities", NODES.stringNode("TEXT"));
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(wrongType));
 
     ObjectNode nonTextElement = canonicalDescriptorNode();
@@ -380,7 +380,7 @@ class ModelDescriptorJsonCodecTest {
 
   private static List<String> fieldNames(JsonNode node) {
     List<String> names = new ArrayList<>();
-    node.fieldNames().forEachRemaining(names::add);
+    node.propertyNames().forEach(names::add);
     return names;
   }
 
@@ -399,7 +399,7 @@ class ModelDescriptorJsonCodecTest {
       return (ObjectNode)
           OBJECT_MAPPER.readTree(
               new ModelDescriptorJsonCodec().encodeDescriptor(canonicalDescriptor()));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException(exception);
     }
   }

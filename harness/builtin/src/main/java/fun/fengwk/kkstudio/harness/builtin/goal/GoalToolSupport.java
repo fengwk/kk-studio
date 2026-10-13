@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
@@ -29,7 +30,7 @@ import java.util.UUID;
 final class GoalToolSupport {
 
   private static final GoalProgressCodec CODEC = new GoalProgressCodec();
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private GoalToolSupport() {}
@@ -74,10 +75,10 @@ final class GoalToolSupport {
 
   static String requiredNonBlankText(ObjectNode arguments, String field) {
     JsonNode value = arguments.get(field);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new IllegalArgumentException(field + " is required and must be a non-blank string");
     }
-    return value.textValue().strip();
+    return value.stringValue().strip();
   }
 
   static Instant timestamp(Instant value) {
@@ -136,7 +137,7 @@ final class GoalToolSupport {
   private static String write(JsonNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode goal JSON", error);
     }
   }

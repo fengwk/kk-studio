@@ -1,12 +1,16 @@
 package fun.fengwk.kkstudio.harness.infra.postgresql;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.jdbc.core.RowMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
@@ -153,7 +157,14 @@ final class PostgresqlHarnessRows {
               JoinPurpose.fromWireName(resultSet.getString("purpose")),
               nullableUuid(resultSet, "superseded_by_invocation_id"));
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  /** cancelled_inputs 是本模块自有持久协议：严格读取 + BigDecimal 读回自由 JSON，避免数值退化。 */
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   static final RowMapper<StoppedThreadReceipt> STOPPED_THREAD_RECEIPT =
@@ -185,7 +196,7 @@ final class PostgresqlHarnessRows {
         list.add(new CancelledThreadInput(sequence, idempotencyKey, payload));
       }
       return list;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed cancelled_inputs JSON", error);
     }
   }
@@ -199,13 +210,13 @@ final class PostgresqlHarnessRows {
       node.put("type", input.payload().type().name());
       try {
         node.set("payload", MAPPER.readTree(COMMAND_PAYLOADS.encode(input.payload())));
-      } catch (JsonProcessingException error) {
+      } catch (JacksonException error) {
         throw new IllegalArgumentException("cannot encode cancelled input payload", error);
       }
     }
     try {
       return MAPPER.writeValueAsString(arrayNode);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("cannot encode cancelled_inputs JSON", error);
     }
   }

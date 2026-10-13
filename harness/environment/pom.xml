@@ -46,8 +46,8 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog</include>
-                                        <include>fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec</include>
                                     </includes>
                                     <limits>
                                         <limit>

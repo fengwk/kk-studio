@@ -30,7 +30,7 @@
             <artifactId>kk-studio-harness-environment</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
+            <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
@@ -62,8 +62,8 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor</include>
-                                        <include>fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.goal.GoalProgressCodec</include>
                                     </includes>
                                     <limits>
                                         <limit>

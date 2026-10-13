@@ -13,7 +13,8 @@ ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](
 与 Contributor 目录承担；环境能力的网络传输与子进程执行由
 [`harness-environment`](harness-environment.md) 与 [`harness-daemon`](harness-daemon.md) 承担。
 Skill 由 System Prompt 提供稳定路径，读取统一交给
-`read`。生产依赖见 [`pom.xml`](../../harness/builtin/pom.xml)，由
+`read`。生产依赖为 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`
+与 Jackson 3（`tools.jackson`），见 [`pom.xml`](../../harness/builtin/pom.xml)，由
 [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)
 守卫。
 
@@ -85,7 +86,9 @@ reportedAt: 毫秒截断
 ```
 
 [`GoalProgressCodec`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalProgressCodec.java)
-要求精确字段集合：未知字段、缺失字段、重复键、尾随 token、非终态枚举与时间戳格式错误一律拒绝。
+用不可变 `JsonMapper`（Jackson 3）承载：显式开启 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`，
+要求精确字段集合，未知字段、缺失字段、重复键、尾随 token、非终态枚举与时间戳格式错误一律拒绝。
+Jackson 3 把空/纯空白输入解析为 `MissingNode`，因此空白文档与畸形文档同样 fail-closed。
 声明通过 goalId 绑定用户目标，表示 Agent 的终态进度报告；Goal 本身与业务验收
 分别由用户输入和业务流程维护。
 
@@ -145,7 +148,8 @@ URI 的支持范围由读取器显式校验。Skill 读取使用 read 的路由�
   锁定完整的 13 工具清单（12 个 SELECTABLE 与 1 个 INTERNAL `task`）、环境支持级别、capability 映射与 descriptor
   schema/defaultTimeout；[`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java)
   覆盖 catalog 无创建工具、只读目标读取、过期 `goalId` 进度陈旧、声明绑定当前 `goalId`、
-  重复终态声明被拒与缺失上下文安全失败；[`BuiltinHistoryRenderersTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHistoryRenderersTest.java)、
+  重复终态声明被拒与缺失上下文安全失败；[`GoalProgressCodecTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalProgressCodecTest.java)
+  以参数化 fixture 锁定 canonical 往返，以及 schemaVersion、字段集、UUID、状态、文本、时间戳、空白与畸形文档的 fail-closed 拒绝；[`BuiltinHistoryRenderersTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHistoryRenderersTest.java)、
   [`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java)、
   [`SubagentTaskMessagesTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessagesTest.java)
   与 [`SubagentConfigTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigTest.java)

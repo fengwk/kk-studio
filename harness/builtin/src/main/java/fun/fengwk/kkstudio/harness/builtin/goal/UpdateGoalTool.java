@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;

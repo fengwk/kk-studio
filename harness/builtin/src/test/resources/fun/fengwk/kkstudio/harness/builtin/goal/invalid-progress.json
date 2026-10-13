@@ -1,0 +1,127 @@
+[
+  {
+    "name": "schema version mismatch",
+    "mode": "decode",
+    "schemaVersion": 2,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002a",
+      "status": "complete",
+      "reason": "done",
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "unsupported goal progress schemaVersion: 2"
+  },
+  {
+    "name": "non-object document",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": [1, 2],
+    "error": "goal progress must be an object"
+  },
+  {
+    "name": "null document",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": null,
+    "error": "goal progress must be an object"
+  },
+  {
+    "name": "unknown extra field",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002a",
+      "status": "complete",
+      "reason": "done",
+      "reportedAt": "2026-01-01T00:00:00Z",
+      "extra": 1
+    },
+    "error": "goal progress fields must be exactly"
+  },
+  {
+    "name": "missing field replaced by unknown",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002a",
+      "status": "complete",
+      "extra": "done",
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "goal progress must declare reason"
+  },
+  {
+    "name": "goal id is not a uuid",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "not-a-uuid",
+      "status": "complete",
+      "reason": "done",
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "goal progress.goalId must be a UUID"
+  },
+  {
+    "name": "non-terminal status",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002a",
+      "status": "active",
+      "reason": "done",
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "status must be complete or blocked"
+  },
+  {
+    "name": "unknown status",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002a",
+      "status": "done",
+      "reason": "done",
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "unknown goal status: done"
+  },
+  {
+    "name": "reason is not text",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002a",
+      "status": "complete",
+      "reason": 1,
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "goal progress.reason must be text"
+  },
+  {
+    "name": "reported at is not an instant",
+    "mode": "decode",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002a",
+      "status": "blocked",
+      "reason": "blocked",
+      "reportedAt": "yesterday"
+    },
+    "error": "goal progress.reportedAt must be an instant"
+  },
+  {
+    "name": "empty raw document",
+    "mode": "parse",
+    "schemaVersion": 1,
+    "raw": "   ",
+    "error": "goal progress must not be empty"
+  },
+  {
+    "name": "malformed raw document",
+    "mode": "parse",
+    "schemaVersion": 1,
+    "raw": "{",
+    "error": "malformed goal progress JSON"
+  }
+]

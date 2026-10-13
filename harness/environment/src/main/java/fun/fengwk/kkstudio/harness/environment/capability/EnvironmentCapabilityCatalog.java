@@ -8,13 +8,12 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Atomic Environment Capability execution descriptors.
@@ -33,7 +32,10 @@ public final class EnvironmentCapabilityCatalog {
   private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
   private static final List<EnvironmentCapabilityDescriptor> DESCRIPTORS = createDescriptors();
   private static final Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> BY_ID =
-      indexById(DESCRIPTORS);
+      DESCRIPTORS.stream()
+          .collect(
+              Collectors.toUnmodifiableMap(
+                  EnvironmentCapabilityDescriptor::id, Function.identity()));
 
   private EnvironmentCapabilityCatalog() {}
 
@@ -71,25 +73,7 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.SKILL_SYNC, Duration.ZERO));
   }
 
-  /** 全部已注册 descriptor。 */
-  private static Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> indexById(
-      List<EnvironmentCapabilityDescriptor> descriptors) {
-    Objects.requireNonNull(descriptors, "descriptors");
-    Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> result = new LinkedHashMap<>();
-    Set<EnvironmentCapabilityDescriptor> uniqueDescriptors = new HashSet<>();
-    for (EnvironmentCapabilityDescriptor descriptor : descriptors) {
-      Objects.requireNonNull(descriptor, "descriptors[]");
-      if (!uniqueDescriptors.add(descriptor)) {
-        throw new IllegalStateException(
-            "duplicate Environment capability descriptor: " + descriptor.id());
-      }
-      if (result.putIfAbsent(descriptor.id(), descriptor) != null) {
-        throw new IllegalStateException("duplicate Environment capability id: " + descriptor.id());
-      }
-    }
-    return Map.copyOf(result);
-  }
-
+  /** 构造单个 capability descriptor：id、catalog 版本、从 classpath 加载的 input schema 与默认执行超时。 */
   private static EnvironmentCapabilityDescriptor descriptor(
       EnvironmentCapabilityId id, Duration defaultTimeout) {
     return new EnvironmentCapabilityDescriptor(id, VERSION, loadSchema(id), defaultTimeout);

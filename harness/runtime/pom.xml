@@ -35,7 +35,7 @@
             <artifactId>slf4j-api</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
+            <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
@@ -85,21 +85,21 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocation</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/compaction/AutomaticCompactionPlanner</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/compaction/CompactionHistory</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ResolvedRequestValidator</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextProbe</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/codec/ToolBindingJsonCodec</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/join/ThreadJoin</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinRequest</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionControl</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadState</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.processor.ModelExecution</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.AcceptCommandsControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadState</include>
                                     </includes>
                                     <limits>
                                         <limit>

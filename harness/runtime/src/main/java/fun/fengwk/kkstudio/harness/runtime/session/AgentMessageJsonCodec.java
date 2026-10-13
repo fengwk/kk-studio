@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 
@@ -25,7 +26,7 @@ import java.util.UUID;
  * <p>字段固定且顺序确定；content 通过 {@code type} discriminator 区分。codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON
  * null；trailing token（共享 {@link ObjectMapper} 启用 {@link
  * DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用 {@link
- * JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）；未知枚举；未知 content discriminator；raw {@code
+ * StreamReadFeature#STRICT_DUPLICATE_DETECTION}）；未知枚举；未知 content discriminator；raw {@code
  * argumentsJson} / {@code detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code
  * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}。encode 端同样严格校验 raw JSON 字段。
  *
@@ -37,7 +38,12 @@ import java.util.UUID;
  */
 public final class AgentMessageJsonCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
@@ -58,11 +64,6 @@ public final class AgentMessageJsonCodec {
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_FIELDS =
       orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview", "imageTier");
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   public AgentMessageJsonCodec() {}
 
@@ -113,10 +114,11 @@ public final class AgentMessageJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed agent message JSON", error);
     }
-    if (root == null) {
+    // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 malformed。
+    if (root == null || root.isMissingNode()) {
       throw new IllegalArgumentException("malformed agent message JSON");
     }
     return decodeNode(root);
@@ -207,10 +209,10 @@ public final class AgentMessageJsonCodec {
   private static AgentMessageContent decodeContent(JsonNode value) {
     ObjectNode node = requireObject(value, "content");
     JsonNode typeNode = node.get("type");
-    if (typeNode == null || !typeNode.isTextual()) {
+    if (typeNode == null || !typeNode.isString()) {
       throw new IllegalArgumentException("content.type must be text");
     }
-    String type = typeNode.textValue();
+    String type = typeNode.stringValue();
     return switch (type) {
       case "text" -> {
         requireExactFields(node, TEXT_FIELDS, "content");
@@ -305,8 +307,12 @@ public final class AgentMessageJsonCodec {
     JsonNode parsed;
     try {
       parsed = MAPPER.readTree(raw);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException(name + " must contain JSON", error);
+    }
+    // Jackson 3 对空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为缺失文档。
+    if (parsed == null || parsed.isMissingNode()) {
+      throw new IllegalArgumentException(name + " must contain JSON");
     }
     return parsed;
   }
@@ -316,7 +322,7 @@ public final class AgentMessageJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode agent message JSON", error);
     }
   }
@@ -337,10 +343,10 @@ public final class AgentMessageJsonCodec {
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String requiredText(ObjectNode node, String field, String context) {
@@ -349,10 +355,10 @@ public final class AgentMessageJsonCodec {
   }
 
   private static String requiredText(JsonNode value, String field, String context) {
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    String text = value.textValue();
+    String text = value.stringValue();
     if (text.isBlank()) {
       throw new IllegalArgumentException(context + "." + field + " must not be blank");
     }
@@ -370,10 +376,10 @@ public final class AgentMessageJsonCodec {
   /** 与 {@link #requiredText} 类似，但允许空字符串（仅 non-null 约束，如 {@link TextMessageContent#text}）。 */
   private static String requiredTextAllowEmpty(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   /** 可空文本字段：JSON null 或 text。 */
@@ -382,19 +388,19 @@ public final class AgentMessageJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
   private static UUID canonicalUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    String text = value.textValue();
+    String text = value.stringValue();
     UUID parsed;
     try {
       parsed = UUID.fromString(text);
@@ -471,7 +477,7 @@ public final class AgentMessageJsonCodec {
 
   private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
     Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.fieldNames();
+    Iterator<String> names = node.propertyNames().iterator();
     while (names.hasNext()) {
       actual.add(names.next());
     }
