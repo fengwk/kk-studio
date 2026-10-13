@@ -16,7 +16,7 @@ public class AgentProviderDTO {
   /** 可空描述（text，无长度上限）。 */
   private String description;
 
-  /** 供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_response}、{@code anthropic}、{@code google}。 */
+  /** 供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_responses}、{@code anthropic}、{@code google}。 */
   private String providerType;
 
   /** 可空模型 API base URL（≤512 字符）。 */

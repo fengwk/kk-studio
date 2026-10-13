@@ -180,7 +180,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     modelName: 'gpt-5.6-luna',
     variant: 'off',
     variants: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
-    providerType: 'openai_response',
+    providerType: 'openai_responses',
   })
 
   const minimax = REAL_MODEL_DEFINITIONS.find((d) => d.idSuffix === 'minimax_anthropic')
@@ -346,7 +346,7 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
     },
     {
       name: 'openai',
-      providerType: 'openai_response',
+      providerType: 'openai_responses',
       configured: false, // 未配置
       baseUrl: 'https://api.openai.com/v1',
       version: '1',
@@ -442,15 +442,15 @@ test('assertProviderUsageAlgebra 针对四大厂商规范代数严格断言正�
     reasoningTokens: 15,
     providerTotalTokens: 145, // wireInput (80+20+10=110) + wireOutput (20+15=35) = 145
   }
-  assert.doesNotThrow(() => assertProviderUsageAlgebra(validOpenAi, 'openai_response'))
+  assert.doesNotThrow(() => assertProviderUsageAlgebra(validOpenAi, 'openai_responses'))
   // 违规：OpenAI Responses 不支持 cacheWriteLongTokens
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validOpenAi, cacheWriteLongTokens: 5 }, 'openai_response'),
+    () => assertProviderUsageAlgebra({ ...validOpenAi, cacheWriteLongTokens: 5 }, 'openai_responses'),
     /cacheWriteLongTokens must be 0/,
   )
   // 违规：providerTotal 算术不平
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 140 }, 'openai_response'),
+    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 140 }, 'openai_responses'),
     /OpenAI Responses providerTotalTokens algebra mismatch/,
   )
 
@@ -682,7 +682,7 @@ test('sanitizeArtifact 与 safeDiagnosticJson 递归严格脱敏推理文本、�
 test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 providerTotalTokens=0，但分类 token 为 0 时仍拒绝，正 total 仍做代数校验', () => {
   // 测试意图：验证上游 Responses 与 Chat Completions 协议在未返回 total_tokens 时归一化为 providerTotalTokens=0 属于协议合法，此时断言必须放行通过；但分类 input/output 事实有效性校验不能被削弱（分类为 0 仍必须拒绝）；且当 providerTotalTokens > 0 时代数等式仍必须严格闭合。
 
-  // 1. OpenAI Responses (providerType: 'openai_response')
+  // 1. OpenAI Responses (providerType: 'openai_responses')
   const responsesZeroTotal = {
     inputTokens: 100,
     outputTokens: 20,
@@ -695,7 +695,7 @@ test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 prov
   // 零 total 且分类 token > 0 应成功放行
   assert.doesNotThrow(() =>
     assertAssistantUsage(responsesZeroTotal, {
-      providerType: 'openai_response',
+      providerType: 'openai_responses',
       requirePositiveIO: true,
     }),
   )
@@ -710,7 +710,7 @@ test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 prov
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         },
-        { providerType: 'openai_response', requirePositiveIO: true },
+        { providerType: 'openai_responses', requirePositiveIO: true },
       ),
     /inputTokens \+ cacheReadTokens \+ cacheWriteTokens \+ cacheWriteLongTokens must be > 0/,
   )
@@ -720,7 +720,7 @@ test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 prov
     () =>
       assertAssistantUsage(
         { ...responsesZeroTotal, outputTokens: 0, reasoningTokens: 0 },
-        { providerType: 'openai_response', requirePositiveIO: true },
+        { providerType: 'openai_responses', requirePositiveIO: true },
       ),
     /outputTokens \+ reasoningTokens must be > 0/,
   )
@@ -729,14 +729,14 @@ test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 prov
   assert.doesNotThrow(() =>
     assertAssistantUsage(
       { ...responsesZeroTotal, providerTotalTokens: 150 },
-      { providerType: 'openai_response', requirePositiveIO: true },
+      { providerType: 'openai_responses', requirePositiveIO: true },
     ),
   )
   assert.throws(
     () =>
       assertAssistantUsage(
         { ...responsesZeroTotal, providerTotalTokens: 149 },
-        { providerType: 'openai_response', requirePositiveIO: true },
+        { providerType: 'openai_responses', requirePositiveIO: true },
       ),
     /OpenAI Responses providerTotalTokens algebra mismatch/,
   )

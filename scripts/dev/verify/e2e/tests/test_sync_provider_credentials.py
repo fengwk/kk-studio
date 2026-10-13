@@ -26,12 +26,12 @@ from scripts.dev.verify.e2e.sync_provider_credentials import (
     PROVIDER_SPECS,
     TEST_ANTHROPIC_API_KEY,
     TEST_ANTHROPIC_BASE_URL,
-    TEST_DEEPSEEK_API_KEY,
-    TEST_DEEPSEEK_BASE_URL,
     TEST_GOOGLE_API_KEY,
     TEST_GOOGLE_BASE_URL,
     TEST_OPENAI_API_KEY,
     TEST_OPENAI_BASE_URL,
+    TEST_OPENAI_RESPONSES_API_KEY,
+    TEST_OPENAI_RESPONSES_BASE_URL,
     sync_provider_credentials,
 )
 
@@ -51,7 +51,7 @@ def seed_rows(**overrides):
         "openai": {
             "name": "openai",
             "description": "OpenAI (OpenAI Responses).",
-            "providerType": "openai_response",
+            "providerType": "openai_responses",
             "baseUrl": None,
             "version": "0",
             "modelCallTimeoutMillis": 1800000,
@@ -139,12 +139,12 @@ class TestSyncProviderCredentials(unittest.TestCase):
         env = {
             TEST_GOOGLE_BASE_URL: "https://generativelanguage.googleapis.com///",
             TEST_GOOGLE_API_KEY: "secret-gemini",
-            TEST_OPENAI_BASE_URL: "https://api.openai.com///",
-            TEST_OPENAI_API_KEY: "secret-openai",
+            TEST_OPENAI_RESPONSES_BASE_URL: "https://api.openai.com///",
+            TEST_OPENAI_RESPONSES_API_KEY: "secret-openai",
             TEST_ANTHROPIC_BASE_URL: "https://api.minimax.example/anthropic/v1///",
             TEST_ANTHROPIC_API_KEY: "secret-minimax-anthropic",
-            TEST_DEEPSEEK_BASE_URL: "https://api.deepseek.com///",
-            TEST_DEEPSEEK_API_KEY: "secret-deepseek",
+            TEST_OPENAI_BASE_URL: "https://api.deepseek.com///",
+            TEST_OPENAI_API_KEY: "secret-deepseek",
         }
 
         lines = sync_provider_credentials(
@@ -165,7 +165,7 @@ class TestSyncProviderCredentials(unittest.TestCase):
         # Check each PUT URL, providerType, baseUrl, and credential
         expected_puts = [
             ("google", "google", "https://generativelanguage.googleapis.com", "secret-gemini"),
-            ("openai", "openai_response", "https://api.openai.com/v1", "secret-openai"),
+            ("openai", "openai_responses", "https://api.openai.com/v1", "secret-openai"),
             ("minimax-anthropic", "anthropic", "https://api.minimax.example/anthropic/v1", "secret-minimax-anthropic"),
             ("deepseek", "openai", "https://api.deepseek.com/v1", "secret-deepseek"),
         ]
@@ -189,13 +189,49 @@ class TestSyncProviderCredentials(unittest.TestCase):
             lines,
         )
 
+    def test_cpa_pairs_preserve_protocol_paths_without_duplicate_versions(self):
+        """A shared CPA gateway must retain each protocol's explicit base path."""
+        base = "https://cpa.example"
+        key = "fixture-cpa-key"
+        calls = []
+        env = {
+            TEST_GOOGLE_BASE_URL: f"{base}/v1beta",
+            TEST_GOOGLE_API_KEY: key,
+            TEST_OPENAI_RESPONSES_BASE_URL: f"{base}/v1",
+            TEST_OPENAI_RESPONSES_API_KEY: key,
+            TEST_ANTHROPIC_BASE_URL: base,
+            TEST_ANTHROPIC_API_KEY: key,
+            TEST_OPENAI_BASE_URL: f"{base}/v1",
+            TEST_OPENAI_API_KEY: key,
+        }
+
+        sync_provider_credentials(
+            "http://backend", env=env, urlopen=routed_http(seed_rows(), calls)
+        )
+
+        self.assertEqual(5, len(calls))
+        actual = [
+            (url.rsplit("/", 1)[-1], payload["providerType"], payload["baseUrl"])
+            for url, payload, _ in calls[1:]
+        ]
+        self.assertEqual(
+            [
+                ("google", "google", f"{base}/v1beta"),
+                ("openai", "openai_responses", f"{base}/v1"),
+                ("minimax-anthropic", "anthropic", base),
+                ("deepseek", "openai", f"{base}/v1"),
+            ],
+            actual,
+        )
+        self.assertTrue(all(payload["credential"] == key for _, payload, _ in calls[1:]))
+
     def test_missing_seed_provider_fails_before_any_put(self):
         calls = []
         env = {
             TEST_GOOGLE_BASE_URL: "https://generativelanguage.googleapis.com",
             TEST_GOOGLE_API_KEY: "secret-gemini",
-            TEST_OPENAI_BASE_URL: "https://api.openai.com",
-            TEST_OPENAI_API_KEY: "secret-openai",
+            TEST_OPENAI_RESPONSES_BASE_URL: "https://api.openai.com",
+            TEST_OPENAI_RESPONSES_API_KEY: "secret-openai",
         }
         # Seed rows omit 'openai'
         rows = seed_rows(openai=None)
@@ -234,8 +270,8 @@ class TestSyncProviderCredentials(unittest.TestCase):
     def test_missing_seed_version_fails_before_any_put(self):
         calls = []
         env = {
-            TEST_DEEPSEEK_BASE_URL: "https://api.deepseek.com",
-            TEST_DEEPSEEK_API_KEY: "secret-deepseek",
+            TEST_OPENAI_BASE_URL: "https://api.deepseek.com",
+            TEST_OPENAI_API_KEY: "secret-deepseek",
         }
         rows = seed_rows(deepseek={"version": ""})
 
@@ -253,8 +289,8 @@ class TestSyncProviderCredentials(unittest.TestCase):
     def test_rerun_inherits_timeout_and_version(self):
         calls = []
         env = {
-            TEST_DEEPSEEK_BASE_URL: "https://api.deepseek.com",
-            TEST_DEEPSEEK_API_KEY: "secret-deepseek",
+            TEST_OPENAI_BASE_URL: "https://api.deepseek.com",
+            TEST_OPENAI_API_KEY: "secret-deepseek",
         }
         rows = seed_rows(
             deepseek={

@@ -19,7 +19,7 @@ public enum ProviderType {
 
   /** OpenAI Responses：用户内容与工具结果都支持 IMAGE/DOCUMENT。 */
   OPENAI_RESPONSES(
-      "openai_response",
+      "openai_responses",
       Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
       Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT)),
 

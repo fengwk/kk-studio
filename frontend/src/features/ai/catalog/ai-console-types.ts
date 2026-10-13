@@ -104,5 +104,5 @@ export type ResourceModal =
       expectedVersion: CatalogVersion
     }
 
-export const providerTypes = ['openai', 'openai_response', 'anthropic', 'google'] as const satisfies
+export const providerTypes = ['openai', 'openai_responses', 'anthropic', 'google'] as const satisfies
   readonly AgentProviderType[]

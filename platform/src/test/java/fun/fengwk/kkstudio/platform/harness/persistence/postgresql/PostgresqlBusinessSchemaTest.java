@@ -1072,13 +1072,14 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
 
   @Test
   void providerTypeCheckAllowsOnlyStableWireValues() throws SQLException {
-    // 真实 PostgreSQL schema 必须接受四个稳定 wire 值，并在数据库边界拒绝大小写、空白和未知值。
-    for (String providerType : new String[] {"openai", "openai_response", "anthropic", "google"}) {
+    // 真实 PostgreSQL schema 必须接受四个稳定 wire 值，并在数据库边界严格拒绝非法值。
+    for (String providerType : new String[] {"openai", "openai_responses", "anthropic", "google"}) {
       try (Connection conn = newConnection()) {
         insertProvider(conn, "provider-" + FIXTURE_IDS.incrementAndGet(), providerType);
       }
     }
-    for (String invalid : new String[] {"OPENAI", "openai ", "OpenAI", "missing"}) {
+    for (String invalid :
+        new String[] {"OPENAI", "openai ", "OpenAI", "missing", "openai_response"}) {
       try (Connection conn = newConnection()) {
         assertTransactionConstraintViolation(
             conn,

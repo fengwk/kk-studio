@@ -15,7 +15,7 @@ import {
   naturalNameCompare,
 } from '@/shared/lib/search-utils'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
-import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
+import { providerTypes, type ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import {
   emptyAgentDraft,
@@ -108,7 +108,7 @@ describe('AI domain utilities', () => {
         id: 'provider-1',
         name: 'minimax',
         description: 'provider desc',
-        providerType: 'openai_response',
+        providerType: 'openai_responses',
         baseUrl: 'https://api.minimax.io/v1',
         configured: true,
         modelCallTimeoutMillis: 120000,
@@ -119,7 +119,7 @@ describe('AI domain utilities', () => {
     ).toEqual({
       name: 'minimax',
       description: 'provider desc',
-      providerType: 'openai_response',
+      providerType: 'openai_responses',
       baseUrl: 'https://api.minimax.io/v1',
       credential: '',
       modelCallTimeoutMillis: '120000',
@@ -179,12 +179,17 @@ describe('AI domain utilities', () => {
     })
   })
 
+  /** providerType 选择项必须与 AgentProviderType wire 契约暴露同一组合法枚举。 */
+  it('lists the supported provider type wire values', () => {
+    expect(providerTypes).toEqual(['openai', 'openai_responses', 'anthropic', 'google'])
+  })
+
   /** 结构化草稿必须按当前的 provider/model/agent API payload 契约序列化。 */
   it('serializes structured drafts into backend payloads', () => {
     const providerInput = {
       name: ' minimax ',
       description: ' provider desc ',
-      providerType: ' openai ',
+      providerType: ' openai_responses ',
       baseUrl: ' https://api.minimax.io/v1 ',
       credential: ' secret ',
       modelCallTimeoutMillis: '120000',
@@ -194,7 +199,7 @@ describe('AI domain utilities', () => {
     expect(toEditableProvider(providerInput)).toEqual({
       name: 'minimax',
       description: 'provider desc',
-      providerType: 'openai',
+      providerType: 'openai_responses',
       baseUrl: 'https://api.minimax.io/v1',
       credential: 'secret',
       modelCallTimeoutMillis: 120000,
@@ -203,7 +208,7 @@ describe('AI domain utilities', () => {
     })
     expect(toEditableProviderUpdate(providerInput)).toEqual({
       description: 'provider desc',
-      providerType: 'openai',
+      providerType: 'openai_responses',
       baseUrl: 'https://api.minimax.io/v1',
       credential: 'secret',
       modelCallTimeoutMillis: 120000,
@@ -359,7 +364,7 @@ describe('AI domain utilities', () => {
         id: 'provider-2',
         name: 'openai',
         description: 'OpenAI',
-        providerType: 'openai_response',
+        providerType: 'openai_responses',
         baseUrl: null,
         configured: true,
         modelCallTimeoutMillis: 1800000,
