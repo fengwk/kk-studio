@@ -20,7 +20,7 @@ import java.util.stream.Stream;
 /**
  * Project 模块的架构守卫：模块只承载 Project 领域与自身持久化，绝不反向依赖宿主。
  *
- * <p>Project 允许直接依赖 harness-runtime（会话/线程协议）、Spring、MyBatis、Jackson 与 convention4j；跨宿主能力必须经 {@code
+ * <p>Project 允许直接依赖 harness-runtime（会话/线程协议）、Spring JDBC、Jackson 与 lombok；跨宿主能力必须经 {@code
  * fun.fengwk.kkstudio.project.port} 暴露并由宿主实现。本测试锁定这条边界，防止后续维护不小心把 platform/web 的类型或依赖重新引入模块，形成循环依赖。
  */
 class ProjectArchitectureTest {
@@ -39,19 +39,15 @@ class ProjectArchitectureTest {
   private static final Set<String> ALLOWED_EXTERNAL_IMPORT_PREFIXES =
       Set.of(
           "com.fasterxml.jackson.",
-          "fun.fengwk.convention4j.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "lombok.",
-          "org.apache.ibatis.",
-          "org.mybatis.",
           "org.springframework.");
 
   /** 允许声明的生产依赖：与上面的导入前缀一一对应，新增依赖必须同步在这里显式登记。 */
   private static final List<String> EXPECTED_PRODUCTION_DEPENDENCIES =
       List.of(
           "fun.fengwk.kk-studio:kk-studio-harness-runtime",
-          "fun.fengwk.convention4j:convention4j-spring-boot-starter",
-          "org.mybatis.spring.boot:mybatis-spring-boot-starter",
+          "org.springframework.boot:spring-boot-starter-jdbc",
           "com.fasterxml.jackson.core:jackson-databind");
 
   private static final Pattern DEPENDENCY_PATTERN =

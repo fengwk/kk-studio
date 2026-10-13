@@ -5,8 +5,8 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.repo.IssueEvidenceRepository;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueEvidenceMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueEvidenceDO;
+import fun.fengwk.kkstudio.project.repo.impl.store.IssueEvidenceJdbcStore;
 
 import java.util.List;
 import java.util.UUID;
@@ -16,12 +16,12 @@ import java.util.UUID;
 @Repository
 public class PostgresqlIssueEvidenceRepository implements IssueEvidenceRepository {
 
-  private final IssueEvidenceMapper mapper;
+  private final IssueEvidenceJdbcStore store;
   private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueEvidence evidence) {
-    boolean changed = mapper.insert(toDO(evidence)) == 1;
+    boolean changed = store.insert(toDO(evidence)) == 1;
     if (changed) {
       notifier.issueChanged(evidence.getIssueId());
     }
@@ -30,20 +30,20 @@ public class PostgresqlIssueEvidenceRepository implements IssueEvidenceRepositor
 
   @Override
   public IssueEvidence get(UUID issueId, UUID blobId) {
-    IssueEvidenceDO row = mapper.get(issueId, blobId);
+    IssueEvidenceDO row = store.get(issueId, blobId);
     return row == null ? null : toModel(row);
   }
 
   @Override
   public List<IssueEvidence> listByIssueId(UUID issueId) {
-    return mapper.listByIssueId(issueId).stream()
+    return store.listByIssueId(issueId).stream()
         .map(PostgresqlIssueEvidenceRepository::toModel)
         .toList();
   }
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    int changed = mapper.deleteByIssueId(issueId);
+    int changed = store.deleteByIssueId(issueId);
     if (changed > 0) {
       notifier.issueChanged(issueId);
     }

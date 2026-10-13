@@ -807,17 +807,16 @@ public class IssueServiceImpl implements IssueService {
 
   /** owner 锁内的精确重试判定：同键同指纹返回当前事实，同键异指纹冲突，未命中才继续版本与状态校验。 */
   private boolean replayedUnderLock(UUID issueId, Identity identity) {
-    return IssueActivityIdempotency.findAppliedUnderLock(issueActivityRepository, issueId, identity)
-        != null;
+    return IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity) != null;
   }
 
   /**
-   * 锁前重放返回的权威当前事实：在观察到 receipt 之后重新读取已提交的行，绕过事务内 MyBatis 一级缓存。
+   * 锁前重放返回的权威当前事实：在观察到 receipt 之后重新读取已提交的行，不会返回本事务早先读到的旧快照。
    *
-   * <p>本事务早先读到的旧 Issue 只是历史快照，不得作为重放结果返回：并发首次提交完全可能落在那次读取与本事务的 receipt 检查之间。
+   * <p>每次读取都是新的语句快照：并发首次提交完全可能落在那次读取与本事务的 receipt 检查之间，因此重放结果必须来自这里的权威读。
    */
   private Issue currentIssue(UUID issueId) {
-    Issue issue = issueRepository.getByIdAuthoritative(issueId);
+    Issue issue = issueRepository.getById(issueId);
     if (issue == null) {
       throw new ProjectNotFoundException("issue");
     }
