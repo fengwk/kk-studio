@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
@@ -24,13 +25,13 @@ public final class ProviderToolCallDiagnosticJsonCodec {
 
   public static final String TYPE_TAG = "tool_call_diagnostic";
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> FIELDS =
       orderedSet("type", "callIndex", "id", "name", "partialArguments", "message");
@@ -92,11 +93,12 @@ public final class ProviderToolCallDiagnosticJsonCodec {
   private static JsonNode parse(String json) {
     try {
       JsonNode node = OBJECT_MAPPER.readTree(json);
-      if (node == null) {
+      // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 empty document。
+      if (node == null || node.isMissingNode()) {
         throw new IllegalArgumentException("empty JSON document");
       }
       return node;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed tool call diagnostic JSON");
     }
   }
@@ -104,7 +106,7 @@ public final class ProviderToolCallDiagnosticJsonCodec {
   private static String write(JsonNode node) {
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode tool call diagnostic JSON");
     }
   }
@@ -118,10 +120,10 @@ public final class ProviderToolCallDiagnosticJsonCodec {
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String decodeNullableText(ObjectNode node, String field) {
@@ -129,10 +131,10 @@ public final class ProviderToolCallDiagnosticJsonCodec {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static long nonNegativeLong(ObjectNode node, String field) {

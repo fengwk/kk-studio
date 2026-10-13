@@ -24,7 +24,9 @@ import java.util.stream.Stream;
 /**
  * runtime 模块的轻量级架构守卫。
  *
- * <p>基于 allowlist 扫描整个 {@code src/main/java} 目录，校验全部 Harness 模块及其直接的生产依赖与 import 边界。
+ * <p>基于 allowlist 扫描整个 {@code src/main/java} 目录，校验全部 Harness 模块及其直接的生产依赖与 import 边界；Jackson 只允许
+ * Jackson 3 的 {@code tools.jackson} 与仍复用的 {@code com.fasterxml.jackson.annotation}，本模块禁止 Jackson 2
+ * core/databind 回流。
  */
 class RuntimeModuleArchitectureTest {
 
@@ -38,7 +40,8 @@ class RuntimeModuleArchitectureTest {
           "java.",
           "javax.",
           "lombok.",
-          "com.fasterxml.jackson.",
+          "com.fasterxml.jackson.annotation.",
+          "tools.jackson.",
           "fun.fengwk.kkstudio.harness.common.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",
@@ -80,34 +83,34 @@ class RuntimeModuleArchitectureTest {
     assertManagedInternalDependency(rootPom, "kk-studio-harness-environment-server");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-provider");
     assertDirectProductionDependencies(
-        harnessRoot.resolve("common/pom.xml"),
-        Set.of("com.fasterxml.jackson.core:jackson-databind"));
+        harnessRoot.resolve("common/pom.xml"), Set.of("tools.jackson.core:jackson-databind"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("mcp/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "dev.langchain4j:langchain4j-mcp",
             "fun.fengwk.kk-studio:kk-studio-harness-common"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("tool/pom.xml"),
         Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-common"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("environment/pom.xml"),
         Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-common"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("environment-server/pom.xml"),
         Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-environment"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("runtime/pom.xml"),
         Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
@@ -128,7 +131,7 @@ class RuntimeModuleArchitectureTest {
     assertDirectProductionDependencies(
         harnessRoot.resolve("builtin/pom.xml"),
         Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
@@ -145,7 +148,7 @@ class RuntimeModuleArchitectureTest {
     assertDirectProductionDependencies(
         harnessRoot.resolve("daemon/pom.xml"),
         Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "com.google.re2j:re2j",
             "com.squareup.okhttp3:okhttp",
             "fun.fengwk.kk-studio:kk-studio-share",

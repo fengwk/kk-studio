@@ -3,11 +3,11 @@ package fun.fengwk.kkstudio.harness.runtime.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 
@@ -123,7 +123,7 @@ class ModelInvocationErrorJsonCodecTest {
   private static ObjectNode canonicalNode() {
     try {
       return (ObjectNode) OBJECT_MAPPER.readTree(readResource(CANONICAL_RESOURCE));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException(
           "invalid canonical model invocation error fixture", exception);
     }

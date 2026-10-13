@@ -1,20 +1,23 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -285,7 +288,7 @@ class ProviderResponseJsonCodecTest {
   private static ObjectNode canonicalNode() {
     try {
       return (ObjectNode) OBJECT_MAPPER.readTree(readResource(CANONICAL_RESOURCE));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("invalid canonical provider response fixture", exception);
     }
   }
@@ -306,5 +309,77 @@ class ProviderResponseJsonCodecTest {
 
   private static ObjectNode usage(ObjectNode root) {
     return (ObjectNode) root.path("usage");
+  }
+
+  /** 自由 JSON 字段（rawUsageJson/argumentsJson）按原始文本搬运，不经过 double。 */
+  @Test
+  void preservesRawFreeFormJsonNumberTextWithoutDoubleCoercion() {
+    ObjectNode root = canonicalNode();
+    root.put("rawUsageJson", "{\"big\":1e309,\"tiny\":1e-324}");
+    toolCall(root).put("argumentsJson", "{\"big\":1e309}");
+
+    ProviderResponse decoded = codec.decodeNode(root);
+    String encoded = codec.encode(decoded);
+
+    assertTrue(encoded.contains("1e309"), encoded);
+    assertTrue(encoded.contains("1e-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(encoded, codec.encode(codec.decode(encoded)));
+  }
+
+  /**
+   * toolCallDiagnostics 是 canonical 严格数组：nullable id/name 与必填文本都精确往返；callIndex 必须落在 toolCalls +
+   * diagnostics 的总数内，超出 int 范围的索引也在 boundary 拒绝而不静默截断。
+   */
+  @Test
+  void roundTripsToolCallDiagnosticsAndRejectsCallIndexBoundaries() {
+    ProviderResponse base = canonicalResponse();
+    ProviderResponse response =
+        new ProviderResponse(
+            base.text(),
+            base.thinking(),
+            base.toolCalls(),
+            base.stopReason(),
+            base.usage(),
+            base.requestId(),
+            base.serviceTier(),
+            base.rawUsageJson(),
+            List.of(
+                new ProviderToolCallDiagnostic(0, "call-1", "lookup", "{\"q\":1}", "partial"),
+                new ProviderToolCallDiagnostic(1, null, null, "{}", "dropped")),
+            base.decodeDurationMillis());
+
+    String encoded = codec.encode(response);
+    ProviderResponse decoded = codec.decode(encoded);
+
+    assertEquals(response, decoded);
+    assertEquals(encoded, codec.encode(decoded));
+    assertEquals("{\"q\":1}", decoded.toolCallDiagnostics().get(0).partialArguments());
+    assertNull(decoded.toolCallDiagnostics().get(1).id());
+    assertNull(decoded.toolCallDiagnostics().get(1).name());
+
+    // 总数 = 2 个 toolCalls + 1 个 diagnostic，callIndex 4 越界。
+    ObjectNode outOfBounds = canonicalNode();
+    outOfBounds
+        .putArray("toolCallDiagnostics")
+        .addObject()
+        .put("callIndex", 4)
+        .putNull("id")
+        .putNull("name")
+        .put("partialArguments", "{}")
+        .put("message", "out-of-bounds");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(outOfBounds));
+
+    // 非负 long 仍是合法 JSON 整数，但超出 int 的诊断索引必须拒绝。
+    ObjectNode overflow = canonicalNode();
+    overflow
+        .putArray("toolCallDiagnostics")
+        .addObject()
+        .put("callIndex", (long) Integer.MAX_VALUE + 1)
+        .putNull("id")
+        .putNull("name")
+        .put("partialArguments", "{}")
+        .put("message", "overflow");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(overflow));
   }
 }

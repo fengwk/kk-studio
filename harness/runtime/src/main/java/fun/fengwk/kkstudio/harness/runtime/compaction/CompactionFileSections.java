@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -29,7 +30,7 @@ import java.util.regex.Pattern;
  */
 public final class CompactionFileSections {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final Pattern RESERVED_SECTION =
       Pattern.compile(
           "<read-files>.*?</read-files>|<modified-files>.*?</modified-files>",
@@ -113,11 +114,11 @@ public final class CompactionFileSections {
       if (node != null
           && node.isObject()
           && node.hasNonNull("path")
-          && node.get("path").isTextual()) {
-        String path = node.get("path").textValue();
+          && node.get("path").isString()) {
+        String path = node.get("path").stringValue();
         return isSafeSectionPath(path) ? path : null;
       }
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       return null;
     }
     return null;

@@ -31,7 +31,7 @@ class InfraModuleArchitectureTest {
           "org.springframework:spring-jdbc");
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
-          "com.fasterxml.jackson.",
+          "com.fasterxml.jackson.annotation.",
           "java.",
           "javax.",
           "fun.fengwk.kkstudio.harness.common.",
@@ -43,7 +43,8 @@ class InfraModuleArchitectureTest {
           "org.slf4j.",
           "org.springframework.dao.",
           "org.springframework.jdbc.",
-          "org.springframework.transaction.");
+          "org.springframework.transaction.",
+          "tools.jackson.");
 
   /** 所有生产源码都必须留在 adapter 包内，且禁止引入 Core/Web 技术。 */
   @Test

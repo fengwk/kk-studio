@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -212,5 +213,26 @@ class CompactionPromptsTest {
 
   private static String resource(String resourceName) {
     return LOADER.load(ROOT + resourceName).raw();
+  }
+
+  /** Tool call arguments 是自由 JSON：数值按 BigDecimal 渲染，1e309 不得在摘要里变成 Infinity 文本。 */
+  @Test
+  void toolCallArgumentsRenderNumbersWithoutFloatLoss() {
+    AgentMessage assistant =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                new ToolCallMessageContent(
+                    "call-1",
+                    "bash",
+                    "bash",
+                    "{\"big\":1e309,\"tiny\":1e-324,\"exact\":0.1234567890123456789012345678}")));
+
+    String serialized = CompactionPrompts.serializeConversation(List.of(assistant));
+
+    assertTrue(
+        serialized.contains("bash(big=1E+309, tiny=1E-324, exact=0.1234567890123456789012345678)"),
+        serialized);
+    assertFalse(serialized.contains("Infinity"), serialized);
   }
 }

@@ -2,7 +2,7 @@
 
 `harness-runtime` 维护会话执行协议：Session 与 append-only Entry Tree 保存历史，命令邮箱保存已接受输入，Invocation 保存调用状态，Work 保存调度义务。用户输入、模型结果、工具副作用和控制操作沿这些持久事实推进，恢复复用同一状态转换路径。
 
-本模块是纯 Java：生产依赖只有 `harness-common`、`harness-tool`、`harness-environment`、`harness-contributor-api`（Tool SPI 与目录类型）、Jackson、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化实现与调度分发在 [Harness Infra](harness-infra.md)，模型协议编码在 [Harness Provider](harness-provider.md)，外部执行装配在 [Platform](platform.md) 与 [Web](web.md)。
+本模块是纯 Java：生产依赖只有 `harness-common`、`harness-tool`、`harness-environment`、`harness-contributor-api`（Tool SPI 与目录类型）、Jackson 3（`tools.jackson.core` / `tools.jackson.databind`）、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化实现与调度分发在 [Harness Infra](harness-infra.md)，模型协议编码在 [Harness Provider](harness-provider.md)，外部执行装配在 [Platform](platform.md) 与 [Web](web.md)。
 
 ## 同步入口与事务边界
 
@@ -334,7 +334,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | `runtime.model.cache` | `PromptCacheRetention`、`ProviderCacheControl` | 留存档位与会话 key 的静态契约，不维护缓存存储、命中事实或前缀哈希 |
 | `runtime.model.codec` | `ModelDescriptor` 与 `ModelVariant` 的权威 JSON 编解码 | 拒绝未知字段，不允许数据库 resource id 或密钥进入该边界 |
 | `runtime.model.provider` | 供应商中立的请求/响应/流事件、`ProviderAdapter`、`ProviderReplayState`、`ContextPressureDetector` | 与具体协议实现解耦；wire 编码与 SSE 解析归 `harness-provider` |
-| `runtime.model.provider.codec` | `ProviderRequest`、`ProviderResponse`、replay state 与工具诊断的编解码；顶层精确字段集合，观测计时 `decodeDurationMillis` 必填但可为 null | 只依赖 Jackson 与纯 model 类型 |
+| `runtime.model.provider.codec` | `ProviderRequest`、`ProviderResponse`、replay state 与工具诊断的编解码；顶层精确字段集合，观测计时 `decodeDurationMillis` 必填但可为 null | 只依赖 Jackson 3 与纯 model 类型；自由 JSON 以 `BigDecimal` 保精度 |
 | `runtime.permission` | `PermissionEvaluator`、规则模型与 `BashSurfaceAnalyzer` | 只产出策略候选；真实路径、符号链接与沙箱由 Environment Daemon 负责 |
 | `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
 | `runtime.processor` | `ThreadProcessor`、`ModelProcessor`、`ToolProcessor`、`ModelExecution`、`ToolExecution`、`WorkHeartbeat`、`ClaimAdmissionGuard` 与各 ProcessorConfig | Target 级单动作归约、两阶段激活、租约心跳；所有写入走短事务与所有权围栏 |
@@ -347,6 +347,15 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | `runtime.thread.command` | 命令邮箱实体（typed `GOAL` 的 `GoalCommandPayload`、系统 `NotificationCommandPayload`、内部 `SetContributorStateCommandPayload`）、`ThreadCommandState` / `appliedEntryId` 派生与 `CommandHarvestReducer` | 只做 typed 字段归约；持久化与 CAS 由调度路径负责；产品 HTTP 入口不接受 NOTIFICATION 与 SET_CONTRIBUTOR_STATE |
 | `runtime.tool` | `ToolInvocationError` 与严格 JSON 编解码 | 只含错误值类型，不定义执行状态机 |
 | `runtime.work` | `Work`、`ClaimedWork`、`WorkTarget`、`WorkTargetType` 与环境亲和性标记 | 独占 lease 与所有权围栏；不存放业务状态、attempt 或审批 |
+
+## 严格 JSON 契约
+
+本模块的 durable 列与 wire 载荷各由自己的 codec 承担，共享同一条契约。mapper 一律是不可变 `JsonMapper`（`JsonMapper.builder()`），显式开启 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`；未知、缺失、重复与尾随内容都在边界 fail-closed 拒绝。
+
+- 真正按树搬运自由 JSON 的 mapper 开启 `USE_BIG_DECIMAL_FOR_FLOATS`，以 `BigDecimal` 读回：`variant.protocolOptions`（`InvocationJsonSupport`、`ProviderRequestJsonCodec`、`ModelDescriptorJsonCodec`）、`SET_CONTRIBUTOR_STATE.state.data`、replay state、工具诊断、`argumentsJson` / `detailsJson` / `rawUsageJson`、历史 CUSTOM payload 与压缩摘要里的 tool-call arguments。`1e309`、`1e-324` 与高精度小数不会在 double 中退化成 `Infinity` / `0` 或被重新格式化；按原始文本搬运的字符串字段（如 `json` 内容块）则逐字保留。
+- 厂商原生选项与 `ModelDescriptor` 的 canonical 文本额外开启 `STRIP_TRAILING_BIGDECIMAL_ZEROES`，只移除无语义意义的尾零，保持既有 canonical golden 稳定。
+- durable 与 wire codec 的 `readTree` 入口把 Jackson 3 的空/纯空白输入（`MissingNode`，Jackson 2 为 `null`）判为缺失文档并拒绝，与畸形文档同样 fail-closed。[`ThreadCreationRequestHash`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadCreationRequestHash.java) 只重解析本模块自己产出的 canonical ROOT payload（仅含 id、枚举与文本，没有任何自由数值），因此不声明数值 profile。
+- 无法映射为 JSON 的输入（例如 `ProviderProtocolOptions.of` 收到无属性的任意对象）在构造期以 `IllegalArgumentException` 明确失败，不静默丢弃或降级；只有编码阶段的不可恢复失败才是 `IllegalStateException`。
 
 ## 源码与测试
 

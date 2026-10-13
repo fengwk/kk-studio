@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
@@ -37,13 +38,13 @@ public record ProviderResponse(
     List<ProviderToolCallDiagnostic> toolCallDiagnostics,
     Long decodeDurationMillis) {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final String EMPTY_USAGE_JSON = "{}";
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final String EMPTY_USAGE_JSON = "{}";
 
   public ProviderResponse {
     text = text == null ? "" : text;
@@ -156,7 +157,7 @@ public record ProviderResponse(
     JsonNode node;
     try {
       node = OBJECT_MAPPER.readTree(value);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("rawUsageJson must contain JSON");
     }
     if (!node.isObject() && !node.isArray()) {

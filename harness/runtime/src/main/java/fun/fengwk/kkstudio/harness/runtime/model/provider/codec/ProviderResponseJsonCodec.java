@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -33,7 +34,12 @@ import java.util.Set;
  */
 public final class ProviderResponseJsonCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> RESPONSE_FIELDS =
@@ -62,18 +68,13 @@ public final class ProviderResponseJsonCodec {
           "reasoningTokens",
           "providerTotalTokens");
 
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
-
   public ProviderResponseJsonCodec() {}
 
   public String encode(ProviderResponse response) {
     Objects.requireNonNull(response, "response");
     try {
       return OBJECT_MAPPER.writeValueAsString(encodeNode(response));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("cannot encode provider response", exception);
     }
   }
@@ -116,7 +117,7 @@ public final class ProviderResponseJsonCodec {
     Objects.requireNonNull(json, "json");
     try {
       return decodeNode(OBJECT_MAPPER.readTree(json));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed provider response", exception);
     }
   }
@@ -257,10 +258,10 @@ public final class ProviderResponseJsonCodec {
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String decodeNullableText(ObjectNode node, String field) {
@@ -268,10 +269,10 @@ public final class ProviderResponseJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static long nonNegativeLong(ObjectNode node, String field) {
@@ -315,11 +316,12 @@ public final class ProviderResponseJsonCodec {
   private static JsonNode parseJson(String value, String field) {
     try {
       JsonNode parsed = OBJECT_MAPPER.readTree(value);
-      if (parsed == null) {
+      // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为缺少 JSON。
+      if (parsed == null || parsed.isMissingNode()) {
         throw new IllegalArgumentException(field + " must contain JSON");
       }
       return parsed;
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException(field + " must contain JSON", exception);
     }
   }
@@ -343,7 +345,7 @@ public final class ProviderResponseJsonCodec {
   /** 严格字段集合校验：{@code expected} 必须全部存在且实际字段不得超出它；未知字段、缺失必填字段一律拒绝。 */
   private static void requireFields(ObjectNode node, Set<String> expected, String name) {
     Set<String> actual = new HashSet<>();
-    node.fieldNames().forEachRemaining(actual::add);
+    node.propertyNames().forEach(actual::add);
     if (!actual.equals(expected)) {
       throw new IllegalArgumentException(
           "unexpected fields for " + name + ": " + actual + " (expected " + expected + ")");

@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.model.provider;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import java.util.Objects;
 

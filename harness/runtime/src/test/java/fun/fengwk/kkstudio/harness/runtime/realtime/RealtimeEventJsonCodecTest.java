@@ -1,11 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -495,5 +497,28 @@ class RealtimeEventJsonCodecTest {
       node.putNull("eventId");
     }
     return node;
+  }
+
+  /** Tool partial payload 中 details 的自由 JSON number 以 BigDecimal 保留精度，不得退化为 "Infinity"/0.0。 */
+  @Test
+  void toolPartialPreservesFreeFormDetailsNumberPrecision() {
+    String raw =
+        "{\"threadId\":\"00000000-0000-0000-0000-000000000007\","
+            + "\"subjectKind\":\"TOOL_INVOCATION\","
+            + "\"subjectId\":\"00000000-0000-0000-0000-000000000063\","
+            + "\"attempt\":2,\"eventId\":\"00000000-0000-0000-0000-0000000000e1\","
+            + "\"type\":\"TOOL_PARTIAL\","
+            + "\"payload\":{\"toolCallId\":\"call-1\",\"contents\":[{\"type\":\"text\","
+            + "\"text\":\"partial\"}],\"error\":false,"
+            + "\"details\":{\"big\":1e309,\"tiny\":1e-324}},"
+            + "\"createdAt\":\"2026-01-05T00:00:00Z\"}";
+
+    RealtimeEvent decoded = codec.decode(raw);
+    String encoded = codec.encode(decoded);
+
+    assertTrue(encoded.contains("\"big\":1E+309"), encoded);
+    assertTrue(encoded.contains("\"tiny\":1E-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(encoded, codec.encode(codec.decode(encoded)));
   }
 }

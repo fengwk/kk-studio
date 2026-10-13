@@ -3,14 +3,17 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 
@@ -103,7 +106,7 @@ class ModelRequestSpecJsonCodecTest {
   void encodedSpecContainsExactlyTheFrozenInvocationFields() {
     ObjectNode encoded = codec.encodeNode(environmentModelRequest());
     Set<String> fieldNames = new HashSet<>();
-    encoded.fieldNames().forEachRemaining(fieldNames::add);
+    encoded.propertyNames().forEach(fieldNames::add);
     assertEquals(
         Set.of(
             "providerType",
@@ -242,5 +245,38 @@ class ModelRequestSpecJsonCodecTest {
 
   private void assertInvalid(ObjectNode node) {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
+  }
+
+  /**
+   * 测试意图：variant.protocolOptions 是厂商原生自由 JSON，必须按 BigDecimal 穿过冻结 spec 的编解码边界；1e309/1e-324
+   * 与高精度小数不得在 double 中退化为 Infinity / 0，也不得被改写成字符串。
+   */
+  @Test
+  void roundTripsVariantProtocolOptionsWithoutFloatLoss() {
+    ModelRequestSpec base = hostModelRequest();
+    String rawOptions = "{\"big\":1e309,\"tiny\":1e-324,\"exact\":0.1234567890123456789012345678}";
+    ModelRequestSpec requestSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            new ModelVariant("v1", "high", new ProviderProtocolOptions(rawOptions)),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl());
+
+    String encoded = codec.encode(requestSpec);
+
+    assertTrue(encoded.contains("\"big\":1E+309"), encoded);
+    assertTrue(encoded.contains("\"tiny\":1E-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+
+    ModelRequestSpec decoded = codec.decode(encoded);
+    assertEquals(requestSpec, decoded);
+    assertEquals(
+        "{\"big\":1E+309,\"tiny\":1E-324,\"exact\":0.1234567890123456789012345678}",
+        decoded.variant().protocolOptions().canonicalJson());
   }
 }

@@ -42,18 +42,18 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/schema/InputValidator</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/schema/InputNormalizer</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/resource/ResourceRef</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/json/JsonValues</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/json/BoundedOutputStream</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/text/TextReadWindow</include>
-                                        <include>fun/fengwk/kkstudio/harness/common/network/HttpProxySelector*</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.prompt.PromptTemplateLoader</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.schema.InputValidator</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.schema.InputNormalizer</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.resource.ResourceRef</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.resource.ResourceUriValidator</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.json.JsonValues</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.json.BoundedJsonWriter</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.json.BoundedOutputStream</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.text.TextReadWindow</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.network.HttpProxySelector*</include>
                                     </includes>
                                     <limits>
                                         <limit>

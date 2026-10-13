@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.json.ToolArguments;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderRequest;

@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 
@@ -21,14 +22,14 @@ import java.util.Set;
  */
 public final class ModelInvocationErrorJsonCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Set<String> EXPECTED_FIELDS = Set.of("kind", "message", "httpStatus");
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   public ModelInvocationErrorJsonCodec() {}
 
@@ -40,7 +41,7 @@ public final class ModelInvocationErrorJsonCodec {
     Objects.requireNonNull(error, "error");
     try {
       return OBJECT_MAPPER.writeValueAsString(encodeNode(error));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("cannot encode model invocation error", exception);
     }
   }
@@ -59,7 +60,7 @@ public final class ModelInvocationErrorJsonCodec {
     Objects.requireNonNull(json, "json");
     try {
       return decodeNode(OBJECT_MAPPER.readTree(json));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed model invocation error", exception);
     }
   }
@@ -81,7 +82,7 @@ public final class ModelInvocationErrorJsonCodec {
 
   private static void requireFields(ObjectNode node) {
     Set<String> actual = new HashSet<>();
-    node.fieldNames().forEachRemaining(actual::add);
+    node.propertyNames().forEach(actual::add);
     if (!actual.equals(EXPECTED_FIELDS)) {
       throw new IllegalArgumentException("unexpected model invocation error fields: " + actual);
     }
@@ -89,10 +90,10 @@ public final class ModelInvocationErrorJsonCodec {
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   /** 读取 required 的 {@code httpStatus}：显式 null 或 100–599 的整型 HTTP 状态；其余一律拒绝。 */

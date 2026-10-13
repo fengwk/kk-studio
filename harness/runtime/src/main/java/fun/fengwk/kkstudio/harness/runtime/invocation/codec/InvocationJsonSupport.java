@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
@@ -22,12 +24,14 @@ final class InvocationJsonSupport {
 
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // 树搬运的自由 JSON（如 variant.protocolOptions）按 BigDecimal 读回，1e309/1e-324 与高精度小数不得退化为 Infinity
+          // / 0。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private InvocationJsonSupport() {}
 
@@ -35,11 +39,12 @@ final class InvocationJsonSupport {
     Objects.requireNonNull(json, "json");
     try {
       JsonNode value = MAPPER.readTree(json);
-      if (value == null) {
+      // Jackson 3 对空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 empty document。
+      if (value == null || value.isMissingNode()) {
         throw new IllegalArgumentException("malformed " + context + " JSON: empty document");
       }
       return value;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed " + context + " JSON", error);
     }
   }
@@ -47,7 +52,7 @@ final class InvocationJsonSupport {
   static String write(JsonNode node, String context) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode " + context + " JSON", error);
     }
   }
@@ -97,10 +102,10 @@ final class InvocationJsonSupport {
 
   static String text(ObjectNode node, String field, String context) {
     JsonNode value = required(node, field, context);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   static String nullableText(ObjectNode node, String field, String context) {
@@ -108,10 +113,10 @@ final class InvocationJsonSupport {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   static boolean bool(ObjectNode node, String field, String context) {
@@ -233,7 +238,7 @@ final class InvocationJsonSupport {
         throw new IllegalArgumentException(context + " must contain a JSON object");
       }
       return value;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException(context + " must contain a JSON object", error);
     }
   }

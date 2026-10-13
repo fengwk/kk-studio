@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -45,8 +45,7 @@ import java.util.UUID;
 /** {@link ProviderReplayStateJsonCodec} 严格性、深拷贝、toString 脱敏与 Jackson @JsonIgnore 验证。 */
 class ProviderReplayStateJsonCodecTest {
 
-  private static final ObjectMapper OBJECT_MAPPER =
-      new ObjectMapper().disable(MapperFeature.REQUIRE_HANDLERS_FOR_JAVA8_TIMES);
+  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private final ProviderReplayStateJsonCodec codec = new ProviderReplayStateJsonCodec();
@@ -410,5 +409,25 @@ class ProviderReplayStateJsonCodecTest {
             UUID.fromString("11111111-2222-3333-4444-555555555555"),
             "claude-3-5-sonnet"),
         payload);
+  }
+
+  /** 自由 payload 树中的 JSON number 以 BigDecimal 保留精度：1e309/1e-324 不得退化为 "Infinity"/0.0。 */
+  @Test
+  void preservesFreeFormPayloadNumberPrecision() {
+    String raw =
+        "{\"format\":\"anthropic_messages\",\"affinity\":{"
+            + "\"providerType\":\"anthropic\",\"providerName\":\"anthropic\","
+            + "\"connectionGenerationId\":\"11111111-2222-3333-4444-555555555555\","
+            + "\"modelId\":\"claude-3-5-sonnet\"},"
+            + "\"payload\":{\"big\":1e309,\"tiny\":1e-324}}";
+
+    ProviderReplayState decoded = codec.decode(raw);
+    String encoded = codec.encode(decoded);
+
+    assertTrue(encoded.contains("\"big\":1E+309"), encoded);
+    assertTrue(encoded.contains("\"tiny\":1E-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    // 再往返一次保持稳定，证明没有 double 归一化漂移。
+    assertEquals(encoded, codec.encode(codec.decode(encoded)));
   }
 }

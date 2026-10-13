@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
@@ -115,10 +115,11 @@ final class HistoryValueCodecs {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
-    return BranchSettings.requireCanonicalEnvironmentName(value.textValue(), context + "." + field);
+    return BranchSettings.requireCanonicalEnvironmentName(
+        value.stringValue(), context + "." + field);
   }
 
   // ---------- ModelSelection ----------
@@ -200,10 +201,10 @@ final class HistoryValueCodecs {
 
   static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   static String requiredText(ObjectNode node, String field, String context) {
@@ -212,10 +213,10 @@ final class HistoryValueCodecs {
   }
 
   static String requiredText(JsonNode value, String field, String context) {
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    String text = value.textValue();
+    String text = value.stringValue();
     if (text.isBlank()) {
       throw new IllegalArgumentException(context + "." + field + " must not be blank");
     }
@@ -353,11 +354,11 @@ final class HistoryValueCodecs {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
     try {
-      return UUID.fromString(value.textValue());
+      return UUID.fromString(value.stringValue());
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string", error);
@@ -366,7 +367,7 @@ final class HistoryValueCodecs {
 
   static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
     Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.fieldNames();
+    Iterator<String> names = node.propertyNames().iterator();
     while (names.hasNext()) {
       actual.add(names.next());
     }
@@ -383,7 +384,7 @@ final class HistoryValueCodecs {
   static void requireFields(
       ObjectNode node, Set<String> required, Set<String> optional, String context) {
     Set<String> actual = new LinkedHashSet<>();
-    node.fieldNames().forEachRemaining(actual::add);
+    node.propertyNames().forEach(actual::add);
     Set<String> allowed = new LinkedHashSet<>(required);
     allowed.addAll(optional);
     if (!actual.containsAll(required) || !allowed.containsAll(actual)) {

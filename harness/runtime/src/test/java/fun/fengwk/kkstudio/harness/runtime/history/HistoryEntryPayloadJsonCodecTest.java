@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -1134,5 +1135,34 @@ class HistoryEntryPayloadJsonCodecTest {
   private static BranchSettings settings() {
     return new BranchSettings(
         "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
+  }
+
+  /** CUSTOM entry 的 data 自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */
+  @Test
+  void preservesCustomEntryDataNumberPrecision() {
+    String dataJson = "{\"big\":1E+309,\"tiny\":1E-324}";
+    EntryPayload payload = new CustomEntryPayload("com.example.goal", "goal", 1, dataJson);
+
+    String encoded = CODEC.encode(payload);
+
+    assertTrue(encoded.contains("1E+309"), encoded);
+    assertTrue(encoded.contains("1E-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(payload, CODEC.decode(EntryType.CUSTOM, encoded));
+  }
+
+  /** CUSTOM_MESSAGE 的 details 自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */
+  @Test
+  void preservesCustomMessageDetailsNumberPrecision() {
+    String detailsJson = "{\"big\":1E+309,\"tiny\":1E-324}";
+    EntryPayload payload =
+        new CustomMessagePayload("core", "message", "message", user("system"), detailsJson);
+
+    String encoded = CODEC.encode(payload);
+
+    assertTrue(encoded.contains("1E+309"), encoded);
+    assertTrue(encoded.contains("1E-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(payload, CODEC.decode(EntryType.CUSTOM_MESSAGE, encoded));
   }
 }
