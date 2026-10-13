@@ -108,6 +108,7 @@ test('frontend coverage and offline layout are required gates using the locked b
   const commands = [
     'npm --prefix frontend ci',
     'npm --prefix frontend run lint',
+    'npm --prefix frontend run typecheck:test',
     'npm --prefix frontend run coverage',
     'npm --prefix frontend run build',
     'npx --no-install playwright install --with-deps chromium',
@@ -125,7 +126,7 @@ test('frontend coverage and offline layout are required gates using the locked b
     assert.doesNotMatch(step, /continue-on-error:|(?:\|\||&&)\s*true|--passWithNoTests/u)
   }
   assert.ok(!steps.some((step) => stepField(step, 'run') === 'npm --prefix frontend run test'))
-  const browser = steps.find((step) => stepField(step, 'run') === commands[4])
+  const browser = steps.find((step) => stepField(step, 'run') === 'npx --no-install playwright install --with-deps chromium')
   assert.equal(stepField(browser, 'working-directory'), 'frontend')
   const lock = JSON.parse(readFileSync(new URL('frontend/package-lock.json', root), 'utf8'))
   const playwright = lock.packages['node_modules/playwright']

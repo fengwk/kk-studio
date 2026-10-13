@@ -179,6 +179,8 @@ jobs:
         run: npm --prefix frontend ci
       - name: Lint frontend
         run: npm --prefix frontend run lint
+      - name: Check frontend test and browser types
+        run: npm --prefix frontend run typecheck:test
       - name: Verify frontend coverage
         run: npm --prefix frontend run coverage
       - name: Build frontend

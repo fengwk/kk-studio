@@ -85,7 +85,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
-| 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run build`、`run coverage` |
+| 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
 | 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
 | 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
@@ -119,7 +119,7 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 
 该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装器回归，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
-前端必须通过 lint、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
+前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
 Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明确检查 Bash 3.2，
@@ -223,6 +223,8 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -Pdistribution -pl web -am clean packa
 npm --prefix frontend ci
 npm --prefix frontend run test
 npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend run typecheck:test
 npm --prefix frontend run build
 npm --prefix frontend run coverage
 ```
@@ -232,6 +234,8 @@ npm --prefix frontend run coverage
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
 | `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、共享资源卡/控件、Chat 1–9 pane 布局、Agent 执行树与回执、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 创建确认/生成布局/耐用性、Catalog i18n、Project 工作流与 Agent、Settings 同步与 Environment 安装；不依赖 Backend，产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
+| `run typecheck` | `tsc -b` | 生产源码与构建配置的严格类型检查，不打包 |
+| `run typecheck:test` | `tsc -p tsconfig.test.json` | 全部单元测试、浏览器用例及其基座的严格类型检查，不运行浏览器或模型 |
 | `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
 | `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |
 

@@ -11,7 +11,7 @@ PostgreSQL 持久化与 REST 调度，经
 [`ProjectAutoConfiguration`](../../project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。HTTP DTO 映射由 Web 提供，Environment 校验、Session 深删除与 Blob 操作
 通过下文端口调用 [Platform](platform.md) 的适配。生产依赖包括
-`harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`）与 Spring Boot、MyBatis、Jackson 通用框架，
+`harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`）与 Spring JDBC、Jackson 通用框架，
 [`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
 同时锁定「生产依赖集合精确相等」与 import 白名单。
 
@@ -21,7 +21,7 @@ PostgreSQL 持久化与 REST 调度，经
 | --- | --- |
 | [domain](../../project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转与阶段预算授权规则 |
 | [model](../../project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、Run、Activity、Evidence、Work、Agent Thread 绑定、阶段预算行与暂停原因等值 |
-| [repo](../../project/src/main/java/fun/fengwk/kkstudio/project/repo) | 仓库契约与 PostgreSQL 实现（`repo/impl` 下另有 mapper 与 DO） |
+| [repo](../../project/src/main/java/fun/fengwk/kkstudio/project/repo) | 仓库契约与 PostgreSQL 实现（`repo/impl` 下的 JdbcStore 提供命名参数 SQL 与显式 RowMapper，model 提供 DO） |
 | [service](../../project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project/Issue/Run/Evidence 与 Work 邮箱 |
 | [controller](../../project/src/main/java/fun/fengwk/kkstudio/project/controller) | Issue 调度的部署级配置与确定性推进 |
 | [port](../../project/src/main/java/fun/fengwk/kkstudio/project/port) | 宿主必须实现的跨宿主能力 |
@@ -131,7 +131,7 @@ Work 请求、claim、续租、完成与重排统一以数据库 `statement_time
 加延迟，不保留本次 claim 的旧 past-due；有新 wake 时才取现有 due_at 与目标时刻的较早值。
 实现见 [`IssueControllerDispatcher`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/IssueControllerDispatcher.java)、
 [`IssueWorkStoreImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueWorkStoreImpl.java)
-及 [`IssueWorkMapper`](../../project/src/main/java/fun/fengwk/kkstudio/project/repo/impl/mapper/IssueWorkMapper.java)。
+及 [`IssueWorkJdbcStore`](../../project/src/main/java/fun/fengwk/kkstudio/project/repo/impl/store/IssueWorkJdbcStore.java)。
 Harness 的调度时间域见 [Harness Infra](harness-infra.md#work-的-claim--lease--wake)。
 
 ## 错误映射
