@@ -11,6 +11,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.OfficialReleaseHttp;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -46,6 +48,8 @@ import java.util.jar.Manifest;
  * 更新器阶段完成。
  */
 public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
+
+  private static final Logger LOG = System.getLogger(ManagedDaemonUpdater.class.getName());
 
   /** 受管二进制文件名（由安装器布局固定）。 */
   public static final String MANAGED_JAR_NAME = "kk-studio-daemon.jar";
@@ -396,8 +400,10 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
       } finally {
         try {
           Files.deleteIfExists(log);
-        } catch (IOException ignored) {
-          // 临时诊断文件清理失败不影响预检结论。
+        } catch (IOException error) {
+          // 临时诊断文件清理失败不影响预检结论，但必须留下安全诊断：只记录阶段与异常类型。
+          LOG.log(
+              Level.DEBUG, "failed to delete preflight log: " + error.getClass().getSimpleName());
         }
       }
     }
