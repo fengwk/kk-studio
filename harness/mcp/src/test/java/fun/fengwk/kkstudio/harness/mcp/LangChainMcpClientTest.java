@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -361,6 +362,30 @@ class LangChainMcpClientTest {
     assertThat(result.detailsJson()).isEqualTo("{\"traceId\":\"t-1\"}");
   }
 
+  /** 模块自有的 attributes 序列化走 Jackson 3：非 ASCII 直接写为 UTF-8 原文，不经 SDK 的 Jackson 2 边界。 */
+  @Test
+  void serializesOwnAttributesWithJackson3RawUtf8() {
+    DefaultMcpClient sdk = mock(DefaultMcpClient.class);
+    when(sdk.executeTool(any(ToolExecutionRequest.class)))
+        .thenReturn(
+            ToolExecutionResult.builder()
+                .isError(false)
+                .result(List.of(new TextResultContent("ok")))
+                .resultText("ok")
+                .attributes(Map.of("note", "中文😀"))
+                .build());
+    LangChainMcpClient client = newClient(sdk, null);
+
+    McpToolCallResult result = client.callTool("tool", "{}", McpDeadline.of(BUDGET), none());
+
+    assertThat(result.detailsJson()).isEqualTo("{\"note\":\"中文😀\"}");
+    assertThat(result.detailsJson())
+        .as("自有 JSON 是 Jackson 3 profile：非 ASCII 不转义")
+        .contains("中文😀")
+        .doesNotContain("\\u");
+    assertThat(result.detailsJson().getBytes(StandardCharsets.UTF_8)).hasSize(21);
+  }
+
   /** 结果不可按内容单元投影时必须退化到 resultText，且空文本同样给出显式空内容而不是 null。 */
   @Test
   void fallsBackToResultTextWhenContentsAreNotProjectable() {
@@ -404,6 +429,32 @@ class LangChainMcpClientTest {
 
     assertThat(result.error()).isTrue();
     assertThat(result.detailsJson()).isEqualTo("{}");
+  }
+
+  /**
+   * 无可序列化属性的 value（empty bean）在 Jackson 2 约定下必须编码失败并回退为固定空 JSON object，绝不产出 {@code {"bad":{}}}
+   * 这类假合法详情，也不回显 attributes 中的敏感内容。
+   */
+  @Test
+  void fallsBackToEmptyDetailsWhenAttributesContainEmptyBean() {
+    Map<String, Object> attributes = new HashMap<>();
+    attributes.put("bad", new Object());
+    attributes.put("secret", "top-secret");
+    DefaultMcpClient sdk = mock(DefaultMcpClient.class);
+    when(sdk.executeTool(any(ToolExecutionRequest.class)))
+        .thenReturn(
+            ToolExecutionResult.builder()
+                .isError(true)
+                .result("raw")
+                .resultText("failed")
+                .attributes(attributes)
+                .build());
+    LangChainMcpClient client = newClient(sdk, null);
+
+    McpToolCallResult result = client.callTool("tool", "{}", McpDeadline.of(BUDGET), none());
+
+    assertThat(result.error()).isTrue();
+    assertThat(result.detailsJson()).isEqualTo("{}").doesNotContain("top-secret");
   }
 
   /** 关闭必须释放 worker 池并关闭 SDK 与传输，且任一关闭失败都不得外抛或阻断后续清理。 */

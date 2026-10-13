@@ -14,6 +14,7 @@
     <artifactId>kk-studio-harness-mcp</artifactId>
 
     <dependencies>
+        <!-- SDK：MCP client 与传输实现。 -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-mcp</artifactId>
@@ -22,6 +23,16 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-common</artifactId>
         </dependency>
+        <!-- 模块自有 JSON（工具 schema、调用详情）一律走 Jackson 3。 -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <!--
+            Jackson 2 只用于 SDK 边界：McpToolResultExtractor 的签名固定接收
+            com.fasterxml.jackson.databind.JsonNode，因此只有 McpResultExtractor 直接依赖它；
+            该边界之外的生产代码禁止再引入 Jackson 2 core/databind。
+        -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
