@@ -1,16 +1,18 @@
 package fun.fengwk.kkstudio.harness.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.mcp.client.McpToolResultExtractor;
 import dev.langchain4j.service.tool.ToolExecutionResult;
 
-import fun.fengwk.kkstudio.harness.common.json.BoundedJsonWriter;
+import fun.fengwk.kkstudio.harness.common.json.BoundedOutputStream;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -21,11 +23,15 @@ import java.util.List;
  * <ul>
  *   <li>text 内容映射为 {@link TextResultContent}，并计入单次响应的累计内容预算；
  *   <li>image 内容在解码前按 encoded 长度检查 decoded 上界，再映射为 {@link BinaryResultContent}；
- *   <li>resource 或其他结构化内容先用 {@link BoundedJsonWriter} 在 {@link
+ *   <li>resource 或其他结构化内容先用 {@link BoundedOutputStream} 在 {@link
  *       JsonResultContent#MAX_JSON_UTF8_BYTES} 内写出，再映射为 {@link JsonResultContent}；超限 fail
  *       closed，不退化为同尺寸无界文本；
  *   <li>非法 Base64 等受控结构仍保留为有界 JSON，不因单条畸形内容二次失败。
  * </ul>
+ *
+ * <p>本类是模块内<strong>唯一的 Jackson 2 适配边界</strong>：SDK 的 {@link McpToolResultExtractor} 签名固定接收 {@code
+ * com.fasterxml.jackson.databind.JsonNode}，因此这里用一个 J2 mapper 只把 SDK 节点有界写回 JSON 文本；模块自有的 JSON（工具
+ * schema、调用详情）一律走 Jackson 3。J2 mapper 保持默认 UTF-8 编码 profile，不额外改编码开关。
  *
  * <p>累计预算是单次 {@code extract} 内全部 text 与 binary 字节之和，上限为 {@link #MAX_CONTENT_BUDGET_BYTES}（64
  * MiB）。该数字对齐既有 terminal 工具产物硬上限的数量级（daemon multiline 扫描与 terminal 结果尺寸检查使用的 64 MiB）， 不是新的调用配置：MCP
@@ -39,6 +45,12 @@ public final class McpResultExtractor implements McpToolResultExtractor {
    * <p>与既有 terminal/daemon 64 MiB 上界对齐，不新增配置。
    */
   public static final int MAX_CONTENT_BUDGET_BYTES = 64 * 1024 * 1024;
+
+  /**
+   * 只用于把 SDK 的 Jackson 2 内容节点有界写回 JSON 文本的 mapper；保留其默认 UTF-8 编码 profile，模块自有 JSON 一律走 Jackson
+   * 3（{@code tools.jackson}）。
+   */
+  private static final ObjectMapper SDK_NODE_MAPPER = new ObjectMapper();
 
   @Override
   public ToolExecutionResult extract(JsonNode contentNode, boolean isError) {
@@ -109,7 +121,7 @@ public final class McpResultExtractor implements McpToolResultExtractor {
     if (node.isTextual()) {
       return chargeText(node.asText(""), budget);
     }
-    String json = BoundedJsonWriter.write(node, JsonResultContent.MAX_JSON_UTF8_BYTES);
+    String json = writeBoundedJson(node, JsonResultContent.MAX_JSON_UTF8_BYTES);
     if (json == null) {
       throw new McpException(
           "MCP content exceeds "
@@ -118,6 +130,36 @@ public final class McpResultExtractor implements McpToolResultExtractor {
     }
     chargeUtf8(json, "json", budget);
     return new JsonResultContent(json);
+  }
+
+  /**
+   * 把 SDK 的 Jackson 2 节点写成不超过 {@code maxBytes} 的 UTF-8 JSON 文本。
+   *
+   * <p>上限判定只认有界输出流自身的 {@link BoundedOutputStream.LimitExceededException}（直接抛出或沿 cause 链），超限时返回
+   * {@code null}，把「超限」决策留给调用方；其它序列化/IO 失败一律收敛为固定不透明 {@link McpException}，绝不回显节点内容或保留底层 cause。
+   */
+  static String writeBoundedJson(JsonNode node, int maxBytes) {
+    BoundedOutputStream out = new BoundedOutputStream(maxBytes, true);
+    try {
+      SDK_NODE_MAPPER.writeValue(out, node);
+    } catch (IOException error) {
+      if (isOverLimit(error)) {
+        return null;
+      }
+      // 序列化失败的消息可能携带节点片段或本地路径，不能跨越模块边界。
+      throw new McpException("MCP content cannot be encoded as bounded JSON");
+    }
+    return out.toUtf8String();
+  }
+
+  /** 仅当 cause 链中出现有界输出流自身的超限中止时判定为超限；其它序列化/IO 失败不视为超限。 */
+  private static boolean isOverLimit(Throwable error) {
+    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (cause instanceof BoundedOutputStream.LimitExceededException) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static TextResultContent chargeText(String text, ContentBudget budget) {
