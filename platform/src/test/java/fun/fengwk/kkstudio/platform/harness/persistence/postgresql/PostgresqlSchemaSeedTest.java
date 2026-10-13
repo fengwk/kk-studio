@@ -119,8 +119,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       applyE2eDatabase(conn);
       try (Statement st = conn.createStatement()) {
         assertEquals(
-            "anthropic:anthropic,deepseek:openai,google:google,minimax:openai_response,"
-                + "minimax-anthropic:anthropic,openai:openai_response,xai:openai_response,"
+            "anthropic:anthropic,deepseek:openai,google:google,minimax:openai_responses,"
+                + "minimax-anthropic:anthropic,openai:openai_responses,xai:openai_responses,"
                 + "zai:openai",
             singleString(
                 st,
@@ -128,7 +128,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                     + " from agent_provider"),
             "the complete E2E seed catalog must retain its deterministic provider names");
         assertEquals(
-            "minimax:openai_response",
+            "minimax:openai_responses",
             singleString(
                 st,
                 "select name || ':' || provider_type from agent_provider where name = 'minimax'"),

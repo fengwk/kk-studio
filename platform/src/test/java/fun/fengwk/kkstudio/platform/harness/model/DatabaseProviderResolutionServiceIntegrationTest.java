@@ -98,7 +98,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals(secondGen, openAi.descriptor.connectionGenerationId());
 
     AgentProviderUpdateDTO typeUpdate = new AgentProviderUpdateDTO();
-    typeUpdate.setProviderType("openai_response");
+    typeUpdate.setProviderType("openai_responses");
     typeUpdate.setExpectedVersion(updated.getVersion());
     providerService.updateProvider(name, typeUpdate);
     IllegalArgumentException typeDrift =

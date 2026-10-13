@@ -124,7 +124,7 @@ def build_payload(
     provider_type = (
         spec.provider_type
         if spec is not None
-        else (current.get("providerType") or "openai_response")
+        else (current.get("providerType") or "openai_responses")
     )
     description = current.get("description") or (
         spec.default_description if spec is not None else ""

@@ -177,7 +177,7 @@ public class AgentProviderMutationFactoryTest {
     // providerType 变更触发轮换
     UUID afterUrlChange = provider.getConnectionGenerationId();
     AgentProviderUpdateDTO typeChange = new AgentProviderUpdateDTO();
-    typeChange.setProviderType("openai_response");
+    typeChange.setProviderType("openai_responses");
     typeChange.setBaseUrl("http://localhost:9090");
     factory.update(provider, typeChange);
     assertNotEquals(afterUrlChange, provider.getConnectionGenerationId());

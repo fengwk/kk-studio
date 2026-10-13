@@ -44,7 +44,7 @@ test('四指定模型声明式定义与 MINIMAX_ANTHROPIC_M3 契约值严格对�
       modelName: 'gpt-5.6-luna',
       variant: 'off',
       variants: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
-      providerType: 'openai_response',
+      providerType: 'openai_responses',
     },
     {
       idSuffix: 'minimax_anthropic',

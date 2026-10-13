@@ -76,7 +76,7 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 按下面的顺序配置：
 
 1. 打开 [Provider](http://localhost:8080/providers)，新建 Provider。
-   - 选择上游实际使用的协议：`openai`、`openai_response`、`anthropic` 或 `google`。
+   - 选择上游实际使用的协议：`openai`、`openai_responses`、`anthropic` 或 `google`。
    - 填写 Base URL；上游需要认证时再填写 API Key。保存后的密钥不会在 UI 中回显。
 2. 打开 [Model](http://localhost:8080/models)，新建 Model。
    - 选择刚创建的 Provider。

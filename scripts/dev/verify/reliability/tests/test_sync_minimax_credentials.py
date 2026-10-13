@@ -55,15 +55,15 @@ class TestReliabilityMiniMaxCredentialSync(unittest.TestCase):
         self.assertEqual(["minimax: skip (no credential pair)"], lines)
         self.assertEqual([], calls)
 
-    def test_complete_pair_updates_legacy_responses_provider(self):
-        # 意图：当提供完整的 MiniMax 凭据对时，通过共享原语更新 openai_response provider，
+    def test_complete_pair_updates_responses_provider(self):
+        # 意图：当提供完整的 MiniMax 凭据对时，通过共享原语更新 openai_responses provider，
         # 并规范化 base URL 追加 /v1。
         calls = []
         rows = [
             {
                 "name": "minimax",
                 "description": "MiniMax.",
-                "providerType": "openai_response",
+                "providerType": "openai_responses",
                 "baseUrl": None,
                 "version": "7",
                 "modelCallTimeoutMillis": 1800000,
@@ -86,7 +86,7 @@ class TestReliabilityMiniMaxCredentialSync(unittest.TestCase):
             calls[1][0],
         )
         self.assertEqual("https://api.minimax.example/v1", calls[1][1]["baseUrl"])
-        self.assertEqual("openai_response", calls[1][1]["providerType"])
+        self.assertEqual("openai_responses", calls[1][1]["providerType"])
         self.assertEqual("secret-minimax", calls[1][1]["credential"])
         self.assertEqual(["minimax: configured=True baseUrl_set=True"], lines)
 

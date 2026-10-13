@@ -6,9 +6,9 @@ Usage:
 
 Targets:
     google:            TEST_GOOGLE_BASE_URL / TEST_GOOGLE_API_KEY
-    openai:            TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
+    openai:            TEST_OPENAI_RESPONSES_BASE_URL / TEST_OPENAI_RESPONSES_API_KEY
     minimax-anthropic: TEST_ANTHROPIC_BASE_URL / TEST_ANTHROPIC_API_KEY
-    deepseek:          TEST_DEEPSEEK_BASE_URL / TEST_DEEPSEEK_API_KEY
+    deepseek:          TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
 
 When all credential pairs are absent, the script skips without contacting the backend.
 When any provider has an incomplete (half) pair, it raises ValueError before any HTTP request.
@@ -48,12 +48,12 @@ from scripts.dev.lib.provider_credentials import (  # noqa: E402
 
 TEST_GOOGLE_BASE_URL = "TEST_GOOGLE_BASE_URL"
 TEST_GOOGLE_API_KEY = "TEST_GOOGLE_API_KEY"
-TEST_OPENAI_BASE_URL = "TEST_OPENAI_BASE_URL"
-TEST_OPENAI_API_KEY = "TEST_OPENAI_API_KEY"
+TEST_OPENAI_RESPONSES_BASE_URL = "TEST_OPENAI_RESPONSES_BASE_URL"
+TEST_OPENAI_RESPONSES_API_KEY = "TEST_OPENAI_RESPONSES_API_KEY"
 TEST_ANTHROPIC_BASE_URL = "TEST_ANTHROPIC_BASE_URL"
 TEST_ANTHROPIC_API_KEY = "TEST_ANTHROPIC_API_KEY"
-TEST_DEEPSEEK_BASE_URL = "TEST_DEEPSEEK_BASE_URL"
-TEST_DEEPSEEK_API_KEY = "TEST_DEEPSEEK_API_KEY"
+TEST_OPENAI_BASE_URL = "TEST_OPENAI_BASE_URL"
+TEST_OPENAI_API_KEY = "TEST_OPENAI_API_KEY"
 
 
 PROVIDER_SPECS: List[ProviderSpec] = [
@@ -67,9 +67,9 @@ PROVIDER_SPECS: List[ProviderSpec] = [
     ),
     ProviderSpec(
         name="openai",
-        provider_type="openai_response",
-        base_url_env=TEST_OPENAI_BASE_URL,
-        api_key_env=TEST_OPENAI_API_KEY,
+        provider_type="openai_responses",
+        base_url_env=TEST_OPENAI_RESPONSES_BASE_URL,
+        api_key_env=TEST_OPENAI_RESPONSES_API_KEY,
         requires_v1_suffix=True,
         default_description="OpenAI (OpenAI Responses).",
     ),
@@ -84,8 +84,8 @@ PROVIDER_SPECS: List[ProviderSpec] = [
     ProviderSpec(
         name="deepseek",
         provider_type="openai",
-        base_url_env=TEST_DEEPSEEK_BASE_URL,
-        api_key_env=TEST_DEEPSEEK_API_KEY,
+        base_url_env=TEST_OPENAI_BASE_URL,
+        api_key_env=TEST_OPENAI_API_KEY,
         requires_v1_suffix=True,
         default_description="DeepSeek (OpenAI Chat Completions).",
     ),
@@ -105,12 +105,12 @@ def sync_provider_credentials(backend_url: str, env: Optional[dict] = None, urlo
     env_values = {
         TEST_GOOGLE_BASE_URL: env.get(TEST_GOOGLE_BASE_URL),
         TEST_GOOGLE_API_KEY: env.get(TEST_GOOGLE_API_KEY),
-        TEST_OPENAI_BASE_URL: env.get(TEST_OPENAI_BASE_URL),
-        TEST_OPENAI_API_KEY: env.get(TEST_OPENAI_API_KEY),
+        TEST_OPENAI_RESPONSES_BASE_URL: env.get(TEST_OPENAI_RESPONSES_BASE_URL),
+        TEST_OPENAI_RESPONSES_API_KEY: env.get(TEST_OPENAI_RESPONSES_API_KEY),
         TEST_ANTHROPIC_BASE_URL: env.get(TEST_ANTHROPIC_BASE_URL),
         TEST_ANTHROPIC_API_KEY: env.get(TEST_ANTHROPIC_API_KEY),
-        TEST_DEEPSEEK_BASE_URL: env.get(TEST_DEEPSEEK_BASE_URL),
-        TEST_DEEPSEEK_API_KEY: env.get(TEST_DEEPSEEK_API_KEY),
+        TEST_OPENAI_BASE_URL: env.get(TEST_OPENAI_BASE_URL),
+        TEST_OPENAI_API_KEY: env.get(TEST_OPENAI_API_KEY),
     }
     return sync_provider_specs(
         backend_url,
