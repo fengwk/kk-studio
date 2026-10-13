@@ -3,13 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/catalog/AiConsolePanels'
+import type { AgentModelConfigDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { ChatCardsPanel } from '@/features/ai/chat/ChatCardsPanel'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
-const baseConfig = {
+const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
-  abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] as const },
+  abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
   pricing: {
     currency: 'USD',
     pricingTier: 'default',
@@ -31,6 +32,7 @@ function modelWithProvider(): AgentModelView {
   return {
     providerName: 'minimax',
     name: 'MiniMax',
+    modelId: 'minimax',
     description: null,
     config: baseConfig,
     version: '1',
@@ -54,6 +56,7 @@ describe('AiConsolePanels', () => {
               id: 'c1',
               title: 'One',
               agentName: 'missing',
+              environmentName: null,
               yoloEnabled: false,
               version: '1',
               createTime: null,
@@ -66,7 +69,6 @@ describe('AiConsolePanels', () => {
         <AgentsPanel
           agents={[
             {
-              id: 'a1',
               name: 'assistant',
               description: 'd',
               systemPrompt: null,
@@ -100,7 +102,6 @@ describe('AiConsolePanels', () => {
         <ProvidersPanel
           providers={[
             {
-              id: 'p1',
               name: 'minimax',
               description: null,
               providerType: 'openai',
@@ -111,6 +112,7 @@ describe('AiConsolePanels', () => {
               version: '1',
               createTime: null,
               updateTime: null,
+              modelHttpRetryStatusCodes: null,
             },
           ]}
           deletePending={false}

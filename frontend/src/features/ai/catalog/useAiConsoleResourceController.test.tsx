@@ -3,6 +3,11 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAiConsoleResourceController } from '@/features/ai/catalog/useAiConsoleResourceController'
+import type {
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  AgentProviderDTO,
+} from '@/shared/api/contracts/ai-catalog'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -55,18 +60,38 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.deleteAgent).mockResolvedValue(undefined)
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([])
     vi.mocked(agentService.updateProvider).mockImplementation(async (_name, data) => {
-      currentProvider = { ...currentProvider, ...data, name: data.name ?? currentProvider.name }
+      currentProvider = {
+        ...currentProvider,
+        ...data,
+        name: data.name ?? currentProvider.name,
+        description: data.description !== undefined ? data.description : currentProvider.description,
+        baseUrl: data.baseUrl !== undefined ? data.baseUrl : currentProvider.baseUrl,
+        modelCallTimeoutMillis: data.modelCallTimeoutMillis ?? currentProvider.modelCallTimeoutMillis,
+        modelCallIdleTimeoutMillis: data.modelCallIdleTimeoutMillis ?? currentProvider.modelCallIdleTimeoutMillis,
+        modelHttpRetryStatusCodes: data.modelHttpRetryStatusCodes !== undefined ? data.modelHttpRetryStatusCodes : currentProvider.modelHttpRetryStatusCodes,
+      }
       currentModel = { ...currentModel, providerName: currentProvider.name }
       currentAgent = { ...currentAgent, model: `${currentModel.providerName}/${currentModel.name}` }
       return currentProvider
     })
     vi.mocked(agentService.updateModel).mockImplementation(async (_providerName, _modelName, data) => {
-      currentModel = { ...currentModel, ...data }
+      currentModel = {
+        ...currentModel,
+        ...data,
+        description: data.description !== undefined ? data.description : currentModel.description,
+      }
       currentAgent = { ...currentAgent, model: `${currentModel.providerName}/${currentModel.name}` }
       return currentModel
     })
     vi.mocked(agentService.updateAgent).mockImplementation(async (_name, data) => {
-      currentAgent = { ...currentAgent, ...data }
+      currentAgent = {
+        ...currentAgent,
+        ...data,
+        description: data.description !== undefined ? data.description : currentAgent.description,
+        systemPrompt: data.systemPrompt !== undefined ? data.systemPrompt : currentAgent.systemPrompt,
+        model: data.model !== undefined ? data.model : currentAgent.model,
+        variant: data.variant !== undefined ? data.variant : currentAgent.variant,
+      }
       return currentAgent
     })
   })
@@ -315,15 +340,19 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([
       {
         packageName: 'core',
+        description: 'Core skills',
         repositoryUrl: 'https://github.com/example/core.git',
         branch: 'main',
+        hasToken: false,
         currentCommit: '1111111111111111111111111111111111111111',
         observedHeadCommit: '1111111111111111111111111111111111111111',
         headCheckedAt: '2026-09-21T00:00:00.000Z',
         headCheckError: null,
-        checkStatus: 'IDLE',
-        skills: [{ name: 'dev', description: 'dev skill', path: 'dev/SKILL.md' }],
+        checkStatus: 'UNCHECKED',
+        skills: [{ name: 'dev', description: 'dev skill' }],
         version: '1',
+        createTime: '2026-09-21T00:00:00.000Z',
+        updateTime: '2026-09-21T00:00:00.000Z',
       },
     ])
 
@@ -340,6 +369,7 @@ function ResourceControllerHarness() {
     providers: true,
     models: true,
     agents: true,
+    tools: true,
     skills: true,
     environments: true,
   })
@@ -508,7 +538,7 @@ function page<T>(results: T[]) {
   }
 }
 
-function provider() {
+function provider(): AgentProviderDTO {
   return {
     name: 'stub',
     description: 'Local deterministic provider',
@@ -520,10 +550,11 @@ function provider() {
     version: '0',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
+    modelHttpRetryStatusCodes: null,
   }
 }
 
-function model() {
+function model(): AgentModelDTO {
   return {
     providerName: 'stub',
     name: 'acceptance-stub',
@@ -554,7 +585,7 @@ function model() {
   }
 }
 
-function agent() {
+function agent(): AgentDefinitionDTO {
   return {
     name: 'default-assistant',
     description: 'Cloud agent',

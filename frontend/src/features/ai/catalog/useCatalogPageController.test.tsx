@@ -6,6 +6,11 @@ import {
   useCatalogPageController,
   type CatalogPageScope,
 } from '@/features/ai/catalog/useCatalogPageController'
+import type {
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  AgentProviderDTO,
+} from '@/shared/api/contracts/ai-catalog'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/shared/api/environment-service'
 
@@ -192,9 +197,8 @@ function page<T>(results: T[]) {
   }
 }
 
-function provider() {
+function provider(): AgentProviderDTO {
   return {
-    id: 'provider-1',
     name: 'stub',
     description: 'Local provider',
     providerType: 'openai',
@@ -205,13 +209,15 @@ function provider() {
     version: '1',
     createTime: null,
     updateTime: null,
+    modelHttpRetryStatusCodes: null,
   }
 }
 
-function model() {
+function model(): AgentModelDTO {
   return {
     providerName: 'stub',
     name: 'model',
+    modelId: 'model-1',
     description: 'Test model',
     config: {
       limit: { context: 128000, output: 8192 },
@@ -226,6 +232,7 @@ function model() {
         outputPerMillionTokens: 0,
         cacheReadPerMillionTokens: 0,
         cacheWritePerMillionTokens: 0,
+        cacheWriteLongPerMillionTokens: 0,
         reasoningPerMillionTokens: 0,
       },
       defaultVariant: 'default',
@@ -237,9 +244,8 @@ function model() {
   }
 }
 
-function agent() {
+function agent(): AgentDefinitionDTO {
   return {
-    id: 'agent-1',
     name: 'default-assistant',
     description: null,
     systemPrompt: null,

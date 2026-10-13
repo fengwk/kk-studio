@@ -36,7 +36,7 @@ function modelConfig(): AgentModelConfigDTO {
   }
 }
 
-function provider(id: string, name: string): AgentProviderDTO {
+function provider(_id: string, name: string): AgentProviderDTO {
   return {
     name,
     description: null,
@@ -56,6 +56,7 @@ function model(id: string, providerName: string): AgentModelDTO {
   return {
     providerName,
     name: id,
+    modelId: id.toLowerCase(),
     description: null,
     config: modelConfig(),
     version: '1',

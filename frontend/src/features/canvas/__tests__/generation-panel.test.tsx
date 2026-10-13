@@ -538,7 +538,7 @@ describe('Canvas generic generation panel', () => {
 
   it('renders without an anchor while the measuring effect tolerates a missing ResizeObserver', () => {
     const original = globalThis.ResizeObserver
-    // @ts-expect-error 删除全局观察者以覆盖生产代码的 undefined 早退分支。
+    // 删除全局观察者以覆盖生产代码的 undefined 早退分支。
     delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
     try {
       const view = renderPanel()

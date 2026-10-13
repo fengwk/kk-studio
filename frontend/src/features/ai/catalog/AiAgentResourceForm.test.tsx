@@ -13,9 +13,9 @@ import {
 import type {
   AgentDefinitionDTO,
   AgentModelConfigDTO,
-  AgentModelView,
   SkillPackageDTO,
 } from '@/shared/api/contracts/ai-catalog'
+import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 
 const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
@@ -41,6 +41,7 @@ function modelWithVariants(): AgentModelView {
   return {
     providerName: 'minimax',
     name: 'MiniMax',
+    modelId: 'minimax-variants',
     description: null,
     config: baseConfig,
     version: '1',
@@ -240,12 +241,12 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
-    await chooseSelectOption(user, /Default Variant Override|模型变体覆盖/, 'fast')
+    await chooseSelectOption(user, 'Default Variant Override', 'fast')
     expect(drafts.at(-1)?.variant).toBe('fast')
 
     await chooseSelectOption(
       user,
-      /Default Variant Override|模型变体覆盖/,
+      'Default Variant Override',
       /use model default|使用模型默认/i,
     )
     expect(drafts.at(-1)?.variant).toBe('')

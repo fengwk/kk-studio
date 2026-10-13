@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useFunctionConfigSync } from '@/features/canvas/function-config'
-import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasCommandDTO, CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 
 describe('useFunctionConfigSync', () => {
   beforeEach(() => {
@@ -70,10 +71,10 @@ describe('useFunctionConfigSync', () => {
   })
 
   it('resets debounce timer on rapid edits and only flushes latest draft', async () => {
-    const executeCommands = vi.fn(async () => undefined)
+    const executeCommands = vi.fn(async (_commands: CanvasCommandDTO[], _acks?: CanvasDraftAck[]) => undefined)
     let gen = 0
     const onImmediateDraft = vi.fn(() => ++gen)
-    const nodeId = 'node-2' as UUIDString
+    const nodeId = '00000000-0000-4000-8000-000000000002' as UUIDString
 
     const { result } = renderHook(() =>
       useFunctionConfigSync({
@@ -115,25 +116,40 @@ describe('useFunctionConfigSync', () => {
       await vi.advanceTimersByTimeAsync(120)
     })
     expect(executeCommands).toHaveBeenCalledTimes(1)
-    expect(executeCommands.mock.calls[0]?.[0]?.[0]?.function?.args?.prompt).toBe('version 2')
+    const cmd = executeCommands.mock.calls[0]?.[0]?.[0]
+    expect(cmd?.type).toBe('SET_NODE_FUNCTION')
+    if (cmd?.type !== 'SET_NODE_FUNCTION') {
+      throw new Error('Expected SET_NODE_FUNCTION')
+    }
+    expect(cmd.function?.args.prompt).toBe('version 2')
   })
 
   it('flushFunctionConfig flushes immediately and cancels pending timer', async () => {
-    const executeCommands = vi.fn(async () => undefined)
-    const nodeId = 'node-3' as UUIDString
+    const executeCommands = vi.fn(async (_commands: CanvasCommandDTO[], _acks?: CanvasDraftAck[]) => undefined)
+    const nodeId = '00000000-0000-4000-8000-000000000003' as UUIDString
 
     const mockSnapshot: CanvasSnapshotDTO = {
-      document: { id: 'canvas-1', title: 'test', version: '1', createdAt: '', updatedAt: '' },
+      document: {
+        id: '11111111-1111-4000-8000-000000000001',
+        title: 'test',
+        revision: '1',
+        createdAt: '2026-08-10T00:00:00Z',
+        updatedAt: '2026-08-10T00:00:00Z',
+      },
       nodes: [
         {
           id: nodeId,
-          kind: 'resource',
+          canvasId: '11111111-1111-4000-8000-000000000001',
+          name: 'node-3',
           transform: { x: 0, y: 0, width: 100, height: 100 },
+          groupId: null,
+          resources: [],
           function: { name: 'old-func', args: { old: true } },
+          run: null,
         },
       ],
-      links: [],
-      runs: [],
+      groups: [],
+      references: [],
     }
 
     const { result } = renderHook(() =>
@@ -157,7 +173,12 @@ describe('useFunctionConfigSync', () => {
     })
 
     expect(executeCommands).toHaveBeenCalledTimes(1)
-    expect(executeCommands.mock.calls[0]?.[0]?.[0]?.expectedFunction).toEqual({
+    const cmd = executeCommands.mock.calls[0]?.[0]?.[0]
+    expect(cmd?.type).toBe('SET_NODE_FUNCTION')
+    if (cmd?.type !== 'SET_NODE_FUNCTION') {
+      throw new Error('Expected SET_NODE_FUNCTION')
+    }
+    expect(cmd.expectedFunction).toEqual({
       name: 'old-func',
       args: { old: true },
     })

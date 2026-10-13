@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import type { CanvasView } from '@/features/canvas/types'
 
@@ -19,10 +19,10 @@ interface KeyboardApi {
   fitViewRef: { current: (() => void) | null }
   focusSelectionRef: { current: (() => void) | null }
   zoomRef: { current: ((scale: number) => void) | null }
-  clearSelection: ReturnType<typeof vi.fn>
-  deleteSelection: ReturnType<typeof vi.fn>
-  createTextNode: ReturnType<typeof vi.fn>
-  closeOverlays: ReturnType<typeof vi.fn>
+  clearSelection: Mock<() => void>
+  deleteSelection: Mock<() => void>
+  createTextNode: Mock<() => void>
+  closeOverlays: Mock<() => void>
 }
 
 function createApi(): KeyboardApi {

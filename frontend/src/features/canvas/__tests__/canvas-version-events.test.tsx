@@ -114,7 +114,7 @@ describe('useCanvasVersionEvents', () => {
   })
 
   it('refreshes the snapshot via the subscribed ack after a shared-connection reconnect', async () => {
-    const { sockets, onSnapshot } = renderEvents({ version: '3' })
+    const { sockets, onSnapshot } = renderEvents({ revision: '3' })
     const first = sockets.openLatest()
     act(() => first.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
     expect(onSnapshot).toHaveBeenCalledTimes(1)
