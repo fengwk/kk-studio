@@ -68,21 +68,30 @@ final class ProcessScopeState {
     }
   }
 
-  /** 删除调用私有的状态目录；清理失败不影响调用结果。 */
-  static void deleteQuietly(Path directory) {
+  /**
+   * 删除调用私有的状态目录；只要还有成员没能删掉就返回 {@code false}。
+   *
+   * <p>单条失败的清理绝不中断其余成员，也不把异常抛给调用方：目录只承载调用私有的握手文件，删除失败不改变调用结果。返回真实
+   * 结果是为了让调用方能留下「没有清理干净」这一去敏诊断，而不是把「没删干净」静默吞掉。
+   */
+  static boolean deleteQuietly(Path directory) {
     if (directory == null || !Files.exists(directory)) {
-      return;
+      return true;
     }
+    boolean deleted = true;
     try (Stream<Path> paths = Files.walk(directory)) {
       for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
         try {
           Files.deleteIfExists(path);
         } catch (IOException ignored) {
-          // 单条残留的清理失败不能影响调用收尾；目录本身仍会被尝试删除。
+          // 单条残留的清理失败不能影响其余成员的清理；目录本身仍会被尝试删除。
+          deleted = false;
         }
       }
     } catch (IOException ignored) {
-      // 状态目录只承载调用私有的握手文件，清理失败不改变调用结果。
+      // 遍历失败同样只影响本次清理的完整性，不改变调用结果。
+      deleted = false;
     }
+    return deleted;
   }
 }

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -93,6 +94,41 @@ class ProcessScopeHelperFailureTest {
     assertFalse(Files.exists(marker), "没有得到许可的命令一次都不该执行");
   }
 
+  /**
+   * helper 只以编译期常量引用启动契约，绝不加载父进程侧的 {@link ProcessScopeHelperLauncher}。
+   *
+   * <p>这个类带父进程的 logger：helper 是执行范围的核心，任何在 helper 里意外的 JUL 初始化都可能把日志绑到命令的 stderr （双向模式下正是命令的 stderr
+   * 管道）。因此属性名必须是编译期内联的字符串常量，而不是对 launcher 的运行时引用。
+   *
+   * <p>用一个全新 JVM 打开 {@code -verbose:class} 直接跑 helper 入口：既证明 helper 入口真的被加载，又能逐行证明 launcher
+   * 从未出现在类加载日志里。
+   */
+  @Test
+  void helperNeverLoadsTheParentSideLauncher() throws Exception {
+    Path stateDir = Files.createDirectories(workdir.resolve("state-class-load"));
+    List<String> command = new ArrayList<>();
+    command.add(javaBinary());
+    command.add("-verbose:class");
+    command.addAll(TestCoverageAgentArguments.forwarded());
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(ProcessScopeHelper.class.getName());
+    command.add(stateDir.toString());
+    command.add(workdir.toString());
+    command.addAll(exitCommand());
+    Process helper = new ProcessBuilder(command).redirectErrorStream(true).start();
+    // 父进程放行；helper 读到许可后启动命令并自然收尾。
+    ProcessScopeState.publish(stateDir, ProcessScopeState.PERMIT_FILE, "permit");
+    // 先把类加载日志读到 EOF（等 helper 退出），再等进程结束：否则输出超过管道缓冲会让 helper 阻塞。
+    String verbose = new String(helper.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertTrue(helper.waitFor(60, TimeUnit.SECONDS), "helper 必须在预算内结束");
+    assertEquals(0, helper.exitValue(), "命令自然退出后 helper 必须以 0 结束");
+    assertTrue(verbose.contains("ProcessScopeHelper source"), "verbose:class 必须先证明 helper 入口已被加载");
+    assertFalse(
+        verbose.contains("ProcessScopeHelperLauncher"),
+        "helper 绝不能加载父进程侧的 launcher（启动契约常量必须编译期内联）");
+  }
+
   private int runHelperWithPermit(
       Path stateDir, Path commandWorkdir, List<String> command, Duration budget) throws Exception {
     Process helper = startHelper(stateDir, commandWorkdir, command);
@@ -148,6 +184,11 @@ class ProcessScopeHelperFailureTest {
         .resolve("bin")
         .resolve(isWindows() ? "java.exe" : "java")
         .toString();
+  }
+
+  /** 立刻以 0 退出的最小跨平台命令：只用来让 helper 走完整的「派生 -> 自然退出 -> 收敛」路径。 */
+  private static List<String> exitCommand() {
+    return isWindows() ? List.of("cmd", "/c", "exit 0") : List.of("sh", "-c", "exit 0");
   }
 
   private static boolean isWindows() {
