@@ -176,11 +176,11 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
         continue;
       }
       String lower = message.toLowerCase(Locale.ROOT);
+      // 只匹配 JGit 鉴权短语，避免把 URL/端口中的状态码数字误判为鉴权失败。
       if (lower.contains("not authorized")
           || lower.contains("authentication is required")
-          || lower.contains("not permitted")
-          || lower.contains("401")
-          || lower.contains("403")) {
+          || lower.contains("authentication not supported")
+          || lower.contains("not permitted")) {
         return true;
       }
     }
