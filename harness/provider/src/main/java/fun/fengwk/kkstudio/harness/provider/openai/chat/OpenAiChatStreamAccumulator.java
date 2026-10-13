@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -426,22 +427,28 @@ final class OpenAiChatStreamAccumulator {
     return true;
   }
 
-  /** 按条目自身的 {@code index} 定位既有槽位并递归合并，槽位不存在时追加，保持 provider 给出的片段顺序。 */
+  /**
+   * 按条目自身的 {@code index} 定位既有槽位并递归合并，槽位不存在时追加，保持 provider 给出的片段顺序。
+   *
+   * <p>槽位坐标是任意宽度的整数：索引按 {@code BigInteger} 读出并精确比对/写回，超出 int 范围的原生索引不会因截断被并进别的槽位。
+   */
   private static void mergeNativeIndexedArray(ArrayNode target, ArrayNode incoming) {
     for (JsonNode item : incoming) {
-      int index = item.get("index").asInt(0);
+      BigInteger index = item.get("index").bigIntegerValue();
       ObjectNode slot = indexedSlot(target, index);
       mergeNativeObject(slot, (ObjectNode) item);
     }
   }
 
-  private static ObjectNode indexedSlot(ArrayNode target, int index) {
+  private static ObjectNode indexedSlot(ArrayNode target, BigInteger index) {
     for (JsonNode item : target) {
       if (!item.isObject()) {
         continue;
       }
       JsonNode itemIndex = item.get("index");
-      if (itemIndex != null && itemIndex.isIntegralNumber() && itemIndex.asInt(0) == index) {
+      if (itemIndex != null
+          && itemIndex.isIntegralNumber()
+          && itemIndex.bigIntegerValue().equals(index)) {
         return (ObjectNode) item;
       }
     }

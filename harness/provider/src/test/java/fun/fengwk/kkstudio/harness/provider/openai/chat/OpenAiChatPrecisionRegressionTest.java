@@ -12,6 +12,7 @@ import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+import fun.fengwk.kkstudio.harness.provider.ProviderTestFixtures;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -46,11 +47,9 @@ class OpenAiChatPrecisionRegressionTest {
       JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private static final String FREE_FORM_SCHEMA =
-      "{\"type\":\"object\",\"properties\":{"
-          + "\"big\":{\"type\":\"number\",\"const\":1e309},"
-          + "\"tiny\":{\"type\":\"number\",\"const\":1e-324},"
-          + "\"exact\":{\"type\":\"number\",\"const\":0.1234567890123456789012345678},"
-          + "\"ratio\":{\"type\":\"number\",\"const\":1.10}}}";
+      ProviderTestFixtures.read(
+          OpenAiChatPrecisionRegressionTest.class,
+          "/fun/fengwk/kkstudio/harness/provider/fixtures/precision/free-form-schema.json");
 
   private final ProviderDescriptor descriptor =
       new ProviderDescriptor(
@@ -131,6 +130,53 @@ class OpenAiChatPrecisionRegressionTest {
     assertPreservedScale(replayed.path("ratio"), "1.10");
   }
 
+  /**
+   * 原生 opaque 数组的 {@code index} 是大整数槽位坐标：不同宽整数（含 64 位）经 delta 合并后各自独立成槽， 合法 0 索引不受影响，payload 不因 int
+   * 截断被改写或互相覆盖。
+   */
+  @Test
+  void opaqueIndexedArrayKeepsDistinctWideIndices() throws Exception {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(List.of(user("Hi")), List.of()),
+            descriptor,
+            OpenAiChatConfiguration.defaults(),
+            bridge);
+    for (JsonNode frame : frames("fixtures/precision/opaque-indexed-deltas.json")) {
+      accumulator.handleData(frame.stringValue());
+    }
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    JsonNode items = completion.replayState().payload().path("vendor_items");
+    assertEquals(4, items.size());
+    assertExactNumber(items.get(0).path("index"), "0");
+    assertEquals("a", items.get(0).path("v").asString(""));
+    assertExactNumber(items.get(1).path("index"), "2147483648");
+    assertEquals("b", items.get(1).path("v").asString(""));
+    assertEquals("b2", items.get(1).path("w").asString(""));
+    assertExactNumber(items.get(2).path("index"), "4294967296");
+    assertEquals("c", items.get(2).path("v").asString(""));
+    assertEquals("c2", items.get(2).path("w").asString(""));
+    assertExactNumber(items.get(3).path("index"), "9007199254740993");
+    assertEquals("d", items.get(3).path("v").asString(""));
+
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("ok")),
+            completion.replayState());
+    JsonNode replayed =
+        wire(request(List.of(user("Hi"), assistant), List.of()))
+            .path("messages")
+            .get(2)
+            .path("vendor_items");
+    assertEquals(4, replayed.size());
+    assertExactNumber(replayed.get(1).path("index"), "2147483648");
+    assertExactNumber(replayed.get(2).path("index"), "4294967296");
+    assertExactNumber(replayed.get(3).path("index"), "9007199254740993");
+  }
+
   /** JSON null 的 id/service_tier 回落协议默认（缺省），不被写成 {@code "null"} 文本。 */
   @Test
   void nullIdAndServiceTierFallBackToProtocolDefaults() {
@@ -169,6 +215,16 @@ class OpenAiChatPrecisionRegressionTest {
         new OpenAiChatRequestEncoder()
             .encode(request, descriptor, OpenAiChatConfiguration.defaults())
             .bodyUtf8Bytes());
+  }
+
+  private static JsonNode[] frames(String name) throws Exception {
+    JsonNode array =
+        MAPPER.readTree(ProviderTestFixtures.read(OpenAiChatPrecisionRegressionTest.class, name));
+    JsonNode[] frames = new JsonNode[array.size()];
+    for (int i = 0; i < frames.length; i++) {
+      frames[i] = array.get(i);
+    }
+    return frames;
   }
 
   private static ProviderMessage user(String text) {

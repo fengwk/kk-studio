@@ -1,0 +1,5 @@
+[
+  "{\"type\":\"response.output_item.added\",\"output_index\":2147483648,\"item\":{\"type\":\"vendor_future_item\",\"id\":\"wide_a\",\"payload\":{\"n\":2147483648}}}",
+  "{\"type\":\"response.output_item.added\",\"output_index\":4294967296,\"item\":{\"type\":\"vendor_future_item\",\"id\":\"wide_b\",\"payload\":{\"n\":4294967296}}}",
+  "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"
+]

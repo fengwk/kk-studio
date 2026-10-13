@@ -1,0 +1,4 @@
+[
+  "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\",\"vendor_items\":[{\"index\":0,\"v\":\"a\"},{\"index\":2147483648,\"v\":\"b\"},{\"index\":4294967296,\"v\":\"c\"}]},\"finish_reason\":null}]}",
+  "{\"choices\":[{\"index\":0,\"delta\":{\"vendor_items\":[{\"index\":2147483648,\"w\":\"b2\"},{\"index\":4294967296,\"w\":\"c2\"},{\"index\":9007199254740993,\"v\":\"d\"}]},\"finish_reason\":\"stop\"}]}"
+]
