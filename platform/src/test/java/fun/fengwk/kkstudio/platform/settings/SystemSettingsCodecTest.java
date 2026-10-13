@@ -2,13 +2,15 @@ package fun.fengwk.kkstudio.platform.settings;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
@@ -27,7 +29,7 @@ import java.util.Map;
 class SystemSettingsCodecTest {
 
   private final SystemSettingsCodec codec = new SystemSettingsCodec();
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
   void canonicalRoundTripIsIdentity() {
@@ -403,11 +405,11 @@ class SystemSettingsCodecTest {
 
   /** 反转顶层七个 section 的声明顺序（保持 JSON 合法），验证解码不依赖键序。 */
   private static String reverseTopLevelKeys(String json) throws Exception {
-    ObjectMapper mapper = new ObjectMapper();
+    ObjectMapper mapper = JsonMapper.builder().build();
     ObjectNode root = (ObjectNode) mapper.readTree(json);
     ObjectNode reordered = mapper.createObjectNode();
     List<String> names = new ArrayList<>();
-    root.fieldNames().forEachRemaining(names::add);
+    root.propertyNames().forEach(names::add);
     for (int i = names.size() - 1; i >= 0; i--) {
       reordered.set(names.get(i), root.get(names.get(i)));
     }
@@ -434,5 +436,21 @@ class SystemSettingsCodecTest {
     ObjectNode root = (ObjectNode) mapper.readTree(canonical);
     ((ObjectNode) ((ObjectNode) root.get("integrations")).get(group)).set(field, value);
     return mapper.writeValueAsString(root);
+  }
+
+  /**
+   * 持久化 codec 使用独立 plain mapper：HTTP/convention 的 Long→十进制字符串不泄漏进 canonical JSON，时长仍是 JSON 数值
+   * token；同时严格解码继续拒绝字符串→整数的隐式强制转换，证明迁移后 profile 未被削弱。
+   */
+  @Test
+  void canonicalProfileKeepsDurationsNumericAndStillRejectsStringCoercion() throws Exception {
+    String canonical = codec.encode(SystemSettings.DEFAULT);
+    assertFalse(canonical.contains("\"modelGatewayBusyRetryMillis\":\""));
+    JsonNode tool = mapper.readTree(canonical).get("tool");
+    assertTrue(tool.get("modelGatewayBusyRetryMillis").isIntegralNumber());
+
+    ObjectNode root = (ObjectNode) mapper.readTree(canonical);
+    ((ObjectNode) root.get("tool")).put("modelGatewayBusyRetryMillis", "1234");
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
   }
 }

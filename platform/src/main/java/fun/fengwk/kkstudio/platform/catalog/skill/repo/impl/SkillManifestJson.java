@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.platform.catalog.skill.repo.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 
@@ -18,7 +19,7 @@ import java.util.List;
 final class SkillManifestJson {
 
   private static final ObjectMapper OBJECT_MAPPER =
-      new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+      JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
   private static final TypeReference<List<SkillManifestEntry>> MANIFEST_TYPE =
       new TypeReference<>() {};
@@ -28,7 +29,7 @@ final class SkillManifestJson {
   static String encode(List<SkillManifestEntry> manifest) {
     try {
       return OBJECT_MAPPER.writeValueAsString(manifest);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("skill manifest cannot be serialized", error);
     }
   }
@@ -43,7 +44,7 @@ final class SkillManifestJson {
         throw new IllegalStateException("stored skill manifest is invalid");
       }
       return List.copyOf(manifest);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("stored skill manifest is invalid", error);
     }
   }

@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.platform.environment.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfigurationCodec;
@@ -13,7 +14,7 @@ import java.util.Set;
 
 /** HTTP、配置同步和持久化共用的安装设置边界；只检查输入，不探测服务器上的宿主路径。 */
 public final class EnvironmentInstallConfigs {
-  private static final ObjectMapper JSON = new ObjectMapper();
+  private static final ObjectMapper JSON = JsonMapper.builder().build();
 
   private EnvironmentInstallConfigs() {}
 
@@ -91,7 +92,7 @@ public final class EnvironmentInstallConfigs {
     }
     try {
       return JSON.writeValueAsString(value);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot serialize installConfig", error);
     }
   }
@@ -102,7 +103,7 @@ public final class EnvironmentInstallConfigs {
     }
     try {
       return parse(JSON.readTree(value));
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("invalid persisted installConfig", error);
     }
   }
@@ -111,8 +112,8 @@ public final class EnvironmentInstallConfigs {
     if (node == null || !node.isObject()) {
       throw invalid(path + " must be an object");
     }
-    node.fieldNames()
-        .forEachRemaining(
+    node.propertyNames()
+        .forEach(
             key -> {
               if (!allowed.contains(key)) {
                 throw invalid(path + " has an unknown field");

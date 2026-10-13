@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.platform.catalog.provider.configuration;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
@@ -62,7 +62,7 @@ public final class AgentProviderConfigurationCodec {
     config.put(MODEL_CALL_IDLE_TIMEOUT_MILLIS, idleMillis);
     try {
       return objectMapper.writeValueAsString(config);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode provider configuration", error);
     }
   }
@@ -135,7 +135,7 @@ public final class AgentProviderConfigurationCodec {
   private String writeObject(ObjectNode config) {
     try {
       return objectMapper.writeValueAsString(config);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode provider configuration", error);
     }
   }
@@ -150,7 +150,7 @@ public final class AgentProviderConfigurationCodec {
         throw new IllegalArgumentException("persisted provider configJson must be an object");
       }
       return (ObjectNode) config;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("persisted provider configJson must be valid JSON");
     }
   }

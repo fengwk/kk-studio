@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.platform.environment.service;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
@@ -20,7 +21,10 @@ public final class EnvironmentInstallScripts {
       "https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon";
 
   private static final ObjectMapper JSON =
-      new ObjectMapper().setDefaultPropertyInclusion(JsonInclude.Include.ALWAYS);
+      JsonMapper.builder()
+          .changeDefaultPropertyInclusion(
+              inclusion -> inclusion.withValueInclusion(JsonInclude.Include.ALWAYS))
+          .build();
   private static final String UNIX = load("environment-install-unix.sh");
   private static final String WINDOWS = load("environment-install-windows.ps1");
 
@@ -96,7 +100,7 @@ public final class EnvironmentInstallScripts {
   private static String daemonJson(DaemonConfiguration daemon) {
     try {
       return JSON.writeValueAsString(daemon);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot serialize daemon configuration", error);
     }
   }

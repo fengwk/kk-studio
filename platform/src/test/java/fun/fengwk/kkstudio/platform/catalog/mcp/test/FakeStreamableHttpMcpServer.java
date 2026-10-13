@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.test;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -25,7 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class FakeStreamableHttpMcpServer implements AutoCloseable {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private final HttpServer server;
   private final List<DiscoveredTool> tools = new CopyOnWriteArrayList<>();

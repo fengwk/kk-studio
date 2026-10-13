@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
@@ -87,7 +88,8 @@ public class AgentModelMutationFactoryTest {
     factory.update(model, update);
 
     AgentModelConfigDTO persisted =
-        new AgentModelRuntimeConfigParser(new ObjectMapper()).decode(model.getConfigJson());
+        new AgentModelRuntimeConfigParser(JsonMapper.builder().build())
+            .decode(model.getConfigJson());
     assertNotNull(persisted.getPricing());
     assertEquals("EUR", persisted.getPricing().getCurrency());
     assertEquals("batch", persisted.getPricing().getPricingTier());
@@ -172,7 +174,7 @@ public class AgentModelMutationFactoryTest {
   }
 
   private AgentModelMutationFactory factory() {
-    ObjectMapper objectMapper = new ObjectMapper();
+    ObjectMapper objectMapper = JsonMapper.builder().build();
     return new AgentModelMutationFactory(
         new AgentEditableSupport(objectMapper), new AgentModelRuntimeConfigParser(objectMapper));
   }
