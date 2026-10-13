@@ -7,7 +7,11 @@ import {
   ThreadDebugInspector,
   type DebugInspectorSelection,
 } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
-import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  ThreadModelRequestDebugData,
+  ThreadModelRequestDebugSkill,
+  ThreadModelRequestDebugTool,
+} from '@/features/ai/runtime/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
 
 function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): ThreadModelRequestDebugData {

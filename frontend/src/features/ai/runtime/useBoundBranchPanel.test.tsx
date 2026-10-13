@@ -18,6 +18,7 @@ import type {
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -66,6 +67,7 @@ function branchSettings(
     agentName: 'assistant',
     model: modelSelection(),
     environmentName: null,
+    goal: null,
     ...overrides,
   }
 }
@@ -108,6 +110,7 @@ function snapshotOf(
     toolInvocations: [],
     modelAttemptFailures: [],
     stopReceipts: [],
+    manualCompaction: { available: false, disabledReason: null },
     ...extras,
   }
 }
@@ -189,11 +192,12 @@ function acceptedResponse(
   }
 }
 
-const agents = [
+const agents: AgentDefinitionDTO[] = [
   {
     name: 'assistant',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'minimax/MiniMax',
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
@@ -205,12 +209,13 @@ const agents = [
     name: 'coder',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'minimax/MiniMax',
     variant: 'default',
     config: {
       inheritParentEnvironment: true,
       tools: ['web_search'],
-      skills: ['skill-a'],
+      skills: [{ packageName: 'pkg', name: 'skill-a' }],
       subagents: [],
     },
     version: '0',
@@ -221,6 +226,7 @@ const agents = [
     name: 'writer',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'anthropic/Claude',
     variant: 'fast',
     config: {
@@ -237,6 +243,7 @@ const agents = [
     name: 'broken-model-agent',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'nonexistent/model',
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
@@ -248,6 +255,7 @@ const agents = [
     name: 'broken-variant-agent',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'minimax/MiniMax',
     variant: 'nonexistent-variant',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
@@ -257,9 +265,10 @@ const agents = [
   },
 ]
 
-const claudeModelEntry = {
+const claudeModelEntry: AgentModelDTO = {
   providerName: 'anthropic',
   name: 'Claude',
+  modelId: 'anthropic/Claude',
   description: null,
   config: {
     limit: { context: 200000, output: 4096 },
@@ -285,9 +294,10 @@ const claudeModelEntry = {
   updateTime: null,
 }
 
-const modelEntry = {
+const modelEntry: AgentModelDTO = {
   providerName: 'minimax',
   name: 'MiniMax',
+  modelId: 'minimax/MiniMax',
   description: null,
   config: {
     limit: { context: 128000, output: 8192 },
@@ -361,7 +371,7 @@ describe('useBoundBranchPanel', () => {
       snapshotOf(threadFixture(THREAD_ID)),
     )
     vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
-      [] as HarnessThreadCommandDTO[],
+      acceptedResponse(threadFixture(THREAD_ID), []),
     )
     // 直接控制面默认回显请求值（同值 no-op 由服务端保证，这里仅回显）。
     vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
@@ -1189,7 +1199,7 @@ describe('useBoundBranchPanel', () => {
         snapshotOf(threadFixture(THREAD_ID, { status, processing: false })),
       )
       vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
-        [] as unknown as AgentCommandBatchResponseDTO,
+        acceptedResponse(threadFixture(THREAD_ID), []),
       )
       const { result, unmount } = renderHook(
         () => useBoundBranchPanel({ threadId: THREAD_ID }),
