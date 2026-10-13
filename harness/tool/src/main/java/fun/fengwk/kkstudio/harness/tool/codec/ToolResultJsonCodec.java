@@ -1,15 +1,17 @@
 package fun.fengwk.kkstudio.harness.tool.codec;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.BoundedOutputStream;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
@@ -20,32 +22,22 @@ import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 /** 最终与部分 ToolResult 的严格持久化 codec。 */
 public final class ToolResultJsonCodec {
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // JSON number 按 BigDecimal 读回，避免 1e309 变成 Infinity、1e-324 下溢成 0 或高精度 decimal 丢精度。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final List<String> RESOURCE_BASE_FIELDS =
       List.of("type", "uri", "mediaType", "name", "size", "sha256");
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
-
-  /**
-   * 计数用字节生成器工厂：打开 {@link JsonGenerator.Feature#COMBINE_UNICODE_SURROGATES_IN_UTF8}，让补充平面字符（emoji）与
-   * {@link #encode} 的 {@code writeValueAsString} 一样按 4 字节 UTF-8 原样输出，保证字节计数精确、不因 Jackson 默认的
-   * unicode 转义而多算。
-   */
-  private static final JsonFactory COUNTING_FACTORY =
-      OBJECT_MAPPER
-          .getFactory()
-          .copy()
-          .enable(JsonGenerator.Feature.COMBINE_UNICODE_SURROGATES_IN_UTF8);
 
   private ToolResultJsonCodec() {}
 
@@ -64,7 +56,7 @@ public final class ToolResultJsonCodec {
   public static String encode(ToolResult result) {
     try {
       return OBJECT_MAPPER.writeValueAsString(encodeNode(result));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("cannot encode tool result", exception);
     }
   }
@@ -86,50 +78,63 @@ public final class ToolResultJsonCodec {
       throw new IllegalArgumentException("maxBytes must be positive");
     }
     BoundedOutputStream out = new BoundedOutputStream(maxBytes);
-    try (JsonGenerator generator = COUNTING_FACTORY.createGenerator(out)) {
+    try (JsonGenerator generator = OBJECT_MAPPER.createGenerator(out)) {
       writeResult(generator, result);
-    } catch (BoundedOutputStream.LimitExceededException error) {
-      return true;
-    } catch (IOException exception) {
-      throw new IllegalArgumentException("cannot encode tool result", exception);
+    } catch (JacksonException error) {
+      if (isOverLimit(error)) {
+        return true;
+      }
+      throw new IllegalArgumentException("cannot encode tool result", error);
     }
     return false;
   }
 
-  private static void writeResult(JsonGenerator generator, ToolResult result) throws IOException {
+  /**
+   * 仅当 cause 链中出现有界输出流自身的 {@link BoundedOutputStream.LimitExceededException} 时判定为超限中止；其它编码 / IO
+   * 失败沿链识别不到该专属异常，不得误判为超限并被静默吞掉。
+   */
+  private static boolean isOverLimit(Throwable error) {
+    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (cause instanceof BoundedOutputStream.LimitExceededException) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static void writeResult(JsonGenerator generator, ToolResult result) {
     generator.writeStartObject();
-    generator.writeStringField("toolCallId", result.toolCallId());
-    generator.writeArrayFieldStart("contents");
+    generator.writeStringProperty("toolCallId", result.toolCallId());
+    generator.writeArrayPropertyStart("contents");
     for (ResultContent content : result.contents()) {
       writeContent(generator, content);
     }
     generator.writeEndArray();
-    generator.writeBooleanField("error", result.error());
-    generator.writeFieldName("details");
+    generator.writeBooleanProperty("error", result.error());
+    generator.writeName("details");
     copyRawJson(generator, result.detailsJson(), "detailsJson", true);
     generator.writeEndObject();
   }
 
-  private static void writeContent(JsonGenerator generator, ResultContent content)
-      throws IOException {
+  private static void writeContent(JsonGenerator generator, ResultContent content) {
     generator.writeStartObject();
     if (content instanceof TextResultContent value) {
-      generator.writeStringField("type", "text");
-      generator.writeStringField("text", value.text());
+      generator.writeStringProperty("type", "text");
+      generator.writeStringProperty("text", value.text());
     } else if (content instanceof JsonResultContent value) {
-      generator.writeStringField("type", "json");
-      generator.writeFieldName("json");
+      generator.writeStringProperty("type", "json");
+      generator.writeName("json");
       copyRawJson(generator, value.json(), "json", false);
     } else if (content instanceof ResourceResultContent value) {
       ResourceRef resource = value.resource();
-      generator.writeStringField("type", "resource");
-      generator.writeStringField("uri", resource.uri());
-      generator.writeStringField("mediaType", resource.mediaType());
+      generator.writeStringProperty("type", "resource");
+      generator.writeStringProperty("uri", resource.uri());
+      generator.writeStringProperty("mediaType", resource.mediaType());
       writeNullableText(generator, "name", resource.name());
       writeNullableLong(generator, "size", resource.size());
       writeNullableText(generator, "sha256", resource.sha256());
       if (value.preview() != null) {
-        generator.writeStringField("preview", value.preview());
+        generator.writeStringProperty("preview", value.preview());
       }
       if (value.textMetadata() != null) {
         writeTextMetadata(generator, value.textMetadata());
@@ -141,12 +146,11 @@ public final class ToolResultJsonCodec {
   }
 
   /**
-   * 用严格 parser（重复字段 / 尾随内容约束）解析单个 JSON 值/对象并流式复制到 {@code generator}：逐 token 复制，不构建中间树， 输出与 {@link
-   * #encode} 的树序列化保持相同转义/数字语义；超过输出上限由 bounded 输出流在复制点中止。
+   * 用严格 parser（重复字段 / 尾随内容约束）解析单个 JSON 值/对象并流式复制到 {@code generator}：逐 token exact 复制，不构建中间树， 数字按同一
+   * BigDecimal profile 原样写出，输出与 {@link #encode} 的树序列化保持相同转义/数字语义；超过输出上限由 bounded 输出流在复制点中止。
    */
   private static void copyRawJson(
-      JsonGenerator generator, String rawJson, String name, boolean requireObject)
-      throws IOException {
+      JsonGenerator generator, String rawJson, String name, boolean requireObject) {
     try (JsonParser parser = OBJECT_MAPPER.createParser(rawJson)) {
       JsonToken token = parser.nextToken();
       if (token == null) {
@@ -155,45 +159,47 @@ public final class ToolResultJsonCodec {
       if (requireObject && token != JsonToken.START_OBJECT) {
         throw new IllegalArgumentException(name + " must be an object");
       }
-      generator.copyCurrentStructure(parser);
+      generator.copyCurrentStructureExact(parser);
       if (parser.nextToken() != null) {
         throw new IllegalArgumentException(name + " has trailing content");
       }
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
+      // 有界输出流超限会被 Jackson 包装成 JacksonException；保留原异常沿 cause 链上抛，不能被误判为“非法 JSON”。
+      if (isOverLimit(exception)) {
+        throw exception;
+      }
       throw new IllegalArgumentException(name + " is invalid JSON", exception);
     }
   }
 
-  private static void writeTextMetadata(JsonGenerator generator, TextArtifactMetadata metadata)
-      throws IOException {
-    generator.writeObjectFieldStart("textMetadata");
-    generator.writeNumberField("totalBytes", metadata.totalBytes());
-    generator.writeNumberField("totalLines", metadata.totalLines());
+  private static void writeTextMetadata(JsonGenerator generator, TextArtifactMetadata metadata) {
+    generator.writeObjectPropertyStart("textMetadata");
+    generator.writeNumberProperty("totalBytes", metadata.totalBytes());
+    generator.writeNumberProperty("totalLines", metadata.totalLines());
     generator.writeEndObject();
   }
 
-  private static void writeNullableText(JsonGenerator generator, String name, String value)
-      throws IOException {
+  private static void writeNullableText(JsonGenerator generator, String name, String value) {
     if (value == null) {
-      generator.writeNullField(name);
+      generator.writeNullProperty(name);
     } else {
-      generator.writeStringField(name, value);
+      generator.writeStringProperty(name, value);
     }
   }
 
-  private static void writeNullableLong(JsonGenerator generator, String name, Long value)
-      throws IOException {
+  private static void writeNullableLong(JsonGenerator generator, String name, Long value) {
     if (value == null) {
-      generator.writeNullField(name);
+      generator.writeNullProperty(name);
     } else {
-      generator.writeNumberField(name, value.longValue());
+      generator.writeNumberProperty(name, value.longValue());
     }
   }
 
   public static ToolResult decode(String resultJson) {
     try {
       JsonNode parsed = OBJECT_MAPPER.readTree(resultJson);
-      if (!(parsed instanceof ObjectNode node)) {
+      // Jackson 3 对空/纯空白输入返回 MissingNode；两种形态都在解码入口统一拒绝。
+      if (parsed == null || parsed.isMissingNode() || !(parsed instanceof ObjectNode node)) {
         throw new IllegalArgumentException("tool result must be an object");
       }
       requireFields(node, "toolCallId", "contents", "error", "details");
@@ -207,7 +213,7 @@ public final class ToolResultJsonCodec {
           contents,
           bool(node, "error"),
           OBJECT_MAPPER.writeValueAsString(requireObject(node.get("details"), "details")));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed tool result", exception);
     }
   }
@@ -252,7 +258,7 @@ public final class ToolResultJsonCodec {
         requireFields(node, "type", "json");
         try {
           yield new JsonResultContent(OBJECT_MAPPER.writeValueAsString(node.get("json")));
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
           throw new IllegalArgumentException("cannot decode JSON content", exception);
         }
       }
@@ -294,7 +300,7 @@ public final class ToolResultJsonCodec {
   private static JsonNode readObjectOrValue(String json, String name) {
     try {
       return OBJECT_MAPPER.readTree(json);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException(name + " is invalid JSON", exception);
     }
   }
@@ -315,18 +321,18 @@ public final class ToolResultJsonCodec {
 
   private static String text(ObjectNode node, String name) {
     JsonNode value = node.get(name);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new IllegalArgumentException(name + " must be non-blank text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String textAllowEmpty(ObjectNode node, String name) {
     JsonNode value = node.get(name);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(name + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String textOrNull(ObjectNode node, String name) {
@@ -334,10 +340,10 @@ public final class ToolResultJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(name + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static ObjectNode textMetadataNode(TextArtifactMetadata metadata) {
