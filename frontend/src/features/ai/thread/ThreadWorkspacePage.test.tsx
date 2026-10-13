@@ -123,6 +123,7 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
   }
 
   return {
+    version: '0',
     thread: thread({ threadId: targetThreadId }),
     entries: [toolEntry],
     queuedCommands: [],
@@ -137,7 +138,11 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         toolCallId: 'call-bash-1',
         toolName: 'bash',
         rendererKey: 'bash',
-        environment: null,
+        environmentId: null,
+        requiredEnvironmentId: null,
+        waitingForEnvironment: false,
+        requiredEnvironmentName: null,
+        environmentWaitFreshnessAt: null,
         argumentsJson: '{"command":"rm -rf /tmp/test"}',
         approvalJson: JSON.stringify({
           required: true,
@@ -243,7 +248,7 @@ describe('ThreadWorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setLocale('zh-CN')
-    vi.mocked(agentService.listAgents).mockResolvedValue({ results: [], total: 0 })
+    vi.mocked(agentService.listAgents).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
@@ -251,6 +256,7 @@ describe('ThreadWorkspacePage', () => {
       results: [{
         providerName: 'minimax',
         name: 'MiniMax',
+        modelId: 'MiniMax',
         description: null,
         config: {
           limit: { context: 128000, output: 8192 },
@@ -260,6 +266,13 @@ describe('ThreadWorkspacePage', () => {
             pricingTier: 'default',
             serviceTier: 'standard',
             serviceTierMultiplier: 1,
+            version: '1',
+            inputPerMillionTokens: 0,
+            outputPerMillionTokens: 0,
+            cacheReadPerMillionTokens: 0,
+            cacheWritePerMillionTokens: 0,
+            cacheWriteLongPerMillionTokens: 0,
+            reasoningPerMillionTokens: 0,
           },
           defaultVariant: 'default',
           variants: [{ id: 'default' }],
@@ -269,10 +282,23 @@ describe('ThreadWorkspacePage', () => {
         updateTime: null,
       }],
     })
-    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue([])
-    vi.mocked(agentService.listProviders).mockResolvedValue({ results: [], total: 0 })
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue({
+      session: { sessionId: 'session-1', name: 'Session', createdAt: null },
+      rootEntry: {
+        entryId: 'root',
+        sessionId: 'session-1',
+        parentEntryId: null,
+        entryType: 'ROOT',
+        payloadJson: '{}',
+        createTime: null,
+      },
+      thread: thread(),
+      acceptedCommands: [],
+      replayed: false,
+    })
+    vi.mocked(agentService.listProviders).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-    vi.mocked(harnessService.decideApproval).mockResolvedValue(undefined)
+    vi.mocked(harnessService.decideApproval).mockResolvedValue(snapshotWithPendingTool(CHILD_THREAD_ID).toolInvocations[0])
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
       items: [],
       nextCursor: null,
@@ -309,7 +335,7 @@ describe('ThreadWorkspacePage', () => {
     expect(document.querySelector('.workspace-view-identity')).toHaveTextContent('researcher · minimax/MiniMax')
     expect(screen.queryByText('main', { exact: true })).toBeNull()
     expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', `/threads/${rootId}`)
-    expect(screen.queryByRole('button', { name: 'Debug', exact: true })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
     expect(screen.queryByRole('link', { name: '回到对话' })).toBeNull()
     await user.click(screen.getByRole('button', { name: '打开另一个 Thread' }))
     expect(screen.queryByRole('button', { name: '关闭 Debug' })).toBeNull()

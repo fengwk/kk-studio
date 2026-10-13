@@ -16,16 +16,12 @@ vi.mock('@/shared/api/environment-service', () => ({
 
 const agentWithEnv: AgentDefinitionDTO = {
   name: 'assistant',
-  model: {
-    providerName: 'minimax',
-    modelName: 'MiniMax',
-    variant: 'default',
-  },
-  tools: [],
-  skills: [],
-  instruction: '',
-  executionConfig: {
-    environment: 'macos',
+  description: null,
+  systemPrompt: null,
+  type: 'USER',
+  model: 'minimax/MiniMax',
+  variant: 'default',
+  config: {
     inheritParentEnvironment: true,
     tools: [],
     skills: [],

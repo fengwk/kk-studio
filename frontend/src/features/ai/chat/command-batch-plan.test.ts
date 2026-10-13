@@ -20,6 +20,7 @@ function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBra
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     environmentName: null,
+    goal: null,
     ...overrides,
   }
 }

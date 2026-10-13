@@ -10,10 +10,12 @@ import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
+  AgentCommandBatchResponseDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import { setLocale } from '@/shared/i18n'
 
 const CHAT_ID = 'chat-1'
@@ -63,10 +65,11 @@ vi.mock('@/shared/api/harness-service', () => ({
   },
 }))
 
-const assistantAgent = {
+const assistantAgent: AgentDefinitionDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
+  type: 'USER',
   model: 'minimax/MiniMax',
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
@@ -75,9 +78,10 @@ const assistantAgent = {
   updateTime: null,
 }
 
-const model = {
+const model: AgentModelDTO = {
   providerName: 'minimax',
   name: 'MiniMax',
+  modelId: 'MiniMax',
   description: null,
   config: {
     limit: { context: 128000, output: 8192 },
@@ -87,6 +91,13 @@ const model = {
       pricingTier: 'default',
       serviceTier: 'default',
       serviceTierMultiplier: 1,
+      version: '1',
+      inputPerMillionTokens: 0,
+      outputPerMillionTokens: 0,
+      cacheReadPerMillionTokens: 0,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 0,
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -114,6 +125,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
+      goal: null,
     },
     createTime: null,
     updateTime: null,
@@ -135,7 +147,7 @@ function snapshot(currentThread = thread()): HarnessThreadSnapshotDTO {
   }
 }
 
-function acceptedResponse(currentThread = thread()) {
+function acceptedResponse(currentThread = thread()): AgentCommandBatchResponseDTO {
   const rootEntry: HarnessSessionEntryDTO = {
     entryId: 'root-1',
     sessionId: currentThread.sessionId,
@@ -145,7 +157,7 @@ function acceptedResponse(currentThread = thread()) {
     createTime: null,
   }
   return {
-    session: { sessionId: currentThread.sessionId, createdAt: null },
+    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: null },
     rootEntry,
     thread: currentThread,
     acceptedCommands: [],
@@ -382,8 +394,8 @@ describe('ChatWorkspacePage', () => {
     })
     const user = userEvent.setup()
     let resolveBatch!: () => void
-    const pendingPromise = new Promise<{ thread: HarnessThreadDTO; entries: HarnessSessionEntryDTO[] }>((resolve) => {
-      resolveBatch = () => resolve({ thread: thread(), entries: [] })
+    const pendingPromise = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      resolveBatch = () => resolve(acceptedResponse())
     })
 
     vi.mocked(harnessService.acceptCommandBatch).mockImplementation(() => pendingPromise)
@@ -821,7 +833,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       await waitFor(() => expect(harnessService.renameThread).toHaveBeenCalled())
     }
     await user.click(screen.getByRole('button', { name: '布局' }))
-    await user.click(screen.getByRole('option', { name: '1', exact: true }))
+    await user.click(screen.getByRole('option', { name: '1' }))
     expect(document.querySelector('[data-pane-id="pane-3"]')).toHaveAttribute('hidden')
     const dialog = await openBranchDialogFromTree(user)
     await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'not-overwritten')
