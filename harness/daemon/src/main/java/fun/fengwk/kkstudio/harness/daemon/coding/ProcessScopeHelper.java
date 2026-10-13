@@ -47,9 +47,6 @@ public final class ProcessScopeHelper {
   /** 测试闸门的等待预算：没有释放就必须显式失败，绝不静默继续。 */
   private static final Duration SPAWN_LATCH_BUDGET = Duration.ofSeconds(20);
 
-  /** 双向标准流模式的属性值；属性名与父进程 {@code ProcessScope} 的约定一致。 */
-  private static final String STDIO_PROPERTY = "kk-studio.process-scope.stdio";
-
   private static final String SPAWN_LATCH_READY_FILE = "spawn-ready";
   private static final String SPAWN_LATCH_RELEASE_FILE = "spawn-go";
 
@@ -71,7 +68,8 @@ public final class ProcessScopeHelper {
     int exitCode;
     try {
       exitCode = helper.run();
-    } catch (Throwable error) {
+    } catch (Exception error) {
+      // 只把调用级的 Exception 收敛成显式失败原因；进程级 Error 绝不吞掉，交给 JVM 默认处理器写诊断并以非零状态退出。
       helper.publishFailure(error);
       exitCode = 1;
     }
@@ -96,7 +94,8 @@ public final class ProcessScopeHelper {
               StandardCharsets.UTF_8);
       System.setErr(diagnostics);
     } catch (IOException ignored) {
-      // 诊断文件不可写只影响 helper 报错的可见性；父进程仍会以退出码与状态文件收敛为失败。
+      // 日志失败兜底：诊断通道本身不可用，这里没有第二个可以安全使用的输出（写 stdout 会污染命令输出，写诊断文件正是失败
+      // 的那条路）。这是「日志设置失败」，与「业务/删除失败」不同，允许保持静默；父进程仍以退出码与状态文件收敛为失败。
     }
   }
 
@@ -140,7 +139,8 @@ public final class ProcessScopeHelper {
       this.stateDir = stateDir;
       this.workdir = workdir;
       this.command = command;
-      this.duplex = "duplex".equalsIgnoreCase(System.getProperty(STDIO_PROPERTY));
+      this.duplex =
+          "duplex".equalsIgnoreCase(System.getProperty(ProcessScopeHelperLauncher.STDIO_PROPERTY));
     }
 
     private int run() throws Exception {
@@ -248,12 +248,14 @@ public final class ProcessScopeHelper {
             stateDir, ProcessScopeState.CLEANUP_FILE, Boolean.toString(drained));
         convergenceResult = drained;
         return drained;
-      } catch (RuntimeException | Error failure) {
+      } catch (RuntimeException failure) {
+        // 调用级异常收敛成显式失败原因；进程级 Error 不在这里吞掉，交给拥有执行线程的调用方（main 已不再捕获它）。
         publishFailure(failure);
         ProcessScopeState.publishQuietly(stateDir, ProcessScopeState.CLEANUP_FILE, "false");
         convergenceResult = false;
         return false;
       } finally {
+        // 无论收敛是成功、失败还是上抛 Error，等待同一收敛的并发调用都必须被释放。
         convergenceFinished.countDown();
       }
     }
@@ -279,11 +281,14 @@ public final class ProcessScopeHelper {
     }
 
     /**
-     * 仅测试使用的派生闸门：显式设置 {@link ProcessScope#SPAWN_LATCH_PROPERTY} 时，启动命令之前先写下就绪标记并等待释放
-     * 标记，用来确定性地构造「取消与派生同时发生」。生产路径不设置该属性，因此这里直接返回。
+     * 仅测试使用的派生闸门：显式设置 {@link ProcessScopeHelperLauncher#SPAWN_LATCH_PROPERTY} 时，启动命令之前先写下就绪
+     * 标记并等待释放标记，用来确定性地构造「取消与派生同时发生」。生产路径不设置该属性，因此这里直接返回。
+     *
+     * <p>属性名取自 {@link ProcessScopeHelperLauncher} 的编译期常量：helper 因此不需要在运行时加载那个类（它带父进程侧的
+     * logger），启动契约以字符串字面量内联进本类。
      */
     private void awaitSpawnRelease() throws IOException {
-      String latch = System.getProperty(ProcessScope.SPAWN_LATCH_PROPERTY);
+      String latch = System.getProperty(ProcessScopeHelperLauncher.SPAWN_LATCH_PROPERTY);
       if (latch == null || latch.isBlank()) {
         return;
       }
@@ -409,11 +414,17 @@ public final class ProcessScopeHelper {
       return message == null || message.isBlank() ? error.toString() : message;
     }
 
+    /**
+     * 关闭命令的 stdin 写端；失败时留下去敏诊断。
+     *
+     * <p>只在捕获模式调用（双向模式不创建这条管道），此时 helper 的 stderr 已经指向调用私有的诊断文件，所以诊断直接写 {@link System#err}
+     * 即可。关闭失败可能让等待 EOF 的命令一直阻塞，因此不能静默；诊断只报「关闭失败」这一事实，不回显 私有路径或命令参数。
+     */
     private static void closeQuietly(OutputStream stream) {
       try {
         stream.close();
-      } catch (IOException ignored) {
-        // 关闭失败只影响命令能否读到 EOF：命令自身的去向仍由退出码与收敛结论决定。
+      } catch (IOException error) {
+        System.err.println("cannot close the process scope command standard input");
       }
     }
 
