@@ -36,7 +36,7 @@ const model: AgentModelDTO = {
 function options() {
   return {
     views: { viewKey: 'thread:child', mode: 'conversation' as 'conversation' | 'debug', switchMode: vi.fn() },
-    projection: { thread: thread as HarnessThreadDTO | null, models: [model] },
+    projection: { thread: thread as HarnessThreadDTO | undefined, models: [model] },
     threadId: 'child', selected: true, active: true, onReport: vi.fn(),
     onParent: vi.fn(),
   }
@@ -53,7 +53,9 @@ describe('visible thread presentation', () => {
   it('only reports real matching model reasoning effort, never the variant id', () => {
     expect(threadIdentity({ thread, models: [model] })).toBe('researcher · provider/model · high')
     expect(threadIdentity({ thread, models: [] })).toBe('researcher · provider/model')
-    expect(threadIdentity({ thread: null, models: [model] })).toBeNull()
+    expect(threadIdentity({ thread: undefined, models: [model] })).toBeNull()
+    // 保留运行时非法 null 输入回归的意图，验证防空指针保护
+    expect(threadIdentity({ thread: null as unknown as HarnessThreadDTO | undefined, models: [model] })).toBeNull()
     for (const config of [
       { ...model.config, variants: [{ id: 'deep' }] },
       { ...model.config, variants: [{ id: 'other', reasoningEffort: 'low' }] },
@@ -114,7 +116,7 @@ describe('visible thread presentation', () => {
     })
     expect(initial.views.switchMode).not.toHaveBeenCalled()
     expect(initial.onParent).not.toHaveBeenCalled()
-    rerender({ ...initial, threadId: '', projection: { thread: null, models: [] } })
+    rerender({ ...initial, threadId: '', projection: { thread: undefined, models: [] } })
     act(() => result.current.act('thread:child', 'debug'))
     expect(initial.views.switchMode).toHaveBeenCalledWith('debug')
   })
@@ -187,12 +189,12 @@ describe('visible thread presentation', () => {
     expect(initial.views.switchMode).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
     host.rerender(<ThreadPresentationActions view={{ ...result.current, mode: 'debug' }} />)
-    expect(screen.queryByRole('button', { name: 'Debug', exact: true })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
     expect(document.querySelector('.workspace-read-actions')).toBeNull()
     host.rerender(<ThreadPresentationActions view={{
       ...result.current, viewKey: '', threadId: null, identity: null, parentThreadId: null,
     }} />)
-    expect(screen.queryByRole('button', { name: 'Debug', exact: true })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
     expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
     expect(document.querySelector('.workspace-view-identity')).toBeNull()
   })
