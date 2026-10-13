@@ -511,9 +511,9 @@ describe('EnvironmentsPage', () => {
     ])
     renderPage()
 
-    const card = (await screen.findByText('fat-box')).closest('article')
+    const card = (await screen.findByText('fat-box')).closest('article') as HTMLElement | null
     expect(card).not.toBeNull()
-    const capabilityRow = within(card!).getByText('Capabilities').closest('.resource-card-meta-row')
+    const capabilityRow = within(card!).getByText('Capabilities').closest('.resource-card-meta-row') as HTMLElement | null
     expect(capabilityRow).not.toBeNull()
     expect(capabilityRow!.querySelectorAll('.resource-card-tag')).toHaveLength(4)
     expect(within(capabilityRow!).getByText('+2')).toBeInTheDocument()

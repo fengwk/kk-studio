@@ -33,7 +33,7 @@ const savedNormalized: EnvironmentInstallConfigDTO = {
     lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'], firstMatchMarkers: [] } } } },
 }
 const card: EnvironmentCardDTO = {
-  id: 'env-1', name: 'box', version: '7', status: 'OFFLINE', ready: false,
+  id: 'env-1', name: 'box', version: '7', status: 'OFFLINE', ready: false, statusExpiresAt: null,
   lastSeen: null, capabilities: [], createTime: '', updateTime: '', installConfig: saved,
 }
 const copyButton = () => screen.getByRole('button', { name: '保存并复制安装命令' })
@@ -413,7 +413,7 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(copyButton()).toBeEnabled())
     const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
     expect(editor).toHaveValue(JSON.stringify(servers, null, 2))
-    expect(editor).not.toHaveValue(/mason/)
+    expect((editor as HTMLTextAreaElement).value).not.toMatch(/mason/)
   })
 
   it('shows gray OS path examples without saving them or overwriting entered values', async () => {

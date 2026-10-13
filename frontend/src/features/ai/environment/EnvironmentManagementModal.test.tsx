@@ -26,6 +26,7 @@ function testEnvironment(overrides: Partial<EnvironmentCardDTO> = {}): Environme
     daemonVersion: '1.2.3',
     status: 'READY',
     ready: true,
+    statusExpiresAt: null,
     lastSeen: '2026-07-20T02:00:00.000Z',
     capabilities: [],
     version: '1',
