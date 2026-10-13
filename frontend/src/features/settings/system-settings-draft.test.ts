@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   assembleSettingsUpdate,
   draftLeafPaths,
-  DraftValidationError,
   getDraftValue,
   setDraftValue,
   settingsSectionsToDraft,
@@ -170,7 +169,7 @@ describe('system settings draft codec', () => {
 
     // 输入 DTO 携带残留未知属性时，draft 与 update 依然不会泄露该未知属性
     const dirtyDto = makeSettingsDto()
-    ;(dirtyDto.integrations.minimaxH3 as Record<string, unknown>)[unknownField] = 'dirty-value'
+    Object.assign(dirtyDto.integrations.minimaxH3, { [unknownField]: 'dirty-value' })
     const cleanDraft = settingsSectionsToDraft(dirtyDto)
     expect(Object.hasOwn(cleanDraft.integrations.minimaxH3, unknownField)).toBe(false)
     const cleanUpdate = assembleSettingsUpdate(cleanDraft, '0')
@@ -182,7 +181,7 @@ describe('system settings draft codec', () => {
     const blankTool = settingsSectionsToDraft(makeSettingsDto())
     blankTool.tool.permission = [{ tool: '  ', rules: [{ pattern: '*', action: 'ask' }] }]
     expect(() => assembleSettingsUpdate(blankTool, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'blankToolName' }),
+      expect.objectContaining({ reason: 'blankToolName' }),
     )
 
     const blankPattern = settingsSectionsToDraft(makeSettingsDto())
@@ -190,13 +189,13 @@ describe('system settings draft codec', () => {
       { tool: 'bash', rules: [{ pattern: '  ', action: 'ask' }] },
     ]
     expect(() => assembleSettingsUpdate(blankPattern, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'blankPattern' }),
+      expect.objectContaining({ reason: 'blankPattern' }),
     )
 
     const emptyNumeric = settingsSectionsToDraft(makeSettingsDto())
     emptyNumeric.environment.maxResourceBytes = ''
     expect(() => assembleSettingsUpdate(emptyNumeric, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'emptyNumericField' }),
+      expect.objectContaining({ reason: 'emptyNumericField' }),
     )
   })
 
@@ -208,7 +207,7 @@ describe('system settings draft codec', () => {
       { tool: '  write  ', rules: [{ pattern: '*', action: 'allow' }] },
     ]
     expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'duplicateToolName' }),
+      expect.objectContaining({ reason: 'duplicateToolName' }),
     )
   })
 
@@ -253,29 +252,29 @@ describe('system settings draft codec', () => {
     // Duplicate check
     draft.aiRuntime.modelHttpRetryStatusCodes = [429, 500, '500']
     expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusDuplicate' }),
+      expect.objectContaining({ reason: 'httpStatusDuplicate' }),
     )
 
     // Out of range check
     draft.aiRuntime.modelHttpRetryStatusCodes = [200]
     expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusOutOfRange' }),
+      expect.objectContaining({ reason: 'httpStatusOutOfRange' }),
     )
 
     draft.aiRuntime.modelHttpRetryStatusCodes = [600]
     expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusOutOfRange' }),
+      expect.objectContaining({ reason: 'httpStatusOutOfRange' }),
     )
 
     // Non-integer check
     draft.aiRuntime.modelHttpRetryStatusCodes = ['abc']
     expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusNotInteger' }),
+      expect.objectContaining({ reason: 'httpStatusNotInteger' }),
     )
 
     draft.aiRuntime.modelHttpRetryStatusCodes = [500.5]
     expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
-      expect.objectContaining<DraftValidationError>({ reason: 'httpStatusNotInteger' }),
+      expect.objectContaining({ reason: 'httpStatusNotInteger' }),
     )
   })
 })
