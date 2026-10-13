@@ -21,6 +21,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -46,6 +48,8 @@ import java.util.regex.Pattern;
  * <p>单路径安装：临时 clone 精确分支 -> 检出 exact commit -> 校验并物化到 staging -> 原子替换 skills 目录，支持失败回滚与重启自愈。
  */
 public final class SkillPackageInstaller {
+
+  private static final Logger LOG = System.getLogger(SkillPackageInstaller.class.getName());
 
   private static final Pattern COMMIT_PATTERN = Pattern.compile("^[0-9a-f]{40}$|^[0-9a-f]{64}$");
 
@@ -609,7 +613,11 @@ public final class SkillPackageInstaller {
     }
     try {
       deleteRecursively(path);
-    } catch (Exception ignored) {
+    } catch (Exception error) {
+      // 清理失败不改变安装/回滚的对外结果，但必须留下安全诊断：只记录阶段与异常类型，不回显路径或正文。
+      LOG.log(
+          Level.WARNING,
+          "failed to clean up skill install directory: " + error.getClass().getSimpleName());
     }
   }
 
