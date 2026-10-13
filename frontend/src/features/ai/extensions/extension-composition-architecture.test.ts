@@ -20,7 +20,7 @@ describe('AI extension composition architecture', () => {
       ['ai.mcp-servers', 'mcp-servers'],
     ])
     // 伪通用 Navigation registry 已彻底移除，AI 二级导航由 pages 的 metadata 本地派生
-    expect((aiExtension as Record<string, unknown>).navigation).toBeUndefined()
+    expect('navigation' in aiExtension).toBe(false)
     expect(aiExtension.dialogs?.map((dialog) => dialog.id)).toEqual([
       'ai.create-chat',
       'ai.resource-editor',

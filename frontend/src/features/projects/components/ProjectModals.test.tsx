@@ -205,7 +205,7 @@ describe('EditProjectModal', () => {
       await user.click(screen.getByRole('button', { name: '执行方式' }))
       await user.click(screen.getByRole('option', { name: 'Agent 执行' }))
       expect(screen.getByRole('button', { name: '执行方式' })).toHaveTextContent('Agent 执行')
-      const agentField = screen.getByRole('button', { name: 'Agent', exact: true })
+      const agentField = screen.getByRole('button', { name: 'Agent' })
       expect(agentField).toHaveAttribute('aria-required', 'true')
       expect(agentField).toHaveAttribute('aria-invalid', 'true')
       expect(within(screen.getByRole('button', { name: /2处理中/ })).getByText('Agent')).toBeInTheDocument()

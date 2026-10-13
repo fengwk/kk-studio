@@ -13,8 +13,8 @@ import { ResourceEditorModal } from '@/features/ai/catalog/AiConsoleResourceEdit
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import { emptyProviderDraft } from '@/features/ai/catalog/ai-provider-draft-codec'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { environmentService } from '@/shared/api/environment-service'
-import { harnessService } from '@/shared/api/harness-service'
 import { setLocale, translate } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
@@ -27,20 +27,11 @@ vi.mock('@/shared/api/environment-service', () => ({
   },
 }))
 
-vi.mock('@/shared/api/harness-service', () => ({
-  harnessService: {
-    getRetryPolicy: vi.fn(),
-    updateRetryPolicy: vi.fn(),
-    getRealtimeStreamPolicy: vi.fn(),
-    updateRealtimeStreamPolicy: vi.fn(),
-  },
-}))
-
-const agent = {
-  id: 'a1',
+const agent: AgentDefinitionDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
+  type: 'USER',
   model: 'm1',
   variant: 'default',
   config: {
@@ -50,27 +41,14 @@ const agent = {
     subagents: [],
   },
   version: '1',
-  createTime: null,
-  updateTime: null,
+  createTime: '2026-09-27T10:00:00Z',
+  updateTime: '2026-09-27T10:00:00Z',
 }
-
-const defaultRetryPolicy = {
-  maxRetries: 3,
-  backoffStrategy: 'EXPONENTIAL' as const,
-  baseDelayMillis: 2_000,
-  maxDelayMillis: 60_000,
-}
-
-const defaultRealtimeStreamPolicy = { maxLength: 5_000 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   act(() => setLocale('zh-CN'))
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-  vi.mocked(harnessService.getRetryPolicy).mockResolvedValue(defaultRetryPolicy)
-  vi.mocked(harnessService.updateRetryPolicy).mockResolvedValue(defaultRetryPolicy)
-  vi.mocked(harnessService.getRealtimeStreamPolicy).mockResolvedValue(defaultRealtimeStreamPolicy)
-  vi.mocked(harnessService.updateRealtimeStreamPolicy).mockResolvedValue(defaultRealtimeStreamPolicy)
 })
 
 afterEach(() => {
