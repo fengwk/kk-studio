@@ -53,6 +53,7 @@ ACL_OWNER_ONLY_CASES = (
 )
 CORE_CLASSES = (
     "ProcessScope",
+    "ProcessScopeHelperLauncher",
     "ProcessScopeHelper",
     "PosixProcessGroup",
     "ProcessScopeState",

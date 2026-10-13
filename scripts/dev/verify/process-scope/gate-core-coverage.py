@@ -15,9 +15,10 @@
 import sys
 import xml.etree.ElementTree as ElementTree
 
-# 核心路径：执行范围编排、helper 派生/收敛、共用原语、Windows 实现、命令行拼装与 bash 能力。
+# 核心路径：执行范围编排、子 JVM 启动辅助、helper 派生/收敛、共用原语、Windows 实现、命令行拼装与 bash 能力。
 CORE_CLASSES = (
     "ProcessScope",
+    "ProcessScopeHelperLauncher",
     "ProcessScopeHelper",
     "PosixProcessGroup",
     "ProcessScopeState",

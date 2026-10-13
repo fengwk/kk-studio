@@ -341,7 +341,7 @@ class ProcessScopeTest {
     Path latch = workdir.resolve("spawn-latch-held");
     Files.createDirectories(latch);
     Path pidFile = workdir.resolve("spawn-held.pids");
-    System.setProperty(ProcessScope.SPAWN_LATCH_PROPERTY, latch.toString());
+    System.setProperty(ProcessScopeHelperLauncher.SPAWN_LATCH_PROPERTY, latch.toString());
     ProcessScope scope;
     try {
       scope =
@@ -356,7 +356,7 @@ class ProcessScopeTest {
                       + pidFile
                       + "'; wait"));
     } finally {
-      System.clearProperty(ProcessScope.SPAWN_LATCH_PROPERTY);
+      System.clearProperty(ProcessScopeHelperLauncher.SPAWN_LATCH_PROPERTY);
     }
     try {
       // helper 停在派生之前，闸门一直不解开：取消必须在这里就收敛，而不是等命令跑起来再收尾。
@@ -386,7 +386,7 @@ class ProcessScopeTest {
     Path latch = workdir.resolve("spawn-latch-race");
     Files.createDirectories(latch);
     Path pidFile = workdir.resolve("spawn-window.pids");
-    System.setProperty(ProcessScope.SPAWN_LATCH_PROPERTY, latch.toString());
+    System.setProperty(ProcessScopeHelperLauncher.SPAWN_LATCH_PROPERTY, latch.toString());
     ProcessScope scope;
     try {
       scope =
@@ -401,7 +401,7 @@ class ProcessScopeTest {
                       + pidFile
                       + "'; wait"));
     } finally {
-      System.clearProperty(ProcessScope.SPAWN_LATCH_PROPERTY);
+      System.clearProperty(ProcessScopeHelperLauncher.SPAWN_LATCH_PROPERTY);
     }
     try {
       awaitFile(latch.resolve("spawn-ready"));
