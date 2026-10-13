@@ -6,11 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec.TicketState;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec.UploadCommit;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec.UploadRequest;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec.UploadTicket;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -148,5 +150,151 @@ class DaemonResourceTransferCodecTest {
             + "\",\"presignedPut\":{\"method\":\"PUT\",\"url\":\"https://example.test\","
             + "\"headers\":{},\"expiresAt\":\"2026-07-28T10:01:00.000Z\"}}";
     assertThrows(DaemonProtocolException.class, () -> codec.decodeTicket(pending));
+  }
+
+  /** 控制 payload 的原始预算与形状：空白、超长与非对象在任何字段解析前拒绝。 */
+  @Test
+  void rejectsBlankOversizedAndNonObjectPayloads() {
+    for (String blank : List.of("", "   ")) {
+      assertThrows(DaemonProtocolException.class, () -> codec.decodeRequest(blank));
+      assertThrows(DaemonProtocolException.class, () -> codec.decodeCommit(blank));
+      assertThrows(DaemonProtocolException.class, () -> codec.decodeTicket(blank));
+      assertThrows(DaemonProtocolException.class, () -> codec.transferIdOf(blank));
+    }
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.transferIdOf("x".repeat(DaemonResourceTransferCodec.MAX_PAYLOAD_CHARS + 1)));
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeRequest("[]"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeTicket("not-json"));
+  }
+
+  /** 显式文件名在 REQUEST 往返中保留；非字符串、空白名与非整数尺寸被拒绝。 */
+  @Test
+  void roundTripsNamedRequestAndRejectsInvalidNameOrSize() {
+    UploadRequest named =
+        new UploadRequest(UUID.randomUUID(), "image/png", "diagram.png", 7L, SHA256);
+    assertEquals(named, codec.decodeRequest(codec.encodeRequest(named)));
+    String prefix = "{\"transferId\":\"" + named.transferId() + "\",\"mediaType\":\"image/png\",";
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeRequest(prefix + "\"name\":123,\"size\":7,\"sha256\":\"" + SHA256 + "\"}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeRequest(
+                prefix + "\"name\":\" \",\"size\":7,\"sha256\":\"" + SHA256 + "\"}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeRequest(
+                prefix + "\"name\":null,\"size\":1.5,\"sha256\":\"" + SHA256 + "\"}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeRequest(
+                "{\"transferId\":\""
+                    + named.transferId()
+                    + "\",\"mediaType\":\"\",\"name\":null,\"size\":1,\"sha256\":\""
+                    + SHA256
+                    + "\"}"));
+  }
+
+  /** ticket 状态机、presignedPut 形状与规范 Instant 的严格拒绝路径。 */
+  @Test
+  void rejectsInvalidTicketShape() {
+    UUID transferId = UUID.randomUUID();
+    UUID uploadId = UUID.randomUUID();
+    assertThrows(
+        DaemonProtocolException.class, () -> codec.decodeTicket(ticket(transferId, "BOGUS", "")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeTicket(
+                ticket(
+                    transferId,
+                    "PENDING",
+                    ",\"uploadId\":\"" + uploadId + "\",\"presignedPut\":[]")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeTicket(
+                pending(
+                    transferId,
+                    uploadId,
+                    "{\"method\":\"PUT\",\"url\":\"https://x\",\"headers\":[],\"expiresAt\":\"2026-07-28T10:01:00Z\"}")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeTicket(
+                pending(
+                    transferId,
+                    uploadId,
+                    "{\"method\":\"PUT\",\"url\":\"https://x\",\"headers\":{\"k\":1},\"expiresAt\":\"2026-07-28T10:01:00Z\"}")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeTicket(
+                pending(
+                    transferId,
+                    uploadId,
+                    "{\"method\":\"PUT\",\"url\":\"https://x\",\"headers\":{},\"expiresAt\":\"nope\"}")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeTicket(
+                pending(
+                    transferId,
+                    uploadId,
+                    "{\"method\":\"POST\",\"url\":\"https://x\",\"headers\":{},\"expiresAt\":\"2026-07-28T10:01:00Z\"}")));
+  }
+
+  /** record 构造器的字段校验是 wire 之外的第一道门。 */
+  @Test
+  void recordConstructorsRejectInvalidFields() {
+    UUID transferId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class, () -> new UploadRequest(transferId, " ", null, 1L, SHA256));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new UploadRequest(transferId, "image/png", " ", 1L, SHA256));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new UploadRequest(transferId, "image/png", null, -1L, SHA256));
+
+    DaemonPresignedPut put =
+        new DaemonPresignedPut("PUT", "https://x", Map.of(), Instant.parse("2026-07-28T10:01:00Z"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new UploadTicket(transferId, TicketState.PENDING, null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new UploadTicket(transferId, TicketState.READY, null, put, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new UploadTicket(transferId, TicketState.FAILED, null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new UploadTicket(
+                transferId,
+                TicketState.FAILED,
+                null,
+                null,
+                "x".repeat(DaemonResourceTransferCodec.MAX_FAILURE_MESSAGE_CHARS + 1)));
+  }
+
+  private static String ticket(UUID transferId, String state, String extra) {
+    return "{\"transferId\":\"" + transferId + "\",\"state\":\"" + state + "\"" + extra + "}";
+  }
+
+  private static String pending(UUID transferId, UUID uploadId, String presignedPut) {
+    return "{\"transferId\":\""
+        + transferId
+        + "\",\"state\":\"PENDING\",\"uploadId\":\""
+        + uploadId
+        + "\",\"presignedPut\":"
+        + presignedPut
+        + "}";
   }
 }

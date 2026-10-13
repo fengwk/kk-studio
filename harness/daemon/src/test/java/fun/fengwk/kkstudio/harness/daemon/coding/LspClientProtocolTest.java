@@ -6,10 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -558,7 +558,7 @@ class LspClientProtocolTest {
   private int startedProcesses() {
     int started = 0;
     for (JsonNode event : FakeLspServers.events(transcript)) {
-      if (event.path("event").asText().equals("start")) {
+      if (event.path("event").asString().equals("start")) {
         started++;
       }
     }
@@ -569,7 +569,7 @@ class LspClientProtocolTest {
     return FakeLspServers.await(
             transcript,
             event ->
-                event.path("event").asText().equals("recv")
+                event.path("event").asString().equals("recv")
                     && event.path("message").path("method").isMissingNode()
                     && event.path("message").path("id").asLong() == id)
         .path("message");

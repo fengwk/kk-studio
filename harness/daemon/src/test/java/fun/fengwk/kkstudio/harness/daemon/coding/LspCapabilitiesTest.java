@@ -5,10 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -86,7 +86,7 @@ class LspCapabilitiesTest {
             .path("params")
             .path("textDocument")
             .path("uri")
-            .asText());
+            .asString());
   }
 
   /** 意图：workspace symbols 与 java decompile 走同一份共享客户端，源码正文原样透传。 */
@@ -144,7 +144,7 @@ class LspCapabilitiesTest {
     assertTrue(text(result).contains("Use read with offset/limit"), text(result));
     JsonNode textOutput =
         AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(published.isAbsolute(), "外化必须给出绝对路径");
     assertEquals(FakeLspServer.LARGE_DECOMPILED_SOURCE, Files.readString(published));
   }
@@ -310,7 +310,7 @@ class LspCapabilitiesTest {
             .path("params")
             .path("arguments")
             .get(0)
-            .asText());
+            .asString());
     // 文档 URI 是真实绝对路径；服务器进程目录来自自动发现的项目根。
     assertEquals(
         file.toRealPath().toUri().toString(),
@@ -319,7 +319,7 @@ class LspCapabilitiesTest {
             .path("params")
             .path("textDocument")
             .path("uri")
-            .asText());
+            .asString());
     assertEquals(1, service.activeClientCount());
   }
 
@@ -370,7 +370,7 @@ class LspCapabilitiesTest {
   }
 
   private static String methodOf(JsonNode event) {
-    return event.path("message").path("method").asText("");
+    return event.path("message").path("method").asString("");
   }
 
   /** 调用方有效超时是 LSP 请求的真实 deadline，因此默认给足时间，只有超时用例才收紧。 */

@@ -4,9 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /** READY capabilities codec 的严格版本、宿主 metadata 形状与未知字段拒绝契约。 */
 class DaemonCapabilitiesCodecTest {
@@ -28,7 +28,7 @@ class DaemonCapabilitiesCodecTest {
           + "\"tempDirectory\":\"/tmp/kk-studio\"}";
   private static final String DAEMON_VERSION_JSON = "\"daemonVersion\":\"" + DAEMON_VERSION + "\",";
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
   private final DaemonCapabilitiesCodec codec = new DaemonCapabilitiesCodec();
 

@@ -1,14 +1,16 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.StreamReadConstraints;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.BoundedJsonWriter;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
@@ -21,7 +23,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -62,22 +63,22 @@ public final class DaemonCapabilityResultCodec {
   public static final int MAX_PAYLOAD_UTF8_BYTES = 16 * 1024 * 1024;
 
   private static final ObjectMapper OBJECT_MAPPER =
-      new ObjectMapper(
-          JsonFactory.builder()
-              // 解析放大防护：字符串、嵌套深度、数字长度与文档长度全部有界（与 payload 上限同量级）。
-              .streamReadConstraints(
-                  StreamReadConstraints.builder()
-                      .maxStringLength(MAX_PAYLOAD_UTF8_BYTES)
-                      .maxNestingDepth(100)
-                      .maxNumberLength(1000)
-                      .maxDocumentLength(MAX_PAYLOAD_UTF8_BYTES)
-                      .build())
-              .build());
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+      JsonMapper.builder(
+              JsonFactory.builder()
+                  // 解析放大防护：字符串、嵌套深度、数字长度与文档长度全部有界（与 payload 上限同量级）。
+                  .streamReadConstraints(
+                      StreamReadConstraints.builder()
+                          .maxStringLength(MAX_PAYLOAD_UTF8_BYTES)
+                          .maxNestingDepth(100)
+                          .maxNumberLength(1000)
+                          .maxDocumentLength(MAX_PAYLOAD_UTF8_BYTES)
+                          .build())
+                  .build())
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // JSON number 以 BigDecimal 保留树内精度，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的 wire 失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private static final Set<String> RESOURCE_FIELDS =
       Set.of("type", "uploadId", "mediaType", "name", "size", "sha256", "preview");
@@ -426,10 +427,10 @@ public final class DaemonCapabilityResultCodec {
     if (previewNode == null || previewNode.isNull()) {
       return null;
     }
-    if (!previewNode.isTextual()) {
+    if (!previewNode.isString()) {
       throw new DaemonProtocolException(context + " 'preview' must be a string or null");
     }
-    String preview = previewNode.textValue();
+    String preview = previewNode.stringValue();
     if (ResourceRef.utf8LengthUpTo(preview, "preview", ResourceRef.MAX_PREVIEW_UTF8_BYTES)
         > ResourceRef.MAX_PREVIEW_UTF8_BYTES) {
       throw new DaemonProtocolException(
@@ -466,7 +467,7 @@ public final class DaemonCapabilityResultCodec {
         throw new DaemonProtocolException("result 'details' must be a JSON object");
       }
       return value;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("result 'details' must be valid JSON");
     }
   }
@@ -474,11 +475,11 @@ public final class DaemonCapabilityResultCodec {
   private JsonNode readJson(String json) {
     try {
       JsonNode value = OBJECT_MAPPER.readTree(json);
-      if (value == null) {
+      if (value == null || value.isMissingNode()) {
         throw new DaemonProtocolException("json must not be null");
       }
       return value;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("json must be valid");
     }
   }
@@ -490,7 +491,7 @@ public final class DaemonCapabilityResultCodec {
         throw new DaemonProtocolException(name + " must be a JSON object");
       }
       return (ObjectNode) value;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException(name + " must be valid JSON");
     }
   }
@@ -498,7 +499,7 @@ public final class DaemonCapabilityResultCodec {
   private String writeJson(JsonNode node) {
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("cannot encode daemon payload");
     }
   }
@@ -529,10 +530,10 @@ public final class DaemonCapabilityResultCodec {
     if (value == null || value.isNull()) {
       throw new DaemonProtocolException(context + " must declare '" + field + "'");
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new DaemonProtocolException(context + " '" + field + "' must be a string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private String optionalTextOrNull(ObjectNode obj, String field, String context) {
@@ -543,10 +544,10 @@ public final class DaemonCapabilityResultCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new DaemonProtocolException(context + " '" + field + "' must be a string or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private long requiredLong(ObjectNode obj, String field, String context) {
@@ -604,12 +605,7 @@ public final class DaemonCapabilityResultCodec {
   }
 
   private void rejectUnknownFields(ObjectNode obj, Set<String> allowed, String context) {
-    Iterator<String> fields = obj.fieldNames();
-    if (fields == null) {
-      return;
-    }
-    while (fields.hasNext()) {
-      String name = fields.next();
+    for (String name : obj.propertyNames()) {
       if (!allowed.contains(name)) {
         throw new DaemonProtocolException(context + " unknown field: '" + name + "'");
       }

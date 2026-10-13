@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
@@ -427,7 +427,7 @@ public final class BashCapability implements EnvironmentCapability {
   private static ObjectNode parseDetails(String detailsJson) {
     try {
       return (ObjectNode) AbstractCodingCapability.OBJECT_MAPPER.readTree(detailsJson);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("capability detailsJson must be a JSON object", error);
     }
   }

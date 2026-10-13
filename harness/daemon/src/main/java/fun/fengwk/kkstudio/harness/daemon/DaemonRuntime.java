@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import okhttp3.OkHttpClient;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;

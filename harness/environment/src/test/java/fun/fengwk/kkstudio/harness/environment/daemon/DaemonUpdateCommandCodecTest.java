@@ -102,4 +102,32 @@ class DaemonUpdateCommandCodecTest {
             + "\",\"artifactSha256\":\"not-a-digest\"}";
     assertThrows(DaemonProtocolException.class, () -> codec.decode(payload));
   }
+
+  /** 非对象 payload 与非法字段类型在 wire 边界拒绝，不进入领域校验。 */
+  @Test
+  void rejectsNonObjectPayloadAndInvalidFields() {
+    assertThrows(DaemonProtocolException.class, () -> codec.decode("[]"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"operationId\":\""
+                    + OP
+                    + "\",\"targetVersion\":\"  \",\"artifactUrl\":\""
+                    + URL
+                    + "\",\"artifactSha256\":\""
+                    + SHA
+                    + "\"}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"operationId\":\""
+                    + OP
+                    + "\",\"targetVersion\":\""
+                    + VERSION
+                    + "\",\"artifactUrl\":\""
+                    + URL
+                    + "\",\"artifactSha256\":123}"));
+  }
 }

@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
@@ -98,7 +98,7 @@ class LargeTextResultSpoolerTest {
 
     JsonNode textOutput =
         AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(published.isAbsolute(), "必须给出绝对路径");
     assertTrue(published.toString().endsWith(".log"));
     assertEquals(payload, Files.readString(published), "durable 全文必须逐字完整");
@@ -125,7 +125,7 @@ class LargeTextResultSpoolerTest {
     JsonNode textOutput =
         AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
     assertEquals(OutputSpool.INLINE_MAX_LINES + 500, textOutput.path("totalLines").asLong());
-    assertEquals(payload, Files.readString(Path.of(textOutput.path("path").asText())));
+    assertEquals(payload, Files.readString(Path.of(textOutput.path("path").asString())));
   }
 
   /** 多字节内容必须逐字节完整落盘，预览不得出现替换字符。 */
@@ -139,7 +139,7 @@ class LargeTextResultSpoolerTest {
 
     JsonNode textOutput =
         AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
-    assertEquals(payload, Files.readString(Path.of(textOutput.path("path").asText())));
+    assertEquals(payload, Files.readString(Path.of(textOutput.path("path").asString())));
     assertFalse(text(result).contains("\uFFFD"), "预览不得切断多字节字符");
   }
 
@@ -155,8 +155,8 @@ class LargeTextResultSpoolerTest {
 
     assertTrue(result.error(), "error 必须保留");
     JsonNode details = AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson());
-    assertEquals("SKILL_SYNC_FAILED", details.path("code").asText(), "已有 details 键不得被覆盖");
-    assertTrue(details.path("textOutput").path("path").asText().endsWith(".log"));
+    assertEquals("SKILL_SYNC_FAILED", details.path("code").asString(), "已有 details 键不得被覆盖");
+    assertTrue(details.path("textOutput").path("path").asString().endsWith(".log"));
   }
 
   /** JSON、二进制与多内容结果不参与外化：即使文本很大也原样返回。 */
@@ -264,8 +264,8 @@ class LargeTextResultSpoolerTest {
               .readTree(spooledText.detailsJson())
               .path("textOutput");
       assertTrue(textOutput.has("path"));
-      assertTrue(Path.of(textOutput.path("path").asText()).isAbsolute());
-      assertEquals(largeText, Files.readString(Path.of(textOutput.path("path").asText())));
+      assertTrue(Path.of(textOutput.path("path").asString()).isAbsolute());
+      assertEquals(largeText, Files.readString(Path.of(textOutput.path("path").asString())));
 
       // JSON、二进制、多内容不被外化
       assertSame(jsonRes, spooledJson);

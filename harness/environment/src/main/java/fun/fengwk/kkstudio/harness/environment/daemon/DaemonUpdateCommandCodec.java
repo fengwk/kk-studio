@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.Objects;
 import java.util.Set;
@@ -20,9 +21,10 @@ import java.util.Set;
 public final class DaemonUpdateCommandCodec {
 
   private static final ObjectMapper MAPPER =
-      new ObjectMapper()
-          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private static final Set<String> FIELDS =
       Set.of("operationId", "targetVersion", "artifactUrl", "artifactSha256");
@@ -36,7 +38,7 @@ public final class DaemonUpdateCommandCodec {
     root.put("artifactSha256", command.artifactSha256());
     try {
       return MAPPER.writeValueAsString(root);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("cannot encode update command payload", error);
     }
   }
@@ -45,14 +47,14 @@ public final class DaemonUpdateCommandCodec {
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("malformed update command payload", error);
     }
     if (!(value instanceof ObjectNode root)) {
       throw new DaemonProtocolException("update command payload must be an object");
     }
-    root.fieldNames()
-        .forEachRemaining(
+    root.propertyNames()
+        .forEach(
             field -> {
               if (!FIELDS.contains(field)) {
                 throw new DaemonProtocolException("unexpected update command field: " + field);
@@ -72,9 +74,9 @@ public final class DaemonUpdateCommandCodec {
 
   private static String text(ObjectNode root, String field) {
     JsonNode value = root.get(field);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new DaemonProtocolException("update command." + field + " must be non-blank text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 }

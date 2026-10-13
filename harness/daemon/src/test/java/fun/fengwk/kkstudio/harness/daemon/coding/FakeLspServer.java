@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,7 +32,7 @@ public final class FakeLspServer {
   /** {@code large-decompile} 模式返回的反编译源码：行数与字节数都超过结果级外化的内联阈值。 */
   public static final String LARGE_DECOMPILED_SOURCE = "// decompiled line\n".repeat(3000);
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
   private static final int DEFINITION_LINE = 9;
   private static final int DEFINITION_CHARACTER = 5;
   private static final long SLOW_INIT_MILLIS = 3_000;
@@ -128,7 +128,7 @@ public final class FakeLspServer {
    * @return {@code false} 表示服务器主动结束。
    */
   private boolean handle(JsonNode message, OutputStream out) throws IOException {
-    String method = message.path("method").asText(null);
+    String method = message.path("method").asString(null);
     if (method == null) {
       // 服务端请求的应答：记录即可，测试据此断言客户端如何回答我们。
       return true;
@@ -177,9 +177,9 @@ public final class FakeLspServer {
             default -> symbols();
           });
       case "java/classFileContents" -> sendResult(
-          out, id, MAPPER.getNodeFactory().textNode(decompiledSource()));
+          out, id, MAPPER.getNodeFactory().stringNode(decompiledSource()));
       case "workspace/executeCommand" -> sendResult(
-          out, id, MAPPER.getNodeFactory().textNode(decompiledSource()));
+          out, id, MAPPER.getNodeFactory().stringNode(decompiledSource()));
       default -> sendError(out, id, -32601, "Method not found: " + method);
     }
     return true;
@@ -215,7 +215,7 @@ public final class FakeLspServer {
       case "null-definition" -> sendResult(out, id, MAPPER.nullNode());
       case "weird-locations" -> sendResult(out, id, weirdLocations());
       case "link-definition" -> {
-        String uri = message.path("params").path("textDocument").path("uri").asText("");
+        String uri = message.path("params").path("textDocument").path("uri").asString("");
         ObjectNode link = MAPPER.createObjectNode();
         link.put("targetUri", uri);
         link.set("targetRange", range(DEFINITION_LINE, DEFINITION_CHARACTER, 3));
@@ -223,7 +223,7 @@ public final class FakeLspServer {
         sendResult(out, id, MAPPER.createArrayNode().add(link));
       }
       default -> {
-        String uri = message.path("params").path("textDocument").path("uri").asText("");
+        String uri = message.path("params").path("textDocument").path("uri").asString("");
         ObjectNode location = MAPPER.createObjectNode();
         location.put("uri", uri);
         location.set("range", range(DEFINITION_LINE, DEFINITION_CHARACTER, 3));

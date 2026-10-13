@@ -65,4 +65,26 @@ class DaemonUpdateResultCodecTest {
         IllegalArgumentException.class,
         () -> DaemonUpdateResult.failed(OP, "x".repeat(DaemonUpdateResult.MAX_MESSAGE_CHARS + 1)));
   }
+
+  /** 畸形 JSON、非对象 payload 与非法字段类型在 wire 边界拒绝。 */
+  @Test
+  void rejectsMalformedNonObjectAndInvalidFields() {
+    assertThrows(DaemonProtocolException.class, () -> codec.decode("not-json"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decode("[]"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"operationId\":\"\",\"phase\":\"ACCEPTED\"}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"operationId\":\"" + OP + "\",\"phase\":\"ACCEPTED\",\"message\":123}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"operationId\":\""
+                    + OP
+                    + "\",\"phase\":\"FAILED\",\"message\":\"bad\\u0000x\"}"));
+  }
 }

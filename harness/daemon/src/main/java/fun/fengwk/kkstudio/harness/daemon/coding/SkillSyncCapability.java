@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.daemon.skill.InstalledSkillPackage;
 import fun.fengwk.kkstudio.harness.daemon.skill.SkillPackageInstaller;
@@ -65,10 +65,10 @@ public final class SkillSyncCapability extends AbstractCodingCapability {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException("credential must be a string");
     }
-    String text = value.textValue();
+    String text = value.stringValue();
     return text.isBlank() ? null : text;
   }
 }

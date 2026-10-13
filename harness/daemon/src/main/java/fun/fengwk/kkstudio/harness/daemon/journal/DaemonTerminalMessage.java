@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon.journal;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 
@@ -11,7 +12,7 @@ import java.util.Set;
 /** 可在重复 INVOKE 或重连后重发的终态 wire 消息。 */
 public record DaemonTerminalMessage(DaemonMessageType messageType, String payloadJson) {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final Set<DaemonMessageType> TERMINAL_TYPES =
       Set.of(DaemonMessageType.COMPLETED, DaemonMessageType.FAILED, DaemonMessageType.CANCELLED);
 

@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -52,8 +52,8 @@ class LspClientTest {
     assertTrue(client.isAlive());
 
     JsonNode params = FakeLspServers.received(transcript, "initialize").getFirst().path("params");
-    assertEquals(root.toUri().toString(), params.path("rootUri").asText());
-    assertEquals(root.toString(), params.path("rootPath").asText());
+    assertEquals(root.toUri().toString(), params.path("rootUri").asString());
+    assertEquals(root.toString(), params.path("rootPath").asString());
     assertTrue(params.path("processId").asLong() > 0, params.toString());
     assertEquals(
         List.of("utf-16", "utf-8"),
@@ -74,9 +74,9 @@ class LspClientTest {
             .path("definition")
             .path("linkSupport")
             .asBoolean());
-    assertEquals("workspace", params.path("workspaceFolders").get(0).path("name").asText());
+    assertEquals("workspace", params.path("workspaceFolders").get(0).path("name").asString());
     assertEquals(
-        root.toUri().toString(), params.path("workspaceFolders").get(0).path("uri").asText());
+        root.toUri().toString(), params.path("workspaceFolders").get(0).path("uri").asString());
     // initialized 是 fire-and-forget 通知：等它真的到达服务器再断言，避免与发送时序竞争。
     FakeLspServers.await(transcript, event -> hasMethod(event, "initialized"));
     assertEquals(1, FakeLspServers.received(transcript, "initialized").size());
@@ -93,10 +93,10 @@ class LspClientTest {
     assertEquals(List.of(file + ":10:5"), locations);
     JsonNode opened =
         FakeLspServers.received(transcript, "textDocument/didOpen").getFirst().path("params");
-    assertEquals(file.toUri().toString(), opened.path("textDocument").path("uri").asText());
-    assertEquals("java", opened.path("textDocument").path("languageId").asText());
+    assertEquals(file.toUri().toString(), opened.path("textDocument").path("uri").asString());
+    assertEquals("java", opened.path("textDocument").path("languageId").asString());
     assertEquals(1, opened.path("textDocument").path("version").asInt());
-    assertEquals(Files.readString(file), opened.path("textDocument").path("text").asText());
+    assertEquals(Files.readString(file), opened.path("textDocument").path("text").asString());
     JsonNode request = FakeLspServers.received(transcript, "textDocument/definition").getFirst();
     assertEquals(2, request.path("params").path("position").path("line").asInt());
     assertEquals(4, request.path("params").path("position").path("character").asInt());
@@ -138,7 +138,7 @@ class LspClientTest {
 
     List<String> languageIds =
         FakeLspServers.received(transcript, "textDocument/didOpen").stream()
-            .map(node -> node.path("params").path("textDocument").path("languageId").asText())
+            .map(node -> node.path("params").path("textDocument").path("languageId").asString())
             .toList();
     assertEquals(
         List.of("typescript", "typescript", "javascript", "javascript", "python", "fake"),
@@ -160,7 +160,7 @@ class LspClientTest {
             .path("params")
             .path("textDocument")
             .path("text")
-            .asText());
+            .asString());
 
     Files.write(file, "\ufeffclass Bom { void run() {} }\n".getBytes(StandardCharsets.UTF_8));
     client.definition(file, 1, 0, REQUEST_TIMEOUT);
@@ -172,7 +172,7 @@ class LspClientTest {
             .path("contentChanges")
             .get(0)
             .path("text")
-            .asText());
+            .asString());
   }
 
   /** 意图：文件被外部修改后重新查询会发送全量 didChange 与 didSave，且不重复 didOpen。 */
@@ -191,7 +191,7 @@ class LspClientTest {
     assertEquals(2, changed.path("textDocument").path("version").asInt());
     assertEquals(
         "class App { void run() {} }\n",
-        changed.path("contentChanges").get(0).path("text").asText());
+        changed.path("contentChanges").get(0).path("text").asString());
     assertEquals(1, FakeLspServers.received(transcript, "textDocument/didSave").size());
   }
 
@@ -265,7 +265,7 @@ class LspClientTest {
     JsonNode request = FakeLspServers.received(transcript, "java/classFileContents").getFirst();
     assertEquals(
         "jdt://contents/java.base/java/lang/String.class",
-        request.path("params").path("uri").asText());
+        request.path("params").path("uri").asString());
     assertTrue(
         FakeLspServers.received(transcript, "initialize")
             .getFirst()
@@ -302,8 +302,8 @@ class LspClientTest {
     assertEquals(FakeLspServer.DECOMPILED_SOURCE, source);
     JsonNode request =
         FakeLspServers.received(transcript, "workspace/executeCommand").getFirst().path("params");
-    assertEquals("java.decompile", request.path("command").asText());
-    assertEquals(classFile.toUri().toString(), request.path("arguments").get(0).asText());
+    assertEquals("java.decompile", request.path("command").asString());
+    assertEquals(classFile.toUri().toString(), request.path("arguments").get(0).asString());
   }
 
   /** 意图：服务端发出的请求都被应答：能力协商类返回可用结果、未知方法回 MethodNotFound。 */
@@ -319,7 +319,7 @@ class LspClientTest {
     JsonNode workspaceFolders = awaitResponse(903);
     assertEquals(
         root.toUri().toString(),
-        workspaceFolders.path("result").get(0).path("uri").asText(),
+        workspaceFolders.path("result").get(0).path("uri").asString(),
         "workspace/workspaceFolders 必须回答当前项目根");
     JsonNode unknown = awaitResponse(904);
     assertEquals(-32601, unknown.path("error").path("code").asInt(), unknown.toString());
@@ -464,14 +464,14 @@ class LspClientTest {
   }
 
   private static boolean hasMethod(JsonNode event, String method) {
-    if (!event.path("event").asText().equals("recv")) {
+    if (!event.path("event").asString().equals("recv")) {
       return false;
     }
     JsonNode message = event.path("message");
     if (method == null) {
       return message.path("method").isMissingNode() && message.has("id");
     }
-    return method.equals(message.path("method").asText());
+    return method.equals(message.path("method").asString());
   }
 
   private Path write(String name, String content) throws IOException {
@@ -480,7 +480,7 @@ class LspClientTest {
 
   private static List<String> texts(JsonNode array) {
     List<String> values = new ArrayList<>();
-    array.forEach(element -> values.add(element.asText()));
+    array.forEach(element -> values.add(element.asString()));
     return values;
   }
 
