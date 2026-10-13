@@ -6,9 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
-import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.DatabindException;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -22,7 +25,7 @@ import java.util.Map;
  */
 class SystemSettingsDtoContractTest {
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final JsonMapper objectMapper = JsonMapper.builder().build();
 
   @Test
   void rejectsUnknownFieldsAtEveryNestingLevel() throws Exception {
@@ -174,12 +177,49 @@ class SystemSettingsDtoContractTest {
     for (String field : List.of("proxyUrl", "noProxyHosts")) {
       for (String value : List.of("1", "1.5", "true", "[]", "{}")) {
         assertThrows(
-            JsonMappingException.class,
+            DatabindException.class,
             () ->
                 objectMapper.readValue(
                     "{\"" + field + "\":" + value + "}", SystemSettingsNetworkDTO.class));
       }
     }
+  }
+
+  /**
+   * HTTP wire profile 的真实往返 fixture：Long 时限字段输出规范十进制字符串，Integer 计数保持 JSON 数值，且能按同一 profile
+   * 反序列化回原值。这里复刻 HTTP 层 Long→String 的能力（它不属于 Share DTO 自身，但不能因迁移被弱化）。
+   */
+  @Test
+  void longFieldsSerializeAsWireStringsWhileIntegersStayNumbers() throws Exception {
+    JsonMapper wireMapper =
+        JsonMapper.builder()
+            .changeDefaultPropertyInclusion(
+                inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+            .addModule(longToStringModule())
+            .build();
+
+    SystemSettingsAiRuntimeDTO ai = new SystemSettingsAiRuntimeDTO();
+    ai.setRetryBaseDelayMillis(250L);
+    ai.setSubagentMaxTurns(5);
+    ai.setModelHttpRetryStatusCodes(List.of(429, 500));
+
+    String json = wireMapper.writeValueAsString(ai);
+    assertTrue(json.contains("\"retryBaseDelayMillis\":\"250\""), json);
+    assertTrue(json.contains("\"subagentMaxTurns\":5"), json);
+    assertTrue(json.contains("\"modelHttpRetryStatusCodes\":[429,500]"), json);
+
+    SystemSettingsAiRuntimeDTO read = wireMapper.readValue(json, SystemSettingsAiRuntimeDTO.class);
+    assertEquals(250L, read.getRetryBaseDelayMillis());
+    assertEquals(5, read.getSubagentMaxTurns());
+    assertEquals(List.of(429, 500), read.getModelHttpRetryStatusCodes());
+  }
+
+  /** 复刻 HTTP 层 Long/long → 十进制字符串的能力，供 Share wire profile 往返 fixture 使用。 */
+  private static SimpleModule longToStringModule() {
+    SimpleModule module = new SimpleModule("LongToStringModule");
+    module.addSerializer(Long.class, new ToStringSerializer(Long.class));
+    module.addSerializer(Long.TYPE, new ToStringSerializer(Long.TYPE));
+    return module;
   }
 
   private static List<Field> allDeclaredFields(Class<?> type) {

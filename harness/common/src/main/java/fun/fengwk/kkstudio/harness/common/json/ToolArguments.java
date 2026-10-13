@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.common.json;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import java.util.function.Function;
 
@@ -33,10 +33,10 @@ public final class ToolArguments {
       return null;
     }
     JsonNode value = arguments.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       return null;
     }
-    String text = value.textValue();
+    String text = value.stringValue();
     return text.isBlank() ? null : text;
   }
 

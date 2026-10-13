@@ -7,8 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 /** Project wire DTO 契约测试：精确字段集、nullable 显式序列化、未知字段拒绝以及关键聚合 DTO 的 JSON 编解码回环。 */
 class ProjectDtoContractTest {
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final JsonMapper objectMapper = JsonMapper.builder().build();
 
   private static final String[] REQUIRED_ALWAYS_FIELDS = {
     "ProjectDTO.archivedAt",

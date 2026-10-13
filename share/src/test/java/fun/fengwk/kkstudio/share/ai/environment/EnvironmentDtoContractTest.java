@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.time.Instant;
@@ -16,14 +16,18 @@ import java.util.List;
 /** 验证 Environment 相关 DTO 的序列化、反序列化以及未知字段严格校验契约。 */
 class EnvironmentDtoContractTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   /** 无连接时仍显式给出 null 截止时间，客户端不以缺失字段猜测连接状态。 */
   @Test
   void offlineCardKeepsNullStatusDeadlineUnderNonNullWirePolicy() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
     card.setStatus("OFFLINE");
-    ObjectMapper mapper = MAPPER.copy().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    JsonMapper mapper =
+        JsonMapper.builder()
+            .changeDefaultPropertyInclusion(
+                inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+            .build();
     JsonNode json = mapper.readTree(mapper.writeValueAsString(card));
     assertTrue(json.has("statusExpiresAt"));
     assertTrue(json.get("statusExpiresAt").isNull());

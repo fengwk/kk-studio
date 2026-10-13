@@ -1,30 +1,30 @@
 package fun.fengwk.kkstudio.harness.common.json;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.Objects;
 
 /**
  * 严格 JSON 值与对象校验与读取门禁。
  *
- * <p>启用 {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION} 与 {@link
+ * <p>启用 {@link StreamReadFeature#STRICT_DUPLICATE_DETECTION} 与 {@link
  * DeserializationFeature#FAIL_ON_TRAILING_TOKENS}，在边界严格拒绝重复字段与尾随 token。
  */
 public final class JsonValues {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    // JSON number 按 BigDecimal 读回，避免 1e-324 / 1e309 在 double 中变成 0 或 Infinity。
-    OBJECT_MAPPER.configure(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
-  }
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // JSON number 按 BigDecimal 读回，避免 1e-324 / 1e309 在 double 中变成 0 或 Infinity。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private JsonValues() {}
 
@@ -68,7 +68,10 @@ public final class JsonValues {
   /**
    * 解析非空严格 JSON 文本为 {@link JsonNode}。
    *
-   * @throws IllegalArgumentException 文本为 null、非合法 JSON 或包含重复字段/尾随内容时
+   * <p>Jackson 3 对空/纯空白输入返回 {@link JsonNode#isMissingNode() MissingNode} 而非 {@code null}，因此这里显式拒绝
+   * missing 节点；JSON 字面量 {@code null} 解析为合法的 {@code NullNode}，不属于 missing。
+   *
+   * @throws IllegalArgumentException 文本为 null、空白、非合法 JSON 或包含重复字段/尾随内容时
    */
   public static JsonNode readTree(String json) {
     if (json == null) {
@@ -76,11 +79,11 @@ public final class JsonValues {
     }
     try {
       JsonNode node = OBJECT_MAPPER.readTree(json);
-      if (node == null) {
-        throw new IllegalArgumentException("json must not be null");
+      if (node == null || node.isMissingNode()) {
+        throw new IllegalArgumentException("json must not be blank");
       }
       return node;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("json must be valid", error);
     }
   }
@@ -94,7 +97,7 @@ public final class JsonValues {
     Objects.requireNonNull(node, "node");
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode JSON node", error);
     }
   }

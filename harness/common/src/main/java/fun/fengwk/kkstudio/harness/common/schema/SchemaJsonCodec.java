@@ -1,17 +1,17 @@
 package fun.fengwk.kkstudio.harness.common.schema;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -28,13 +28,12 @@ import java.util.TreeSet;
  */
 public final class SchemaJsonCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   public SchemaJsonCodec() {}
 
@@ -62,10 +61,11 @@ public final class SchemaJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed input schema JSON", error);
     }
-    if (root == null) {
+    // Jackson 3 对空/纯空白输入返回 MissingNode 而非 null，两种形态都在解码入口统一拒绝。
+    if (root == null || root.isMissingNode()) {
       throw new IllegalArgumentException("input schema JSON must not be empty");
     }
     return decodeNode(root, "inputSchema");
@@ -142,7 +142,7 @@ public final class SchemaJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode schema JSON", error);
     }
   }
@@ -159,19 +159,15 @@ public final class SchemaJsonCodec {
     Set<String> requiredNames = readRequiredArray(obj, context);
     boolean additionalProperties = readAdditionalProperties(obj, context);
     Map<String, SchemaElement> properties = new LinkedHashMap<>();
-    Iterator<String> declaredNames = propertiesObject.fieldNames();
-    if (declaredNames != null) {
-      while (declaredNames.hasNext()) {
-        String propertyName = declaredNames.next();
-        JsonNode child = propertiesObject.get(propertyName);
-        if (child == null || !child.isObject()) {
-          throw new IllegalArgumentException(
-              context + " property '" + propertyName + "' must be an object");
-        }
-        properties.put(
-            propertyName,
-            readSchemaElement((ObjectNode) child, context + " property '" + propertyName + "'"));
+    for (String propertyName : propertiesObject.propertyNames()) {
+      JsonNode child = propertiesObject.get(propertyName);
+      if (child == null || !child.isObject()) {
+        throw new IllegalArgumentException(
+            context + " property '" + propertyName + "' must be an object");
       }
+      properties.put(
+          propertyName,
+          readSchemaElement((ObjectNode) child, context + " property '" + propertyName + "'"));
     }
     for (String requiredName : requiredNames) {
       if (!properties.containsKey(requiredName)) {
@@ -213,11 +209,11 @@ public final class SchemaJsonCodec {
         Set<String> seen = new HashSet<>();
         int enumIndex = 0;
         for (JsonNode entry : enumNode) {
-          if (!entry.isTextual()) {
+          if (!entry.isString()) {
             throw new IllegalArgumentException(
                 context + " 'enum'[" + enumIndex + "] must be a string");
           }
-          String text = entry.textValue();
+          String text = entry.stringValue();
           if (text == null || text.isBlank()) {
             throw new IllegalArgumentException(
                 context + " 'enum'[" + enumIndex + "] must be non-blank");
@@ -264,20 +260,15 @@ public final class SchemaJsonCodec {
         Set<String> requiredNames = readRequiredArray(node, context);
         boolean additionalProperties = readAdditionalProperties(node, context);
         Map<String, SchemaElement> properties = new LinkedHashMap<>();
-        Iterator<String> declaredNames = propertiesObject.fieldNames();
-        if (declaredNames != null) {
-          while (declaredNames.hasNext()) {
-            String propertyName = declaredNames.next();
-            JsonNode child = propertiesObject.get(propertyName);
-            if (child == null || !child.isObject()) {
-              throw new IllegalArgumentException(
-                  context + " property '" + propertyName + "' must be an object");
-            }
-            properties.put(
-                propertyName,
-                readSchemaElement(
-                    (ObjectNode) child, context + " property '" + propertyName + "'"));
+        for (String propertyName : propertiesObject.propertyNames()) {
+          JsonNode child = propertiesObject.get(propertyName);
+          if (child == null || !child.isObject()) {
+            throw new IllegalArgumentException(
+                context + " property '" + propertyName + "' must be an object");
           }
+          properties.put(
+              propertyName,
+              readSchemaElement((ObjectNode) child, context + " property '" + propertyName + "'"));
         }
         for (String requiredName : requiredNames) {
           if (!properties.containsKey(requiredName)) {
@@ -356,7 +347,7 @@ public final class SchemaJsonCodec {
 
   private static void readObjectSchemaShape(ObjectNode node, String context) {
     JsonNode typeNode = node.get("type");
-    if (typeNode == null || !typeNode.isTextual() || !"object".equals(typeNode.textValue())) {
+    if (typeNode == null || !typeNode.isString() || !"object".equals(typeNode.stringValue())) {
       throw new IllegalArgumentException(context + " schema type must be 'object'");
     }
     if (node.get("properties") == null || node.get("properties").isNull()) {
@@ -381,10 +372,10 @@ public final class SchemaJsonCodec {
     Set<String> names = new HashSet<>();
     int index = 0;
     for (JsonNode entry : required) {
-      if (!entry.isTextual()) {
+      if (!entry.isString()) {
         throw new IllegalArgumentException(context + " 'required'[" + index + "] must be a string");
       }
-      String text = entry.textValue();
+      String text = entry.stringValue();
       if (text == null || text.isBlank()) {
         throw new IllegalArgumentException(
             context + " 'required'[" + index + "] must be non-blank");
@@ -410,12 +401,7 @@ public final class SchemaJsonCodec {
   }
 
   private static void rejectUnknownFields(ObjectNode node, Set<String> allowed, String context) {
-    Iterator<String> fields = node.fieldNames();
-    if (fields == null) {
-      return;
-    }
-    while (fields.hasNext()) {
-      String name = fields.next();
+    for (String name : node.propertyNames()) {
       if (!allowed.contains(name)) {
         throw new IllegalArgumentException(context + " unknown field: '" + name + "'");
       }
@@ -435,10 +421,10 @@ public final class SchemaJsonCodec {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + " '" + field + "' must be a string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static ObjectNode requiredObject(JsonNode node, String context) {
