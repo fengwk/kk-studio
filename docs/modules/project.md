@@ -11,7 +11,8 @@ PostgreSQL 持久化与 REST 调度，经
 [`ProjectAutoConfiguration`](../../project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。HTTP DTO 映射由 Web 提供，Environment 校验、Session 深删除与 Blob 操作
 通过下文端口调用 [Platform](platform.md) 的适配。生产依赖包括
-`harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`）与 Spring JDBC、Jackson 通用框架，
+`harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`）、Spring JDBC 与 Jackson 3
+（`tools.jackson.core` / `tools.jackson.databind`），
 [`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
 同时锁定「生产依赖集合精确相等」与 import 白名单。
 
