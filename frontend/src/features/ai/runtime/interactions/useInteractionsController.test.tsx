@@ -66,14 +66,12 @@ describe('useInteractionsController', () => {
   function mockPage(
     items: InteractionDTO[],
     nextCursor: string | null = null,
-    overrides?: Partial<InteractionPageDTO>,
   ): InteractionPageDTO {
     return {
       items,
       nextCursor,
       total: items.length,
       freshnessAt: null,
-      ...overrides,
     }
   }
 

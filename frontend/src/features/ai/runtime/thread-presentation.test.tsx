@@ -54,8 +54,8 @@ describe('visible thread presentation', () => {
     expect(threadIdentity({ thread, models: [model] })).toBe('researcher · provider/model · high')
     expect(threadIdentity({ thread, models: [] })).toBe('researcher · provider/model')
     expect(threadIdentity({ thread: undefined, models: [model] })).toBeNull()
-    // 保留运行时非法 null 输入回归的意图，验证防空指针保护
-    expect(threadIdentity({ thread: null as unknown as HarnessThreadDTO | undefined, models: [model] })).toBeNull()
+    // 在运行时边界注入非法 null，验证空值保护。
+    expect(Reflect.apply(threadIdentity, undefined, [{ thread: null, models: [model] }])).toBeNull()
     for (const config of [
       { ...model.config, variants: [{ id: 'deep' }] },
       { ...model.config, variants: [{ id: 'other', reasoningEffort: 'low' }] },
