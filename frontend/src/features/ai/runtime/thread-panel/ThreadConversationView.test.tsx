@@ -3,7 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/ThreadConversationView'
 import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcript-reading'
-import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type { DialogueMessage, TextDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
 /**
  * Conversation 视图的自动贴底生命周期（挂载即生效，卸载即消失）：
@@ -20,18 +20,18 @@ import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-type
  * ChatWorkspacePane.commands.test 覆盖。
  */
 
-function assistantMessage(id: string, text: string): DialogueMessage {
+function assistantMessage(id: string, text: string, status: 'done' | 'streaming' = 'done'): TextDialogueMessage {
   return {
     id,
     role: 'assistant',
     subjectEntryId: id,
     text,
     createdAt: '2026-07-28T10:00:00Z',
-    status: 'done',
+    status,
   }
 }
 
-function messages(count: number): DialogueMessage[] {
+function messages(count: number): TextDialogueMessage[] {
   return Array.from({ length: count }, (_, index) =>
     assistantMessage(`m${index + 1}`, `reply ${index + 1}`),
   )
@@ -42,7 +42,7 @@ function streamingMessages(count: number, tailText = 'reply streaming'): Dialogu
   const list = messages(count)
   const tail = list[list.length - 1]
   if (tail) {
-    list[list.length - 1] = { ...tail, text: tailText, status: 'streaming' }
+    list[list.length - 1] = assistantMessage(tail.id, tailText, 'streaming')
   }
   return list
 }

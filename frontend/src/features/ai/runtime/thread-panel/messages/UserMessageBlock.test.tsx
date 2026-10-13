@@ -4,8 +4,8 @@ import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-build
 import { UserMessageBlock } from '@/features/ai/runtime/thread-panel/messages/UserMessageBlock'
 import { ResourceBlobUrlContext } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 
-const text = (value: string) => ({ type: 'text', text: value })
-const image = (name: string) => ({ type: 'resource', blobId: name, name, mediaType: 'image/png' })
+const text = (value: string) => ({ type: 'text' as const, text: value })
+const image = (name: string) => ({ type: 'resource' as const, blobId: name, name, mediaType: 'image/png' })
 
 function message(contents: Record<string, unknown>[]) {
   const timeline = buildThreadTimeline([{

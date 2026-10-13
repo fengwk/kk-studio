@@ -19,6 +19,7 @@ import type {
 } from '@/features/ai/composer'
 import { AttachmentStrip } from '@/features/ai/composer/attachment-strip'
 import type { AttachmentUpload } from '@/features/ai/composer/use-attachment-uploads'
+import type { ThreadComposerSettingsInput } from '@/features/ai/runtime/thread-panel/ThreadComposerControls'
 
 type StorageUploadDTO = Awaited<ReturnType<StorageService['reserveUpload']>>
 
@@ -67,7 +68,7 @@ function fakeStorage() {
 
 const hashFile: HashFile = vi.fn(async () => 'a'.repeat(64))
 
-const MODEL_SETTINGS = {
+const MODEL_SETTINGS: ThreadComposerSettingsInput = {
   model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
   models: [
     {
@@ -80,8 +81,11 @@ const MODEL_SETTINGS = {
     },
   ],
   yoloEnabled: false,
+  environmentName: null,
+  environments: [],
   onModelChange: vi.fn(),
   onYoloChange: vi.fn(),
+  onEnvironmentChange: vi.fn(),
 }
 
 /** 受控 Harness：把 parts 状态回显到 DOM，便于精确断言草稿内容。 */
@@ -103,7 +107,7 @@ function Harness({
   disabled?: boolean
   historicalUserMessages?: readonly string[]
   focusOnEscape?: boolean
-  settings?: typeof MODEL_SETTINGS
+  settings?: ThreadComposerSettingsInput
   commands?: ThreadCommand[]
 }) {
   const [parts, setParts] = useState<ComposerPart[]>(initialParts)
@@ -133,13 +137,17 @@ function Harness({
   )
 }
 
-function partsSnapshot(): Array<Record<string, string>> {
+function partsSnapshot(): Array<Record<string, unknown>> {
   const raw = JSON.parse(screen.getByTestId('parts').textContent ?? '[]') as ComposerPart[]
-  return raw.map((part) =>
-    part.type === 'text'
-      ? { type: 'text', text: part.text }
-      : { type: 'attachment', uploadId: part.uploadId, filename: part.filename },
-  )
+  return raw.map((part) => {
+    if (part.type === 'text') {
+      return { type: 'text', text: part.text }
+    }
+    if (part.type === 'attachment') {
+      return { type: 'attachment', uploadId: part.uploadId, filename: part.filename }
+    }
+    return { type: 'resource', blobId: part.blobId, name: part.name }
+  })
 }
 
 function editorOf(): HTMLElement {
@@ -163,8 +171,8 @@ async function waitForIdleUploads() {
 describe('ThreadComposer edge interactions', () => {
   beforeEach(() => {
     vi.mocked(hashFile).mockClear()
-    MODEL_SETTINGS.onModelChange.mockClear()
-    MODEL_SETTINGS.onYoloChange.mockClear()
+    vi.mocked(MODEL_SETTINGS.onModelChange).mockClear()
+    vi.mocked(MODEL_SETTINGS.onYoloChange).mockClear()
   })
 
   afterEach(() => {

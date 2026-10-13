@@ -97,12 +97,12 @@ const hashFile: HashFile = vi.fn(async () => 'a'.repeat(64))
 const EMPTY_PARTS: ComposerPart[] = []
 
 function Harness({
-  service,
+  service = fakeStorage().service,
   initialParts = EMPTY_PARTS,
   onSubmit = vi.fn(),
   hash = hashFile,
 }: {
-  service: StorageService
+  service?: StorageService
   initialParts?: ComposerPart[]
   onSubmit?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   hash?: HashFile
@@ -131,13 +131,17 @@ function Harness({
   )
 }
 
-function partsSnapshot(): Array<Record<string, string>> {
+function partsSnapshot(): Array<Record<string, unknown>> {
   const raw = JSON.parse(screen.getByTestId('parts').textContent ?? '[]') as ComposerPart[]
-  return raw.map((part) =>
-    part.type === 'text'
-      ? { type: 'text', text: part.text }
-      : { type: 'attachment', uploadId: part.uploadId, filename: part.filename },
-  )
+  return raw.map((part) => {
+    if (part.type === 'text') {
+      return { type: 'text', text: part.text }
+    }
+    if (part.type === 'attachment') {
+      return { type: 'attachment', uploadId: part.uploadId, filename: part.filename }
+    }
+    return { type: 'resource', blobId: part.blobId, name: part.name }
+  })
 }
 
 async function pasteFiles(editor: HTMLElement, ...files: File[]) {
@@ -369,7 +373,7 @@ describe('ThreadComposer attachment pills', () => {
     fireEvent.keyDown(editor, { key: 'Enter' })
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     const sent = onSubmit.mock.calls[0]?.[0] as ComposerPart[]
-    const sentIds = sent.map((part) => part.uploadId)
+    const sentIds = sent.map((part) => (part.type === 'attachment' ? part.uploadId : ''))
     expect(sentIds[0]).toMatch(/^up-\d+$/)
     expect(sentIds[0]).not.toBe(sentIds[1])
   })
