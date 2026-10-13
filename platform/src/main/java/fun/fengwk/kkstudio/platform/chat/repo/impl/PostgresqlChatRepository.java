@@ -4,8 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.repo.impl.mapper.ChatMapper;
 import fun.fengwk.kkstudio.platform.chat.repo.impl.model.ChatDO;
+import fun.fengwk.kkstudio.platform.chat.repo.impl.store.ChatJdbcStore;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 
 import java.util.List;
@@ -17,41 +17,41 @@ import java.util.stream.Collectors;
 @Repository
 public class PostgresqlChatRepository implements ChatRepository {
 
-  private final ChatMapper chatMapper;
+  private final ChatJdbcStore chatJdbcStore;
 
   @Override
   public List<Chat> listNewestFirst() {
-    return chatMapper.listNewestFirst().stream().map(this::toModel).collect(Collectors.toList());
+    return chatJdbcStore.listNewestFirst().stream().map(this::toModel).collect(Collectors.toList());
   }
 
   @Override
   public Chat getById(UUID id) {
-    return toModel(chatMapper.getById(id));
+    return toModel(chatJdbcStore.getById(id));
   }
 
   @Override
   public Chat lockById(UUID id) {
-    return toModel(chatMapper.lockById(id));
+    return toModel(chatJdbcStore.lockById(id));
   }
 
   @Override
   public Chat lockForKeyShare(UUID id) {
-    return toModel(chatMapper.lockForKeyShare(id));
+    return toModel(chatJdbcStore.lockForKeyShare(id));
   }
 
   @Override
   public boolean create(Chat chat) {
-    return chatMapper.insert(toDO(chat)) == 1;
+    return chatJdbcStore.insert(toDO(chat)) == 1;
   }
 
   @Override
   public boolean updateById(Chat chat, long expectedVersion) {
-    return chatMapper.updateById(toDO(chat), expectedVersion) == 1;
+    return chatJdbcStore.updateById(toDO(chat), expectedVersion) == 1;
   }
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
-    return chatMapper.deleteById(id, expectedVersion) == 1;
+    return chatJdbcStore.deleteById(id, expectedVersion) == 1;
   }
 
   private ChatDO toDO(Chat chat) {

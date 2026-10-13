@@ -13,19 +13,20 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class PostgresqlSystemSettingsRepository implements SystemSettingsRepository {
 
-  private final SystemSettingsMapper systemSettingsMapper;
+  private final SystemSettingsJdbcStore systemSettingsJdbcStore;
   private final SystemSettingsCodec systemSettingsCodec;
   private final PostgresqlSystemSettingsChangeNotifier notifier;
 
   @Override
   public SystemSettingsRecord get() {
-    return convert(systemSettingsMapper.get());
+    return convert(systemSettingsJdbcStore.get());
   }
 
   @Override
   public boolean update(SystemSettings settings, long expectedVersion) {
     PostgresqlSystemSettingsChangeNotifier.requireTransaction();
-    if (systemSettingsMapper.updateByVersion(systemSettingsCodec.encode(settings), expectedVersion)
+    if (systemSettingsJdbcStore.updateByVersion(
+            systemSettingsCodec.encode(settings), expectedVersion)
         != 1) {
       return false;
     }

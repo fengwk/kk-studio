@@ -821,7 +821,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
   /**
    * 同键重放必须在观察到 receipt 之后返回权威当前事实：并发首次提交落在「锁前已读到旧快照」与「锁前 receipt 检查」之间时，重放绝不能把本事务早先读到的旧 Issue
-   * 当作当前版本返回（MyBatis 一级缓存会遮蔽并发已提交的版本推进）。
+   * 当作当前版本返回（并发已提交的版本推进只有重新查询才能观察到，不能复用早先读到的快照）。
    *
    * <p>本用例用 spy 把第二个请求精确停在锁前 receipt 检查上，等第一个请求完整提交后再放行，因此是与 {@link
    * #concurrentSameCommentKeyAndPayloadReplaysAfterOwnerLock()} 同一交错窗口的确定性复现，而不是概率竞争。

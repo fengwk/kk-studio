@@ -13,13 +13,6 @@ spring:
     username: unused
     password: unused
 
-mybatis:
-  mapper-locations: classpath:**/*Mapper.xml
-  type-aliases-package: fun.fengwk.kkstudio.**.model
-  configuration:
-    map-underscore-to-camel-case: true
-
-
 kk-studio:
   storage:
     s3:

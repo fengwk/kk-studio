@@ -7,8 +7,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.mapper.AgentModelMapper;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
+import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.store.AgentModelJdbcStore;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 
 import java.util.List;
@@ -18,45 +18,45 @@ import java.util.List;
 @Repository
 public class PostgresqlAgentModelRepository implements AgentModelRepository {
 
-  private final AgentModelMapper agentModelMapper;
+  private final AgentModelJdbcStore agentModelJdbcStore;
 
   @Override
   public Page<AgentModel> page(PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<AgentModelDO> results = agentModelMapper.page(offset, limit);
-    return Pages.page(pageQuery, results, agentModelMapper.count()).map(this::convert);
+    List<AgentModelDO> results = agentModelJdbcStore.page(offset, limit);
+    return Pages.page(pageQuery, results, agentModelJdbcStore.count()).map(this::convert);
   }
 
   @Override
   public List<AgentModel> listAll() {
-    return agentModelMapper.listAll().stream().map(this::convert).toList();
+    return agentModelJdbcStore.listAll().stream().map(this::convert).toList();
   }
 
   @Override
   public AgentModel getByProviderNameAndName(String providerName, String name) {
-    return convert(agentModelMapper.getByProviderNameAndName(providerName, name));
+    return convert(agentModelJdbcStore.getByProviderNameAndName(providerName, name));
   }
 
   @Override
   public AgentModel getByProviderNameAndNameForUpdate(String providerName, String name) {
-    return convert(agentModelMapper.getByProviderNameAndNameForUpdate(providerName, name));
+    return convert(agentModelJdbcStore.getByProviderNameAndNameForUpdate(providerName, name));
   }
 
   @Override
   public boolean create(AgentModel model) {
-    return agentModelMapper.insert(convert(model)) == 1;
+    return agentModelJdbcStore.insert(convert(model)) == 1;
   }
 
   @Override
   public boolean updateByName(AgentModel model, long expectedVersion) {
-    return agentModelMapper.updateByName(convert(model), expectedVersion) == 1;
+    return agentModelJdbcStore.updateByName(convert(model), expectedVersion) == 1;
   }
 
   @Override
   public void rename(String oldName, AgentModel model, long expectedVersion) {
     AgentModelDO modelDO = convert(model);
-    int inserted = agentModelMapper.insertRenamed(oldName, modelDO, expectedVersion);
+    int inserted = agentModelJdbcStore.insertRenamed(oldName, modelDO, expectedVersion);
     if (inserted != 1) {
       throw new IllegalStateException(
           "insert target model failed during rename: "
@@ -66,8 +66,9 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
               + ", expectedVersion="
               + expectedVersion);
     }
-    agentModelMapper.updateReferencingAgents(model.getProviderName(), oldName, model.getName());
-    int deleted = agentModelMapper.deleteByName(model.getProviderName(), oldName, expectedVersion);
+    agentModelJdbcStore.updateReferencingAgents(model.getProviderName(), oldName, model.getName());
+    int deleted =
+        agentModelJdbcStore.deleteByName(model.getProviderName(), oldName, expectedVersion);
     if (deleted != 1) {
       throw new IllegalStateException(
           "delete old model failed during rename: "
@@ -79,12 +80,12 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
 
   @Override
   public boolean deleteByName(String providerName, String name, long expectedVersion) {
-    return agentModelMapper.deleteByName(providerName, name, expectedVersion) == 1;
+    return agentModelJdbcStore.deleteByName(providerName, name, expectedVersion) == 1;
   }
 
   @Override
   public boolean hasAgents(String providerName, String name) {
-    return agentModelMapper.countAgentsByModelName(providerName, name) > 0;
+    return agentModelJdbcStore.countAgentsByModelName(providerName, name) > 0;
   }
 
   private AgentModelDO convert(AgentModel model) {

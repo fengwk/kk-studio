@@ -4,8 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
-import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.mapper.StorageUploadMapper;
 import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.model.StorageUploadDO;
+import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.store.StorageUploadJdbcStore;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 
 import java.time.Instant;
@@ -17,56 +17,56 @@ import java.util.UUID;
 @Repository
 public class PostgresqlStorageUploadRepository implements StorageUploadRepository {
 
-  private final StorageUploadMapper uploadMapper;
+  private final StorageUploadJdbcStore storageUploadJdbcStore;
 
   @Override
   public boolean insert(StorageUpload upload) {
-    return uploadMapper.insert(toDO(upload)) == 1;
+    return storageUploadJdbcStore.insert(toDO(upload)) == 1;
   }
 
   @Override
   public StorageUpload getById(UUID id) {
-    return toModel(uploadMapper.getById(id));
+    return toModel(storageUploadJdbcStore.getById(id));
   }
 
   @Override
   public StorageUpload getByIdForUpdate(UUID id) {
-    return toModel(uploadMapper.getByIdForUpdate(id));
+    return toModel(storageUploadJdbcStore.getByIdForUpdate(id));
   }
 
   @Override
   public boolean setBlobIdIfNull(UUID id, UUID blobId, Instant expiryCutoff) {
-    return uploadMapper.setBlobIdIfNull(id, blobId, expiryCutoff) == 1;
+    return storageUploadJdbcStore.setBlobIdIfNull(id, blobId, expiryCutoff) == 1;
   }
 
   @Override
   public boolean markCleanupRequested(UUID id, Instant requestedAt) {
-    return uploadMapper.markCleanupRequested(id, requestedAt) == 1;
+    return storageUploadJdbcStore.markCleanupRequested(id, requestedAt) == 1;
   }
 
   @Override
   public List<UUID> listCleanupCandidateIds(int limit, Instant now, Instant expiryCutoff) {
-    return uploadMapper.listCleanupCandidateIds(limit, now, expiryCutoff);
+    return storageUploadJdbcStore.listCleanupCandidateIds(limit, now, expiryCutoff);
   }
 
   @Override
   public StorageUpload claimById(UUID id, Instant now, Instant leaseUntil, String cleanupToken) {
-    return toModel(uploadMapper.claimById(id, now, leaseUntil, cleanupToken));
+    return toModel(storageUploadJdbcStore.claimById(id, now, leaseUntil, cleanupToken));
   }
 
   @Override
   public boolean finalizePending(UUID id, String cleanupToken) {
-    return uploadMapper.finalizePending(id, cleanupToken) == 1;
+    return storageUploadJdbcStore.finalizePending(id, cleanupToken) == 1;
   }
 
   @Override
   public boolean finalizeReady(UUID id, UUID blobId, String cleanupToken) {
-    return uploadMapper.finalizeReady(id, blobId, cleanupToken) == 1;
+    return storageUploadJdbcStore.finalizeReady(id, blobId, cleanupToken) == 1;
   }
 
   @Override
   public boolean releaseCleanupClaim(UUID id, String cleanupToken) {
-    return uploadMapper.releaseCleanupClaim(id, cleanupToken) == 1;
+    return storageUploadJdbcStore.releaseCleanupClaim(id, cleanupToken) == 1;
   }
 
   private StorageUploadDO toDO(StorageUpload upload) {
