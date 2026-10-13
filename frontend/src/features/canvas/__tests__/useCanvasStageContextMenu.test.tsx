@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import type { MutableRefObject } from 'react'
+import type { MouseEvent as ReactMouseEvent, MutableRefObject } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   CanvasSnapshot,
@@ -11,11 +11,12 @@ import type { CanvasFlowNode } from '@/features/canvas/projection'
 import {
   useCanvasStageContextMenu,
 } from '@/features/canvas/useCanvasStageContextMenu'
+import type { CanvasFunctionDefinitionDTO, UUIDString } from '@/shared/api/contracts/studio'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
-const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f'
-const NODE_A = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
-const NODE_B = 'a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d'
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f' as UUIDString
+const NODE_A = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a' as UUIDString
+const NODE_B = 'a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d' as UUIDString
 
 const transform = { x: 0, y: 0, width: 320, height: 260 }
 
@@ -68,18 +69,19 @@ function snapshot(overrides: Partial<CanvasSnapshot> = {}): CanvasSnapshot {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: '0',
+      revision: '0',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
     resourceNodes: [resourceNode()],
     groups: [group()],
-    links: [],
+    references: [],
     ...overrides,
   }
 }
 
 function flowNode(id: string, dataKind: 'resource' | 'group' = 'resource'): CanvasFlowNode {
+  const nodeId = (id.startsWith('group:') ? id.slice(6) : id) as UUIDString
   return {
     id,
     type: dataKind,
@@ -89,22 +91,52 @@ function flowNode(id: string, dataKind: 'resource' | 'group' = 'resource'): Canv
       ? { kind: 'group', group: group() }
       : {
         kind: 'resource',
-        node: resourceNode({ id }),
+        node: resourceNode({ id: nodeId }),
         model: null,
         callbacks: { editTextNode: vi.fn() },
       },
   } as CanvasFlowNode
 }
 
-function mouseEvent(clientX = 100, clientY = 120): MouseEvent {
-  return {
+function mouseEvent(clientX = 100, clientY = 120): ReactMouseEvent<Element> {
+  const nativeEvent = new window.MouseEvent('contextmenu', { clientX, clientY })
+  const synthetic: ReactMouseEvent<Element> = {
     clientX,
     clientY,
+    nativeEvent,
+    currentTarget: document.body,
+    target: document.body,
+    bubbles: true,
+    cancelable: true,
+    defaultPrevented: false,
+    eventPhase: 0,
+    isTrusted: true,
+    detail: 0,
+    view: window as unknown as ReactMouseEvent['view'],
     preventDefault: vi.fn(),
-  } as unknown as MouseEvent
+    isDefaultPrevented: () => false,
+    stopPropagation: vi.fn(),
+    isPropagationStopped: () => false,
+    persist: () => {},
+    timeStamp: Date.now(),
+    type: 'contextmenu',
+    altKey: false,
+    button: 2,
+    buttons: 2,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    getModifierState: () => false,
+    movementX: 0,
+    movementY: 0,
+    pageX: clientX,
+    pageY: clientY,
+    relatedTarget: null,
+    screenX: clientX,
+    screenY: clientY,
+  }
+  return synthetic
 }
-
-import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
 
 function setupHook(options: {
   snapshotValue?: CanvasSnapshot | null
@@ -214,7 +246,7 @@ describe('useCanvasStageContextMenu', () => {
     const { result } = setupHook({})
     const event = mouseEvent()
 
-    act(() => result.current.openNodeContextMenu(event, flowNode('ghost-id')))
+    act(() => result.current.openNodeContextMenu(event, flowNode('00000000-0000-4000-8000-000000000099')))
 
     expect(event.preventDefault).toHaveBeenCalled()
     expect(result.current.contextMenu).toBeNull()

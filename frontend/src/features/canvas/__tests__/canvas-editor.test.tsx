@@ -5,9 +5,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
-import type { CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { UseQueryResult } from '@tanstack/react-query'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const CANVAS_ID: UUIDString = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
 /** Stage 依赖 @xyflow/react，Editor 测试只验证状态渲染、导航与线程开关 wiring。 */
 vi.mock('@/features/canvas/CanvasStage', () => ({
@@ -19,6 +20,178 @@ interface EditorQueryState {
   error: unknown
   isLoading: boolean
   refetch: () => Promise<unknown>
+}
+
+function buildSnapshotQuery(
+  options: Partial<EditorQueryState> = {},
+  snapshot: CanvasSnapshotDTO | null = null,
+): UseQueryResult<CanvasSnapshotDTO, Error> {
+  const isError = Boolean(options.isError)
+  const isLoading = options.isLoading ?? !isError
+  const error = (options.error as Error | null) ?? null
+  const refetch = (options.refetch ?? vi.fn(async () => ({} as never))) as UseQueryResult<CanvasSnapshotDTO, Error>['refetch']
+
+  if (isError) {
+    const errorPromise = Promise.reject(error)
+    errorPromise.catch(() => undefined)
+    return {
+      status: 'error',
+      fetchStatus: 'idle',
+      isEnabled: true,
+      isPending: false,
+      isSuccess: false,
+      isError: true,
+      isLoading: false,
+      isLoadingError: true,
+      isRefetchError: false,
+      data: undefined,
+      error: error ?? new Error('Query failed'),
+      dataUpdatedAt: 0,
+      errorUpdatedAt: Date.now(),
+      failureCount: 1,
+      failureReason: error,
+      errorUpdateCount: 1,
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isFetching: false,
+      isInitialLoading: false,
+      isPaused: false,
+      isPlaceholderData: false,
+      isRefetching: false,
+      isStale: true,
+      refetch,
+      promise: errorPromise,
+    }
+  }
+
+  if (isLoading) {
+    return {
+      status: 'pending',
+      fetchStatus: 'fetching',
+      isEnabled: true,
+      isPending: true,
+      isSuccess: false,
+      isError: false,
+      isLoading: true,
+      isLoadingError: false,
+      isRefetchError: false,
+      data: undefined,
+      error: null,
+      dataUpdatedAt: 0,
+      errorUpdatedAt: 0,
+      failureCount: 0,
+      failureReason: null,
+      errorUpdateCount: 0,
+      isFetched: false,
+      isFetchedAfterMount: false,
+      isFetching: true,
+      isInitialLoading: true,
+      isPaused: false,
+      isPlaceholderData: false,
+      isRefetching: false,
+      isStale: true,
+      refetch,
+      promise: new Promise(() => {}),
+    }
+  }
+
+  return {
+    status: 'success',
+    fetchStatus: 'idle',
+    isEnabled: true,
+    isPending: false,
+    isSuccess: true,
+    isError: false,
+    isLoading: false,
+    isLoadingError: false,
+    isRefetchError: false,
+    data: snapshot ?? snapshotDTO(),
+    error: null,
+    dataUpdatedAt: Date.now(),
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    errorUpdateCount: 0,
+    isFetched: true,
+    isFetchedAfterMount: true,
+    isFetching: false,
+    isInitialLoading: false,
+    isPaused: false,
+    isPlaceholderData: false,
+    isRefetching: false,
+    isStale: false,
+    refetch,
+    promise: Promise.resolve(snapshot ?? snapshotDTO()),
+  }
+}
+
+function createController(
+  state: CanvasController['state'],
+  snapshot: CanvasSnapshotDTO | null,
+  snapshotQuery: UseQueryResult<CanvasSnapshotDTO, Error>,
+): CanvasController {
+  return {
+    state,
+    snapshot,
+    projectedSnapshot: null,
+    stageMetrics: { width: 1000, height: 800, dockTop: 100 },
+    setStageMetrics: vi.fn(),
+    fitViewRef: { current: vi.fn() },
+    focusSelectionRef: { current: vi.fn() },
+    zoomRef: { current: vi.fn() },
+    stageElementRef: { current: null },
+    dockAddRef: { current: null },
+    closeContextMenuRef: { current: vi.fn() },
+    snapshotQuery,
+    modelsQuery: { data: [] } as never,
+    models: [],
+    nodeCallbacks: { editTextNode: vi.fn() },
+    initialFitPending: false,
+    completeInitialFit: vi.fn(),
+    openEditor: vi.fn(),
+    openLibrary: vi.fn(),
+    setToast: vi.fn(),
+    setViewport: vi.fn(),
+    setSelection: vi.fn(),
+    moveNodes: vi.fn(),
+    commitTransforms: vi.fn(),
+    createLink: vi.fn(),
+    deleteLink: vi.fn(),
+    deleteSelection: vi.fn(),
+    createTextNode: vi.fn(),
+    setTextEditorDraft: vi.fn(),
+    closeTextEditor: vi.fn(),
+    saveTextEditor: vi.fn(),
+    createFunctionNode: vi.fn(),
+    scheduleFunctionConfig: vi.fn(),
+    flushFunctionConfig: vi.fn(),
+    startFunctionRun: vi.fn(),
+    cancelFunctionRun: vi.fn(),
+    resolveFunctionRun: vi.fn(),
+    discardPendingRun: vi.fn(() => false),
+    localPendingErrors: {},
+    isNodeInFlight: vi.fn(() => false),
+    createGroup: vi.fn(),
+    ungroupGroup: vi.fn(),
+    renameGroup: vi.fn(),
+    deleteGroup: vi.fn(),
+    renameNode: vi.fn(),
+    editTextNode: vi.fn(),
+    deleteNode: vi.fn(),
+    uploadFiles: vi.fn(),
+    handleAddAction: vi.fn(),
+    toggleAddMenu: vi.fn(),
+    closeAddMenu: vi.fn(),
+    setAddMenuIndex: vi.fn(),
+    dismissDraft: vi.fn(),
+    retryDraft: vi.fn(),
+    retryDraftPersist: vi.fn(async () => {}),
+    ackDurableDrafts: vi.fn(async () => {}),
+    retryRecovery: vi.fn(),
+    dismissConflictMessage: vi.fn(),
+    saveDraftAsNewNode: vi.fn(),
+    restoreDeletedDraftAsNewNode: vi.fn(),
+  }
 }
 
 function snapshotDTO(overrides: Partial<CanvasSnapshotDTO> = {}): CanvasSnapshotDTO {
@@ -50,6 +223,9 @@ function renderEditor(options: {
     selectedIds: [],
     selectedLinks: [],
     positionDrafts: {},
+    drafts: {},
+    storageError: null,
+    draftPersistPending: false,
     viewport: { x: 0, y: 0, zoom: 1 },
     toast: null,
     addMenuOpen: false,
@@ -66,27 +242,27 @@ function renderEditor(options: {
     refetch,
     ...options.query,
   }
-  const runtime = {
-    state,
-    snapshot: options.snapshot ?? null,
-    snapshotQuery: query,
-  } as unknown as CanvasController
-  const tree = (nextState: typeof state, nextQuery: EditorQueryState) => (
-    <MemoryRouter initialEntries={['/canvas/abc']}>
-      <CanvasRuntimeContext.Provider
-        value={{ ...runtime, state: nextState, snapshotQuery: nextQuery } as CanvasController}
-      >
-        {options.withLibraryRoute ? (
-          <Routes>
-            <Route path="/canvas" element={<div data-testid="library" />} />
-            <Route path="/canvas/:canvasId" element={<CanvasEditor />} />
-          </Routes>
-        ) : (
-          <CanvasEditor />
-        )}
-      </CanvasRuntimeContext.Provider>
-    </MemoryRouter>
-  )
+  const tree = (nextState: typeof state, nextQuery: EditorQueryState) => {
+    const controller = createController(
+      nextState,
+      options.snapshot ?? null,
+      buildSnapshotQuery(nextQuery, options.snapshot ?? null),
+    )
+    return (
+      <MemoryRouter initialEntries={['/canvas/abc']}>
+        <CanvasRuntimeContext.Provider value={controller}>
+          {options.withLibraryRoute ? (
+            <Routes>
+              <Route path="/canvas" element={<div data-testid="library" />} />
+              <Route path="/canvas/:canvasId" element={<CanvasEditor />} />
+            </Routes>
+          ) : (
+            <CanvasEditor />
+          )}
+        </CanvasRuntimeContext.Provider>
+      </MemoryRouter>
+    )
+  }
   const view = render(tree(state, query))
   return {
     refetch,

@@ -28,7 +28,7 @@ function snapshotDTO(
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: '0',
+      revision: '0',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
@@ -58,7 +58,7 @@ function snapshotDTO(
       run: null,
     }],
     groups: [],
-    links: [],
+    references: [],
   }
 }
 
@@ -76,6 +76,9 @@ function renderTextEditor(options: {
     selectedIds: [],
     selectedLinks: [],
     positionDrafts: {},
+    drafts: {},
+    storageError: null,
+    draftPersistPending: false,
     viewport: options.viewport ?? { x: 0, y: 0, zoom: 1 },
     toast: null,
     addMenuOpen: false,
@@ -181,7 +184,7 @@ describe('CanvasTextEditor panels', () => {
 
   it('renders edit mode without an anchor when the flow node is missing', () => {
     const { panel } = renderTextEditor({
-      textEditor: { mode: 'edit', nodeId: 'ghost-id', name: 'Note', markdown: 'hello' },
+      textEditor: { mode: 'edit', nodeId: '00000000-0000-0000-0000-000000000000', name: 'Note', markdown: 'hello' },
       snapshot: snapshotDTO(),
     })
     expect(screen.getByLabelText('编辑 Markdown 文本「Note」')).toBeInTheDocument()

@@ -8,6 +8,7 @@ import {
 import type { CanvasPendingOperation } from '@/features/canvas/canvas-operation-storage'
 import type {
   ApplyCanvasCommandsRequestDTO,
+  CanvasCommandDTO,
   CanvasNodePatchDTO,
   CanvasPatchDTO,
   CanvasSnapshotDTO,
@@ -16,6 +17,15 @@ import type {
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
 const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b' as UUIDString
+
+function deleteCommand(nodeId: UUIDString = NODE_ID): CanvasCommandDTO {
+  return {
+    type: 'DELETE_NODE',
+    nodeId,
+    expectedResourceIds: [],
+    expectedFunction: null,
+  }
+}
 
 /** 测试内版本前进：bigint-safe，支持超过 Number.MAX_SAFE_INTEGER 的用例。 */
 function nextRevision(revision: string): string {
@@ -66,8 +76,8 @@ describe('CanvasCommandQueue', () => {
         .mockReturnValueOnce('aaaaaaaa-0000-4000-8000-000000000002'),
     })
 
-    const first = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
-    const second = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    const first = queue.enqueue([deleteCommand()])
+    const second = queue.enqueue([deleteCommand()])
 
     await expect(first).resolves.toMatchObject({ document: { revision: '8' } })
     await expect(second).resolves.toMatchObject({ document: { revision: '9' } })
@@ -91,7 +101,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     await expect(queue.enqueue([
-      { type: 'RENAME_NODE', nodeId: NODE_ID, name: 'Changed' },
+      { type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'before', name: 'Changed' },
     ])).rejects.toBeInstanceOf(CanvasCommandConflictError)
 
     expect(apply).toHaveBeenCalledTimes(1)
@@ -99,7 +109,7 @@ describe('CanvasCommandQueue', () => {
     expect(queue.currentSnapshot().document.revision).toBe('12')
     expect(revisions).toEqual(['12'])
 
-    await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    await queue.enqueue([deleteCommand()])
     expect(apply).toHaveBeenCalledTimes(2)
   })
 
@@ -114,8 +124,8 @@ describe('CanvasCommandQueue', () => {
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000004',
     })
 
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).rejects.toThrow('bad request')
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
+    await expect(queue.enqueue([deleteCommand()])).rejects.toThrow('bad request')
+    await expect(queue.enqueue([deleteCommand()])).resolves.toMatchObject({
       document: { revision: '2' },
     })
   })
@@ -131,11 +141,11 @@ describe('CanvasCommandQueue', () => {
       refetch: vi.fn(),
     })
 
-    await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }], { signal })
+    await queue.enqueue([deleteCommand()], { signal })
 
     expect(apply).toHaveBeenCalledWith(CANVAS_ID, {
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-000000000005',
-      commands: [{ type: 'DELETE_NODE', nodeId: NODE_ID }],
+      commands: [deleteCommand()],
     }, { signal })
     randomUUID.mockRestore()
   })
@@ -184,7 +194,7 @@ describe('CanvasCommandQueue', () => {
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000006',
     })
 
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
+    await expect(queue.enqueue([deleteCommand()])).resolves.toMatchObject({
       document: { revision: '4' },
     })
     expect(refetch).toHaveBeenCalledWith(CANVAS_ID, { signal: undefined })
@@ -201,7 +211,7 @@ describe('CanvasCommandQueue', () => {
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000007',
     })
 
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
+    await expect(queue.enqueue([deleteCommand()])).resolves.toMatchObject({
       document: { revision: hugeNext },
     })
     // 过期查询快照（大版本语境）不能回退本地状态。
@@ -220,10 +230,11 @@ describe('CanvasCommandQueue', () => {
       operationStore: store.store,
     })
 
-    const commands = [{ type: 'RENAME_NODE' as const, nodeId: NODE_ID, expectedName: 'a', name: 'original' }]
+    const renameCmd = { type: 'RENAME_NODE' as const, nodeId: NODE_ID, expectedName: 'a', name: 'original' }
+    const commands: CanvasCommandDTO[] = [renameCmd]
     const pending = queue.enqueue(commands)
-    commands[0].name = 'mutated'
-    commands.push({ type: 'DELETE_NODE', nodeId: NODE_ID })
+    renameCmd.name = 'mutated'
+    commands.push(deleteCommand())
 
     await pending
 
@@ -259,7 +270,7 @@ describe('CanvasCommandQueue', () => {
       operationStore: store,
     })
 
-    const pending = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    const pending = queue.enqueue([deleteCommand()])
     await Promise.resolve()
     expect(save).toHaveBeenCalledTimes(1)
     expect(apply).not.toHaveBeenCalled()
@@ -284,7 +295,7 @@ describe('CanvasCommandQueue', () => {
       operationStore: failingStore,
     })
 
-    await expect(failingQueue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }]))
+    await expect(failingQueue.enqueue([deleteCommand()]))
       .rejects.toThrow('disk full')
     expect(failingApply).not.toHaveBeenCalled()
   })
@@ -375,7 +386,7 @@ describe('CanvasCommandQueue', () => {
       operationStore: store.store,
     })
 
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).rejects.toThrow('server error')
+    await expect(queue.enqueue([deleteCommand()])).rejects.toThrow('server error')
     expect(store.saved.size).toBe(1)
     expect(store.store.remove).not.toHaveBeenCalled()
   })
@@ -395,8 +406,8 @@ describe('CanvasCommandQueue', () => {
       operationStore: store.store,
     })
 
-    await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).rejects.toThrow('network down')
+    await queue.enqueue([deleteCommand()])
+    await expect(queue.enqueue([deleteCommand()])).rejects.toThrow('network down')
 
     // 成功那笔被清除，失败那笔仍在待重放集合中。
     expect([...store.saved.keys()]).toEqual([
@@ -415,7 +426,7 @@ describe('CanvasCommandQueue', () => {
       operationStore: noopStore(),
     })
 
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
+    await expect(queue.enqueue([deleteCommand()])).resolves.toMatchObject({
       document: { revision: '9' },
     })
     expect(refetch).toHaveBeenCalledTimes(1)
@@ -429,7 +440,7 @@ describe('CanvasCommandQueue', () => {
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000j2',
       operationStore: noopStore(),
     })
-    await contiguous.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    await contiguous.enqueue([deleteCommand()])
     expect(contiguous.currentSnapshot().document.revision).toBe('11')
   })
 
@@ -526,7 +537,7 @@ describe('CanvasCommandQueue', () => {
     expect(queue.isBlocked()).toBe(false)
 
     // 恢复后新的 enqueue 能够正常执行
-    await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    await queue.enqueue([deleteCommand()])
     expect(applyRequests).toHaveLength(3)
     expect(applyRequests[2]?.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-0000000000b3')
   })
@@ -595,7 +606,7 @@ describe('CanvasCommandQueue', () => {
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000d1' as UUIDString,
-      commands: [{ type: 'DELETE_NODE', nodeId: NODE_ID }],
+      commands: [deleteCommand()],
       ack: [],
       sequence: 0,
       createdAt: 1000,
@@ -676,7 +687,7 @@ describe('CanvasCommandQueue', () => {
     expect(apply).not.toHaveBeenCalled()
 
     // 阻塞态下新的 enqueue 直接拒绝
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }]))
+    await expect(queue.enqueue([deleteCommand()]))
       .rejects.toBeInstanceOf(CanvasQueueBlockedError)
   })
 
@@ -715,7 +726,7 @@ describe('CanvasCommandQueue', () => {
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e3' as UUIDString,
-      commands: [{ type: 'DELETE_NODE', nodeId: NODE_ID }],
+      commands: [deleteCommand()],
       ack: [{ nodeId: NODE_ID, field: 'text', generation: 2 }],
       sequence: 2,
       createdAt: 3000,
@@ -782,7 +793,7 @@ describe('CanvasCommandQueue', () => {
     expect(createCommandId).toHaveBeenCalledTimes(2)
 
     // 在 blocked 状态下调用新的 enqueue
-    const pC = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    const pC = queue.enqueue([deleteCommand()])
     await expect(pC).rejects.toBeInstanceOf(CanvasQueueBlockedError)
 
     // createCommandId 没有被再次调用，store 中依然只有 2 条，没有造多余 key
@@ -1056,7 +1067,7 @@ describe('CanvasCommandQueue', () => {
     await Promise.resolve()
 
     // 在 store.list 挂起期间入队 B
-    const bPromise = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    const bPromise = queue.enqueue([deleteCommand()])
 
     // 释放门禁使 store.list 抛出错误
     releaseListGate()
@@ -1095,7 +1106,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
-    await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }], { ack })
+    await queue.enqueue([deleteCommand()], { ack })
 
     expect(onDraftAcks).toHaveBeenCalledWith(ack)
     expect(callOrder).toEqual(['onDraftAcks', 'store.remove'])
@@ -1118,7 +1129,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
-    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }], { ack }))
+    await expect(queue.enqueue([deleteCommand()], { ack }))
       .rejects.toThrow('IndexedDB draft ACK transaction aborted')
 
     // 关键断言：草稿 ACK 失败时，底层 operation 绝未被删除，仍留在持久化 store 中
@@ -1139,7 +1150,7 @@ describe('CanvasCommandQueue', () => {
     })
 
     const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
-    await expect(queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, name: 'New' }], { ack }))
+    await expect(queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'before', name: 'New' }], { ack }))
       .rejects.toBeInstanceOf(CanvasCommandConflictError)
 
     // 关键断言：409 终端失败时不清除草稿 ACK，保留草稿供用户救援

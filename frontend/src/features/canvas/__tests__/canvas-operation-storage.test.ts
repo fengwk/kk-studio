@@ -21,6 +21,12 @@ import type { CanvasCommandDTO, UUIDString } from '@/shared/api/contracts/studio
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
 const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b' as UUIDString
+const KEY_1: UUIDString = '11111111-1111-4000-8000-000000000001'
+const KEY_2: UUIDString = '22222222-2222-4000-8000-000000000002'
+const KEY_LATER: UUIDString = '33333333-3333-4000-8000-000000000003'
+const KEY_EARLIER: UUIDString = '44444444-4444-4000-8000-000000000004'
+const KEY_PERSISTED_1: UUIDString = '55555555-5555-4000-8000-000000000005'
+const KEY_PERSISTED_2: UUIDString = '66666666-6666-4000-8000-000000000006'
 
 function renameCommand(name: string): CanvasCommandDTO {
   return { type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'before', name }
@@ -28,7 +34,7 @@ function renameCommand(name: string): CanvasCommandDTO {
 
 function operation(
   sequence: number,
-  idempotencyKey: string,
+  idempotencyKey: UUIDString,
   name: string,
   editingSessionId = 'tab-1',
 ): CanvasPendingOperation {
@@ -47,12 +53,12 @@ function operation(
 describe('Canvas 待确认操作持久化 (operation store)', () => {
   it('按冻结顺序持久化与加载，并与草稿记录完全分离', async () => {
     const idbFactory = createMockIDBFactory()
-    await saveCanvasOperation(operation(2, 'key-2', 'second'), {
+    await saveCanvasOperation(operation(2, KEY_2, 'second'), {
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })
-    await saveCanvasOperation(operation(1, 'key-1', 'first'), {
+    await saveCanvasOperation(operation(1, KEY_1, 'first'), {
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -65,14 +71,14 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     })
 
     // 与写入顺序无关，严格按 sequence 升序恢复，保证重放顺序确定。
-    expect(loaded.map((item) => item.idempotencyKey)).toEqual(['key-1', 'key-2'])
+    expect(loaded.map((item) => item.idempotencyKey)).toEqual([KEY_1, KEY_2])
     expect(loaded[0]?.commands).toEqual([renameCommand('first')])
     expect(loaded[0]?.ack).toEqual([{ nodeId: NODE_ID, field: 'text', generation: 1 }])
   })
 
   it('删除单个待确认操作后不再被恢复', async () => {
     const idbFactory = createMockIDBFactory()
-    const saved = operation(1, 'key-1', 'first')
+    const saved = operation(1, KEY_1, 'first')
     await saveCanvasOperation(saved, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
     await deleteCanvasOperation(saved.id, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
 
@@ -86,7 +92,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
 
   it('不同编辑会话（标签页）严格隔离待确认操作', async () => {
     const idbFactory = createMockIDBFactory()
-    await saveCanvasOperation(operation(1, 'key-1', 'first', 'tab-1'), {
+    await saveCanvasOperation(operation(1, KEY_1, 'first', 'tab-1'), {
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -105,7 +111,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const onError = vi.fn()
     const unsubscribe = onCanvasStorageError(onError)
 
-    await expect(saveCanvasOperation(operation(1, 'key-1', 'first'), {
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), {
       idbFactory,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -121,7 +127,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const onError = vi.fn()
     const unsubscribe = onCanvasStorageError(onError)
 
-    await expect(saveCanvasOperation(operation(1, 'key-1', 'first'), {
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), {
       userId: 'user-1',
       editingSessionId: 'tab-1',
     })).rejects.toMatchObject({ name: 'CanvasStorageUnavailableError' })
@@ -142,7 +148,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const unsubscribe = onCanvasStorageError(onError)
 
     const openFailure = createMockIDBFactory({ shouldFailOpen: true })
-    await expect(saveCanvasOperation(operation(1, 'key-1', 'first'), {
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), {
       idbFactory: openFailure,
       userId: 'user-1',
       editingSessionId: 'tab-1',
@@ -183,7 +189,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const scoped = { userId: 'user-1', editingSessionId: 'tab-1' }
 
     const txError = createMockIDBFactory({ shouldFailTransaction: true })
-    await expect(saveCanvasOperation(operation(1, 'key-1', 'first'), { ...scoped, idbFactory: txError }))
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), { ...scoped, idbFactory: txError }))
       .rejects.toThrow()
     await expect(deleteCanvasOperation('op-1', { ...scoped, idbFactory: txError })).rejects.toThrow()
     await loadCanvasOperations(CANVAS_ID, { ...scoped, idbFactory: txError })
@@ -192,13 +198,13 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     await expect(deleteCanvasOperation('op-1', { ...scoped, idbFactory: abortFactory })).rejects.toThrow()
 
     const createFailure = createMockIDBFactory({ shouldFailTransactionCreate: true })
-    await expect(saveCanvasOperation(operation(1, 'key-1', 'first'), { ...scoped, idbFactory: createFailure }))
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), { ...scoped, idbFactory: createFailure }))
       .rejects.toThrow()
     await expect(deleteCanvasOperation('op-1', { ...scoped, idbFactory: createFailure })).rejects.toThrow()
     await expect(loadCanvasOperations(CANVAS_ID, { ...scoped, idbFactory: createFailure })).rejects.toThrow()
 
     const putFailure = createMockIDBFactory({ shouldFailRequest: true })
-    await expect(saveCanvasOperation(operation(1, 'key-1', 'first'), { ...scoped, idbFactory: putFailure }))
+    await expect(saveCanvasOperation(operation(1, KEY_1, 'first'), { ...scoped, idbFactory: putFailure }))
       .rejects.toThrow()
 
     expect(onError).toHaveBeenCalled()
@@ -214,7 +220,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
       canvasId: CANVAS_ID,
       userId: 'user-1',
       editingSessionId: 'tab-1',
-      idempotencyKey: 'key-later',
+      idempotencyKey: KEY_LATER,
       commands: [renameCommand('later')],
       sequence: 1,
       createdAt: 300,
@@ -223,7 +229,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
       canvasId: CANVAS_ID,
       userId: 'user-1',
       editingSessionId: 'tab-1',
-      idempotencyKey: 'key-earlier',
+      idempotencyKey: KEY_EARLIER,
       commands: [renameCommand('earlier')],
       sequence: 1,
       createdAt: 100,
@@ -269,7 +275,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     // 测试意图：验证当 bfcache 导致 sessionReloading 为 true 时，待确认操作存储的所有入口（save/remove/list）全部拒绝抛出 CanvasStorageUnavailableError，且旧 session 已存记录完好无损未被篡改
     resetEditingSessionForTests()
     const idbFactory = createMockIDBFactory()
-    const validOp = operation(1, 'key-persisted-1', 'initial-state', 'tab-1')
+    const validOp = operation(1, KEY_PERSISTED_1, 'initial-state', 'tab-1')
 
     // 1. 在正常状态下预先写入一条合法记录
     await saveCanvasOperation(validOp, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
@@ -279,7 +285,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
       editingSessionId: 'tab-1',
     })
     expect(initialList).toHaveLength(1)
-    expect(initialList[0].idempotencyKey).toBe('key-persisted-1')
+    expect(initialList[0].idempotencyKey).toBe(KEY_PERSISTED_1)
 
     // 2. 在正常状态下创建 store 实例
     const store = createCanvasOperationStore(CANVAS_ID, {
@@ -304,7 +310,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     handlePageshow({ persisted: true })
 
     // 4. 测试已建 store 调用 save/remove/list 均拒绝
-    const newOp = operation(2, 'key-persisted-2', 'polluting-state', 'tab-1')
+    const newOp = operation(2, KEY_PERSISTED_2, 'polluting-state', 'tab-1')
 
     await expect(store.save(newOp)).rejects.toThrow(CanvasStorageUnavailableError)
     await expect(store.remove(validOp.id)).rejects.toThrow(CanvasStorageUnavailableError)
@@ -335,7 +341,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
       editingSessionId: 'tab-1',
     })
     expect(verifyList).toHaveLength(1)
-    expect(verifyList[0].idempotencyKey).toBe('key-persisted-1')
+    expect(verifyList[0].idempotencyKey).toBe(KEY_PERSISTED_1)
     expect(verifyList[0].commands).toEqual([renameCommand('initial-state')])
   })
 })
