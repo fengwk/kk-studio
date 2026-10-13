@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
+import type { InteractionDTO, InteractionPageDTO } from '@/shared/api/contracts/ai-interaction'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
@@ -63,16 +63,22 @@ describe('useInteractionsController', () => {
     createTime: '2026-09-27T00:01:00Z',
   }
 
+  function mockPage(
+    items: InteractionDTO[],
+    nextCursor: string | null = null,
+  ): InteractionPageDTO {
+    return {
+      items,
+      nextCursor,
+      total: items.length,
+      freshnessAt: null,
+    }
+  }
+
   it('loads first page and handles cursor-based loadMore', async () => {
     const listSpy = vi.spyOn(interactionService, 'listInteractions')
-      .mockResolvedValueOnce({
-        items: [mockItem1],
-        nextCursor: 'cursor-page-2',
-      })
-      .mockResolvedValueOnce({
-        items: [mockItem2],
-        nextCursor: null,
-      })
+      .mockResolvedValueOnce(mockPage([mockItem1], 'cursor-page-2'))
+      .mockResolvedValueOnce(mockPage([mockItem2], null))
 
     const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
 
@@ -98,8 +104,8 @@ describe('useInteractionsController', () => {
     const otherRootThreadId = '99999999-2222-4333-8444-555555555555'
     const listSpy = vi
       .spyOn(interactionService, 'listInteractions')
-      .mockResolvedValueOnce({ items: [mockItem1], nextCursor: null })
-      .mockResolvedValueOnce({ items: [mockItem2], nextCursor: null })
+      .mockResolvedValueOnce(mockPage([mockItem1], null))
+      .mockResolvedValueOnce(mockPage([mockItem2], null))
 
     const { result } = renderHook(() => useInteractionsController(rootThreadId, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -135,8 +141,8 @@ describe('useInteractionsController', () => {
 
   it('handles refresh by resetting cursor and invalidating queries', async () => {
     vi.spyOn(interactionService, 'listInteractions')
-      .mockResolvedValueOnce({ items: [mockItem1], nextCursor: 'cursor-1' })
-      .mockResolvedValueOnce({ items: [mockItem2], nextCursor: null })
+      .mockResolvedValueOnce(mockPage([mockItem1], 'cursor-1'))
+      .mockResolvedValueOnce(mockPage([mockItem2], null))
 
     const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -154,13 +160,13 @@ describe('useInteractionsController', () => {
   it('discards stale loadMore responses and does not reset state across refresh generation fence', async () => {
     // 测试意图：验证 loadMore 在途时触发 refresh，旧代 loadMore 的迟到响应会被 generation fence 丢弃，
     // 不会污染刚刷新的列表和游标，且旧代 finally 不会破坏新状态
-    let resolveSlowLoadMore!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
-    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+    let resolveSlowLoadMore!: (val: InteractionPageDTO) => void
+    const slowLoadMorePromise = new Promise<InteractionPageDTO>((resolve) => {
       resolveSlowLoadMore = resolve
     })
 
-    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
-    const refreshedPage = { items: [mockItem2], nextCursor: 'cursor-refreshed' }
+    const initialPage = mockPage([mockItem1], 'cursor-page-2')
+    const refreshedPage = mockPage([mockItem2], 'cursor-refreshed')
 
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(initialPage) // 挂载首屏
@@ -192,7 +198,7 @@ describe('useInteractionsController', () => {
     // 此时旧代的 slow loadMore 响应返回
     const staleItem: InteractionDTO = { ...mockItem1, interactionId: 'stale-int-old' }
     await act(async () => {
-      resolveSlowLoadMore({ items: [staleItem], nextCursor: 'stale-cursor-old' })
+      resolveSlowLoadMore(mockPage([staleItem], 'stale-cursor-old'))
       await loadMorePromise
     })
 
@@ -206,14 +212,17 @@ describe('useInteractionsController', () => {
     // 测试意图：验证当 loadMore 请求在途时，卡片外部操作触发 queryClient.invalidateQueries 导致首屏第一页数据更新，
     // 该第一页更新推进了代际，旧 loadMore 迟到响应被丢弃（旧数据不 append、旧 cursor 不写覆盖），
     // 并且 isFetchingMore 及时恢复为 false，使针对新第一页的下一次 loadMore 能够正常触发执行。
-    let resolveSlowLoadMore!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
-    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+    let resolveSlowLoadMore!: (val: InteractionPageDTO) => void
+    const slowLoadMorePromise = new Promise<InteractionPageDTO>((resolve) => {
       resolveSlowLoadMore = resolve
     })
 
-    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
-    const externalInvalidatedPage = { items: [{ ...mockItem1, interactionId: 'int-new-first' }], nextCursor: 'cursor-new-page-2' }
-    const subsequentPage = { items: [mockItem2], nextCursor: null }
+    const initialPage = mockPage([mockItem1], 'cursor-page-2')
+    const externalInvalidatedPage = mockPage(
+      [{ ...mockItem1, interactionId: 'int-new-first' }],
+      'cursor-new-page-2',
+    )
+    const subsequentPage = mockPage([mockItem2], null)
 
     const listSpy = vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(initialPage) // 挂载首屏
@@ -245,7 +254,7 @@ describe('useInteractionsController', () => {
 
     // 此时旧在途 loadMore 返回
     await act(async () => {
-      resolveSlowLoadMore({ items: [{ ...mockItem1, interactionId: 'stale-int-old' }], nextCursor: 'stale-cursor-old' })
+      resolveSlowLoadMore(mockPage([{ ...mockItem1, interactionId: 'stale-int-old' }], 'stale-cursor-old'))
       await loadMorePromise
     })
 
@@ -268,13 +277,13 @@ describe('useInteractionsController', () => {
   it('resets isFetchingMore on refresh so subsequent loadMore is not permanently blocked', async () => {
     // 测试意图：验证 loadMore 在途时触发 refresh，refresh 立即同步重置 isFetchingMore，
     // 避免旧代 finally 栅栏跳过重置导致 isFetchingMore 永久卡在 true。
-    let resolveSlowLoadMore!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
-    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+    let resolveSlowLoadMore!: (val: InteractionPageDTO) => void
+    const slowLoadMorePromise = new Promise<InteractionPageDTO>((resolve) => {
       resolveSlowLoadMore = resolve
     })
 
-    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
-    const refreshedPage = { items: [mockItem2], nextCursor: 'cursor-refreshed' }
+    const initialPage = mockPage([mockItem1], 'cursor-page-2')
+    const refreshedPage = mockPage([mockItem2], 'cursor-refreshed')
 
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(initialPage)
@@ -300,7 +309,7 @@ describe('useInteractionsController', () => {
 
     // 释放旧 loadMore
     await act(async () => {
-      resolveSlowLoadMore({ items: [mockItem1], nextCursor: 'old' })
+      resolveSlowLoadMore(mockPage([mockItem1], 'old'))
     })
     expect(result.current.isFetchingMore).toBe(false)
   })
@@ -308,10 +317,10 @@ describe('useInteractionsController', () => {
   it('guards against duplicate loadMore calls within the same tick using ref guard', async () => {
     // 测试意图：验证同一 tick 内连续同步触发两次 loadMore 时，
     // ref guard 能同步拦截第二次请求，只发出一次网络调用，防止竞态拉取两份分页。
-    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const initialPage = mockPage([mockItem1], 'cursor-page-2')
     const listSpy = vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(initialPage)
-      .mockResolvedValue({ items: [mockItem2], nextCursor: null })
+      .mockResolvedValue(mockPage([mockItem2], null))
 
     const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -331,12 +340,12 @@ describe('useInteractionsController', () => {
     // 测试意图：验证旧代 loadMore 在途时触发 refresh，随后旧代抛出网络错误，
     // 该 stale error 不会污染新世代的 isError 与 error 状态。
     let rejectSlowLoadMore!: (err: Error) => void
-    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((_, reject) => {
+    const slowLoadMorePromise = new Promise<InteractionPageDTO>((_, reject) => {
       rejectSlowLoadMore = reject
     })
 
-    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
-    const refreshedPage = { items: [mockItem2], nextCursor: 'cursor-refreshed' }
+    const initialPage = mockPage([mockItem1], 'cursor-page-2')
+    const refreshedPage = mockPage([mockItem2], 'cursor-refreshed')
 
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(initialPage)
@@ -369,7 +378,7 @@ describe('useInteractionsController', () => {
   it('resets in-flight loadMore when external invalidate returns structurally identical first page', async () => {
     // 测试意图：验证当 React Query structural sharing 导致外部 invalidate 返回 same object（initialPage 引用未变但 dataUpdatedAt 推进）时，
     // 也能正确触发更新并 reset in-flight 状态，且原有已加载的分页不丢失。
-    const samePage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const samePage = mockPage([mockItem1], 'cursor-page-2')
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValue(samePage)
 
@@ -390,17 +399,17 @@ describe('useInteractionsController', () => {
     // 测试意图：验证结构共享下外部 invalidate 返回 same object（引用相同），触发 generation 递增，
     // 此时两个延迟的 loadMore 请求发生乱序返回（旧代在途迟于新代到达），
     // 旧代响应绝不能覆盖新代的 cursor，旧代的 finally 绝不能干扰新代 flag，cursor/flag 严格由新代拥有。
-    let resolveSlowLoadMore1!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
-    const slowLoadMore1Promise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+    let resolveSlowLoadMore1!: (val: InteractionPageDTO) => void
+    const slowLoadMore1Promise = new Promise<InteractionPageDTO>((resolve) => {
       resolveSlowLoadMore1 = resolve
     })
 
-    let resolveSlowLoadMore2!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
-    const slowLoadMore2Promise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+    let resolveSlowLoadMore2!: (val: InteractionPageDTO) => void
+    const slowLoadMore2Promise = new Promise<InteractionPageDTO>((resolve) => {
       resolveSlowLoadMore2 = resolve
     })
 
-    const sameFirstPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const sameFirstPage = mockPage([mockItem1], 'cursor-page-2')
 
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(sameFirstPage) // 挂载首屏
@@ -434,7 +443,7 @@ describe('useInteractionsController', () => {
 
     // 4. 新代 loadMore 2 先完成返回
     await act(async () => {
-      resolveSlowLoadMore2({ items: [mockItem2], nextCursor: 'cursor-page-3-new-generation' })
+      resolveSlowLoadMore2(mockPage([mockItem2], 'cursor-page-3-new-generation'))
       await slowLoadMore2Promise
     })
 
@@ -446,10 +455,9 @@ describe('useInteractionsController', () => {
 
     // 5. 旧代 loadMore 1 迟到返回
     await act(async () => {
-      resolveSlowLoadMore1({
-        items: [{ ...mockItem1, interactionId: 'stale-int-from-gen1' }],
-        nextCursor: 'cursor-stale-gen1',
-      })
+      resolveSlowLoadMore1(
+        mockPage([{ ...mockItem1, interactionId: 'stale-int-from-gen1' }], 'cursor-stale-gen1'),
+      )
       await slowLoadMore1Promise
     })
 
@@ -466,8 +474,8 @@ describe('useInteractionsController', () => {
     const rootA = 'root-a'
     const rootB = 'root-b'
     vi.spyOn(interactionService, 'listInteractions')
-      .mockResolvedValueOnce({ items: [mockItem1], nextCursor: 'cursor-root-a' })
-      .mockResolvedValueOnce({ items: [mockItem2], nextCursor: null })
+      .mockResolvedValueOnce(mockPage([mockItem1], 'cursor-root-a'))
+      .mockResolvedValueOnce(mockPage([mockItem2], null))
 
     const { result, rerender } = renderHook(
       ({ rootThreadId }: { rootThreadId: string }) => useInteractionsController(rootThreadId, 10),
@@ -496,20 +504,20 @@ describe('useInteractionsController', () => {
     // 游标或翻页状态——即使新根的第一页还没到。
     const rootA = 'root-a'
     const rootB = 'root-b'
-    let resolveStaleLoadMore!: (page: { items: InteractionDTO[]; nextCursor: string | null }) => void
-    const staleLoadMore = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>(
+    let resolveStaleLoadMore!: (page: InteractionPageDTO) => void
+    const staleLoadMore = new Promise<InteractionPageDTO>(
       (resolve) => {
         resolveStaleLoadMore = resolve
       },
     )
-    let resolveNewRootPage!: (page: { items: InteractionDTO[]; nextCursor: string | null }) => void
-    const newRootPage = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>(
+    let resolveNewRootPage!: (page: InteractionPageDTO) => void
+    const newRootPage = new Promise<InteractionPageDTO>(
       (resolve) => {
         resolveNewRootPage = resolve
       },
     )
     vi.spyOn(interactionService, 'listInteractions')
-      .mockResolvedValueOnce({ items: [mockItem1], nextCursor: 'cursor-root-a-2' })
+      .mockResolvedValueOnce(mockPage([mockItem1], 'cursor-root-a-2'))
       .mockImplementationOnce(() => staleLoadMore)
       .mockImplementationOnce(() => newRootPage)
 
@@ -533,10 +541,9 @@ describe('useInteractionsController', () => {
     expect(result.current.isFetchingMore).toBe(false)
 
     await act(async () => {
-      resolveStaleLoadMore({
-        items: [{ ...mockItem1, interactionId: 'stale-root-a-page-2' }],
-        nextCursor: 'cursor-stale-root-a',
-      })
+      resolveStaleLoadMore(
+        mockPage([{ ...mockItem1, interactionId: 'stale-root-a-page-2' }], 'cursor-stale-root-a'),
+      )
       await staleLoadMore
     })
 
@@ -547,7 +554,7 @@ describe('useInteractionsController', () => {
     expect(result.current.isError).toBe(false)
 
     await act(async () => {
-      resolveNewRootPage({ items: [mockItem2], nextCursor: null })
+      resolveNewRootPage(mockPage([mockItem2], null))
       await newRootPage
     })
 
@@ -561,7 +568,7 @@ describe('useInteractionsController', () => {
   it('loadMore catch sets controlled error on active generation without unhandled rejection', async () => {
     // 测试意图：验证 loadMore 发生异常时，调用返回的 Promise 正常 resolve 而非 unhandled rejection，
     // 当前活跃世代正确写入受控 error，便于 UI 呈现错误横幅
-    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const initialPage = mockPage([mockItem1], 'cursor-page-2')
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(initialPage)
       .mockRejectedValueOnce(new Error('Network error on loadMore'))
@@ -585,7 +592,7 @@ describe('useInteractionsController', () => {
     const rootThreadId = '11111111-2222-4333-8444-555555555555'
     const listSpy = vi
       .spyOn(interactionService, 'listInteractions')
-      .mockResolvedValue({ items: [mockItem1], nextCursor: null })
+      .mockResolvedValue(mockPage([mockItem1], null))
 
     const { result } = renderHook(() => useInteractionsController(rootThreadId, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -658,11 +665,10 @@ describe('useInteractionsController', () => {
     // 测试意图：环境等待的 interactionId 恒为 null，若按 interactionId 去重会把所有环境等待并成一项；
     // 只有按聚合身份去重才既剔除跨页重叠、又保留不同环境。
     vi.spyOn(interactionService, 'listInteractions')
-      .mockResolvedValueOnce({ items: [mockItem1, environmentWait('env-a', 2)], nextCursor: 'c2' })
-      .mockResolvedValueOnce({
-        items: [environmentWait('env-a', 3), environmentWait('env-b'), mockItem2],
-        nextCursor: null,
-      })
+      .mockResolvedValueOnce(mockPage([mockItem1, environmentWait('env-a', 2)], 'c2'))
+      .mockResolvedValueOnce(
+        mockPage([environmentWait('env-a', 3), environmentWait('env-b'), mockItem2], null),
+      )
 
     const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))

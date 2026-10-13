@@ -23,13 +23,21 @@ import { chatService } from '@/shared/api/chat-service'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
+  ApprovalInteractionDTO,
+  InteractionDTO,
+  InteractionPageDTO,
+} from '@/shared/api/contracts/ai-interaction'
+import type { StoragePresignedUrlDTO } from '@/shared/api/contracts/storage'
+import type {
+  AgentRuntimeOwnerDTO,
   HarnessModelRequestDebugDTO,
   HarnessSessionDTO,
   HarnessSessionEntryDTO,
-  HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
+  HarnessThreadStopResultDTO,
   ProviderRequestPreviewDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
@@ -106,7 +114,19 @@ vi.mock('@/features/ai/composer/use-attachment-uploads', async (importOriginal) 
 })
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
-  const manager = { subscribe: vi.fn(() => vi.fn()) }
+  const manager = {
+    subscribe: vi.fn(
+      (
+        _resource?: unknown,
+        _listener?: {
+          onSubscribed?: (cursor: string) => void
+          onEvent?: (name: string, data: unknown, cursor?: string) => void
+          onResync?: () => void
+          onError?: (code: string, message: string) => void
+        },
+      ) => vi.fn(),
+    ),
+  }
   return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
 })
 
@@ -137,8 +157,21 @@ const { fakeStorage } = vi.hoisted(() => {
       completeUpload,
       deleteUpload,
       uploadFile,
-      getBlobDownloadUrl: vi.fn(async () => ({ url: 'https://storage.test/blob', expiresAt: null })),
-      getBlobPreviewUrl: vi.fn(async () => null),
+      getBlobDownloadUrl: vi.fn(
+        async (
+          _blobId: string,
+        ): Promise<StoragePresignedUrlDTO> => ({
+          url: 'https://storage.test/blob',
+          expiresAt: null,
+          mediaType: 'application/octet-stream',
+          sizeBytes: 128,
+        }),
+      ),
+      getBlobPreviewUrl: vi.fn(
+        async (
+          _blobId: string,
+        ): Promise<StoragePresignedUrlDTO | null> => null,
+      ),
     },
   }
 })
@@ -199,18 +232,19 @@ const agents: AgentDefinitionDTO[] = [{
   name: 'assistant',
   description: null,
   systemPrompt: null,
+  type: 'USER',
   model: 'minimax/MiniMax',
   variant: 'default',
-  environmentId: 'env-local-1',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
   createTime: null,
   updateTime: null,
 }]
 
-const models = [{
+const models: AgentModelDTO[] = [{
   providerName: 'minimax',
   name: 'MiniMax',
+  modelId: 'minimax/MiniMax',
   description: null,
   config: {
     limit: { context: 128000, output: 8192 },
@@ -220,6 +254,13 @@ const models = [{
       pricingTier: 'default',
       serviceTier: 'standard',
       serviceTierMultiplier: 1,
+      version: '1',
+      inputPerMillionTokens: 1,
+      outputPerMillionTokens: 1,
+      cacheReadPerMillionTokens: 0,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 0,
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -251,6 +292,7 @@ function thread(
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
+      goal: null,
     },
     createTime: null,
     updateTime: null,
@@ -299,6 +341,19 @@ function acceptedResponse(currentThread = thread()) {
   }
 }
 
+function interactionPage(
+  items: InteractionDTO[],
+  nextCursor: string | null = null,
+  total = items.length,
+): InteractionPageDTO {
+  return {
+    items,
+    nextCursor,
+    total,
+    freshnessAt: null,
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
@@ -325,18 +380,17 @@ beforeEach(() => {
   vi.mocked(harnessService.getThreadTree).mockImplementation(async (threadId) => [
     treeNode(threadId, null, 'thread-name', false),
   ])
-  vi.mocked(interactionService.listInteractions).mockResolvedValue({
-    items: [],
-    nextCursor: null,
-  })
+  vi.mocked(interactionService.listInteractions).mockResolvedValue(interactionPage([]))
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
     Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled, version: '1' })),
   )
-  vi.mocked(harnessService.renameSession).mockImplementation(async (sessionId, data) =>
-    thread({ sessionId, name: data.name }),
-  )
+  vi.mocked(harnessService.renameSession).mockImplementation(async (sessionId, data) => ({
+    sessionId,
+    name: data.name,
+    createdAt: null,
+  }))
   vi.mocked(harnessService.renameThread).mockImplementation(async (threadId, data) =>
     thread({ threadId, name: data.name }),
   )
@@ -370,7 +424,7 @@ function treeNode(
 }
 
 /** 根交互汇聚里的一个待决审批（来源 Thread 可指定）。 */
-function approvalInteraction(threadId: string) {
+function approvalInteraction(threadId: string): ApprovalInteractionDTO {
   return {
     type: 'APPROVAL',
     interactionId: `inv-${threadId}`,
@@ -695,7 +749,7 @@ describe('AgentPane orchestration', () => {
 
   it('fences a late success after abandon without changing the target', async () => {
     const user = userEvent.setup()
-    let resolve: ((value: ReturnType<typeof acceptedResponse>) => void) | null = null
+    let resolve!: (value: ReturnType<typeof acceptedResponse>) => void
     vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(
       () => new Promise((complete) => {
         resolve = complete
@@ -706,7 +760,7 @@ describe('AgentPane orchestration', () => {
     await user.type(composer, 'late response')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await user.click(await screen.findByRole('button', { name: '取消' }))
-    resolve?.(acceptedResponse())
+    resolve(acceptedResponse())
 
     await waitFor(() => expect(localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -716,7 +770,7 @@ describe('AgentPane orchestration', () => {
 
   it('ignores a late rejection after abandon without restoring a stale error', async () => {
     const user = userEvent.setup()
-    let reject: ((error: Error) => void) | null = null
+    let reject!: (error: Error) => void
     vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(
       () => new Promise((_, fail) => {
         reject = fail
@@ -727,7 +781,7 @@ describe('AgentPane orchestration', () => {
     await user.type(composer, 'late rejection')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await user.click(await screen.findByRole('button', { name: '取消' }))
-    reject?.(new Error('stale rejection'))
+    reject(new Error('stale rejection'))
     await waitFor(() => expect(screen.queryByText('stale rejection')).not.toBeInTheDocument())
   })
 
@@ -865,7 +919,7 @@ describe('AgentPane orchestration', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
     expect(composer.isConnected).toBe(true)
-    await user.click(screen.getByRole('button', { name: '关闭 Debug', exact: true }))
+    await user.click(screen.getByRole('button', { name: '关闭 Debug' }))
     expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
   })
 
@@ -918,6 +972,7 @@ describe('AgentPane orchestration', () => {
       homeDirectory: null,
       ready: true,
       status: 'READY',
+      statusExpiresAt: null,
       lastSeen: null,
       capabilities: [],
       version: '1',
@@ -1018,7 +1073,7 @@ describe('AgentPane orchestration', () => {
         entryId: 'entry-3',
         sessionId: 'session-1',
         parentEntryId: 'entry-2',
-        entryType: 'AGENT_MESSAGE',
+        entryType: 'MESSAGE',
         payloadJson: JSON.stringify({ message: { role: 'AGENT', contents: [] } }),
         createTime: null,
       },
@@ -1117,15 +1172,15 @@ describe('AgentPane orchestration', () => {
     )).toContain('NEW_SESSION_DRAFT'))
     const calls = fakeApplicationEvents.useApplicationEvents().subscribe.mock.calls
     const handlers = calls.at(-1)?.[1]
-    handlers?.onSubscribed?.()
-    handlers?.onEvent?.('unrelated', {})
+    handlers?.onSubscribed?.('c1')
+    handlers?.onEvent?.('unrelated', {}, undefined)
     handlers?.onResync?.()
-    handlers?.onError?.()
+    handlers?.onError?.('ERR', 'mock error')
     view.client.setQueryData(
       queryKeys.threads.snapshot(THREAD_ID),
       snapshot(thread({ status: 'IDLE', processing: false })),
     )
-    handlers?.onEvent?.('version', {})
+    handlers?.onEvent?.('version', {}, undefined)
     await waitFor(() => expect(
       fakeApplicationEvents.useApplicationEvents().subscribe.mock.results.at(-1)?.value,
     ).toHaveBeenCalled())
@@ -1286,7 +1341,7 @@ describe('AgentPane orchestration', () => {
   })
 
   it('keeps pending acceptance fenced while commands and a direct composer callback race', async () => {
-    let resolve: ((value: ReturnType<typeof acceptedResponse>) => void) | null = null
+    let resolve!: (value: ReturnType<typeof acceptedResponse>) => void
     vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(
       () => new Promise((complete) => {
         resolve = complete
@@ -1294,16 +1349,16 @@ describe('AgentPane orchestration', () => {
     )
     const hook = renderController()
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
-    act(() => hook.result.current.composer.onSubmit([createTextPart('first')]))
+    act(() => hook.result.current.composer.onSubmit([createTextPart('first')], [createTextPart('first')]))
     await waitFor(() => expect(hook.result.current.pendingAcceptance).not.toBeNull())
 
     act(() => hook.result.current.composer.onCommand(testCommand('new')))
     expect(hook.result.current.error).toBeTruthy()
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     act(() => hook.result.current.composer.onCommand(testCommand('history')))
-    act(() => hook.result.current.composer.onSubmit([createTextPart('second')]))
+    act(() => hook.result.current.composer.onSubmit([createTextPart('second')], [createTextPart('second')]))
     act(() => hook.result.current.composer.onPartsChange([createTextPart('typed during request')]))
-    resolve?.(acceptedResponse())
+    resolve(acceptedResponse())
     await waitFor(() => expect(hook.result.current.pendingAcceptance).toBeNull())
     expect(hook.result.current.target.kind).toBe('BOUND_THREAD')
     act(() => hook.result.current.abandonPendingAcceptance())
@@ -1312,8 +1367,8 @@ describe('AgentPane orchestration', () => {
   it('takes the unbound submit early returns and yolo null-draft path', async () => {
     const hook = renderController({ agents: [] })
     await waitFor(() => expect(hook.result.current.activeDraft).toBeNull())
-    act(() => hook.result.current.composer.onSubmit([createTextPart('/unknown-command')]))
-    act(() => hook.result.current.composer.onSubmit([]))
+    act(() => hook.result.current.composer.onSubmit([createTextPart('/unknown-command')], [createTextPart('/unknown-command')]))
+    act(() => hook.result.current.composer.onSubmit([], []))
     act(() => hook.result.current.composer.onCommand(testCommand('yolo')))
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
@@ -1322,9 +1377,11 @@ describe('AgentPane orchestration', () => {
     const hook = renderController()
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.composer.onPartsChange([createTextPart('stored parts')]))
-    act(() => hook.result.current.composer.onSubmit())
+    act(() => {
+      Reflect.apply(hook.result.current.composer.onSubmit, undefined, [])
+    })
     await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    expect(harnessService.acceptCommandBatch.mock.calls[0]?.[0].commands[0]?.type)
+    expect(vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0].commands[0]?.type)
       .toBe('USER_MESSAGE')
   })
 
@@ -1809,7 +1866,7 @@ describe('AgentPane orchestration', () => {
     // PUT 成功后跳过 cache patch 与失效，留下本地陈旧名称）；完成后仍需
     // 关闭并展示服务端权威名称。
     const user = userEvent.setup()
-    let resolveRename: ((session: HarnessSessionDTO) => void) | null = null
+    let resolveRename!: (session: HarnessSessionDTO) => void
     let canonicalName = 'session one'
     vi.mocked(chatService.listChatSessions).mockImplementation(async () => [{
       sessionId: 'session-1',
@@ -1845,7 +1902,7 @@ describe('AgentPane orchestration', () => {
 
     // PUT 返回权威名称：面板关闭、picker 行立即展示服务端规范化名称。
     canonicalName = 'RENAMED SESSION'
-    resolveRename?.({ sessionId: 'session-1', name: canonicalName, createdAt: null })
+    resolveRename({ sessionId: 'session-1', name: canonicalName, createdAt: null })
     await waitFor(() =>
       expect(screen.queryByRole('region', { name: '重命名 Session' })).not.toBeInTheDocument())
     expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
@@ -1945,7 +2002,7 @@ describe('AgentPane orchestration', () => {
     expect(hook.result.current.interaction).toBeNull()
     expect(hook.result.current.error).toContain('等待完成或重试原操作')
 
-    act(() => hook.result.current.composer.onSubmit([createTextPart('下一条消息')]))
+    act(() => hook.result.current.composer.onSubmit([createTextPart('下一条消息')], [createTextPart('下一条消息')]))
     await waitFor(() =>
       expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledWith(
         THREAD_ID,
@@ -2198,7 +2255,10 @@ describe('AgentPane orchestration', () => {
   })
 })
 
-function threadFixture(threadId: string, overrides: Partial<HarnessThreadDTO> = {}) {
+function threadFixture(
+  threadId: string,
+  overrides: Parameters<typeof thread>[0] = {},
+) {
   return thread({ threadId, ...overrides })
 }
 
@@ -2440,15 +2500,11 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     // 首次发送遇到网络超时（未知结果），重试必须复用同一组客户端预分配的 sessionId/threadId 与命令幂等键。
     vi.mocked(harnessService.acceptCommandBatch)
       .mockRejectedValueOnce(new Error('network timeout'))
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(acceptedResponse(thread({
+        threadId: 'forked-thread-1',
         sessionId: 'forked-session-1',
-        thread: thread({
-          threadId: 'forked-thread-1',
-          sessionId: 'forked-session-1',
-          name: 'main',
-        }),
-        acceptedCommands: [],
-      })
+        name: 'main',
+      })))
 
     const draftComposer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(draftComposer)
@@ -2491,7 +2547,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     await screen.findByRole('listbox', { name: '事件' })
     expect(document.querySelector('.thread-debug-back')).toBeNull()
     expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '关闭 Debug', exact: true }))
+    await user.click(screen.getByRole('button', { name: '关闭 Debug' }))
 
     // 回到会话视图：Debug chrome 与事件列表消失，草稿、pane 绑定原地保留。
     expect(document.querySelector('.thread-debug-back')).toBeNull()
@@ -2594,6 +2650,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       id: 'uuid-env-ready',
       name: 'cluster-ready',
       status: 'READY',
+      statusExpiresAt: null,
       ready: true,
       lastSeen: '2026-09-19T00:00:00.000Z',
       capabilities: [],
@@ -2613,10 +2670,11 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
         useRootControlProbe({
           owner: { type: 'CHAT', chatId: CHAT_ID },
           paneId: 'p1',
-          target: { kind: 'NEW_SESSION_DRAFT' },
+          initialTarget: { kind: 'NEW_SESSION_DRAFT' },
           agents,
           environments: [envCard],
           defaults: {},
+          focused: true,
         }),
       {
         wrapper: ({ children }) => (
@@ -2671,10 +2729,11 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     await waitFor(() => expect(result.current.composer.disabled).toBe(false))
 
     await act(async () => {
-      result.current.composer.onSubmit([
-        { type: 'text', partId: 'p-1', text: 'Here is document' },
-        { type: 'attachment', partId: 'p-2', uploadId: 'up-123', filename: 'doc.pdf' },
-      ])
+      const parts = [
+        { type: 'text' as const, partId: 'p-1', text: 'Here is document' },
+        { type: 'attachment' as const, partId: 'p-2', uploadId: 'up-123', filename: 'doc.pdf' },
+      ]
+      result.current.composer.onSubmit(parts, parts)
     })
 
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
@@ -2784,7 +2843,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       await user.type(composer, 'draft kept across branch debug')
       const permissionBefore = document.querySelector('[aria-label="权限模式"]')?.textContent
 
-      await user.click(screen.getByRole('button', { name: '关闭 Debug', exact: true }))
+      await user.click(screen.getByRole('button', { name: '关闭 Debug' }))
 
       expect(document.querySelector('.thread-debug-back')).toBeNull()
       expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
@@ -2890,7 +2949,14 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
         preview: previewResponse(),
       }))
       act(() => result.current.setTarget({ ...target }))
-      act(() => result.current.control.selectSession('session-1'))
+      act(() => result.current.control.selectSession({
+        sessionId: 'session-1',
+        name: 'session-1',
+        createdAt: null,
+        lastActivityAt: null,
+        firstMessagePreview: null,
+        threadCount: 1,
+      }))
 
       expect(result.current.control.boundViews.mode).toBe('debug')
       expect(result.current.control.boundViews.debugSelection).not.toBeNull()
@@ -2939,7 +3005,10 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       await waitFor(() => expect(result.current.composer.disabled).toBe(false))
 
       await act(async () => {
-        await result.current.composer.onSubmit([createTextPart('owner-free message')])
+        result.current.composer.onSubmit(
+          [createTextPart('owner-free message')],
+          [createTextPart('owner-free message')],
+        )
       })
       await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
       const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
@@ -3359,8 +3428,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
         `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
         JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
       )
-      let resolveRetry!: (val: HarnessThreadCommandDTO[]) => void
-      const retryPromise = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      let resolveRetry!: (val: ReturnType<typeof acceptedResponse>) => void
+      const retryPromise = new Promise<ReturnType<typeof acceptedResponse>>((resolve) => {
         resolveRetry = resolve
       })
 
@@ -3389,7 +3458,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       await user.click(composer)
       expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
 
-      resolveRetry([])
+      resolveRetry(acceptedResponse())
       await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
       expect(screen.queryByTestId('bound-pending-controls')).toBeNull()
     })
@@ -3397,8 +3466,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
     it('keeps an externally updated draft after an in-flight submission succeeds', async () => {
       // 测试意图：绑定 composer 在 pending 期间对用户输入禁用，不能靠 user.type 改草稿。
       // 通过真实 onPartsChange 模拟飞行中的外部草稿更新，成功返回后不得被清空。
-      let resolveFirst!: (val: HarnessThreadCommandDTO[]) => void
-      const firstCallPromise = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      let resolveFirst!: (val: ReturnType<typeof acceptedResponse>) => void
+      const firstCallPromise = new Promise<ReturnType<typeof acceptedResponse>>((resolve) => {
         resolveFirst = resolve
       })
       vi.mocked(harnessService.acceptThreadCommandBatch).mockReturnValueOnce(firstCallPromise)
@@ -3422,9 +3491,11 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       await waitFor(() => expect(result.current.composer.disabled).toBe(false))
 
       act(() => result.current.composer.onPartsChange([createTextPart('first message')]))
-      let submission!: Promise<void>
       act(() => {
-        submission = result.current.composer.onSubmit()
+        result.current.composer.onSubmit(
+          result.current.composer.parts,
+          result.current.composer.parts,
+        )
       })
       await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
       expect(result.current.composer.disabled).toBe(true)
@@ -3435,8 +3506,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       ])
 
       await act(async () => {
-        resolveFirst([])
-        await submission
+        resolveFirst(acceptedResponse())
       })
       await waitFor(() => expect(result.current.composer.pending).toBe(false))
       expect(result.current.composer.parts).toEqual([
@@ -3452,8 +3522,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
         `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
         JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
       )
-      let resolvePane2!: (val: HarnessThreadCommandDTO[]) => void
-      const pane2Request = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      let resolvePane2!: (val: ReturnType<typeof acceptedResponse>) => void
+      const pane2Request = new Promise<ReturnType<typeof acceptedResponse>>((resolve) => {
         resolvePane2 = resolve
       })
       vi.mocked(harnessService.acceptThreadCommandBatch)
@@ -3486,7 +3556,10 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
 
       act(() => controller2.current.composer.onPartsChange([createTextPart('pane 2 message')]))
       act(() => {
-        void controller2.current.composer.onSubmit()
+        controller2.current.composer.onSubmit(
+          controller2.current.composer.parts,
+          controller2.current.composer.parts,
+        )
       })
       await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
       const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
@@ -3495,7 +3568,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       expect(controller2.current.pendingMessage?.request).toBeDefined()
 
       await act(async () => {
-        resolvePane2([])
+        resolvePane2(acceptedResponse())
       })
       await waitFor(() => expect(controller2.current.pendingMessage).toBeNull())
       expect(localStorage.getItem(pendingKey)).toBeNull()
@@ -3513,8 +3586,11 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
 
       act(() => controller2.current.composer.onPartsChange([createTextPart('pane 2 retry')]))
-      await act(async () => {
-        await controller2.current.composer.onSubmit()
+      act(() => {
+        controller2.current.composer.onSubmit(
+          controller2.current.composer.parts,
+          controller2.current.composer.parts,
+        )
       })
       expect(controller2.current.error).toMatch(/无法保存发送记录/)
       expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
@@ -3535,9 +3611,10 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
   })
 
   describe('selectAgent model follow & validation behavior', () => {
-    const claudeModel = {
+    const claudeModel: AgentModelDTO = {
       providerName: 'anthropic',
       name: 'Claude',
+      modelId: 'anthropic/Claude',
       description: null,
       config: {
         limit: { context: 200000, output: 4096 },
@@ -3547,6 +3624,13 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           pricingTier: 'default',
           serviceTier: 'standard',
           serviceTierMultiplier: 1,
+          version: '1',
+          inputPerMillionTokens: 1,
+          outputPerMillionTokens: 1,
+          cacheReadPerMillionTokens: 0,
+          cacheWritePerMillionTokens: 0,
+          cacheWriteLongPerMillionTokens: 0,
+          reasoningPerMillionTokens: 0,
         },
         defaultVariant: 'v1',
         variants: [{ id: 'v1' }, { id: 'fast' }],
@@ -3560,9 +3644,9 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       name: 'coder',
       description: null,
       systemPrompt: null,
+      type: 'USER',
       model: 'anthropic/Claude',
       variant: 'fast',
-      environmentId: null,
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
       version: '0',
       createTime: null,
@@ -3573,9 +3657,9 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       name: 'broken-agent',
       description: null,
       systemPrompt: null,
+      type: 'USER',
       model: 'nonexistent/model',
       variant: null,
-      environmentId: null,
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
       version: '0',
       createTime: null,
@@ -3697,7 +3781,10 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       })
 
       await act(async () => {
-        await hook.result.current.composer.onSubmit([createTextPart('bound message')])
+        hook.result.current.composer.onSubmit(
+          [createTextPart('bound message')],
+          [createTextPart('bound message')],
+        )
       })
 
       expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
@@ -3754,10 +3841,9 @@ describe('AgentPane root control and child observation', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(
       async (threadId: string) => snapshotForThread(threadId),
     )
-    vi.mocked(interactionService.listInteractions).mockResolvedValue({
-      items: [approvalInteraction(CHILD_THREAD_ID)],
-      nextCursor: null,
-    })
+    vi.mocked(interactionService.listInteractions).mockResolvedValue(
+      interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
+    )
     bindPaneToRoot()
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
@@ -3822,10 +3908,9 @@ describe('AgentPane root control and child observation', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(
       async (threadId: string) => snapshotForThread(threadId),
     )
-    vi.mocked(interactionService.listInteractions).mockResolvedValue({
-      items: [approvalInteraction(CHILD_THREAD_ID)],
-      nextCursor: null,
-    })
+    vi.mocked(interactionService.listInteractions).mockResolvedValue(
+      interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
+    )
     bindPaneToRoot()
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
@@ -3887,10 +3972,9 @@ describe('AgentPane root control and child observation', () => {
       treeNode(THREAD_ID, null, 'root thread', false),
       treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', true),
     ])
-    vi.mocked(interactionService.listInteractions).mockResolvedValue({
-      items: [approvalInteraction(CHILD_THREAD_ID)],
-      nextCursor: null,
-    })
+    vi.mocked(interactionService.listInteractions).mockResolvedValue(
+      interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
+    )
     bindPaneToRoot()
     const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
@@ -3906,10 +3990,9 @@ describe('AgentPane root control and child observation', () => {
 
     // 重试入口真的重新拉取，而不是只显示文案。
     const callsBeforeRetry = vi.mocked(interactionService.listInteractions).mock.calls.length
-    vi.mocked(interactionService.listInteractions).mockResolvedValue({
-      items: [approvalInteraction(CHILD_THREAD_ID)],
-      nextCursor: null,
-    })
+    vi.mocked(interactionService.listInteractions).mockResolvedValue(
+      interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
+    )
     await user.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => expect(vi.mocked(interactionService.listInteractions).mock.calls.length)
       .toBeGreaterThan(callsBeforeRetry))
@@ -4254,7 +4337,7 @@ describe('AgentPane root control mounting', () => {
   it('resolves timeline resources through the pane blob adapter and degrades safely', async () => {
     // 资源消息的下载/预览 URL 由 pane 的适配层解析；服务端缺字段时不伪造可预览 URL。
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
-    const resourceEntry = (entryId: string, blobId: string) => ({
+    const resourceEntry = (entryId: string, blobId: string): HarnessSessionEntryDTO => ({
       entryId,
       sessionId: 'session-1',
       parentEntryId: null,
@@ -4274,7 +4357,10 @@ describe('AgentPane root control mounting', () => {
       entries: [resourceEntry('user-blob-1', 'blob-1'), resourceEntry('user-blob-2', 'blob-2')],
     }))
 
-    const defaultDownload = async () => ({ url: 'https://storage.test/blob', expiresAt: null })
+    const defaultDownload = async (_blobId: string = ''): Promise<StoragePresignedUrlDTO> => ({
+      url: 'https://storage.test/blob',
+      expiresAt: null,
+    })
     fakeStorage.getBlobDownloadUrl.mockImplementation(async (blobId: string) => {
       if (blobId === 'blob-1') {
         return { url: 'https://storage.test/blob-1', mediaType: 'image/png', sizeBytes: 128, expiresAt: null }
@@ -4342,10 +4428,9 @@ describe('AgentPane root control mounting', () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(THREAD_ID, null, 'thread-name', false),
     ])
-    vi.mocked(interactionService.listInteractions).mockResolvedValue({
-      items: [approvalInteraction(unknownSourceId)],
-      nextCursor: null,
-    })
+    vi.mocked(interactionService.listInteractions).mockResolvedValue(
+      interactionPage([approvalInteraction(unknownSourceId)]),
+    )
 
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
@@ -4364,14 +4449,12 @@ describe('AgentPane root control mounting', () => {
       treeNode(secondSourceId, THREAD_ID, 'second worker', true),
     ])
     vi.mocked(interactionService.listInteractions)
-      .mockResolvedValueOnce({
-        items: [approvalInteraction(CHILD_THREAD_ID)],
-        nextCursor: 'cursor-2',
-      })
-      .mockResolvedValueOnce({
-        items: [approvalInteraction(secondSourceId)],
-        nextCursor: null,
-      })
+      .mockResolvedValueOnce(
+        interactionPage([approvalInteraction(CHILD_THREAD_ID)], 'cursor-2'),
+      )
+      .mockResolvedValueOnce(
+        interactionPage([approvalInteraction(secondSourceId)], null),
+      )
 
     const user = userEvent.setup()
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -4393,10 +4476,9 @@ describe('AgentPane root control mounting', () => {
       treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker child', true),
     ])
     vi.mocked(interactionService.listInteractions)
-      .mockResolvedValueOnce({
-        items: [approvalInteraction(CHILD_THREAD_ID)],
-        nextCursor: 'cursor-2',
-      })
+      .mockResolvedValueOnce(
+        interactionPage([approvalInteraction(CHILD_THREAD_ID)], 'cursor-2'),
+      )
       .mockRejectedValueOnce(new Error('page two down'))
 
     const user = userEvent.setup()
