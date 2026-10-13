@@ -8,8 +8,8 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.impl.mapper.AgentProviderMapper;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.impl.model.AgentProviderDO;
+import fun.fengwk.kkstudio.platform.catalog.provider.repo.impl.store.AgentProviderJdbcStore;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 
 import java.util.List;
@@ -19,49 +19,49 @@ import java.util.List;
 @Repository
 public class PostgresqlAgentProviderRepository implements AgentProviderRepository {
 
-  private final AgentProviderMapper agentProviderMapper;
+  private final AgentProviderJdbcStore agentProviderJdbcStore;
 
   @Override
   public Page<AgentProvider> page(PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<AgentProviderDO> results = agentProviderMapper.page(offset, limit);
-    return Pages.page(pageQuery, results, agentProviderMapper.count()).map(this::convert);
+    List<AgentProviderDO> results = agentProviderJdbcStore.page(offset, limit);
+    return Pages.page(pageQuery, results, agentProviderJdbcStore.count()).map(this::convert);
   }
 
   @Override
   public List<AgentProvider> listAll() {
-    return agentProviderMapper.listAll().stream().map(this::convert).toList();
+    return agentProviderJdbcStore.listAll().stream().map(this::convert).toList();
   }
 
   @Override
   public AgentProvider getByName(String name) {
-    return convert(agentProviderMapper.getByName(name));
+    return convert(agentProviderJdbcStore.getByName(name));
   }
 
   @Override
   public AgentProvider getByNameForUpdate(String name) {
-    return convert(agentProviderMapper.getByNameForUpdate(name));
+    return convert(agentProviderJdbcStore.getByNameForUpdate(name));
   }
 
   @Override
   public boolean create(AgentProvider provider) {
-    return agentProviderMapper.insert(convert(provider)) == 1;
+    return agentProviderJdbcStore.insert(convert(provider)) == 1;
   }
 
   @Override
   public boolean updateByName(AgentProvider provider, long expectedVersion) {
-    return agentProviderMapper.updateByName(convert(provider), expectedVersion) == 1;
+    return agentProviderJdbcStore.updateByName(convert(provider), expectedVersion) == 1;
   }
 
   @Override
   public boolean deleteByName(String name, long expectedVersion) {
-    return agentProviderMapper.deleteByName(name, expectedVersion) == 1;
+    return agentProviderJdbcStore.deleteByName(name, expectedVersion) == 1;
   }
 
   @Override
   public boolean hasModels(String providerName) {
-    return agentProviderMapper.countModelsByProviderName(providerName) > 0;
+    return agentProviderJdbcStore.countModelsByProviderName(providerName) > 0;
   }
 
   private AgentProviderDO convert(AgentProvider provider) {

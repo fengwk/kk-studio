@@ -7,9 +7,9 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.mapper.McpServerMapper;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpServerDO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpToolDO;
+import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.store.McpServerJdbcStore;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
@@ -22,95 +22,95 @@ import java.util.Optional;
 @Repository
 public class PostgresqlMcpServerRepository implements McpServerRepository {
 
-  private final McpServerMapper mapper;
+  private final McpServerJdbcStore mcpServerJdbcStore;
 
   @Override
   public Page<McpServer> page(PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<McpServerDO> results = mapper.page(offset, limit);
-    return Pages.page(pageQuery, results, mapper.count()).map(this::convertServer);
+    List<McpServerDO> results = mcpServerJdbcStore.page(offset, limit);
+    return Pages.page(pageQuery, results, mcpServerJdbcStore.count()).map(this::convertServer);
   }
 
   @Override
   public List<McpServer> listAllServers() {
-    return mapper.listAllServers().stream().map(this::convertServer).toList();
+    return mcpServerJdbcStore.listAllServers().stream().map(this::convertServer).toList();
   }
 
   @Override
   public Optional<McpServer> getByName(String name) {
-    return Optional.ofNullable(convertServer(mapper.getByName(name)));
+    return Optional.ofNullable(convertServer(mcpServerJdbcStore.getByName(name)));
   }
 
   @Override
   public Optional<McpServer> lockForShare(String name) {
-    return Optional.ofNullable(convertServer(mapper.lockForShare(name)));
+    return Optional.ofNullable(convertServer(mcpServerJdbcStore.lockForShare(name)));
   }
 
   @Override
   public Optional<McpServer> getForUpdate(String name) {
-    return Optional.ofNullable(convertServer(mapper.getForUpdate(name)));
+    return Optional.ofNullable(convertServer(mcpServerJdbcStore.getForUpdate(name)));
   }
 
   @Override
   public boolean create(McpServer server) {
-    return mapper.insert(convertServer(server)) == 1;
+    return mcpServerJdbcStore.insert(convertServer(server)) == 1;
   }
 
   @Override
   public boolean update(McpServer server, long expectedVersion) {
-    return mapper.update(convertServer(server), expectedVersion) == 1;
+    return mcpServerJdbcStore.update(convertServer(server), expectedVersion) == 1;
   }
 
   @Override
   public boolean updateDiscoveryStatus(
       String name, long expectedVersion, McpDiscoveryStatus status) {
-    return mapper.updateDiscoveryStatus(name, expectedVersion, status.name()) == 1;
+    return mcpServerJdbcStore.updateDiscoveryStatus(name, expectedVersion, status.name()) == 1;
   }
 
   @Override
   public boolean delete(String name, long expectedVersion) {
-    return mapper.delete(name, expectedVersion) == 1;
+    return mcpServerJdbcStore.delete(name, expectedVersion) == 1;
   }
 
   @Override
   public Optional<McpTool> getTool(String name) {
-    return Optional.ofNullable(convertTool(mapper.getTool(name)));
+    return Optional.ofNullable(convertTool(mcpServerJdbcStore.getTool(name)));
   }
 
   @Override
   public Optional<McpTool> lockToolForShare(String name) {
-    return Optional.ofNullable(convertTool(mapper.lockToolForShare(name)));
+    return Optional.ofNullable(convertTool(mcpServerJdbcStore.lockToolForShare(name)));
   }
 
   @Override
   public List<McpTool> listTools(String serverName) {
-    return mapper.listTools(serverName).stream().map(this::convertTool).toList();
+    return mcpServerJdbcStore.listTools(serverName).stream().map(this::convertTool).toList();
   }
 
   @Override
   public List<McpTool> listAllTools() {
-    return mapper.listAllTools().stream().map(this::convertTool).toList();
+    return mcpServerJdbcStore.listAllTools().stream().map(this::convertTool).toList();
   }
 
   @Override
   public int countTools(String serverName) {
-    return mapper.countTools(serverName);
+    return mcpServerJdbcStore.countTools(serverName);
   }
 
   @Override
   public void deleteTools(String serverName) {
-    mapper.deleteTools(serverName);
+    mcpServerJdbcStore.deleteTools(serverName);
   }
 
   @Override
   public void insertTool(McpTool tool) {
-    mapper.insertTool(convertTool(tool));
+    mcpServerJdbcStore.insertTool(convertTool(tool));
   }
 
   @Override
   public List<String> selectReferencedToolNames() {
-    return mapper.selectReferencedToolNames();
+    return mcpServerJdbcStore.selectReferencedToolNames();
   }
 
   private McpServerDO convertServer(McpServer server) {

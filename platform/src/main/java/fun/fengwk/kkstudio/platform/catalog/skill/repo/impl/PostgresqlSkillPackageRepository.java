@@ -4,8 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.mapper.SkillPackageMapper;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.model.SkillPackageDO;
+import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.store.SkillPackageJdbcStore;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 
@@ -22,33 +22,33 @@ import java.util.Objects;
 @Repository
 public class PostgresqlSkillPackageRepository implements SkillPackageRepository {
 
-  private final SkillPackageMapper skillPackageMapper;
+  private final SkillPackageJdbcStore skillPackageJdbcStore;
   private final PostgresqlSkillPackageChangeNotifier notifier;
 
   @Override
   public List<SkillPackage> listPackages() {
-    return skillPackageMapper.listPackages().stream().map(this::toPackage).toList();
+    return skillPackageJdbcStore.listPackages().stream().map(this::toPackage).toList();
   }
 
   @Override
   public SkillPackage getPackage(String packageName) {
-    return toPackage(skillPackageMapper.getPackage(packageName));
+    return toPackage(skillPackageJdbcStore.getPackage(packageName));
   }
 
   @Override
   public SkillPackage lockPackageForShare(String packageName) {
-    return toPackage(skillPackageMapper.lockPackageForShare(packageName));
+    return toPackage(skillPackageJdbcStore.lockPackageForShare(packageName));
   }
 
   @Override
   public SkillPackage lockPackage(String packageName) {
-    return toPackage(skillPackageMapper.lockPackage(packageName));
+    return toPackage(skillPackageJdbcStore.lockPackage(packageName));
   }
 
   @Override
   public boolean insertPackage(SkillPackage skillPackage) {
     PostgresqlSkillPackageChangeNotifier.requireTransaction();
-    if (skillPackageMapper.insertPackage(toPackageDO(skillPackage)) != 1) {
+    if (skillPackageJdbcStore.insertPackage(toPackageDO(skillPackage)) != 1) {
       return false;
     }
     notifier.packageChanged(skillPackage.getPackageName());
@@ -58,7 +58,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
   @Override
   public boolean updatePackage(SkillPackage skillPackage, long expectedVersion) {
     PostgresqlSkillPackageChangeNotifier.requireTransaction();
-    if (skillPackageMapper.updatePackage(toPackageDO(skillPackage), expectedVersion) != 1) {
+    if (skillPackageJdbcStore.updatePackage(toPackageDO(skillPackage), expectedVersion) != 1) {
       return false;
     }
     // UPDATE 命中即 version = version + 1，因此成功写的 version 必然真变化，与通知条件一致。
@@ -69,7 +69,7 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
   @Override
   public boolean deletePackage(String packageName, long expectedVersion) {
     PostgresqlSkillPackageChangeNotifier.requireTransaction();
-    if (skillPackageMapper.deletePackage(packageName, expectedVersion) != 1) {
+    if (skillPackageJdbcStore.deletePackage(packageName, expectedVersion) != 1) {
       return false;
     }
     notifier.packageChanged(packageName);

@@ -9,24 +9,16 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.mapping.Environment;
-import org.apache.ibatis.session.Configuration;
-import org.apache.ibatis.session.ExecutorType;
-import org.apache.ibatis.session.SqlSessionFactory;
-import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.mybatis.spring.SqlSessionTemplate;
-import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
-import org.mybatis.spring.boot.autoconfigure.MybatisProperties;
-import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.jdbc.autoconfigure.JdbcClientAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import javax.sql.DataSource;
 
@@ -45,26 +37,10 @@ class PostgresqlPersistenceConfigurationTest {
 
   @Test
   void firstSqlExceptionsKeepPostgresqlClassificationWithoutMetadataConnections() throws Exception {
-    // 每种状态使用全新真实模板：首次 SQL 异常不能触发第二次连接获取或元数据访问。
+    // 每种状态使用全新真实 JdbcTemplate：首次 SQL 异常不能触发第二次连接获取或元数据访问。
     assertClassification("23505", DuplicateKeyException.class);
     assertClassification("23503", DataIntegrityViolationException.class);
     assertClassification("08006", DataAccessResourceFailureException.class);
-  }
-
-  private static void assertClassification(String sqlState, Class<? extends RuntimeException> type)
-      throws Exception {
-    List<Connection> connections = new CopyOnWriteArrayList<>();
-    DataSource jdbc = failingJdbc(sqlState, null, connections);
-    SqlSessionTemplate template =
-        new PostgresqlPersistenceConfiguration()
-            .sqlSessionTemplate(factory(jdbc, ExecutorType.SIMPLE), new MybatisProperties());
-    verify(jdbc, never()).getConnection();
-    RuntimeException failure =
-        assertThrows(type, () -> template.getMapper(FailingMapper.class).read());
-    assertThat(failure).hasRootCauseInstanceOf(SQLException.class);
-    assertThat(((SQLException) failure.getCause()).getSQLState()).isEqualTo(sqlState);
-    verify(jdbc, times(1)).getConnection();
-    assertClosedWithoutMetadata(connections, 1);
   }
 
   @Test
@@ -74,9 +50,7 @@ class PostgresqlPersistenceConfigurationTest {
     CountDownLatch executing = new CountDownLatch(callers);
     List<Connection> connections = new CopyOnWriteArrayList<>();
     DataSource jdbc = failingJdbc("08006", executing, connections);
-    SqlSessionTemplate template =
-        new PostgresqlPersistenceConfiguration()
-            .sqlSessionTemplate(factory(jdbc, ExecutorType.SIMPLE), new MybatisProperties());
+    JdbcTemplate template = template(jdbc);
     try (var executor = Executors.newFixedThreadPool(callers)) {
       var failures = new ArrayList<Future<RuntimeException>>();
       for (int i = 0; i < callers; i++) {
@@ -85,7 +59,7 @@ class PostgresqlPersistenceConfigurationTest {
                 () ->
                     assertThrows(
                         DataAccessResourceFailureException.class,
-                        () -> template.getMapper(FailingMapper.class).read())));
+                        () -> template.queryForObject("select 1", Integer.class))));
       }
       for (var failure : failures) {
         assertThat(failure.get(5, TimeUnit.SECONDS)).hasRootCauseInstanceOf(SQLException.class);
@@ -95,41 +69,53 @@ class PostgresqlPersistenceConfigurationTest {
     assertClosedWithoutMetadata(connections, callers);
   }
 
-  @ParameterizedTest
-  @CsvSource({"SIMPLE,,SIMPLE", "BATCH,,BATCH", "SIMPLE,BATCH,BATCH", "BATCH,SIMPLE,SIMPLE"})
-  void bootPropertiesOverrideFactoryDefaultWithoutChangingExecutorSemantics(
-      ExecutorType factoryDefault, ExecutorType property, ExecutorType expected) {
-    // 验证真实 Boot 属性绑定及默认模板退让；未指定 property 时保留 factory 的默认 executor。
-    var runner =
-        new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(MybatisAutoConfiguration.class))
-            .withUserConfiguration(PostgresqlPersistenceConfiguration.class)
-            .withBean(DataSource.class, () -> mock(DataSource.class))
-            .withBean(
-                SqlSessionFactory.class, () -> factory(mock(DataSource.class), factoryDefault));
-    if (property != null) {
-      runner = runner.withPropertyValues("mybatis.executor-type=" + property);
-    }
-    runner.run(
-        context -> {
-          assertThat(context).hasNotFailed().hasSingleBean(SqlSessionTemplate.class);
-          SqlSessionTemplate template = context.getBean(SqlSessionTemplate.class);
-          assertThat(template.getExecutorType()).isEqualTo(expected);
-          assertThat(
-                  context
-                      .getBeanFactory()
-                      .getBeanDefinition("sqlSessionTemplate")
-                      .getFactoryBeanName())
-              .isEqualTo("postgresqlPersistenceConfiguration");
-        });
+  @Test
+  void bootAutoConfiguredJdbcClientUsesPostgresqlTranslatorWithoutMetadataConnections()
+      throws Exception {
+    // 生产装配由 Boot 自动配置 Stock JdbcClient；平台的翻译器 Bean 必须被采用，故障路径不读元数据。
+    List<Connection> connections = new CopyOnWriteArrayList<>();
+    DataSource jdbc = failingJdbc("23505", null, connections);
+    new ApplicationContextRunner()
+        .withConfiguration(
+            AutoConfigurations.of(
+                JdbcTemplateAutoConfiguration.class, JdbcClientAutoConfiguration.class))
+        .withUserConfiguration(PostgresqlPersistenceConfiguration.class)
+        .withBean("dataSource", DataSource.class, () -> jdbc)
+        .run(
+            context -> {
+              assertThat(context).hasNotFailed().hasSingleBean(JdbcClient.class);
+              verify(jdbc, never()).getConnection();
+              JdbcClient client = context.getBean(JdbcClient.class);
+              RuntimeException failure =
+                  assertThrows(
+                      DuplicateKeyException.class,
+                      () -> client.sql("select 1").query(Integer.class).single());
+              assertThat(failure).hasRootCauseInstanceOf(SQLException.class);
+              assertThat(((SQLException) failure.getCause()).getSQLState()).isEqualTo("23505");
+              verify(jdbc, times(1)).getConnection();
+              assertClosedWithoutMetadata(connections, 1);
+            });
   }
 
-  private static SqlSessionFactory factory(DataSource jdbc, ExecutorType defaultExecutor) {
-    Configuration config = new Configuration();
-    config.setEnvironment(new Environment("test", new SpringManagedTransactionFactory(), jdbc));
-    config.setDefaultExecutorType(defaultExecutor);
-    config.addMapper(FailingMapper.class);
-    return new SqlSessionFactoryBuilder().build(config);
+  private static void assertClassification(String sqlState, Class<? extends RuntimeException> type)
+      throws Exception {
+    List<Connection> connections = new CopyOnWriteArrayList<>();
+    DataSource jdbc = failingJdbc(sqlState, null, connections);
+    JdbcTemplate template = template(jdbc);
+    verify(jdbc, never()).getConnection();
+    RuntimeException failure =
+        assertThrows(type, () -> template.queryForObject("select 1", Integer.class));
+    assertThat(failure).hasRootCauseInstanceOf(SQLException.class);
+    assertThat(((SQLException) failure.getCause()).getSQLState()).isEqualTo(sqlState);
+    verify(jdbc, times(1)).getConnection();
+    assertClosedWithoutMetadata(connections, 1);
+  }
+
+  private static JdbcTemplate template(DataSource jdbc) {
+    JdbcTemplate template = new JdbcTemplate(jdbc);
+    template.setExceptionTranslator(
+        new PostgresqlPersistenceConfiguration().postgresqlSqlExceptionTranslator());
+    return template;
   }
 
   private static DataSource failingJdbc(
@@ -141,23 +127,38 @@ class PostgresqlPersistenceConfigurationTest {
               Connection connection = mock(Connection.class);
               PreparedStatement statement = mock(PreparedStatement.class);
               when(connection.getAutoCommit()).thenReturn(true);
+              // JdbcTemplate 的静态 SQL 走 createStatement，JdbcClient/命名参数走 prepareStatement。
+              when(connection.createStatement()).thenReturn(statement);
               when(connection.prepareStatement(anyString())).thenReturn(statement);
-              when(statement.execute())
+              when(statement.executeQuery(anyString()))
                   .thenAnswer(
                       call -> {
-                        if (executing != null) {
-                          executing.countDown();
-                          if (!executing.await(5, TimeUnit.SECONDS)) {
-                            throw new AssertionError(
-                                "all JDBC operations must reach the failure barrier");
-                          }
-                        }
-                        throw new SQLException("controlled SQL failure", state);
+                        throw failure(state, executing);
+                      });
+              when(statement.executeQuery())
+                  .thenAnswer(
+                      call -> {
+                        throw failure(state, executing);
                       });
               connections.add(connection);
               return connection;
             });
     return jdbc;
+  }
+
+  private static SQLException failure(String state, CountDownLatch executing) throws SQLException {
+    if (executing != null) {
+      executing.countDown();
+      try {
+        if (!executing.await(5, TimeUnit.SECONDS)) {
+          throw new AssertionError("all JDBC operations must reach the failure barrier");
+        }
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("interrupted while waiting for the failure barrier", interrupted);
+      }
+    }
+    return new SQLException("controlled SQL failure", state);
   }
 
   private static void assertClosedWithoutMetadata(List<Connection> connections, int expected)
@@ -167,10 +168,5 @@ class PostgresqlPersistenceConfigurationTest {
       verify(connection, never()).getMetaData();
       verify(connection).close();
     }
-  }
-
-  public interface FailingMapper {
-    @Select("select 1")
-    int read();
   }
 }

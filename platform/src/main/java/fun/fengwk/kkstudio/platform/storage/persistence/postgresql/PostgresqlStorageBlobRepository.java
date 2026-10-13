@@ -4,8 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
-import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.mapper.StorageBlobMapper;
 import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.model.StorageBlobDO;
+import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.store.StorageBlobJdbcStore;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
@@ -17,46 +17,46 @@ import java.util.UUID;
 @Repository
 public class PostgresqlStorageBlobRepository implements StorageBlobRepository {
 
-  private final StorageBlobMapper blobMapper;
+  private final StorageBlobJdbcStore storageBlobJdbcStore;
 
   @Override
   public StorageBlob getById(UUID id) {
-    return toModel(blobMapper.getById(id));
+    return toModel(storageBlobJdbcStore.getById(id));
   }
 
   @Override
   public StorageBlob getActiveByHashAndSize(String sha256, long sizeBytes) {
-    return toModel(blobMapper.getActiveByHashAndSize(sha256, sizeBytes));
+    return toModel(storageBlobJdbcStore.getActiveByHashAndSize(sha256, sizeBytes));
   }
 
   @Override
   public boolean insertActiveCandidate(StorageBlob blob) {
-    return blobMapper.insertActiveCandidate(toDO(blob)) == 1;
+    return storageBlobJdbcStore.insertActiveCandidate(toDO(blob)) == 1;
   }
 
   @Override
   public boolean insertDeletingCandidate(StorageBlob blob) {
-    return blobMapper.insertDeletingCandidate(toDO(blob)) == 1;
+    return storageBlobJdbcStore.insertDeletingCandidate(toDO(blob)) == 1;
   }
 
   @Override
   public boolean incrementRefCount(UUID id) {
-    return blobMapper.incrementRefCount(id) == 1;
+    return storageBlobJdbcStore.incrementRefCount(id) == 1;
   }
 
   @Override
   public boolean releaseOnce(UUID id) {
-    return blobMapper.releaseOnce(id) == 1;
+    return storageBlobJdbcStore.releaseOnce(id) == 1;
   }
 
   @Override
   public boolean deleteDeleting(UUID id) {
-    return blobMapper.deleteDeleting(id) == 1;
+    return storageBlobJdbcStore.deleteDeleting(id) == 1;
   }
 
   @Override
   public List<UUID> listDeletingIds(int limit) {
-    return blobMapper.listDeletingIds(limit);
+    return storageBlobJdbcStore.listDeletingIds(limit);
   }
 
   private StorageBlobDO toDO(StorageBlob blob) {
