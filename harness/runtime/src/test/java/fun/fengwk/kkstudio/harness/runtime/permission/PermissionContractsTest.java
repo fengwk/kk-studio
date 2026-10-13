@@ -214,7 +214,6 @@ class PermissionContractsTest {
     assertTrue(codec.decode("   ").permission().isEmpty());
     assertTrue(codec.decode("{}").permission().isEmpty());
     assertEquals("{\"permission\":{}}", codec.canonicalize(null));
-    // 未迁移到严格读取前，重复字段与尾随内容会被静默接受。
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.canonicalize("{\"permission\":{},\"permission\":{}}"));
