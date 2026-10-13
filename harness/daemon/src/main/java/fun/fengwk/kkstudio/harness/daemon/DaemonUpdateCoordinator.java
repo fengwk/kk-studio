@@ -11,14 +11,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -44,21 +42,27 @@ final class DaemonUpdateCoordinator {
   private final DaemonUpdateResultCodec updateResultCodec = new DaemonUpdateResultCodec();
 
   /**
+   * 受管更新编排的同步门：同时守护在途认领与结果缓存，使「已完成判定」「在途认领」「结果入缓存并释放在途认领」都是同一门内的原子决定。
+   *
+   * <p>该门只保护这两份内存事实的判定与跃迁：prepare/launch 与回执出站都在门外执行，因此慢速下载和发送不会阻塞重放判定。
+   */
+  private final Object updateGate = new Object();
+
+  /**
    * 受管更新操作的结果缓存（operationId -> 冻结回执）：同一 operation 的重发只重放结果，不产生第二次下载。
    *
-   * <p>保留最近若干条并在重连后重发，使断开不等于失败时 Platform 能重新收敛。
+   * <p>保留最近若干条并在重连后重发，使断开不等于失败时 Platform 能重新收敛。仅由 {@link #updateGate} 保护。
    */
   private final Map<String, DaemonUpdateResult> updateResults =
-      Collections.synchronizedMap(
-          new LinkedHashMap<>(16, 0.75f, false) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, DaemonUpdateResult> eldest) {
-              return size() > MAX_TRACKED_UPDATE_OPERATIONS;
-            }
-          });
+      new LinkedHashMap<>(16, 0.75f, false) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, DaemonUpdateResult> eldest) {
+          return size() > MAX_TRACKED_UPDATE_OPERATIONS;
+        }
+      };
 
-  /** 正在准备的 operationId；null 表示当前没有更新在途。 */
-  private final AtomicReference<String> activeUpdateOperationId = new AtomicReference<>();
+  /** 正在准备的 operationId；null 表示当前没有更新在途。与 {@link #updateResults} 同受 {@link #updateGate} 保护。 */
+  private String activeUpdateOperationId;
 
   private volatile ManagedUpdatePreparer managedUpdater;
   private volatile ManagedUpdateLauncher updateLauncher;
@@ -87,22 +91,35 @@ final class DaemonUpdateCoordinator {
       throw new DaemonProtocolException("UPDATE requires a READY bound connection");
     }
     DaemonUpdateCommand command = updateCommandCodec.decode(envelope.payloadJson());
-    DaemonUpdateResult completed = updateResults.get(command.operationId());
+    DaemonUpdateResult completed;
+    synchronized (updateGate) {
+      completed = updateResults.get(command.operationId());
+      if (completed == null) {
+        // 「已完成判定」与「在途认领」必须同一门内原子决定：否则重放可能落在刚释放在途认领、结果尚未入缓存的窗口，触发第二次下载。
+        if (command.operationId().equals(activeUpdateOperationId)) {
+          return;
+        }
+        if (activeUpdateOperationId != null) {
+          throw new DaemonProtocolException("a different update operation is already in progress");
+        }
+        activeUpdateOperationId = command.operationId();
+      }
+    }
     if (completed != null) {
       sendUpdateResult(completed);
       return;
     }
-    if (!activeUpdateOperationId.compareAndSet(null, command.operationId())) {
-      if (command.operationId().equals(activeUpdateOperationId.get())) {
-        return;
-      }
-      throw new DaemonProtocolException("a different update operation is already in progress");
+    try {
+      sendUpdateResult(DaemonUpdateResult.accepted(command.operationId()));
+    } catch (RuntimeException error) {
+      // 接受回执未能送达时更新尚未提交：释放在途认领并让异常传播，使 Platform 可重试，不留下永久在途或半途副作用。
+      releaseActive(command.operationId());
+      throw error;
     }
-    sendUpdateResult(DaemonUpdateResult.accepted(command.operationId()));
     try {
       taskExecutor.execute(() -> runUpdate(command));
     } catch (RejectedExecutionException error) {
-      activeUpdateOperationId.compareAndSet(command.operationId(), null);
+      releaseActive(command.operationId());
       sendUpdateResult(
           DaemonUpdateResult.failed(command.operationId(), "update executor rejected"));
     }
@@ -110,17 +127,17 @@ final class DaemonUpdateCoordinator {
 
   /** 重连 READY 后重发已知更新回执：进行中重发 ACCEPTED，否则重发最近一次已完成回执。 */
   void resendAfterReconnect() {
-    String active = activeUpdateOperationId.get();
-    if (active != null && !updateResults.containsKey(active)) {
-      sendUpdateResult(DaemonUpdateResult.accepted(active));
-      return;
+    DaemonUpdateResult resend;
+    synchronized (updateGate) {
+      if (activeUpdateOperationId != null && !updateResults.containsKey(activeUpdateOperationId)) {
+        resend = DaemonUpdateResult.accepted(activeUpdateOperationId);
+      } else {
+        List<DaemonUpdateResult> snapshot = new ArrayList<>(updateResults.values());
+        resend = snapshot.isEmpty() ? null : snapshot.get(snapshot.size() - 1);
+      }
     }
-    List<DaemonUpdateResult> snapshot;
-    synchronized (updateResults) {
-      snapshot = new ArrayList<>(updateResults.values());
-    }
-    if (!snapshot.isEmpty()) {
-      sendUpdateResult(snapshot.get(snapshot.size() - 1));
+    if (resend != null) {
+      sendUpdateResult(resend);
     }
   }
 
@@ -148,11 +165,28 @@ final class DaemonUpdateCoordinator {
           };
     } catch (RuntimeException error) {
       result = DaemonUpdateResult.failed(command.operationId(), "update preparation failed");
-    } finally {
-      activeUpdateOperationId.compareAndSet(command.operationId(), null);
+    } catch (Error error) {
+      // 进程级 Error 必须向上传播，但同样要释放在途认领，避免后续更新永久阻塞。
+      releaseActive(command.operationId());
+      throw error;
     }
-    updateResults.put(command.operationId(), result);
+    // 结果入缓存与释放在途认领必须同一门内完成：两者的中间窗口会让同一 operation 的重放越过已完成判定并触发第二次下载。
+    synchronized (updateGate) {
+      updateResults.put(command.operationId(), result);
+      if (command.operationId().equals(activeUpdateOperationId)) {
+        activeUpdateOperationId = null;
+      }
+    }
     sendUpdateResult(result);
+  }
+
+  /** 在同一门内释放在途认领；仅当它仍属于同一次 operation 时释放。 */
+  private void releaseActive(String operationId) {
+    synchronized (updateGate) {
+      if (operationId.equals(activeUpdateOperationId)) {
+        activeUpdateOperationId = null;
+      }
+    }
   }
 
   private void sendUpdateResult(DaemonUpdateResult result) {

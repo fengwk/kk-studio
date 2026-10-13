@@ -413,14 +413,23 @@ public final class DaemonRuntime implements AutoCloseable {
     if (!session.beginShutdown(terminalState, reason)) {
       return;
     }
-    // shutdown 必须收敛：先停止 transport 接入（会话已完成），再取消调用、停止资源策略并停止执行资源；单步失败不得跳过后续清理或悬挂 shutdown。
+    // shutdown 必须收敛：先停止 transport 接入（会话已完成），再取消调用、停止资源策略并停止执行资源；任一步抛出都不得跳过后续清理或悬挂 termination 闩。
     try {
       invocations.shutdown();
-      closeQuietly(capabilityResources, "capability resources");
-      temporaryResources.close();
-      shutdownExecutors(scheduler, taskExecutor, lspExecutor);
     } finally {
-      session.signalTerminated();
+      try {
+        closeQuietly(capabilityResources, "capability resources");
+      } finally {
+        try {
+          temporaryResources.close();
+        } finally {
+          try {
+            shutdownExecutors(scheduler, taskExecutor, lspExecutor);
+          } finally {
+            session.signalTerminated();
+          }
+        }
+      }
     }
   }
 
