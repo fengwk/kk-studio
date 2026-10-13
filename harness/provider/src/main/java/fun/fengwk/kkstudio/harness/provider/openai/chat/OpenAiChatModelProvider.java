@@ -42,7 +42,6 @@ final class OpenAiChatModelProvider implements ModelProvider {
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
           .build();
 
   private final JdkHttpSseTransport transport;

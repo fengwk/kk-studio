@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -145,7 +146,7 @@ class UpstreamTestManifestTest {
           assertNull(
               parser.nextToken(),
               () -> "fixture JSON must have no trailing content for " + resourcePath);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
           throw new AssertionError("fixture failed to parse as valid JSON: " + resourcePath, e);
         }
       }

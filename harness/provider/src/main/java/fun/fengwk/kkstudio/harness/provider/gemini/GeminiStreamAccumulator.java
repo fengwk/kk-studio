@@ -55,7 +55,6 @@ final class GeminiStreamAccumulator {
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
           .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -394,7 +393,7 @@ final class GeminiStreamAccumulator {
 
   /** 保真化原生 part：null text 与空白 thoughtSignature 不承载语义且无法写入合法 replay，按不存在处理。 */
   private static ObjectNode normalizedRawPart(JsonNode partNode) {
-    ObjectNode rawPart = partNode.deepCopy();
+    ObjectNode rawPart = (ObjectNode) partNode.deepCopy();
     if (rawPart.has("text") && rawPart.get("text").isNull()) {
       rawPart.remove("text");
     }
