@@ -6,8 +6,8 @@ import org.springframework.stereotype.Repository;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.mapper.PluginCredentialMapper;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model.PluginCredentialDO;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,21 +18,21 @@ import java.util.Optional;
 @Repository
 public class PostgresqlPluginCredentialRepository implements PluginCredentialRepository {
 
-  private final PluginCredentialMapper mapper;
+  private final PluginCredentialJdbcStore pluginCredentialJdbcStore;
 
   @Override
   public Optional<PluginCredentialRow> find(String pluginId) {
-    return Optional.ofNullable(mapper.getByPluginId(pluginId)).map(this::toRow);
+    return Optional.ofNullable(pluginCredentialJdbcStore.getByPluginId(pluginId)).map(this::toRow);
   }
 
   @Override
   public boolean upsert(PluginCredentialRow row) {
-    return mapper.upsert(toDO(row)) == 1;
+    return pluginCredentialJdbcStore.upsert(toDO(row)) == 1;
   }
 
   @Override
   public boolean delete(String pluginId) {
-    return mapper.deleteByPluginId(pluginId) == 1;
+    return pluginCredentialJdbcStore.deleteByPluginId(pluginId) == 1;
   }
 
   @Override
@@ -40,7 +40,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
     if (pluginIds.isEmpty()) {
       return 0;
     }
-    return mapper.markExpiredLeasesUncertain(pluginIds, now, error);
+    return pluginCredentialJdbcStore.markExpiredLeasesUncertain(pluginIds, now, error);
   }
 
   @Override
@@ -49,7 +49,9 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
     if (pluginIds.isEmpty()) {
       return List.of();
     }
-    return mapper.claimDue(pluginIds, now, leaseUntil, leaseToken, limit).stream()
+    return pluginCredentialJdbcStore
+        .claimDue(pluginIds, now, leaseUntil, leaseToken, limit)
+        .stream()
         .map(this::toRow)
         .toList();
   }
@@ -65,7 +67,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
       Instant nextRefreshAt,
       Instant refreshedAt,
       Instant now) {
-    return mapper.finalizeSuccess(
+    return pluginCredentialJdbcStore.finalizeSuccess(
             pluginId,
             leaseToken,
             version,
@@ -87,19 +89,20 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
       Instant nextRefreshAt,
       String error,
       Instant now) {
-    return mapper.finalizeFailure(
+    return pluginCredentialJdbcStore.finalizeFailure(
             pluginId, leaseToken, version, status.name(), nextRefreshAt, error, now)
         == 1;
   }
 
   @Override
   public boolean releaseLease(String pluginId, String leaseToken, long version, Instant now) {
-    return mapper.releaseLease(pluginId, leaseToken, version, now) == 1;
+    return pluginCredentialJdbcStore.releaseLease(pluginId, leaseToken, version, now) == 1;
   }
 
   @Override
   public boolean ownsUnexpiredLease(String pluginId, String leaseToken, long version, Instant now) {
-    return mapper.countOwnedUnexpiredLease(pluginId, leaseToken, version, now) == 1;
+    return pluginCredentialJdbcStore.countOwnedUnexpiredLease(pluginId, leaseToken, version, now)
+        == 1;
   }
 
   @Override
@@ -107,13 +110,15 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
     if (pluginIds.isEmpty()) {
       return Optional.empty();
     }
-    return Optional.ofNullable(mapper.earliestRefreshAt(pluginIds, now));
+    return Optional.ofNullable(pluginCredentialJdbcStore.earliestRefreshAt(pluginIds, now));
   }
 
   @Override
   public boolean rejectUsedCredential(
       String pluginId, long version, byte[] encryptedPayload, String error, Instant now) {
-    return mapper.rejectUsedCredential(pluginId, version, encryptedPayload, error, now) == 1;
+    return pluginCredentialJdbcStore.rejectUsedCredential(
+            pluginId, version, encryptedPayload, error, now)
+        == 1;
   }
 
   private PluginCredentialRow toRow(PluginCredentialDO row) {

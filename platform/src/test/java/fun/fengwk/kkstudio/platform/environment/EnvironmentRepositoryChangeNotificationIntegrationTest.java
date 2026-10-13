@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.mapper.EnvironmentMapper;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
@@ -44,7 +44,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   @Autowired private EnvironmentService environmentService;
   @Autowired private EnvironmentRepository environmentRepository;
   @Autowired private EnvironmentRegistry environmentRegistry;
-  @Autowired private EnvironmentMapper environmentMapper;
+  @Autowired private EnvironmentJdbcStore environmentJdbcStore;
   @Autowired private PostgresqlEnvironmentChangeNotifier notifier;
 
   /** 测试意图：Card 行写入只在事务提交后投递一次；未提交与回滚都不投递，CAS 更新与删除同样投递。 */
@@ -125,7 +125,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
           .when(failingNotifier)
           .environmentChanged(any());
       PostgresqlEnvironmentRepository failingRepository =
-          new PostgresqlEnvironmentRepository(environmentMapper, failingNotifier);
+          new PostgresqlEnvironmentRepository(environmentJdbcStore, failingNotifier);
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
       Environment created = new Environment();

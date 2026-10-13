@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
-import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.mapper.SessionBlobRefMapper;
+import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.store.SessionBlobRefJdbcStore;
 
 import java.util.List;
 import java.util.UUID;
@@ -14,25 +14,25 @@ import java.util.UUID;
 @Repository
 public class PostgresqlSessionBlobRefRepository implements SessionBlobRefRepository {
 
-  private final SessionBlobRefMapper mapper;
+  private final SessionBlobRefJdbcStore sessionBlobRefJdbcStore;
 
   @Override
   public boolean insertIfAbsent(UUID sessionId, UUID blobId) {
-    return mapper.insertIfAbsent(sessionId, blobId) == 1;
+    return sessionBlobRefJdbcStore.insertIfAbsent(sessionId, blobId) == 1;
   }
 
   @Override
   public boolean delete(UUID sessionId, UUID blobId) {
-    return mapper.delete(sessionId, blobId) == 1;
+    return sessionBlobRefJdbcStore.delete(sessionId, blobId) == 1;
   }
 
   @Override
   public boolean exists(UUID sessionId, UUID blobId) {
-    return mapper.exists(sessionId, blobId);
+    return sessionBlobRefJdbcStore.exists(sessionId, blobId);
   }
 
   @Override
   public List<UUID> listBlobIds(UUID sessionId) {
-    return mapper.listBlobIds(sessionId);
+    return sessionBlobRefJdbcStore.listBlobIds(sessionId);
   }
 }

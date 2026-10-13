@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.catalog.model.runtime;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.mapper.AgentModelMapper;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
+import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.store.AgentModelJdbcStore;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 import java.util.Objects;
@@ -17,12 +17,12 @@ import java.util.Objects;
 @Component
 public class AgentModelDefaultVariantResolver {
 
-  private final AgentModelMapper agentModelMapper;
+  private final AgentModelJdbcStore agentModelJdbcStore;
   private final AgentModelRuntimeConfigParser configParser;
 
   public AgentModelDefaultVariantResolver(
-      AgentModelMapper agentModelMapper, AgentModelRuntimeConfigParser configParser) {
-    this.agentModelMapper = Objects.requireNonNull(agentModelMapper, "agentModelMapper");
+      AgentModelJdbcStore agentModelJdbcStore, AgentModelRuntimeConfigParser configParser) {
+    this.agentModelJdbcStore = Objects.requireNonNull(agentModelJdbcStore, "agentModelJdbcStore");
     this.configParser = Objects.requireNonNull(configParser, "configParser");
   }
 
@@ -33,7 +33,7 @@ public class AgentModelDefaultVariantResolver {
     if (modelName == null || modelName.isBlank()) {
       throw new IllegalArgumentException("modelName must not be blank");
     }
-    AgentModelDO model = agentModelMapper.getByProviderNameAndName(providerName, modelName);
+    AgentModelDO model = agentModelJdbcStore.getByProviderNameAndName(providerName, modelName);
     if (model == null) {
       throw new IllegalArgumentException("unknown agent model: " + providerName + "/" + modelName);
     }

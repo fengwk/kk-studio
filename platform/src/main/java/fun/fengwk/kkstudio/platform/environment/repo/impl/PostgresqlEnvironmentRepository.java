@@ -4,8 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.mapper.EnvironmentMapper;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.model.EnvironmentDO;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 
@@ -23,55 +23,55 @@ import java.util.stream.Collectors;
 @Repository
 public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
-  private final EnvironmentMapper environmentMapper;
+  private final EnvironmentJdbcStore environmentJdbcStore;
   private final PostgresqlEnvironmentChangeNotifier notifier;
 
   @Override
   public List<Environment> listNewestFirst() {
-    return environmentMapper.listNewestFirst().stream()
+    return environmentJdbcStore.listNewestFirst().stream()
         .map(this::toModel)
         .collect(Collectors.toList());
   }
 
   @Override
   public List<Environment> listAll() {
-    return environmentMapper.listAll().stream().map(this::toModel).collect(Collectors.toList());
+    return environmentJdbcStore.listAll().stream().map(this::toModel).collect(Collectors.toList());
   }
 
   @Override
   public Environment getById(UUID id) {
-    return toModel(environmentMapper.getById(id));
+    return toModel(environmentJdbcStore.getById(id));
   }
 
   @Override
   public Environment getByName(String name) {
-    return toModel(environmentMapper.getByName(name));
+    return toModel(environmentJdbcStore.getByName(name));
   }
 
   @Override
   public Environment getByRegistrationToken(String registrationToken) {
-    return toModel(environmentMapper.getByRegistrationToken(registrationToken));
+    return toModel(environmentJdbcStore.getByRegistrationToken(registrationToken));
   }
 
   @Override
   public Environment lockById(UUID id) {
-    return toModel(environmentMapper.lockById(id));
+    return toModel(environmentJdbcStore.lockById(id));
   }
 
   @Override
   public Environment lockForKeyShare(UUID id) {
-    return toModel(environmentMapper.lockForKeyShare(id));
+    return toModel(environmentJdbcStore.lockForKeyShare(id));
   }
 
   @Override
   public boolean existsByName(String name) {
-    return environmentMapper.existsByName(name);
+    return environmentJdbcStore.existsByName(name);
   }
 
   @Override
   public boolean create(Environment environment) {
     PostgresqlEnvironmentChangeNotifier.requireTransaction();
-    boolean created = environmentMapper.insert(toDO(environment)) == 1;
+    boolean created = environmentJdbcStore.insert(toDO(environment)) == 1;
     if (created) {
       notifier.environmentChanged(environment.getId());
     }
@@ -81,7 +81,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
   @Override
   public boolean updateById(Environment environment, long expectedVersion) {
     PostgresqlEnvironmentChangeNotifier.requireTransaction();
-    boolean updated = environmentMapper.updateById(toDO(environment), expectedVersion) == 1;
+    boolean updated = environmentJdbcStore.updateById(toDO(environment), expectedVersion) == 1;
     if (updated) {
       notifier.environmentChanged(environment.getId());
     }
@@ -91,7 +91,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
     PostgresqlEnvironmentChangeNotifier.requireTransaction();
-    boolean deleted = environmentMapper.deleteById(id, expectedVersion) == 1;
+    boolean deleted = environmentJdbcStore.deleteById(id, expectedVersion) == 1;
     if (deleted) {
       // 连接行随 environment 级联删除，同一 environment 的通知已覆盖级联，不另造连接级来源。
       notifier.environmentChanged(id);

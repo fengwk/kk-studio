@@ -7,8 +7,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.mapper.AgentDefinitionMapper;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.model.AgentDefinitionDO;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.store.AgentDefinitionJdbcStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
@@ -19,54 +19,54 @@ import java.util.List;
 @Repository
 public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepository {
 
-  private final AgentDefinitionMapper agentDefinitionMapper;
+  private final AgentDefinitionJdbcStore agentDefinitionJdbcStore;
 
   @Override
   public Page<AgentDefinition> page(PageQuery pageQuery) {
     long offset = Pages.queryOffset(pageQuery);
     int limit = Pages.queryLimit(pageQuery);
-    List<AgentDefinitionDO> results = agentDefinitionMapper.page(offset, limit);
-    return Pages.page(pageQuery, results, agentDefinitionMapper.count()).map(this::convert);
+    List<AgentDefinitionDO> results = agentDefinitionJdbcStore.page(offset, limit);
+    return Pages.page(pageQuery, results, agentDefinitionJdbcStore.count()).map(this::convert);
   }
 
   @Override
   public List<AgentDefinition> listAll() {
-    return agentDefinitionMapper.listAll().stream().map(this::convert).toList();
+    return agentDefinitionJdbcStore.listAll().stream().map(this::convert).toList();
   }
 
   @Override
   public AgentDefinition getByName(String name) {
-    return convert(agentDefinitionMapper.getByName(name));
+    return convert(agentDefinitionJdbcStore.getByName(name));
   }
 
   @Override
   public AgentDefinition getByNameForUpdate(String name) {
-    return convert(agentDefinitionMapper.getByNameForUpdate(name));
+    return convert(agentDefinitionJdbcStore.getByNameForUpdate(name));
   }
 
   @Override
   public boolean existsReferencingSubagent(String name) {
-    return agentDefinitionMapper.existsReferencingSubagent(name);
+    return agentDefinitionJdbcStore.existsReferencingSubagent(name);
   }
 
   @Override
   public boolean existsReferencingSkill(String packageName, String skillName) {
-    return agentDefinitionMapper.existsReferencingSkill(packageName, skillName);
+    return agentDefinitionJdbcStore.existsReferencingSkill(packageName, skillName);
   }
 
   @Override
   public boolean create(AgentDefinition agentDefinition) {
-    return agentDefinitionMapper.insert(convert(agentDefinition)) == 1;
+    return agentDefinitionJdbcStore.insert(convert(agentDefinition)) == 1;
   }
 
   @Override
   public boolean updateByName(AgentDefinition agentDefinition, long expectedVersion) {
-    return agentDefinitionMapper.updateByName(convert(agentDefinition), expectedVersion) == 1;
+    return agentDefinitionJdbcStore.updateByName(convert(agentDefinition), expectedVersion) == 1;
   }
 
   @Override
   public boolean deleteByName(String name, long expectedVersion) {
-    return agentDefinitionMapper.deleteByName(name, expectedVersion) == 1;
+    return agentDefinitionJdbcStore.deleteByName(name, expectedVersion) == 1;
   }
 
   private AgentDefinitionDO convert(AgentDefinition definition) {

@@ -38,7 +38,7 @@ public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
     assertNotNull(stored);
     assertEquals(name, stored.getName());
     assertEquals(ProviderType.OPENAI, stored.getProviderType());
-    // Repository 必须显式写入稳定 wire 值，不能依赖 MyBatis enum name 转换。
+    // Repository 必须显式写入稳定 wire 值，不做隐式 enum 名称转换。
     assertEquals(
         "openai",
         jdbc.queryForObject(
