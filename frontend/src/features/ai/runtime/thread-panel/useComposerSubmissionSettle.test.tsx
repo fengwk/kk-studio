@@ -22,7 +22,6 @@ function upload(localId: string, overrides: Partial<AttachmentUpload> = {}): Att
     sha256: null,
     status: 'ready',
     progress: 1,
-    error: null,
     previewUrl: null,
     detached: false,
     ...overrides,

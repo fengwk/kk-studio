@@ -54,7 +54,7 @@ describe('ThreadComposer and commands', () => {
       'goal',
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
-    expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
+    expect(THREAD_COMMANDS.some((c) => (c.id as string) === 'session')).toBe(false)
     // 命令可用性只由目标 kind 与显式能力决定，不再接受 owner 选项。
     const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
@@ -75,7 +75,7 @@ describe('ThreadComposer and commands', () => {
     expect(blank.find((c) => c.id === 'compact')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'rename-session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'rename-thread')?.disabled).toBe(true)
-    expect(threadCommandsForTarget({ kind: 'BOUND_THREAD' }).every((c) => !c.disabled)).toBe(true)
+    expect(threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 'thread-1' }).every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop', 'history'])
     expect(filterThreadCommands('hist')[0]?.id).toBe('history')
@@ -307,8 +307,11 @@ describe('ThreadComposer and commands', () => {
             },
           ],
           yoloEnabled: false,
+          environmentName: null,
+          environments: [],
           onModelChange: vi.fn(),
           onYoloChange: vi.fn(),
+          onEnvironmentChange: vi.fn(),
         }}
       />,
     )
@@ -356,8 +359,11 @@ describe('ThreadComposer and commands', () => {
             },
           ],
           yoloEnabled: false,
+          environmentName: null,
+          environments: [],
           onModelChange,
           onYoloChange,
+          onEnvironmentChange: vi.fn(),
         }}
       />,
     )
@@ -404,8 +410,11 @@ describe('ThreadComposer and commands', () => {
             },
           ],
           yoloEnabled: false,
+          environmentName: null,
+          environments: [],
           onModelChange: vi.fn(),
           onYoloChange: vi.fn(),
+          onEnvironmentChange: vi.fn(),
         }}
       />,
     )
