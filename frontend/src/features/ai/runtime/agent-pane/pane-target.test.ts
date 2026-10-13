@@ -998,7 +998,11 @@ describe('PaneTarget durable-local FSM', () => {
       expect(loaded).toBeDefined()
       // 刷新恢复时：因原本 unknownOutcome=false，load 自动将其标为 true，并回写 storage
       expect(loaded?.unknownOutcome).toBe(true)
-      expect(loaded?.request.commands[0]?.contents).toHaveLength(3)
+      const firstCommand = loaded?.request.commands[0]
+      expect(firstCommand?.type).toBe('USER_MESSAGE')
+      if (firstCommand?.type === 'USER_MESSAGE') {
+        expect(firstCommand.contents).toHaveLength(3)
+      }
 
       // Fail-closed 存储校验：当存储写入验证失败时抛出错误
       const faultyStorage: Storage = {

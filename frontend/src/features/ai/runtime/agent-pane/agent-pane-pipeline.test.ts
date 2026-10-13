@@ -47,6 +47,7 @@ const thread: HarnessThreadDTO = {
     agentName: 'assistant',
     model: { providerName: 'provider', modelName: 'model', variant: 'default' },
     environmentName: null,
+    goal: null,
   },
   createTime: null,
   updateTime: null,
@@ -234,7 +235,7 @@ describe('AgentPane acceptance pipeline', () => {
       [createTextPart('frozen')],
       [createTextPart('new input')],
     )
-    expect(result.map((part) => part.type === 'text' ? part.text : part.uploadId)).toEqual([
+    expect(result.map((part) => part.type === 'text' ? part.text : part.type === 'attachment' ? part.uploadId : part.blobId)).toEqual([
       'frozen',
       'new input',
     ])

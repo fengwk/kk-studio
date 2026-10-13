@@ -121,7 +121,7 @@ describe('createRealtimeFrameScheduler', () => {
   })
 
   it('cancels scheduled frame and prevents flush from executing on stale frame', () => {
-    let frameCb: FrameRequestCallback | null = null
+    let frameCb!: FrameRequestCallback
     const raf = vi.fn((cb: FrameRequestCallback) => {
       frameCb = cb
       return 50
@@ -136,9 +136,7 @@ describe('createRealtimeFrameScheduler', () => {
     expect(caf).toHaveBeenCalledWith(50)
 
     // 即使底层回调被异常触发，generation fence 也会丢弃
-    if (frameCb) {
-      frameCb(performance.now())
-    }
+    frameCb(performance.now())
     expect(onFlush).not.toHaveBeenCalled()
   })
 

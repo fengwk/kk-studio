@@ -10,7 +10,7 @@ import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types
 
 function attachment(overrides: Partial<ToolAttachment> = {}): ToolAttachment {
   return {
-    id: 'a1',
+    data: '',
     name: 'report.pdf',
     mime: 'application/pdf',
     type: 'file',

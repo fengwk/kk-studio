@@ -101,7 +101,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     expect(submittedBody.declined).toBe(false)
     expect(submittedBody.submissionId).toBeDefined()
     // 验证后端禁止的 actor 绝对不存在
-    expect((submittedBody as Record<string, unknown>).actor).toBeUndefined()
+    expect('actor' in submittedBody).toBe(false)
 
     // 验证 answers：按题目位置对应的一维数组，多选包含选项与自定义，第三题为纯自定义
     expect(submittedBody.answers).toEqual([
@@ -229,6 +229,10 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       toolName: 'bash',
       rendererKey: 'tool',
       environmentId: null,
+      requiredEnvironmentId: null,
+      waitingForEnvironment: false,
+      requiredEnvironmentName: null,
+      environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"rm -rf /"}',
       approvalJson: '{"required":true}',
       resultJson: null,

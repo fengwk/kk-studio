@@ -4,12 +4,14 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
+  AgentCommandBatchResponseDTO,
   HarnessCancelledInputDTO,
   HarnessStoppedThreadReceiptDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopResultDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { useAgentThreadController } from '@/features/ai/runtime/useAgentThreadController'
@@ -111,10 +113,11 @@ function clientWrapper(client: QueryClient) {
   }
 }
 
-const assistantAgentEntry = {
+const assistantAgentEntry: AgentDefinitionDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
+  type: 'USER',
   model: 'minimax/MiniMax',
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
@@ -147,6 +150,7 @@ function threadFixture(
         variant: 'default',
       },
       environmentName: null,
+      goal: null,
     },
     createTime: null,
     updateTime: null,
@@ -166,8 +170,29 @@ function snapshotOf(
     modelInvocation: null,
     toolInvocations: [],
     modelAttemptFailures: [],
+    manualCompaction: {
+      available: false,
+      disabledReason: null,
+    },
     stopReceipts: [],
     ...extras,
+  }
+}
+
+function acceptedResponse(currentThread = threadFixture()): AgentCommandBatchResponseDTO {
+  return {
+    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: null },
+    rootEntry: {
+      entryId: 'root-1',
+      sessionId: currentThread.sessionId,
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    },
+    thread: currentThread,
+    acceptedCommands: [],
+    replayed: false,
   }
 }
 
@@ -280,7 +305,7 @@ describe('useAgentThreadController draft restore', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) =>
       snapshotOf(threadFixture({ threadId })))
-    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue([])
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'STOPPED',
       thread: threadFixture(),

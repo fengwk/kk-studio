@@ -21,6 +21,7 @@ import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 const model: AgentModelDTO = {
   providerName: 'provider',
   name: 'model',
+  modelId: 'model',
   description: null,
   config: {
     limit: { context: 32_000, output: 4_000 },
@@ -70,9 +71,15 @@ function agent(
     name: 'root',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'provider/model',
     variant: null,
-    config: { inheritParentEnvironment: true, tools, skills, subagents },
+    config: {
+      inheritParentEnvironment: true,
+      tools,
+      skills: skills.map((name) => ({ packageName: 'default', name })),
+      subagents,
+    },
     version: '1',
     createTime: '2026-08-09T00:00:00Z',
     updateTime: '2026-08-09T00:00:00Z',
@@ -181,6 +188,7 @@ describe('BranchDraft conversion and diff semantics', () => {
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
+      goal: null,
     }
   }
 
@@ -450,7 +458,8 @@ describe('BranchDraft conversion and diff semantics', () => {
       idempotencyKey: 'cid-3',
       environmentName: 'new-env',
     })
-    expect(commands.some((command) => command.type === 'SET_YOLO')).toBe(false)
+    const commandTypes: string[] = commands.map((command) => command.type)
+    expect(commandTypes).not.toContain('SET_YOLO')
   })
 })
 

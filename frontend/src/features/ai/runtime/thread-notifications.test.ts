@@ -18,12 +18,11 @@ function toolMessage(
     subjectEntryId: 'assistant-1',
     createdAt: null,
     phase: 'call',
-    text: '',
+    contents: [],
     toolCallId: 'call-1',
     toolName: 'bash',
     rendererKey: 'bash',
     arguments: '{}',
-    attachments: [],
     invocationId: '10',
     ...overrides,
   }

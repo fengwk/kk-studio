@@ -28,15 +28,17 @@ import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
+  AgentCommandBatchResponseDTO,
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
   HarnessSessionEntryDTO,
-  HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopResultDTO,
+  ManualCompactionResponseDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 
 /** 控制器 Thread id：资源订阅经严格 codec，必须是 canonical UUID。 */
@@ -78,6 +80,7 @@ function branchSettings(
     agentName: 'assistant',
     model: modelSelection(),
     environmentName: null,
+    goal: null,
     ...overrides,
   }
 }
@@ -118,15 +121,63 @@ function snapshotOf(
     modelInvocation: null,
     toolInvocations: [],
     modelAttemptFailures: [],
+    manualCompaction: {
+      available: false,
+      disabledReason: 'Thread snapshot is not loaded',
+    },
     stopReceipts: [],
     ...extras,
   }
 }
 
-const assistantAgentEntry = {
+function acceptedResponse(currentThread = threadFixture()): AgentCommandBatchResponseDTO {
+  return {
+    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: null },
+    rootEntry: {
+      entryId: 'root-1',
+      sessionId: currentThread.sessionId,
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    },
+    thread: currentThread,
+    acceptedCommands: [],
+    replayed: false,
+  }
+}
+
+function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
+  return {
+    id: 'tool-1',
+    modelInvocationId: 'm1',
+    assistantEntryId: 'a1',
+    callIndex: 0,
+    status: 'APPROVED',
+    attempt: 1,
+    toolCallId: 'call-1',
+    toolName: 'demo',
+    rendererKey: 'demo',
+    environmentId: null,
+    requiredEnvironmentId: null,
+    waitingForEnvironment: false,
+    requiredEnvironmentName: null,
+    environmentWaitFreshnessAt: null,
+    argumentsJson: '{}',
+    approvalJson: '{}',
+    resultJson: null,
+    errorJson: null,
+    createTime: null,
+    updateTime: null,
+    ...overrides,
+  }
+}
+
+const assistantAgentEntry: AgentDefinitionDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
+  type: 'USER',
   model: 'minimax/MiniMax',
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
@@ -190,6 +241,7 @@ describe('useAgentThreadController', () => {
         {
           providerName: 'minimax',
           name: 'MiniMax',
+          modelId: 'MiniMax',
           description: null,
           config: {
             limit: { context: 128000, output: 8192 },
@@ -218,7 +270,7 @@ describe('useAgentThreadController', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(threadFixture()))
     vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
-      [] as HarnessThreadCommandDTO[],
+      acceptedResponse(),
     )
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'STOPPED',
@@ -226,25 +278,7 @@ describe('useAgentThreadController', () => {
       stoppedThreads: [],
     } as HarnessThreadStopResultDTO)
     vi.mocked(harnessService.decideApproval).mockImplementation(
-      async (_threadId, invocationId) =>
-        ({
-          id: invocationId,
-          modelInvocationId: 'm1',
-          assistantEntryId: 'a1',
-          callIndex: 0,
-          status: 'APPROVED',
-          attempt: 1,
-          toolCallId: 'call-1',
-          toolName: 'demo',
-          rendererKey: 'demo',
-          environmentId: null,
-          argumentsJson: '{}',
-          approvalJson: '{}',
-          resultJson: null,
-          errorJson: null,
-          createTime: null,
-          updateTime: null,
-        }) satisfies ToolInvocationDTO,
+      async (_threadId, invocationId) => toolInvocationFixture({ id: invocationId }),
     )
   })
 
@@ -334,7 +368,7 @@ describe('useAgentThreadController', () => {
     expect(result.current.conflict?.detail).toContain('expected version mismatch')
     // 失效 snapshot 查询，以重新拉取当前 version。
     await waitFor(() =>
-      expect(harnessService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(
+      expect(vi.mocked(harnessService.getThreadSnapshot).mock.calls.length).toBeGreaterThan(
         snapshotCallsBefore,
       ),
     )
@@ -384,7 +418,7 @@ describe('useAgentThreadController', () => {
           { reason: 'STALE_COMMAND_CURSOR' },
         ),
       )
-      .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+      .mockResolvedValueOnce(acceptedResponse(advancedThread))
     const base = branchDraftFromThread(currentThread)
 
     const { result } = renderHook(
@@ -588,7 +622,7 @@ describe('useAgentThreadController', () => {
     const draft = base
     vi.mocked(harnessService.acceptThreadCommandBatch)
       .mockRejectedValueOnce(new Error('queue full'))
-      .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+      .mockResolvedValueOnce(acceptedResponse(currentThread))
 
     const { result } = renderHook(
       () =>
@@ -640,7 +674,7 @@ describe('useAgentThreadController', () => {
       .mockRejectedValueOnce(new Error('queue full'))
       .mockImplementationOnce(async () => {
         projectionApplied = true
-        return [] as HarnessThreadCommandDTO[]
+        return acceptedResponse(currentThread)
       })
 
     const { result } = renderHook(
@@ -678,7 +712,7 @@ describe('useAgentThreadController', () => {
     const draft = base
     vi.mocked(harnessService.acceptThreadCommandBatch)
       .mockRejectedValueOnce(new Error('queue full'))
-      .mockResolvedValue([] as HarnessThreadCommandDTO[])
+      .mockResolvedValue(acceptedResponse(currentThread))
 
     const { result } = renderHook(
       () =>
@@ -1108,24 +1142,7 @@ describe('useAgentThreadController', () => {
   it('decides approval with a stable decisionId per invocation across a retry', async () => {
     vi.mocked(harnessService.decideApproval)
       .mockRejectedValueOnce(new Error('network unavailable'))
-      .mockResolvedValueOnce({
-        id: 'tool-1',
-        modelInvocationId: 'm1',
-        assistantEntryId: 'a1',
-        callIndex: 0,
-        status: 'APPROVED',
-        attempt: 1,
-        toolCallId: 'call-1',
-        toolName: 'demo',
-        rendererKey: 'demo',
-        environmentId: null,
-        argumentsJson: '{}',
-        approvalJson: '{}',
-        resultJson: null,
-        errorJson: null,
-        createTime: null,
-        updateTime: null,
-      } as ToolInvocationDTO)
+      .mockResolvedValueOnce(toolInvocationFixture({ id: 'tool-1' }))
 
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1180,24 +1197,9 @@ describe('useAgentThreadController', () => {
   it('relays child-thread approvals to the target thread with an isolated replay key', async () => {
     vi.mocked(harnessService.decideApproval)
       .mockRejectedValueOnce(new Error('network unavailable'))
-      .mockResolvedValueOnce({
-        id: 'tool-child',
-        modelInvocationId: 'm1',
-        assistantEntryId: 'a1',
-        callIndex: 0,
-        status: 'APPROVED',
-        attempt: 1,
-        toolCallId: 'call-1',
-        toolName: 'bash',
-        rendererKey: 'bash',
-        environmentId: null,
-        argumentsJson: '{}',
-        approvalJson: '{}',
-        resultJson: null,
-        errorJson: null,
-        createTime: null,
-        updateTime: null,
-      } as ToolInvocationDTO)
+      .mockResolvedValueOnce(
+        toolInvocationFixture({ id: 'tool-child', toolName: 'bash', rendererKey: 'bash' }),
+      )
 
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1257,7 +1259,7 @@ describe('useAgentThreadController', () => {
       await result.current.stopThread()
     })
     await waitFor(() =>
-      expect(harnessService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(initialCalls),
+      expect(vi.mocked(harnessService.getThreadSnapshot).mock.calls.length).toBeGreaterThan(initialCalls),
     )
   })
 
@@ -1271,9 +1273,9 @@ describe('useAgentThreadController', () => {
           name: 'assistant',
           description: null,
           systemPrompt: null,
+          type: 'USER',
           model: 'minimax/MiniMax',
           variant: 'default',
-          environmentId: 'env-local',
           config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
           version: '1',
           createTime: null,
@@ -1367,7 +1369,9 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
       new ApiError('conflict', 409, 'CONFLICT'),
     )
-    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValueOnce([])
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValueOnce(
+      acceptedResponse(currentThread),
+    )
     const base = branchDraftFromThread(currentThread)
 
     const { result } = renderHook(
@@ -1562,15 +1566,15 @@ describe('useAgentThreadController', () => {
   })
 
   it('blocks overlapping in-flight submission and prevents second submit from overwriting first pending', async () => {
-    let releaseFirst!: (val: HarnessThreadCommandDTO[]) => void
+    let releaseFirst!: (val: AgentCommandBatchResponseDTO) => void
     vi.mocked(harnessService.acceptThreadCommandBatch)
       .mockImplementationOnce(
         () =>
-          new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+          new Promise<AgentCommandBatchResponseDTO>((resolve) => {
             releaseFirst = resolve
           }),
       )
-      .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+      .mockResolvedValueOnce(acceptedResponse())
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
@@ -1599,7 +1603,7 @@ describe('useAgentThreadController', () => {
 
     // 释放首个请求成功返回
     await act(async () => {
-      releaseFirst([] as HarnessThreadCommandDTO[])
+      releaseFirst(acceptedResponse(currentThread))
     })
     await waitFor(() => expect(result.current.pending).toBe(false))
 
@@ -1803,7 +1807,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.compactThread).mockResolvedValue({
       thread: threadFixture({ version: '1' }),
       turnStartEntryId: 't1',
-      modelInvocationId: null,
+      childThreadId: null,
     })
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -1879,7 +1883,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.compactThread).mockResolvedValue({
       thread: threadFixture(),
       turnStartEntryId: 't1',
-      modelInvocationId: null,
+      childThreadId: null,
     })
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -2042,12 +2046,12 @@ describe('useAgentThreadController', () => {
     const baseB = branchDraftFromThread(threadB)
 
     let resolveSendA!: () => void
-    const sendPromiseA = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
-      resolveSendA = () => resolve([])
+    const sendPromiseA = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      resolveSendA = () => resolve(acceptedResponse(threadA))
     })
     let resolveSendB!: () => void
-    const sendPromiseB = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
-      resolveSendB = () => resolve([])
+    const sendPromiseB = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      resolveSendB = () => resolve(acceptedResponse(threadB))
     })
 
     vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation(async (threadId) => {
@@ -2126,7 +2130,7 @@ describe('useAgentThreadController', () => {
     })
 
     let rejectSendA!: (err: unknown) => void
-    const sendPromiseA = new Promise<HarnessThreadCommandDTO[]>((_resolve, reject) => {
+    const sendPromiseA = new Promise<AgentCommandBatchResponseDTO>((_resolve, reject) => {
       rejectSendA = reject
     })
 
@@ -2134,7 +2138,7 @@ describe('useAgentThreadController', () => {
       if (threadId === THREAD_ID) {
         return sendPromiseA
       }
-      return []
+      return acceptedResponse(threadB)
     })
 
     const { result, rerender } = renderHook(
@@ -2192,7 +2196,7 @@ describe('useAgentThreadController', () => {
     })
 
     let rejectSendA!: (err: unknown) => void
-    const sendPromiseA = new Promise<HarnessThreadCommandDTO[]>((_resolve, reject) => {
+    const sendPromiseA = new Promise<AgentCommandBatchResponseDTO>((_resolve, reject) => {
       rejectSendA = reject
     })
 
@@ -2200,7 +2204,7 @@ describe('useAgentThreadController', () => {
       if (threadId === THREAD_ID) {
         return sendPromiseA
       }
-      return []
+      return acceptedResponse(threadB)
     })
 
     const { result, rerender } = renderHook(
@@ -2289,7 +2293,7 @@ describe('useAgentThreadController', () => {
 
     // 第一次 acceptThreadCommandBatch 抛出 STALE_COMMAND_CURSOR
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
-      new ApiError(409, 'STALE_COMMAND_CURSOR', 'stale cursor'),
+      new ApiError('stale cursor', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
     )
 
     act(() => result.current.setDraft([createTextPart('retry msg')]))
@@ -2325,12 +2329,12 @@ describe('useAgentThreadController', () => {
     })
 
     let resolveSendEpoch0!: () => void
-    const sendPromiseEpoch0 = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
-      resolveSendEpoch0 = () => resolve([])
+    const sendPromiseEpoch0 = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      resolveSendEpoch0 = () => resolve(acceptedResponse(threadA))
     })
     let resolveSendEpoch2!: () => void
-    const sendPromiseEpoch2 = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
-      resolveSendEpoch2 = () => resolve([])
+    const sendPromiseEpoch2 = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      resolveSendEpoch2 = () => resolve(acceptedResponse(threadA))
     })
 
     let callCount = 0
@@ -2426,12 +2430,12 @@ describe('useAgentThreadController', () => {
     })
 
     let rejectSendEpoch0!: (err: unknown) => void
-    const sendPromiseEpoch0 = new Promise<HarnessThreadCommandDTO[]>((_resolve, reject) => {
+    const sendPromiseEpoch0 = new Promise<AgentCommandBatchResponseDTO>((_resolve, reject) => {
       rejectSendEpoch0 = reject
     })
     let resolveSendEpoch2!: () => void
-    const sendPromiseEpoch2 = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
-      resolveSendEpoch2 = () => resolve([])
+    const sendPromiseEpoch2 = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      resolveSendEpoch2 = () => resolve(acceptedResponse(threadA))
     })
 
     let callCount = 0
@@ -2552,8 +2556,8 @@ describe('useAgentThreadController', () => {
       })
     })
 
-    let resolveCompactEpoch0!: (res: unknown) => void
-    const compactPromiseEpoch0 = new Promise((resolve) => {
+    let resolveCompactEpoch0!: (res: ManualCompactionResponseDTO) => void
+    const compactPromiseEpoch0 = new Promise<ManualCompactionResponseDTO>((resolve) => {
       resolveCompactEpoch0 = resolve
     })
 
@@ -2561,16 +2565,12 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.compactThread).mockImplementation(async () => {
       compactCallCount += 1
       if (compactCallCount === 1) {
-        return compactPromiseEpoch0 as Promise<{
-          thread: typeof threadA
-          turnStartEntryId: string
-          modelInvocationId: string | null
-        }>
+        return compactPromiseEpoch0
       }
       return {
         thread: threadFixture({ threadId: THREAD_ID, version: '1' }),
         turnStartEntryId: 't1',
-        modelInvocationId: null,
+        childThreadId: null,
       }
     })
 
@@ -2607,7 +2607,7 @@ describe('useAgentThreadController', () => {
       resolveCompactEpoch0({
         thread: threadFixture({ threadId: THREAD_ID, version: '1' }),
         turnStartEntryId: 't1',
-        modelInvocationId: null,
+        childThreadId: null,
       })
       await compactActionEpoch0
     })
@@ -2639,14 +2639,12 @@ describe('useAgentThreadController', () => {
       if (callIndex === 2) {
         throw new TypeError('network failed in epoch 2')
       }
-      return {
-        invocationId: 'inv-1',
+      return toolInvocationFixture({
+        id: 'inv-1',
         toolName: 'test',
-        input: {},
-        output: null,
-        error: null,
-        approval: { decision: 'ALLOW', decisionId: body.decisionId, reason: null },
-      }
+        rendererKey: 'test',
+        approvalJson: JSON.stringify({ decision: 'ALLOW', decisionId: body.decisionId, reason: null }),
+      })
     })
 
     const { result, rerender } = renderHook(
@@ -2679,14 +2677,14 @@ describe('useAgentThreadController', () => {
 
     // 4. 此时 epoch 0 的旧审批成功返回
     await act(async () => {
-      resolveApprovalEpoch0({
-        invocationId: 'inv-1',
-        toolName: 'test',
-        input: {},
-        output: null,
-        error: null,
-        approval: { decision: 'ALLOW', decisionId: decisionIdEpoch0, reason: null },
-      })
+      resolveApprovalEpoch0(
+        toolInvocationFixture({
+          id: 'inv-1',
+          toolName: 'test',
+          rendererKey: 'test',
+          approvalJson: JSON.stringify({ decision: 'ALLOW', decisionId: decisionIdEpoch0, reason: null }),
+        }),
+      )
       await approvalActionEpoch0
     })
 

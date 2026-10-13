@@ -8,7 +8,7 @@ import { setLocale } from '@/shared/i18n'
  * 逐字文案由 catalog 拥有（新 key 见交付报告），此处只验证 Footer 的接线与结构；
  * 文案组合本身在 thread-status-format.test.ts 用注入式 t 做确定性验证。
  */
-function hoverLines(element: HTMLElement): string[] {
+function hoverLines(element: Element): string[] {
   return (element.getAttribute('title') ?? '').split('\n')
 }
 

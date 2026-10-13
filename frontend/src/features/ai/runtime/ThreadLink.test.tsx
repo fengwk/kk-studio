@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -78,7 +78,7 @@ describe('ThreadLink', () => {
     renderLink({ observe })
 
     await user.keyboard('{Meta>}')
-    await user.click(screen.getByRole('link', { name: 'child link' }), modifiers)
+    fireEvent.click(screen.getByRole('link', { name: 'child link' }), modifiers)
     await user.keyboard('{/Meta}')
     expect(observe).not.toHaveBeenCalled()
   })
