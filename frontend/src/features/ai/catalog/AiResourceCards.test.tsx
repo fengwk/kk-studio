@@ -50,7 +50,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     config: {
       inheritParentEnvironment: true,
       tools: ['read', 'bash', 'grep'],
-      skills: ['dev'],
+      skills: [{ packageName: 'default', name: 'dev' }],
       subagents: ['writer'],
     },
     version: '1',
@@ -233,10 +233,11 @@ describe('AI resource cards', () => {
     expect(screen.getByText('prompt')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除 assistant' })).toBeDisabled()
 
+    // 回归测试：验证 Agent 卡片在引用模型的 providerName 异常为 null 时的回退展示
     rerender(
       <AgentResourceCard
         agent={agent({ description: null, systemPrompt: null })}
-        models={[model({ providerName: null })]}
+        models={[model({ providerName: null as unknown as string })]}
         onEdit={() => undefined}
         onDelete={() => undefined}
         deletePending={false}
@@ -262,10 +263,11 @@ describe('AI resource cards', () => {
     expect(screen.getAllByText('quality')).toHaveLength(2)
     expect(screen.getByText('+1')).toBeInTheDocument()
 
+    // 回归测试：验证孤立模型（providerName 为 null）及边界空值展示
     rerender(
       <ModelResourceCard
         model={model({
-          providerName: null,
+          providerName: null as unknown as string,
           description: null,
           config: {
             ...model().config,

@@ -384,9 +384,10 @@ describe('ai-model-draft-codec', () => {
     expect(extractDefaultVariantFromModel(undefined)).toBe('')
   })
 
-  /** 不完整的 wire model 不得让列表/过滤投影崩溃。 */
+  /** 边界/容错回归：不完整的 wire model（缺失结构化 config 的不可信输入）不得让列表/过滤投影崩溃。 */
   it('tolerates models whose structured config is missing', () => {
-    const incomplete = { id: '1', name: 'broken' } as AgentModelDTO
+    // 显式构造缺失 config 的畸形模型，验证客户端防御
+    const incomplete = { name: 'broken', providerName: 'broken' } as unknown as AgentModelDTO
     expect(extractVariantIdsFromModel(incomplete)).toEqual([])
     expect(extractDefaultVariantFromModel(incomplete)).toBe('')
     expect(extractContextWindow(incomplete)).toBeUndefined()

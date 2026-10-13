@@ -12,6 +12,7 @@ function model(): AgentModelDTO {
   return {
     providerName: 'minimax',
     name: 'model',
+    modelId: 'model-id',
     description: null,
     config: {
       limit: { context: 128000, output: 8192 },

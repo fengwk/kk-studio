@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
-import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
+import type { ModelDraft, ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import {
   validateResourceDraft,
 } from '@/features/ai/catalog/ai-resource-form-validation'
@@ -29,7 +29,7 @@ function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   }
 }
 
-function providerDraft() {
+function providerDraft(): ProviderDraft {
   return {
     name: 'p',
     description: '',
@@ -94,11 +94,13 @@ describe('ai-resource-form-validation', () => {
               draftId: 'variant-default',
               id: 'fast',
               reasoningEffort: '',
+              protocolOptionsJson: '',
             },
             {
               draftId: 'variant-2',
               id: 'creative',
               reasoningEffort: '',
+              protocolOptionsJson: '',
             },
           ],
         }),
@@ -122,6 +124,7 @@ describe('ai-resource-form-validation', () => {
               draftId: 'variant-x',
               id: 'medium',
               reasoningEffort: '',
+              protocolOptionsJson: '',
             },
           ],
         }),
@@ -136,7 +139,7 @@ describe('ai-resource-form-validation', () => {
   it('does not mutate the model draft while validating', () => {
     const modelDraft = draft({
       reasoning: true,
-      variants: [{ draftId: 'variant-x', id: 'medium', reasoningEffort: '' }],
+      variants: [{ draftId: 'variant-x', id: 'medium', reasoningEffort: '', protocolOptionsJson: '' }],
     })
     const snapshot = JSON.stringify(modelDraft)
     const result = validateResourceDraft(
