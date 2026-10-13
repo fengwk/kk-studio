@@ -8,6 +8,7 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -32,6 +33,8 @@ public final class ToolResultJsonCodec {
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // JSON number 按 BigDecimal 读回，避免 1e309 变成 Infinity、1e-324 下溢成 0 或高精度 decimal 丢精度。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
   private static final List<String> RESOURCE_BASE_FIELDS =
       List.of("type", "uri", "mediaType", "name", "size", "sha256");
@@ -143,8 +146,8 @@ public final class ToolResultJsonCodec {
   }
 
   /**
-   * 用严格 parser（重复字段 / 尾随内容约束）解析单个 JSON 值/对象并流式复制到 {@code generator}：逐 token 复制，不构建中间树， 输出与 {@link
-   * #encode} 的树序列化保持相同转义/数字语义；超过输出上限由 bounded 输出流在复制点中止。
+   * 用严格 parser（重复字段 / 尾随内容约束）解析单个 JSON 值/对象并流式复制到 {@code generator}：逐 token exact 复制，不构建中间树， 数字按同一
+   * BigDecimal profile 原样写出，输出与 {@link #encode} 的树序列化保持相同转义/数字语义；超过输出上限由 bounded 输出流在复制点中止。
    */
   private static void copyRawJson(
       JsonGenerator generator, String rawJson, String name, boolean requireObject) {
@@ -156,7 +159,7 @@ public final class ToolResultJsonCodec {
       if (requireObject && token != JsonToken.START_OBJECT) {
         throw new IllegalArgumentException(name + " must be an object");
       }
-      generator.copyCurrentStructure(parser);
+      generator.copyCurrentStructureExact(parser);
       if (parser.nextToken() != null) {
         throw new IllegalArgumentException(name + " has trailing content");
       }
