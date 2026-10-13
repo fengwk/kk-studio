@@ -20,7 +20,10 @@ function fakeClient() {
   }
 }
 
-function pendingUpload(id: string, overrides: Partial<StorageUploadDTO> = {}): StorageUploadDTO {
+function pendingUpload(
+  id: string,
+  overrides: Partial<Extract<StorageUploadDTO, { state: 'PENDING' }>> = {},
+): Extract<StorageUploadDTO, { state: 'PENDING' }> {
   return {
     id,
     state: 'PENDING',

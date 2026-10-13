@@ -28,30 +28,31 @@ import type {
 setLocale('zh-CN')
 
 const INITIAL_PANE_STATE: ChatPaneState = {
-  activePaneId: 'pane-1',
+  focusedPaneId: 'pane-1',
   layout: 'split-2',
   panes: [
-    { id: 'pane-1', threadId: 'thread-1', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-2', threadId: 'thread-2', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-3', threadId: 'thread-3', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-4', threadId: 'thread-4', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-5', threadId: 'thread-5', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-6', threadId: 'thread-6', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-7', threadId: 'thread-7', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-8', threadId: 'thread-8', agentId: 'agent-1', environmentName: 'production' },
-    { id: 'pane-9', threadId: 'thread-9', agentId: 'agent-1', environmentName: 'production' },
+    { id: 'pane-1' },
+    { id: 'pane-2' },
+    { id: 'pane-3' },
+    { id: 'pane-4' },
+    { id: 'pane-5' },
+    { id: 'pane-6' },
+    { id: 'pane-7' },
+    { id: 'pane-8' },
+    { id: 'pane-9' },
   ],
 }
 
 const SAMPLE_USER_MESSAGE: TextDialogueMessage = {
   id: 'msg-user-1',
+  subjectEntryId: null,
   role: 'user',
   text: '首行文字内容',
   createdAt: 1000,
   contents: [
     { type: 'text', text: '首行文字内容' },
     {
-      type: 'attachment',
+      type: 'resource',
       attachment: {
         type: 'image',
         name: 'test-preview.png',
@@ -78,6 +79,7 @@ const SAMPLE_TURN_USAGE: TurnUsage = {
 
 const SAMPLE_TURN_USAGE_MESSAGE: MetaDialogueMessage = {
   id: 'msg-turn-usage-1',
+  subjectEntryId: null,
   role: 'meta',
   kind: 'turn_usage',
   text: formatTurnUsageText(SAMPLE_TURN_USAGE),

@@ -1,5 +1,5 @@
-import { expect, test, type Page, type Route } from './fixture'
-import type { WebSocketRoute } from '@playwright/test'
+import { expect, test, type Page } from './fixture'
+import type { Route, WebSocketRoute } from '@playwright/test'
 
 /**
  * 新建分支流程真实浏览器回归（独立基座、独立端口 5184）。
