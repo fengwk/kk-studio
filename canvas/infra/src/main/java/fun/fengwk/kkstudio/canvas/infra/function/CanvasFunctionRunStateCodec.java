@@ -1,14 +1,18 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
@@ -65,13 +69,20 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           "height",
           "durationMs");
 
-  private final ObjectMapper mapper;
-
-  public CanvasFunctionRunStateCodec(ObjectMapper objectMapper) {
-    mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
-    mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    mapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder(
+              JsonFactory.builder()
+                  // 只把 number 预算对齐 CanvasJson；其余读取限制保持 Jackson 默认，不抬高无关上限。
+                  .streamReadConstraints(
+                      StreamReadConstraints.builder()
+                          .maxNumberLength(CanvasJson.MAX_LENGTH)
+                          .build())
+                  .build())
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // 与 CanvasJson 一致：浮点按 BigDecimal 读回，避免高精度/极值 args 退化成 double、下溢或 Infinity。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   @Override
   public String initial(CanvasFunctionFrozenRun run) {
@@ -81,7 +92,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   @Override
   public String encode(CanvasFunctionFrozenRun run) {
     validateStage(run.stage());
-    ObjectNode root = mapper.createObjectNode();
+    ObjectNode root = MAPPER.createObjectNode();
     root.put("version", VERSION);
     ObjectNode plan = root.putObject("plan");
     plan.put("canvasId", run.canvasId().toString());
@@ -115,19 +126,19 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     }
     plan.put("submitState", run.submitState().name());
     root.put("stage", run.stage());
-    JsonNode adapterState = mapper.valueToTree(run.adapterState());
+    JsonNode adapterState = MAPPER.valueToTree(run.adapterState());
     if (!adapterState.isObject()) {
       throw new IllegalArgumentException("adapterState must be a JSON object");
     }
     root.set("adapterState", adapterState);
     try {
-      byte[] adapterBytes = mapper.writeValueAsBytes(adapterState);
+      byte[] adapterBytes = MAPPER.writeValueAsBytes(adapterState);
       if (adapterBytes.length > MAX_ADAPTER_STATE_BYTES) {
         throw new IllegalArgumentException(
             "adapterState must be at most " + MAX_ADAPTER_STATE_BYTES + " bytes");
       }
-      return mapper.writeValueAsString(root);
-    } catch (JsonProcessingException exception) {
+      return MAPPER.writeValueAsString(root);
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("adapterState must be JSON serializable", exception);
     }
   }
@@ -136,7 +147,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   public CanvasFunctionFrozenRun decode(String json, CanvasFunctionDefinition definition) {
     Objects.requireNonNull(definition, "definition");
     try {
-      ObjectNode root = object(mapper.readTree(json), "state");
+      ObjectNode root = object(MAPPER.readTree(json), "state");
       requireExactFields(root, ROOT_FIELDS, "state");
       JsonNode version = required(root, "version");
       if (!version.isIntegralNumber() || version.intValue() != VERSION) {
@@ -155,11 +166,11 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
       validateStage(stage);
       CanvasFunctionSubmitState submitState = submitState(text(plan, "submitState"));
       ObjectNode adapterStateNode = object(required(root, "adapterState"), "state.adapterState");
-      if (mapper.writeValueAsBytes(adapterStateNode).length > MAX_ADAPTER_STATE_BYTES) {
+      if (MAPPER.writeValueAsBytes(adapterStateNode).length > MAX_ADAPTER_STATE_BYTES) {
         throw invalid("state.adapterState exceeds maximum size");
       }
       Map<String, Object> adapterState =
-          mapper.convertValue(
+          MAPPER.convertValue(
               adapterStateNode, new TypeReference<LinkedHashMap<String, Object>>() {});
       return new CanvasFunctionFrozenRun(
           uuid(plan, "canvasId"),
@@ -173,7 +184,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           submitState,
           stage,
           adapterState);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw invalid("FunctionRun stateJson must be valid typed JSON", exception);
     }
   }
@@ -181,11 +192,11 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   @Override
   public String stage(String json) {
     try {
-      ObjectNode root = object(mapper.readTree(json), "state");
+      ObjectNode root = object(MAPPER.readTree(json), "state");
       String stage = text(root, "stage");
       validateStage(stage);
       return stage;
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw invalid("FunctionRun stateJson must be valid typed JSON", exception);
     }
   }
@@ -193,10 +204,10 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   @Override
   public String functionName(String json) {
     try {
-      ObjectNode root = object(mapper.readTree(json), "state");
+      ObjectNode root = object(MAPPER.readTree(json), "state");
       ObjectNode plan = object(required(root, "plan"), "state.plan");
       return text(plan, "functionName");
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw invalid("FunctionRun stateJson must be valid typed JSON", exception);
     }
   }
@@ -226,8 +237,8 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
 
   private JsonNode argsNode(JsonObject args) {
     try {
-      return mapper.readTree(args.write());
-    } catch (JsonProcessingException exception) {
+      return MAPPER.readTree(args.write());
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("args must be JSON serializable", exception);
     }
   }
@@ -316,11 +327,11 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
 
   private static UUID uuid(ObjectNode node, String field) {
     JsonNode value = required(node, field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw invalid(field + " must be a canonical UUID string");
     }
     try {
-      return UUID.fromString(value.textValue());
+      return UUID.fromString(value.stringValue());
     } catch (IllegalArgumentException exception) {
       throw invalid(field + " must be a canonical UUID string", exception);
     }
@@ -355,10 +366,10 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = required(node, field);
-    if (!value.isTextual() || value.textValue().isBlank()) {
+    if (!value.isString() || value.stringValue().isBlank()) {
       throw invalid(field + " must be non-blank text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static JsonNode required(ObjectNode node, String field) {
@@ -378,7 +389,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
 
   private static void requireExactFields(ObjectNode node, Set<String> allowed, String path) {
     Set<String> actual = new HashSet<>();
-    node.fieldNames().forEachRemaining(actual::add);
+    actual.addAll(node.propertyNames());
     Set<String> unknown = new HashSet<>(actual);
     unknown.removeAll(allowed);
     if (!unknown.isEmpty()) {
