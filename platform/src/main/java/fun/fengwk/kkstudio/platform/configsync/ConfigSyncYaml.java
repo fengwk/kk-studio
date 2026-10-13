@@ -10,6 +10,7 @@ import org.yaml.snakeyaml.error.YAMLException;
 import org.yaml.snakeyaml.nodes.Node;
 import org.yaml.snakeyaml.nodes.ScalarNode;
 import org.yaml.snakeyaml.nodes.Tag;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.BeanDescription;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JavaType;
@@ -132,7 +133,7 @@ public final class ConfigSyncYaml {
     }
     try {
       return strictMapper.convertValue(node, type);
-    } catch (IllegalArgumentException error) {
+    } catch (IllegalArgumentException | JacksonException error) {
       throw new AiValidationException(RESOURCE, path + " is not a valid value");
     }
   }
@@ -142,7 +143,7 @@ public final class ConfigSyncYaml {
   public Map<String, Object> toMap(Object value, String path) {
     try {
       return strictMapper.convertValue(value, LinkedHashMap.class);
-    } catch (IllegalArgumentException | ClassCastException error) {
+    } catch (IllegalArgumentException | ClassCastException | JacksonException error) {
       throw new IllegalStateException("cannot serialize " + path, error);
     }
   }

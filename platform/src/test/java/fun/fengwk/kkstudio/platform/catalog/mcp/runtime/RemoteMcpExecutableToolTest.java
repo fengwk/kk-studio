@@ -13,13 +13,20 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
+import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
+import fun.fengwk.kkstudio.harness.mcp.McpClient;
 import fun.fengwk.kkstudio.harness.mcp.McpClientFactory;
+import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
+import fun.fengwk.kkstudio.harness.mcp.McpTimeoutException;
+import fun.fengwk.kkstudio.harness.mcp.McpToolCallResult;
+import fun.fengwk.kkstudio.harness.mcp.McpToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -32,6 +39,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -265,6 +273,99 @@ class RemoteMcpExecutableToolTest {
 
     handle.cancel();
     assertTrue(handle.isCancelled());
+  }
+
+  /** 调用超时是本次调用的终态：listener 收到脱敏超时结果，客户端仍被关闭，内部细节绝不外泄。 */
+  @Test
+  void reportsTimeoutAsRedactedErrorResultAndClosesClient() throws Exception {
+    // 意图：McpTimeoutException 映射为固定超时文案的错误结果，且 try-with-resources 仍关闭客户端
+    stubServerAndTool("mcp_srv_slow", "slow_tool", "mcp_srv_slow");
+    AtomicBoolean callToolInvoked = new AtomicBoolean(false);
+    AtomicBoolean clientClosed = new AtomicBoolean(false);
+    ToolDescriptor descriptor = SampleDescriptors.tool("mcp_srv_slow");
+    RemoteMcpExecutableTool tool =
+        new RemoteMcpExecutableTool(
+            descriptor,
+            SERVER_NAME,
+            "mcp_srv_slow",
+            "slow_tool",
+            repository,
+            executor,
+            (config, deadline) ->
+                throwingClient(
+                    () -> {
+                      callToolInvoked.set(true);
+                      throw new McpTimeoutException("internal-timeout-marker");
+                    },
+                    () -> clientClosed.set(true)),
+            name -> null);
+
+    ToolResult result = execute(tool, descriptor, "call_timeout", "{}");
+
+    assertTrue(callToolInvoked.get());
+    assertTrue(clientClosed.get());
+    assertTrue(result.error());
+    assertEquals("call_timeout", result.toolCallId());
+    assertEquals("MCP tool call timed out", firstText(result));
+    assertFalse(result.toString().contains("internal-timeout-marker"));
+  }
+
+  /** 非超时/取消的意外失败同样终结为脱敏失败结果，且不把原始异常文本回显给模型。 */
+  @Test
+  void reportsUnexpectedFailureAsRedactedErrorResultAndClosesClient() throws Exception {
+    // 意图：任意 RuntimeException 只以固定失败文案结案，底层异常文本不跨越模块边界
+    stubServerAndTool("mcp_srv_broken", "broken_tool", "mcp_srv_broken");
+    AtomicBoolean clientClosed = new AtomicBoolean(false);
+    ToolDescriptor descriptor = SampleDescriptors.tool("mcp_srv_broken");
+    RemoteMcpExecutableTool tool =
+        new RemoteMcpExecutableTool(
+            descriptor,
+            SERVER_NAME,
+            "mcp_srv_broken",
+            "broken_tool",
+            repository,
+            executor,
+            (config, deadline) ->
+                throwingClient(
+                    () -> {
+                      throw new IllegalStateException("internal-failure-marker");
+                    },
+                    () -> clientClosed.set(true)),
+            name -> null);
+
+    ToolResult result = execute(tool, descriptor, "call_broken", "{}");
+
+    assertTrue(clientClosed.get());
+    assertTrue(result.error());
+    assertEquals("call_broken", result.toolCallId());
+    assertEquals("MCP tool call failed", firstText(result));
+    assertFalse(result.toString().contains("internal-failure-marker"));
+  }
+
+  /** 只实现执行路径的 client 替身：callTool 主体按用例抛错，close 用于验证资源释放。 */
+  private static McpClient throwingClient(Runnable callToolBody, Runnable onClose) {
+    return new McpClient() {
+      @Override
+      public List<McpToolDefinition> listTools(McpDeadline deadline, McpCancellationToken token) {
+        throw new UnsupportedOperationException("callTool path does not list tools");
+      }
+
+      @Override
+      public McpToolCallResult callTool(
+          String name, String argumentsJson, McpDeadline deadline, McpCancellationToken token) {
+        callToolBody.run();
+        throw new AssertionError("callTool body must terminate by throwing");
+      }
+
+      @Override
+      public void close() {
+        onClose.run();
+      }
+    };
+  }
+
+  private static String firstText(ToolResult result) {
+    return ((TextResultContent) result.contents().getFirst()).text();
   }
 
   private void stubServerAndTool(String toolName, String sourceName, String serverName) {
