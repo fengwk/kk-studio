@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -33,10 +34,10 @@ final class ModelResponseValidator {
   private ModelResponseValidator() {}
 
   private static ObjectMapper strictObjectMapper() {
-    ObjectMapper mapper = new ObjectMapper();
-    mapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    return mapper;
+    return JsonMapper.builder()
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .build();
   }
 
   static ProviderResponse validate(ProviderResponse response) {
@@ -69,7 +70,7 @@ final class ModelResponseValidator {
       if (!node.isObject()) {
         throw new IllegalArgumentException(name + " must contain a JSON object");
       }
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException(name + " must contain JSON", exception);
     }
   }

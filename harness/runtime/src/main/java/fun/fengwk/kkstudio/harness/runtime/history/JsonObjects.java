@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * history 包内部的严格 canonical JSON object 校验工具：供 {@link CustomEntryPayload} / {@link
@@ -15,12 +17,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 final class JsonObjects {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // 自由 JSON number 以 BigDecimal 读回，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的精度/类型失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private JsonObjects() {}
 
@@ -32,7 +35,7 @@ final class JsonObjects {
     String canonical;
     try {
       canonical = MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot canonicalize " + name, error);
     }
     if (!canonical.equals(raw)) {
@@ -45,7 +48,7 @@ final class JsonObjects {
     JsonNode node;
     try {
       node = MAPPER.readTree(raw);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException(name + " must contain JSON", error);
     }
     if (node == null || !node.isObject()) {
@@ -58,7 +61,7 @@ final class JsonObjects {
   static String write(JsonNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode JSON", error);
     }
   }

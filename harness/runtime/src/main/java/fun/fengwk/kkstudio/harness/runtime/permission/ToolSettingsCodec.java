@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -32,7 +32,7 @@ public final class ToolSettingsCodec {
     root.set("permission", encodePermission(settings.permission()));
     try {
       return objectMapper.writeValueAsString(root);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("cannot encode tool settings", error);
     }
   }
@@ -45,7 +45,7 @@ public final class ToolSettingsCodec {
         throw new IllegalArgumentException("settingsJson must be a JSON object");
       }
       return object.deepCopy();
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("settingsJson must be valid JSON", error);
     }
   }
@@ -74,8 +74,8 @@ public final class ToolSettingsCodec {
     for (JsonNode rule : node) {
       if (!rule.isObject()
           || rule.size() != 2
-          || !rule.path("pattern").isTextual()
-          || !rule.path("action").isTextual()) {
+          || !rule.path("pattern").isString()
+          || !rule.path("action").isString()) {
         throw new IllegalArgumentException(
             "permission rule must be an object with exact string keys 'pattern' and 'action'");
       }

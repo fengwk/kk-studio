@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.harness.runtime.model.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -30,7 +32,7 @@ import java.util.Set;
  * <p>字段访问为逐字段 JsonNode 读 / 写：每个对象层都先列出允许字段集合，未知字段直接抛 {@link IllegalArgumentException}；类型不符（如非
  * string 的 enum 元素、非 boolean 的 flag）同样抛错。底层 Jackson {@link ObjectMapper} 启用 {@link
  * DeserializationFeature#FAIL_ON_TRAILING_TOKENS} 与 {@link
- * JsonParser.Feature#STRICT_DUPLICATE_DETECTION}，在边界拒绝 trailing token 与 duplicate field。
+ * StreamReadFeature#STRICT_DUPLICATE_DETECTION}，在边界拒绝 trailing token 与 duplicate field。
  *
  * <p>canonical 输出策略：
  *
@@ -48,7 +50,16 @@ import java.util.Set;
  */
 public final class ModelDescriptorJsonCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // variant 的 protocolOptions 以厂商原生数值语义搬运：先按 BigDecimal 读回避免 1e309/1e-324 失真，
+          // 再做 canonical 规范化（移除无语义意义的尾零），与既有 canonical wire golden 一致。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   /** descriptor 字段顺序。 */
@@ -58,13 +69,6 @@ public final class ModelDescriptorJsonCodec {
   /** variant 字段顺序。 */
   private static final Set<String> VARIANT_FIELDS =
       orderedSet("id", "reasoningEffort", "protocolOptions");
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    // variant 的 protocolOptions 以厂商原生数值语义搬运，避免 Double 归一化改写第三方协议事实。
-    MAPPER.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-  }
 
   public ModelDescriptorJsonCodec() {}
 
@@ -85,7 +89,7 @@ public final class ModelDescriptorJsonCodec {
     Objects.requireNonNull(json, "json");
     try {
       return decodeDescriptorNode(MAPPER.readTree(json));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed model descriptor JSON", exception);
     }
   }
@@ -113,7 +117,7 @@ public final class ModelDescriptorJsonCodec {
     Objects.requireNonNull(json, "json");
     try {
       return decodeVariantNode(MAPPER.readTree(json));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed model variant JSON", exception);
     }
   }
@@ -159,15 +163,15 @@ public final class ModelDescriptorJsonCodec {
     }
     Set<ModelInputModality> result = new LinkedHashSet<>();
     for (JsonNode item : modalities) {
-      if (!item.isTextual() || item.textValue().isBlank()) {
+      if (!item.isString() || item.stringValue().isBlank()) {
         throw new IllegalArgumentException("inputModalities must contain non-blank strings");
       }
       ModelInputModality modality;
       try {
-        modality = ModelInputModality.valueOf(item.textValue());
+        modality = ModelInputModality.valueOf(item.stringValue());
       } catch (IllegalArgumentException exception) {
         throw new IllegalArgumentException(
-            "unknown input modality: " + item.textValue(), exception);
+            "unknown input modality: " + item.stringValue(), exception);
       }
       if (!result.add(modality)) {
         throw new IllegalArgumentException("inputModalities must not contain duplicates");
@@ -208,7 +212,7 @@ public final class ModelDescriptorJsonCodec {
   private static ObjectNode protocolOptionsNode(ProviderProtocolOptions protocolOptions) {
     try {
       return object(MAPPER.readTree(protocolOptions.canonicalJson()), "protocolOptions");
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("cannot encode variant protocol options", exception);
     }
   }
@@ -218,7 +222,7 @@ public final class ModelDescriptorJsonCodec {
     ObjectNode options = object(node.get("protocolOptions"), "protocolOptions");
     try {
       return new ProviderProtocolOptions(MAPPER.writeValueAsString(options));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("invalid variant protocolOptions", exception);
     }
   }
@@ -245,10 +249,10 @@ public final class ModelDescriptorJsonCodec {
 
   static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   static String decodeNullableText(ObjectNode node, String field) {
@@ -256,10 +260,10 @@ public final class ModelDescriptorJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   static boolean bool(ObjectNode node, String field) {
@@ -272,7 +276,7 @@ public final class ModelDescriptorJsonCodec {
 
   static void requireFields(ObjectNode node, Set<String> expected, String name) {
     Set<String> actual = new HashSet<>();
-    node.fieldNames().forEachRemaining(actual::add);
+    node.propertyNames().forEach(actual::add);
     if (!actual.equals(expected)) {
       throw new IllegalArgumentException(
           "unexpected fields for " + name + ": " + actual + " (expected " + expected + ")");
@@ -295,7 +299,7 @@ public final class ModelDescriptorJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("cannot encode model JSON", exception);
     }
   }

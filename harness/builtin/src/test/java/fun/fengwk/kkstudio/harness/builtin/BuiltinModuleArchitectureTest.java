@@ -20,8 +20,9 @@ import java.util.stream.Stream;
  *
  * <p>Builtin 源码只能依赖 JDK 与 {@code fun.fengwk.kkstudio.harness.contributor.api} / {@code
  * fun.fengwk.kkstudio.harness.common} / {@code fun.fengwk.kkstudio.harness.tool} / {@code
- * fun.fengwk.kkstudio.harness.environment} / {@code fun.fengwk.kkstudio.harness.builtin} / {@code
- * com.fasterxml.jackson}；禁止依赖 runtime、Spring、infra、daemon、platform 与 web。
+ * fun.fengwk.kkstudio.harness.environment} / {@code fun.fengwk.kkstudio.harness.builtin}。Jackson
+ * 只允许 Jackson 3 的 {@code tools.jackson} 与仍复用的 {@code com.fasterxml.jackson.annotation}，禁止 Jackson 2
+ * core/databind 回流；禁止依赖 runtime、Spring、infra、daemon、platform 与 web。
  */
 class BuiltinModuleArchitectureTest {
 
@@ -83,7 +84,7 @@ class BuiltinModuleArchitectureTest {
               "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
               "fun.fengwk.kk-studio:kk-studio-harness-tool",
               "fun.fengwk.kk-studio:kk-studio-harness-environment",
-              "com.fasterxml.jackson.core:jackson-databind")
+              "tools.jackson.core:jackson-databind")
           .contains(coordinate)) {
         violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
       }
@@ -111,6 +112,12 @@ class BuiltinModuleArchitectureTest {
                       if (imported.startsWith(prefix)) {
                         violations.add(relative(root, path) + ": " + trimmed);
                       }
+                    }
+                    // Jackson 2 core/databind 不得回流；Jackson 3 复用的 annotation 仍放行。
+                    if (imported.startsWith("com.fasterxml.jackson.")
+                        && !imported.startsWith("com.fasterxml.jackson.annotation.")) {
+                      violations.add(
+                          relative(root, path) + ": Jackson 2 import is not allowed: " + trimmed);
                     }
                   }
                 } catch (IOException error) {

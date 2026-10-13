@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.HashSet;
 import java.util.Objects;
@@ -15,19 +16,19 @@ import java.util.Set;
 /** {@link ToolInvocationError} 的严格 canonical JSON codec。 */
 public final class ToolInvocationErrorJsonCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final Set<String> FIELDS = Set.of("kind", "message");
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final Set<String> FIELDS = Set.of("kind", "message");
 
   public String encode(ToolInvocationError error) {
     Objects.requireNonNull(error, "error");
     try {
       return OBJECT_MAPPER.writeValueAsString(encodeNode(error));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("cannot encode tool invocation error", exception);
     }
   }
@@ -44,7 +45,7 @@ public final class ToolInvocationErrorJsonCodec {
     Objects.requireNonNull(json, "json");
     try {
       return decodeNode(OBJECT_MAPPER.readTree(json));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed tool invocation error", exception);
     }
   }
@@ -54,7 +55,7 @@ public final class ToolInvocationErrorJsonCodec {
       throw new IllegalArgumentException("tool invocation error must be an object");
     }
     Set<String> fields = new HashSet<>();
-    node.fieldNames().forEachRemaining(fields::add);
+    node.propertyNames().forEach(fields::add);
     if (!fields.equals(FIELDS)) {
       throw new IllegalArgumentException("unexpected tool invocation error fields: " + fields);
     }
@@ -63,9 +64,9 @@ public final class ToolInvocationErrorJsonCodec {
 
   private static String text(ObjectNode node, String name) {
     JsonNode value = node.get(name);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(name + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 }

@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -54,7 +55,12 @@ import java.util.UUID;
  */
 public final class ProviderRequestJsonCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   /** 共享 model/variant 子树 codec，确保 wire 与 {@code ModelDescriptorJsonCodec} 单一权威实现一致。 */
@@ -84,18 +90,13 @@ public final class ProviderRequestJsonCodec {
   private static final Set<String> RESOURCE_BLOCK_FIELDS =
       orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview", "imageTier");
 
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
-
   public ProviderRequestJsonCodec() {}
 
   public String encode(ProviderRequest request) {
     Objects.requireNonNull(request, "request");
     try {
       return OBJECT_MAPPER.writeValueAsString(encodeNode(request));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("cannot encode provider request", exception);
     }
   }
@@ -123,7 +124,7 @@ public final class ProviderRequestJsonCodec {
     Objects.requireNonNull(json, "json");
     try {
       return decodeNode(OBJECT_MAPPER.readTree(json));
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed provider request", exception);
     }
   }
@@ -324,10 +325,10 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException("content block must have type field");
     }
     JsonNode typeNode = node.get("type");
-    if (!typeNode.isTextual()) {
+    if (!typeNode.isString()) {
       throw new IllegalArgumentException("content block type must be text");
     }
-    String type = typeNode.textValue();
+    String type = typeNode.stringValue();
     return switch (type) {
       case "text" -> {
         requireFields(node, TEXT_BLOCK_FIELDS, "text content block");
@@ -408,19 +409,19 @@ public final class ProviderRequestJsonCodec {
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   /** 必填文本但允许空字符串（如 resource preview 的 empty 形态）。 */
   private static String textAllowEmpty(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
@@ -443,10 +444,10 @@ public final class ProviderRequestJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(field + " must be text or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static Long decodeNullableLong(ObjectNode node, String field) {
@@ -507,11 +508,12 @@ public final class ProviderRequestJsonCodec {
   private static JsonNode parseJson(String value, String field) {
     try {
       JsonNode parsed = OBJECT_MAPPER.readTree(value);
-      if (parsed == null) {
+      // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为缺少 JSON。
+      if (parsed == null || parsed.isMissingNode()) {
         throw new IllegalArgumentException(field + " must contain JSON");
       }
       return parsed;
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalArgumentException(field + " must contain JSON", exception);
     }
   }
@@ -531,7 +533,7 @@ public final class ProviderRequestJsonCodec {
 
   private static void requireFields(ObjectNode node, Set<String> expected, String name) {
     Set<String> actual = new HashSet<>();
-    node.fieldNames().forEachRemaining(actual::add);
+    node.propertyNames().forEach(actual::add);
     if (!actual.equals(expected)) {
       throw new IllegalArgumentException(
           "unexpected fields for " + name + ": " + actual + " (expected " + expected + ")");

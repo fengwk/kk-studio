@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
@@ -103,7 +103,7 @@ class ModelRequestSpecJsonCodecTest {
   void encodedSpecContainsExactlyTheFrozenInvocationFields() {
     ObjectNode encoded = codec.encodeNode(environmentModelRequest());
     Set<String> fieldNames = new HashSet<>();
-    encoded.fieldNames().forEachRemaining(fieldNames::add);
+    encoded.propertyNames().forEach(fieldNames::add);
     assertEquals(
         Set.of(
             "providerType",

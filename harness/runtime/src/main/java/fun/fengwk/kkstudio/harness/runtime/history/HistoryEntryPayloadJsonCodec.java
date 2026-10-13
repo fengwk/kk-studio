@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -32,7 +34,7 @@ import java.util.Set;
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
- * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）；未知枚举；非 canonical 十进制 ID；非法 {@code
+ * {@link StreamReadFeature#STRICT_DUPLICATE_DETECTION}）；未知枚举；非 canonical 十进制 ID；非法 {@code
  * environmentId}。字段顺序固定；list 顺序保留。
  *
  * <p>{@code message} 子树委派 {@link AgentMessageJsonCodec}；settings / model / assistant metadata 子树
@@ -40,7 +42,14 @@ import java.util.Set;
  */
 public final class HistoryEntryPayloadJsonCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // 自由 JSON number 以 BigDecimal 读回，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的精度/类型失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> ROOT_FIELDS = orderedSet("settings");
@@ -85,11 +94,6 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
-
   public HistoryEntryPayloadJsonCodec() {}
 
   /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 11 类 history payload，其它实现显式拒绝。 */
@@ -128,10 +132,11 @@ public final class HistoryEntryPayloadJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed " + type.name() + " entry payload JSON", error);
     }
-    if (root == null) {
+    // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 malformed。
+    if (root == null || root.isMissingNode()) {
       throw new IllegalArgumentException("malformed " + type.name() + " entry payload JSON");
     }
     return decodeNode(type, root);
@@ -637,7 +642,7 @@ public final class HistoryEntryPayloadJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode history entry payload JSON", error);
     }
   }

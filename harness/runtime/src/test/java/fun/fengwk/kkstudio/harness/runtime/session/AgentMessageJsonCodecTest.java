@@ -561,4 +561,20 @@ class AgentMessageJsonCodecTest {
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"contents\":{},"
                     + "\"error\":false,\"detailsJson\":\"{}\"}]}"));
   }
+
+  /** json content 是自由 JSON 文本，按原始文本搬运：1e309/1e-324 不得经过 double 归一化。 */
+  @Test
+  void preservesJsonContentRawNumberTextWithoutDoubleCoercion() {
+    AgentMessage message =
+        new AgentMessage(
+            AgentMessageRole.USER,
+            List.of(new JsonMessageContent("{\"big\":1e309,\"tiny\":1e-324}")));
+
+    String encoded = codec.encode(message);
+
+    assertTrue(encoded.contains("1e309"), encoded);
+    assertTrue(encoded.contains("1e-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(message, codec.decode(encoded));
+  }
 }

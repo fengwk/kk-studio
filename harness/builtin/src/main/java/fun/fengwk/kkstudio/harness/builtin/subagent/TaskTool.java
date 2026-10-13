@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.harness.builtin.subagent;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
@@ -59,7 +60,7 @@ public final class TaskTool implements Tool {
   private final ObjectMapper objectMapper;
 
   public TaskTool(SubagentRunner runner) {
-    this(runner, new ObjectMapper());
+    this(runner, JsonMapper.builder().build());
   }
 
   public TaskTool(SubagentRunner runner, ObjectMapper objectMapper) {
@@ -121,7 +122,7 @@ public final class TaskTool implements Tool {
     JsonNode value;
     try {
       value = objectMapper.readTree(call.argumentsJson() == null ? "{}" : call.argumentsJson());
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw reject("task arguments are not valid JSON");
     }
     if (!(value instanceof ObjectNode node)) {
@@ -151,10 +152,10 @@ public final class TaskTool implements Tool {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw reject(field + " must be a canonical UUID string");
     }
-    String raw = value.textValue();
+    String raw = value.stringValue();
     UUID parsed;
     try {
       parsed = UUID.fromString(raw);
@@ -169,10 +170,10 @@ public final class TaskTool implements Tool {
 
   private static String requiredText(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw reject(field + " is required");
     }
-    String text = value.textValue();
+    String text = value.stringValue();
     if (field.equals("subagent_type")) {
       if (!text.equals(text.strip())) {
         throw reject("subagent_type must not contain surrounding whitespace");

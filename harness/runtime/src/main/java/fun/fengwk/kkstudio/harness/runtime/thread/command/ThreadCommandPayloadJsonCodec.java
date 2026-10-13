@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
@@ -33,11 +34,16 @@ import java.util.UUID;
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
- * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）。字段顺序固定；list 顺序保留。
+ * {@link StreamReadFeature#STRICT_DUPLICATE_DETECTION}）。字段顺序固定；list 顺序保留。
  */
 public final class ThreadCommandPayloadJsonCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> USER_MESSAGE_FIELDS = orderedSet("message");
@@ -58,11 +64,6 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static final ThreadCommandPayloadJsonCodec REQUEST_HASH_CODEC =
       new ThreadCommandPayloadJsonCodec();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   public ThreadCommandPayloadJsonCodec() {}
 
@@ -118,11 +119,12 @@ public final class ThreadCommandPayloadJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException(
           "malformed " + type.name() + " command payload JSON", error);
     }
-    if (root == null) {
+    // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 malformed。
+    if (root == null || root.isMissingNode()) {
       throw new IllegalArgumentException("malformed " + type.name() + " command payload JSON");
     }
     return switch (type) {
@@ -245,11 +247,11 @@ public final class ThreadCommandPayloadJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
     return CommandValueValidation.requireCanonicalGoalText(
-        value.textValue(), context + "." + field);
+        value.stringValue(), context + "." + field);
   }
 
   private static SetAgentCommandPayload decodeSetAgent(JsonNode value) {
@@ -277,11 +279,11 @@ public final class ThreadCommandPayloadJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
     return CommandValueValidation.requireCanonicalEnvironmentName(
-        value.textValue(), context + "." + field);
+        value.stringValue(), context + "." + field);
   }
 
   private static ModelSelection decodeModelSelection(JsonNode value) {
@@ -318,11 +320,11 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static UUID requiredUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be a UUID string");
     }
     try {
-      return UUID.fromString(value.textValue());
+      return UUID.fromString(value.stringValue());
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(context + "." + field + " must be a UUID string", error);
     }
@@ -331,11 +333,11 @@ public final class ThreadCommandPayloadJsonCodec {
   private static NotificationKind requiredNotificationKind(
       ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be a notification kind");
     }
     try {
-      return NotificationKind.valueOf(value.textValue());
+      return NotificationKind.valueOf(value.stringValue());
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a notification kind", error);
@@ -358,7 +360,7 @@ public final class ThreadCommandPayloadJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode thread command payload JSON", error);
     }
   }
@@ -368,7 +370,7 @@ public final class ThreadCommandPayloadJsonCodec {
     JsonNode node;
     try {
       node = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException(context + " must contain JSON", error);
     }
     if (node == null || !node.isObject()) {
@@ -386,15 +388,15 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static String canonicalText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    return CommandValueValidation.requireCanonicalName(value.textValue(), context + "." + field);
+    return CommandValueValidation.requireCanonicalName(value.stringValue(), context + "." + field);
   }
 
   private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
     Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.fieldNames();
+    Iterator<String> names = node.propertyNames().iterator();
     while (names.hasNext()) {
       actual.add(names.next());
     }
