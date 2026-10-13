@@ -6,8 +6,8 @@
 # unregistered, and no path outside the temporary fixture is touched.
 #
 # Covered: missing/not-owned/stop/backup/replace/restart failures, a failing failure-receipt
-# write, and the guarantee that the one-shot task cleanup is independent of both the update
-# outcome and the receipt write.
+# write, a failing stderr diagnostic, and the guarantee that the one-shot task cleanup is
+# independent of the update outcome, the receipt write and the diagnostic.
 #
 # This script needs Windows PowerShell (5.1) or PowerShell 7 on Windows: it reads the real
 # WindowsIdentity SID and drives native scheduled-task APIs. It is intentionally not wired
@@ -334,6 +334,37 @@ function Unregister-ScheduledTask {
   Assert-True ($result.phase -eq 'PREPARED') 'cleanup failure keeps the PREPARED receipt'
   Assert-True ((Read-Stderr $case) -match 'could not unregister its one-shot task') `
     'cleanup failure leaves a safe diagnostic'
+} finally { Remove-Case $case }
+
+# 11. A failing stderr diagnostic cannot skip the one-shot task cleanup.
+$case = New-Case 'diagnostic-fail'
+try {
+  $getMissing = @'
+function Get-ScheduledTask {
+  param([string]$TaskName, [string]$ErrorAction)
+  Add-TestLog "GetScheduledTask:$TaskName"
+  return $null
+}
+'@
+  # Replace Console.Error with a writer that always throws: the real script has no test hook,
+  # so this is the only way to drive the "diagnostic itself fails" path.
+  $throwingStderr = @'
+class ThrowingStderrWriter : System.IO.TextWriter {
+  [System.Text.Encoding] get_Encoding() { return [System.Text.Encoding]::UTF8 }
+  [void] Write([char]$value) { throw [System.IO.IOException]::new('stderr is unavailable') }
+  [void] Write([string]$value) { if ($null -ne $value) { throw [System.IO.IOException]::new('stderr is unavailable') } }
+  [void] WriteLine([string]$value) { throw [System.IO.IOException]::new('stderr is unavailable') }
+}
+[Console]::SetError([ThrowingStderrWriter]::new())
+'@
+  $exit = Invoke-Case $case $getMissing $defaultStop $defaultStart $defaultUnregister $throwingStderr
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'failing diagnostic exits non-zero'
+  Assert-True ($result.phase -eq 'FAILED') 'failing diagnostic still writes the FAILED receipt'
+  Assert-True ($result.message -eq 'managed scheduled task is missing') `
+    'failing diagnostic keeps the safe reason'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'failing diagnostic still cleans up the one-shot task'
 } finally { Remove-Case $case }
 
 if ($script:failures -gt 0) {

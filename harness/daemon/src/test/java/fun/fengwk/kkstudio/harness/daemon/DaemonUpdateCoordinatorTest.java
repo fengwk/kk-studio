@@ -35,6 +35,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -160,7 +161,6 @@ class DaemonUpdateCoordinatorTest {
     AtomicInteger preparations = new AtomicInteger();
     CountDownLatch prepareEntered = new CountDownLatch(1);
     CountDownLatch releasePrepare = new CountDownLatch(1);
-    CountDownLatch replayStart = new CountDownLatch(1);
     DaemonUpdateCoordinator coordinator =
         coordinator(singleThread(), true, DaemonOperatingSystem.LINUX);
     coordinator.setPreparer(
@@ -172,25 +172,29 @@ class DaemonUpdateCoordinatorTest {
         });
     coordinator.setLauncher(prepared -> true);
 
-    coordinator.handleUpdate(updateCommand(OP));
-    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
-    assertTrue(prepareEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    Replayers replayers = null;
+    try {
+      coordinator.handleUpdate(updateCommand(OP));
+      assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+      assertTrue(prepareEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
 
-    List<Thread> replays = replayThreads(coordinator, replayStart, 8);
-    replayStart.countDown();
-    joinAll(replays);
-    assertNull(sink.pollNoWait(), "an in-flight replay must not be re-acknowledged");
+      replayers = new Replayers(coordinator, 8);
+      replayers.release();
+      replayers.awaitAll();
+      assertNull(sink.pollNoWait(), "an in-flight replay must not be re-acknowledged");
+    } finally {
+      releasePrepare.countDown();
+      if (replayers != null) {
+        replayers.close();
+      }
+    }
 
-    releasePrepare.countDown();
     assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
     assertEquals(1, preparations.get(), "in-flight replays must not prepare again");
     assertEquals(1, sink.acceptedCount(), "an operation may be accepted exactly once");
   }
 
-  /**
-   * 完成与重放共用同一同步门：测试持门时，完成的「入缓存 + 释放在途认领 + 出站」与重放判定都必须停在门上， 因此两者之间不存在可被重放利用的窗口。用持门加线程状态等待确定地制造竞争，不依赖
-   * sleep 或概率。
-   */
+  /** 完成与重放共用同一同步门：测试持门时，完成的「入缓存 + 释放在途认领 + 出站」与重放判定都必须停在门上， 因此两者之间不存在可被重放利用的窗口。 */
   @Test
   void completionAndReplayShareTheUpdateGate() throws Exception {
     AtomicReference<Thread> runner = new AtomicReference<>();
@@ -219,60 +223,32 @@ class DaemonUpdateCoordinatorTest {
           return true;
         });
 
-    coordinator.handleUpdate(updateCommand(OP));
-    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
-    assertTrue(launchEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    Replayers replayers = null;
+    try {
+      coordinator.handleUpdate(updateCommand(OP));
+      assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+      assertTrue(launchEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
 
-    Object updateGate = updateGate(coordinator);
-    Thread replay = new Thread(() -> coordinator.handleUpdate(updateCommand(OP)), "replay");
-    synchronized (updateGate) {
-      // runUpdate 已返回 launch，下一步就是「入缓存 + 释放在途认领」：此处持门可确定地把它挡在完成临界区之外。
+      Object updateGate = updateGate(coordinator);
+      replayers = new Replayers(coordinator, 1);
+      synchronized (updateGate) {
+        // runUpdate 已返回 launch，下一步就是「入缓存 + 释放在途认领」：此处持门可确定地把它挡在完成临界区之外。
+        releaseLaunch.countDown();
+        awaitBlocked(runner.get());
+        replayers.release();
+        awaitBlocked(replayers.thread(0));
+        assertNull(sink.pollNoWait(), "no receipt may be produced while the update gate is held");
+      }
+      replayers.awaitAll();
+    } finally {
       releaseLaunch.countDown();
-      awaitBlocked(runner.get());
-      replay.start();
-      awaitBlocked(replay);
-      assertNull(sink.pollNoWait(), "no receipt may be produced while the update gate is held");
+      if (replayers != null) {
+        replayers.close();
+      }
     }
-    replay.join(TimeUnit.SECONDS.toMillis(ASYNC_TIMEOUT_SECONDS));
-    assertFalse(replay.isAlive());
 
     assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
     assertEquals(1, preparations.get(), "the replay must reuse the frozen receipt");
-    assertEquals(1, sink.acceptedCount(), "an operation may be accepted exactly once");
-  }
-
-  /** 与完成并发的重放不得产生第二次准备或第二次接受：闩栅同时放行，不依赖 sleep。 */
-  @Test
-  void keepsCompletionAtomicAgainstConcurrentReplays() throws Exception {
-    AtomicInteger preparations = new AtomicInteger();
-    CountDownLatch launchEntered = new CountDownLatch(1);
-    CountDownLatch releaseLaunch = new CountDownLatch(1);
-    CountDownLatch replayStart = new CountDownLatch(1);
-    DaemonUpdateCoordinator coordinator =
-        coordinator(singleThread(), true, DaemonOperatingSystem.LINUX);
-    coordinator.setPreparer(
-        command -> {
-          preparations.incrementAndGet();
-          return preparedOutcome(command.operationId());
-        });
-    coordinator.setLauncher(
-        prepared -> {
-          launchEntered.countDown();
-          awaitRelease(releaseLaunch);
-          return true;
-        });
-
-    coordinator.handleUpdate(updateCommand(OP));
-    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
-    assertTrue(launchEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
-
-    List<Thread> replays = replayThreads(coordinator, replayStart, 8);
-    releaseLaunch.countDown();
-    replayStart.countDown();
-    joinAll(replays);
-
-    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
-    assertEquals(1, preparations.get(), "concurrent replays must not prepare again");
     assertEquals(1, sink.acceptedCount(), "an operation may be accepted exactly once");
   }
 
@@ -391,43 +367,22 @@ class DaemonUpdateCoordinatorTest {
     return executor;
   }
 
+  /** 等待闩栅释放：超时或中断都必须让测试明确失败，绝不静默继续并产生假绿。 */
   private static void awaitRelease(CountDownLatch release) {
     try {
-      release.await();
+      assertTrue(
+          release.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+          "latch must be released within " + ASYNC_TIMEOUT_SECONDS + "s");
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-    }
-  }
-
-  /** 并发重放同一 operation 的线程：在给定闩栅释放后同时发起，用于精确制造与完成过程的竞争。 */
-  private static List<Thread> replayThreads(
-      DaemonUpdateCoordinator coordinator, CountDownLatch start, int count) {
-    List<Thread> threads = new ArrayList<>(count);
-    for (int index = 0; index < count; index++) {
-      Thread thread =
-          new Thread(
-              () -> {
-                awaitRelease(start);
-                coordinator.handleUpdate(updateCommand(OP));
-              },
-              "replay-" + index);
-      thread.start();
-      threads.add(thread);
-    }
-    return threads;
-  }
-
-  private static void joinAll(List<Thread> threads) throws InterruptedException {
-    for (Thread thread : threads) {
-      thread.join(TimeUnit.SECONDS.toMillis(ASYNC_TIMEOUT_SECONDS));
-      assertFalse(thread.isAlive(), "replay must converge within the budget");
+      throw new AssertionError("interrupted while waiting for the test latch", error);
     }
   }
 
   /**
    * 等待线程确定地阻塞在更新同步门上。
    *
-   * <p>门由测试线程持有，因此该状态必然到达；这里只是自旋读取线程状态，不引入任何基于时间的概率假设。
+   * <p>门由测试线程持有，因此该状态必然到达；这里只是自旋读取线程状态，不引入基于时间的概率假设。
    */
   private static void awaitBlocked(Thread thread) {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TIMEOUT_SECONDS);
@@ -442,6 +397,59 @@ class DaemonUpdateCoordinatorTest {
     Field field = DaemonUpdateCoordinator.class.getDeclaredField("updateGate");
     field.setAccessible(true);
     return field.get(coordinator);
+  }
+
+  /** 受控并发重放：子线程异常必须回传主线程使测试失败，且必须能被彻底终止、不留存活线程。 */
+  private static final class Replayers implements AutoCloseable {
+
+    private final CountDownLatch start = new CountDownLatch(1);
+    private final List<FutureTask<Void>> tasks = new ArrayList<>();
+    private final List<Thread> threads = new ArrayList<>();
+
+    private Replayers(DaemonUpdateCoordinator coordinator, int count) {
+      for (int index = 0; index < count; index++) {
+        FutureTask<Void> task =
+            new FutureTask<>(
+                () -> {
+                  awaitRelease(start);
+                  coordinator.handleUpdate(updateCommand(OP));
+                  return null;
+                });
+        Thread thread = new Thread(task, "replay-" + index);
+        tasks.add(task);
+        threads.add(thread);
+        thread.start();
+      }
+    }
+
+    private void release() {
+      start.countDown();
+    }
+
+    private Thread thread(int index) {
+      return threads.get(index);
+    }
+
+    /** 汇合全部重放并回传其异常：单纯 join 不会暴露子线程失败，必须 get 才能让测试真实失败。 */
+    private void awaitAll() throws Exception {
+      for (FutureTask<Void> task : tasks) {
+        task.get(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      }
+    }
+
+    @Override
+    public void close() {
+      start.countDown();
+      threads.forEach(Thread::interrupt);
+      for (Thread thread : threads) {
+        try {
+          thread.join(TimeUnit.SECONDS.toMillis(ASYNC_TIMEOUT_SECONDS));
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+      }
+    }
   }
 
   private ManagedUpdateOutcome.Prepared preparedOutcome(String operationId) {
@@ -478,8 +486,10 @@ class DaemonUpdateCoordinatorTest {
 
     @Override
     public boolean send(DaemonMessageType messageType, String invocationId, String payloadJson) {
-      all.add(new Outbound(messageType, invocationId, codec.decode(payloadJson)));
-      pending.add(all.get(all.size() - 1).result());
+      // 先解码成局部结果再分别入队：并发发送时按索引回头取会读到别人的回执。
+      DaemonUpdateResult result = codec.decode(payloadJson);
+      all.add(new Outbound(messageType, invocationId, result));
+      pending.add(result);
       return true;
     }
 

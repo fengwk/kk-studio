@@ -8,13 +8,11 @@
 # It fails closed: if the managed task definition is missing, not owned by the installer,
 # or cannot be stopped, it reports failure and leaves the old binary untouched.
 #
-# Failure handling is uniform: every step that can fail (preflight, stop, backup, replace,
-# restart and result reporting) runs under one top-level try/catch/finally with a single
-# fail-closed entry point. The failure receipt and the one-shot task cleanup are
-# independent of each other, so a failing report or a failing diagnostic can never skip the
-# cleanup, and `Write-Error` (script-terminating under `$ErrorActionPreference = 'Stop'`) is
-# deliberately avoided in favour of stderr output. The success receipt is best effort, so a
-# broken disk can never turn an applied update into a false failure.
+# Failure handling is uniform: every step that can fail runs under one top-level
+# try/catch/finally with a single fail-closed entry point. Reporting and cleanup are
+# independent (cleanup sits in its own finally), so a failing receipt or diagnostic can
+# never skip it, and `Write-Error` (script-terminating under `$ErrorActionPreference =
+# 'Stop'`) is avoided in favour of stderr. The success receipt is best effort.
 #
 # Usage: kk-studio-daemon-update.ps1 -StagedJar <path> -InstalledJar <path>
 param(
@@ -116,22 +114,23 @@ try {
     $failure = "update failed during ${step} ($($_.Exception.GetType().Name))"
   }
 } finally {
-  # Reporting and cleanup are independent and execute for every outcome, including a
-  # failure raised while reporting the failure itself.
-  if ($null -ne $failure) {
-    try {
-      Write-UpdateResult 'FAILED' $failure
-    } catch {
-      Write-UpdateWarning "could not write the failure receipt ($($_.Exception.GetType().Name))"
-    }
-    Write-FailureDiagnostic $failure
-  }
-  # The one-shot update task is always unregistered: its removal never depends on the
-  # outcome, the failure receipt or the diagnostic above.
+  # Reporting and cleanup are independent: the diagnostic can itself throw, so the one-shot
+  # task removal lives in its own finally and is never skipped by a failing report.
   try {
-    Unregister-ScheduledTask -TaskName $updateTask -Confirm:$false -ErrorAction SilentlyContinue
-  } catch {
-    Write-UpdateWarning "could not unregister its one-shot task ($($_.Exception.GetType().Name))"
+    if ($null -ne $failure) {
+      try {
+        Write-UpdateResult 'FAILED' $failure
+      } catch {
+        Write-UpdateWarning "could not write the failure receipt ($($_.Exception.GetType().Name))"
+      }
+      Write-FailureDiagnostic $failure
+    }
+  } finally {
+    try {
+      Unregister-ScheduledTask -TaskName $updateTask -Confirm:$false -ErrorAction SilentlyContinue
+    } catch {
+      Write-UpdateWarning "could not unregister its one-shot task ($($_.Exception.GetType().Name))"
+    }
   }
 }
 

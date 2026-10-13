@@ -41,18 +41,10 @@ final class DaemonUpdateCoordinator {
   private final DaemonUpdateCommandCodec updateCommandCodec = new DaemonUpdateCommandCodec();
   private final DaemonUpdateResultCodec updateResultCodec = new DaemonUpdateResultCodec();
 
-  /**
-   * 受管更新编排的同步门：同时守护在途认领与结果缓存，使「已完成判定」「在途认领」「结果入缓存并释放在途认领」都是同一门内的原子决定。
-   *
-   * <p>该门只保护这两份内存事实的判定与跃迁：prepare/launch 与回执出站都在门外执行，因此慢速下载和发送不会阻塞重放判定。
-   */
+  /** 同步门：同门守护在途认领与结果缓存，使判定/认领/完成入缓存+释放都是原子决定；门外的 prepare、launch 与出站不持锁。 */
   private final Object updateGate = new Object();
 
-  /**
-   * 受管更新操作的结果缓存（operationId -> 冻结回执）：同一 operation 的重发只重放结果，不产生第二次下载。
-   *
-   * <p>保留最近若干条并在重连后重发，使断开不等于失败时 Platform 能重新收敛。仅由 {@link #updateGate} 保护。
-   */
+  /** 冻结回执缓存（operationId -> 回执）：同一 operation 只重放结果，最近若干条供重连重发。仅由 {@link #updateGate} 保护。 */
   private final Map<String, DaemonUpdateResult> updateResults =
       new LinkedHashMap<>(16, 0.75f, false) {
         @Override
@@ -61,7 +53,7 @@ final class DaemonUpdateCoordinator {
         }
       };
 
-  /** 正在准备的 operationId；null 表示当前没有更新在途。与 {@link #updateResults} 同受 {@link #updateGate} 保护。 */
+  /** 在途认领的 operationId；null 表示无在途更新。与 {@link #updateResults} 同受 {@link #updateGate} 保护。 */
   private String activeUpdateOperationId;
 
   private volatile ManagedUpdatePreparer managedUpdater;
@@ -95,7 +87,7 @@ final class DaemonUpdateCoordinator {
     synchronized (updateGate) {
       completed = updateResults.get(command.operationId());
       if (completed == null) {
-        // 「已完成判定」与「在途认领」必须同一门内原子决定：否则重放可能落在刚释放在途认领、结果尚未入缓存的窗口，触发第二次下载。
+        // 判定与认领必须同门原子：否则重放可能落在「已释放认领、结果尚未入缓存」的窗口，触发第二次下载。
         if (command.operationId().equals(activeUpdateOperationId)) {
           return;
         }
@@ -112,7 +104,7 @@ final class DaemonUpdateCoordinator {
     try {
       sendUpdateResult(DaemonUpdateResult.accepted(command.operationId()));
     } catch (RuntimeException error) {
-      // 接受回执未能送达时更新尚未提交：释放在途认领并让异常传播，使 Platform 可重试，不留下永久在途或半途副作用。
+      // 接受回执未送达即更新尚未提交：释放认领并传播异常，使 Platform 可重试，不留永久在途。
       releaseActive(command.operationId());
       throw error;
     }
@@ -166,11 +158,11 @@ final class DaemonUpdateCoordinator {
     } catch (RuntimeException error) {
       result = DaemonUpdateResult.failed(command.operationId(), "update preparation failed");
     } catch (Error error) {
-      // 进程级 Error 必须向上传播，但同样要释放在途认领，避免后续更新永久阻塞。
+      // Error 仍向上传播，但同样要释放认领，避免后续更新永久阻塞。
       releaseActive(command.operationId());
       throw error;
     }
-    // 结果入缓存与释放在途认领必须同一门内完成：两者的中间窗口会让同一 operation 的重放越过已完成判定并触发第二次下载。
+    // 入缓存与释放认领必须同门完成：中间窗口会让重放越过已完成判定并触发第二次下载。
     synchronized (updateGate) {
       updateResults.put(command.operationId(), result);
       if (command.operationId().equals(activeUpdateOperationId)) {
