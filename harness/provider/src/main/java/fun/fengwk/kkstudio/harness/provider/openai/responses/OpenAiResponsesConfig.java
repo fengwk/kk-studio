@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 
@@ -16,13 +18,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
  */
 public record OpenAiResponsesConfig(PromptCacheRetention promptCacheRetention) {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final String KEY_PROMPT_CACHE_RETENTION = "promptCacheRetention";
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   public OpenAiResponsesConfig {
     promptCacheRetention =
@@ -58,11 +60,11 @@ public record OpenAiResponsesConfig(PromptCacheRetention promptCacheRetention) {
     PromptCacheRetention retention = PromptCacheRetention.NONE;
     JsonNode retentionNode = root.get(KEY_PROMPT_CACHE_RETENTION);
     if (retentionNode != null && !retentionNode.isNull()) {
-      if (!retentionNode.isTextual()) {
+      if (!retentionNode.isString()) {
         throw new IllegalArgumentException("promptCacheRetention must be a string");
       }
       try {
-        retention = PromptCacheRetention.valueOf(retentionNode.asText().trim());
+        retention = PromptCacheRetention.valueOf(retentionNode.asString("").trim());
       } catch (IllegalArgumentException e) {
         throw new IllegalArgumentException("unsupported promptCacheRetention");
       }

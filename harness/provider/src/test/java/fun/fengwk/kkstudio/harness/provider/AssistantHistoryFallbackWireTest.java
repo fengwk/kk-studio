@@ -4,12 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
@@ -58,7 +59,7 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 class AssistantHistoryFallbackWireTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final String JSON_DIAGNOSTIC = "{\"synthetic\":\"tool_call_diagnostic\"}";
@@ -96,7 +97,7 @@ class AssistantHistoryFallbackWireTest {
     JsonNode chatWire =
         encode(chatAdapter(), assistantRequest(chatModel(), contents), chatDescriptor());
     JsonNode chatAssistant = itemWithRole(chatWire.path("messages"), "assistant");
-    assertTrue(chatAssistant.path("content").asText().contains(JSON_DIAGNOSTIC));
+    assertTrue(chatAssistant.path("content").asString("").contains(JSON_DIAGNOSTIC));
 
     JsonNode responsesInput =
         encode(
@@ -105,8 +106,8 @@ class AssistantHistoryFallbackWireTest {
                 responsesDescriptor())
             .path("input");
     JsonNode responsesText = itemOfType(responsesInput, "message").path("content").get(0);
-    assertEquals("output_text", responsesText.path("type").asText());
-    assertTrue(responsesText.path("text").asText().contains(JSON_DIAGNOSTIC));
+    assertEquals("output_text", responsesText.path("type").asString(""));
+    assertTrue(responsesText.path("text").asString("").contains(JSON_DIAGNOSTIC));
 
     JsonNode geminiParts =
         itemWithRole(
@@ -117,7 +118,7 @@ class AssistantHistoryFallbackWireTest {
                     .path("contents"),
                 "model")
             .path("parts");
-    assertEquals(JSON_DIAGNOSTIC, geminiParts.get(0).path("text").asText());
+    assertEquals(JSON_DIAGNOSTIC, geminiParts.get(0).path("text").asString(""));
     assertFalse(geminiParts.get(0).has("thought"), "JSON diagnostic must not be forged as thought");
 
     JsonNode anthropicContent =
@@ -129,8 +130,8 @@ class AssistantHistoryFallbackWireTest {
                     .path("messages"),
                 "assistant")
             .path("content");
-    assertEquals("text", anthropicContent.get(0).path("type").asText());
-    assertEquals(JSON_DIAGNOSTIC, anthropicContent.get(0).path("text").asText());
+    assertEquals("text", anthropicContent.get(0).path("type").asString(""));
+    assertEquals(JSON_DIAGNOSTIC, anthropicContent.get(0).path("text").asString(""));
   }
 
   /**
@@ -295,7 +296,7 @@ class AssistantHistoryFallbackWireTest {
 
   private static JsonNode itemOfType(JsonNode array, String type) {
     for (JsonNode item : array) {
-      if (type.equals(item.path("type").asText())) {
+      if (type.equals(item.path("type").asString(""))) {
         return item;
       }
     }
@@ -304,7 +305,7 @@ class AssistantHistoryFallbackWireTest {
 
   private static JsonNode itemWithRole(JsonNode array, String role) {
     for (JsonNode item : array) {
-      if (role.equals(item.path("role").asText())) {
+      if (role.equals(item.path("role").asString(""))) {
         return item;
       }
     }

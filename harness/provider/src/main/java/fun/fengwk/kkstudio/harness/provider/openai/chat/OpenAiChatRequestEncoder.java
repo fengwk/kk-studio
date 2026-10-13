@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
@@ -57,18 +60,18 @@ import java.util.Set;
  */
 final class OpenAiChatRequestEncoder {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   /** 语义回退中可读思考的来源标记：与 final text 明确分隔，避免无分隔拼接被误读为最终回答。 */
   private static final String THINKING_OPEN = "<thinking>\n";
 
   private static final String THINKING_CLOSE = "\n</thinking>\n";
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   /** 运行时所有权字段：native protocolOptions 一旦声明即冲突，避免厂商选项覆盖运行时事实。 */
   private static final Set<String> RUNTIME_OWNED_FIELDS =
@@ -155,7 +158,7 @@ final class OpenAiChatRequestEncoder {
     byte[] bodyUtf8Bytes;
     try {
       bodyUtf8Bytes = OBJECT_MAPPER.writeValueAsString(root).getBytes(StandardCharsets.UTF_8);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize OpenAI chat request to JSON");
     }
@@ -288,7 +291,7 @@ final class OpenAiChatRequestEncoder {
               "tool inputSchemaJson must be a JSON object: " + tool.name());
         }
         functionNode.set("parameters", params);
-      } catch (JsonProcessingException exception) {
+      } catch (JacksonException exception) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "invalid tool inputSchemaJson for tool: " + tool.name());
@@ -507,8 +510,8 @@ final class OpenAiChatRequestEncoder {
 
     // 校验 role
     if (!payload.has("role")
-        || !payload.get("role").isTextual()
-        || !"assistant".equals(payload.get("role").textValue())) {
+        || !payload.get("role").isString()
+        || !"assistant".equals(payload.get("role").stringValue())) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "invalid OpenAI chat assistant replay payload: illegal role");
@@ -523,8 +526,8 @@ final class OpenAiChatRequestEncoder {
       JsonNode audio = payload.get("audio");
       if (!audio.isObject()
           || audio.size() != 1
-          || !audio.path("id").isTextual()
-          || audio.path("id").textValue().isBlank()) {
+          || !audio.path("id").isString()
+          || audio.path("id").stringValue().isBlank()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI chat assistant replay audio");
       }
@@ -533,7 +536,7 @@ final class OpenAiChatRequestEncoder {
     // 校验 content 类型
     if (payload.has("content")) {
       JsonNode contentNode = payload.get("content");
-      if (!contentNode.isNull() && !contentNode.isTextual()) {
+      if (!contentNode.isNull() && !contentNode.isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "invalid OpenAI chat assistant replay payload: illegal content type");
@@ -543,7 +546,7 @@ final class OpenAiChatRequestEncoder {
     // 校验 refusal 类型
     if (payload.has("refusal")) {
       JsonNode refusalNode = payload.get("refusal");
-      if (!refusalNode.isNull() && !refusalNode.isTextual()) {
+      if (!refusalNode.isNull() && !refusalNode.isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "invalid OpenAI chat assistant replay payload: illegal refusal type");
@@ -553,7 +556,7 @@ final class OpenAiChatRequestEncoder {
     // 校验 reasoning_content 类型
     if (payload.has("reasoning_content")) {
       JsonNode reasoningNode = payload.get("reasoning_content");
-      if (!reasoningNode.isNull() && !reasoningNode.isTextual()) {
+      if (!reasoningNode.isNull() && !reasoningNode.isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "invalid OpenAI chat assistant replay payload: illegal reasoning_content type");
@@ -593,18 +596,18 @@ final class OpenAiChatRequestEncoder {
           }
           // 现代 function 调用要求 id/type/function{name,arguments} 完整且合法；额外嵌套字段属于原生事实可保留
           if (!callNode.has("id")
-              || !callNode.get("id").isTextual()
-              || callNode.get("id").textValue().isBlank()) {
+              || !callNode.get("id").isString()
+              || callNode.get("id").stringValue().isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid OpenAI chat assistant replay payload: tool call id must be a non-blank string");
           }
-          if (!callNode.has("type") || !callNode.get("type").isTextual()) {
+          if (!callNode.has("type") || !callNode.get("type").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid OpenAI chat assistant replay payload: tool call type must be function");
           }
-          if (!"function".equals(callNode.get("type").textValue())) {
+          if (!"function".equals(callNode.get("type").stringValue())) {
             // custom/未知调用类型无法用 durable 工具调用表达：保留原生事实用于回放，不参与 durable 一致性比对
             continue;
           }
@@ -615,26 +618,28 @@ final class OpenAiChatRequestEncoder {
           }
           JsonNode fnNode = callNode.get("function");
           if (!fnNode.has("name")
-              || !fnNode.get("name").isTextual()
-              || fnNode.get("name").textValue().isBlank()) {
+              || !fnNode.get("name").isString()
+              || fnNode.get("name").stringValue().isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid OpenAI chat assistant replay payload: tool call function name must be a non-blank string");
           }
           if (!fnNode.has("arguments")
-              || !fnNode.get("arguments").isTextual()
-              || fnNode.get("arguments").textValue().isBlank()) {
+              || !fnNode.get("arguments").isString()
+              || fnNode.get("arguments").stringValue().isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid OpenAI chat assistant replay payload: tool call function arguments must be a non-blank string");
           }
-          String argumentsStr = fnNode.get("arguments").textValue();
+          String argumentsStr = fnNode.get("arguments").stringValue();
           parseJsonObject(
               argumentsStr,
               "invalid OpenAI chat assistant replay payload: tool call function arguments must be a JSON object");
           payloadCalls.add(
               new ProviderToolCall(
-                  callNode.get("id").textValue(), fnNode.get("name").textValue(), argumentsStr));
+                  callNode.get("id").stringValue(),
+                  fnNode.get("name").stringValue(),
+                  argumentsStr));
         }
       }
     }
@@ -664,11 +669,11 @@ final class OpenAiChatRequestEncoder {
     }
 
     StringBuilder payloadText = new StringBuilder();
-    if (payload.has("content") && payload.get("content").isTextual()) {
-      payloadText.append(payload.get("content").textValue());
+    if (payload.has("content") && payload.get("content").isString()) {
+      payloadText.append(payload.get("content").stringValue());
     }
-    if (payload.has("refusal") && payload.get("refusal").isTextual()) {
-      payloadText.append(payload.get("refusal").textValue());
+    if (payload.has("refusal") && payload.get("refusal").isString()) {
+      payloadText.append(payload.get("refusal").stringValue());
     }
     if (!payloadText.toString().equals(durableText.toString())) {
       throw new ProviderException(
@@ -677,8 +682,8 @@ final class OpenAiChatRequestEncoder {
     }
 
     String payloadThinking =
-        (payload.has("reasoning_content") && payload.get("reasoning_content").isTextual())
-            ? payload.get("reasoning_content").textValue()
+        (payload.has("reasoning_content") && payload.get("reasoning_content").isString())
+            ? payload.get("reasoning_content").stringValue()
             : "";
     if (!payloadThinking.equals(durableThinking.toString())) {
       throw new ProviderException(

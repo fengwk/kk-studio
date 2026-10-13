@@ -350,12 +350,11 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 
 ## 严格 JSON 契约
 
-本模块的 durable 列与 wire 载荷各由自己的 codec 承担，共享同一条契约。mapper 一律是不可变 `JsonMapper`（`JsonMapper.builder()`），显式开启 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`；未知、缺失、重复与尾随内容都在边界 fail-closed 拒绝。
+持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及协议未声明、缺失或类型错误的字段。自由 JSON 子树允许自有字段，不受外层固定字段集合限制。
 
-- 真正按树搬运自由 JSON 的 mapper 开启 `USE_BIG_DECIMAL_FOR_FLOATS`，以 `BigDecimal` 读回：`variant.protocolOptions`（`InvocationJsonSupport`、`ProviderRequestJsonCodec`、`ModelDescriptorJsonCodec`）、`SET_CONTRIBUTOR_STATE.state.data`、replay state、工具诊断、`argumentsJson` / `detailsJson` / `rawUsageJson`、历史 CUSTOM payload 与压缩摘要里的 tool-call arguments。`1e309`、`1e-324` 与高精度小数不会在 double 中退化成 `Infinity` / `0` 或被重新格式化；按原始文本搬运的字符串字段（如 `json` 内容块）则逐字保留。
-- 厂商原生选项与 `ModelDescriptor` 的 canonical 文本额外开启 `STRIP_TRAILING_BIGDECIMAL_ZEROES`，只移除无语义意义的尾零，保持既有 canonical golden 稳定。
-- durable 与 wire codec 的 `readTree` 入口把 Jackson 3 的空/纯空白输入（`MissingNode`，Jackson 2 为 `null`）判为缺失文档并拒绝，与畸形文档同样 fail-closed。[`ThreadCreationRequestHash`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadCreationRequestHash.java) 只重解析本模块自己产出的 canonical ROOT payload（仅含 id、枚举与文本，没有任何自由数值），因此不声明数值 profile。
-- 无法映射为 JSON 的输入（例如 `ProviderProtocolOptions.of` 收到无属性的任意对象）在构造期以 `IllegalArgumentException` 明确失败，不静默丢弃或降级；只有编码阶段的不可恢复失败才是 `IllegalStateException`。
+- 树搬运使用 `BigDecimal`，包括冻结请求的 `variant.protocolOptions`、Contributor state、历史 CUSTOM payload、native replay 和工具结果详情。外层 codec 同样保留精度，`1e309`、`1e-324` 与高精度小数不会经 double 丢失数量级或有效位；以字符串保存的 `argumentsJson`、`detailsJson`、`rawUsageJson` 和 JSON 内容则保留原文。
+- 厂商选项的 canonical 编码移除无语义意义的尾零。无法映射为 JSON 的输入（例如 `ProviderProtocolOptions.of` 收到无属性对象）明确拒绝，不静默变成空对象。
+- 权限配置与参数预览复用 [`JsonValues`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java) 的严格树读写，不依赖 HTTP mapper；未知 Tool 设置保留，permission 字段另做结构校验。空或纯空白文档拒绝，唯有 Tool settings 的缺省输入按其配置契约规范化为空对象。
 
 ## 源码与测试
 

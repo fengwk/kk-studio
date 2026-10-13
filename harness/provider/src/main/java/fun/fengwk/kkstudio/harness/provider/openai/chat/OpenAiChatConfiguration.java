@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -20,12 +22,12 @@ import java.util.Objects;
  */
 public final class OpenAiChatConfiguration {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   public static final String FIELD_INCLUDE_USAGE = "openAiChatIncludeUsage";
   public static final String FIELD_REQUIRE_DONE = "openAiChatRequireDone";
@@ -70,7 +72,7 @@ public final class OpenAiChatConfiguration {
     JsonNode root;
     try {
       root = OBJECT_MAPPER.readTree(configJson);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI chat configuration JSON");
     }
@@ -104,12 +106,12 @@ public final class OpenAiChatConfiguration {
     PromptCacheRetention promptCacheRetention = PromptCacheRetention.NONE;
     if (root.has(FIELD_PROMPT_CACHE_RETENTION)) {
       JsonNode node = root.get(FIELD_PROMPT_CACHE_RETENTION);
-      if (!node.isTextual()) {
+      if (!node.isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "field " + FIELD_PROMPT_CACHE_RETENTION + " must be a string");
       }
-      String text = node.textValue().trim();
+      String text = node.stringValue().trim();
       try {
         promptCacheRetention = PromptCacheRetention.valueOf(text);
       } catch (IllegalArgumentException ex) {
@@ -122,12 +124,12 @@ public final class OpenAiChatConfiguration {
     ThinkingFormat thinkingFormat = ThinkingFormat.STANDARD;
     if (root.has(FIELD_THINKING_FORMAT)) {
       JsonNode node = root.get(FIELD_THINKING_FORMAT);
-      if (!node.isTextual()) {
+      if (!node.isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "field " + FIELD_THINKING_FORMAT + " must be a string");
       }
-      String text = node.textValue().trim();
+      String text = node.stringValue().trim();
       try {
         thinkingFormat = ThinkingFormat.valueOf(text);
       } catch (IllegalArgumentException ex) {

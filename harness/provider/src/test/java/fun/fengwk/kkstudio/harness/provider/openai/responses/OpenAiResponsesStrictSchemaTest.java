@@ -4,10 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,7 +23,7 @@ import java.util.Map;
  */
 class OpenAiResponsesStrictSchemaTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private static ObjectNode normalize(String schemaJson) throws Exception {
     return OpenAiResponsesStrictSchema.normalize((ObjectNode) MAPPER.readTree(schemaJson));
@@ -30,7 +31,7 @@ class OpenAiResponsesStrictSchemaTest {
 
   private static List<String> requiredOf(JsonNode objectSchema) {
     List<String> required = new ArrayList<>();
-    objectSchema.path("required").forEach(entry -> required.add(entry.asText()));
+    objectSchema.path("required").forEach(entry -> required.add(entry.asString("")));
     return required;
   }
 
@@ -38,7 +39,7 @@ class OpenAiResponsesStrictSchemaTest {
   private static void assertStrictObject(JsonNode objectSchema, List<String> expectedRequired) {
     assertEquals(expectedRequired, requiredOf(objectSchema));
     assertTrue(objectSchema.has("additionalProperties"), "additionalProperties must be present");
-    assertFalse(objectSchema.path("additionalProperties").asBoolean());
+    assertFalse(objectSchema.path("additionalProperties").asBoolean(false));
   }
 
   /**
@@ -55,10 +56,10 @@ class OpenAiResponsesStrictSchemaTest {
 
     JsonNode properties = normalized.path("properties");
     assertStrictObject(normalized, List.of("scalar", "nil"));
-    assertEquals(5, properties.path("scalar").path("anyOf").get(0).asInt());
-    assertEquals("null", properties.path("scalar").path("anyOf").get(1).path("type").asText());
+    assertEquals(5, properties.path("scalar").path("anyOf").get(0).asInt(0));
+    assertEquals("null", properties.path("scalar").path("anyOf").get(1).path("type").asString(""));
     assertTrue(properties.path("nil").path("anyOf").get(0).isNull());
-    assertEquals("null", properties.path("nil").path("anyOf").get(1).path("type").asText());
+    assertEquals("null", properties.path("nil").path("anyOf").get(1).path("type").asString(""));
   }
 
   /**
@@ -83,19 +84,20 @@ class OpenAiResponsesStrictSchemaTest {
     // anyOf 中已含 null：保持原 schema，不额外包装
     assertEquals(2, properties.path("alreadyNullable").path("anyOf").size());
     assertEquals(
-        "null", properties.path("alreadyNullable").path("anyOf").get(0).path("type").asText());
+        "null", properties.path("alreadyNullable").path("anyOf").get(0).path("type").asString(""));
     assertFalse(properties.path("alreadyNullable").has("type"));
     // anyOf 全部不可空：外包一层 anyOf+null，原 anyOf 保留在 anyOf[0]
     assertEquals(
-        "null", properties.path("noNullVariant").path("anyOf").get(1).path("type").asText());
+        "null", properties.path("noNullVariant").path("anyOf").get(1).path("type").asString(""));
     assertEquals(2, properties.path("noNullVariant").path("anyOf").get(0).path("anyOf").size());
     // 类型数组不含 null：外包一层
     assertEquals(
-        "null", properties.path("typeArrayWithoutNull").path("anyOf").get(1).path("type").asText());
+        "null",
+        properties.path("typeArrayWithoutNull").path("anyOf").get(1).path("type").asString(""));
     // type 形态不可识别：按不可空处理
     assertEquals(
         "null",
-        properties.path("unrecognizedTypeShape").path("anyOf").get(1).path("type").asText());
+        properties.path("unrecognizedTypeShape").path("anyOf").get(1).path("type").asString(""));
     assertStrictObject(
         normalized,
         List.of(
@@ -148,9 +150,9 @@ class OpenAiResponsesStrictSchemaTest {
     assertStrictObject(normalized.path("dependentSchemas").path("l"), List.of("l"));
 
     // 字面量位置不递归：enum 内的 object 与 const 保持原样
-    assertEquals("string", normalized.path("enum").get(1).path("n").path("type").asText());
+    assertEquals("string", normalized.path("enum").get(1).path("n").path("type").asString(""));
     assertFalse(normalized.path("enum").get(1).path("n").has("required"));
-    assertEquals("string", normalized.path("const").path("o").path("type").asText());
+    assertEquals("string", normalized.path("const").path("o").path("type").asString(""));
     assertFalse(normalized.path("const").path("o").has("required"));
   }
 }

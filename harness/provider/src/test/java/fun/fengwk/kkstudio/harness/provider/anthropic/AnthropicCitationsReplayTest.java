@@ -4,11 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -44,7 +45,7 @@ import java.util.UUID;
  */
 class AnthropicCitationsReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final String SYSTEM_INSTRUCTION = "Test system instruction.";
 
@@ -148,13 +149,13 @@ class AnthropicCitationsReplayTest {
 
     JsonNode content = accumulator.finish().replayState().payload().path("content");
     assertEquals(2, content.size());
-    assertEquals("body", content.get(0).path("text").asText());
+    assertEquals("body", content.get(0).path("text").asString(""));
     assertEquals(2, content.get(0).path("citations").size());
-    assertEquals("start", content.get(0).path("citations").get(0).path("cited_text").asText());
-    assertEquals("delta", content.get(0).path("citations").get(1).path("cited_text").asText());
-    assertEquals("plain", content.get(1).path("text").asText());
+    assertEquals("start", content.get(0).path("citations").get(0).path("cited_text").asString(""));
+    assertEquals("delta", content.get(0).path("citations").get(1).path("cited_text").asString(""));
+    assertEquals("plain", content.get(1).path("text").asString(""));
     assertEquals(1, content.get(1).path("citations").size());
-    assertEquals("only", content.get(1).path("citations").get(0).path("cited_text").asText());
+    assertEquals("only", content.get(1).path("citations").get(0).path("cited_text").asString(""));
   }
 
   /** 测试意图：citations_delta 的 citation 必须是对象；否则显式失败而不是累积损坏的 citation。 */

@@ -2,10 +2,11 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -38,7 +39,7 @@ import java.util.UUID;
 /** 对齐上游 PartsAndContentsMapper、FunctionMapper 与 FinishReason 契约的测试。 */
 class GeminiRequestMapperTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private final GeminiRequestEncoder encoder = new GeminiRequestEncoder();
   private static final ModelVariant VARIANT = new ModelVariant("default");
 
@@ -82,12 +83,12 @@ class GeminiRequestMapperTest {
 
     ArrayNode contents = (ArrayNode) root.get("contents");
     assertEquals(1, contents.size());
-    assertEquals("user", contents.get(0).get("role").asText());
+    assertEquals("user", contents.get(0).get("role").asString(""));
 
     ArrayNode parts = (ArrayNode) contents.get(0).get("parts");
     assertEquals(2, parts.size());
-    assertEquals("part 1", parts.get(0).get("text").asText());
-    assertEquals("part 2", parts.get(1).get("text").asText());
+    assertEquals("part 1", parts.get(0).get("text").asString(""));
+    assertEquals("part 2", parts.get(1).get("text").asString(""));
   }
 
   /** 验证上游 FunctionMapper 的参数 schema 结构无损映射。 */
@@ -123,14 +124,14 @@ class GeminiRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode fnDecl = root.get("tools").get(0).get("functionDeclarations").get(0);
-    assertEquals("forecast", fnDecl.get("name").asText());
-    assertEquals("Weather forecast", fnDecl.get("description").asText());
+    assertEquals("forecast", fnDecl.get("name").asString(""));
+    assertEquals("Weather forecast", fnDecl.get("description").asString(""));
 
     JsonNode params = fnDecl.get("parameters");
-    assertEquals("object", params.get("type").asText());
-    assertEquals("string", params.get("properties").get("city").get("type").asText());
-    assertEquals("integer", params.get("properties").get("days").get("type").asText());
-    assertEquals("city", params.get("required").get(0).asText());
+    assertEquals("object", params.get("type").asString(""));
+    assertEquals("string", params.get("properties").get("city").get("type").asString(""));
+    assertEquals("integer", params.get("properties").get("days").get("type").asString(""));
+    assertEquals("city", params.get("required").get(0).asString(""));
   }
 
   /** 验证多轮对话中，工具调用与工具返回被组织为符合上游期望的连续交互。 */
@@ -164,18 +165,18 @@ class GeminiRequestMapperTest {
     ArrayNode contents = (ArrayNode) root.get("contents");
     assertEquals(3, contents.size());
 
-    assertEquals("user", contents.get(0).get("role").asText());
-    assertEquals("model", contents.get(1).get("role").asText());
-    assertEquals("user", contents.get(2).get("role").asText());
+    assertEquals("user", contents.get(0).get("role").asString(""));
+    assertEquals("model", contents.get(1).get("role").asString(""));
+    assertEquals("user", contents.get(2).get("role").asString(""));
 
     JsonNode fnCall = contents.get(1).get("parts").get(0).get("functionCall");
-    assertEquals("add", fnCall.get("name").asText());
-    assertEquals("call_add", fnCall.get("id").asText());
+    assertEquals("add", fnCall.get("name").asString(""));
+    assertEquals("call_add", fnCall.get("id").asString(""));
 
     JsonNode fnResp = contents.get(2).get("parts").get(0).get("functionResponse");
-    assertEquals("add", fnResp.get("name").asText());
-    assertEquals("call_add", fnResp.get("id").asText());
-    assertEquals("2", fnResp.get("response").get("result").asText());
+    assertEquals("add", fnResp.get("name").asString(""));
+    assertEquals("call_add", fnResp.get("id").asString(""));
+    assertEquals("2", fnResp.get("response").get("result").asString(""));
   }
 
   /** 验证各种 finishReason 到 GenerationStopReason 的规范映射。 */

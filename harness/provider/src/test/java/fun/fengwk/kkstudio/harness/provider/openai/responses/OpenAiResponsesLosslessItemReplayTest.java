@@ -4,11 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -45,7 +46,7 @@ import java.util.UUID;
  */
 class OpenAiResponsesLosslessItemReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default", "medium");
   private static final String INSTRUCTION = "Test system instruction.";
 
@@ -244,8 +245,8 @@ class OpenAiResponsesLosslessItemReplayTest {
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"check the weather\"}]}]}}"));
 
     JsonNode replayItem = accumulator.replayState().payload().path("output").get(0);
-    assertEquals("enc_stream", replayItem.path("encrypted_content").asText());
-    assertEquals("completed", replayItem.path("status").asText());
+    assertEquals("enc_stream", replayItem.path("encrypted_content").asString(""));
+    assertEquals("completed", replayItem.path("status").asString(""));
   }
 
   /**

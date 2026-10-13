@@ -6,14 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -42,7 +43,7 @@ import java.util.Set;
  */
 class OpenAiChatProtocolOptionsTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private OpenAiChatRequestEncoder encoder;
   private ProviderDescriptor descriptor;
@@ -106,30 +107,30 @@ class OpenAiChatProtocolOptionsTest {
 
     assertTrue(root.path("response_format").path("json_schema").path("schema").isObject());
     assertEquals(2, root.path("modalities").size());
-    assertEquals("alloy", root.path("audio").path("voice").asText());
-    assertEquals("expected", root.path("prediction").path("content").asText());
-    assertTrue(root.path("logprobs").asBoolean());
-    assertEquals(3, root.path("top_logprobs").asInt());
-    assertEquals("low", root.path("web_search_options").path("search_context_size").asText());
-    assertEquals("flex", root.path("service_tier").asText());
-    assertEquals("t1", root.path("metadata").path("tenant").asText());
-    assertFalse(root.path("parallel_tool_calls").asBoolean());
-    assertEquals(7, root.path("seed").asInt());
-    assertEquals(0.25, root.path("temperature").asDouble());
-    assertEquals(0.9, root.path("top_p").asDouble());
-    assertEquals(-0.5, root.path("frequency_penalty").asDouble());
-    assertEquals(0.5, root.path("presence_penalty").asDouble());
-    assertEquals("END", root.path("stop").get(0).asText());
-    assertEquals("u-1", root.path("user").asText());
-    assertEquals(1, root.path("n").asInt());
+    assertEquals("alloy", root.path("audio").path("voice").asString(""));
+    assertEquals("expected", root.path("prediction").path("content").asString(""));
+    assertTrue(root.path("logprobs").asBoolean(false));
+    assertEquals(3, root.path("top_logprobs").asInt(0));
+    assertEquals("low", root.path("web_search_options").path("search_context_size").asString(""));
+    assertEquals("flex", root.path("service_tier").asString(""));
+    assertEquals("t1", root.path("metadata").path("tenant").asString(""));
+    assertFalse(root.path("parallel_tool_calls").asBoolean(false));
+    assertEquals(7, root.path("seed").asInt(0));
+    assertEquals(0.25, root.path("temperature").asDouble(0.0));
+    assertEquals(0.9, root.path("top_p").asDouble(0.0));
+    assertEquals(-0.5, root.path("frequency_penalty").asDouble(0.0));
+    assertEquals(0.5, root.path("presence_penalty").asDouble(0.0));
+    assertEquals("END", root.path("stop").get(0).asString(""));
+    assertEquals("u-1", root.path("user").asString(""));
+    assertEquals(1, root.path("n").asInt(0));
 
     // 运行时事实不被 native 影响
-    assertEquals("gpt-4o-reasoning", root.path("model").asText());
-    assertTrue(root.path("stream").asBoolean());
-    assertEquals(1024, root.path("max_tokens").asInt());
+    assertEquals("gpt-4o-reasoning", root.path("model").asString(""));
+    assertTrue(root.path("stream").asBoolean(false));
+    assertEquals(1024, root.path("max_tokens").asInt(0));
     assertFalse(root.has("max_completion_tokens"));
-    assertTrue(root.path("stream_options").path("include_usage").asBoolean());
-    assertEquals("system", root.path("messages").get(0).path("role").asText());
+    assertTrue(root.path("stream_options").path("include_usage").asBoolean(false));
+    assertEquals("system", root.path("messages").get(0).path("role").asString(""));
   }
 
   /** 测试意图：原始小数/指数经 protocolOptions 规范化为整数 1 后，单候选请求仍可执行；非 1 小数另有拒绝用例。 */
@@ -181,8 +182,8 @@ class OpenAiChatProtocolOptionsTest {
             reasoningModel,
             nativeVariant("{\"stream_options\":{\"continuous_usage_stats\":true}}"),
             List.of());
-    assertTrue(merged.path("stream_options").path("continuous_usage_stats").asBoolean());
-    assertTrue(merged.path("stream_options").path("include_usage").asBoolean());
+    assertTrue(merged.path("stream_options").path("continuous_usage_stats").asBoolean(false));
+    assertTrue(merged.path("stream_options").path("include_usage").asBoolean(false));
 
     // runtime 配置仍然决定 include_usage 的最终值
     OpenAiChatConfiguration withoutUsage =
@@ -198,8 +199,8 @@ class OpenAiChatProtocolOptionsTest {
                     descriptor,
                     withoutUsage)
                 .bodyUtf8Bytes());
-    assertFalse(configured.path("stream_options").path("include_usage").asBoolean());
-    assertTrue(configured.path("stream_options").path("continuous_usage_stats").asBoolean());
+    assertFalse(configured.path("stream_options").path("include_usage").asBoolean(false));
+    assertTrue(configured.path("stream_options").path("continuous_usage_stats").asBoolean(false));
 
     // include_usage 是 runtime-owned：native 声明即冲突
     ProviderException conflict =
@@ -237,7 +238,7 @@ class OpenAiChatProtocolOptionsTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     ArrayNode tools = (ArrayNode) root.path("tools");
     assertEquals(1, tools.size());
-    assertEquals("runtime_calc", tools.get(0).path("function").path("name").asText());
+    assertEquals("runtime_calc", tools.get(0).path("function").path("name").asString(""));
 
     // 仅空 native tools 时保留空声明
     OpenAiChatEncodedRequest nativeOnlyEncoded =
@@ -299,7 +300,7 @@ class OpenAiChatProtocolOptionsTest {
     // variant 未声明 effort：native 的 reasoning_effort 原样保留
     JsonNode nativeEffort =
         encode(reasoningModel, nativeVariant("{\"reasoning_effort\":\"xhigh\"}"), List.of());
-    assertEquals("xhigh", nativeEffort.path("reasoning_effort").asText());
+    assertEquals("xhigh", nativeEffort.path("reasoning_effort").asString(""));
 
     // variant 未声明 effort：native 的 thinking 开关与预算原样保留
     JsonNode nativeThinking =
@@ -307,13 +308,13 @@ class OpenAiChatProtocolOptionsTest {
             reasoningModel,
             nativeVariant("{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":4096}}"),
             List.of());
-    assertEquals("enabled", nativeThinking.path("thinking").path("type").asText());
-    assertEquals(4096, nativeThinking.path("thinking").path("budget_tokens").asInt());
+    assertEquals("enabled", nativeThinking.path("thinking").path("type").asString(""));
+    assertEquals(4096, nativeThinking.path("thinking").path("budget_tokens").asInt(0));
 
     // 非 reasoning 模型 + variant 未声明 effort：native 字段仍属厂商原生事实
     JsonNode plainNative =
         encode(plainModel, nativeVariant("{\"reasoning_effort\":\"high\"}"), List.of());
-    assertEquals("high", plainNative.path("reasoning_effort").asText());
+    assertEquals("high", plainNative.path("reasoning_effort").asString(""));
 
     // variant 声明 effort 后 reasoning_effort / thinking 由 runtime 独占：native 声明即冲突
     for (String field : List.of("reasoning_effort", "thinking")) {
@@ -339,7 +340,7 @@ class OpenAiChatProtocolOptionsTest {
                     descriptor,
                     OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    assertEquals("high", standard.path("reasoning_effort").asText());
+    assertEquals("high", standard.path("reasoning_effort").asString(""));
 
     JsonNode deepseek =
         MAPPER.readTree(
@@ -353,7 +354,7 @@ class OpenAiChatProtocolOptionsTest {
                         PromptCacheRetention.NONE,
                         OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK))
                 .bodyUtf8Bytes());
-    assertEquals("disabled", deepseek.path("thinking").path("type").asText());
+    assertEquals("disabled", deepseek.path("thinking").path("type").asString(""));
     assertFalse(deepseek.has("reasoning_effort"));
   }
 

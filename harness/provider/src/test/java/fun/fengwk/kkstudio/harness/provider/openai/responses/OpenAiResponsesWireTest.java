@@ -5,9 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -41,7 +42,7 @@ import java.util.UUID;
 /** 验证 OpenAI Responses Wire 协议交互、finish reasons 映射与 SSE 事件解析。 */
 class OpenAiResponsesWireTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String VALID_PREFIX_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
@@ -176,19 +177,19 @@ class OpenAiResponsesWireTest {
     OpenAiResponsesEncodedRequest enc = encoder.encode(req, createDescriptor());
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
-    assertEquals("gpt-5.4-mini", root.path("model").asText());
-    assertTrue(root.path("stream").asBoolean());
-    assertEquals(100, root.path("max_output_tokens").asInt());
-    assertEquals("medium", root.path("reasoning").path("effort").asText());
-    assertEquals("auto", root.path("reasoning").path("summary").asText());
-    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
+    assertEquals("gpt-5.4-mini", root.path("model").asString(""));
+    assertTrue(root.path("stream").asBoolean(false));
+    assertEquals(100, root.path("max_output_tokens").asInt(0));
+    assertEquals("medium", root.path("reasoning").path("effort").asString(""));
+    assertEquals("auto", root.path("reasoning").path("summary").asString(""));
+    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asString(""));
 
     // 系统指令是本协议唯一的顶层 instructions 字符串，绝不作为 input 中的 system/developer item。
-    assertEquals("You are helpful.", root.path("instructions").asText());
+    assertEquals("You are helpful.", root.path("instructions").asString(""));
     JsonNode input = root.get("input");
     assertEquals(1, input.size());
-    assertEquals("user", input.get(0).path("role").asText());
-    assertEquals("Tell me a story.", input.get(0).path("content").get(0).path("text").asText());
+    assertEquals("user", input.get(0).path("role").asString(""));
+    assertEquals("Tell me a story.", input.get(0).path("content").get(0).path("text").asString(""));
   }
 
   /** 对应 upstream PDF 文档支持与多模态输入验证。 */
@@ -210,8 +211,8 @@ class OpenAiResponsesWireTest {
 
     JsonNode content = root.get("input").get(0).get("content");
     assertEquals(2, content.size());
-    assertEquals("input_file", content.get(1).path("type").asText());
-    assertEquals("https://example.com/spec.pdf", content.get(1).path("file_url").asText());
+    assertEquals("input_file", content.get(1).path("type").asString(""));
+    assertEquals("https://example.com/spec.pdf", content.get(1).path("file_url").asString(""));
   }
 
   /** 对应 upstream 工具调用请求与工具执行结果回传的 Wire 消息链编码验证。 */
@@ -251,19 +252,19 @@ class OpenAiResponsesWireTest {
     assertEquals(3, input.size());
 
     // 0: user message
-    assertEquals("message", input.get(0).path("type").asText());
-    assertEquals("user", input.get(0).path("role").asText());
+    assertEquals("message", input.get(0).path("type").asString(""));
+    assertEquals("user", input.get(0).path("role").asString(""));
 
     // 1: assistant function call
-    assertEquals("function_call", input.get(1).path("type").asText());
-    assertEquals("c_math", input.get(1).path("call_id").asText());
-    assertEquals("calculator", input.get(1).path("name").asText());
-    assertEquals("{\"expr\":\"2+2\"}", input.get(1).path("arguments").asText());
+    assertEquals("function_call", input.get(1).path("type").asString(""));
+    assertEquals("c_math", input.get(1).path("call_id").asString(""));
+    assertEquals("calculator", input.get(1).path("name").asString(""));
+    assertEquals("{\"expr\":\"2+2\"}", input.get(1).path("arguments").asString(""));
 
     // 2: tool function_call_output
-    assertEquals("function_call_output", input.get(2).path("type").asText());
-    assertEquals("c_math", input.get(2).path("call_id").asText());
-    assertEquals("4", input.get(2).path("output").asText());
+    assertEquals("function_call_output", input.get(2).path("type").asString(""));
+    assertEquals("c_math", input.get(2).path("call_id").asString(""));
+    assertEquals("4", input.get(2).path("output").asString(""));
   }
 
   /** 验证 reasoning effort 为 "none" 时的 Wire 协议编码：仅生成 effort:"none"，省略 summary 与 include。 */
@@ -282,7 +283,7 @@ class OpenAiResponsesWireTest {
     OpenAiResponsesEncodedRequest enc = encoder.encode(req, createDescriptor());
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
-    assertEquals("none", root.path("reasoning").path("effort").asText());
+    assertEquals("none", root.path("reasoning").path("effort").asString(""));
     assertFalse(root.path("reasoning").has("summary"));
     assertFalse(root.has("include"));
   }
@@ -305,12 +306,12 @@ class OpenAiResponsesWireTest {
     OpenAiResponsesEncodedRequest enc = encoder.encode(req, createDescriptor());
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
-    assertEquals("high", root.path("reasoning").path("effort").asText());
-    assertEquals("auto", root.path("reasoning").path("summary").asText());
-    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
+    assertEquals("high", root.path("reasoning").path("effort").asString(""));
+    assertEquals("auto", root.path("reasoning").path("summary").asString(""));
+    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asString(""));
     assertTrue(root.has("tools"));
-    assertEquals("get_time", root.path("tools").get(0).path("name").asText());
-    assertTrue(root.path("tools").get(0).path("strict").asBoolean());
+    assertEquals("get_time", root.path("tools").get(0).path("name").asString(""));
+    assertTrue(root.path("tools").get(0).path("strict").asBoolean(false));
   }
 
   /**
@@ -351,20 +352,20 @@ class OpenAiResponsesWireTest {
     JsonNode root = MAPPER.readTree(encoder.encode(req, createDescriptor()).bodyUtf8Bytes());
 
     // OpenAI Responses 只接受 >= 16 的输出上限，合法冻结预算必须原样编码。
-    assertEquals(16, root.path("max_output_tokens").asInt());
-    assertEquals("Test system instruction.", root.path("instructions").asText());
-    assertEquals("user", root.get("input").get(0).path("role").asText());
-    assertEquals(cacheControl.key(), root.path("prompt_cache_key").asText());
-    assertEquals("in_memory", root.path("prompt_cache_retention").asText());
-    assertEquals("medium", root.path("reasoning").path("effort").asText());
+    assertEquals(16, root.path("max_output_tokens").asInt(0));
+    assertEquals("Test system instruction.", root.path("instructions").asString(""));
+    assertEquals("user", root.get("input").get(0).path("role").asString(""));
+    assertEquals(cacheControl.key(), root.path("prompt_cache_key").asString(""));
+    assertEquals("in_memory", root.path("prompt_cache_retention").asString(""));
+    assertEquals("medium", root.path("reasoning").path("effort").asString(""));
 
     JsonNode parameters = root.get("tools").get(0).path("parameters");
-    assertEquals("string", parameters.path("properties").path("city").path("type").asText());
+    assertEquals("string", parameters.path("properties").path("city").path("type").asString(""));
     assertEquals(
         "string",
-        parameters.path("properties").path("unit").path("anyOf").get(0).path("type").asText());
+        parameters.path("properties").path("unit").path("anyOf").get(0).path("type").asString(""));
     assertEquals(
         "null",
-        parameters.path("properties").path("unit").path("anyOf").get(1).path("type").asText());
+        parameters.path("properties").path("unit").path("anyOf").get(1).path("type").asString(""));
   }
 }

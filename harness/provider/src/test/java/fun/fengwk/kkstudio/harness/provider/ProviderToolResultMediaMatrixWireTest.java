@@ -5,14 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
@@ -78,7 +79,7 @@ import java.util.stream.Stream;
  */
 class ProviderToolResultMediaMatrixWireTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private static final String TOOL_CALL_ID = "call_1";
   private static final String TOOL_NAME = "get_media";
@@ -321,33 +322,33 @@ class ProviderToolResultMediaMatrixWireTest {
         assertTrue(output.isArray(), "tool result media must be an output array");
         // 文本结果 + 媒体：两者按原顺序进入同一个 output 数组
         assertEquals(2, output.size());
-        assertEquals("input_text", output.get(0).path("type").asText());
-        assertEquals("result", output.get(0).path("text").asText());
+        assertEquals("input_text", output.get(0).path("type").asString(""));
+        assertEquals("result", output.get(0).path("text").asString(""));
         if (modality == ModelInputModality.IMAGE) {
-          assertEquals("input_image", output.get(1).path("type").asText());
-          assertEquals(PNG_DATA_URI, output.get(1).path("image_url").asText());
+          assertEquals("input_image", output.get(1).path("type").asString(""));
+          assertEquals(PNG_DATA_URI, output.get(1).path("image_url").asString(""));
         } else {
-          assertEquals("input_file", output.get(1).path("type").asText());
-          assertEquals(PDF_DATA_URI, output.get(1).path("file_data").asText());
-          assertEquals("document.pdf", output.get(1).path("filename").asText());
+          assertEquals("input_file", output.get(1).path("type").asString(""));
+          assertEquals(PDF_DATA_URI, output.get(1).path("file_data").asString(""));
+          assertEquals("document.pdf", output.get(1).path("filename").asString(""));
         }
       }
       case ANTHROPIC -> {
         JsonNode nested = findAnthropicToolResult(body).path("content");
         // 文本结果 + 媒体：两者按原顺序嵌套在同一个 tool_result.content 内
         assertEquals(2, nested.size());
-        assertEquals("text", nested.get(0).path("type").asText());
-        assertEquals("result", nested.get(0).path("text").asText());
+        assertEquals("text", nested.get(0).path("type").asString(""));
+        assertEquals("result", nested.get(0).path("text").asString(""));
         JsonNode block = nested.get(1);
-        assertEquals("base64", block.path("source").path("type").asText());
+        assertEquals("base64", block.path("source").path("type").asString(""));
         if (modality == ModelInputModality.IMAGE) {
-          assertEquals("image", block.path("type").asText());
-          assertEquals("image/png", block.path("source").path("media_type").asText());
-          assertEquals("iVBORw0KGgo=", block.path("source").path("data").asText());
+          assertEquals("image", block.path("type").asString(""));
+          assertEquals("image/png", block.path("source").path("media_type").asString(""));
+          assertEquals("iVBORw0KGgo=", block.path("source").path("data").asString(""));
         } else {
-          assertEquals("document", block.path("type").asText());
-          assertEquals("application/pdf", block.path("source").path("media_type").asText());
-          assertEquals("JVBERi0xLjQK", block.path("source").path("data").asText());
+          assertEquals("document", block.path("type").asString(""));
+          assertEquals("application/pdf", block.path("source").path("media_type").asString(""));
+          assertEquals("JVBERi0xLjQK", block.path("source").path("data").asString(""));
         }
       }
       case GEMINI -> {
@@ -355,19 +356,19 @@ class ProviderToolResultMediaMatrixWireTest {
         // 媒体只作为 functionResponse 内部的 part，绝不与 functionResponse 同级
         assertEquals(1, parts.size(), "media must not be a sibling part of functionResponse");
         JsonNode functionResponse = parts.get(0).path("functionResponse");
-        assertEquals(TOOL_NAME, functionResponse.path("name").asText());
-        assertEquals(TOOL_CALL_ID, functionResponse.path("id").asText());
-        assertEquals("result", functionResponse.path("response").path("result").asText());
+        assertEquals(TOOL_NAME, functionResponse.path("name").asString(""));
+        assertEquals(TOOL_CALL_ID, functionResponse.path("id").asString(""));
+        assertEquals("result", functionResponse.path("response").path("result").asString(""));
         JsonNode nested = functionResponse.path("parts");
         assertEquals(1, nested.size());
         JsonNode inlineData = nested.get(0).path("inlineData");
         assertFalse(inlineData.has("displayName"), "v1beta schema has no displayName field");
         if (modality == ModelInputModality.IMAGE) {
-          assertEquals("image/png", inlineData.path("mimeType").asText());
-          assertEquals("iVBORw0KGgo=", inlineData.path("data").asText());
+          assertEquals("image/png", inlineData.path("mimeType").asString(""));
+          assertEquals("iVBORw0KGgo=", inlineData.path("data").asString(""));
         } else {
-          assertEquals("application/pdf", inlineData.path("mimeType").asText());
-          assertEquals("JVBERi0xLjQK", inlineData.path("data").asText());
+          assertEquals("application/pdf", inlineData.path("mimeType").asString(""));
+          assertEquals("JVBERi0xLjQK", inlineData.path("data").asString(""));
         }
       }
       case OPENAI_CHAT -> throw new IllegalStateException(
@@ -377,8 +378,8 @@ class ProviderToolResultMediaMatrixWireTest {
 
   private static JsonNode findResponsesToolOutput(JsonNode body) {
     for (JsonNode item : body.path("input")) {
-      if ("function_call_output".equals(item.path("type").asText())) {
-        assertEquals(TOOL_CALL_ID, item.path("call_id").asText());
+      if ("function_call_output".equals(item.path("type").asString(""))) {
+        assertEquals(TOOL_CALL_ID, item.path("call_id").asString(""));
         return item.path("output");
       }
     }
@@ -388,8 +389,8 @@ class ProviderToolResultMediaMatrixWireTest {
   private static JsonNode findAnthropicToolResult(JsonNode body) {
     for (JsonNode message : body.path("messages")) {
       for (JsonNode block : message.path("content")) {
-        if ("tool_result".equals(block.path("type").asText())) {
-          assertEquals(TOOL_CALL_ID, block.path("tool_use_id").asText());
+        if ("tool_result".equals(block.path("type").asString(""))) {
+          assertEquals(TOOL_CALL_ID, block.path("tool_use_id").asString(""));
           return block;
         }
       }
