@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.harness.tool.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
@@ -14,7 +15,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
-import java.util.Iterator;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -26,14 +26,13 @@ import java.util.Set;
  */
 public final class ToolDescriptorJsonCodec {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   public ToolDescriptorJsonCodec() {}
 
@@ -59,10 +58,11 @@ public final class ToolDescriptorJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed tool descriptor JSON", error);
     }
-    if (root == null) {
+    // Jackson 3 对空/纯空白输入返回 MissingNode；两种形态都在解码入口统一拒绝。
+    if (root == null || root.isMissingNode()) {
       throw new IllegalArgumentException("tool descriptor JSON must not be empty");
     }
     return decodeNode(root);
@@ -86,7 +86,7 @@ public final class ToolDescriptorJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode tool descriptor JSON", error);
     }
   }
@@ -156,12 +156,7 @@ public final class ToolDescriptorJsonCodec {
   }
 
   private static void rejectUnknownFields(ObjectNode node, Set<String> allowed, String context) {
-    Iterator<String> fields = node.fieldNames();
-    if (fields == null) {
-      return;
-    }
-    while (fields.hasNext()) {
-      String name = fields.next();
+    for (String name : node.propertyNames()) {
       if (!allowed.contains(name)) {
         throw new IllegalArgumentException(context + " unknown field: '" + name + "'");
       }
@@ -189,10 +184,10 @@ public final class ToolDescriptorJsonCodec {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(context + " '" + field + "' must be a string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static ObjectNode requiredObject(JsonNode node, String context) {

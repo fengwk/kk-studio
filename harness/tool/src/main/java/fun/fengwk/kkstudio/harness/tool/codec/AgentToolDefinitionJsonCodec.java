@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.harness.tool.codec;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -25,14 +26,13 @@ public final class AgentToolDefinitionJsonCodec {
 
   private static final String CONTEXT = "agentToolDefinition";
   private static final Set<String> FIELDS = Set.of("descriptor", "visibility");
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final ToolDescriptorJsonCodec DESCRIPTOR_CODEC = new ToolDescriptorJsonCodec();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   /** 把完整 Agent tool definition 编码为 deterministic canonical JSON 文本。 */
   public String encode(AgentToolDefinition definition) {
@@ -55,10 +55,11 @@ public final class AgentToolDefinitionJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed " + CONTEXT + " JSON", error);
     }
-    if (root == null) {
+    // Jackson 3 对空/纯空白输入返回 MissingNode；两种形态都在解码入口统一拒绝。
+    if (root == null || root.isMissingNode()) {
       throw new IllegalArgumentException("malformed " + CONTEXT + " JSON: empty document");
     }
     return decodeNode(root);
@@ -98,10 +99,10 @@ public final class AgentToolDefinitionJsonCodec {
 
   private static String text(ObjectNode node, String field) {
     JsonNode value = required(node, field);
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(CONTEXT + "." + field + " must be text");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static <E extends Enum<E>> E enumValue(ObjectNode node, String field, Class<E> enumType) {
@@ -117,7 +118,7 @@ public final class AgentToolDefinitionJsonCodec {
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode " + CONTEXT + " JSON", error);
     }
   }
