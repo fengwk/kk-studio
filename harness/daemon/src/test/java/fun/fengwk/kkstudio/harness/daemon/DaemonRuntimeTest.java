@@ -179,6 +179,69 @@ class DaemonRuntimeTest {
     }
   }
 
+  /** 主机用户名缺失时必须启动即失败：环境信息绝不伪造 userName。 */
+  @Test
+  void rejectsAMissingHostUserNameProperty() {
+    String userName = System.getProperty("user.name");
+    try {
+      System.clearProperty("user.name");
+
+      assertThrows(
+          IllegalStateException.class, () -> runtime(new FakeTransport(), new TestCapability()));
+    } finally {
+      System.setProperty("user.name", userName);
+    }
+  }
+
+  /** 家目录在磁盘上不存在时必须仍可启动与关闭：只做规范化，绝不因 toRealPath 失败拒绝启动，也不创建它。 */
+  @Test
+  void startsWithAHomeDirectoryThatDoesNotExistOnDisk() throws Exception {
+    String home = System.getProperty("user.home");
+    Path missingHome = dataDir().resolve("absent-home");
+    try {
+      System.setProperty("user.home", missingHome.toString());
+
+      DaemonRuntime unstarted = runtime(new FakeTransport(), new TestCapability());
+      unstarted.close();
+
+      assertEquals(DaemonRuntimeState.STOPPED, unstarted.state());
+      assertFalse(Files.exists(missingHome), "启动不得要求或创建家目录");
+    } finally {
+      System.setProperty("user.home", home);
+    }
+  }
+
+  /** 必须携带调用关联的控制帧缺少 invocationId 时是协议错误；错误不破坏已 READY 的连接。 */
+  @Test
+  void rejectsInboundFramesWithoutTheRequiredInvocationId() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receiveRaw(envelopeWithoutInvocationId("CANCEL"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receiveRaw(envelopeWithoutInvocationId("RESOURCE_UPLOAD_TICKET"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    // 连接仍然可用：随后的合法控制帧照常生效。
+    transport.receive(policyMessage(120L, 30L));
+    assertEquals(120L, runtime.temporaryResourceTtlSeconds());
+    assertEquals(30L, runtime.temporaryResourceCleanupIntervalSeconds());
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  private static String envelopeWithoutInvocationId(String messageType) {
+    return "{\"protocolVersion\":"
+        + DaemonProtocol.VERSION
+        + ",\"messageType\":\""
+        + messageType
+        + "\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{}}";
+  }
+
   /** 注册身份已被另一 live daemon 持有是终态冲突：daemon 进入 FAILED、停止重连并释放终止闩。 */
   @Test
   void registrationRejectedErrorIsTerminalFailureWithoutReconnect() throws Exception {
@@ -2241,6 +2304,77 @@ class DaemonRuntimeTest {
     assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
   }
 
+  /** 关闭等待执行资源时被中断：关闭必须仍然完成，且中断标记被恢复而不是吞掉。 */
+  @Test
+  void closeRestoresInterruptWhileWaitingForExecutors() throws Exception {
+    ExecutorService stuckTasks =
+        Executors.newSingleThreadExecutor(runnable -> daemonThread("stuck-task", runnable));
+    ScheduledExecutorService stuckScheduler =
+        Executors.newScheduledThreadPool(1, runnable -> daemonThread("stuck-scheduler", runnable));
+    stuckTasks.execute(uninterruptibleTask());
+    stuckScheduler.schedule(uninterruptibleTask(), 0L, TimeUnit.MILLISECONDS);
+    DaemonRuntime closing =
+        new DaemonRuntime(
+            new DaemonConfig(
+                URI.create("ws://localhost/gateway"),
+                registrationTokenFile(),
+                Duration.ofMinutes(1),
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                null,
+                dataDir()),
+            new FakeTransport(),
+            new DaemonCapabilityRegistry(),
+            new InMemoryDaemonInvocationJournal(),
+            stuckScheduler,
+            stuckTasks);
+    AtomicBoolean interruptRestored = new AtomicBoolean();
+    AtomicBoolean finished = new AtomicBoolean();
+    Thread closer =
+        new Thread(
+            () -> {
+              closing.close();
+              interruptRestored.set(Thread.currentThread().isInterrupted());
+              finished.set(true);
+            },
+            "closer");
+    closer.start();
+    try {
+      // 关闭已进入等待执行资源终止：此时中断只允许被恢复，绝不允许让关闭悬挂。
+      Thread.sleep(200L);
+      closer.interrupt();
+      closer.join(TimeUnit.SECONDS.toMillis(20));
+
+      assertTrue(finished.get(), "关闭不得因中断而悬挂");
+      assertTrue(interruptRestored.get(), "关闭必须恢复中断标记而不是吞掉它");
+      assertEquals(DaemonRuntimeState.STOPPED, closing.state());
+    } finally {
+      closer.interrupt();
+      stuckTasks.shutdownNow();
+      stuckScheduler.shutdownNow();
+    }
+  }
+
+  private static Thread daemonThread(String name, Runnable runnable) {
+    Thread thread = new Thread(runnable, name);
+    thread.setDaemon(true);
+    return thread;
+  }
+
+  /** 一个忽略中断、无法在关闭超时前终止的任务：用来验证关闭被中断时的收敛行为。 */
+  private static Runnable uninterruptibleTask() {
+    return () -> {
+      long deadline = System.currentTimeMillis() + 1_000L;
+      while (System.currentTimeMillis() < deadline) {
+        try {
+          Thread.sleep(50L);
+        } catch (InterruptedException ignored) {
+          // 故意忽略中断：模拟不配合关闭的本地任务。
+        }
+      }
+    };
+  }
+
   /** close 的两个执行资源必须恰好归 runtime 所有：重复关闭后均 shutdownNow 且在有界时间内终止。 */
   @Test
   void closeTerminatesSchedulerAndSharedTaskExecutorIdempotently() throws Exception {
@@ -2576,6 +2710,55 @@ class DaemonRuntimeTest {
     assertEquals(
         TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS,
         runtime.temporaryResourceCleanupIntervalSeconds());
+  }
+
+  /** 服务端 ERROR 载荷的形状也受协议约束：未知字段与非文本/未知 code 都是协议错误，连接保持可用。 */
+  @Test
+  void rejectsMalformedErrorPayloadsWithoutBreakingTheConnection() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receiveRaw(errorEnvelope("\"message\":\"x\",\"unexpected\":1"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receiveRaw(errorEnvelope("\"code\":7"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receiveRaw(errorEnvelope("\"code\":\"NOT_A_KNOWN_CODE\""));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    transport.receive(policyMessage(120L, 30L));
+    assertEquals(120L, runtime.temporaryResourceTtlSeconds());
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  /** 同一条连接只能绑定一次 WELCOME：第二次是协议错误，且不得改变已绑定的环境。 */
+  @Test
+  void rejectsASecondWelcomeOnTheSameConnection() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(platformMessage(DaemonMessageType.WELCOME));
+
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  private static String errorEnvelope(String payloadFields) {
+    return "{\"protocolVersion\":"
+        + DaemonProtocol.VERSION
+        + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
+        + "\"payload\":{"
+        + payloadFields
+        + "}}";
   }
 
   private DaemonEnvelope policyMessage(long ttlSeconds, long cleanupIntervalSeconds) {

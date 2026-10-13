@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCode
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader;
 
 import java.io.IOException;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -26,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Daemon 侧的资源上传客户端：把内存字节经调用作用域控制面直传全局对象存储。
@@ -54,6 +57,8 @@ final class DaemonResourceTransferClient {
 
   private static final String REJECTED_PREFIX = "resource upload was rejected by storage";
 
+  private static final Logger LOG = System.getLogger(DaemonResourceTransferClient.class.getName());
+
   private final OkHttpClient httpClient;
   private final DaemonResourceTransferCodec codec = new DaemonResourceTransferCodec();
   private final ConcurrentHashMap<
@@ -62,6 +67,9 @@ final class DaemonResourceTransferClient {
   private final TransferSender sender;
   private final Duration ticketWait;
   private final Object connectionMonitor = new Object();
+
+  /** 本连接 WELCOME 通告的单条/聚合资源字节预算；0 表示尚未通告或连接已失效。 */
+  private final AtomicLong maxResourceBytes = new AtomicLong();
 
   /** 当前是否存在可递交控制帧的连接：重连 READY 前置为 false，连接失效时复位。 */
   private boolean connectionAvailable;
@@ -117,8 +125,11 @@ final class DaemonResourceTransferClient {
     DaemonResourceTransferCodec.UploadTicket ticket;
     try {
       ticket = codec.decodeTicket(payloadJson);
-    } catch (RuntimeException ignored) {
-      // 非法票据是服务端的协议问题；客户端不因单条控制帧内容破坏已建立的连接。
+    } catch (RuntimeException error) {
+      // 非法票据是服务端的协议问题；客户端不因单条控制帧内容破坏已建立的连接，只记录安全阶段与异常类型。
+      LOG.log(
+          Level.DEBUG,
+          "discarding malformed resource upload ticket: " + error.getClass().getSimpleName());
       return;
     }
     if (invocationId == null || invocationId.isBlank()) {
@@ -131,8 +142,9 @@ final class DaemonResourceTransferClient {
     }
   }
 
-  /** 连接失效：唤醒等待方进入重连等待，恢复后由 {@link #onConnectionReady()} 放行。 */
+  /** 连接失效：复位连接作用域的字节预算，并唤醒等待方进入重连等待，恢复后由 {@link #onConnectionReady()} 放行。 */
   void onConnectionLost() {
+    maxResourceBytes.set(0L);
     List<CompletableFuture<DaemonResourceTransferCodec.UploadTicket>> abandoned;
     synchronized (connectionMonitor) {
       connectionAvailable = false;
@@ -149,6 +161,16 @@ final class DaemonResourceTransferClient {
       connectionAvailable = true;
       connectionMonitor.notifyAll();
     }
+  }
+
+  /** 应用最近一次 WELCOME 通告的字节预算；连接失效时由 {@link #onConnectionLost()} 复位。 */
+  void announceBudget(long bytes) {
+    maxResourceBytes.set(bytes);
+  }
+
+  /** 最近一次通告的资源字节预算；0 表示尚未通告或连接已失效。 */
+  long budgetBytes() {
+    return maxResourceBytes.get();
   }
 
   /** 绑定调用 deadline 的上传端口：编码终态时按当前 invocation 的有效预算直传字节。 */
