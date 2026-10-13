@@ -21,38 +21,38 @@ import java.util.UUID;
 @Repository
 public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunRepository {
 
-  private final CanvasFunctionRunMapper runMapper;
+  private final CanvasFunctionRunJdbcStore runStore;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final PostgresqlCanvasChangeNotifier notifier;
 
   public PostgresqlCanvasFunctionRunRepository(
-      CanvasFunctionRunMapper runMapper,
+      CanvasFunctionRunJdbcStore runStore,
       CanvasFunctionRunStateCodecPort stateCodec,
       PostgresqlCanvasChangeNotifier notifier) {
-    this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
+    this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
 
   @Override
   public Optional<CanvasFunctionRun> findByNodeId(UUID nodeId) {
-    return Optional.ofNullable(runMapper.getByNodeId(nodeId)).map(this::toDomain);
+    return runStore.findByNodeId(nodeId).map(this::toDomain);
   }
 
   @Override
   public Optional<CanvasFunctionRun> findByNodeIdForUpdate(UUID nodeId) {
-    return Optional.ofNullable(runMapper.getByNodeIdForUpdate(nodeId)).map(this::toDomain);
+    return runStore.findByNodeIdForUpdate(nodeId).map(this::toDomain);
   }
 
   @Override
   public boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, String leaseToken) {
-    return runMapper.ownsRunningRequest(canvasId, nodeId, requestId, leaseToken);
+    return runStore.ownsRunningRequest(canvasId, nodeId, requestId, leaseToken);
   }
 
   @Override
   public List<CanvasFunctionRun> findByCanvasId(UUID canvasId) {
     List<CanvasFunctionRun> runs = new ArrayList<>();
-    for (CanvasFunctionRunDO run : runMapper.listByCanvas(canvasId)) {
+    for (CanvasFunctionRunDO run : runStore.listByCanvas(canvasId)) {
       runs.add(toDomain(run));
     }
     return List.copyOf(runs);
@@ -62,7 +62,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   @Transactional
   public void insertReady(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.READY);
-    if (runMapper.insert(toData(run)) != 1) {
+    if (runStore.insert(toData(run)) != 1) {
       throw new IllegalStateException("insert canvas function run failed: " + run.nodeId());
     }
     notifier.functionWorkChanged(run.nodeId());
@@ -72,7 +72,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   @Transactional
   public boolean replaceTerminalWithReady(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.READY);
-    if (runMapper.replaceTerminalWithReady(toData(run)) != 1) {
+    if (runStore.replaceTerminalWithReady(toData(run)) != 1) {
       return false;
     }
     notifier.functionWorkChanged(run.nodeId());
@@ -90,7 +90,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
     if (!stage.equals(stateCodec.stage(stateJson))) {
       throw new IllegalArgumentException("checkpoint stage must match stateJson");
     }
-    return runMapper.checkpoint(
+    return runStore.checkpoint(
             nodeId,
             requestId,
             leaseToken,
@@ -105,13 +105,13 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
         || run.status() == CanvasFunctionRunStatus.RUNNING) {
       throw new IllegalArgumentException("terminal transition requires terminal status");
     }
-    return runMapper.transitionTerminal(toData(run), leaseToken) == 1;
+    return runStore.transitionTerminal(toData(run), leaseToken) == 1;
   }
 
   @Override
   public boolean markUnknown(CanvasFunctionRun run, String leaseToken) {
     requireStatus(run, CanvasFunctionRunStatus.UNKNOWN);
-    return runMapper.markUnknown(toData(run), leaseToken) == 1;
+    return runStore.markUnknown(toData(run), leaseToken) == 1;
   }
 
   @Override
@@ -121,7 +121,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
     if (run.availableAt() == null) {
       throw new IllegalArgumentException("resumed FunctionRun must declare availableAt");
     }
-    if (runMapper.resumeUnknown(
+    if (runStore.resumeUnknown(
             run.nodeId(),
             run.requestId(),
             run.stateJson(),
@@ -140,23 +140,23 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
         && run.status() != CanvasFunctionRunStatus.CANCELLED) {
       throw new IllegalArgumentException("resolved FunctionRun must be FAILED or CANCELLED");
     }
-    return runMapper.resolveUnknownTerminal(toData(run)) == 1;
+    return runStore.resolveUnknownTerminal(toData(run)) == 1;
   }
 
   @Override
   public boolean cancelActive(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.CANCELLED);
-    return runMapper.cancelActive(toData(run)) == 1;
+    return runStore.cancelActive(toData(run)) == 1;
   }
 
   @Override
   public boolean deleteByNodeId(UUID nodeId) {
-    return runMapper.deleteByNodeId(nodeId) >= 0;
+    return runStore.deleteByNodeId(nodeId) >= 0;
   }
 
   @Override
   public boolean deleteByCanvasId(UUID canvasId) {
-    return runMapper.deleteByCanvas(canvasId) >= 0;
+    return runStore.deleteByCanvas(canvasId) >= 0;
   }
 
   private CanvasFunctionRun toDomain(CanvasFunctionRunDO run) {

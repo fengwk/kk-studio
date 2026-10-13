@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -19,9 +19,9 @@ public class PostgresqlCanvasChangeNotifier {
   static final String REVISION_CHANNEL = "canvas_revision";
   static final String FUNCTION_WORK_CHANNEL = "canvas_function_work";
 
-  private final JdbcTemplate jdbc;
+  private final JdbcClient jdbc;
 
-  public PostgresqlCanvasChangeNotifier(JdbcTemplate jdbc) {
+  public PostgresqlCanvasChangeNotifier(JdbcClient jdbc) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
   }
 
@@ -29,11 +29,11 @@ public class PostgresqlCanvasChangeNotifier {
   public void revisionChanged(UUID canvasId, long revision) {
     Objects.requireNonNull(canvasId, "canvasId");
     requireTransaction();
-    jdbc.query(
-        "select pg_notify(?, ?)",
-        (resultSet, rowNumber) -> null,
-        REVISION_CHANNEL,
-        canvasId + ":" + revision);
+    jdbc.sql("select pg_notify(:channel, :payload)")
+        .param("channel", REVISION_CHANNEL)
+        .param("payload", canvasId + ":" + revision)
+        .query((resultSet, rowNumber) -> null)
+        .list();
   }
 
   /**
@@ -45,15 +45,16 @@ public class PostgresqlCanvasChangeNotifier {
   public void functionWorkChanged(UUID nodeId) {
     Objects.requireNonNull(nodeId, "nodeId");
     requireTransaction();
-    jdbc.query(
-        "select pg_notify(?, '') from canvas_function_run"
-            + " where node_id = ?"
-            + " and status = 'READY'"
-            + " and lease_token is null"
-            + " and available_at <= current_timestamp",
-        (resultSet, rowNumber) -> null,
-        FUNCTION_WORK_CHANNEL,
-        nodeId);
+    jdbc.sql(
+            "select pg_notify(:channel, '') from canvas_function_run"
+                + " where node_id = :nodeId"
+                + " and status = 'READY'"
+                + " and lease_token is null"
+                + " and available_at <= current_timestamp")
+        .param("channel", FUNCTION_WORK_CHANNEL)
+        .param("nodeId", nodeId)
+        .query((resultSet, rowNumber) -> null)
+        .list();
   }
 
   static void requireTransaction() {
