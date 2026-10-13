@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -363,11 +363,6 @@ describe('ThreadEventView', () => {
       const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
       const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
 
-      const selectedRecord = useMemo(
-        () => (selectedEventId ? events.find((e) => e.id === selectedEventId) ?? null : null),
-        [events, selectedEventId],
-      )
-
       return (
         <div>
           <div data-testid="controls">
@@ -391,7 +386,6 @@ describe('ThreadEventView', () => {
               }
               setDebugSelection(selection)
             }}
-            selectedRecord={selectedRecord}
           />
         </div>
       )
@@ -771,7 +765,7 @@ describe('ThreadEventView', () => {
           record={record('e-test', {
             title: 'Detail Test',
             details: [{ label: 'Key', value: 'Value' }],
-            payloadJson: '{"foo":"bar"}',
+            rawJson: '{"foo":"bar"}',
           })}
           onClose={onClose}
           autoFocusCloseButton={true}

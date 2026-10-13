@@ -6,6 +6,7 @@ import { useModelRequestDebug, useHistoricalRequestPreview } from '@/features/ai
 import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessModelRequestDebugDTO,
+  HarnessModelRequestDebugRequestDTO,
   ProviderRequestPreviewDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
@@ -118,11 +119,11 @@ describe('useModelRequestDebug', () => {
       .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
       .mockImplementationOnce(() => new Promise((resolve) => { finishSecond = resolve }))
 
-    const firstSelection = {
+    const firstSelection: HarnessModelRequestDebugRequestDTO = {
       model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
       environmentName: null,
     }
-    const secondSelection = {
+    const secondSelection: HarnessModelRequestDebugRequestDTO = {
       model: { providerName: 'openai', modelName: 'gpt-4o', variant: 'high' },
       environmentName: 'dev-node',
     }
