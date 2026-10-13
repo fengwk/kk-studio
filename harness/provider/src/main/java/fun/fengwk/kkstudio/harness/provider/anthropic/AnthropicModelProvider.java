@@ -44,10 +44,7 @@ final class AnthropicModelProvider implements ModelProvider {
 
   /** 仅用于从原生 payload 推导事件名；payload 本体不落到日志、normalized event 或 ProviderResponse。 */
   private static final ObjectMapper PROTOCOL_EVENT_MAPPER =
-      JsonMapper.builder()
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
-          .build();
+      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private final JdkHttpSseTransport transport;
   private final ProviderDescriptor descriptor;

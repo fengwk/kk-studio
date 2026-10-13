@@ -303,7 +303,7 @@ class OpenAiChatNativeReplayTest {
                 .bodyUtf8Bytes());
     assertEquals(calls, wire.path("messages").get(2).path("tool_calls"));
 
-    ObjectNode tampered = completion.replayState().payload().deepCopy();
+    ObjectNode tampered = (ObjectNode) completion.replayState().payload().deepCopy();
     ((ObjectNode) tampered.path("tool_calls").get(1)).put("index", 7);
     ProviderReplayState badIndex =
         new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), tampered);
@@ -479,7 +479,7 @@ class OpenAiChatNativeReplayTest {
     ProviderCompletion completion = accumulator.finish();
 
     // 篡改 known 字段但保留原生未知字段：affinity/hash 匹配也必须以 durable 一致性为准拒绝
-    ObjectNode tampered = completion.replayState().payload().deepCopy();
+    ObjectNode tampered = (ObjectNode) completion.replayState().payload().deepCopy();
     tampered.put("content", "tampered");
     tampered.put("vendor_future_field", "kept");
     ProviderReplayState tamperedState =

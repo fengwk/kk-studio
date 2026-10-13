@@ -22,10 +22,7 @@ import java.util.Locale;
 final class OpenAiChatErrorMapper {
 
   private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
-          .build();
+      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   static final String MSG_AUTH = "OpenAI authentication failed";
   static final String MSG_BILLING = "OpenAI billing or quota error";

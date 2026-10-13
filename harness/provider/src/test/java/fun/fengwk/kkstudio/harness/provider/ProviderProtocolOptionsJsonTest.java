@@ -11,6 +11,8 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 
+import java.math.BigDecimal;
+
 /**
  * {@link ProviderProtocolOptionsJson} 契约：空选项返回空 object、数值按 JSON 语义还原，且每次调用都返回互不影响的独立副本。
  *
@@ -47,6 +49,30 @@ class ProviderProtocolOptionsJsonTest {
     assertTrue(options.path("revision").isIntegralNumber());
     assertEquals(1758880000000L, options.path("revision").asLong(0L));
     assertEquals(2, options.path("flags").size());
+  }
+
+  /**
+   * 厂商原生数值按 BigDecimal 还原：{@code 1e309}/{@code 1e-324} 不得退化为 {@code Infinity}/{@code 0}，高精度小数不得截断；
+   * canonical 文本按既有语义移除无语义尾零（{@code 1.10 -> 1.1}）。
+   */
+  @Test
+  void restoresHighPrecisionNativeNumbersWithoutFloatLoss() {
+    ModelVariant variant =
+        new ModelVariant(
+            "precise",
+            null,
+            new ProviderProtocolOptions(
+                "{\"big\":1e309,\"tiny\":1e-324,"
+                    + "\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}"));
+
+    ObjectNode options = ProviderProtocolOptionsJson.copyOfOptions(variant);
+
+    assertEquals(new BigDecimal("1e309"), options.path("big").decimalValue());
+    assertEquals(new BigDecimal("1e-324"), options.path("tiny").decimalValue());
+    assertEquals(
+        new BigDecimal("0.1234567890123456789012345678"), options.path("exact").decimalValue());
+    // canonical 语义：无语义尾零被移除，1.10 归一为 1.1
+    assertEquals(new BigDecimal("1.1"), options.path("ratio").decimalValue());
   }
 
   /** 防御性副本：每次调用返回新树，编码器对副本的修改不会影响 variant 或在后续调用中可见。 */
