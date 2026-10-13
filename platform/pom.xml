@@ -177,7 +177,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/McpToolNameNormalizer</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.McpToolNameNormalizer</include>
                                     </includes>
                                     <limits>
                                         <limit>
@@ -190,22 +190,22 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway</include>
-                                        <include>fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver</include>
+                                        <include>fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderInlineBlobReader*</include>
-                                        <include>fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/discovery/McpInputSchemaConverter</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/discovery/McpToolDiscovery</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/McpConfigParser</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerMutationValidator</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/impl/McpServerServiceImpl</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/RemoteMcpExecutableTool</include>
-                                        <include>fun/fengwk/kkstudio/platform/plugin/resource/PublicAddressPolicy</include>
-                                        <include>fun/fengwk/kkstudio/platform/plugin/resource/PublicAddressDnsResolver</include>
-                                        <include>fun/fengwk/kkstudio/platform/plugin/resource/HttpRemoteMediaTransport</include>
-                                        <include>fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpInputSchemaConverter</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.service.McpConfigParser</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.service.impl.McpServerServiceImpl</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.runtime.RemoteMcpExecutableTool</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.resource.PublicAddressPolicy</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.resource.PublicAddressDnsResolver</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.resource.HttpRemoteMediaTransport</include>
+                                        <include>fun.fengwk.kkstudio.platform.persistence.PostgresqlPersistenceConfiguration</include>
                                     </includes>
                                     <limits>
                                         <limit>
@@ -218,7 +218,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/platform/configsync/ConfigSync*</include>
+                                        <include>fun.fengwk.kkstudio.platform.configsync.ConfigSync*</include>
                                     </includes>
                                     <limits>
                                         <limit>
