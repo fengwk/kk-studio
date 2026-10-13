@@ -49,7 +49,7 @@ const STORAGE_KEY = 'kkstudio.browser-preferences.v1'
 
 interface NotificationState {
   permission: NotificationPermission
-  requestPermission: ReturnType<typeof vi.fn>
+  requestPermission: ReturnType<typeof vi.fn<() => Promise<NotificationPermission>>>
 }
 
 let notificationState: NotificationState

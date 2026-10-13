@@ -36,11 +36,10 @@ describe('AI lazy contributions', () => {
     const message: ToolRendererMessage = {
       rendererKey: 'task',
       phase: 'result',
-      text: '<task id="task-1" state="completed">done</task>',
+      contents: [{ type: 'text', text: '<task id="task-1" state="completed">done</task>' }],
       toolCallId: 'call-1',
       toolName: 'task',
       arguments: '{}',
-      attachments: [],
       status: 'done',
     }
 

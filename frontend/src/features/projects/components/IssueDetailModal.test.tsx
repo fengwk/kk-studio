@@ -3,9 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
-import type { IssueDetailDTO } from '../types'
+import type { IssueDetailDTO, ProjectWorkflowDTO } from '../types'
 import type { StorageService } from '@/shared/api/storage-service'
-import type { StorageUploadDTO, StorageUploadResultDTO } from '@/shared/api/contracts/storage'
+import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 import { ApiError } from '@/shared/api/client'
 import { LOCALE_STORAGE_KEY, setLocale } from '@/shared/i18n'
 import {
@@ -45,7 +45,10 @@ describe('IssueDetailModal', () => {
       title: 'Implement OAuth2 login',
       description: 'Support GitHub and Google OAuth2 providers',
       state: 'IN_PROGRESS',
-      paused: false,
+      blockedFromState: null,
+      blockReason: null,
+      pauseReason: null,
+      pauseDetail: null,
       version: '3',
       archivedAt: null,
       createdAt: '2026-09-20T10:00:00Z',
@@ -53,23 +56,21 @@ describe('IssueDetailModal', () => {
     },
     activities: [
       {
-        id: 'act-1',
         issueId,
         sequence: '1',
-        actorType: 'HUMAN',
-        actorName: 'Lead Architect',
         kind: 'INSTRUCTION',
+        actorType: 'HUMAN',
+        actorAgentName: 'Lead Architect',
+        runId: null,
         body: 'Use standard authorization code flow with PKCE.',
         createdAt: '2026-09-20T10:05:00Z',
       },
     ],
     agentThreads: [
       {
-        id: 'thread-item-1',
         issueId,
         agentName: 'auth-developer',
         threadId: 'thread-auth-dev-uuid',
-        createdAt: '2026-09-20T10:01:00Z',
       },
     ],
     runs: [
@@ -79,35 +80,33 @@ describe('IssueDetailModal', () => {
         ordinal: '1',
         state: 'IN_PROGRESS',
         agentName: 'auth-developer',
+        sessionId: 'sess-1',
+        threadId: 'thread-1',
         status: 'RUNNING',
         startEntryId: 'entry-001',
         endEntryId: null,
+        finalAnswerEntryId: null,
+        nextState: null,
+        observedActivitySequence: '1',
         remainingExecutionMs: '120000',
-        createdAt: '2026-09-20T10:01:00Z',
-        updatedAt: '2026-09-20T10:02:00Z',
+        error: null,
+        version: '1',
+        startedAt: '2026-09-20T10:01:00Z',
+        endedAt: null,
       },
     ],
     stageBudgets: [
       {
-        issueId,
         state: 'IN_PROGRESS',
-        maxRuns: '5',
+        maxRuns: 5,
         usedRuns: '1',
         remainingRuns: '4',
         budgetAfterOrdinal: '0',
       },
     ],
-    evidences: [
-      {
-        id: 'ev-1',
-        issueId,
-        storageKey: 'evidence/oauth2-design.png',
-        mimeType: 'image/png',
-        sizeBytes: '204800',
-        description: 'Architecture diagram',
-        createdAt: '2026-09-20T10:15:00Z',
-      },
-    ],
+    currentRun: null,
+    latestRun: null,
+    nextActivityCursor: null,
   }
 
   const createMockApi = (overrides: Partial<ProjectsApi> = {}): ProjectsApi => ({
@@ -116,6 +115,7 @@ describe('IssueDetailModal', () => {
     getProject: vi.fn(),
     updateProject: vi.fn(),
     updateWorkflow: vi.fn(),
+    updateYolo: vi.fn(),
     deleteProject: vi.fn(),
     archiveProject: vi.fn(),
     unarchiveProject: vi.fn(),
@@ -129,10 +129,21 @@ describe('IssueDetailModal', () => {
     reopenIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resolveUnknown: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     pauseIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
+    resumeIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     stopIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     appendIssueActivity: vi.fn().mockResolvedValue(mockActiveIssueDetail.activities[0]),
-    addIssueEvidence: vi.fn().mockResolvedValue(mockActiveIssueDetail.evidences[0]),
+    listActivities: vi.fn().mockResolvedValue([]),
+    addIssueEvidence: vi.fn().mockResolvedValue({
+      issueId,
+      blobId: 'blob-1',
+      uri: 'https://example.com/evidence/oauth2-design.png',
+      name: 'Architecture diagram',
+      actorAgentName: null,
+      runId: null,
+      createdAt: '2026-09-20T10:15:00Z',
+    }),
+    listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn().mockResolvedValue(undefined),
     archiveIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     unarchiveIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
@@ -140,17 +151,17 @@ describe('IssueDetailModal', () => {
   })
 
   const mockUploadDTO: StorageUploadDTO = {
-    uploadId: 'mock-upload-id',
-    storageKey: 'mock-storage-key',
-    token: 'mock-token',
-    maxSizeBytes: 10485760,
+    id: 'mock-upload-id',
+    state: 'READY',
+    blobId: 'mock-blob-id',
+    presignedPut: null,
     expiresAt: '2026-09-20T12:00:00Z',
   }
 
   const createMockStorageService = (): StorageService => ({
     reserveUpload: vi.fn().mockResolvedValue(mockUploadDTO),
     uploadFile: vi.fn().mockResolvedValue(undefined),
-    completeUpload: vi.fn().mockResolvedValue(mockUploadDTO as unknown as StorageUploadResultDTO),
+    completeUpload: vi.fn().mockResolvedValue(mockUploadDTO),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
     getBlobDownloadUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/download/blob-1', expiresAt: '2026-09-27T00:00:00Z', sizeBytes: 1024, mediaType: 'image/png' }),
     getBlobPreviewUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/preview/blob-1', expiresAt: '2026-09-27T00:00:00Z' }),
@@ -535,9 +546,9 @@ describe('IssueDetailModal', () => {
     expect(onOpenThread).toHaveBeenCalledWith('th-arch-001')
   })
 
-  const mockWorkflow = {
+  const mockWorkflow: ProjectWorkflowDTO = {
     states: [
-      { state: 'IN_PROGRESS', next: ['REVIEW'] },
+      { state: 'IN_PROGRESS', name: '进行中', next: ['REVIEW'] },
     ],
   }
 

@@ -141,7 +141,7 @@ describe('system settings schema validation', () => {
     expect(validateSystemSettingsSchema(schema, testDraft)).toBeNull()
 
     // Non-array value for INTEGER_LIST should fail
-    ;(testDraft.aiRuntime as Record<string, unknown>).modelHttpRetryStatusCodes = 'not-an-array'
+    Object.assign(testDraft.aiRuntime, { modelHttpRetryStatusCodes: 'not-an-array' })
     expect(validateSystemSettingsSchema(schema, testDraft)).toMatch(
       /settings schema type does not match draft: aiRuntime\.modelHttpRetryStatusCodes/,
     )
