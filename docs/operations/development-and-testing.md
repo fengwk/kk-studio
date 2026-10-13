@@ -109,7 +109,7 @@ E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节
 
 ### CI 验证与镜像发布
 
-`docker-publish` 在 `main` 上先执行仓库、Unix 与 Windows 安装器门禁再发布；`dev` push 默认只构建发布，
+`docker-publish` 在 `main` 上先执行仓库、Unix 与 Windows 安装和更新门禁再发布；`dev` push 默认只构建发布，
 不会执行这些门禁，因此不能把 dev 镜像构建成功当作测试通过。需要在合入 main 前运行完整 CI 时，
 先把待验证提交推送到目标分支，再显式运行不发布模式：
 
@@ -117,22 +117,22 @@ E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节
 gh workflow run docker-publish.yml --ref dev -f validate_only=true
 ```
 
-该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装器回归，
+该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装和更新回归，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
 前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
 Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明确检查 Bash 3.2，
-不以 Homebrew Bash 的结果替代系统自带版本。Daemon Release 发布也依赖同一套三平台安装器门禁。
+不以 Homebrew Bash 的结果替代系统自带版本。Daemon Release 发布也依赖同一套三平台安装和更新门禁。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
 `psql`、`pg_dump`、`pg_restore`、`createdb`、`pg_isready` 必须来自同一主版本且不低于 17；
 测试在创建容器前检查工具链，不兼容时直接失败，不跳过数据库回归。
 
-### Daemon 安装脚本回归
+### Daemon 安装与受管更新回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与发布脚本契约。
+在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载、受管更新与发布脚本契约。
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与暂存输入校验，验证 latest
 解析与 JAR 版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
@@ -143,12 +143,19 @@ Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
 ```powershell
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
 pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_update_windows.ps1
+pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_update_windows.ps1
 ```
 
 该套件检查真实 ScheduledTasks 定义、ACL、Java argv 和进程捕获，但不注册任务。
 Windows 计划任务直接执行 Java，只以 UTF-8 Base64 传输唯一的 `--config` 参数；
 应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
 验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
+
+更新套件真实执行已打包的更新脚本，以隔离文件和服务管理桩验证所有权、停止、备份、替换和重启，
+以及失败回执或诊断输出失败后仍独立清理一次性任务。替换后重启失败不自动回滚；成功后的回执写入失败
+只报告警告，不把已完成的替换改报失败。Windows 套件分别在 PowerShell 5.1/7 上运行，
+Unix 套件在系统 Bash 上运行；均不注册、启停或移除宿主真实服务。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中

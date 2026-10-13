@@ -186,11 +186,26 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
 test('both release workflows run the second Windows host even after the first fails', () => {
   // Do not use continue-on-error: either native host must still fail the release gate.
   for (const [name, source] of [['docker', docker], ['release', release]]) {
-    const block = source.match(/- name: Test installer with PowerShell 7\n([\s\S]*?)(?=\n\s+- name:|\n  \w+:)/)?.[1]
-    assert.ok(block, `${name}: missing PS7 step`)
-    assert.match(block, /if: \$\{\{ !cancelled\(\) \}\}/u)
-    assert.match(block, /shell: pwsh/u)
-    assert.match(block, /run: .\\scripts\\daemon\\tests\\test_daemon_install_windows.ps1/u)
+    for (const [suite, script] of [['installer', 'install'], ['updater', 'update']]) {
+      const block = source.match(new RegExp(`- name: Test ${suite} with PowerShell 7\\n([\\s\\S]*?)(?=\\n\\s+- name:|\\n  \\w+:)`))?.[1]
+      assert.ok(block, `${name}: missing ${suite} PS7 step`)
+      assert.match(block, /if: \$\{\{ !cancelled\(\) \}\}/u)
+      assert.match(block, /shell: pwsh/u)
+      assert.ok(block.includes(`run: .\\scripts\\daemon\\tests\\test_daemon_${script}_windows.ps1`))
+    }
     assert.doesNotMatch(source, /continue-on-error:/u)
+  }
+})
+
+test('managed update scripts are required native and Unix release gates', () => {
+  // Source-only checks cannot prove PowerShell failure handling or service cleanup.
+  for (const [name, source] of [['docker', docker], ['release', release]]) {
+    const block = source.match(/- name: Test updater with Windows PowerShell 5\.1\n([\s\S]*?)(?=\n\s+- name:|\n  \w+:)/)?.[1]
+    assert.ok(block, `${name}: missing PS5.1 update step`)
+    assert.match(block, /if: \$\{\{ !cancelled\(\) \}\}/u)
+    assert.match(block, /shell: powershell/u)
+    assert.ok(block.includes('run: .\\scripts\\daemon\\tests\\test_daemon_update_windows.ps1'))
+    assert.ok(source.includes("python3 -m unittest discover -s scripts/daemon/tests -p 'test_daemon_update*.py'"))
+    assert.doesNotMatch(block, /continue-on-error:|\|\|\s*true/u)
   }
 })

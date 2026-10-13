@@ -55,6 +55,7 @@ jobs:
           python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install.py
           python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install_macos.py
           python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_download.py
+          python3 -m unittest discover -s scripts/daemon/tests -p 'test_daemon_update*.py'
 
   validate_windows_daemon:
     name: validate Windows daemon installer
@@ -84,6 +85,14 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Test updater with Windows PowerShell 5.1
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: .\scripts\daemon\tests\test_daemon_update_windows.ps1
+      - name: Test updater with PowerShell 7
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: .\scripts\daemon\tests\test_daemon_update_windows.ps1
       - name: Set up Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
