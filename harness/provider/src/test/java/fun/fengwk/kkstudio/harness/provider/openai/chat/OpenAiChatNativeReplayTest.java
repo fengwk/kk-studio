@@ -5,13 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -53,7 +54,7 @@ import java.util.UUID;
  */
 class OpenAiChatNativeReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private OpenAiChatRequestEncoder encoder;
   private ProviderDescriptor descriptor;
@@ -145,13 +146,13 @@ class OpenAiChatNativeReplayTest {
 
     JsonNode payload = completion.replayState().payload();
     // 字符串增量追加、object 递归合并、标量覆盖
-    assertEquals("Hello world", payload.path("content").asText());
+    assertEquals("Hello world", payload.path("content").asString(""));
     assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), payload.path("audio"));
     assertFalse(payload.has("annotations"));
-    assertEquals("legacy_lookup", payload.path("function_call").path("name").asText());
-    assertEquals("{\"q\":\"hi\"}", payload.path("function_call").path("arguments").asText());
-    assertEquals("t-1", payload.path("vendor_future_field").path("trace_id").asText());
-    assertEquals(2, payload.path("vendor_future_field").path("attempt").asInt());
+    assertEquals("legacy_lookup", payload.path("function_call").path("name").asString(""));
+    assertEquals("{\"q\":\"hi\"}", payload.path("function_call").path("arguments").asString(""));
+    assertEquals("t-1", payload.path("vendor_future_field").path("trace_id").asString(""));
+    assertEquals(2, payload.path("vendor_future_field").path("attempt").asInt(0));
 
     // chunk 级 transport metadata 不进入 assistant message
     for (String transportField :
@@ -176,12 +177,12 @@ class OpenAiChatNativeReplayTest {
                     OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     JsonNode wireAsst = wireRoot.path("messages").get(2);
-    assertEquals("assistant", wireAsst.path("role").asText());
-    assertEquals("Hello world", wireAsst.path("content").asText());
+    assertEquals("assistant", wireAsst.path("role").asString(""));
+    assertEquals("Hello world", wireAsst.path("content").asString(""));
     assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), wireAsst.path("audio"));
     assertFalse(wireAsst.has("annotations"));
-    assertEquals("legacy_lookup", wireAsst.path("function_call").path("name").asText());
-    assertEquals("t-1", wireAsst.path("vendor_future_field").path("trace_id").asText());
+    assertEquals("legacy_lookup", wireAsst.path("function_call").path("name").asString(""));
+    assertEquals("t-1", wireAsst.path("vendor_future_field").path("trace_id").asString(""));
   }
 
   /** 测试意图：缺失有效 audio id 的上游响应不能冻结；持久化后篡改为响应 audio 或 annotations 不能进入下一轮请求。 */
@@ -209,7 +210,7 @@ class OpenAiChatNativeReplayTest {
       ObjectNode payload =
           (ObjectNode) MAPPER.readTree("{\"role\":\"assistant\",\"content\":\"Hi\"}");
       ObjectNode extra = (ObjectNode) MAPPER.readTree("{" + added + "}");
-      extra.fields().forEachRemaining(field -> payload.set(field.getKey(), field.getValue()));
+      extra.properties().forEach(field -> payload.set(field.getKey(), field.getValue()));
       ProviderMessage assistant =
           assistant(
               List.of(new ProviderTextBlock("Hi")),
@@ -241,8 +242,8 @@ class OpenAiChatNativeReplayTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals(List.of(), completion.response().toolCalls());
     JsonNode nativeCall = completion.replayState().payload().path("tool_calls").get(0);
-    assertEquals("custom_1", nativeCall.path("id").asText());
-    assertEquals("print(1)", nativeCall.path("custom").path("input").asText());
+    assertEquals("custom_1", nativeCall.path("id").asString(""));
+    assertEquals("print(1)", nativeCall.path("custom").path("input").asString(""));
     assertFalse(nativeCall.has("index"));
     JsonNode wire =
         MAPPER.readTree(
@@ -284,11 +285,11 @@ class OpenAiChatNativeReplayTest {
     assertEquals("{\"q\":1}", completion.response().toolCalls().get(0).argumentsJson());
     JsonNode calls = completion.replayState().payload().path("tool_calls");
     assertEquals(2, calls.size());
-    assertEquals("custom", calls.get(0).path("type").asText());
-    assertEquals("fn_1", calls.get(1).path("id").asText());
-    assertEquals("retained", calls.get(1).path("future").asText());
-    assertEquals(1, calls.get(1).path("function").path("futureFn").path("value").asInt());
-    assertEquals("{\"q\":1}", calls.get(1).path("function").path("arguments").asText());
+    assertEquals("custom", calls.get(0).path("type").asString(""));
+    assertEquals("fn_1", calls.get(1).path("id").asString(""));
+    assertEquals("retained", calls.get(1).path("future").asString(""));
+    assertEquals(1, calls.get(1).path("function").path("futureFn").path("value").asInt(0));
+    assertEquals("{\"q\":1}", calls.get(1).path("function").path("arguments").asString(""));
     assertFalse(calls.get(0).has("index"));
     assertFalse(calls.get(1).has("index"));
     ProviderMessage assistant =
@@ -404,7 +405,7 @@ class OpenAiChatNativeReplayTest {
     assertNotNull(completion.replayState());
     assertEquals("main answer", completion.response().text());
     JsonNode payload = completion.replayState().payload();
-    assertEquals("main answer", payload.path("content").asText());
+    assertEquals("main answer", payload.path("content").asString(""));
     assertFalse(payload.toString().contains("other"));
     assertFalse(payload.toString().contains("secondary"));
   }
@@ -454,10 +455,10 @@ class OpenAiChatNativeReplayTest {
     JsonNode payload = accumulator.finish().replayState().payload();
     JsonNode steps = payload.path("vendor_steps");
     assertEquals(2, steps.size());
-    assertEquals("ac", steps.get(0).path("text").asText());
-    assertEquals("second", steps.get(0).path("state").path("phase").asText());
-    assertEquals(1, steps.get(1).path("index").asInt());
-    assertEquals("b", steps.get(1).path("text").asText());
+    assertEquals("ac", steps.get(0).path("text").asString(""));
+    assertEquals("second", steps.get(0).path("state").path("phase").asString(""));
+    assertEquals(1, steps.get(1).path("index").asInt(0));
+    assertEquals("b", steps.get(1).path("text").asString(""));
   }
 
   @Test
@@ -509,8 +510,8 @@ class OpenAiChatNativeReplayTest {
                     OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     JsonNode honestWire = honestRoot.path("messages").get(2);
-    assertEquals("assistant", honestWire.path("role").asText());
-    assertEquals("honest", honestWire.path("content").asText());
+    assertEquals("assistant", honestWire.path("role").asString(""));
+    assertEquals("honest", honestWire.path("content").asString(""));
   }
 
   /**
@@ -531,7 +532,7 @@ class OpenAiChatNativeReplayTest {
     audioPayload.putObject("audio").put("id", "audio_1");
     JsonNode audioAsst =
         assistantNode(wire(user, List.of(new ProviderTextBlock("Hello")), other, audioPayload));
-    assertEquals("Hello", audioAsst.path("content").asText());
+    assertEquals("Hello", audioAsst.path("content").asString(""));
     assertFalse(audioAsst.has("audio"));
 
     // 2. 已废弃的 function_call 属于 native 事实：affinity 失配时丢弃
@@ -542,7 +543,7 @@ class OpenAiChatNativeReplayTest {
     JsonNode legacyAsst =
         assistantNode(
             wire(user, List.of(new ProviderTextBlock("Hello")), other, legacyCallPayload));
-    assertEquals("Hello", legacyAsst.path("content").asText());
+    assertEquals("Hello", legacyAsst.path("content").asString(""));
     assertFalse(legacyAsst.has("function_call"));
 
     // 3. reasoning_content 即使与 durable thinking 一致，也不跨 affinity 转移；可读思考改以带来源标记的普通文本保留
@@ -558,7 +559,7 @@ class OpenAiChatNativeReplayTest {
                 other,
                 reasoningPayload));
     assertEquals(
-        "<thinking>\nhidden chain\n</thinking>\nHello", reasoningAsst.path("content").asText());
+        "<thinking>\nhidden chain\n</thinking>\nHello", reasoningAsst.path("content").asString(""));
     assertFalse(reasoningAsst.has("reasoning_content"));
 
     // 4. refusal 属于 native 事实：affinity 失配时退回纯文本
@@ -568,7 +569,7 @@ class OpenAiChatNativeReplayTest {
     JsonNode refusalAsst =
         assistantNode(
             wire(user, List.of(new ProviderTextBlock("I cannot help")), other, refusalPayload));
-    assertEquals("I cannot help", refusalAsst.path("content").asText());
+    assertEquals("I cannot help", refusalAsst.path("content").asString(""));
     assertFalse(refusalAsst.has("refusal"));
 
     // 5. tool_calls 的额外嵌套字段属于 native 事实：affinity 失配时只保留 durable 标准调用
@@ -627,9 +628,10 @@ class OpenAiChatNativeReplayTest {
             new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}")));
     for (ProviderReplayAffinity affinity : List.of(other, modelAffinity())) {
       JsonNode wireAsst = assistantNode(wire(user, durableBlocks, affinity, minimalPayload));
-      assertEquals("Hello", wireAsst.path("content").asText());
-      assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
-      assertEquals("fn", wireAsst.path("tool_calls").get(0).path("function").path("name").asText());
+      assertEquals("Hello", wireAsst.path("content").asString(""));
+      assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asString(""));
+      assertEquals(
+          "fn", wireAsst.path("tool_calls").get(0).path("function").path("name").asString(""));
     }
   }
 
@@ -667,7 +669,7 @@ class OpenAiChatNativeReplayTest {
               encoder
                   .encode(changed, descriptor, OpenAiChatConfiguration.defaults())
                   .bodyUtf8Bytes());
-      assertEquals(system, wire.at("/messages/0/content").asText());
+      assertEquals(system, wire.at("/messages/0/content").asString(""));
       assertEquals(payload, wire.path("messages").get(2));
       assertEquals(payload, replay.payload());
     }
@@ -700,7 +702,7 @@ class OpenAiChatNativeReplayTest {
                 new UUID(0L, 1L),
                 original.modelId()))) {
       JsonNode asst = assistantNode(wire(user, durable, other, payload));
-      assertEquals("<thinking>\nreasoning\n</thinking>\nHello", asst.path("content").asText());
+      assertEquals("<thinking>\nreasoning\n</thinking>\nHello", asst.path("content").asString(""));
       assertFalse(asst.has("reasoning_content"));
     }
   }
@@ -721,9 +723,9 @@ class OpenAiChatNativeReplayTest {
     payload.putArray("reasoning_details").addObject().put("signature", "opaque");
     payload.put("vendor_future_field", "opaque");
     JsonNode asst = assistantNode(wire(user, contents, modelAffinity(), payload));
-    assertEquals("opaque", asst.path("reasoning_details").get(0).path("signature").asText());
-    assertEquals("opaque", asst.path("vendor_future_field").asText());
-    assertEquals("reasoning", asst.path("reasoning_content").asText());
+    assertEquals("opaque", asst.path("reasoning_details").get(0).path("signature").asString(""));
+    assertEquals("opaque", asst.path("vendor_future_field").asString(""));
+    assertEquals("reasoning", asst.path("reasoning_content").asString(""));
 
     // reasoning_content 形态损坏（非文本）拒绝
     ObjectNode objectReasoning = MAPPER.createObjectNode();

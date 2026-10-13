@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.harness.provider.gemini;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
@@ -38,7 +41,6 @@ import java.math.BigInteger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -57,13 +59,14 @@ import java.util.regex.Pattern;
  */
 final class GeminiRequestEncoder {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   // data:<mediatype>;base64,<data>：用户内容与工具结果统一只接受内联 Base64 媒体
   private static final Pattern BASE64_DATA_URI_PATTERN =
@@ -180,7 +183,7 @@ final class GeminiRequestEncoder {
       byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(root);
       bodySizeGuard.enforce(bytes);
       return new GeminiEncodedRequest(bytes);
-    } catch (JsonProcessingException e) {
+    } catch (JacksonException e) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize Gemini request body JSON");
     }
@@ -293,8 +296,8 @@ final class GeminiRequestEncoder {
         JsonNode nativeTool = nativeTools.get(i);
         if (!nativeTool.isObject()
             || nativeTool.size() != 1
-            || !HOSTED_TOOL_KEYS.contains(nativeTool.fieldNames().next())
-            || !nativeTool.elements().next().isObject()) {
+            || !HOSTED_TOOL_KEYS.contains(nativeTool.propertyNames().iterator().next())
+            || !nativeTool.values().iterator().next().isObject()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST,
               "protocolOptions tools["
@@ -663,8 +666,8 @@ final class GeminiRequestEncoder {
   /** thoughtSignature 属于已知字段：出现时必须是非空白字符串；作为 opaque 原生事实只在原位回放时使用。 */
   private static void validateReplayThoughtSignature(JsonNode part) {
     if (part.has("thoughtSignature")
-        && (!part.get("thoughtSignature").isTextual()
-            || part.get("thoughtSignature").asText().isBlank())) {
+        && (!part.get("thoughtSignature").isString()
+            || part.get("thoughtSignature").asString("").isBlank())) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
     }
@@ -682,9 +685,7 @@ final class GeminiRequestEncoder {
     }
 
     // 严格检查顶级字段白名单：只能有 role 和 parts，禁止无关字段混入
-    Iterator<String> topFields = payload.fieldNames();
-    while (topFields.hasNext()) {
-      String f = topFields.next();
+    for (String f : payload.propertyNames()) {
       if (!"role".equals(f) && !"parts".equals(f)) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
@@ -692,8 +693,8 @@ final class GeminiRequestEncoder {
     }
 
     if (!payload.has("role")
-        || !payload.get("role").isTextual()
-        || !"model".equals(payload.get("role").asText())) {
+        || !payload.get("role").isString()
+        || !"model".equals(payload.get("role").asString(""))) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
     }
@@ -734,7 +735,7 @@ final class GeminiRequestEncoder {
       }
 
       if (hasText) {
-        if (!item.get("text").isTextual()) {
+        if (!item.get("text").isString()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
@@ -743,8 +744,8 @@ final class GeminiRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
 
-        String txt = item.get("text").asText();
-        if (item.has("thought") && item.get("thought").asBoolean()) {
+        String txt = item.get("text").asString("");
+        if (item.has("thought") && item.get("thought").asBoolean(false)) {
           payloadThinking.append(txt);
         } else {
           payloadText.append(txt);
@@ -756,7 +757,7 @@ final class GeminiRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
 
-        if (!fn.has("name") || !fn.get("name").isTextual()) {
+        if (!fn.has("name") || !fn.get("name").isString()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
@@ -764,13 +765,13 @@ final class GeminiRequestEncoder {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
-        if (fn.has("id") && !fn.get("id").isTextual()) {
+        if (fn.has("id") && !fn.get("id").isString()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
 
-        String name = fn.get("name").asText();
-        String id = fn.has("id") ? fn.get("id").asText() : null;
+        String name = fn.get("name").asString("");
+        String id = fn.has("id") ? fn.get("id").asString("") : null;
         String argsJson = fn.get("args").toString();
         payloadCalls.add(new ReplayPayloadCall(id, name, argsJson));
       }

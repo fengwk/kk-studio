@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
@@ -19,7 +21,11 @@ import java.util.Locale;
  */
 final class OpenAiChatErrorMapper {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
 
   static final String MSG_AUTH = "OpenAI authentication failed";
   static final String MSG_BILLING = "OpenAI billing or quota error";
@@ -174,8 +180,8 @@ final class OpenAiChatErrorMapper {
   private static String getTextField(JsonNode node, String fieldName) {
     if (node != null && node.has(fieldName)) {
       JsonNode fieldNode = node.get(fieldName);
-      if (fieldNode != null && fieldNode.isTextual()) {
-        return fieldNode.asText();
+      if (fieldNode != null && fieldNode.isString()) {
+        return fieldNode.asString("");
       }
     }
     return null;

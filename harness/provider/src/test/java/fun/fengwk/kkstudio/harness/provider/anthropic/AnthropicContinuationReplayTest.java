@@ -5,12 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -47,7 +48,7 @@ import java.util.UUID;
  */
 class AnthropicContinuationReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
@@ -97,9 +98,9 @@ class AnthropicContinuationReplayTest {
     assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
     JsonNode content = replayState.payload().path("content");
     assertEquals(2, content.size());
-    assertEquals("server_tool_use", content.get(0).path("type").asText());
-    assertEquals("kk", content.get(0).path("input").path("query").asText());
-    assertEquals("Searching", content.get(1).path("text").asText());
+    assertEquals("server_tool_use", content.get(0).path("type").asString(""));
+    assertEquals("kk", content.get(0).path("input").path("query").asString(""));
+    assertEquals("Searching", content.get(1).path("text").asString(""));
 
     // 下一轮：CONTINUE 的 native replay 必须原样进入 wire
     ProviderRequest nextRequest =
@@ -110,8 +111,8 @@ class AnthropicContinuationReplayTest {
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(2, assistantContent.size());
-    assertEquals("server_tool_use", assistantContent.get(0).path("type").asText());
-    assertEquals("kk", assistantContent.get(0).path("input").path("query").asText());
+    assertEquals("server_tool_use", assistantContent.get(0).path("type").asString(""));
+    assertEquals("kk", assistantContent.get(0).path("input").path("query").asString(""));
   }
 
   /** 测试意图：{@code compaction} 同样映射为 CONTINUE；即使没有 native block，也必须有 replay state 供续写。 */
@@ -135,7 +136,8 @@ class AnthropicContinuationReplayTest {
     assertEquals(GenerationStopReason.CONTINUE, completion.response().stopReason());
     assertNotNull(completion.replayState());
     assertEquals(
-        "state", completion.replayState().payload().path("content").get(0).path("text").asText());
+        "state",
+        completion.replayState().payload().path("content").get(0).path("text").asString(""));
   }
 
   /**
@@ -165,11 +167,11 @@ class AnthropicContinuationReplayTest {
 
     // 被摘要的历史（user: old question）必须整体省略，compaction assistant message 是首条消息
     assertEquals(2, messages.size());
-    assertEquals("assistant", messages.get(0).path("role").asText());
+    assertEquals("assistant", messages.get(0).path("role").asString(""));
     assertEquals(1, messages.get(0).path("content").size());
     assertEquals(compactionBlock, messages.get(0).path("content").get(0));
-    assertEquals("user", messages.get(1).path("role").asText());
-    assertEquals("new question", messages.get(1).path("content").get(0).path("text").asText());
+    assertEquals("user", messages.get(1).path("role").asString(""));
+    assertEquals("new question", messages.get(1).path("content").get(0).path("text").asString(""));
   }
 
   /**
@@ -198,9 +200,9 @@ class AnthropicContinuationReplayTest {
     JsonNode messages = wire(encoder.encode(continuationRequest, descriptor)).path("messages");
 
     assertEquals(2, messages.size());
-    assertEquals("assistant", messages.get(0).path("role").asText());
+    assertEquals("assistant", messages.get(0).path("role").asString(""));
     assertEquals(compactionBlock, messages.get(0).path("content").get(0));
-    assertEquals("new question", messages.get(1).path("content").get(0).path("text").asText());
+    assertEquals("new question", messages.get(1).path("content").get(0).path("text").asString(""));
   }
 
   /** 测试意图：compaction block 必须唯一且位于消息首部，否则显式失败而不是编码出语义错误的请求。 */

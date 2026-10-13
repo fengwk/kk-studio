@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
@@ -41,7 +43,11 @@ final class AnthropicModelProvider implements ModelProvider {
   private static final String DONE_PROTOCOL_EVENT_TYPE = "done";
 
   /** 仅用于从原生 payload 推导事件名；payload 本体不落到日志、normalized event 或 ProviderResponse。 */
-  private static final ObjectMapper PROTOCOL_EVENT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper PROTOCOL_EVENT_MAPPER =
+      JsonMapper.builder()
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
 
   private final JdkHttpSseTransport transport;
   private final ProviderDescriptor descriptor;
@@ -102,14 +108,14 @@ final class AnthropicModelProvider implements ModelProvider {
     JsonNode payload;
     try {
       payload = PROTOCOL_EVENT_MAPPER.readTree(data);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       return null;
     }
     JsonNode typeNode = payload == null ? null : payload.path("type");
-    if (typeNode == null || !typeNode.isTextual() || typeNode.textValue().isBlank()) {
+    if (typeNode == null || !typeNode.isString() || typeNode.stringValue().isBlank()) {
       return null;
     }
-    return typeNode.textValue();
+    return typeNode.stringValue();
   }
 
   AnthropicConfiguration configuration() {

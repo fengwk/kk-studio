@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.gemini;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
@@ -25,7 +27,11 @@ import java.util.concurrent.TimeoutException;
  */
 final class GeminiErrorMapper {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
 
   static final String MSG_AUTH = "Gemini authentication failed";
   static final String MSG_BILLING = "Gemini billing or quota error";
@@ -88,11 +94,11 @@ final class GeminiErrorMapper {
     int statusCode = 0;
     JsonNode errorNode = errorEventNode.get("error");
     if (errorNode != null && errorNode.isObject()) {
-      if (errorNode.has("status") && errorNode.get("status").isTextual()) {
-        errorStatus = errorNode.get("status").asText();
+      if (errorNode.has("status") && errorNode.get("status").isString()) {
+        errorStatus = errorNode.get("status").asString("");
       }
       if (errorNode.has("code") && errorNode.get("code").isIntegralNumber()) {
-        statusCode = errorNode.get("code").asInt();
+        statusCode = errorNode.get("code").asInt(0);
       }
     }
     ProviderErrorKind kind = classify(statusCode, errorStatus);
@@ -173,8 +179,8 @@ final class GeminiErrorMapper {
       JsonNode node = OBJECT_MAPPER.readTree(bodyBytes);
       if (node != null && node.has("error") && node.get("error").isObject()) {
         JsonNode errNode = node.get("error");
-        if (errNode.has("status") && errNode.get("status").isTextual()) {
-          return errNode.get("status").asText();
+        if (errNode.has("status") && errNode.get("status").isString()) {
+          return errNode.get("status").asString("");
         }
       }
     } catch (Exception ignored) {

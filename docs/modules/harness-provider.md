@@ -2,7 +2,7 @@
 
 `harness-provider` 用 JDK 21 `HttpClient` 实现四种模型协议，以有界增量解析器读取 SSE，将正常结束、安全过滤、截断与连接故障收敛为 Runtime 能消费的中立结果。它还负责原生推理回放，并把运行时冻结的 `ProviderCacheControl` 映射为各协议 prompt cache wire 字段；错误只做分类，保留上游诊断正文。
 
-生产依赖为 [`harness-runtime`](harness-runtime.md) 的协议类型与 Jackson；凭据、HttpClient、worker 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/provider/pom.xml)，[`ProviderModuleArchitectureTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderModuleArchitectureTest.java) 校验 import 与 POM。Platform 使用 HTTP/1.1、Redirect.NEVER 和受管虚拟线程 worker。
+生产依赖为 [`harness-runtime`](harness-runtime.md) 的协议类型与 Jackson 3（`tools.jackson.core:jackson-databind`）；凭据、HttpClient、worker 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/provider/pom.xml)，[`ProviderModuleArchitectureTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderModuleArchitectureTest.java) 校验 import 与 POM。Platform 使用 HTTP/1.1、Redirect.NEVER 和受管虚拟线程 worker。
 
 ## 传输层
 

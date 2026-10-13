@@ -5,11 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -43,7 +44,7 @@ import java.util.UUID;
 /** Gemini 思考过程、thoughtSignature 签名及多轮回放测试。 */
 class GeminiThinkingTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private ProviderDescriptor descriptor;
   private ProviderRequest request;
@@ -129,7 +130,7 @@ class GeminiThinkingTest {
     assertNotNull(completion.replayState());
     JsonNode replayPayload = completion.replayState().payload();
     ArrayNode parts = (ArrayNode) replayPayload.get("parts");
-    assertEquals("valid_sig_empty_thought", parts.get(0).get("thoughtSignature").asText());
+    assertEquals("valid_sig_empty_thought", parts.get(0).get("thoughtSignature").asString(""));
   }
 
   /** 验证多个连续 reasoning parts 被累加，并保留签名。 */
@@ -214,7 +215,7 @@ class GeminiThinkingTest {
     assertEquals(2, parts.size());
 
     // 第一个 part 保留原生 thoughtSignature
-    assertEquals("first_call_signature", parts.get(0).get("thoughtSignature").asText());
+    assertEquals("first_call_signature", parts.get(0).get("thoughtSignature").asString(""));
     // 第二个 part 绝不伪造 thoughtSignature
     assertFalse(
         parts.get(1).has("thoughtSignature"),
@@ -266,12 +267,12 @@ class GeminiThinkingTest {
 
     JsonNode parts = completion.replayState().payload().get("parts");
     assertEquals(3, parts.size());
-    assertEquals("think", parts.get(0).path("text").asText());
-    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asText());
+    assertEquals("think", parts.get(0).path("text").asString(""));
+    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asString(""));
     assertTrue(parts.get(1).has("text"));
-    assertEquals("", parts.get(1).path("text").asText());
-    assertEquals("sig_empty", parts.get(1).path("thoughtSignature").asText());
-    assertEquals("answer", parts.get(2).path("text").asText());
+    assertEquals("", parts.get(1).path("text").asString(""));
+    assertEquals("sig_empty", parts.get(1).path("thoughtSignature").asString(""));
+    assertEquals("answer", parts.get(2).path("text").asString(""));
   }
 
   /**
@@ -315,12 +316,12 @@ class GeminiThinkingTest {
 
     JsonNode parts = completion.replayState().payload().get("parts");
     assertEquals(3, parts.size(), "两个签名 part 与文本 part 必须各自保留");
-    assertEquals("think A", parts.get(0).path("text").asText());
-    assertEquals("sig_a", parts.get(0).path("thoughtSignature").asText());
-    assertTrue(parts.get(0).path("thought").asBoolean());
-    assertEquals(" think B", parts.get(1).path("text").asText());
-    assertEquals("sig_b", parts.get(1).path("thoughtSignature").asText());
-    assertEquals("answer", parts.get(2).path("text").asText());
+    assertEquals("think A", parts.get(0).path("text").asString(""));
+    assertEquals("sig_a", parts.get(0).path("thoughtSignature").asString(""));
+    assertTrue(parts.get(0).path("thought").asBoolean(false));
+    assertEquals(" think B", parts.get(1).path("text").asString(""));
+    assertEquals("sig_b", parts.get(1).path("thoughtSignature").asString(""));
+    assertEquals("answer", parts.get(2).path("text").asString(""));
     assertFalse(parts.get(2).has("thoughtSignature"), "文本 part 绝不伪造签名");
   }
 
@@ -356,10 +357,10 @@ class GeminiThinkingTest {
     ProviderCompletion completion = accumulator.finish();
     JsonNode parts = completion.replayState().payload().get("parts");
     assertEquals(2, parts.size(), "带不同签名的累积形态绝不合并成单个 part");
-    assertEquals("think", parts.get(0).path("text").asText());
-    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asText(), "本地签名绝不被上游覆盖");
-    assertEquals("think more", parts.get(1).path("text").asText());
-    assertEquals("sig_2", parts.get(1).path("thoughtSignature").asText());
+    assertEquals("think", parts.get(0).path("text").asString(""));
+    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asString(""), "本地签名绝不被上游覆盖");
+    assertEquals("think more", parts.get(1).path("text").asString(""));
+    assertEquals("sig_2", parts.get(1).path("thoughtSignature").asString(""));
   }
 
   /**
@@ -417,10 +418,10 @@ class GeminiThinkingTest {
         MAPPER.readTree(encoder.encode(secondTurn, descriptor).bodyUtf8Bytes());
     ArrayNode modelParts = (ArrayNode) secondTurnJson.get("contents").get(1).get("parts");
     assertEquals(3, modelParts.size());
-    assertEquals("sig_stream", modelParts.get(0).get("thoughtSignature").asText());
-    assertTrue(modelParts.get(0).get("thought").asBoolean());
-    assertEquals("t-1", modelParts.get(1).path("futurePartField").path("trace").asText());
-    assertEquals("QQ==", modelParts.get(2).path("inlineData").path("data").asText());
+    assertEquals("sig_stream", modelParts.get(0).get("thoughtSignature").asString(""));
+    assertTrue(modelParts.get(0).get("thought").asBoolean(false));
+    assertEquals("t-1", modelParts.get(1).path("futurePartField").path("trace").asString(""));
+    assertEquals("QQ==", modelParts.get(2).path("inlineData").path("data").asString(""));
   }
 
   /** 验证多轮对话中，包含 thoughtSignature 的 ReplayState 经过编码器完整发送回服务端。 */
@@ -472,7 +473,7 @@ class GeminiThinkingTest {
     JsonNode req2Json = MAPPER.readTree(enc2.bodyUtf8Bytes());
 
     ArrayNode modelParts = (ArrayNode) req2Json.get("contents").get(1).get("parts");
-    assertEquals("sig_round_1", modelParts.get(0).get("thoughtSignature").asText());
-    assertEquals("answer round 1", modelParts.get(1).get("text").asText());
+    assertEquals("sig_round_1", modelParts.get(0).get("thoughtSignature").asString(""));
+    assertEquals("answer round 1", modelParts.get(1).get("text").asString(""));
   }
 }

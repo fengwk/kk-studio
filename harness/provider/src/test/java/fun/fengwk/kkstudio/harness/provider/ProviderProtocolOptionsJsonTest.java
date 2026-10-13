@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
@@ -40,12 +40,12 @@ class ProviderProtocolOptionsJsonTest {
 
     ObjectNode options = ProviderProtocolOptionsJson.copyOfOptions(variant);
 
-    assertEquals("catalog", options.path("metadata").path("source").asText());
-    assertEquals(4096, options.path("thinking").path("budget_tokens").asInt());
+    assertEquals("catalog", options.path("metadata").path("source").asString(""));
+    assertEquals(4096, options.path("thinking").path("budget_tokens").asInt(0));
     assertTrue(options.path("ratio").isNumber());
-    assertEquals("1.1", options.path("ratio").asText());
+    assertEquals("1.1", options.path("ratio").asString(""));
     assertTrue(options.path("revision").isIntegralNumber());
-    assertEquals(1758880000000L, options.path("revision").asLong());
+    assertEquals(1758880000000L, options.path("revision").asLong(0L));
     assertEquals(2, options.path("flags").size());
   }
 
@@ -65,14 +65,14 @@ class ProviderProtocolOptionsJsonTest {
     ((ObjectNode) first.path("metadata")).put("source", "mutated");
     first.put("injected", true);
 
-    assertEquals("catalog", second.path("metadata").path("source").asText());
+    assertEquals("catalog", second.path("metadata").path("source").asString(""));
     assertTrue(second.path("injected").isMissingNode());
     assertEquals(
         "catalog",
         ProviderProtocolOptionsJson.copyOfOptions(variant)
             .path("metadata")
             .path("source")
-            .asText());
+            .asString(""));
   }
 
   /** variant 不可为 null：编码器传入错误对象时必须显式失败，而不是产出空选项。 */

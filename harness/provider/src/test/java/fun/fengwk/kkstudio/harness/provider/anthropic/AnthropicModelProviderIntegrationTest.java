@@ -6,12 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -503,7 +504,7 @@ class AnthropicModelProviderIntegrationTest {
   /** 意图：本地 HTTP 捕获三轮真实编码，流响应的签名 replay 与工具结果经过编码器，增长超过 lookback 仍保留上轮端点。 */
   @Test
   void preservesCacheRequestBoundariesAcrossThreeHttpRounds() throws Exception {
-    ObjectMapper mapper = new ObjectMapper();
+    ObjectMapper mapper = JsonMapper.builder().build();
     List<JsonNode> received = new CopyOnWriteArrayList<>();
     byte[] toolResponse;
     byte[] textResponse;
@@ -601,7 +602,7 @@ class AnthropicModelProviderIntegrationTest {
     assertTrue(roundTwo.get(0).path("content").get(0).has("cache_control"));
     assertTrue(roundTwo.get(3).path("content").get(24).has("cache_control"));
     assertEquals(
-        "fixture-signature", roundTwo.get(1).path("content").get(0).path("signature").asText());
+        "fixture-signature", roundTwo.get(1).path("content").get(0).path("signature").asString(""));
     assertFalse(roundTwo.get(1).path("content").get(0).has("cache_control"));
     JsonNode roundThree = received.get(2).path("messages");
     assertFalse(roundThree.get(0).path("content").get(0).has("cache_control"));

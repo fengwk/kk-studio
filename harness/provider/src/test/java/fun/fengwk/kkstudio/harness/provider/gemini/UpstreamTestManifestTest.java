@@ -7,12 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import tools.jackson.core.JsonParser;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -54,7 +55,7 @@ class UpstreamTestManifestTest {
   private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 531;
   private static final int EXPECTED_REAL_CREDENTIAL_INVOCATIONS = 281;
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String TARGET_CLASS_PREFIX = "fun.fengwk.kkstudio.harness.provider.gemini.";
   private static final String CLASSPATH_FIXTURE_PREFIX = "/fun/fengwk/kkstudio/harness/provider/";
 
@@ -177,23 +178,23 @@ class UpstreamTestManifestTest {
     JsonNode root = MAPPER.readTree(in);
     assertEquals(
         REQUIRED_UPSTREAM_COMMIT,
-        root.path("upstreamCommit").asText(),
+        root.path("upstreamCommit").asString(""),
         "upstream commit must match exact 1.20.0 commit");
     assertEquals(
         REQUIRED_UPSTREAM_VERSION,
-        root.path("upstreamVersion").asText(),
+        root.path("upstreamVersion").asString(""),
         "upstream version must match exact 1.20.0");
 
     JsonNode summary = root.path("summary");
-    assertEquals(EXPECTED_TOTAL_SOURCES, summary.path("totalSourceFiles").asInt());
-    assertEquals(EXPECTED_TOTAL_METHODS, summary.path("totalMethods").asInt());
-    assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.path("totalInvocations").asInt());
-    assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.path("portedInvocations").asInt());
+    assertEquals(EXPECTED_TOTAL_SOURCES, summary.path("totalSourceFiles").asInt(0));
+    assertEquals(EXPECTED_TOTAL_METHODS, summary.path("totalMethods").asInt(0));
+    assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.path("totalInvocations").asInt(0));
+    assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.path("portedInvocations").asInt(0));
     assertEquals(
-        EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, summary.path("inScopePendingInvocations").asInt());
-    assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.path("outOfScopeInvocations").asInt());
+        EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, summary.path("inScopePendingInvocations").asInt(0));
+    assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.path("outOfScopeInvocations").asInt(0));
     assertEquals(
-        EXPECTED_REAL_CREDENTIAL_INVOCATIONS, summary.path("realCredentialInvocations").asInt());
+        EXPECTED_REAL_CREDENTIAL_INVOCATIONS, summary.path("realCredentialInvocations").asInt(0));
 
     Set<String> seenInvocationIds = new HashSet<>();
     Set<String> seenSourceFiles = new HashSet<>();
@@ -209,7 +210,7 @@ class UpstreamTestManifestTest {
 
     for (JsonNode methodNode : methodsArray) {
       dynamicTotalMethods++;
-      String sourcePath = methodNode.path("sourcePath").asText();
+      String sourcePath = methodNode.path("sourcePath").asString("");
       seenSourceFiles.add(sourcePath);
 
       JsonNode invocationsNode = methodNode.path("invocations");
@@ -217,38 +218,38 @@ class UpstreamTestManifestTest {
 
       for (JsonNode inv : invocationsNode) {
         dynamicTotalInvocations++;
-        String id = inv.path("invocationId").asText();
+        String id = inv.path("invocationId").asString("");
         assertFalse(id.isBlank(), "invocationId must not be blank");
         assertTrue(seenInvocationIds.add(id), () -> "duplicate invocationId: " + id);
 
-        String mappingStatus = inv.path("mappingStatus").asText();
+        String mappingStatus = inv.path("mappingStatus").asString("");
         assertFalse(
             "PORT_PENDING".equals(mappingStatus) || "SKIPPED".equals(mappingStatus),
             () -> "Zero pending / skipped allowed: " + id);
 
         if ("PORTED".equals(mappingStatus)) {
           dynamicPorted++;
-          assertEquals("PASSED", inv.path("executionStatus").asText());
-          validateTargetTest(inv.path("targetTest").asText());
-          validateFixture(inv.path("fixture").asText());
+          assertEquals("PASSED", inv.path("executionStatus").asString(""));
+          validateTargetTest(inv.path("targetTest").asString(""));
+          validateFixture(inv.path("fixture").asString(""));
           assertTrue(inv.path("capabilityMismatch").isNull());
         } else if ("OUT_OF_SCOPE".equals(mappingStatus)) {
           dynamicOos++;
-          assertEquals("NOT_EXECUTED_OUT_OF_SCOPE", inv.path("executionStatus").asText());
+          assertEquals("NOT_EXECUTED_OUT_OF_SCOPE", inv.path("executionStatus").asString(""));
           assertTrue(
               inv.path("targetTest").isNull(),
               () -> "OUT_OF_SCOPE invocation targetTest must be null: " + id);
           assertTrue(
               inv.path("fixture").isNull(),
               () -> "OUT_OF_SCOPE invocation fixture must be null: " + id);
-          String mismatch = inv.path("capabilityMismatch").asText();
+          String mismatch = inv.path("capabilityMismatch").asString("");
           assertNotNull(mismatch, () -> "OUT_OF_SCOPE must have capabilityMismatch: " + id);
           assertFalse(mismatch.isBlank(), () -> "OUT_OF_SCOPE mismatch must not be blank: " + id);
         } else {
           throw new AssertionError("unknown mappingStatus: " + mappingStatus + " on " + id);
         }
 
-        if ("NOT_EXECUTED_REQUIRES_CREDENTIAL".equals(inv.path("realInteropStatus").asText())) {
+        if ("NOT_EXECUTED_REQUIRES_CREDENTIAL".equals(inv.path("realInteropStatus").asString(""))) {
           dynamicRealCred++;
         }
       }

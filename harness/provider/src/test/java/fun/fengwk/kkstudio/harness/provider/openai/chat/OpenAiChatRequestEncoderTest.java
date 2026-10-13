@@ -7,16 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
@@ -60,7 +61,7 @@ import java.util.stream.Stream;
 /** 测试意图：全面验证 OpenAI Chat 请求编码器（Golden 结构、输出预算、推理、Tools、Messages、Replay、媒体、留存档位映射）。 */
 class OpenAiChatRequestEncoderTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private OpenAiChatRequestEncoder encoder;
   private ProviderDescriptor descriptor;
   private ModelDescriptor modelDesc;
@@ -101,17 +102,17 @@ class OpenAiChatRequestEncoderTest {
     assertNotNull(encoded.bodyUtf8Bytes());
 
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("gpt-4o", root.path("model").asText());
-    assertTrue(root.path("stream").asBoolean());
-    assertTrue(root.path("stream_options").path("include_usage").asBoolean());
+    assertEquals("gpt-4o", root.path("model").asString(""));
+    assertTrue(root.path("stream").asBoolean(false));
+    assertTrue(root.path("stream_options").path("include_usage").asBoolean(false));
 
     ArrayNode messages = (ArrayNode) root.path("messages");
     // 唯一的系统指令合成为前导 system message，会话消息紧随其后
     assertEquals(2, messages.size());
-    assertEquals("system", messages.get(0).path("role").asText());
-    assertEquals("Test system instruction.", messages.get(0).path("content").asText());
-    assertEquals("user", messages.get(1).path("role").asText());
-    assertEquals("Hello", messages.get(1).path("content").asText());
+    assertEquals("system", messages.get(0).path("role").asString(""));
+    assertEquals("Test system instruction.", messages.get(0).path("content").asString(""));
+    assertEquals("user", messages.get(1).path("role").asString(""));
+    assertEquals("Hello", messages.get(1).path("content").asString(""));
   }
 
   @Test
@@ -133,7 +134,7 @@ class OpenAiChatRequestEncoderTest {
 
     OpenAiChatEncodedRequest encoded = encoder.encode(request, descriptor, config);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    assertFalse(root.path("stream_options").path("include_usage").asBoolean());
+    assertFalse(root.path("stream_options").path("include_usage").asBoolean(false));
   }
 
   @Test
@@ -164,7 +165,7 @@ class OpenAiChatRequestEncoderTest {
     JsonNode root1 =
         MAPPER.readTree(
             encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
-    assertEquals("high", root1.path("reasoning_effort").asText());
+    assertEquals("high", root1.path("reasoning_effort").asString(""));
 
     // 手工配置的大小写是厂商原生值，编码时原样下发（如 HIGH 不被小写化）
     for (String effort : List.of("HIGH", "HiGh")) {
@@ -182,7 +183,7 @@ class OpenAiChatRequestEncoderTest {
               encoder
                   .encode(casedReq, descriptor, OpenAiChatConfiguration.defaults())
                   .bodyUtf8Bytes());
-      assertEquals(effort, casedRoot.path("reasoning_effort").asText());
+      assertEquals(effort, casedRoot.path("reasoning_effort").asString(""));
     }
 
     ModelVariant variantOff = new ModelVariant("v2", "off");
@@ -198,7 +199,7 @@ class OpenAiChatRequestEncoderTest {
     JsonNode root2 =
         MAPPER.readTree(
             encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
-    assertEquals("none", root2.path("reasoning_effort").asText());
+    assertEquals("none", root2.path("reasoning_effort").asString(""));
 
     ProviderRequest req3 =
         new ProviderRequest(
@@ -245,8 +246,8 @@ class OpenAiChatRequestEncoderTest {
             ProviderCacheControl.none());
     JsonNode rootLow =
         MAPPER.readTree(encoder.encode(reqLow, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertEquals("enabled", rootLow.path("thinking").path("type").asText());
-    assertEquals("low", rootLow.path("reasoning_effort").asText());
+    assertEquals("enabled", rootLow.path("thinking").path("type").asString(""));
+    assertEquals("low", rootLow.path("reasoning_effort").asString(""));
 
     // 2. DEEPSEEK 格式下 reasoning=true 且 effort="off" -> 显式 thinking:{type:"disabled"}
     // 且不发送 reasoning_effort（off 是显式关闭，不是某个强度值）
@@ -262,7 +263,7 @@ class OpenAiChatRequestEncoderTest {
             ProviderCacheControl.none());
     JsonNode rootOff =
         MAPPER.readTree(encoder.encode(reqOff, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertEquals("disabled", rootOff.path("thinking").path("type").asText());
+    assertEquals("disabled", rootOff.path("thinking").path("type").asString(""));
     assertFalse(rootOff.has("reasoning_effort"));
 
     // 3. DEEPSEEK 格式下 reasoning=true 且 variant.reasoningEffort 为 null -> 不覆盖协议默认：
@@ -319,13 +320,13 @@ class OpenAiChatRequestEncoderTest {
     JsonNode rootStandard =
         MAPPER.readTree(encoder.encode(reqLow, descriptor, standardConfig).bodyUtf8Bytes());
     assertFalse(rootStandard.has("thinking"));
-    assertEquals("low", rootStandard.path("reasoning_effort").asText());
+    assertEquals("low", rootStandard.path("reasoning_effort").asString(""));
 
     // 7. STANDARD 格式下 off 映射为协议关闭值 none
     JsonNode rootStandardOff =
         MAPPER.readTree(encoder.encode(reqOff, descriptor, standardConfig).bodyUtf8Bytes());
     assertFalse(rootStandardOff.has("thinking"));
-    assertEquals("none", rootStandardOff.path("reasoning_effort").asText());
+    assertEquals("none", rootStandardOff.path("reasoning_effort").asString(""));
 
     // 8. STANDARD 格式下 null effort 不发送任何推理字段
     JsonNode rootStandardDefault =
@@ -355,7 +356,7 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(request, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    assertEquals(100, root.path("max_tokens").asInt());
+    assertEquals(100, root.path("max_tokens").asInt(0));
   }
 
   @Test
@@ -385,10 +386,10 @@ class OpenAiChatRequestEncoderTest {
                 .bodyUtf8Bytes());
     ArrayNode tools = (ArrayNode) root.path("tools");
     assertEquals(1, tools.size());
-    assertEquals("function", tools.get(0).path("type").asText());
+    assertEquals("function", tools.get(0).path("type").asString(""));
     JsonNode fn = tools.get(0).path("function");
-    assertEquals("get_weather", fn.path("name").asText());
-    assertEquals("Get current weather", fn.path("description").asText());
+    assertEquals("get_weather", fn.path("name").asString(""));
+    assertEquals("Get current weather", fn.path("description").asString(""));
     assertTrue(fn.path("parameters").isObject());
   }
 
@@ -420,9 +421,9 @@ class OpenAiChatRequestEncoderTest {
                 .bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) root.path("messages");
     assertEquals(2, messages.size());
-    assertEquals("tool", messages.get(1).path("role").asText());
-    assertEquals("call_123", messages.get(1).path("tool_call_id").asText());
-    assertEquals("{\"temp\":25}", messages.get(1).path("content").asText());
+    assertEquals("tool", messages.get(1).path("role").asString(""));
+    assertEquals("call_123", messages.get(1).path("tool_call_id").asString(""));
+    assertEquals("{\"temp\":25}", messages.get(1).path("content").asString(""));
   }
 
   @Test
@@ -446,8 +447,9 @@ class OpenAiChatRequestEncoderTest {
         MAPPER.readTree(
             encoder.encode(reqImg, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     ArrayNode parts = (ArrayNode) rootImg.path("messages").get(1).path("content");
-    assertEquals("image_url", parts.get(0).path("type").asText());
-    assertEquals("https://example.com/a.jpg", parts.get(0).path("image_url").path("url").asText());
+    assertEquals("image_url", parts.get(0).path("type").asString(""));
+    assertEquals(
+        "https://example.com/a.jpg", parts.get(0).path("image_url").path("url").asString(""));
 
     // 2b. base64 data URI 图片必须逐字节保留完整 data URI 作为 image_url.url（不重编码、不丢载荷）
     String base64Png =
@@ -470,9 +472,9 @@ class OpenAiChatRequestEncoderTest {
                 .encode(reqImgBase64, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     ArrayNode imgBase64Parts = (ArrayNode) rootImgBase64.path("messages").get(1).path("content");
-    assertEquals("image_url", imgBase64Parts.get(0).path("type").asText());
-    assertEquals(base64Png, imgBase64Parts.get(0).path("image_url").path("url").asText());
-    assertFalse(imgBase64Parts.get(0).path("image_url").path("url").asText().contains(" "));
+    assertEquals("image_url", imgBase64Parts.get(0).path("type").asString(""));
+    assertEquals(base64Png, imgBase64Parts.get(0).path("image_url").path("url").asString(""));
+    assertFalse(imgBase64Parts.get(0).path("image_url").path("url").asString("").contains(" "));
 
     // 3. 音频处理：URL 必须拒绝
     ProviderMessage userAudioUrl =
@@ -512,9 +514,9 @@ class OpenAiChatRequestEncoderTest {
                 .encode(reqAudioBase64, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     ArrayNode audioParts = (ArrayNode) rootAudio.path("messages").get(1).path("content");
-    assertEquals("input_audio", audioParts.get(0).path("type").asText());
-    assertEquals("UklGRg==", audioParts.get(0).path("input_audio").path("data").asText());
-    assertEquals("wav", audioParts.get(0).path("input_audio").path("format").asText());
+    assertEquals("input_audio", audioParts.get(0).path("type").asString(""));
+    assertEquals("UklGRg==", audioParts.get(0).path("input_audio").path("data").asString(""));
+    assertEquals("wav", audioParts.get(0).path("input_audio").path("format").asString(""));
 
     // 5. PDF 编码
     ProviderMessage userPdf =
@@ -536,10 +538,10 @@ class OpenAiChatRequestEncoderTest {
         MAPPER.readTree(
             encoder.encode(reqPdf, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     ArrayNode pdfParts = (ArrayNode) rootPdf.path("messages").get(1).path("content");
-    assertEquals("file", pdfParts.get(0).path("type").asText());
+    assertEquals("file", pdfParts.get(0).path("type").asString(""));
     assertEquals(
         "data:application/pdf;base64,JVBERi==",
-        pdfParts.get(0).path("file").path("file_data").asText());
+        pdfParts.get(0).path("file").path("file_data").asString(""));
 
     // 6. VIDEO 始终拒绝
     ProviderMessage userVideo =
@@ -605,9 +607,10 @@ class OpenAiChatRequestEncoderTest {
     assertEquals(4, messages.size());
 
     JsonNode replayedAsst = messages.get(2);
-    assertEquals("assistant", replayedAsst.path("role").asText());
-    assertEquals("Why did chicken cross road?", replayedAsst.path("content").asText());
-    assertEquals("A classic joke is appropriate.", replayedAsst.path("reasoning_content").asText());
+    assertEquals("assistant", replayedAsst.path("role").asString(""));
+    assertEquals("Why did chicken cross road?", replayedAsst.path("content").asString(""));
+    assertEquals(
+        "A classic joke is appropriate.", replayedAsst.path("reasoning_content").asString(""));
 
     // 2. 同 format 且 payload 携带 provider 原生未知字段：不在白名单内的合法 assistant 字段必须原样透传
     ObjectNode extendedPayload = validPayload.deepCopy();
@@ -638,8 +641,8 @@ class OpenAiChatRequestEncoderTest {
                 .encode(extendedReq, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     JsonNode extendedAsst = extendedRoot.path("messages").get(2);
-    assertEquals("Why did chicken cross road?", extendedAsst.path("content").asText());
-    assertEquals("kept", extendedAsst.path("vendor_future_field").asText());
+    assertEquals("Why did chicken cross road?", extendedAsst.path("content").asString(""));
+    assertEquals("kept", extendedAsst.path("vendor_future_field").asString(""));
     assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), extendedAsst.path("audio"));
 
     // 2b. 同 format 但 payload 的 known 字段形态损坏（content 非文本）必须抛出 ProviderException 拒绝
@@ -696,8 +699,8 @@ class OpenAiChatRequestEncoderTest {
                 .encode(fallbackReq, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     JsonNode fallbackAsstNode = fallbackRoot.path("messages").get(2);
-    assertEquals("assistant", fallbackAsstNode.path("role").asText());
-    assertEquals("Fallback answer", fallbackAsstNode.path("content").asText());
+    assertEquals("assistant", fallbackAsstNode.path("role").asString(""));
+    assertEquals("Fallback answer", fallbackAsstNode.path("content").asString(""));
     assertFalse(fallbackAsstNode.has("reasoning_content"));
   }
 
@@ -752,7 +755,7 @@ class OpenAiChatRequestEncoderTest {
                 .bodyUtf8Bytes());
 
     JsonNode replayedRefusal = root.path("messages").get(2);
-    assertEquals("I cannot help with that.", replayedRefusal.path("refusal").asText());
+    assertEquals("I cannot help with that.", replayedRefusal.path("refusal").asString(""));
     assertFalse(replayedRefusal.has("content"));
 
     ProviderMessage mismatchedRefusal =
@@ -801,11 +804,11 @@ class OpenAiChatRequestEncoderTest {
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlShort);
     JsonNode rootShort =
         MAPPER.readTree(encoder.encode(reqShort, descriptor, configShort).bodyUtf8Bytes());
-    assertEquals("my-key-short", rootShort.path("prompt_cache_key").asText());
-    assertEquals("in_memory", rootShort.path("prompt_cache_retention").asText());
+    assertEquals("my-key-short", rootShort.path("prompt_cache_key").asString(""));
+    assertEquals("in_memory", rootShort.path("prompt_cache_retention").asString(""));
     assertFalse(rootShort.has("prompt_cache_options"));
     // 不再改写 content 形态或注入 breakpoint
-    assertEquals("User prompt", rootShort.path("messages").get(1).path("content").asText());
+    assertEquals("User prompt", rootShort.path("messages").get(1).path("content").asString(""));
 
     // 3. LONG: retention=24h
     OpenAiChatConfiguration configLong =
@@ -816,8 +819,8 @@ class OpenAiChatRequestEncoderTest {
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlLong);
     JsonNode rootLong =
         MAPPER.readTree(encoder.encode(reqLong, descriptor, configLong).bodyUtf8Bytes());
-    assertEquals("my-key-long", rootLong.path("prompt_cache_key").asText());
-    assertEquals("24h", rootLong.path("prompt_cache_retention").asText());
+    assertEquals("my-key-long", rootLong.path("prompt_cache_key").asString(""));
+    assertEquals("24h", rootLong.path("prompt_cache_retention").asString(""));
 
     // 4. NONE retention: 即便配置为 LONG，cacheControl=NONE 也不发 cache 字段
     ProviderRequest reqLongNone =
@@ -856,7 +859,7 @@ class OpenAiChatRequestEncoderTest {
     JsonNode asstNode = rootAsstThinking.path("messages").get(1);
     assertEquals(
         "<thinking>\ninternal thought\n</thinking>\nanswer text",
-        asstNode.path("content").asText());
+        asstNode.path("content").asString(""));
     assertEquals(1, asstNode.path("tool_calls").size());
 
     // 2. ASSISTANT 包含非法块（如 ImageBlock）抛异常
@@ -897,7 +900,7 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(reqToolJson, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    assertEquals("{\"ans\":42}", rootToolJson.path("messages").get(1).path("content").asText());
+    assertEquals("{\"ans\":42}", rootToolJson.path("messages").get(1).path("content").asString(""));
 
     // 4. 不支持的音频格式抛异常
     OpenAiChatConfiguration audioConfig =
@@ -1062,7 +1065,8 @@ class OpenAiChatRequestEncoderTest {
                 .bodyUtf8Bytes());
     assertEquals(3, rootValidTool.path("messages").size());
     assertEquals(
-        "c1", rootValidTool.path("messages").get(2).path("tool_calls").get(0).path("id").asText());
+        "c1",
+        rootValidTool.path("messages").get(2).path("tool_calls").get(0).path("id").asString(""));
 
     // 5. payload role 不是 text
     ObjectNode badRoleTypePayload = MAPPER.createObjectNode();
@@ -1178,7 +1182,7 @@ class OpenAiChatRequestEncoderTest {
             .get(0)
             .path("input_audio")
             .path("format")
-            .asText());
+            .asString(""));
 
     // 4. PDF 非法 mediaType
     OpenAiChatConfiguration pdfConfig =
@@ -1225,7 +1229,7 @@ class OpenAiChatRequestEncoderTest {
             .get(0)
             .path("file")
             .path("file_data")
-            .asText());
+            .asString(""));
 
     // 6. tool-call-only assistant 不制造 content；启用缓存时也不改写消息内容或注入 breakpoint
     OpenAiChatConfiguration configShort =
@@ -1249,12 +1253,12 @@ class OpenAiChatRequestEncoderTest {
             cacheControlShort);
     JsonNode rootBreak =
         MAPPER.readTree(encoder.encode(reqLastToolBreak, descriptor, configShort).bodyUtf8Bytes());
-    assertEquals("session-key", rootBreak.path("prompt_cache_key").asText());
-    assertEquals("in_memory", rootBreak.path("prompt_cache_retention").asText());
+    assertEquals("session-key", rootBreak.path("prompt_cache_key").asString(""));
+    assertEquals("in_memory", rootBreak.path("prompt_cache_retention").asString(""));
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
     // 0 号是合成的系统指令消息，user 消息紧随其后
     JsonNode userNode = messages.get(1);
-    assertEquals("calc", userNode.path("content").asText());
+    assertEquals("calc", userNode.path("content").asString(""));
     assertFalse(messages.get(2).has("content"));
   }
 
@@ -1294,7 +1298,8 @@ class OpenAiChatRequestEncoderTest {
                 .encode(reqMulti, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     assertEquals(
-        "Result: {\"score\":99} done", rootMulti.path("messages").get(2).path("content").asText());
+        "Result: {\"score\":99} done",
+        rootMulti.path("messages").get(2).path("content").asString(""));
 
     // 2. 包含非法块（例如 ProviderImageBlock）必须抛出 INVALID_REQUEST
     ProviderToolResultBlock badBlockResult =
@@ -1362,9 +1367,9 @@ class OpenAiChatRequestEncoderTest {
                 .encode(request, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     JsonNode wire = root.path("messages").get(1);
-    assertEquals("tool", wire.path("role").asText());
-    assertEquals("call_1", wire.path("tool_call_id").asText());
-    assertEquals(expectedContent, wire.path("content").asText());
+    assertEquals("tool", wire.path("role").asString(""));
+    assertEquals("call_1", wire.path("tool_call_id").asString(""));
+    assertEquals(expectedContent, wire.path("content").asString(""));
   }
 
   private static Stream<Arguments> toolResultBlockCases() {
@@ -1516,8 +1521,8 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(reqValidFallback, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    assertEquals("assistant", rootFallback.path("messages").get(2).path("role").asText());
-    assertEquals("text", rootFallback.path("messages").get(2).path("content").asText());
+    assertEquals("assistant", rootFallback.path("messages").get(2).path("role").asString(""));
+    assertEquals("text", rootFallback.path("messages").get(2).path("content").asString(""));
   }
 
   @Test
@@ -1688,12 +1693,12 @@ class OpenAiChatRequestEncoderTest {
         MAPPER.readTree(
             encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     JsonNode wireAsst = root.path("messages").get(2);
-    assertEquals("assistant", wireAsst.path("role").asText());
+    assertEquals("assistant", wireAsst.path("role").asString(""));
     // 可读思考以带来源标记的普通文本保留，与 final text 明确分隔。
     assertEquals(
         "<thinking>\nthink dropped\n</thinking>\nfallback result",
-        wireAsst.path("content").asText());
-    assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
+        wireAsst.path("content").asString(""));
+    assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asString(""));
     assertFalse(wireAsst.has("reasoning_content"));
   }
 
@@ -1734,11 +1739,11 @@ class OpenAiChatRequestEncoderTest {
         MAPPER.readTree(
             encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     JsonNode wireAsst = root.path("messages").get(2);
-    assertEquals("assistant", wireAsst.path("role").asText());
+    assertEquals("assistant", wireAsst.path("role").asString(""));
     assertEquals(
         "<thinking>\nweigh tradeoffs\n</thinking>\nfallback result",
-        wireAsst.path("content").asText());
-    assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
+        wireAsst.path("content").asString(""));
+    assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asString(""));
     assertFalse(wireAsst.has("reasoning_content"));
     assertFalse(
         wireAsst.has("reasoning"), "Responses-native structural fields must never leak into Chat");
@@ -1854,8 +1859,8 @@ class OpenAiChatRequestEncoderTest {
                     OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     JsonNode wireCall = wire.path("messages").get(2).path("tool_calls").get(0);
-    assertEquals("value", wireCall.path("extra_call_field").asText());
-    assertEquals("value", wireCall.path("function").path("extra_fn_field").asText());
+    assertEquals("value", wireCall.path("extra_call_field").asString(""));
+    assertEquals("value", wireCall.path("function").path("extra_fn_field").asString(""));
   }
 
   @Test
@@ -2022,13 +2027,14 @@ class OpenAiChatRequestEncoderTest {
     assertEquals(4, wireMessages.size());
 
     JsonNode wireAsst = wireMessages.get(2);
-    assertEquals("assistant", wireAsst.path("role").asText());
-    assertEquals("Result 42", wireAsst.path("content").asText());
-    assertEquals("Solving...", wireAsst.path("reasoning_content").asText());
+    assertEquals("assistant", wireAsst.path("role").asString(""));
+    assertEquals("Result 42", wireAsst.path("content").asString(""));
+    assertEquals("Solving...", wireAsst.path("reasoning_content").asString(""));
     assertTrue(wireAsst.path("reasoning_details").isArray());
     assertEquals(2, wireAsst.path("reasoning_details").size());
-    assertEquals(1, wireAsst.path("reasoning_details").get(0).path("step").asInt());
-    assertEquals("completed", wireAsst.path("reasoning_details").get(1).path("status").asText());
+    assertEquals(1, wireAsst.path("reasoning_details").get(0).path("step").asInt(0));
+    assertEquals(
+        "completed", wireAsst.path("reasoning_details").get(1).path("status").asString(""));
   }
 
   @Test
@@ -2241,12 +2247,12 @@ class OpenAiChatRequestEncoderTest {
     JsonNode wireCalls = wire.path("messages").get(2).path("tool_calls");
 
     assertEquals(
-        "native reasoning", wire.path("messages").get(2).path("reasoning_content").asText());
+        "native reasoning", wire.path("messages").get(2).path("reasoning_content").asString(""));
     assertEquals(1, wireCalls.size());
-    assertEquals("call_replay_1", wireCalls.get(0).path("id").asText());
-    assertEquals("function", wireCalls.get(0).path("type").asText());
-    assertEquals("weather_query", wireCalls.get(0).path("function").path("name").asText());
+    assertEquals("call_replay_1", wireCalls.get(0).path("id").asString(""));
+    assertEquals("function", wireCalls.get(0).path("type").asString(""));
+    assertEquals("weather_query", wireCalls.get(0).path("function").path("name").asString(""));
     assertEquals(
-        "{\"city\":\"Berlin\"}", wireCalls.get(0).path("function").path("arguments").asText());
+        "{\"city\":\"Berlin\"}", wireCalls.get(0).path("function").path("arguments").asString(""));
   }
 }

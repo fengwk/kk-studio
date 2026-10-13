@@ -4,11 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
@@ -62,7 +63,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * usage，可由运行者重定向到仓库外临时 artifact。缓存命中是观测而非协议保证。
  */
 class AnthropicHistoryCacheLiveProbeTest {
-  private static final ObjectMapper JSON = new ObjectMapper();
+  private static final ObjectMapper JSON = JsonMapper.builder().build();
   private static final String MODEL = "claude-fable-5-dd-3M-xaMiniM";
   private static final String MARKER = ",\"cache_control\":{\"type\":\"ephemeral\"}";
   private static final AnthropicConfiguration CONFIG =
@@ -274,13 +275,13 @@ class AnthropicHistoryCacheLiveProbeTest {
 
   private static void verify(byte[] body, boolean old, boolean warm) throws Exception {
     JsonNode root = JSON.readTree(body);
-    assertEquals(MODEL, root.path("model").asText());
-    assertEquals(128, root.path("max_tokens").asInt());
-    assertEquals("disabled", root.path("thinking").path("type").asText());
+    assertEquals(MODEL, root.path("model").asString(""));
+    assertEquals(128, root.path("max_tokens").asInt(0));
+    assertEquals("disabled", root.path("thinking").path("type").asString(""));
     JsonNode system = root.path("system").get(0);
-    assertEquals("answer OK only", system.path("text").asText());
+    assertEquals("answer OK only", system.path("text").asString(""));
     // 新契约：SHORT 留存固定给 system 文本块打 ephemeral marker；请求没有 tools 也就不存在 tools marker。
-    assertEquals("ephemeral", system.path("cache_control").path("type").asText());
+    assertEquals("ephemeral", system.path("cache_control").path("type").asString(""));
     assertFalse(system.path("cache_control").has("ttl"));
     assertFalse(root.has("tools"));
     List<Integer> positions = markers(root);

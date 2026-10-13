@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
@@ -19,7 +21,11 @@ import java.util.Locale;
  */
 final class OpenAiResponsesErrorMapper {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
 
   static final String MSG_AUTH = "OpenAI Responses authentication failed";
   static final String MSG_BILLING = "OpenAI Responses billing or quota error";
@@ -167,21 +173,21 @@ final class OpenAiResponsesErrorMapper {
     }
 
     if (errorNode != null && errorNode.isObject()) {
-      if (errorNode.has("code") && errorNode.get("code").isTextual()) {
-        return errorNode.get("code").asText();
+      if (errorNode.has("code") && errorNode.get("code").isString()) {
+        return errorNode.get("code").asString("");
       }
-      if (errorNode.has("type") && errorNode.get("type").isTextual()) {
-        return errorNode.get("type").asText();
+      if (errorNode.has("type") && errorNode.get("type").isString()) {
+        return errorNode.get("type").asString("");
       }
-      if (errorNode.has("message") && errorNode.get("message").isTextual()) {
-        return errorNode.get("message").asText();
+      if (errorNode.has("message") && errorNode.get("message").isString()) {
+        return errorNode.get("message").asString("");
       }
     }
-    if (node.has("code") && node.get("code").isTextual()) {
-      return node.get("code").asText();
+    if (node.has("code") && node.get("code").isString()) {
+      return node.get("code").asString("");
     }
-    if (node.has("type") && node.get("type").isTextual()) {
-      return node.get("type").asText();
+    if (node.has("type") && node.get("type").isString()) {
+      return node.get("type").asString("");
     }
     return null;
   }

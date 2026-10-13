@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -26,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagno
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -48,13 +49,14 @@ import java.util.TreeMap;
  */
 final class AnthropicStreamAccumulator {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private static final Set<String> KNOWN_SSE_EVENTS =
       Set.of(
@@ -137,8 +139,8 @@ final class AnthropicStreamAccumulator {
           ProviderErrorKind.INVALID_RESPONSE, "SSE event data is not a JSON object");
     }
     if (!node.has("type")
-        || !node.get("type").isTextual()
-        || !eventName.equals(node.get("type").textValue())) {
+        || !node.get("type").isString()
+        || !eventName.equals(node.get("type").stringValue())) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "mismatched SSE event type");
     }
 
@@ -400,10 +402,10 @@ final class AnthropicStreamAccumulator {
     }
 
     if (messageNode.has("id")) {
-      if (!messageNode.get("id").isTextual() || messageNode.get("id").textValue().isBlank()) {
+      if (!messageNode.get("id").isString() || messageNode.get("id").stringValue().isBlank()) {
         throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "invalid message id");
       }
-      this.messageId = messageNode.get("id").textValue();
+      this.messageId = messageNode.get("id").stringValue();
     }
 
     if (messageNode.has("usage")) {
@@ -427,11 +429,11 @@ final class AnthropicStreamAccumulator {
               ProviderErrorKind.INVALID_RESPONSE, "cache_miss_reason must be an object");
         }
         JsonNode typeNode = missNode.get("type");
-        if (typeNode == null || !typeNode.isTextual()) {
+        if (typeNode == null || !typeNode.isString()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "cache_miss_reason type must be a string");
         }
-        String type = typeNode.textValue();
+        String type = typeNode.stringValue();
         if (ALLOWED_CACHE_MISS_REASONS.contains(type)) {
           this.cacheMissReasonType = type;
           if (missNode.has("cache_missed_input_tokens")) {
@@ -454,7 +456,7 @@ final class AnthropicStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "invalid content_block_start index");
     }
-    int index = indexNode.asInt();
+    int index = indexNode.asInt(0);
     if (index < 0 || (lastBlockIndex != null && index <= lastBlockIndex)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
@@ -467,11 +469,11 @@ final class AnthropicStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "content_block_start missing content_block object");
     }
-    if (!blockNode.has("type") || !blockNode.get("type").isTextual()) {
+    if (!blockNode.has("type") || !blockNode.get("type").isString()) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "content_block missing type");
     }
 
-    String type = blockNode.get("type").textValue();
+    String type = blockNode.get("type").stringValue();
     // start 对象是所有 block 的 replay 基座：终态只覆盖 normalized 字段，官方附加字段原样保留
     WireBlockAccumulator accumulator =
         new WireBlockAccumulator(type, (ObjectNode) blockNode.deepCopy());
@@ -479,11 +481,11 @@ final class AnthropicStreamAccumulator {
     switch (type) {
       case "text" -> {
         if (blockNode.has("text")) {
-          if (!blockNode.get("text").isTextual()) {
+          if (!blockNode.get("text").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "text content_block text must be string");
           }
-          String text = blockNode.get("text").textValue();
+          String text = blockNode.get("text").stringValue();
           if (!text.isEmpty()) {
             accumulator.textBuffer.append(text);
             bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
@@ -496,45 +498,45 @@ final class AnthropicStreamAccumulator {
       }
       case "thinking" -> {
         if (blockNode.has("thinking")) {
-          if (!blockNode.get("thinking").isTextual()) {
+          if (!blockNode.get("thinking").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE,
                 "thinking content_block thinking must be string");
           }
-          String thinking = blockNode.get("thinking").textValue();
+          String thinking = blockNode.get("thinking").stringValue();
           if (!thinking.isEmpty()) {
             accumulator.thinkingBuffer.append(thinking);
             bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(thinking));
           }
         }
         if (blockNode.has("signature")) {
-          if (!blockNode.get("signature").isTextual()) {
+          if (!blockNode.get("signature").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "thinking signature must be string");
           }
-          accumulator.signature = blockNode.get("signature").textValue();
+          accumulator.signature = blockNode.get("signature").stringValue();
         }
       }
       case "redacted_thinking" -> {
         if (blockNode.has("data")) {
-          if (!blockNode.get("data").isTextual()) {
+          if (!blockNode.get("data").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "redacted_thinking data must be string");
           }
-          accumulator.redactedData = blockNode.get("data").textValue();
+          accumulator.redactedData = blockNode.get("data").stringValue();
         }
       }
       case "tool_use" -> {
         if (!blockNode.has("id")
-            || !blockNode.get("id").isTextual()
+            || !blockNode.get("id").isString()
             || !blockNode.has("name")
-            || !blockNode.get("name").isTextual()) {
+            || !blockNode.get("name").isString()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE,
               "tool_use content_block missing valid id or name");
         }
-        accumulator.toolId = blockNode.get("id").textValue();
-        accumulator.toolName = blockNode.get("name").textValue();
+        accumulator.toolId = blockNode.get("id").stringValue();
+        accumulator.toolName = blockNode.get("name").stringValue();
         if (accumulator.toolId.isBlank() || accumulator.toolName.isBlank()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE,
@@ -581,7 +583,7 @@ final class AnthropicStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "invalid content_block_delta index");
     }
-    int index = indexNode.asInt();
+    int index = indexNode.asInt(0);
     WireBlockAccumulator block = blocksByIndex.get(index);
     if (block == null || block.state != BlockLifecycle.ACTIVE) {
       throw new ProviderException(
@@ -593,20 +595,20 @@ final class AnthropicStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "content_block_delta missing delta object");
     }
-    if (!deltaNode.has("type") || !deltaNode.get("type").isTextual()) {
+    if (!deltaNode.has("type") || !deltaNode.get("type").isString()) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "delta object missing type");
     }
 
-    String deltaType = deltaNode.get("type").textValue();
+    String deltaType = deltaNode.get("type").stringValue();
     switch (block.type) {
       case "text" -> {
         switch (deltaType) {
           case "text_delta" -> {
-            if (!deltaNode.has("text") || !deltaNode.get("text").isTextual()) {
+            if (!deltaNode.has("text") || !deltaNode.get("text").isString()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_RESPONSE, "text_delta text must be string");
             }
-            String text = deltaNode.get("text").textValue();
+            String text = deltaNode.get("text").stringValue();
             if (!text.isEmpty()) {
               block.textBuffer.append(text);
               bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
@@ -629,21 +631,21 @@ final class AnthropicStreamAccumulator {
       }
       case "thinking" -> {
         if ("thinking_delta".equals(deltaType)) {
-          if (!deltaNode.has("thinking") || !deltaNode.get("thinking").isTextual()) {
+          if (!deltaNode.has("thinking") || !deltaNode.get("thinking").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "thinking_delta thinking must be string");
           }
-          String thinking = deltaNode.get("thinking").textValue();
+          String thinking = deltaNode.get("thinking").stringValue();
           if (!thinking.isEmpty()) {
             block.thinkingBuffer.append(thinking);
             bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(thinking));
           }
         } else if ("signature_delta".equals(deltaType)) {
-          if (!deltaNode.has("signature") || !deltaNode.get("signature").isTextual()) {
+          if (!deltaNode.has("signature") || !deltaNode.get("signature").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "signature_delta signature must be string");
           }
-          String sig = deltaNode.get("signature").textValue();
+          String sig = deltaNode.get("signature").stringValue();
           if (block.signature == null) {
             block.signature = sig;
           } else {
@@ -711,10 +713,10 @@ final class AnthropicStreamAccumulator {
   }
 
   private static String requirePartialJson(JsonNode deltaNode, String errorMessage) {
-    if (!deltaNode.has("partial_json") || !deltaNode.get("partial_json").isTextual()) {
+    if (!deltaNode.has("partial_json") || !deltaNode.get("partial_json").isString()) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, errorMessage);
     }
-    return deltaNode.get("partial_json").textValue();
+    return deltaNode.get("partial_json").stringValue();
   }
 
   /** citation 集合只校验容器与元素形状，官方未来新增的 citation 字段一律无损保留。 */
@@ -744,7 +746,7 @@ final class AnthropicStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "invalid content_block_stop index");
     }
-    int index = indexNode.asInt();
+    int index = indexNode.asInt(0);
     WireBlockAccumulator block = blocksByIndex.get(index);
     if (block == null || block.state != BlockLifecycle.ACTIVE) {
       throw new ProviderException(
@@ -771,11 +773,11 @@ final class AnthropicStreamAccumulator {
           ProviderErrorKind.INVALID_RESPONSE, "message_delta missing delta object");
     }
     if (deltaNode.has("stop_reason") && !deltaNode.get("stop_reason").isNull()) {
-      if (!deltaNode.get("stop_reason").isTextual()) {
+      if (!deltaNode.get("stop_reason").isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE, "stop_reason must be string");
       }
-      String reasonStr = deltaNode.get("stop_reason").textValue();
+      String reasonStr = deltaNode.get("stop_reason").stringValue();
       this.stopReason = mapStopReason(reasonStr);
     }
     if (root.has("usage")) {
@@ -808,9 +810,7 @@ final class AnthropicStreamAccumulator {
 
   private void applyUsageSnapshot(JsonNode usageNode) {
     // 原始快照按顶层字段合并：官方未知字段（如 server_tool_use）原样保留，绝不被 normalized 解析丢弃
-    Iterator<Map.Entry<String, JsonNode>> rawFields = usageNode.fields();
-    while (rawFields.hasNext()) {
-      Map.Entry<String, JsonNode> field = rawFields.next();
+    for (Map.Entry<String, JsonNode> field : usageNode.properties()) {
       rawUsage.set(field.getKey(), field.getValue().deepCopy());
     }
 
@@ -831,11 +831,11 @@ final class AnthropicStreamAccumulator {
     }
     if (usageNode.has("service_tier") && !usageNode.get("service_tier").isNull()) {
       JsonNode tierNode = usageNode.get("service_tier");
-      if (!tierNode.isTextual() || tierNode.textValue().isBlank()) {
+      if (!tierNode.isString() || tierNode.stringValue().isBlank()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE, "usage service_tier must be a non-blank string");
       }
-      this.serviceTier = tierNode.textValue();
+      this.serviceTier = tierNode.stringValue();
     }
     extractAndValidateCacheCreationBreakdown(usageNode);
   }
@@ -927,7 +927,7 @@ final class AnthropicStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "usage " + fieldName + " must be an integer");
     }
-    long val = node.asLong();
+    long val = node.asLong(0L);
     if (val < 0) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "usage " + fieldName + " must not be negative");
@@ -954,7 +954,7 @@ final class AnthropicStreamAccumulator {
   private static JsonNode parseJson(String text) {
     try {
       return OBJECT_MAPPER.readTree(text);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "failed to parse SSE event JSON payload");
     }
@@ -967,7 +967,7 @@ final class AnthropicStreamAccumulator {
     try {
       JsonNode node = OBJECT_MAPPER.readTree(text);
       return node.isObject() ? node : null;
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       return null;
     }
   }
