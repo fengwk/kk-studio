@@ -5,13 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
@@ -68,7 +69,7 @@ import java.util.stream.Stream;
 class ProviderUserProjectedMediaWireTest {
 
   private static final String TOOL_CALL_ID = "call-read-1";
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final byte[] MEDIA_BYTES = new byte[] {0, 1, 2};
   private static final String MEDIA_BASE64 = Base64.getEncoder().encodeToString(MEDIA_BYTES);
   private static final Set<ModelInputModality> ALL_MODALITIES =
@@ -176,18 +177,18 @@ class ProviderUserProjectedMediaWireTest {
     JsonNode part = messages.get(mediaIndex).get("content").get(1);
     switch (modality) {
       case IMAGE -> {
-        assertEquals("image_url", part.get("type").asText());
-        assertEquals(dataUri, part.get("image_url").get("url").asText());
+        assertEquals("image_url", part.get("type").asString(""));
+        assertEquals(dataUri, part.get("image_url").get("url").asString(""));
       }
       case AUDIO -> {
-        assertEquals("input_audio", part.get("type").asText());
-        assertEquals(MEDIA_BASE64, part.get("input_audio").get("data").asText());
-        assertEquals("wav", part.get("input_audio").get("format").asText());
+        assertEquals("input_audio", part.get("type").asString(""));
+        assertEquals(MEDIA_BASE64, part.get("input_audio").get("data").asString(""));
+        assertEquals("wav", part.get("input_audio").get("format").asString(""));
       }
       case DOCUMENT -> {
-        assertEquals("file", part.get("type").asText());
-        assertEquals(dataUri, part.get("file").get("file_data").asText());
-        assertEquals("pdf_file", part.get("file").get("filename").asText());
+        assertEquals("file", part.get("type").asString(""));
+        assertEquals(dataUri, part.get("file").get("file_data").asString(""));
+        assertEquals("pdf_file", part.get("file").get("filename").asString(""));
       }
       default -> throw new IllegalStateException("unexpected projected modality " + modality);
     }
@@ -207,8 +208,8 @@ class ProviderUserProjectedMediaWireTest {
         "tool functionResponse must not carry media bytes");
 
     JsonNode inlineData = parts.get(inlineIndex).get("inlineData");
-    assertEquals(mediaType, inlineData.get("mimeType").asText());
-    assertEquals(MEDIA_BASE64, inlineData.get("data").asText());
+    assertEquals(mediaType, inlineData.get("mimeType").asString(""));
+    assertEquals(MEDIA_BASE64, inlineData.get("data").asString(""));
   }
 
   /** 平台物化器在 USER 位置投影工具结果媒体时产生的消息形态。 */
@@ -284,7 +285,7 @@ class ProviderUserProjectedMediaWireTest {
 
   private static int indexOfMessageWithRole(JsonNode messages, String role) {
     for (int i = 0; i < messages.size(); i++) {
-      if (role.equals(messages.get(i).path("role").asText())) {
+      if (role.equals(messages.get(i).path("role").asString(""))) {
         return i;
       }
     }

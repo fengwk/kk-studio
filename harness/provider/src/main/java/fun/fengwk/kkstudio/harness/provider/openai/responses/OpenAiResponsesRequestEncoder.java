@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
@@ -37,7 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -60,13 +62,13 @@ import java.util.Set;
  */
 final class OpenAiResponsesRequestEncoder {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   /** OpenAI Responses 拒绝低于 16 的 max_output_tokens；该下限只属于本 Provider。 */
   private static final int OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
@@ -139,7 +141,7 @@ final class OpenAiResponsesRequestEncoder {
     byte[] utf8Bytes;
     try {
       utf8Bytes = OBJECT_MAPPER.writeValueAsBytes(root);
-    } catch (JsonProcessingException e) {
+    } catch (JacksonException e) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize OpenAI Responses request JSON");
     }
@@ -285,7 +287,7 @@ final class OpenAiResponsesRequestEncoder {
     ArrayNode include =
         root.has("include") ? (ArrayNode) root.get("include") : root.putArray("include");
     for (JsonNode item : include) {
-      if (item.isTextual() && entry.equals(item.textValue())) {
+      if (item.isString() && entry.equals(item.stringValue())) {
         return;
       }
     }
@@ -306,12 +308,12 @@ final class OpenAiResponsesRequestEncoder {
     for (int i = 0; i < tools.size(); i++) {
       JsonNode tool = tools.get(i);
       JsonNode type = tool.path("type");
-      String kind = type.isTextual() ? type.textValue() : "";
+      String kind = type.isString() ? type.stringValue() : "";
       if (!tool.isObject()
           || !HOSTED_TOOL_TYPES.contains(kind)
           || ("mcp".equals(kind)
-              && (!tool.path("require_approval").isTextual()
-                  || !"never".equals(tool.path("require_approval").textValue())))) {
+              && (!tool.path("require_approval").isString()
+                  || !"never".equals(tool.path("require_approval").stringValue())))) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "protocolOptions tools["
@@ -319,14 +321,14 @@ final class OpenAiResponsesRequestEncoder {
                 + "] must be a supported hosted tool; bind client tools through runtime ProviderToolDefinition");
       }
       JsonNode name = tool.get("name");
-      if (name != null && name.isTextual() && !names.add(name.textValue())) {
+      if (name != null && name.isString() && !names.add(name.stringValue())) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "protocolOptions tools[" + i + "] duplicates a tool name");
       }
-      if (name != null && name.isTextual() && runtimeTools != null) {
+      if (name != null && name.isString() && runtimeTools != null) {
         for (JsonNode runtimeTool : runtimeTools) {
-          if (name.textValue().equals(runtimeTool.path("name").asText())) {
+          if (name.stringValue().equals(runtimeTool.path("name").asString(""))) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "protocolOptions tools[" + i + "] name conflicts with runtime tool");
@@ -363,7 +365,7 @@ final class OpenAiResponsesRequestEncoder {
     JsonNode schemaNode;
     try {
       schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
     }
@@ -547,7 +549,7 @@ final class OpenAiResponsesRequestEncoder {
     }
     StringBuilder replayThinking = new StringBuilder();
     for (JsonNode item : outputArray) {
-      if ("reasoning".equals(item.path("type").asText())) {
+      if ("reasoning".equals(item.path("type").asString(""))) {
         replayThinking.append(
             OpenAiResponsesReasoningText.read(item, ProviderErrorKind.INVALID_REQUEST));
       }
@@ -683,30 +685,30 @@ final class OpenAiResponsesRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: must be a JSON object");
       }
       if (!item.has("type")
-          || !item.get("type").isTextual()
-          || item.get("type").textValue().isBlank()) {
+          || !item.get("type").isString()
+          || item.get("type").stringValue().isBlank()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: missing string type");
       }
-      String type = item.get("type").textValue();
+      String type = item.get("type").stringValue();
       switch (type) {
         case "message" -> {
           if (!item.has("role")
-              || !item.get("role").isTextual()
-              || !"assistant".equals(item.get("role").textValue())) {
+              || !item.get("role").isString()
+              || !"assistant".equals(item.get("role").stringValue())) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "replay message item must have role='assistant'");
           }
           // id/status/phase 与任何额外成员都是原生事实，原样保留
           if (item.has("id")) {
-            if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
+            if (!item.get("id").isString() || item.get("id").stringValue().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST, "replay message id must be non-blank string");
             }
           }
           if (item.has("phase")) {
-            if (!item.get("phase").isTextual() || item.get("phase").textValue().isBlank()) {
+            if (!item.get("phase").isString() || item.get("phase").stringValue().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
                   "replay message phase must be non-blank string");
@@ -723,28 +725,28 @@ final class OpenAiResponsesRequestEncoder {
                   ProviderErrorKind.INVALID_REQUEST,
                   "replay message content block must be an object");
             }
-            if (!block.has("type") || !block.get("type").isTextual()) {
+            if (!block.has("type") || !block.get("type").isString()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
                   "replay message content block must have string type");
             }
-            switch (block.get("type").textValue()) {
+            switch (block.get("type").stringValue()) {
               case "output_text" -> {
-                if (!block.has("text") || !block.get("text").isTextual()) {
+                if (!block.has("text") || !block.get("text").isString()) {
                   throw new ProviderException(
                       ProviderErrorKind.INVALID_REQUEST,
                       "replay output_text block must have string text");
                 }
                 // annotations/logprobs 与任何额外成员都是原生事实，原样保留
-                replayText.append(block.get("text").textValue());
+                replayText.append(block.get("text").stringValue());
               }
               case "refusal" -> {
-                if (!block.has("refusal") || !block.get("refusal").isTextual()) {
+                if (!block.has("refusal") || !block.get("refusal").isString()) {
                   throw new ProviderException(
                       ProviderErrorKind.INVALID_REQUEST,
                       "replay refusal block must have string refusal");
                 }
-                replayText.append(block.get("refusal").textValue());
+                replayText.append(block.get("refusal").stringValue());
               }
               default -> throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
@@ -754,7 +756,7 @@ final class OpenAiResponsesRequestEncoder {
         }
         case "reasoning" -> {
           if (item.has("id")) {
-            if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
+            if (!item.get("id").isString() || item.get("id").stringValue().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
                   "replay reasoning id must be non-blank string");
@@ -763,7 +765,7 @@ final class OpenAiResponsesRequestEncoder {
           boolean itemHasEncrypted = false;
           if (item.has("encrypted_content")) {
             JsonNode encNode = item.get("encrypted_content");
-            if (!encNode.isTextual() || encNode.textValue().isBlank()) {
+            if (!encNode.isString() || encNode.stringValue().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
                   "replay reasoning encrypted_content must be non-blank string");
@@ -784,19 +786,19 @@ final class OpenAiResponsesRequestEncoder {
                     "replay reasoning summary block must be an object");
               }
               if (!s.has("type")
-                  || !s.get("type").isTextual()
-                  || !"summary_text".equals(s.get("type").textValue())) {
+                  || !s.get("type").isString()
+                  || !"summary_text".equals(s.get("type").stringValue())) {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_REQUEST,
                     "replay reasoning summary block type must be 'summary_text'");
               }
-              if (!s.has("text") || !s.get("text").isTextual()) {
+              if (!s.has("text") || !s.get("text").isString()) {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_REQUEST,
                     "replay reasoning summary block must have string text");
               }
               // opaque summary 块（除 type/text 外还有成员）仍按原生事实原样保留
-              String summaryText = s.get("text").textValue();
+              String summaryText = s.get("text").stringValue();
               if (!summaryText.isBlank()) {
                 itemHasUsableSummary = true;
               }
@@ -819,20 +821,20 @@ final class OpenAiResponsesRequestEncoder {
         case "function_call" -> {
           String callId = null;
           if (item.has("call_id")) {
-            if (!item.get("call_id").isTextual() || item.get("call_id").textValue().isBlank()) {
+            if (!item.get("call_id").isString() || item.get("call_id").stringValue().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
                   "function_call call_id must be non-blank string");
             }
-            callId = item.get("call_id").textValue();
+            callId = item.get("call_id").stringValue();
           }
           if (item.has("id")) {
-            if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
+            if (!item.get("id").isString() || item.get("id").stringValue().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST, "function_call id must be non-blank string");
             }
             if (callId == null) {
-              callId = item.get("id").textValue();
+              callId = item.get("id").stringValue();
             }
           }
           if (callId == null || callId.isBlank()) {
@@ -840,17 +842,17 @@ final class OpenAiResponsesRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST, "function_call missing call_id or id");
           }
           if (!item.has("name")
-              || !item.get("name").isTextual()
-              || item.get("name").textValue().isBlank()) {
+              || !item.get("name").isString()
+              || item.get("name").stringValue().isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "function_call missing non-blank string name");
           }
-          String name = item.get("name").textValue();
-          if (!item.has("arguments") || !item.get("arguments").isTextual()) {
+          String name = item.get("name").stringValue();
+          if (!item.has("arguments") || !item.get("arguments").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "function_call missing string arguments");
           }
-          String args = item.get("arguments").textValue();
+          String args = item.get("arguments").stringValue();
           parseJsonObject(args, "function_call arguments must be a JSON object");
           replayToolCalls.add(new ProviderToolCall(callId, name, args));
         }
@@ -929,9 +931,8 @@ final class OpenAiResponsesRequestEncoder {
 
   /** 节点是否携带给定白名单之外的成员：reasoning 额外成员都是 durable 语义无法表达的原生事实。 */
   private static boolean hasFieldOutside(JsonNode node, Set<String> allowedFields) {
-    Iterator<String> fields = node.fieldNames();
-    while (fields.hasNext()) {
-      if (!allowedFields.contains(fields.next())) {
+    for (String field : node.propertyNames()) {
+      if (!allowedFields.contains(field)) {
         return true;
       }
     }
@@ -940,9 +941,7 @@ final class OpenAiResponsesRequestEncoder {
 
   private static void validateAllowedFields(
       JsonNode node, Set<String> allowedFields, String context) {
-    Iterator<String> fields = node.fieldNames();
-    while (fields.hasNext()) {
-      String field = fields.next();
+    for (String field : node.propertyNames()) {
       if (!allowedFields.contains(field)) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "disallowed field '" + field + "' in " + context);

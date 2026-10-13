@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.tool.service;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
@@ -18,8 +17,8 @@ public class HarnessToolConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public ToolSettingsCodec toolSettingsCodec(ObjectMapper objectMapper) {
-    return new ToolSettingsCodec(objectMapper);
+  public ToolSettingsCodec toolSettingsCodec() {
+    return new ToolSettingsCodec();
   }
 
   @Bean
@@ -36,8 +35,7 @@ public class HarnessToolConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public PermissionEvaluator permissionEvaluator(
-      ObjectMapper objectMapper, BashSurfaceAnalyzer bashSurfaceAnalyzer) {
-    return new PermissionEvaluator(objectMapper, bashSurfaceAnalyzer);
+  public PermissionEvaluator permissionEvaluator(BashSurfaceAnalyzer bashSurfaceAnalyzer) {
+    return new PermissionEvaluator(bashSurfaceAnalyzer);
   }
 }

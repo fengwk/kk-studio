@@ -5,11 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -46,7 +47,7 @@ import java.util.UUID;
  */
 class OpenAiResponsesOpaqueItemReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
   private static final String INSTRUCTION = "Test system instruction.";
 
@@ -237,7 +238,7 @@ class OpenAiResponsesOpaqueItemReplayTest {
                       List.of(
                           new ProviderTextBlock("hi"),
                           new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}")))));
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind(), item.path("type").asText());
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind(), item.path("type").asString(""));
     }
   }
 
@@ -281,8 +282,8 @@ class OpenAiResponsesOpaqueItemReplayTest {
                 List.of(new ProviderTextBlock("hi")))
             .get("input");
     assertEquals(1, nativeInput.size());
-    assertEquals("assistant", nativeInput.get(0).path("role").asText());
-    assertEquals("hi", nativeInput.get(0).path("content").get(0).path("text").asText());
+    assertEquals("assistant", nativeInput.get(0).path("role").asString(""));
+    assertEquals("hi", nativeInput.get(0).path("content").get(0).path("text").asString(""));
     assertFalse(nativeInput.toString().contains("web_search_call"));
 
     // 2. 只含最小 message item 的 payload：affinity 失配同样回退语义编码
@@ -298,7 +299,7 @@ class OpenAiResponsesOpaqueItemReplayTest {
                     List.of(new ProviderTextBlock("hi")))
                 .get("input");
     assertEquals(1, input.size());
-    assertEquals("assistant", input.get(0).path("role").asText());
+    assertEquals("assistant", input.get(0).path("role").asString(""));
     assertFalse(input.toString().contains("web_search_call"));
   }
 
@@ -326,11 +327,11 @@ class OpenAiResponsesOpaqueItemReplayTest {
 
     ArrayNode input = (ArrayNode) root.get("input");
     assertEquals(3, input.size());
-    assertEquals("reasoning", input.get(0).path("type").asText());
-    assertEquals("enc_blob", input.get(0).path("encrypted_content").asText());
+    assertEquals("reasoning", input.get(0).path("type").asString(""));
+    assertEquals("enc_blob", input.get(0).path("encrypted_content").asString(""));
     assertEquals(output.get(1), input.get(1));
-    assertEquals("function_call", input.get(2).path("type").asText());
-    assertEquals("c1", input.get(2).path("call_id").asText());
+    assertEquals("function_call", input.get(2).path("type").asString(""));
+    assertEquals("c1", input.get(2).path("call_id").asString(""));
   }
 
   /** 测试意图：未知 item 在 replay 中的相对顺序与冻结事实一致。 */
@@ -348,11 +349,11 @@ class OpenAiResponsesOpaqueItemReplayTest {
         encodeWithReplay(replayState(payloadWith(output)), List.of(new ProviderTextBlock("hi")));
 
     ArrayNode input = (ArrayNode) root.get("input");
-    assertEquals("web_search_call", input.get(0).path("type").asText());
-    assertEquals("message", input.get(1).path("type").asText());
-    assertEquals("image_generation_call", input.get(2).path("type").asText());
-    assertTrue(input.get(0).path("id").asText().equals("first"));
-    assertTrue(input.get(2).path("id").asText().equals("last"));
+    assertEquals("web_search_call", input.get(0).path("type").asString(""));
+    assertEquals("message", input.get(1).path("type").asString(""));
+    assertEquals("image_generation_call", input.get(2).path("type").asString(""));
+    assertTrue(input.get(0).path("id").asString("").equals("first"));
+    assertTrue(input.get(2).path("id").asString("").equals("last"));
   }
 
   /**
@@ -378,8 +379,8 @@ class OpenAiResponsesOpaqueItemReplayTest {
                 List.of(new ProviderTextBlock("sunny")))
             .get("input");
     assertEquals(1, messageInput.size());
-    assertEquals("message", messageInput.get(0).path("type").asText());
-    assertEquals("sunny", messageInput.get(0).path("content").get(0).path("text").asText());
+    assertEquals("message", messageInput.get(0).path("type").asString(""));
+    assertEquals("sunny", messageInput.get(0).path("content").get(0).path("text").asString(""));
     assertFalse(messageInput.toString().contains("annotations"));
 
     // 2. reasoning 携带密文：affinity 失配回退语义编码，思考由 durable 承载，密文不重建
@@ -401,11 +402,11 @@ class OpenAiResponsesOpaqueItemReplayTest {
                     new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("sunny")))
             .get("input");
     assertEquals(2, reasoningInput.size());
-    assertEquals("reasoning", reasoningInput.get(0).path("type").asText());
+    assertEquals("reasoning", reasoningInput.get(0).path("type").asString(""));
     assertEquals(
-        "durable thought", reasoningInput.get(0).path("summary").get(0).path("text").asText());
+        "durable thought", reasoningInput.get(0).path("summary").get(0).path("text").asString(""));
     assertFalse(reasoningInput.get(0).has("encrypted_content"));
-    assertEquals("sunny", reasoningInput.get(1).path("content").get(0).path("text").asText());
+    assertEquals("sunny", reasoningInput.get(1).path("content").get(0).path("text").asString(""));
 
     // 3. function_call 携带 status 与未来成员：affinity 失配回退语义编码
     ArrayNode extendedCallOutput = MAPPER.createArrayNode();
@@ -419,8 +420,8 @@ class OpenAiResponsesOpaqueItemReplayTest {
                 List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))))
             .get("input");
     assertEquals(1, callInput.size());
-    assertEquals("function_call", callInput.get(0).path("type").asText());
-    assertEquals("c1", callInput.get(0).path("call_id").asText());
+    assertEquals("function_call", callInput.get(0).path("type").asString(""));
+    assertEquals("c1", callInput.get(0).path("call_id").asString(""));
     assertFalse(callInput.get(0).has("future_member"));
 
     // 4. reasoning 只有 id/status/summary：affinity 失配回退语义编码，思考不丢失
@@ -440,10 +441,10 @@ class OpenAiResponsesOpaqueItemReplayTest {
                     new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("sunny")))
             .get("input");
     assertEquals(2, summaryInput.size());
-    assertEquals("reasoning", summaryInput.get(0).path("type").asText());
+    assertEquals("reasoning", summaryInput.get(0).path("type").asString(""));
     assertEquals(
-        "durable thought", summaryInput.get(0).path("summary").get(0).path("text").asText());
-    assertEquals("sunny", summaryInput.get(1).path("content").get(0).path("text").asText());
+        "durable thought", summaryInput.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals("sunny", summaryInput.get(1).path("content").get(0).path("text").asString(""));
 
     // 5. 空 reasoning 占位符 + hosted item 混排：占位符不承载原生推理，decline 原位回放而回退语义编码；回退省略 hosted
     //    native 事实，但绝不拒绝整个请求。
@@ -462,8 +463,8 @@ class OpenAiResponsesOpaqueItemReplayTest {
                 List.of(new ProviderTextBlock("sunny")))
             .get("input");
     assertEquals(1, placeholderInput.size());
-    assertEquals("message", placeholderInput.get(0).path("type").asText());
-    assertEquals("sunny", placeholderInput.get(0).path("content").get(0).path("text").asText());
+    assertEquals("message", placeholderInput.get(0).path("type").asString(""));
+    assertEquals("sunny", placeholderInput.get(0).path("content").get(0).path("text").asString(""));
     assertFalse(placeholderInput.toString().contains("web_search_call"));
   }
 }

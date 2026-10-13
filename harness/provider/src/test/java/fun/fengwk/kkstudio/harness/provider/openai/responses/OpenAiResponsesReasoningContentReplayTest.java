@@ -5,15 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
@@ -48,7 +49,7 @@ import java.util.stream.Stream;
 /** 合成 reasoning.content 历史的生产、持久化、投影与严格回放回归。 */
 class OpenAiResponsesReasoningContentReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String THINKING = "0123456789".repeat(5);
   private static final String TEXT = "Synthetic answer.";
   private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -126,7 +127,7 @@ class OpenAiResponsesReasoningContentReplayTest {
         new OpenAiResponsesStreamAccumulator(request(SOURCE, MODEL, List.of()), SOURCE, e -> {});
     JsonNode events = fixture();
     for (JsonNode event : events) {
-      accumulator.handleEvent(event.path("type").asText(), event.toString());
+      accumulator.handleEvent(event.path("type").asString(""), event.toString());
     }
     assertEquals(50, accumulator.response().thinking().length());
     assertEquals(THINKING, accumulator.response().thinking());
@@ -181,8 +182,8 @@ class OpenAiResponsesReasoningContentReplayTest {
 
   private static void assertSemantic(JsonNode input) {
     assertEquals(2, input.size());
-    assertEquals(THINKING, input.get(0).path("summary").get(0).path("text").asText());
-    assertEquals(TEXT, input.get(1).path("content").get(0).path("text").asText());
+    assertEquals(THINKING, input.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals(TEXT, input.get(1).path("content").get(0).path("text").asString(""));
     for (JsonNode item : input) {
       assertFalse(item.has("id"));
       assertFalse(item.has("encrypted_content"));

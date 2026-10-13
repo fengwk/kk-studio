@@ -6,12 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -40,7 +41,7 @@ import java.util.stream.Stream;
 /** 验证 native protocolOptions 合并语义：非所有权官方顶层字段无损透传、所有权字段冲突显式失败、tools 与 output_config 按官方语义合并。 */
 class AnthropicProtocolOptionsTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String SYSTEM_INSTRUCTION = "Test system instruction.";
 
   /** 除 runtime 所有权字段外的官方顶层选项集合；{@code thinking}/{@code output_config} 在 effort 未声明时也必须原样保留。 */
@@ -87,26 +88,28 @@ class AnthropicProtocolOptionsTest {
     JsonNode root = wire(encoder.encode(request, descriptor));
 
     // 非所有权官方顶层字段逐个原样进入 wire
-    assertEquals(0.7, root.path("temperature").asDouble(), 1e-9);
-    assertEquals(0.9, root.path("top_p").asDouble(), 1e-9);
-    assertEquals(4, root.path("top_k").asInt());
-    assertEquals("STOP", root.path("stop_sequences").get(0).asText());
-    assertEquals("user-1", root.path("metadata").path("user_id").asText());
-    assertEquals("standard_only", root.path("service_tier").asText());
-    assertEquals("auto", root.path("tool_choice").path("type").asText());
-    assertEquals("https://mcp.example.com", root.path("mcp_servers").get(0).path("url").asText());
-    assertEquals("container-1", root.path("container").asText());
+    assertEquals(0.7, root.path("temperature").asDouble(0.0), 1e-9);
+    assertEquals(0.9, root.path("top_p").asDouble(0.0), 1e-9);
+    assertEquals(4, root.path("top_k").asInt(0));
+    assertEquals("STOP", root.path("stop_sequences").get(0).asString(""));
+    assertEquals("user-1", root.path("metadata").path("user_id").asString(""));
+    assertEquals("standard_only", root.path("service_tier").asString(""));
+    assertEquals("auto", root.path("tool_choice").path("type").asString(""));
+    assertEquals(
+        "https://mcp.example.com", root.path("mcp_servers").get(0).path("url").asString(""));
+    assertEquals("container-1", root.path("container").asString(""));
 
     // effort 未声明：native thinking 与 output_config（含 effort）都不得被 runtime 改写
-    assertEquals("enabled", root.path("thinking").path("type").asText());
-    assertEquals(2048, root.path("thinking").path("budget_tokens").asInt());
-    assertEquals("low", root.path("output_config").path("effort").asText());
-    assertEquals("json_schema", root.path("output_config").path("format").path("type").asText());
+    assertEquals("enabled", root.path("thinking").path("type").asString(""));
+    assertEquals(2048, root.path("thinking").path("budget_tokens").asInt(0));
+    assertEquals("low", root.path("output_config").path("effort").asString(""));
+    assertEquals(
+        "json_schema", root.path("output_config").path("format").path("type").asString(""));
 
     // runtime 事实仍由 runtime 写入
-    assertEquals("claude-3-5-sonnet", root.path("model").asText());
-    assertEquals(1024, root.path("max_tokens").asInt());
-    assertTrue(root.path("stream").asBoolean());
+    assertEquals("claude-3-5-sonnet", root.path("model").asString(""));
+    assertEquals(1024, root.path("max_tokens").asInt(0));
+    assertTrue(root.path("stream").asBoolean(false));
     assertFalse(root.has("tools"));
   }
 
@@ -131,11 +134,11 @@ class AnthropicProtocolOptionsTest {
 
     // native server tool 在前、runtime function tool 在后，native 条目逐字段保留
     assertEquals(2, tools.size());
-    assertEquals("web_search_20250305", tools.get(0).path("type").asText());
-    assertEquals("web_search", tools.get(0).path("name").asText());
-    assertEquals(3, tools.get(0).path("max_uses").asInt());
-    assertEquals("calc", tools.get(1).path("name").asText());
-    assertEquals("object", tools.get(1).path("input_schema").path("type").asText());
+    assertEquals("web_search_20250305", tools.get(0).path("type").asString(""));
+    assertEquals("web_search", tools.get(0).path("name").asString(""));
+    assertEquals(3, tools.get(0).path("max_uses").asInt(0));
+    assertEquals("calc", tools.get(1).path("name").asString(""));
+    assertEquals("object", tools.get(1).path("input_schema").path("type").asString(""));
 
     // 合并结果就是最终 wire 事实：与不含 native tools 的同一请求相比，native server tool 真实进入请求体
     ProviderRequest withoutNativeTools =
@@ -144,7 +147,7 @@ class AnthropicProtocolOptionsTest {
     JsonNode toolsWithoutNative =
         wire(encoder.encode(withoutNativeTools, descriptor)).path("tools");
     assertEquals(1, toolsWithoutNative.size());
-    assertEquals("calc", toolsWithoutNative.get(0).path("name").asText());
+    assertEquals("calc", toolsWithoutNative.get(0).path("name").asString(""));
     assertNotEquals(tools, toolsWithoutNative);
   }
 
@@ -163,7 +166,7 @@ class AnthropicProtocolOptionsTest {
     JsonNode tools = wire(encoder.encode(request, descriptor)).path("tools");
 
     assertEquals(1, tools.size());
-    assertEquals("web_search_20250305", tools.get(0).path("type").asText());
+    assertEquals("web_search_20250305", tools.get(0).path("type").asString(""));
   }
 
   /** 测试意图：native tools 不是 array 时显式失败，不做静默兼容。 */
@@ -233,7 +236,7 @@ class AnthropicProtocolOptionsTest {
     JsonNode tools = wire(encoder.encode(request, descriptor)).path("tools");
 
     // cache marker 必须落在最终合并结果的最后一个 tool（runtime 工具）上，native server tool 保持原样
-    assertEquals("ephemeral", tools.get(1).path("cache_control").path("type").asText());
+    assertEquals("ephemeral", tools.get(1).path("cache_control").path("type").asString(""));
     assertFalse(tools.get(0).has("cache_control"));
   }
 
@@ -252,11 +255,13 @@ class AnthropicProtocolOptionsTest {
 
     JsonNode root = wire(encoder.encode(request, descriptor));
 
-    assertEquals("adaptive", root.path("thinking").path("type").asText());
-    assertEquals("high", root.path("output_config").path("effort").asText());
-    assertEquals("json_schema", root.path("output_config").path("format").path("type").asText());
+    assertEquals("adaptive", root.path("thinking").path("type").asString(""));
+    assertEquals("high", root.path("output_config").path("effort").asString(""));
     assertEquals(
-        "object", root.path("output_config").path("format").path("schema").path("type").asText());
+        "json_schema", root.path("output_config").path("format").path("type").asString(""));
+    assertEquals(
+        "object",
+        root.path("output_config").path("format").path("schema").path("type").asString(""));
   }
 
   /** 测试意图：BUDGET 模式 runtime 不写 effort，native output_config 子字段保留且不得凭空生成 effort。 */
@@ -275,9 +280,10 @@ class AnthropicProtocolOptionsTest {
     JsonNode root = wire(budgetEncoder.encode(request, descriptor));
 
     // BUDGET 模式 runtime 不写 effort：native output_config 子字段原样保留且不得凭空出现 effort
-    assertEquals("enabled", root.path("thinking").path("type").asText());
-    assertEquals(8192, root.path("thinking").path("budget_tokens").asInt());
-    assertEquals("json_schema", root.path("output_config").path("format").path("type").asText());
+    assertEquals("enabled", root.path("thinking").path("type").asString(""));
+    assertEquals(8192, root.path("thinking").path("budget_tokens").asInt(0));
+    assertEquals(
+        "json_schema", root.path("output_config").path("format").path("type").asString(""));
     assertFalse(root.path("output_config").has("effort"));
   }
 

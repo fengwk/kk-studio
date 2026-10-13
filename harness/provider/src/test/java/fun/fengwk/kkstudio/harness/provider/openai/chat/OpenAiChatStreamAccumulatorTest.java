@@ -7,11 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -51,7 +52,7 @@ class OpenAiChatStreamAccumulatorTest {
   private static final String MSG_SEMANTIC_DELTA_AFTER_FINALIZE =
       "semantic delta received after finalized choice";
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private ProviderDescriptor descriptor;
   private ModelDescriptor modelDesc;
@@ -178,7 +179,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("hi", completion.response().text());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
     assertEquals(4L, completion.response().usage().totalTokens());
-    assertEquals("hi", completion.replayState().payload().path("content").asText());
+    assertEquals("hi", completion.replayState().payload().path("content").asString(""));
   }
 
   /**
@@ -206,7 +207,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(4L, completion.response().usage().totalTokens());
     assertEquals(1, recordedEvents.size());
     assertEquals("hi", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
-    assertEquals("hi", completion.replayState().payload().path("content").asText());
+    assertEquals("hi", completion.replayState().payload().path("content").asString(""));
   }
 
   /** 测试意图：tool_calls 终态后的冗余 finish_reason=tool_calls 幂等——不重复累积工具调用，也不重发 ToolCallDelta。 */
@@ -358,7 +359,7 @@ class OpenAiChatStreamAccumulatorTest {
     // 验证生成了合法的 ReplayState
     assertNotNull(completion.replayState());
     assertEquals(ProviderReplayFormat.OPENAI_CHAT, completion.replayState().format());
-    assertEquals("Hello world!", completion.replayState().payload().path("content").asText());
+    assertEquals("Hello world!", completion.replayState().payload().path("content").asString(""));
   }
 
   /** 验证 refusal 是正常完成的可见助手文本，并以原生字段进入 replay。 */
@@ -385,7 +386,8 @@ class OpenAiChatStreamAccumulatorTest {
     assertNotNull(completion.replayState());
     assertFalse(completion.replayState().payload().has("content"));
     assertEquals(
-        "I cannot help with that.", completion.replayState().payload().path("refusal").asText());
+        "I cannot help with that.",
+        completion.replayState().payload().path("refusal").asString(""));
   }
 
   @Test
@@ -453,7 +455,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertNotNull(completion.replayState());
     assertEquals(
         "Pondering problem...",
-        completion.replayState().payload().path("reasoning_content").asText());
+        completion.replayState().payload().path("reasoning_content").asString(""));
     assertEquals(2, completion.replayState().payload().path("reasoning_details").size());
   }
 
@@ -554,8 +556,8 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
     JsonNode nativeCalls = completion.replayState().payload().path("tool_calls");
     assertEquals(2, nativeCalls.size());
-    assertEquals("custom", nativeCalls.get(0).path("type").asText());
-    assertEquals("fn_1", nativeCalls.get(1).path("id").asText());
+    assertEquals("custom", nativeCalls.get(0).path("type").asString(""));
+    assertEquals("fn_1", nativeCalls.get(1).path("id").asString(""));
     assertFalse(nativeCalls.get(0).has("index"));
     assertFalse(nativeCalls.get(1).has("index"));
   }
@@ -587,7 +589,8 @@ class OpenAiChatStreamAccumulatorTest {
         recordedEvents);
     assertEquals("fn_1", completion.response().toolCalls().get(0).id());
     assertEquals(
-        "fn_1", completion.replayState().payload().path("tool_calls").get(0).path("id").asText());
+        "fn_1",
+        completion.replayState().payload().path("tool_calls").get(0).path("id").asString(""));
   }
 
   /** 测试意图：builder 建立后的 identity-only 片段只累积 id，不得因缺少 function 触发 NPE；明确 null 与标量 function 则是非法响应。 */
@@ -738,9 +741,9 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(
         List.of("a", "c", "b"),
         List.of(
-            nativeCalls.get(0).path("id").asText(),
-            nativeCalls.get(1).path("id").asText(),
-            nativeCalls.get(2).path("id").asText()));
+            nativeCalls.get(0).path("id").asString(""),
+            nativeCalls.get(1).path("id").asString(""),
+            nativeCalls.get(2).path("id").asString("")));
     for (JsonNode call : nativeCalls) {
       assertFalse(call.has("index"));
     }
@@ -882,7 +885,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(130L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
-    assertEquals(40L, rawUsage.path("prompt_tokens_details").path("cached_tokens").asLong());
+    assertEquals(40L, rawUsage.path("prompt_tokens_details").path("cached_tokens").asLong(0L));
   }
 
   @Test
@@ -918,8 +921,8 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(120L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
-    assertEquals(75L, rawUsage.path("prompt_cache_hit_tokens").asLong());
-    assertEquals(25L, rawUsage.path("prompt_cache_miss_tokens").asLong());
+    assertEquals(75L, rawUsage.path("prompt_cache_hit_tokens").asLong(0L));
+    assertEquals(25L, rawUsage.path("prompt_cache_miss_tokens").asLong(0L));
   }
 
   @Test
@@ -953,7 +956,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(95L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
-    assertEquals(30L, rawUsage.path("cached_tokens").asLong());
+    assertEquals(30L, rawUsage.path("cached_tokens").asLong(0L));
   }
 
   @Test

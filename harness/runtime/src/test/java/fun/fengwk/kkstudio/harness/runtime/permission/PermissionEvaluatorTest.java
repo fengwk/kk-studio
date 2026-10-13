@@ -10,6 +10,9 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -20,8 +23,7 @@ class PermissionEvaluatorTest {
   private static final String CUSTOM_EXEC = "custom_exec";
 
   private final ObjectMapper objectMapper = new ObjectMapper();
-  private final PermissionEvaluator evaluator =
-      new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer());
+  private final PermissionEvaluator evaluator = new PermissionEvaluator(new BashSurfaceAnalyzer());
 
   /** 最后命中规则生效，且 tool-specific 必须在全局规则之后应用。 */
   @Test
@@ -295,7 +297,7 @@ class PermissionEvaluatorTest {
   /** 规范的 ToolSettings 配置在 canonicalize 与 decode 时保持结构一致。 */
   @Test
   void canonicalizesAndDecodesToolSettings() throws Exception {
-    ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
+    ToolSettingsCodec codec = new ToolSettingsCodec();
     String canonical =
         codec.canonicalize(
             "{\"permission\":{\"write\":[{\"pattern\":\"*\",\"action\":\"ask\"}],"
@@ -316,6 +318,54 @@ class PermissionEvaluatorTest {
                 "{\"permission\":{\"*\":[{\"pattern\":\"*\",\"action\":\"ask\"}]}}"));
     assertEquals("*", global.path("permission").path("*").get(0).path("pattern").asText());
     assertEquals("ask", global.path("permission").path("*").get(0).path("action").asText());
+  }
+
+  /** 未知 Tool 设置里的自由数值按 BigDecimal 搬运：1e309/1e-324 与高精度小数既不变形也不被改成字符串。 */
+  @Test
+  void canonicalizePreservesUnknownSettingNumberPrecision() {
+    ToolSettingsCodec codec = new ToolSettingsCodec();
+    String canonical =
+        codec.canonicalize(
+            "{\"unknownToolSetting\":{\"big\":1e309,\"tiny\":1e-324,"
+                + "\"exact\":0.1234567890123456789012345678},"
+                + "\"permission\":{\"bash\":[{\"pattern\":\"*\",\"action\":\"ask\"}]}}");
+
+    assertTrue(canonical.contains("\"big\":1E+309"), canonical);
+    assertTrue(canonical.contains("\"tiny\":1E-324"), canonical);
+    assertTrue(canonical.contains("\"exact\":0.1234567890123456789012345678"), canonical);
+    assertFalse(canonical.contains("Infinity"), canonical);
+
+    JsonNode unknown = JsonValues.readTree(canonical).path("unknownToolSetting");
+    assertTrue(unknown.get("big").isNumber(), canonical);
+    assertTrue(unknown.get("tiny").isNumber(), canonical);
+    assertTrue(unknown.get("exact").isNumber(), canonical);
+    assertEquals(0, unknown.get("big").decimalValue().compareTo(new BigDecimal("1e309")));
+    assertEquals(0, unknown.get("tiny").decimalValue().compareTo(new BigDecimal("1e-324")));
+    assertEquals(PermissionAction.ASK, codec.decode(canonical).rulesFor(BASH).get(0).action());
+  }
+
+  /** permission preview 重新序列化 arguments 时不得把自由数值改写成 Infinity 或降低精度。 */
+  @Test
+  void previewRendersFreeFormNumbersWithoutFloatLoss() {
+    PermissionEvaluator.Evaluation evaluation =
+        evaluateRaw(
+            WRITE,
+            "{\"path\":\"/a.txt\",\"big\":1e309,\"tiny\":1e-324,"
+                + "\"exact\":0.1234567890123456789012345678}",
+            settings(Map.of(WRITE, List.of(new PermissionRule("*", PermissionAction.ASK)))));
+
+    String arguments = evaluation.promptPreview().arguments();
+    assertEquals(
+        "{\"path\":\"/a.txt\",\"big\":1E+309,\"tiny\":1E-324,"
+            + "\"exact\":0.1234567890123456789012345678}",
+        arguments);
+    assertFalse(arguments.contains("Infinity"), arguments);
+
+    JsonNode rendered = JsonValues.readTree(arguments);
+    assertTrue(rendered.get("big").isNumber(), arguments);
+    assertTrue(rendered.get("tiny").isNumber(), arguments);
+    assertEquals(0, rendered.get("big").decimalValue().compareTo(new BigDecimal("1e309")));
+    assertEquals(0, rendered.get("tiny").decimalValue().compareTo(new BigDecimal("1e-324")));
   }
 
   private static ToolSettings deny(String deniedPattern) {

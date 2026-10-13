@@ -7,11 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -57,7 +58,7 @@ import java.util.UUID;
  */
 class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default", "medium");
   private static final String FIXTURE = "fixtures/empty-reasoning-summary.sse";
   private static final ProviderToolDefinition TOOL =
@@ -199,14 +200,14 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     JsonNode input = root.get("input");
 
     assertEquals(3, input.size());
-    assertEquals("message", input.get(0).path("type").asText());
+    assertEquals("message", input.get(0).path("type").asString(""));
     // 语义回退以 summary 承载 durable 思考；绝不伪造 encrypted_content。
-    assertEquals("reasoning", input.get(1).path("type").asText());
-    assertEquals(durableThinking, input.get(1).path("summary").get(0).path("text").asText());
+    assertEquals("reasoning", input.get(1).path("type").asString(""));
+    assertEquals(durableThinking, input.get(1).path("summary").get(0).path("text").asString(""));
     assertFalse(
         input.get(1).has("encrypted_content"),
         "semantic fallback must never forge encrypted_content");
-    assertEquals(durableText, input.get(2).path("content").get(0).path("text").asText());
+    assertEquals(durableText, input.get(2).path("content").get(0).path("text").asString(""));
   }
 
   /** 意图：即使 affinity 失配，损坏的 replay 仍必须先被强校验拒绝——不因“可回退”而放弃结构/一致性检查。 */
@@ -323,18 +324,18 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     // 原生 encrypted item 原样保留（synthetic cipher preserved）。
     JsonNode reasoning = itemOfType(input, "reasoning");
     assertNotNull(reasoning, "native encrypted reasoning item must be replayed");
-    assertEquals("synthetic-cipher", reasoning.path("encrypted_content").asText());
+    assertEquals("synthetic-cipher", reasoning.path("encrypted_content").asString(""));
     assertFalse(
         reasoning.has("summary"), "must not forge a reasoning summary from durable readable text");
 
     // durable 可读思考必须以普通 assistant 文本出现在 wire 中，不能被静默丢弃。
     boolean readableThinkingTextSeen = false;
     for (JsonNode item : input) {
-      if ("message".equals(item.path("type").asText())) {
+      if ("message".equals(item.path("type").asString(""))) {
         for (JsonNode block : item.path("content")) {
-          if (block.path("text").asText().contains("durable sentinel")) {
+          if (block.path("text").asString("").contains("durable sentinel")) {
             readableThinkingTextSeen = true;
-            assertEquals("output_text", block.path("type").asText());
+            assertEquals("output_text", block.path("type").asString(""));
           }
         }
       }
@@ -373,17 +374,17 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             .get("input");
 
     assertEquals(2, input.size());
-    assertEquals("reasoning", input.get(0).path("type").asText());
-    assertEquals("durable sentinel", input.get(0).path("summary").get(0).path("text").asText());
+    assertEquals("reasoning", input.get(0).path("type").asString(""));
+    assertEquals("durable sentinel", input.get(0).path("summary").get(0).path("text").asString(""));
     assertFalse(
         input.get(0).has("encrypted_content"),
         "cross-affinity fallback must not carry the opaque cipher");
-    assertEquals("answer", input.get(1).path("content").get(0).path("text").asText());
+    assertEquals("answer", input.get(1).path("content").get(0).path("text").asString(""));
   }
 
   private static JsonNode itemOfType(JsonNode input, String type) {
     for (JsonNode item : input) {
-      if (type.equals(item.path("type").asText())) {
+      if (type.equals(item.path("type").asString(""))) {
         return item;
       }
     }
@@ -437,9 +438,9 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             .get("input");
 
     assertEquals(3, input.size());
-    assertEquals("reasoning", input.get(1).path("type").asText());
-    assertEquals("opaque_blob_exact", input.get(1).path("encrypted_content").asText());
-    assertEquals("durable thought", input.get(1).path("summary").get(0).path("text").asText());
+    assertEquals("reasoning", input.get(1).path("type").asString(""));
+    assertEquals("opaque_blob_exact", input.get(1).path("encrypted_content").asString(""));
+    assertEquals("durable thought", input.get(1).path("summary").get(0).path("text").asString(""));
   }
 
   /** 意图：即使 durable 没有 thinking，全空占位符 replay 也必须回退语义编码——绝不把空 reasoning 项直接发给上游。 */
@@ -479,9 +480,9 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
     // 无 durable thinking 时占位符不构成“矛盾”，但空 reasoning 不承载任何语义，仍必须回退为纯语义消息。
     assertEquals(2, input.size());
-    assertEquals("message", input.get(0).path("type").asText());
-    assertEquals("message", input.get(1).path("type").asText());
-    assertEquals("answer", input.get(1).path("content").get(0).path("text").asText());
+    assertEquals("message", input.get(0).path("type").asString(""));
+    assertEquals("message", input.get(1).path("type").asString(""));
+    assertEquals("answer", input.get(1).path("content").get(0).path("text").asString(""));
   }
 
   /** 意图：代际/前缀失配时仍按既有规则回退语义编码，思考由 summary 承载。 */
@@ -515,9 +516,9 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             .get("input");
 
     assertEquals(2, input.size());
-    assertEquals("reasoning", input.get(0).path("type").asText());
-    assertEquals("durable thought", input.get(0).path("summary").get(0).path("text").asText());
-    assertEquals("answer", input.get(1).path("content").get(0).path("text").asText());
+    assertEquals("reasoning", input.get(0).path("type").asString(""));
+    assertEquals("durable thought", input.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals("answer", input.get(1).path("content").get(0).path("text").asString(""));
   }
 
   /** 意图：工具调用链在空占位符回退后仍保持 function_call/function_call_output 的一致顺序。 */
@@ -561,12 +562,12 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             .get("input");
 
     assertEquals(3, input.size());
-    assertEquals("reasoning", input.get(0).path("type").asText());
-    assertEquals("durable thought", input.get(0).path("summary").get(0).path("text").asText());
-    assertEquals("function_call", input.get(1).path("type").asText());
-    assertEquals("call_1", input.get(1).path("call_id").asText());
-    assertEquals("function_call_output", input.get(2).path("type").asText());
-    assertEquals("sunny", input.get(2).path("output").asText());
+    assertEquals("reasoning", input.get(0).path("type").asString(""));
+    assertEquals("durable thought", input.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals("function_call", input.get(1).path("type").asString(""));
+    assertEquals("call_1", input.get(1).path("call_id").asString(""));
+    assertEquals("function_call_output", input.get(2).path("type").asString(""));
+    assertEquals("sunny", input.get(2).path("output").asString(""));
 
     // replay 只剩空 output 却对应 durable 工具调用：属于矛盾而非不可用占位符，仍必须硬失败。
     ObjectNode emptyOutputPayload = MAPPER.createObjectNode();
@@ -634,9 +635,10 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                     .bodyUtf8Bytes())
             .get("input");
     assertEquals(3, sameConnectionInput.size());
-    assertEquals("reasoning", sameConnectionInput.get(1).path("type").asText());
+    assertEquals("reasoning", sameConnectionInput.get(1).path("type").asString(""));
     assertEquals(
-        durableThinking, sameConnectionInput.get(1).path("summary").get(0).path("text").asText());
+        durableThinking,
+        sameConnectionInput.get(1).path("summary").get(0).path("text").asString(""));
     assertFalse(sameConnectionInput.get(1).has("encrypted_content"));
 
     // 连接 B 交接：代际失配走既有安全规则，仍以语义编码承载思考而非失败。
@@ -655,9 +657,10 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                     .bodyUtf8Bytes())
             .get("input");
     assertEquals(3, otherConnectionInput.size());
-    assertEquals("reasoning", otherConnectionInput.get(1).path("type").asText());
+    assertEquals("reasoning", otherConnectionInput.get(1).path("type").asString(""));
     assertEquals(
-        durableThinking, otherConnectionInput.get(1).path("summary").get(0).path("text").asText());
+        durableThinking,
+        otherConnectionInput.get(1).path("summary").get(0).path("text").asString(""));
     assertFalse(otherConnectionInput.get(1).has("encrypted_content"));
 
     // 跨格式交接由各目标格式编码器保证（见 Chat 编码器的跨格式回退回归）。
@@ -700,7 +703,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertNotNull(replay, "含密文的 reasoning 不属于空占位符，opaque replay 必须原样保留");
     assertEquals(
         "opaque_blob",
-        replay.payload().get("output").get(0).path("encrypted_content").asText(),
+        replay.payload().get("output").get(0).path("encrypted_content").asString(""),
         "opaque 密文绝不允许被剥离");
   }
 
@@ -818,7 +821,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertNotNull(replay, "带密文的 reasoning 不属于空占位符，native replay 必须保留");
     JsonNode reasoning = replay.payload().get("output").get(0);
     assertEquals(
-        "opaque_keep_exact", reasoning.path("encrypted_content").asText(), "opaque 密文绝不允许被剥离");
+        "opaque_keep_exact", reasoning.path("encrypted_content").asString(""), "opaque 密文绝不允许被剥离");
   }
 
   /** 意图：终态只给空白摘要时不改变实际流式思考——不得出现额外前导空白或换行拼接。 */
@@ -884,9 +887,9 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             .get("input");
 
     assertEquals(2, input.size());
-    assertEquals("reasoning", input.get(0).path("type").asText());
-    assertEquals("durable thought", input.get(0).path("summary").get(0).path("text").asText());
-    assertEquals("answer", input.get(1).path("content").get(0).path("text").asText());
+    assertEquals("reasoning", input.get(0).path("type").asString(""));
+    assertEquals("durable thought", input.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals("answer", input.get(1).path("content").get(0).path("text").asString(""));
   }
 
   private void assertRejected(
