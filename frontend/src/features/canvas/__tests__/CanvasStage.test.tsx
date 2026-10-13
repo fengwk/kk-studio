@@ -90,7 +90,9 @@ vi.mock('@xyflow/react', () => ({
   }),
 }))
 
-function resourceDTO(overrides: Partial<CanvasSnapshotDTO['nodes'][number]> = {}) {
+function resourceDTO(
+  overrides: Partial<CanvasSnapshotDTO['nodes'][number]> = {},
+): CanvasSnapshotDTO['nodes'][number] {
   return {
     id: NODE_A,
     canvasId: CANVAS_ID,
@@ -102,7 +104,7 @@ function resourceDTO(overrides: Partial<CanvasSnapshotDTO['nodes'][number]> = {}
       canvasId: CANVAS_ID,
       ownerNodeId: NODE_A,
       resourceIndex: 0,
-      blobId: 'blob-asset',
+      blobId: 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e',
       name: 'image.png',
       textContent: null,
       kind: 'IMAGE',

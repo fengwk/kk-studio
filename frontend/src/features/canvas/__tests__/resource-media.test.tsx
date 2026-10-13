@@ -13,13 +13,17 @@ import {
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
 } from '@/shared/api/studio-service'
+import type { UUIDString } from '@/shared/api/contracts/studio'
 
 vi.mock('@/shared/api/studio-service', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
   getCanvasResourcePreviewUrl: vi.fn(),
 }))
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+const NODE_ID = '00000000-0000-4000-8000-000000000002' as UUIDString
+const RES_ID = '00000000-0000-4000-8000-000000000020' as UUIDString
+const BLOB_ASSET = 'ffffffff-0000-4000-8000-000000000001' as UUIDString
 
 let intersectionCallback: IntersectionObserverCallback
 const observe = vi.fn()
@@ -41,11 +45,11 @@ class IntersectionObserverFake {
 
 function resource(kind: Resource['kind'], overrides: Partial<Resource> = {}): Resource {
   return {
-    id: '20',
+    id: RES_ID,
     canvasId: CANVAS_ID,
-    ownerNodeId: '2',
+    ownerNodeId: NODE_ID,
     resourceIndex: 0,
-    blobId: kind === 'TEXT' ? null : 'blob-asset',
+    blobId: kind === 'TEXT' ? null : BLOB_ASSET,
     name: `${kind.toLowerCase()}.asset`,
     textContent: kind === 'TEXT' ? '# Markdown title\n\n- safe list' : null,
     kind,
@@ -114,7 +118,7 @@ describe('Canvas lazy resource media', () => {
     vi.clearAllMocks()
     vi.stubGlobal('IntersectionObserver', IntersectionObserverFake)
     // jsdom 未实现媒体播放；静默 stub 原型，单测再按场景覆盖。
-    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => undefined)
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(async () => undefined)
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
     vi.mocked(getCanvasResourcePreviewUrl).mockResolvedValue(previewUrl('https://s3.example/preview.webp'))
     vi.mocked(getCanvasResourceOriginalUrl).mockResolvedValue(originalUrl('https://s3.example/original'))

@@ -42,6 +42,8 @@ const REQUEST_STARTED = 'eeeeeeee-0000-4000-8000-000000000001' as UUIDString
 const REQUEST_CURRENT = 'eeeeeeee-0000-4000-8000-000000000002' as UUIDString
 const REQUEST_OLD = 'eeeeeeee-0000-4000-8000-000000000003' as UUIDString
 const REQUEST_NEW = 'eeeeeeee-0000-4000-8000-000000000004' as UUIDString
+const BLOB_OUTPUT = 'ffffffff-0000-4000-8000-000000000001' as UUIDString
+const BLOB_IMAGE = 'ffffffff-0000-4000-8000-000000000002' as UUIDString
 const { FAKE_SHA256 } = vi.hoisted(() => ({ FAKE_SHA256: 'a'.repeat(64) }))
 
 const { fakeApplicationEvents, canvasEventSubscriptions } = vi.hoisted(() => {
@@ -189,7 +191,7 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_FN,
         resourceIndex: 0,
-        blobId: 'blob-output',
+        blobId: BLOB_OUTPUT,
         name: 'old-output.png',
         textContent: null,
         kind: 'IMAGE',
@@ -220,7 +222,7 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_IMG,
         resourceIndex: 0,
-        blobId: 'blob-image',
+        blobId: BLOB_IMAGE,
         name: 'image.png',
         textContent: null,
         kind: 'IMAGE',
@@ -276,24 +278,45 @@ function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDT
         canvasId: current.document.id,
         name: command.name,
         transform: command.transform,
-        groupId: command.groupId ?? null,
-        resources: (command.resources ?? []).map((r, idx) => ({
-          id: (r.kind === 'BLOB' ? r.blobId : `res-${idx}`) as UUIDString,
-          canvasId: current.document.id,
-          ownerNodeId: command.nodeId,
-          resourceIndex: idx,
-          blobId: r.kind === 'BLOB' ? r.blobId : null,
-          name: r.name,
-          textContent: r.kind === 'TEXT' ? (r.textContent ?? null) : null,
-          kind: r.kind === 'BLOB' ? 'IMAGE' : (r.kind as CanvasResourceKind),
-          mediaType: r.kind === 'BLOB' ? 'image/png' : 'text/plain',
-          sizeBytes: 100,
-          width: null,
-          height: null,
-          durationMs: null,
-          createdAt: '2026-08-10T00:00:00Z',
-        })),
-        function: command.function ?? null,
+        groupId: null,
+        resources: (command.resources ?? []).map((r, idx) => {
+          if (r.kind === 'KEEP') {
+            const existing = current.nodes.flatMap((n) => n.resources).find((res) => res.id === r.resourceId)
+            return existing ?? {
+              id: r.resourceId,
+              canvasId: current.document.id,
+              ownerNodeId: command.nodeId,
+              resourceIndex: idx,
+              blobId: null,
+              name: 'resource',
+              textContent: null,
+              kind: 'TEXT' as CanvasResourceKind,
+              mediaType: 'text/plain',
+              sizeBytes: 100,
+              width: null,
+              height: null,
+              durationMs: null,
+              createdAt: '2026-08-10T00:00:00Z',
+            }
+          }
+          return {
+            id: (r.kind === 'BLOB' ? r.blobId : `00000000-0000-4000-8000-0000000000${idx}`) as UUIDString,
+            canvasId: current.document.id,
+            ownerNodeId: command.nodeId,
+            resourceIndex: idx,
+            blobId: r.kind === 'BLOB' ? r.blobId : null,
+            name: r.name,
+            textContent: r.kind === 'TEXT' ? (r.textContent ?? null) : null,
+            kind: r.kind === 'BLOB' ? 'IMAGE' : ('TEXT' as CanvasResourceKind),
+            mediaType: r.kind === 'BLOB' ? 'image/png' : 'text/plain',
+            sizeBytes: 100,
+            width: null,
+            height: null,
+            durationMs: null,
+            createdAt: '2026-08-10T00:00:00Z',
+          }
+        }),
+        function: null,
         run: null,
       }]
     } else if (command.type === 'DELETE_NODE') {
@@ -303,22 +326,43 @@ function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDT
     } else if (command.type === 'SET_NODE_RESOURCES') {
       nodes = nodes.map((n) => n.id === command.nodeId ? {
         ...n,
-        resources: command.resources.map((r, idx) => ({
-          id: `res-${idx}` as UUIDString,
-          canvasId: current.document.id,
-          ownerNodeId: command.nodeId,
-          resourceIndex: idx,
-          blobId: r.kind === 'BLOB' ? r.blobId : null,
-          name: r.name,
-          textContent: r.kind === 'TEXT' ? (r.textContent ?? null) : null,
-          kind: r.kind === 'BLOB' ? 'IMAGE' : (r.kind as CanvasResourceKind),
-          mediaType: 'text/plain',
-          sizeBytes: 100,
-          width: null,
-          height: null,
-          durationMs: null,
-          createdAt: '2026-08-10T00:00:00Z',
-        })),
+        resources: command.resources.map((r, idx) => {
+          if (r.kind === 'KEEP') {
+            const existing = current.nodes.flatMap((item) => item.resources).find((res) => res.id === r.resourceId)
+            return existing ?? {
+              id: r.resourceId,
+              canvasId: current.document.id,
+              ownerNodeId: command.nodeId,
+              resourceIndex: idx,
+              blobId: null,
+              name: 'resource',
+              textContent: null,
+              kind: 'TEXT' as CanvasResourceKind,
+              mediaType: 'text/plain',
+              sizeBytes: 100,
+              width: null,
+              height: null,
+              durationMs: null,
+              createdAt: '2026-08-10T00:00:00Z',
+            }
+          }
+          return {
+            id: (r.kind === 'BLOB' ? r.blobId : `00000000-0000-4000-8000-0000000000${idx}`) as UUIDString,
+            canvasId: current.document.id,
+            ownerNodeId: command.nodeId,
+            resourceIndex: idx,
+            blobId: r.kind === 'BLOB' ? r.blobId : null,
+            name: r.name,
+            textContent: r.kind === 'TEXT' ? (r.textContent ?? null) : null,
+            kind: r.kind === 'BLOB' ? 'IMAGE' : ('TEXT' as CanvasResourceKind),
+            mediaType: 'text/plain',
+            sizeBytes: 100,
+            width: null,
+            height: null,
+            durationMs: null,
+            createdAt: '2026-08-10T00:00:00Z',
+          }
+        }),
       } : n)
     } else if (command.type === 'SET_NODE_FUNCTION') {
       nodes = nodes.map((n) => n.id === command.nodeId ? { ...n, function: command.function } : n)
@@ -985,7 +1029,7 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(getCanvasFunctionRun).not.toHaveBeenCalled()
 
     await act(async () => {
-      await result.current.cancelFunctionRun(NODE_FN)
+      await result.current.cancelFunctionRun(NODE_FN, REQUEST_STARTED)
     })
     expect(cancelCanvasFunctionRun).toHaveBeenCalledWith(
       CANVAS_ID,
@@ -1079,7 +1123,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => result.current.openEditor(CANVAS_ID))
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
-    void result.current.cancelFunctionRun(NODE_FN)
+    void result.current.cancelFunctionRun(NODE_FN, REQUEST_OLD)
     await waitFor(() => expect(cancelCanvasFunctionRun).toHaveBeenCalledTimes(1))
 
     act(() => {
@@ -1353,7 +1397,7 @@ describe('useCanvasController real snapshot runtime', () => {
   it.each(['RUNNING', 'FAILED'] as const)(
     'recovers a lost start response from the matching server run in %s state',
     async (status) => {
-      let submittedRequestId = ''
+      let submittedRequestId: UUIDString = REQUEST_STARTED
       vi.mocked(startCanvasFunctionRun).mockImplementation(async (_canvasId, _nodeId, request) => {
         submittedRequestId = request.requestId
         throw new Error('start response lost')
@@ -1433,7 +1477,8 @@ describe('useCanvasController real snapshot runtime', () => {
     })
 
     const createNewCmd = commands.flatMap((c) => c.commands).find(
-      (cmd) => cmd.type === 'CREATE_NODE' && cmd.name === 'Conflict Note',
+      (cmd): cmd is Extract<CanvasCommandDTO, { type: 'CREATE_NODE' }> =>
+        cmd.type === 'CREATE_NODE' && cmd.name === 'Conflict Note',
     )
     expect(createNewCmd).toBeDefined()
     expect(createNewCmd?.nodeId).not.toBe(NODE_NOTE)
@@ -1593,7 +1638,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 50, y: 60, width: 320, height: 260 },
       }])
     })
@@ -1618,7 +1663,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 100, y: 200, width: 320, height: 260 },
       }])
       result.current.commitTransforms()
@@ -1632,7 +1677,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 110, y: 210, width: 320, height: 260 },
       }])
     })
@@ -1688,7 +1733,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 999, y: 888, width: 320, height: 260 },
       }])
     })
@@ -1722,7 +1767,7 @@ describe('useCanvasController real snapshot runtime', () => {
       // 在画布 1 产生草稿
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 555, y: 666, width: 320, height: 260 },
       }])
       // 紧接着立即切换至画布 2，此时前序 persist 任务仍在异步队列中
@@ -1764,7 +1809,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     // 绝不向网络发送旧配置命令
     const functionCommands = commands.filter((req) =>
-      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function.args.prompt === 'library-exit-draft'),
+      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function?.args.prompt === 'library-exit-draft'),
     )
     expect(functionCommands).toHaveLength(0)
 
@@ -1803,7 +1848,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     // 验证绝无向网络发送画布 1 的配置命令
     const leakedCommands = commands.filter((req) =>
-      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function.args.prompt === 'canvas-1-pending-config'),
+      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function?.args.prompt === 'canvas-1-pending-config'),
     )
     expect(leakedCommands).toHaveLength(0)
 
@@ -1830,7 +1875,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 300, y: 400, width: 320, height: 260 },
       }])
       result.current.commitTransforms()
@@ -1876,7 +1921,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 777, y: 888, width: 320, height: 260 },
       }])
     })
@@ -1918,7 +1963,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 555, y: 666, width: 320, height: 260 },
       }])
       result.current.commitTransforms()
@@ -1988,7 +2033,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 111, y: 111, width: 320, height: 260 },
       }])
       result.current.commitTransforms()
@@ -2005,7 +2050,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 999, y: 999, width: 320, height: 260 },
       }])
     })
@@ -2047,7 +2092,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.moveNodes([{
         id: NODE_NOTE,
-        kind: 'text',
+        kind: 'resource',
         transform: { x: 333, y: 444, width: 320, height: 260 },
       }])
       result.current.commitTransforms()

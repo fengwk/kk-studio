@@ -169,9 +169,7 @@ describe('Canvas snapshot projection', () => {
     })
 
     const nodes = projectNodes(snapshot, [], [], {
-      renameNode: vi.fn(),
       editTextNode: vi.fn(),
-      deleteNode: vi.fn(),
     })
     expect(nodes[0]).toMatchObject({
       style: { width: 256, height: 346 },

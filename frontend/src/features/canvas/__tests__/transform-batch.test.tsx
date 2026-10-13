@@ -1,10 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import {
   useCanvasTransformBatch,
   type CanvasTransformBatchActions,
 } from '@/features/canvas/transform-batch'
 import type { CanvasCommandDTO, CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
+
+type ExecuteCommandsMock = Mock<(commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>>
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
 const NODE_A = 'aaaaaaaa-0000-4000-8000-000000000001' as UUIDString
@@ -60,7 +63,7 @@ interface Harness {
 }
 
 function createHarness(
-  executeCommands: ReturnType<typeof vi.fn>,
+  executeCommands: ExecuteCommandsMock,
   options?: { useSnapshot?: boolean },
 ): Harness {
   let positionDrafts: Record<string, { x: number; y: number }> = {}
@@ -78,7 +81,7 @@ function createHarness(
   }
 }
 
-function firstCommands(executeCommands: ReturnType<typeof vi.fn>): CanvasCommandDTO[] {
+function firstCommands(executeCommands: ExecuteCommandsMock): CanvasCommandDTO[] {
   return executeCommands.mock.calls[0]?.[0] as CanvasCommandDTO[]
 }
 
