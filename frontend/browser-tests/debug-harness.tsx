@@ -139,7 +139,7 @@ function createDebugData(): ThreadModelRequestDebugData {
         tools: [],
         skills: [],
         subagents: [],
-        configurationJson: null,
+        configurationJson: '{}',
       },
     ],
     cacheControl: {

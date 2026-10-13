@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createEnvironmentService } from '@/shared/api/environment-service'
+import { createMockHttpClient } from '@/test-support/mock-http-client'
 
 describe('environmentService', () => {
   it('saves nested daemon settings with the CAS version and encoded ID', async () => {
-    const client = { get: vi.fn(), post: vi.fn(), put: vi.fn().mockResolvedValue({ version: '9' }), delete: vi.fn() }
+    const client = createMockHttpClient()
+    client.put.mockResolvedValue({ version: '9' })
     const config = { operatingSystem: 'linux' as const, daemon: { studioUrl: 'https://studio.example.com' } }
     expect(await createEnvironmentService(client).saveInstallConfig('env/a', '8', config)).toEqual({ version: '9' })
     expect(client.put).toHaveBeenCalledWith('/harness/environments/env%2Fa/install-config', { expectedVersion: '8', installConfig: config })
@@ -12,12 +14,8 @@ describe('environmentService', () => {
    * 测试意图：验证 Environment 列表查询端点已迁移至 /harness/environments。
    */
   it('lists environments from GET /harness/environments', async () => {
-    const client = {
-      get: vi.fn(async () => []),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.get.mockResolvedValue([])
     const service = createEnvironmentService(client)
     await service.listEnvironments()
     expect(client.get).toHaveBeenCalledWith('/harness/environments')
@@ -27,12 +25,8 @@ describe('environmentService', () => {
    * 测试意图：验证通过 UUID 获取单个 Environment 详情端点使用 /harness/environments/{id}。
    */
   it('gets a single environment by UUID via GET /harness/environments/{id}', async () => {
-    const client = {
-      get: vi.fn(async () => ({ id: 'env-1', name: 'local' })),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.get.mockResolvedValue({ id: 'env-1', name: 'local' })
     const service = createEnvironmentService(client)
     await service.getEnvironment('env-1')
     expect(client.get).toHaveBeenCalledWith('/harness/environments/env-1')
@@ -42,12 +36,8 @@ describe('environmentService', () => {
    * 测试意图：验证创建 Environment 使用 POST /harness/environments，且返回包含 registrationToken。
    */
   it('creates an environment card via POST /harness/environments', async () => {
-    const client = {
-      get: vi.fn(async () => ({})),
-      post: vi.fn(async () => ({ id: 'env-1', name: 'dev', registrationToken: 'tok-123' })),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.post.mockResolvedValue({ id: 'env-1', name: 'dev', registrationToken: 'tok-123' })
     const service = createEnvironmentService(client)
     const result = await service.createEnvironment({ name: 'dev' })
     expect(client.post).toHaveBeenCalledWith('/harness/environments', { name: 'dev' })
@@ -59,12 +49,8 @@ describe('environmentService', () => {
    * 且该调用是普通只读 GET（不携带 expectedVersion、不触发轮换）。
    */
   it('reads the current registration token via GET /harness/environments/{id}/token', async () => {
-    const client = {
-      get: vi.fn(async () => ({ id: 'env-1', registrationToken: 'tok-current', version: '3' })),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.get.mockResolvedValue({ id: 'env-1', registrationToken: 'tok-current', version: '3' })
     const service = createEnvironmentService(client)
     const result = await service.getRegistrationToken('env-1')
     expect(client.get).toHaveBeenCalledWith('/harness/environments/env-1/token')
@@ -79,12 +65,8 @@ describe('environmentService', () => {
    */
   it('issues a short install code via POST /harness/environments/{id}/install-code', async () => {
     const issued = { code: "code'汉字", expiresAt: '2026-10-05T09:05:00.000Z' }
-    const client = {
-      get: vi.fn(async () => ({})),
-      post: vi.fn(async () => issued),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.post.mockResolvedValue(issued)
     const service = createEnvironmentService(client)
     const result = await service.createInstallCode('env/a', '8')
     expect(client.post).toHaveBeenCalledWith('/harness/environments/env%2Fa/install-code', {
@@ -99,12 +81,8 @@ describe('environmentService', () => {
    * 且 expectedVersion 放在 POST body { expectedVersion } 中。
    */
   it('rotates registration token via POST /harness/environments/{id}/registration-token with body {expectedVersion}', async () => {
-    const client = {
-      get: vi.fn(async () => ({})),
-      post: vi.fn(async () => ({ id: 'env-1', registrationToken: 'tok-new', version: '2' })),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.post.mockResolvedValue({ id: 'env-1', registrationToken: 'tok-new', version: '2' })
     const service = createEnvironmentService(client)
     const result = await service.rotateToken('env-1', '1')
     expect(client.post).toHaveBeenCalledWith(
@@ -118,12 +96,8 @@ describe('environmentService', () => {
    * 测试意图：验证删除 Environment 端点使用 DELETE /harness/environments/{id}?expectedVersion=。
    */
   it('deletes environment via DELETE /harness/environments/{id}?expectedVersion=', async () => {
-    const client = {
-      get: vi.fn(async () => ({})),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => undefined),
-    }
+    const client = createMockHttpClient()
+    client.delete.mockResolvedValue(undefined)
     const service = createEnvironmentService(client)
     await service.deleteEnvironment('env-1', '3')
     expect(client.delete).toHaveBeenCalledWith(
@@ -144,12 +118,8 @@ describe('environmentService', () => {
         message: 'Connected',
       },
     ]
-    const client = {
-      get: vi.fn(async () => events),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.get.mockResolvedValue(events)
     const service = createEnvironmentService(client)
     const result = await service.listEnvironmentEvents('env/special:1')
     expect(client.get).toHaveBeenCalledWith('/harness/environments/env%2Fspecial%3A1/events')
@@ -164,12 +134,8 @@ describe('environmentService', () => {
       createdAt: '2026-10-09T00:00:00.000Z',
       updatedAt: '2026-10-09T00:01:00.000Z',
     }
-    const client = {
-      get: vi.fn(async () => update),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.get.mockResolvedValue(update)
     const service = createEnvironmentService(client)
     const result = await service.getEnvironmentUpdate('env/a')
     expect(client.get).toHaveBeenCalledWith('/harness/environments/env%2Fa/update')
@@ -179,12 +145,8 @@ describe('environmentService', () => {
 
   it('starts managed daemon update via POST /harness/environments/{id}/update with no body', async () => {
     const card = { id: 'env/a', name: 'local', version: '2' }
-    const client = {
-      get: vi.fn(async () => ({})),
-      post: vi.fn(async () => card),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
+    const client = createMockHttpClient()
+    client.post.mockResolvedValue(card)
     const service = createEnvironmentService(client)
     const result = await service.startEnvironmentUpdate('env/a')
     expect(client.post).toHaveBeenCalledWith('/harness/environments/env%2Fa/update')

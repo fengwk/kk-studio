@@ -8,15 +8,18 @@ import {
   decodeCanvasPatch,
   decodeCanvasSnapshot,
 } from '@/shared/api/studio-codec'
-import type { CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
+import type {
+  CanvasDocumentDTO,
+  UUIDString,
+} from '@/shared/api/contracts/studio'
 
-const ID = '11111111-1111-4111-8111-111111111111'
-const CANVAS_ID = '22222222-2222-4222-8222-222222222222'
-const NODE_ID = '33333333-3333-4333-8333-333333333333'
-const GROUP_ID = '44444444-4444-4444-8444-444444444444'
-const REQUEST_ID = '55555555-5555-4555-8555-555555555555'
+const ID: UUIDString = '11111111-1111-4111-8111-111111111111'
+const CANVAS_ID: UUIDString = '22222222-2222-4222-8222-222222222222'
+const NODE_ID: UUIDString = '33333333-3333-4333-8333-333333333333'
+const GROUP_ID: UUIDString = '44444444-4444-4444-8444-444444444444'
+const REQUEST_ID: UUIDString = '55555555-5555-4555-8555-555555555555'
 
-function documentPayload() {
+function documentPayload(): CanvasDocumentDTO {
   return {
     id: CANVAS_ID,
     title: 'Canvas',
@@ -35,7 +38,7 @@ function resourcePayload() {
     blobId: null,
     name: 'note',
     textContent: 'hello',
-    kind: 'TEXT',
+    kind: 'TEXT' as const,
     mediaType: null,
     sizeBytes: '12',
     width: null,
@@ -83,7 +86,7 @@ function referencePayload() {
   }
 }
 
-function snapshotPayload(): CanvasSnapshotDTO {
+function snapshotPayload() {
   return {
     document: documentPayload(),
     nodes: [nodePayload()],

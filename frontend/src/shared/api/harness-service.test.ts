@@ -1,19 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createHarnessService } from '@/shared/api/harness-service'
-import type { HttpClient } from '@/shared/api/client'
+import { createMockHttpClient } from '@/test-support/mock-http-client'
+import type { AgentCommandBatchRequestDTO } from '@/shared/api/contracts/ai-runtime'
 
-function createClient(): HttpClient & {
-  get: ReturnType<typeof vi.fn>
-  post: ReturnType<typeof vi.fn>
-  put: ReturnType<typeof vi.fn>
-  delete: ReturnType<typeof vi.fn>
-} {
-  return {
-    get: vi.fn(async () => ({})),
-    post: vi.fn(async () => ({})),
-    put: vi.fn(async () => ({})),
-    delete: vi.fn(async () => ({})),
-  }
+function createClient() {
+  return createMockHttpClient()
 }
 
 describe('harnessService', () => {
@@ -24,7 +15,7 @@ describe('harnessService', () => {
   it('submits creation command batches via POST /harness/command-batches', async () => {
     const http = createClient()
     const service = createHarnessService(http)
-    const request = {
+    const request: AgentCommandBatchRequestDTO = {
       owner: { type: 'CHAT' as const, chatId: 'chat-1' },
       target: {
         type: 'NEW_SESSION' as const,
@@ -34,6 +25,7 @@ describe('harnessService', () => {
           agentName: 'assistant',
           model: { providerName: 'p', modelName: 'm', variant: 'v' },
           environmentName: null,
+          goal: null,
         },
         yoloEnabled: false,
       },

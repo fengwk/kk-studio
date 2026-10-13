@@ -1,4 +1,5 @@
-import { expect, test, type Page, type Route } from './fixture'
+import { expect, test, type Page } from './fixture'
+import type { Route } from '@playwright/test'
 
 /**
  * Pane 根控制面真实浏览器回归（独立基座、独立端口 5184）。

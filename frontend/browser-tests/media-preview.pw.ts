@@ -24,7 +24,7 @@ for (const sample of [
       </div>
     `)
     await page.addStyleTag({ content: css })
-    await page.locator('img').evaluate(async (image, dimensions) => {
+    await page.locator('img').evaluate(async (image: HTMLImageElement, dimensions) => {
       const canvas = document.createElement('canvas')
       canvas.width = dimensions.width
       canvas.height = dimensions.height
@@ -56,7 +56,7 @@ for (const width of [360, 1100]) {
       </section>
     `)
     await page.addStyleTag({ content: css })
-    await page.locator('img').evaluate(async (image) => {
+    await page.locator('img').evaluate(async (image: HTMLImageElement) => {
       const canvas = document.createElement('canvas')
       canvas.width = 512
       canvas.height = 288

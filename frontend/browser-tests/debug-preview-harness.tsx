@@ -6,6 +6,7 @@ import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 
 setLocale('zh-CN')
 
@@ -43,6 +44,7 @@ function DebugPreviewHarnessApp() {
                   name: 'assistant',
                   description: '通用助手',
                   systemPrompt: 'You are a precise coding assistant.',
+                  type: 'BUILTIN',
                   model: 'minimax-m2.7',
                   variant: 'default',
                   config: {
@@ -55,13 +57,17 @@ function DebugPreviewHarnessApp() {
                   createTime: '2026-10-01T00:00:00Z',
                   updateTime: '2026-10-01T00:00:00Z',
                 },
-                ...['coder', 'broken-agent'].map((name) => ({
+                ...['coder', 'broken-agent'].map((name): AgentDefinitionDTO => ({
                   name,
                   description: name,
+                  systemPrompt: null,
+                  type: 'USER',
                   model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
                   variant: 'fast',
                   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
                   version: '1',
+                  createTime: '2026-10-01T00:00:00Z',
+                  updateTime: '2026-10-01T00:00:00Z',
                 })),
               ]}
             />

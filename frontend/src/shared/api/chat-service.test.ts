@@ -1,14 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createChatService } from '@/shared/api/chat-service'
-import type { HttpClient } from '@/shared/api/client'
+import { createMockHttpClient } from '@/test-support/mock-http-client'
 
-function createClient(): HttpClient {
-  return {
-    get: vi.fn(async () => ({})),
-    post: vi.fn(async () => ({})),
-    put: vi.fn(async () => ({})),
-    delete: vi.fn(async () => ({})),
-  }
+function createClient() {
+  return createMockHttpClient()
 }
 
 describe('chatService', () => {

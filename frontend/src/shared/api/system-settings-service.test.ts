@@ -1,18 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { HttpClient } from '@/shared/api/client'
 import { createSystemSettingsService } from '@/shared/api/system-settings-service'
+import { createMockHttpClient } from '@/test-support/mock-http-client'
 import {
   DEFAULT_MAX_RESOURCE_BYTES,
   makeSettingsDto,
 } from '@/test-support/settings-test-fixtures'
 
-function createClient(): HttpClient {
-  return {
-    get: vi.fn(async () => ({})),
-    post: vi.fn(async () => ({})),
-    put: vi.fn(async () => ({})),
-    delete: vi.fn(async () => ({})),
-  }
+function createClient() {
+  return createMockHttpClient()
 }
 
 describe('systemSettingsService', () => {
