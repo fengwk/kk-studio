@@ -2,7 +2,7 @@
 
 `harness-common` 为 Runtime、Tool、MCP、Daemon 与 Platform 提供共享的基础契约：prompt 模板、严格 JSON、规范 Resource 引用、结果内容、输入 schema、文本窗口与 HTTP 代理选择。值对象与校验工具不保存业务状态；[`PromptTemplateLoader`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java) 只缓存 classpath 模板。
 
-这些类型在调用边界完成校验，再交给执行模块使用。构造约束通常以 `IllegalArgumentException` 表达，编码阶段的不可恢复失败为 `IllegalStateException`；null 的拒绝或缺省处理以具体入口为准。生产依赖为 JDK 与 Jackson（见 [`pom.xml`](../../harness/common/pom.xml)），[`CommonModuleArchitectureTest`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 校验依赖方向。资源打开与关闭由调用方负责，Common 消费已经提供的值或字符流。
+这些类型在调用边界完成校验，再交给执行模块使用。构造约束通常以 `IllegalArgumentException` 表达，编码阶段的不可恢复失败为 `IllegalStateException`；null 的拒绝或缺省处理以具体入口为准。生产依赖为 JDK 与 Jackson 3（见 [`pom.xml`](../../harness/common/pom.xml)），[`CommonModuleArchitectureTest`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 校验依赖方向，并禁止 Jackson 2 core/databind 回流。资源打开与关闭由调用方负责，Common 消费已经提供的值或字符流。
 
 ## 包架构
 
@@ -26,15 +26,15 @@
 
 ## JSON 边界
 
-[`JsonValues`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java) 是全仓共享的 JSON 门禁，使用的 `ObjectMapper` 开启 `STRICT_DUPLICATE_DETECTION`、`FAIL_ON_TRAILING_TOKENS` 与 `USE_BIG_DECIMAL_FOR_FLOATS`（JSON number 按 `BigDecimal` 读回，`1e-324`、`1e309` 不会在 double 中退化成 0 或 Infinity）：
+[`JsonValues`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java) 是共享的 JSON 门禁，以不可变 `JsonMapper` 显式开启 `STRICT_DUPLICATE_DETECTION`、`FAIL_ON_TRAILING_TOKENS` 与 `USE_BIG_DECIMAL_FOR_FLOATS`（JSON number 按 `BigDecimal` 读回，`1e-324`、`1e309` 不会在 double 中退化成 0 或 Infinity）：
 
 - `requireValidJson(json)` 要求非空白且严格合法，接受任意类型的单一 JSON 值（`null`、标量、数组与对象都合法，不做 object 归一化），并把原文原样返回；
 - `requireJsonObject(json)` / `requireJsonObject(json, name)` 额外要求顶层为 object，并把 `null` 或空白规范化为 `"{}"`，第二个参数用于定制异常里的字段名；
-- `readTree` / `write` 提供同一套严格性的树读写。
+- `readTree` / `write` 提供同一套严格性的树读写；空白文本产生的 MissingNode 被拒绝，JSON 字面量 `null` 仍是合法 NullNode。
 
 [`ToolArguments`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」，`render` 把调用方给出的字段渲染函数应用到指定字段。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
 
-[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本；累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。它刻意继承 `IOException`：Jackson 生成器会把写入期异常原样上抛而不做二次包装，调用方据此区分「超限中止」与「编码失败」。[`harness-tool`](harness-tool.md) 里 Tool 结果的字节预算判定与它复用同一实现。
+[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本；累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。Jackson 3 将输出流异常包装为 `JacksonException`，调用方只沿 cause 链识别专属超限异常；其它编码或 I/O 失败明确抛出，不能误报为超限。[`harness-tool`](harness-tool.md) 里 Tool 结果的字节预算判定与它复用同一实现。
 
 ## Resource 引用与 URI 校验
 

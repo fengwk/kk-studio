@@ -41,6 +41,20 @@ POSIX 目录为 0700、文件为 0600；受控临时产物在支持 ACL 的文�
 
 构造失败释放已创建资源。`start()` 幂等；断开后指数退避，上限由配置决定，连接成功后重置。每次连接有新代际，旧连接回调不再推进当前状态。注册被拒进入 FAILED、停止重连并使进程非零退出；`RETRY_LATER` 则退避重连。
 
+运行时只做装配与协议派发，各类状态由一个组件负责：
+
+| 组件 | 状态与职责 |
+| --- | --- |
+| `DaemonConnectionSession` | 连接代际、绑定、握手、心跳与重连 |
+| `DaemonInvocationCoordinator` | journal 去重、能力派发与终态提交 |
+| `DaemonRunningInvocation` | 单次调用的句柄、deadline、终态互斥与收尾窗口 |
+| `DaemonUpdateCoordinator` | 更新操作的原子认领、冻结回执与重连重放 |
+| `DaemonTemporaryResourcePolicy` | 临时 workspace 的保留期、扫描间隔与清扫 |
+| `DaemonResourceTransferClient` | 连接作用域的上传预算、票据与传输等待 |
+
+各组件通过出站和上传窄端口协作，不另存一份连接或调用状态。更新操作的已完成判断、在途认领、
+结果缓存与认领释放使用同一互斥门，下载、分离更新器启动与回执发送不持门。
+
 INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已有条目直接重放；新调用检查能力标识、版本和 arguments schema，使用 wire 的有效超时，不回落 descriptor 默认值。运行时预检通过才发送 STARTED，然后进入能力执行。STARTED 不保证宿主命令已经启动，能力自己的路径或进程启动预检仍可能失败。
 
 ### 超时与取消收尾
@@ -49,7 +63,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 能力可通过 `terminationGrace()` 声明有界收尾预算。运行时先开启窗口和兜底定时器，再请求收尾；预算内返回的能力文本追加到裁决正文，保留终态类型，便于失败时带回已捕获输出。超大文本不注入；兜底到期或调度器不可用则直接提交裁决。journal 的 RUNNING → terminal 原子跃迁只允许一次终态。
 
-关闭运行时时先关闭连接与传输，取消在途调用并尝试写入 CANCELLED，清空运行集合，再关闭 LSP 等能力资源，最后依次关闭任务、LSP、调度执行器（各最多等待 5 秒）。**不会清空 journal 的已有条目**，但 journal 是内存数据，进程结束后丢失。
+关闭运行时时先关闭连接与传输，取消在途调用并尝试写入 CANCELLED，清空运行集合，再关闭 LSP 等能力资源，最后依次关闭任务、LSP、调度执行器（各最多等待 5 秒）。单个能力的终止异常不阻断其它调用的取消与 journal 收尾；后续资源释放和终止闩释放独立执行，进程级 Error 仍传播。**不会清空 journal 的已有条目**，但 journal 是内存数据，进程结束后丢失。
 
 ### 实例身份与重连恢复
 
@@ -80,6 +94,8 @@ workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿�
 ### 进程执行范围
 
 [`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java) 与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java) 先建立 OS 范围，再经父进程校验和 permit 放行用户命令。helper 冷启动也计入有效超时；放行前取消或失败不会执行用户命令。无法建立范围时明确失败，不退化为无范围直接执行。
+
+[`ProcessScopeHelperLauncher`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelperLauncher.java) 只负责子 JVM 命令、标准流模式和覆盖率代理注入与收集；范围确认、取消与收敛仍归 `ProcessScope`。helper 使用编译期常量读取启动契约，不加载父进程的日志组件。状态目录清理返回真实结果，未清理完成只记录安全诊断，不改变命令结果或阻断其它清理。
 
 - Linux/WSL/macOS：helper 用 JNA `setsid` 建立 session/进程组；普通后代从创建起归组。结束时先温和信号、宽限后强杀，再向内核确认没有活成员；僵尸不算活成员。
 - Windows：命名 Job Object 设置 kill-on-close，不开放 breakaway；首进程在创建时进入 Job，父进程另持句柄。只有 Job 的 ActiveProcesses 为 0 才确认范围结束，helper 退出或根进程退出都不能代替此检查。
