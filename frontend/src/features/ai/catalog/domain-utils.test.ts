@@ -17,6 +17,7 @@ import {
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import {
   emptyAgentDraft,
   emptyModelDraft,
@@ -34,6 +35,8 @@ import {
 import type {
   AgentModelDTO,
   AgentModelConfigDTO,
+  AgentProviderDTO,
+  AgentProviderType,
 } from '@/shared/api/contracts/ai-catalog'
 
 function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
@@ -105,7 +108,6 @@ describe('AI domain utilities', () => {
 
     expect(
       toProviderDraft({
-        id: 'provider-1',
         name: 'minimax',
         description: 'provider desc',
         providerType: 'openai_response',
@@ -113,8 +115,10 @@ describe('AI domain utilities', () => {
         configured: true,
         modelCallTimeoutMillis: 120000,
         modelCallIdleTimeoutMillis: 3000,
+        version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
+        modelHttpRetryStatusCodes: null,
       }),
     ).toEqual({
       name: 'minimax',
@@ -154,10 +158,10 @@ describe('AI domain utilities', () => {
 
     expect(
       toAgentDraft({
-        id: 'agent-1',
         name: 'assistant',
         description: 'desc',
         systemPrompt: 'prompt',
+        type: 'USER',
         model: 'minimax/MiniMax-M2.7',
         variant: 'default',
         config: {
@@ -184,7 +188,7 @@ describe('AI domain utilities', () => {
     const providerInput = {
       name: ' minimax ',
       description: ' provider desc ',
-      providerType: ' openai ',
+      providerType: ' openai ' as unknown as AgentProviderType,
       baseUrl: ' https://api.minimax.io/v1 ',
       credential: ' secret ',
       modelCallTimeoutMillis: '120000',
@@ -339,11 +343,10 @@ describe('AI domain utilities', () => {
     ]
     const models: AgentModelView[] = [
       { ...model({ name: 'MiniMax-M2.7' }), providerName: 'minimax' },
-      { ...model({ id: 'model-2', name: 'gpt-5.4' }), providerName: 'openai' },
+      { ...model({ name: 'gpt-5.4', modelId: 'gpt-5.4' }), providerName: 'openai' },
     ]
-    const providers = [
+    const providers: AgentProviderDTO[] = [
       {
-        id: 'provider-1',
         name: 'minimax',
         description: 'MiniMax endpoint',
         providerType: 'openai',
@@ -354,9 +357,9 @@ describe('AI domain utilities', () => {
         version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
+        modelHttpRetryStatusCodes: null,
       },
       {
-        id: 'provider-2',
         name: 'openai',
         description: 'OpenAI',
         providerType: 'openai_response',
@@ -367,6 +370,7 @@ describe('AI domain utilities', () => {
         version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
+        modelHttpRetryStatusCodes: null,
       },
     ]
 
@@ -392,6 +396,7 @@ describe('AI domain utilities', () => {
             id: '2',
             title: 'beta',
             agentName: 'missing',
+            environmentName: null,
             yoloEnabled: false,
             version: '1',
             createTime: '2026-06-21T00:00:00',
@@ -401,6 +406,7 @@ describe('AI domain utilities', () => {
             id: '1',
             title: 'alpha',
             agentName: 'missing',
+            environmentName: null,
             yoloEnabled: false,
             version: '1',
             createTime: '2026-06-22T00:00:00',
@@ -414,6 +420,7 @@ describe('AI domain utilities', () => {
         id: '1',
         title: 'alpha',
         agentName: 'missing',
+        environmentName: null,
         yoloEnabled: false,
         version: '1',
         createTime: null,
@@ -424,8 +431,8 @@ describe('AI domain utilities', () => {
     expect(includesSearch('MiniMax', '')).toBe(true)
 
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
-    expect(resourceTitle({ kind: 'model', mode: 'edit' })).toBe('编辑 Model')
-    expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('新建 Agent')
+    expect(resourceTitle({ kind: 'model', mode: 'edit', providerName: 'minimax', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
+    expect(resourceTitle({ kind: 'agent', mode: 'create', type: 'USER' })).toBe('新建 Agent')
     expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
     expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
     expect(formatBackendDate(0)).toBe('-')
@@ -437,7 +444,6 @@ describe('AI domain utilities', () => {
   it('handles nullable resource fields and serialization fields', () => {
     expect(
       toProviderDraft({
-        id: 'provider-2',
         name: 'stub',
         description: null,
         providerType: null,
@@ -445,9 +451,11 @@ describe('AI domain utilities', () => {
         configured: false,
         modelCallTimeoutMillis: 1800000,
         modelCallIdleTimeoutMillis: 120000,
+        version: '1',
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
-      }),
+        modelHttpRetryStatusCodes: null,
+      } as unknown as AgentProviderDTO),
     ).toMatchObject({
       name: 'stub',
       description: '',
@@ -467,7 +475,6 @@ describe('AI domain utilities', () => {
 
     expect(
       toAgentDraft({
-        id: 'agent-2',
         name: 'fallback-agent',
         description: null,
         systemPrompt: null,
@@ -496,7 +503,7 @@ describe('AI domain utilities', () => {
       toEditableProvider({
         name: ' stub ',
         description: '   ',
-        providerType: ' openai ',
+        providerType: ' openai ' as unknown as AgentProviderType,
         baseUrl: '   ',
         credential: '   ',
         modelCallTimeoutMillis: '   ',

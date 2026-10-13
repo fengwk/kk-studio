@@ -181,7 +181,7 @@ describe('AiResourceForms', () => {
     render(<ModelFormHarness />)
 
     expect(screen.getByRole('heading', { name: 'Limit' })).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Name', exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Name' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '功能' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Pricing' })).toBeInTheDocument()
     expect(screen.getByLabelText('Tools')).toBeChecked()
@@ -363,6 +363,7 @@ describe('AiResourceForms', () => {
               configured: true,
               modelCallTimeoutMillis: 1800000,
               modelCallIdleTimeoutMillis: 120000,
+              version: '1',
               createTime: '2026-06-20T02:00:00',
               updateTime: '2026-06-20T02:00:00',
               modelHttpRetryStatusCodes: null,
@@ -565,7 +566,7 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByText('请选择 Provider')).toBeInTheDocument()
     expect(screen.getByText('请填写 Model 名称')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Name', exact: true })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByLabelText('Input USD per million tokens')).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByText('上下文窗口无效')).toBeInTheDocument()
     expect(screen.getByText('最大输出长度无效')).toBeInTheDocument()
@@ -661,6 +662,7 @@ function ModelFormHarness() {
           configured: true,
           modelCallTimeoutMillis: 1800000,
           modelCallIdleTimeoutMillis: 120000,
+          version: '1',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
           modelHttpRetryStatusCodes: null,
@@ -721,6 +723,7 @@ function AgentFormHarness() {
         {
           providerName: 'minimax',
           name: 'MiniMax-M2.7',
+          modelId: 'minimax-m2.7',
           description: null,
           config: {
             limit: { context: 128000, output: 8192 },
@@ -741,12 +744,14 @@ function AgentFormHarness() {
             defaultVariant: 'default',
             variants: [{ id: 'default' }],
           },
+          version: '1',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },
         {
           providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
+          modelId: 'claude-sonnet-4.5',
           description: null,
           config: {
             limit: { context: 200000, output: 16000 },
@@ -767,6 +772,7 @@ function AgentFormHarness() {
             defaultVariant: 'creative',
             variants: [{ id: 'creative' }, { id: 'precise' }],
           },
+          version: '1',
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
         },

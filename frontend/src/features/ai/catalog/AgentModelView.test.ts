@@ -22,7 +22,7 @@ function model(providerName = 'minimax', name = 'MiniMax-M2.7'): AgentModelDTO {
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
   }
-  return { providerName, name, description: null, config, version: '1', createTime: null, updateTime: null }
+  return { providerName, name, modelId: name.toLowerCase(), description: null, config, version: '1', createTime: null, updateTime: null }
 }
 
 describe('AgentModelView', () => {
