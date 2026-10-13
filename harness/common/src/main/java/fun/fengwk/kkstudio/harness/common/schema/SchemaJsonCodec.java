@@ -64,7 +64,8 @@ public final class SchemaJsonCodec {
     } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed input schema JSON", error);
     }
-    if (root == null) {
+    // Jackson 3 对空/纯空白输入返回 MissingNode 而非 null，两种形态都在解码入口统一拒绝。
+    if (root == null || root.isMissingNode()) {
       throw new IllegalArgumentException("input schema JSON must not be empty");
     }
     return decodeNode(root, "inputSchema");

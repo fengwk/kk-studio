@@ -7,9 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.databind.DatabindException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationContext;
+import tools.jackson.databind.ValueSerializer;
+import tools.jackson.databind.annotation.JsonSerialize;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
@@ -116,5 +123,34 @@ class BoundedJsonWriterTest {
       return error;
     }
     throw new AssertionError("expected BoundedOutputStream to abort over limit");
+  }
+
+  /**
+   * 通用序列化失败（非超限）必须抛 IllegalArgumentException 而不是被误判为超限返回 null，并保留原始 Jackson cause； 超限识别只认 {@link
+   * BoundedOutputStream.LimitExceededException}。
+   */
+  @Test
+  void serializationFailureSurfacesAsIllegalArgumentNotOverLimitNull() {
+    JsonNode node = JsonNodeFactory.instance.pojoNode(new ThrowingValue());
+
+    IllegalArgumentException writeError =
+        assertThrows(IllegalArgumentException.class, () -> BoundedJsonWriter.write(node, 1024));
+    assertEquals("cannot encode JSON", writeError.getMessage());
+    assertTrue(writeError.getCause() instanceof JacksonException);
+    assertFalse(BoundedJsonWriter.isOverLimit(writeError));
+
+    assertThrows(IllegalArgumentException.class, () -> BoundedJsonWriter.fits(node, 1024));
+  }
+
+  /** 让序列化器直接抛出 JacksonException 的真实 POJO，用于验证通用失败不会被当成超限。 */
+  @JsonSerialize(using = ThrowingSerializer.class)
+  private static final class ThrowingValue {}
+
+  private static final class ThrowingSerializer extends ValueSerializer<ThrowingValue> {
+    @Override
+    public void serialize(
+        ThrowingValue value, JsonGenerator generator, SerializationContext context) {
+      throw DatabindException.from(generator, "serializer failure");
+    }
   }
 }

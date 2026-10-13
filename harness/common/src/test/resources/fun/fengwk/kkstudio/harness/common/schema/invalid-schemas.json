@@ -1,0 +1,255 @@
+[
+  {
+    "name": "missing-properties",
+    "error": "must declare 'properties'",
+    "schema": {"type": "object", "required": [], "additionalProperties": false}
+  },
+  {
+    "name": "missing-required",
+    "error": "must declare 'required'",
+    "schema": {"type": "object", "properties": {}, "additionalProperties": false}
+  },
+  {
+    "name": "missing-additional-properties",
+    "error": "must declare 'additionalProperties'",
+    "schema": {"type": "object", "properties": {}, "required": []}
+  },
+  {
+    "name": "root-type-not-object",
+    "error": "schema type must be 'object'",
+    "schema": {"type": "string", "properties": {}, "required": [], "additionalProperties": false}
+  },
+  {
+    "name": "root-unknown-field",
+    "error": "unknown field: 'extra'",
+    "schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false,
+      "extra": 1
+    }
+  },
+  {
+    "name": "root-property-not-object",
+    "error": "property 'p' must be an object",
+    "schema": {"type": "object", "properties": {"p": 1}, "required": [], "additionalProperties": false}
+  },
+  {
+    "name": "root-blank-property-name",
+    "error": "inputSchema validation failed: properties must use non-blank names",
+    "schema": {
+      "type": "object",
+      "properties": {"": {"type": "string"}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "root-description-not-string",
+    "error": "'description' must be a string",
+    "schema": {
+      "type": "object",
+      "description": 1,
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "required-not-array",
+    "error": "'required' must be an array",
+    "schema": {"type": "object", "properties": {}, "required": {}, "additionalProperties": false}
+  },
+  {
+    "name": "required-entry-not-string",
+    "error": "'required'[0] must be a string",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string"}},
+      "required": [1],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "required-entry-blank",
+    "error": "'required'[0] must be non-blank",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string"}},
+      "required": [""],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "required-entry-duplicate",
+    "error": "'required' contains duplicate entry: p",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string"}},
+      "required": ["p", "p"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "required-entry-not-declared",
+    "error": "'required' entry 'missing' is not declared in 'properties'",
+    "schema": {"type": "object", "properties": {}, "required": ["missing"], "additionalProperties": false}
+  },
+  {
+    "name": "additional-properties-not-boolean",
+    "error": "'additionalProperties' must be boolean",
+    "schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": "yes"
+    }
+  },
+  {
+    "name": "property-missing-type",
+    "error": "'type' must be a non-blank string",
+    "schema": {"type": "object", "properties": {"p": {}}, "required": [], "additionalProperties": false}
+  },
+  {
+    "name": "property-description-not-string",
+    "error": "'description' must be a string",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string", "description": 1}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "enum-not-array",
+    "error": "'enum' must be an array",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string", "enum": "A"}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "enum-entry-not-string",
+    "error": "'enum'[1] must be a string",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string", "enum": ["A", 1]}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "enum-entry-blank",
+    "error": "'enum'[0] must be non-blank",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string", "enum": [""]}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "enum-entry-duplicate",
+    "error": "'enum' contains duplicate entry: A",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string", "enum": ["A", "A"]}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "enum-empty",
+    "error": "enum schema invalid: values must contain non-blank entries",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "string", "enum": []}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "array-items-not-object",
+    "error": "items must be a JSON object",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "array", "items": []}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "unknown-schema-type",
+    "error": "unknown schema type: bogus",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "bogus"}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "unknown-schema-type-in-items",
+    "error": "unknown schema type: bogus",
+    "schema": {
+      "type": "object",
+      "properties": {"p": {"type": "array", "items": {"type": "bogus"}}},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "nested-property-not-object",
+    "error": "property 'q' must be an object",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "p": {
+          "type": "object",
+          "properties": {"q": 1},
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "nested-required-not-declared",
+    "error": "'required' entry 'x' is not declared in 'properties'",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "p": {
+          "type": "object",
+          "properties": {"q": {"type": "string"}},
+          "required": ["x"],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "nested-blank-property-name",
+    "error": "object schema invalid: properties must use non-blank names",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "p": {
+          "type": "object",
+          "properties": {"": {"type": "string"}},
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+]

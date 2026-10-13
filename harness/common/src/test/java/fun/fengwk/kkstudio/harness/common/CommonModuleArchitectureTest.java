@@ -123,9 +123,10 @@ class CommonModuleArchitectureTest {
   }
 
   private static boolean isAllowedImport(String imported) {
+    // com.fasterxml.jackson 只保留 Jackson 3 仍复用的注解；core/databind 必须走 tools.jackson，禁止回流。
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
-        || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("com.fasterxml.jackson.annotation.")
         || imported.startsWith("tools.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.");
   }

@@ -1,12 +1,17 @@
 package fun.fengwk.kkstudio.harness.common.json;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+
+import java.math.BigDecimal;
 
 /** {@link JsonValues} 的严格 JSON 校验、顶层对象约束、重复字段与尾随 token 拦截测试。 */
 class JsonValuesTest {
@@ -83,5 +88,56 @@ class JsonValuesTest {
 
     String written = JsonValues.write(node);
     assertEquals("{\"k\":\"v\"}", written);
+  }
+
+  /** readTree 必须与 requireValidJson 一样拒绝 null 入参，而不是抛出 NullPointerException。 */
+  @Test
+  void readTreeRejectsNullInput() {
+    assertThrows(IllegalArgumentException.class, () -> JsonValues.readTree(null));
+  }
+
+  /** 空白输入在 Jackson 3 解析为 MissingNode，必须被显式拒绝；合法 JSON 字面量 null 仍解析为 NullNode。 */
+  @Test
+  void readTreeRejectsBlankButKeepsJsonNullLiteral() {
+    assertThrows(IllegalArgumentException.class, () -> JsonValues.readTree(""));
+    assertThrows(IllegalArgumentException.class, () -> JsonValues.readTree(" \r\n\t"));
+
+    JsonNode nullNode = JsonValues.readTree("null");
+    assertTrue(nullNode.isNull());
+    assertFalse(nullNode.isMissingNode());
+    assertEquals("null", JsonValues.write(nullNode));
+  }
+
+  /** USE_BIG_DECIMAL_FOR_FLOATS：超出 double 范围的指数按 BigDecimal 无损读回，不退化为 Infinity/0。 */
+  @Test
+  void readsOutOfDoubleRangeNumbersAsBigDecimal() {
+    JsonNode huge = JsonValues.readTree("1e309");
+    assertTrue(huge.isNumber());
+    assertEquals(new BigDecimal("1e309"), huge.decimalValue());
+    assertEquals("1E+309", JsonValues.write(huge));
+
+    JsonNode tiny = JsonValues.readTree("1e-324");
+    assertTrue(tiny.isNumber());
+    assertEquals(new BigDecimal("1e-324"), tiny.decimalValue());
+    assertEquals("1E-324", JsonValues.write(tiny));
+  }
+
+  /** 无法序列化的 POJONode 必须转成 IllegalStateException 并保留 Jackson cause，而不是静默产出错误文本。 */
+  @Test
+  void writeWrapsSerializationFailureAndKeepsJacksonCause() {
+    JsonNode broken = JsonNodeFactory.instance.pojoNode(new BrokenSerializable());
+
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> JsonValues.write(broken));
+    assertTrue(error.getMessage().contains("cannot encode JSON node"));
+    assertTrue(error.getCause() instanceof JacksonException);
+  }
+
+  /** 序列化期抛异常的 POJO：getter 抛错会被 Jackson 包装成 DatabindException（JacksonException）。 */
+  private static final class BrokenSerializable {
+    @SuppressWarnings("unused")
+    public String getValue() {
+      throw new IllegalStateException("cannot serialize");
+    }
   }
 }
