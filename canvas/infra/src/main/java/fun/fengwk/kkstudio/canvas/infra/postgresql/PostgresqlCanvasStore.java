@@ -14,26 +14,26 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** {@link CanvasStore} 的 PostgreSQL/MyBatis 实现。 */
+/** {@link CanvasStore} 的 PostgreSQL/JDBC 实现。 */
 @Repository
 public class PostgresqlCanvasStore implements CanvasStore {
 
-  private final CanvasDocumentMapper documentMapper;
-  private final CanvasNodeMapper nodeMapper;
-  private final CanvasGroupMapper groupMapper;
-  private final CanvasCommandDedupMapper commandDedupMapper;
+  private final CanvasDocumentJdbcStore documentStore;
+  private final CanvasNodeJdbcStore nodeStore;
+  private final CanvasGroupJdbcStore groupStore;
+  private final CanvasCommandDedupJdbcStore commandDedupStore;
   private final PostgresqlCanvasChangeNotifier notifier;
 
   public PostgresqlCanvasStore(
-      CanvasDocumentMapper documentMapper,
-      CanvasNodeMapper nodeMapper,
-      CanvasGroupMapper groupMapper,
-      CanvasCommandDedupMapper commandDedupMapper,
+      CanvasDocumentJdbcStore documentStore,
+      CanvasNodeJdbcStore nodeStore,
+      CanvasGroupJdbcStore groupStore,
+      CanvasCommandDedupJdbcStore commandDedupStore,
       PostgresqlCanvasChangeNotifier notifier) {
-    this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
-    this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
-    this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");
-    this.commandDedupMapper = Objects.requireNonNull(commandDedupMapper, "commandDedupMapper");
+    this.documentStore = Objects.requireNonNull(documentStore, "documentStore");
+    this.nodeStore = Objects.requireNonNull(nodeStore, "nodeStore");
+    this.groupStore = Objects.requireNonNull(groupStore, "groupStore");
+    this.commandDedupStore = Objects.requireNonNull(commandDedupStore, "commandDedupStore");
     this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
 
@@ -43,39 +43,37 @@ public class PostgresqlCanvasStore implements CanvasStore {
     CanvasDocumentDO document = new CanvasDocumentDO();
     document.setId(canvasId);
     document.setTitle(title);
-    if (documentMapper.insert(document) != 1) {
+    if (documentStore.insert(document) != 1) {
       throw new IllegalStateException("insert canvas document failed");
     }
-    CanvasDocumentDO persisted = documentMapper.getById(canvasId);
-    if (persisted == null) {
-      throw new IllegalStateException("canvas document disappeared after insert");
-    }
+    CanvasDocumentDO persisted =
+        documentStore
+            .findById(canvasId)
+            .orElseThrow(
+                () -> new IllegalStateException("canvas document disappeared after insert"));
     notifier.revisionChanged(canvasId, persisted.getRevision());
     return toDomain(persisted);
   }
 
   @Override
   public Optional<CanvasDocument> findDocument(UUID canvasId) {
-    return Optional.ofNullable(documentMapper.getById(canvasId))
-        .map(PostgresqlCanvasStore::toDomain);
+    return documentStore.findById(canvasId).map(PostgresqlCanvasStore::toDomain);
   }
 
   @Override
   public Optional<CanvasDocument> lockDocument(UUID canvasId) {
-    return Optional.ofNullable(documentMapper.getByIdForUpdate(canvasId))
-        .map(PostgresqlCanvasStore::toDomain);
+    return documentStore.findByIdForUpdate(canvasId).map(PostgresqlCanvasStore::toDomain);
   }
 
   @Override
   public Optional<CanvasDocument> lockDocumentForKeyShare(UUID canvasId) {
-    return Optional.ofNullable(documentMapper.getByIdForKeyShare(canvasId))
-        .map(PostgresqlCanvasStore::toDomain);
+    return documentStore.findByIdForKeyShare(canvasId).map(PostgresqlCanvasStore::toDomain);
   }
 
   @Override
   public List<CanvasDocument> listDocuments() {
     List<CanvasDocument> documents = new ArrayList<>();
-    for (CanvasDocumentDO document : documentMapper.listAll()) {
+    for (CanvasDocumentDO document : documentStore.listAll()) {
       documents.add(toDomain(document));
     }
     return List.copyOf(documents);
@@ -84,7 +82,7 @@ public class PostgresqlCanvasStore implements CanvasStore {
   @Override
   @Transactional
   public boolean advanceRevision(UUID canvasId, long expectedRevision, long newRevision) {
-    if (documentMapper.advanceRevision(canvasId, expectedRevision, newRevision) != 1) {
+    if (documentStore.advanceRevision(canvasId, expectedRevision, newRevision) != 1) {
       return false;
     }
     // revision 未真实变化时保持静默：不发布 revision 失效提示。
@@ -96,32 +94,30 @@ public class PostgresqlCanvasStore implements CanvasStore {
 
   @Override
   public boolean deleteDocument(UUID canvasId) {
-    return documentMapper.deleteById(canvasId) == 1;
+    return documentStore.deleteById(canvasId) == 1;
   }
 
   @Override
   public void addNode(NodeRecord node) {
-    if (nodeMapper.insert(toData(node)) != 1) {
+    if (nodeStore.insert(toData(node)) != 1) {
       throw new IllegalStateException("insert canvas node failed: " + node.id());
     }
   }
 
   @Override
   public Optional<NodeRecord> findNode(UUID canvasId, UUID nodeId) {
-    return Optional.ofNullable(nodeMapper.getById(canvasId, nodeId))
-        .map(PostgresqlCanvasStore::toDomain);
+    return nodeStore.findById(canvasId, nodeId).map(PostgresqlCanvasStore::toDomain);
   }
 
   @Override
   public Optional<NodeRecord> lockNode(UUID canvasId, UUID nodeId) {
-    return Optional.ofNullable(nodeMapper.getByIdForUpdate(canvasId, nodeId))
-        .map(PostgresqlCanvasStore::toDomain);
+    return nodeStore.findByIdForUpdate(canvasId, nodeId).map(PostgresqlCanvasStore::toDomain);
   }
 
   @Override
   public List<NodeRecord> listNodes(UUID canvasId) {
     List<NodeRecord> nodes = new ArrayList<>();
-    for (CanvasNodeDO node : nodeMapper.listByCanvas(canvasId)) {
+    for (CanvasNodeDO node : nodeStore.listByCanvas(canvasId)) {
       nodes.add(toDomain(node));
     }
     return List.copyOf(nodes);
@@ -129,31 +125,30 @@ public class PostgresqlCanvasStore implements CanvasStore {
 
   @Override
   public boolean updateNode(NodeRecord node) {
-    return nodeMapper.update(toData(node)) == 1;
+    return nodeStore.update(toData(node)) == 1;
   }
 
   @Override
   public boolean deleteNode(UUID canvasId, UUID nodeId) {
-    return nodeMapper.deleteById(canvasId, nodeId) == 1;
+    return nodeStore.deleteById(canvasId, nodeId) == 1;
   }
 
   @Override
   public void addGroup(CanvasGroup group) {
-    if (groupMapper.insert(toData(group)) != 1) {
+    if (groupStore.insert(toData(group)) != 1) {
       throw new IllegalStateException("insert canvas group failed: " + group.id());
     }
   }
 
   @Override
   public Optional<CanvasGroup> findGroup(UUID canvasId, UUID groupId) {
-    return Optional.ofNullable(groupMapper.getById(canvasId, groupId))
-        .map(PostgresqlCanvasStore::toDomain);
+    return groupStore.findById(canvasId, groupId).map(PostgresqlCanvasStore::toDomain);
   }
 
   @Override
   public List<CanvasGroup> listGroups(UUID canvasId) {
     List<CanvasGroup> groups = new ArrayList<>();
-    for (CanvasGroupDO group : groupMapper.listByCanvas(canvasId)) {
+    for (CanvasGroupDO group : groupStore.listByCanvas(canvasId)) {
       groups.add(toDomain(group));
     }
     return List.copyOf(groups);
@@ -161,30 +156,31 @@ public class PostgresqlCanvasStore implements CanvasStore {
 
   @Override
   public boolean updateGroup(CanvasGroup group) {
-    return groupMapper.update(toData(group)) == 1;
+    return groupStore.update(toData(group)) == 1;
   }
 
   @Override
   public boolean deleteGroup(UUID canvasId, UUID groupId) {
-    return groupMapper.deleteById(canvasId, groupId) == 1;
+    return groupStore.deleteById(canvasId, groupId) == 1;
   }
 
   @Override
   public Optional<CommandDedup> findCommandDedup(UUID canvasId, UUID idempotencyKey) {
-    return Optional.ofNullable(commandDedupMapper.findById(canvasId, idempotencyKey))
+    return commandDedupStore
+        .findById(canvasId, idempotencyKey)
         .map(PostgresqlCanvasStore::toDomain);
   }
 
   @Override
   public void addCommandDedup(CommandDedup commandDedup) {
-    if (commandDedupMapper.insert(toData(commandDedup)) != 1) {
+    if (commandDedupStore.insert(toData(commandDedup)) != 1) {
       throw new IllegalStateException("insert canvas command dedup failed");
     }
   }
 
   @Override
   public int deleteCommandDedupByCanvas(UUID canvasId) {
-    return commandDedupMapper.deleteByCanvas(canvasId);
+    return commandDedupStore.deleteByCanvas(canvasId);
   }
 
   private static CanvasDocument toDomain(CanvasDocumentDO document) {

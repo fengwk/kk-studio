@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.util.UUID;
 
@@ -12,7 +12,7 @@ import java.util.UUID;
 class PostgresqlCanvasChangeNotifierTest {
 
   private final PostgresqlCanvasChangeNotifier notifier =
-      new PostgresqlCanvasChangeNotifier(mock(JdbcTemplate.class));
+      new PostgresqlCanvasChangeNotifier(mock(JdbcClient.class));
 
   @Test
   void rejectsNotificationWithoutActiveTransaction() {

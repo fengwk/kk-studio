@@ -20,7 +20,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/** 守护 Canvas Infra 只承载 Canvas Core 的 PostgreSQL/MyBatis、codec 与 Function Runtime。 */
+/** 守护 Canvas Infra 只承载 Canvas Core 的 PostgreSQL/JDBC、codec 与 Function Runtime。 */
 class CanvasInfraArchitectureTest {
 
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.canvas.infra";
@@ -29,8 +29,8 @@ class CanvasInfraArchitectureTest {
           "com.fasterxml.jackson.core:jackson-databind",
           "fun.fengwk.convention4j:convention4j-spring-boot-starter",
           "fun.fengwk.kk-studio:kk-studio-canvas-core",
-          "org.mybatis.spring.boot:mybatis-spring-boot-starter",
-          "org.springframework.boot:spring-boot-starter-aspectj");
+          "org.springframework.boot:spring-boot-starter-aspectj",
+          "org.springframework.boot:spring-boot-starter-jdbc");
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
           "com.fasterxml.jackson.",
@@ -39,7 +39,6 @@ class CanvasInfraArchitectureTest {
           "java.",
           "javax.",
           "lombok.",
-          "org.apache.ibatis.",
           "org.springframework.");
 
   /** 生产源码必须留在 infra 包内，且不能反向依赖 Platform/Harness/Web。 */

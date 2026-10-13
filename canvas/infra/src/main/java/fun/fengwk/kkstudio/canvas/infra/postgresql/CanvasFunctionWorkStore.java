@@ -20,15 +20,15 @@ import java.util.Optional;
 @Repository
 public class CanvasFunctionWorkStore {
 
-  private final CanvasFunctionWorkMapper mapper;
+  private final CanvasFunctionLeaseJdbcStore leaseStore;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final PostgresqlCanvasChangeNotifier notifier;
 
   public CanvasFunctionWorkStore(
-      CanvasFunctionWorkMapper mapper,
+      CanvasFunctionLeaseJdbcStore leaseStore,
       CanvasFunctionRunStateCodecPort stateCodec,
       PostgresqlCanvasChangeNotifier notifier) {
-    this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
@@ -37,16 +37,16 @@ public class CanvasFunctionWorkStore {
     requireToken(ownerToken);
     now = normalize(now);
     Instant leaseUntil = now.plus(requirePositiveMillis(leaseDuration));
-    CanvasFunctionRunDO claimed =
-        mapper.claimNext(toOffsetDateTime(now), ownerToken, toOffsetDateTime(leaseUntil));
-    return Optional.ofNullable(claimed).map(this::toClaimedRun);
+    return leaseStore
+        .claimNext(toOffsetDateTime(now), ownerToken, toOffsetDateTime(leaseUntil))
+        .map(this::toClaimedRun);
   }
 
   public boolean renew(ClaimedRun claim, Instant now, Duration leaseDuration) {
     Objects.requireNonNull(claim, "claim");
     now = normalize(now);
     Instant leaseUntil = now.plus(requirePositiveMillis(leaseDuration));
-    return mapper.renew(
+    return leaseStore.renew(
             claim.nodeId(),
             claim.requestId(),
             claim.leaseToken(),
@@ -65,7 +65,7 @@ public class CanvasFunctionWorkStore {
     Objects.requireNonNull(claim, "claim");
     now = normalize(now);
     Instant availableAt = now.plus(requirePositiveMillis(delay));
-    if (mapper.reschedule(
+    if (leaseStore.reschedule(
             claim.nodeId(),
             claim.requestId(),
             claim.leaseToken(),
@@ -80,7 +80,7 @@ public class CanvasFunctionWorkStore {
 
   public boolean isOwned(ClaimedRun claim, Instant now) {
     Objects.requireNonNull(claim, "claim");
-    return mapper.countOwned(
+    return leaseStore.countOwned(
             claim.nodeId(), claim.requestId(), claim.leaseToken(), toOffsetDateTime(normalize(now)))
         == 1;
   }
