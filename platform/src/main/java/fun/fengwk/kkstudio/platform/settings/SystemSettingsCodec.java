@@ -93,6 +93,8 @@ public class SystemSettingsCodec {
     this.canonicalMapper =
         JsonMapper.builder()
             .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+            // Jackson 3 默认把 record 的 creator 属性排在前面，会屏蔽字母序；canonical 契约要求所有层级键有序。
+            .disable(MapperFeature.SORT_CREATOR_PROPERTIES_FIRST)
             .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
             .changeDefaultPropertyInclusion(
                 inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
