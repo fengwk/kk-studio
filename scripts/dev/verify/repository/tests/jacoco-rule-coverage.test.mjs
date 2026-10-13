@@ -9,11 +9,9 @@ import { fileURLToPath } from 'node:url'
  * JaCoCo check 命名规约守护。
  *
  * `BundleChecker` 在匹配规则前按 `JavaNames` 转换元素名称：CLASS/PACKAGE 把 `/`、`$` 转为 `.`，
- * SOURCEFILE 仍是 `包/文件`，BUNDLE 用 bundle 名。因此 CLASS/PACKAGE 若写 `fun/fengwk/...` 或
- * `Outer$Inner`，元素永不命中、规则被静默跳过（假绿）。本测试沿 Maven `<modules>` 递归发现模块 POM，
- * 校验 CLASS/PACKAGE 使用的是能命中真实主源码的合法限定名；BUNDLE/SOURCEFILE 命名规约不同，保持区分。
- * 注：`project` 的 BUNDLE 规则写成包模式（`...project.domain.*`），而 BUNDLE 只匹配 bundle 名，同样不生效；
- * 该独立问题按当前范围不在本守护内处理。
+ * SOURCEFILE 用 `包/文件`，BUNDLE 用 bundle 显示名（POM top-level `<name>`，缺失时取模块 artifactId）。
+ * 因此 CLASS/PACKAGE 必须写能命中真实主源码的合法限定名，BUNDLE 必须写能命中 bundle 名的模式；
+ * 否则规则永不命中、门禁被静默跳过。本测试沿 Maven `<modules>` 递归发现模块 POM 并逐条校验。
  */
 
 function repositoryRoot() {
@@ -43,6 +41,17 @@ function stripComments(xml) {
   return xml.replace(/<!--[\s\S]*?-->/gu, '')
 }
 
+/** bundle 显示名：top-level `<name>`，缺失时取模块自身 artifactId（不含 `<parent>`）。 */
+function bundleName(xml) {
+  const clean = stripComments(xml)
+  const header = clean.split(/<(?:build|dependencies|profiles|properties)\b/u)[0]
+  const name = tagValues(header, 'name')[0]
+  if (name) {
+    return name
+  }
+  return tagValues(clean.replace(/<parent>[\s\S]*?<\/parent>/u, ''), 'artifactId')[0]
+}
+
 /**
  * 沿 Maven `<modules>` 递归发现模块 POM（不做全仓库目录遍历）。声明了但缺失的模块 POM 记为 violation，
  * 因为缺失的模块会让其门禁彻底失效而不被发现。
@@ -64,7 +73,7 @@ function discoverModulePoms(root) {
     }
     poms.push(pomPath)
     const moduleDirectory = path.dirname(pomPath)
-    for (const moduleName of tagValues(readFileSync(pomPath, 'utf8'), 'module')) {
+    for (const moduleName of tagValues(stripComments(readFileSync(pomPath, 'utf8')), 'module')) {
       const modulePom = path.join(moduleDirectory, moduleName, 'pom.xml')
       if (existsSync(modulePom)) {
         queue.push(modulePom)
@@ -83,11 +92,11 @@ function parseJacocoRules(xml) {
   const rules = []
   const plugins = [...stripComments(xml).matchAll(/<plugin>[\s\S]*?<\/plugin>/gu)]
     .map((match) => match[0])
-    .filter((block) => block.includes('<artifactId>jacoco-maven-plugin</artifactId>'))
+    .filter((block) => tagValues(block, 'artifactId').includes('jacoco-maven-plugin'))
   for (const plugin of plugins) {
     for (const block of plugin.matchAll(/<rule>([\s\S]*?)<\/rule>/gu)) {
       const body = block[1]
-      const element = body.match(/<element>\s*([^<\s]+)\s*<\/element>/u)?.[1]
+      const element = tagValues(body, 'element')[0]
       if (!element) {
         continue
       }
@@ -168,7 +177,19 @@ function matchesAny(pattern, names) {
   return false
 }
 
-/** 校验全部模块 POM 的 CLASS/PACKAGE 规则；其他 element 的命名规约不同，不作校验。 */
+/** 各 element 的匹配命名空间：CLASS/PACKAGE 用主源码限定名，BUNDLE 用 bundle 显示名，其他 element 不校验。 */
+function ruleNamespace(element, moduleDirectory, bundle) {
+  if (element === 'CLASS' || element === 'PACKAGE') {
+    const { classes, packages } = indexMainSources(moduleDirectory)
+    return element === 'CLASS' ? classes : packages
+  }
+  if (element === 'BUNDLE') {
+    return bundle ? new Set([bundle]) : null
+  }
+  return null
+}
+
+/** 校验全部模块 POM 的 CLASS/PACKAGE/BUNDLE 规则；SOURCEFILE 等命名规约不同，不作校验。 */
 function analyzeJacocoRules(root) {
   const { poms, violations } = discoverModulePoms(root)
   const stats = { modulePomCount: 0, classOrPackageRuleCount: 0, includePatternCount: 0 }
@@ -176,26 +197,44 @@ function analyzeJacocoRules(root) {
     stats.modulePomCount += 1
     const relativePom = path.relative(root, pomPath).split(path.sep).join('/')
     const moduleDirectory = path.dirname(pomPath)
-    for (const rule of parseJacocoRules(readFileSync(pomPath, 'utf8'))) {
-      if (rule.element !== 'CLASS' && rule.element !== 'PACKAGE') {
+    const xml = readFileSync(pomPath, 'utf8')
+    const bundle = bundleName(xml)
+    for (const rule of parseJacocoRules(xml)) {
+      if (rule.element !== 'CLASS' && rule.element !== 'PACKAGE' && rule.element !== 'BUNDLE') {
         continue
       }
-      stats.classOrPackageRuleCount += 1
-      const { classes, packages } = indexMainSources(moduleDirectory)
-      const names = rule.element === 'CLASS' ? classes : packages
-      for (const pattern of [...rule.includes, ...rule.excludes]) {
-        if (!isQualifiedNamePattern(pattern)) {
-          violations.push(
-            `${relativePom}: ${rule.element} rule pattern '${pattern}' is not a qualified name`,
-          )
+      if (rule.element !== 'BUNDLE') {
+        stats.classOrPackageRuleCount += 1
+      }
+      const namespace = ruleNamespace(rule.element, moduleDirectory, bundle)
+      // BUNDLE 的 exclude 属于 bundle 命名空间，不按 CLASS/PACKAGE 规约处理。
+      if (rule.element !== 'BUNDLE') {
+        for (const pattern of [...rule.includes, ...rule.excludes]) {
+          if (!isQualifiedNamePattern(pattern)) {
+            violations.push(
+              `${relativePom}: ${rule.element} rule pattern '${pattern}' is not a qualified name`,
+            )
+          }
         }
       }
+      if (rule.includes.length === 0) {
+        continue
+      }
+      if (namespace === null) {
+        violations.push(`${relativePom}: cannot resolve bundle name for ${rule.element} rule`)
+        continue
+      }
       for (const pattern of rule.includes) {
-        stats.includePatternCount += 1
-        if (isQualifiedNamePattern(pattern) && !matchesAny(pattern, names)) {
-          violations.push(
-            `${relativePom}: ${rule.element} rule include '${pattern}' matches no main source`,
-          )
+        if (rule.element !== 'BUNDLE') {
+          stats.includePatternCount += 1
+        }
+        if (isQualifiedNamePattern(pattern) || rule.element === 'BUNDLE') {
+          if (!matchesAny(pattern, namespace)) {
+            const subject = rule.element === 'CLASS' || rule.element === 'PACKAGE' ? 'main source' : 'bundle name'
+            violations.push(
+              `${relativePom}: ${rule.element} rule include '${pattern}' matches no ${subject}`,
+            )
+          }
         }
       }
     }
@@ -204,9 +243,13 @@ function analyzeJacocoRules(root) {
 }
 
 /** 临时仓库 fixture：两层 `<modules>` 聚合 + 一个带 JaCoCo 规则与主源码的模块。 */
-function createFixture({ rulesXml = '', sources = { 'demo/Existing.java': 'package demo;\nclass Existing {}\n' } } = {}) {
+function createFixture({
+  rulesXml = '',
+  artifactId = 'demo-mod',
+  name,
+  sources = { 'demo/Existing.java': 'package demo;\nclass Existing {}\n' },
+} = {}) {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'kk-studio-jacoco-'))
-  const moduleDirectory = path.join(fixtureRoot, 'group/sub/mod')
   const write = (relativePath, content) => {
     const target = path.join(fixtureRoot, relativePath)
     mkdirSync(path.dirname(target), { recursive: true })
@@ -217,9 +260,10 @@ function createFixture({ rulesXml = '', sources = { 'demo/Existing.java': 'packa
   write('group/sub/pom.xml', '<?xml version="1.0"?><project><modules><module>mod</module></modules></project>\n')
   write(
     'group/sub/mod/pom.xml',
-    `<?xml version="1.0"?><project><build><plugins><plugin>
-<artifactId>jacoco-maven-plugin</artifactId><configuration><rules>${rulesXml}</rules></configuration>
-</plugin></plugins></build></project>\n`,
+    `<?xml version="1.0"?><project><artifactId>${artifactId}</artifactId>
+${name ? `<name>${name}</name>` : ''}
+<build><plugins><plugin><artifactId>jacoco-maven-plugin</artifactId>
+<configuration><rules>${rulesXml}</rules></configuration></plugin></plugins></build></project>\n`,
   )
   for (const [relativePath, content] of Object.entries(sources)) {
     write(path.join('group/sub/mod/src/main/java', relativePath), content)
@@ -242,7 +286,7 @@ function ruleOf(element, ...patterns) {
 <limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.90</minimum></limit></limits></rule>`
 }
 
-test('every repository CLASS/PACKAGE JaCoCo rule uses matching qualified names', () => {
+test('every repository CLASS/PACKAGE/BUNDLE JaCoCo rule matches the element namespace it targets', () => {
   // 本仓库门禁自身必须全部通过，且扫描到的规则/模式数量具有代表性（防止校验器静默失配）。
   const { violations, stats } = analyzeJacocoRules(REPOSITORY_ROOT)
   assert.deepEqual(violations, [])
@@ -299,14 +343,30 @@ test('PACKAGE rule matches real main packages and rejects slash notation', () =>
   })
 })
 
-test('element distinction keeps BUNDLE and SOURCEFILE rules out of the qualified-name check', () => {
-  // SOURCEFILE 用 `包/文件`，BUNDLE 用 bundle 名；二者都不应按 CLASS 规约被判非法。
-  const rulesXml =
-    ruleOf('CLASS', 'demo.Existing') +
-    ruleOf('SOURCEFILE', 'demo/Existing.java') +
-    ruleOf('BUNDLE', 'kk-studio-fixture')
+test('element distinction keeps SOURCEFILE rules out of the qualified-name check', () => {
+  // SOURCEFILE 用 `包/文件`，不应按 CLASS 规约被判非法。
+  const rulesXml = ruleOf('CLASS', 'demo.Existing') + ruleOf('SOURCEFILE', 'demo/Existing.java')
   withFixture({ rulesXml }, (root) => {
     assert.deepEqual(analyzeJacocoRules(root).violations, [])
+  })
+})
+
+test('BUNDLE rule must match the module bundle name', () => {
+  // 正向：bundle 显示名 == artifactId 时命中；`<name>` 存在时优先使用它。
+  withFixture({ rulesXml: ruleOf('BUNDLE', 'demo-mod') }, (root) => {
+    assert.deepEqual(analyzeJacocoRules(root).violations, [])
+  })
+  withFixture({ rulesXml: ruleOf('BUNDLE', 'custom-display-name'), name: 'custom-display-name' }, (root) => {
+    assert.deepEqual(analyzeJacocoRules(root).violations, [])
+  })
+})
+
+test('BUNDLE rule with a package pattern is rejected instead of silently skipped', () => {
+  // 反向：BUNDLE 只匹配 bundle 名，包模式（如 project 曾经的 ...domain.*）必须被拒绝。
+  withFixture({ rulesXml: ruleOf('BUNDLE', 'demo.*') }, (root) => {
+    const { violations } = analyzeJacocoRules(root)
+    assert.equal(violations.length, 1)
+    assert.match(violations[0], /BUNDLE rule include 'demo\.\*' matches no bundle name/u)
   })
 })
 
@@ -327,7 +387,7 @@ test('declared module without a POM is reported instead of silently skipped', ()
 })
 
 test('JaCoCo rule mentions inside XML comments are ignored', () => {
-  // 注释中的示例规则不应被解析为真实门禁。
+  // 注释中的示例规则不应被解析为真实门禁；注释中的 <module> 也不应被当作聚合声明。
   const rulesXml = `<!-- ${ruleOf('CLASS', 'demo/Commented')} -->` + ruleOf('CLASS', 'demo.Existing')
   withFixture({ rulesXml }, (root) => {
     assert.deepEqual(analyzeJacocoRules(root).violations, [])
