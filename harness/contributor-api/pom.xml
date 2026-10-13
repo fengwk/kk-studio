@@ -50,7 +50,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalog</include>
+                                        <include>fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog</include>
                                     </includes>
                                     <limits>
                                         <limit>
