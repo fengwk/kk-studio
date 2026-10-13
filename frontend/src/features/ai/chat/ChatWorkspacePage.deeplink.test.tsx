@@ -82,7 +82,7 @@ beforeEach(() => {
   }))
   vi.mocked(chatService.getChat).mockResolvedValue({
     id: CHAT_ID, title: 'Workspace', agentName: 'assistant',
-    environment: null, yoloEnabled: false, version: '1', createTime: null, updateTime: null,
+    environmentName: null, yoloEnabled: false, version: '1', createTime: null, updateTime: null,
   })
   vi.mocked(agentService.listAgents).mockResolvedValue({
     pageNumber: 1, pageSize: 50, totalCount: 0, results: [],

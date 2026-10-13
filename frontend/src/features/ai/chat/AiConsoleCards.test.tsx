@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { ChatCard } from '@/features/ai/chat/ChatCard'
 import { ChatCardsPanel } from '@/features/ai/chat/ChatCardsPanel'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
 describe('ChatCard', () => {
@@ -194,11 +195,12 @@ function Location() {
   return <output data-testid="location">{useLocation().pathname}</output>
 }
 
-function agent() {
+function agent(): AgentDefinitionDTO {
   return {
     name: 'missing',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'minimax/MiniMax',
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },

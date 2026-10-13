@@ -6,11 +6,8 @@ function makeEntry(overrides: Partial<HarnessSessionEntryDTO> = {}): HarnessSess
   return {
     entryId: 'entry-1',
     sessionId: 'session-1',
-    threadId: 'thread-1',
     parentEntryId: null,
     entryType: 'CUSTOM',
-    author: { type: 'AGENT', name: 'assistant' },
-    status: 'COMMITTED',
     payloadJson: JSON.stringify({
       contributorId: 'builtin',
       customType: 'goal.progress',
@@ -23,7 +20,6 @@ function makeEntry(overrides: Partial<HarnessSessionEntryDTO> = {}): HarnessSess
       },
     }),
     createTime: '2026-09-24T12:00:00Z',
-    updateTime: '2026-09-24T12:00:00Z',
     ...overrides,
   }
 }
@@ -33,7 +29,7 @@ describe('parseGoalProgress', () => {
     expect(parseGoalProgress([], 'goal-123')).toEqual({ active: null, stale: null })
 
     const userEntry = makeEntry({
-      entryType: 'USER_MESSAGE',
+      entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ text: 'hello' }),
     })
     expect(parseGoalProgress([userEntry], 'goal-123')).toEqual({ active: null, stale: null })

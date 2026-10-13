@@ -8,19 +8,24 @@ import {
   preferNewerChat,
 } from '@/features/ai/chat/chat-utils'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { BackendDateTime, InstantTimestamp } from '@/shared/api/contracts/base'
 
-function chat(overrides: Partial<ChatDTO> = {}): ChatDTO {
+function chat(
+  overrides: Omit<Partial<ChatDTO>, 'createTime'> & {
+    createTime?: BackendDateTime | InstantTimestamp | (string | number)[]
+  } = {},
+): ChatDTO {
   return {
     id: 'chat-1',
     title: 'title',
     agentName: 'agent',
-    environment: null,
+    environmentName: null,
     yoloEnabled: false,
     version: '1',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,
-  }
+  } as ChatDTO
 }
 
 describe('compareCatalogVersions', () => {
