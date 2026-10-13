@@ -50,7 +50,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `fun.fengwk.kkstudio.harness.mcp` | MCP client/config/result 模型、LangChain4j Streamable HTTP 适配、deadline 与取消协调 | 管理 client 内的连接与 worker；产品事实持久化、工具身份与 per-call 生命周期归 Platform |
 
-生产依赖只有 `langchain4j-mcp`、[`harness-common`](harness-common.md)、Jackson 与 JDK（见 [`pom.xml`](../../harness/mcp/pom.xml)）；不依赖 Spring、JDBC、[`harness-tool`](harness-tool.md)、[`harness-environment`](harness-environment.md)、Platform 或 Daemon。
+生产依赖只有 `langchain4j-mcp`、[`harness-common`](harness-common.md)、Jackson 与 JDK（见 [`pom.xml`](../../harness/mcp/pom.xml)）；不依赖 Spring、JDBC、[`harness-tool`](harness-tool.md)、[`harness-environment`](harness-environment.md)、Platform 或 Daemon。Jackson 2 core/databind 只作为 SDK 边界 [`McpResultExtractor`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpResultExtractor.java) 的直接依赖（SDK 的 `McpToolResultExtractor` 签名固定接收 `com.fasterxml.jackson.databind.JsonNode`），模块自有的工具 schema 与调用详情一律由 Jackson 3（`tools.jackson`）写出。
 
 ## Client 与配置
 
@@ -36,7 +36,7 @@
 
 ## 结果映射
 
-[`McpResultExtractor`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpResultExtractor.java) 由 factory 安装到 SDK builder，把 MCP content 转成 [`harness-common`](harness-common.md) 的内容单元。文本计入单次响应的累计预算；`image` 在解码前按 encoded 长度检查 decoded 上界，非法 Base64 退化为保留结构的有界 JSON，缺省 mediaType 用 `application/octet-stream`；resource 或任意扩展类型先用有界 JSON writer 写出，超过 `JsonResultContent` 的 1 MiB 上限时直接失败，不退化为同尺寸无界文本。单次响应的聚合内容预算为 64 MiB，不是调用配置。空内容补一个空 `TextResultContent`。工具入参侧则相反地严格：`callTool` 要求 arguments 是严格 JSON object，若入参存在重复键或尾随内容，本地直接以固定文本拒绝，绝不让服务端按「哪个键胜出」的偶然实现执行，也不回显 payload 片段。
+[`McpResultExtractor`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpResultExtractor.java) 由 factory 安装到 SDK builder，把 MCP content 转成 [`harness-common`](harness-common.md) 的内容单元。它是模块内唯一的 Jackson 2 适配边界：SDK 节点用自带 J2 mapper 经有界输出流写出，不把 SDK 节点类型带到自有 JSON。文本计入单次响应的累计预算；`image` 在解码前按 encoded 长度检查 decoded 上界，非法 Base64 退化为保留结构的有界 JSON，缺省 mediaType 用 `application/octet-stream`；resource 或任意扩展类型先按 JSON 单条 1 MiB 上限有界写出，超限直接失败，不退化为同尺寸无界文本。单次响应的聚合内容预算为 64 MiB，不是调用配置。空内容补一个空 `TextResultContent`。工具入参侧则相反地严格：`callTool` 要求 arguments 是严格 JSON object，若入参存在重复键或尾随内容，本地直接以固定文本拒绝，绝不让服务端按「哪个键胜出」的偶然实现执行，也不回显 payload 片段。
 
 ## 源码与测试
 
