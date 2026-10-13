@@ -8,6 +8,7 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { RealtimeModelStream, RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
+import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 
 describe('thread timeline', () => {
@@ -25,7 +26,7 @@ describe('thread timeline', () => {
         argumentsJson: '{"command":"ls"}',
       }])),
     ], [], [tool])
-    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    const call = timeline.messages.find((m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call')
     expect(call).toMatchObject({
       invocationId: tool.id, invocationStatus: status,
       requiredEnvironmentId: 'frozen-route', requiredEnvironmentName: 'archlinux',
@@ -740,7 +741,11 @@ describe('thread timeline', () => {
         toolCallId: 'call-1',
         toolName: 'bash',
         rendererKey: 'bash',
-        environment: null,
+        environmentId: null,
+        requiredEnvironmentId: null,
+        waitingForEnvironment: false,
+        requiredEnvironmentName: null,
+        environmentWaitFreshnessAt: null,
         argumentsJson: '{"command":"ls"}',
         approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
         resultJson: null,
@@ -782,7 +787,7 @@ describe('thread timeline', () => {
       toolStreams,
     )
 
-    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    const call = timeline.messages.find((m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call')
     expect(call).toMatchObject({
       role: 'tool',
       phase: 'call',
@@ -805,7 +810,11 @@ describe('thread timeline', () => {
       toolCallId: 'call-1',
       toolName: 'bash',
       rendererKey: 'bash',
-      environment: null,
+      environmentId: null,
+      requiredEnvironmentId: null,
+      waitingForEnvironment: false,
+      requiredEnvironmentName: null,
+      environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
       approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
       resultJson: null,
@@ -893,7 +902,11 @@ describe('thread timeline', () => {
       toolCallId: 'call-other',
       toolName: 'bash',
       rendererKey: 'bash',
-      environment: null,
+      environmentId: null,
+      requiredEnvironmentId: null,
+      waitingForEnvironment: false,
+      requiredEnvironmentName: null,
+      environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
       approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
       resultJson: null,
@@ -929,7 +942,7 @@ describe('thread timeline', () => {
         status: 'done',
       },
     ])
-    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    const call = timeline.messages.find((m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call')
     expect(call).not.toHaveProperty('invocationId')
     expect(call).not.toHaveProperty('partial')
     expect(call).not.toHaveProperty('approval')
@@ -959,7 +972,7 @@ describe('thread timeline', () => {
       [],
       [],
     )
-    expect(timeline.messages.map((message) => message.text)).toEqual(['A', 'B', 'C'])
+    expect(timeline.messages.map((message) => 'text' in message ? message.text : '')).toEqual(['A', 'B', 'C'])
   })
 
   it('keeps multi-turn USER then ASSISTANT causality when child timestamps regress', () => {
@@ -974,7 +987,7 @@ describe('thread timeline', () => {
       [],
     )
 
-    expect(timeline.messages.map((message) => [message.role, message.text])).toEqual([
+    expect(timeline.messages.map((message) => [message.role, 'text' in message ? message.text : ''])).toEqual([
       ['user', '问题一'],
       ['assistant', '回答一'],
       ['user', '问题二'],
@@ -992,7 +1005,7 @@ describe('thread timeline', () => {
       [],
       [],
     )
-    expect(timeline.messages.map((message) => message.text)).toEqual(['late-valid', 'invalid', 'early-valid'])
+    expect(timeline.messages.map((message) => 'text' in message ? message.text : '')).toEqual(['late-valid', 'invalid', 'early-valid'])
   })
 
   it('projects terminal invocation error overlay and drops partial on attempt mismatch', () => {
@@ -1037,7 +1050,7 @@ describe('thread timeline', () => {
       null,
       new Map([['inv-term', staleStream]]),
     )
-    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    const call = timeline.messages.find((m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call')
     expect(call).toMatchObject({
       role: 'tool',
       phase: 'call',
@@ -1091,7 +1104,7 @@ describe('thread timeline', () => {
       null,
       new Map([['inv-done', liveStream]]),
     )
-    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    const call = timeline.messages.find((m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call')
     expect(call).toMatchObject({
       role: 'tool',
       phase: 'call',
@@ -1138,7 +1151,7 @@ describe('thread timeline', () => {
       [],
       duplicates,
     )
-    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    const call = timeline.messages.find((m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call')
     expect(call).toMatchObject({
       invocationId: 'inv-a',
       approval: { required: true, decision: null, decisionId: null },
@@ -1177,7 +1190,7 @@ describe('thread timeline', () => {
       [],
       mismatched,
     )
-    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    const call = timeline.messages.find((m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call')
     expect(call).toMatchObject({ subjectEntryId: '40', toolCallId: 'call-1', status: 'done' })
     expect(call).not.toHaveProperty('invocationId')
     expect(call).not.toHaveProperty('approval')
@@ -1354,7 +1367,7 @@ describe('thread timeline', () => {
         status: 'done',
       },
     ])
-    expect(timeline.messages.filter((message) => message.role === 'tool' && message.phase === 'result')
+    expect(timeline.messages.filter((message): message is ToolDialogueMessage => message.role === 'tool' && message.phase === 'result')
       .map((message) => message.contents)).toEqual([
       [{ type: 'text', text: 'old output' }],
       [{ type: 'text', text: 'current output' }],
@@ -1469,7 +1482,7 @@ describe('thread timeline', () => {
         callIdentity: '40:0',
       },
     ])
-    expect(tools[0]?.role === 'tool' ? tools[0].partial : 'present').toBeUndefined()
+    expect(tools[0]?.role === 'tool' ? tools[0].partialContents : 'present').toBeUndefined()
     expect(tools[0]?.role === 'tool' ? tools[0].partialErrorText : 'present').toBeUndefined()
     expect(tools.filter((message) => message.phase === 'result')).toHaveLength(1)
     expect(tools.some((message) => message.id.startsWith('transient:tool-result:'))).toBe(false)

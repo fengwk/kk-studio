@@ -92,14 +92,9 @@ it('renders on-demand preview, inspector and history actions and clears history 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const controller = boundController()
   function Harness() {
-    const views = useBoundThreadPanelViews('thread', controller, { onPreview: () => views.selectDebugInspector({
-      type: 'preview', preview: {
-        kind: 'DRAFT_REQUEST_PREVIEW', providerType: 'OPENAI', modelName: 'm',
-        bodyByteSize: 2, bodyJson: '{}', sourceHeadEntryId: 'head', generatedAt: 'now',
-      },
-    }) })
+    const views = useBoundThreadPanelViews('thread', controller)
     const presentation = useThreadPresentation({
-      views, projection: { thread: controller.thread ?? null, models: controller.models },
+      views, projection: { thread: controller.thread, models: controller.models },
       threadId: 'thread', selected: true, active: true,
     })
     return <>
@@ -195,6 +190,7 @@ const READY_ENVIRONMENT: EnvironmentCardDTO = {
   name: 'dev-box',
   registrationToken: null,
   status: 'READY',
+  statusExpiresAt: null,
   ready: true,
   lastSeen: '2026-09-19T00:00:00.000Z',
   capabilities: [],
@@ -217,7 +213,7 @@ describe('useBoundThreadPanelLabels', () => {
           runtimeLabels: { environmentName, contextWindow: 128_000 },
           branchUsage: null,
         }),
-      { initialProps: { environmentName: 'dev-box' } },
+      { initialProps: { environmentName: 'dev-box' as string | null } },
     )
 
     expect(result.current.environment).toEqual({
@@ -256,11 +252,10 @@ describe('useBoundThreadPanelViews view identity', () => {
 
   function renderViews(initialProps: { threadId: string; viewKey?: string }) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const controller = {
+    const controller: BoundThreadPanelController = {
       bodyRef: { current: null },
       events: [] as ThreadEventRecord[],
-      working: false,
-      sessionId: null,
+      sessionId: 'session',
       thread: undefined,
       modelInvocation: null,
       models: [],

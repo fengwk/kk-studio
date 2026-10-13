@@ -14,13 +14,20 @@ function chat(overrides: Partial<ChatDTO> = {}): ChatDTO {
     id: 'chat-1',
     title: 'title',
     agentName: 'agent',
-    environment: null,
+    environmentName: null,
     yoloEnabled: false,
     version: '1',
     createTime: '2026-06-20T02:00:00',
     updateTime: '2026-06-20T02:00:00',
     ...overrides,
   }
+}
+
+/** 注入历史或畸形时间值，正常 fixture 仍遵守当前 wire 契约。 */
+function chatWithUntrustedTime(time: unknown, overrides: Partial<ChatDTO>): ChatDTO {
+  const fixture = chat(overrides)
+  Reflect.set(fixture, 'createTime', time)
+  return fixture
 }
 
 describe('compareCatalogVersions', () => {
@@ -139,7 +146,7 @@ describe('filterChats', () => {
     const chats = [
       chat({ id: '2', title: 'a', createTime: null }),
       chat({ id: '10', title: 'b', createTime: 'not-a-date' }),
-      chat({ id: '3', title: 'c', createTime: [] }),
+      chatWithUntrustedTime([], { id: '3', title: 'c' }),
     ]
     // invalid times sort as 0; the remaining array order is then fixed by the id tie-break
     expect(filterChats(chats, '').map((item) => item.id)).toEqual(['10', '3', '2'])
@@ -159,8 +166,8 @@ describe('filterChats', () => {
 describe('backendTimeValue', () => {
   it('sorts by the full date-time array with defaults for missing parts', () => {
     const chats = [
-      chat({ id: 'array-full', title: 'a', createTime: [2026, 6, 21, 1, 2, 3] }),
-      chat({ id: 'array-partial', title: 'b', createTime: [2026] }),
+      chatWithUntrustedTime([2026, 6, 21, 1, 2, 3], { id: 'array-full', title: 'a' }),
+      chatWithUntrustedTime([2026], { id: 'array-partial', title: 'b' }),
     ]
     // full parts and defaulted (year, 1, 1) parts both produce comparable UTC sort keys
     expect(filterChats(chats, '').map((item) => item.id)).toEqual(['array-full', 'array-partial'])
@@ -177,8 +184,8 @@ describe('backendTimeValue', () => {
   it('coerces non-numeric array parts to defaults and falls back to the id tie-break', () => {
     const chats = [
       // month/day NaN coerce through (month || 1)/(day || 1); year NaN yields a non-finite Date.UTC result
-      chat({ id: 'a1', title: 'a', createTime: ['x', 6, 21] }),
-      chat({ id: 'a2', title: 'b', createTime: [2026, 'x', 'y'] }),
+      chatWithUntrustedTime(['x', 6, 21], { id: 'a1', title: 'a' }),
+      chatWithUntrustedTime([2026, 'x', 'y'], { id: 'a2', title: 'b' }),
     ]
     // both compute a zero sort key, so the numeric-aware id tie-break decides
     expect(filterChats(chats, '').map((item) => item.id)).toEqual(['a2', 'a1'])

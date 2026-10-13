@@ -451,6 +451,10 @@ describe('thread timeline edge branches', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       environmentId: null,
+      requiredEnvironmentId: null,
+      waitingForEnvironment: false,
+      requiredEnvironmentName: null,
+      environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
       approvalJson: null,
       resultJson: null,
@@ -532,6 +536,8 @@ describe('thread timeline edge branches', () => {
     // 防御性 fallback：无内容的 USER/CUSTOM 消息投影为 empty_message 事件；
     // TOOL role 没有 tool_result 时同样投影 empty_message；未知 entryType
     // （此处 'CUSTOM' 与 'SOMETHING_ELSE'）投影为 unknown_entry，而不是静默丢弃。
+    const unknownEntry = entry('unknown-other', 'CUSTOM', { arbitrary: true })
+    Reflect.set(unknownEntry, 'entryType', 'SOMETHING_ELSE')
     const timeline = buildThreadTimeline(
       [
         entry('empty-user', 'MESSAGE', { message: { role: 'USER', contents: [] } }),
@@ -542,7 +548,7 @@ describe('thread timeline edge branches', () => {
           message: { role: 'TOOL', contents: [{ type: 'unexpected', text: 'x' }] },
         }),
         entry('unknown-type', 'CUSTOM', { arbitrary: true }),
-        entry('unknown-other', 'SOMETHING_ELSE', { arbitrary: true }),
+        unknownEntry,
       ],
       [],
       [],

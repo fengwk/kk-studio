@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatPageController } from '@/features/ai/chat/useChatPageController'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -29,6 +30,7 @@ describe('useChatPageController', () => {
       id: 'chat-1',
       title: '新的 Chat',
       agentName: 'default-assistant',
+      environmentName: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -91,6 +93,7 @@ describe('useChatPageController', () => {
       id: 'chat-99',
       title: 'Panel Chat',
       agentName: 'default-assistant',
+      environmentName: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -145,11 +148,12 @@ function page<T>(results: T[]) {
   }
 }
 
-function agent() {
+function agent(): AgentDefinitionDTO {
   return {
     name: 'default-assistant',
     description: null,
     systemPrompt: null,
+    type: 'USER',
     model: 'minimax/MiniMax',
     variant: 'default',
     config: {

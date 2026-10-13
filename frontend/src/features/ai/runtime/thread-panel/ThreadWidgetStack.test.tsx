@@ -9,7 +9,7 @@ describe('ThreadWidgetStack', () => {
     render(
       <ThreadWidgetStack
         working
-        queuedMessages={[{ idempotencyKey: 'input-1', role: 'user', text: '下一条消息', sequence: 1 }]}
+        queuedMessages={[{ idempotencyKey: 'input-1', role: 'user', text: '下一条消息', sequence: '1' }]}
       />,
     )
 
