@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.project.repo.impl;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -11,25 +11,28 @@ import java.util.UUID;
 @Component
 public class PostgresqlProjectChangeNotifier {
 
-  private final JdbcTemplate jdbc;
+  private final JdbcClient jdbc;
 
-  public PostgresqlProjectChangeNotifier(JdbcTemplate jdbc) {
+  public PostgresqlProjectChangeNotifier(JdbcClient jdbc) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
   }
 
   public void projectChanged(UUID projectId) {
     requireTransaction();
-    jdbc.queryForObject(
-        "select pg_notify('project_issue_changed', ?)", String.class, projectId.toString());
+    jdbc.sql("select pg_notify('project_issue_changed', :projectId)")
+        .param("projectId", projectId.toString())
+        .query(String.class)
+        .single();
   }
 
   public void issueChanged(UUID issueId) {
     requireTransaction();
     UUID projectId =
-        jdbc.query(
-            "select project_id from project_issue where id = ?",
-            rs -> rs.next() ? rs.getObject(1, UUID.class) : null,
-            issueId);
+        jdbc.sql("select project_id from project_issue where id = :issueId")
+            .param("issueId", issueId)
+            .query((resultSet, rowNumber) -> resultSet.getObject(1, UUID.class))
+            .optional()
+            .orElse(null);
     if (projectId != null) {
       projectChanged(projectId);
     }

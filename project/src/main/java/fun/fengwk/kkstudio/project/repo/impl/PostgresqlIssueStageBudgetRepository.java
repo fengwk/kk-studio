@@ -5,8 +5,8 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueStageBudgetMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueStageBudgetDO;
+import fun.fengwk.kkstudio.project.repo.impl.store.IssueStageBudgetJdbcStore;
 
 import java.util.List;
 import java.util.UUID;
@@ -15,17 +15,17 @@ import java.util.UUID;
 @Repository
 public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRepository {
 
-  private final IssueStageBudgetMapper mapper;
+  private final IssueStageBudgetJdbcStore store;
   private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public IssueStageBudgetRow get(UUID issueId, String state) {
-    return toModel(mapper.get(issueId, state));
+    return toModel(store.get(issueId, state));
   }
 
   @Override
   public boolean insert(IssueStageBudgetRow budget) {
-    boolean changed = mapper.insert(toDO(budget)) == 1;
+    boolean changed = store.insert(toDO(budget)) == 1;
     if (changed) {
       notifier.issueChanged(budget.getIssueId());
     }
@@ -34,7 +34,7 @@ public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRep
 
   @Override
   public boolean update(IssueStageBudgetRow budget) {
-    boolean changed = mapper.update(toDO(budget)) == 1;
+    boolean changed = store.update(toDO(budget)) == 1;
     if (changed) {
       notifier.issueChanged(budget.getIssueId());
     }
@@ -43,7 +43,7 @@ public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRep
 
   @Override
   public boolean delete(UUID issueId, String state) {
-    boolean changed = mapper.delete(issueId, state) == 1;
+    boolean changed = store.delete(issueId, state) == 1;
     if (changed) {
       notifier.issueChanged(issueId);
     }
@@ -52,7 +52,7 @@ public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRep
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    int changed = mapper.deleteByIssueId(issueId);
+    int changed = store.deleteByIssueId(issueId);
     if (changed > 0) {
       notifier.issueChanged(issueId);
     }
@@ -61,7 +61,7 @@ public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRep
 
   @Override
   public List<IssueStageBudgetRow> listByIssueId(UUID issueId) {
-    return mapper.listByIssueId(issueId).stream()
+    return store.listByIssueId(issueId).stream()
         .map(PostgresqlIssueStageBudgetRepository::toModel)
         .toList();
   }

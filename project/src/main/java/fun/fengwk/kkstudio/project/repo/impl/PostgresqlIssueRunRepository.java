@@ -6,8 +6,8 @@ import org.springframework.stereotype.Repository;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueRunMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueRunDO;
+import fun.fengwk.kkstudio.project.repo.impl.store.IssueRunJdbcStore;
 
 import java.util.List;
 import java.util.UUID;
@@ -16,12 +16,12 @@ import java.util.UUID;
 @Repository
 public class PostgresqlIssueRunRepository implements IssueRunRepository {
 
-  private final IssueRunMapper mapper;
+  private final IssueRunJdbcStore store;
   private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueRun run) {
-    boolean changed = mapper.insert(toDO(run)) == 1;
+    boolean changed = store.insert(toDO(run)) == 1;
     if (changed) {
       notifier.issueChanged(run.getIssueId());
     }
@@ -30,49 +30,44 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
 
   @Override
   public IssueRun getById(UUID id) {
-    return toModel(mapper.getById(id));
-  }
-
-  @Override
-  public IssueRun getByIdAuthoritative(UUID id) {
-    return toModel(mapper.getByIdAuthoritative(id));
+    return toModel(store.getById(id));
   }
 
   @Override
   public IssueRun lockById(UUID id) {
-    return toModel(mapper.lockById(id));
+    return toModel(store.lockById(id));
   }
 
   @Override
   public IssueRun getActiveByIssueId(UUID issueId) {
-    return toModel(mapper.getActiveByIssueId(issueId));
+    return toModel(store.getActiveByIssueId(issueId));
   }
 
   @Override
   public IssueRun lockActiveByIssueId(UUID issueId) {
-    return toModel(mapper.lockActiveByIssueId(issueId));
+    return toModel(store.lockActiveByIssueId(issueId));
   }
 
   @Override
   public IssueRun getLatestByIssueId(UUID issueId) {
-    return toModel(mapper.getLatestByIssueId(issueId));
+    return toModel(store.getLatestByIssueId(issueId));
   }
 
   @Override
   public List<IssueRun> listByIssueId(UUID issueId) {
-    return mapper.listByIssueId(issueId).stream()
+    return store.listByIssueId(issueId).stream()
         .map(PostgresqlIssueRunRepository::toModel)
         .toList();
   }
 
   @Override
   public long countByIssueIdAndStateAfterOrdinal(UUID issueId, String state, long afterOrdinal) {
-    return mapper.countByIssueIdAndStateAfterOrdinal(issueId, state, afterOrdinal);
+    return store.countByIssueIdAndStateAfterOrdinal(issueId, state, afterOrdinal);
   }
 
   @Override
   public boolean updateById(IssueRun run, long expectedVersion) {
-    boolean changed = mapper.updateById(toDO(run), expectedVersion) == 1;
+    boolean changed = store.updateById(toDO(run), expectedVersion) == 1;
     if (changed) {
       notifier.issueChanged(run.getIssueId());
     }
@@ -82,7 +77,7 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
     IssueRun run = getById(id);
-    boolean changed = mapper.deleteById(id, expectedVersion) == 1;
+    boolean changed = store.deleteById(id, expectedVersion) == 1;
     if (changed) {
       notifier.issueChanged(run.getIssueId());
     }
@@ -91,7 +86,7 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    int changed = mapper.deleteByIssueId(issueId);
+    int changed = store.deleteByIssueId(issueId);
     if (changed > 0) {
       notifier.issueChanged(issueId);
     }
