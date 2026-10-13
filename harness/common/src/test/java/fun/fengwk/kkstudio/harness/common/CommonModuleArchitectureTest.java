@@ -84,7 +84,7 @@ class CommonModuleArchitectureTest {
       productionDependencies.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
     }
     assertEquals(
-        List.of("com.fasterxml.jackson.core:jackson-databind"),
+        List.of("tools.jackson.core:jackson-databind"),
         productionDependencies,
         "common module must only declare jackson-databind as production dependency");
   }
@@ -123,9 +123,11 @@ class CommonModuleArchitectureTest {
   }
 
   private static boolean isAllowedImport(String imported) {
+    // com.fasterxml.jackson 只保留 Jackson 3 仍复用的注解；core/databind 必须走 tools.jackson，禁止回流。
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
-        || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("com.fasterxml.jackson.annotation.")
+        || imported.startsWith("tools.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.");
   }
 

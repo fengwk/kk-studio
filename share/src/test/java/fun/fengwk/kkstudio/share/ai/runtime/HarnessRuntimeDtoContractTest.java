@@ -8,10 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 
@@ -23,7 +22,7 @@ import java.util.Map;
 /** Harness Runtime HTTP DTO 契约：严格字段、严格字符串 cursor 与 compact/snapshot 投影。 */
 class HarnessRuntimeDtoContractTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   /** 工具等待 sidecar 的可空字段在真实 NON_NULL Jackson 下仍显式输出，日期类型沿用 Instant。 */
   @Test
@@ -36,8 +35,11 @@ class HarnessRuntimeDtoContractTest {
         ToolInvocationDTO.class.getDeclaredField("environmentWaitFreshnessAt").getType());
     assertRequiredNullable(ToolInvocationDTO.class, "requiredEnvironmentName");
     assertRequiredNullable(ToolInvocationDTO.class, "environmentWaitFreshnessAt");
-    ObjectMapper mapper =
-        new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    JsonMapper mapper =
+        JsonMapper.builder()
+            .changeDefaultPropertyInclusion(
+                inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+            .build();
     ToolInvocationDTO tool = new ToolInvocationDTO();
     var json = mapper.readTree(mapper.writeValueAsString(tool));
     assertTrue(json.has("requiredEnvironmentName"));
@@ -47,16 +49,15 @@ class HarnessRuntimeDtoContractTest {
     tool.setRequiredEnvironmentName("archlinux");
     assertEquals(
         "archlinux",
-        mapper.readTree(mapper.writeValueAsString(tool)).get("requiredEnvironmentName").asText());
+        mapper.readTree(mapper.writeValueAsString(tool)).get("requiredEnvironmentName").asString());
   }
 
   /**
-   * 显式宽松的 Jackson2 mapper：关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES}，复现 wire 上真实 mapper（Jackson3 HTTP
-   * mapper 与 convention4j 共享 Jackson2 bean）默认忽略未知字段的语义，用来证明请求体的 fail-closed 来自 DTO 注解而非 mapper
-   * 默认严格性。
+   * 显式宽松的 Jackson mapper：关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES}，复现 wire 上真实 mapper（Spring Boot 的
+   * Jackson 3 HTTP mapper）默认忽略未知字段的语义，用来证明请求体的 fail-closed 来自 DTO 注解而非 mapper 默认严格性。
    */
-  private static final ObjectMapper LENIENT_MAPPER =
-      new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+  private static final JsonMapper LENIENT_MAPPER =
+      JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
   @Test
   void commandBatchDtoExposesOwnerTargetAndImmutableCommandDefaults() {
@@ -232,8 +233,11 @@ class HarnessRuntimeDtoContractTest {
     assertEquals(
         String.class, HarnessThreadSummaryDTO.class.getDeclaredField("parentThreadId").getType());
     assertRequiredNullable(HarnessThreadSummaryDTO.class, "parentThreadId");
-    ObjectMapper mapper =
-        new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    JsonMapper mapper =
+        JsonMapper.builder()
+            .changeDefaultPropertyInclusion(
+                inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+            .build();
     HarnessThreadSummaryDTO summary = new HarnessThreadSummaryDTO();
     var root = mapper.readTree(mapper.writeValueAsString(summary));
     assertTrue(root.has("parentThreadId"));
@@ -243,7 +247,7 @@ class HarnessRuntimeDtoContractTest {
     String parentId = "00000000-0000-0000-0000-000000000001";
     summary.setParentThreadId(parentId);
     String childJson = mapper.writeValueAsString(summary);
-    assertEquals(parentId, mapper.readTree(childJson).get("parentThreadId").asText());
+    assertEquals(parentId, mapper.readTree(childJson).get("parentThreadId").asString());
     assertEquals(
         parentId, mapper.readValue(childJson, HarnessThreadSummaryDTO.class).getParentThreadId());
   }
@@ -282,8 +286,7 @@ class HarnessRuntimeDtoContractTest {
     Instant updateTime = Instant.parse("2026-03-31T12:00:00Z");
     node.setUpdateTime(updateTime);
 
-    ObjectMapper lenient =
-        new ObjectMapper().disable(MapperFeature.REQUIRE_HANDLERS_FOR_JAVA8_TIMES);
+    JsonMapper lenient = JsonMapper.builder().build();
     String jsonWithInstant = lenient.writeValueAsString(node);
     assertTrue(jsonWithInstant.contains("\"parentThreadId\":null"), jsonWithInstant);
     assertTrue(jsonWithInstant.contains("\"outcome\":null"), jsonWithInstant);
@@ -342,11 +345,10 @@ class HarnessRuntimeDtoContractTest {
   }
 
   /**
-   * 测试意图：wire 上的真实 mapper（Spring Boot 的 Jackson3 HTTP mapper 与 convention4j 的共享 Jackson2
-   * bean）默认都忽略未知 字段，因此请求体的 fail-closed 只能来自 DTO 自己的 {@code @JsonAnySetter}。这里用显式关闭 {@code
-   * FAIL_ON_UNKNOWN_PROPERTIES} 的 Jackson2 mapper 复现同样的宽松语义：无注解的对照类型确实静默忽略未知字段，而 {@link
-   * HarnessToolApprovalDTO} 仍然拒绝，且拒绝原因就是 DTO 自己抛出的 {@link HarnessRequestFormatException}（而非 mapper
-   * 的默认严格性）。
+   * 测试意图：wire 上的真实 mapper（Spring Boot 的 Jackson 3 HTTP mapper）默认忽略未知字段，因此请求体的 fail-closed 只能来自 DTO
+   * 自己的 {@code @JsonAnySetter}。这里用显式关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES} 的 Jackson 3 mapper
+   * 复现同样的宽松语义：无注解的对照类型确实静默忽略未知字段，而 {@link HarnessToolApprovalDTO} 仍然拒绝，且拒绝原因就是 DTO 自己抛出的 {@link
+   * HarnessRequestFormatException}（而非 mapper 的默认严格性）。
    */
   @Test
   void lenientMapperStillRejectsUnknownToolApprovalFieldViaDtoAnnotation() throws Exception {

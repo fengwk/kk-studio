@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 
 /** {@link ToolArguments} 的容错边界测试：历史 action 渲染器只描述过去发生的事，因此任何畸形输入都必须退化为“未提供”而不是抛出。 */
 class ToolArgumentsTest {

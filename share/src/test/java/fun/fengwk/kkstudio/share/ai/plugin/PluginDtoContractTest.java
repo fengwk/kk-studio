@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.time.Instant;
@@ -19,7 +19,7 @@ import java.util.List;
 /** Plugin 管理面 wire 契约：固定认证类型、严格认证请求与「响应不含任何秘密」边界。 */
 class PluginDtoContractTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   @Test
   void prepareAndCompleteRequestsAreStrictlyDeclared() throws Exception {
@@ -62,7 +62,8 @@ class PluginDtoContractTest {
     dto.setCallbackUrl(marker);
 
     // 只写字段没有可序列化属性：放宽空 bean 失败后输出为空对象，绝不回显回调地址。
-    ObjectMapper lenient = new ObjectMapper().disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+    JsonMapper lenient =
+        JsonMapper.builder().disable(SerializationFeature.FAIL_ON_EMPTY_BEANS).build();
     assertFalse(lenient.writeValueAsString(dto).contains("secret-marker"));
     assertFalse(dto.toString().contains("secret-marker"));
   }

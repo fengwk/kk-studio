@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.Data;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * 单个 Agent 模型变体，表达 reasoning effort 与厂商原生协议请求选项。

@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
 import java.util.Map;
@@ -14,7 +14,7 @@ import java.util.Map;
 /** MCP Server 相关 Share DTO 的序列化、严格未知字段拒绝与公开安全边界契约测试。 */
 class McpServerDtoContractTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   @Test
   void createDtoCarriesExplicitHttpFields() throws Exception {

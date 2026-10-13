@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.harness.common.schema;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
@@ -106,9 +106,9 @@ class InputNormalizerTest {
     String normalized = InputNormalizer.normalize(arguments, schema);
     JsonNode items = JsonValues.readTree(normalized).get("items");
     assertEquals(2, items.size());
-    assertEquals("a.txt", items.get(0).get("path").asText());
+    assertEquals("a.txt", items.get(0).get("path").asString());
     assertEquals(10, items.get(0).get("limit").asInt());
-    assertEquals("b.txt", items.get(1).get("path").asText());
+    assertEquals("b.txt", items.get(1).get("path").asString());
     assertEquals(5, items.get(1).get("limit").asInt());
   }
 
