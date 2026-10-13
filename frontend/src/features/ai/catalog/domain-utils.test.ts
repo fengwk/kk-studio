@@ -15,7 +15,7 @@ import {
   naturalNameCompare,
 } from '@/shared/lib/search-utils'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
-import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
+import type { ModelDraft, ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import {
@@ -36,7 +36,6 @@ import type {
   AgentModelDTO,
   AgentModelConfigDTO,
   AgentProviderDTO,
-  AgentProviderType,
 } from '@/shared/api/contracts/ai-catalog'
 
 function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
@@ -185,16 +184,18 @@ describe('AI domain utilities', () => {
 
   /** 结构化草稿必须按当前的 provider/model/agent API payload 契约序列化。 */
   it('serializes structured drafts into backend payloads', () => {
-    const providerInput = {
+    const providerInput: ProviderDraft = {
       name: ' minimax ',
       description: ' provider desc ',
-      providerType: ' openai ' as unknown as AgentProviderType,
+      providerType: 'openai',
       baseUrl: ' https://api.minimax.io/v1 ',
       credential: ' secret ',
       modelCallTimeoutMillis: '120000',
       modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,
     }
+    // 注入带空白的非法枚举值，验证运行时输入标准化。
+    Reflect.set(providerInput, 'providerType', ' openai ')
     expect(toEditableProvider(providerInput)).toEqual({
       name: 'minimax',
       description: 'provider desc',
@@ -443,7 +444,7 @@ describe('AI domain utilities', () => {
   /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */
   it('handles nullable resource fields and serialization fields', () => {
     expect(
-      toProviderDraft({
+      Reflect.apply(toProviderDraft, undefined, [{
         name: 'stub',
         description: null,
         providerType: null,
@@ -455,7 +456,7 @@ describe('AI domain utilities', () => {
         createTime: '2026-06-20T02:00:00',
         updateTime: '2026-06-20T02:00:00',
         modelHttpRetryStatusCodes: null,
-      } as unknown as AgentProviderDTO),
+      }]),
     ).toMatchObject({
       name: 'stub',
       description: '',
@@ -500,16 +501,16 @@ describe('AI domain utilities', () => {
     })
 
     expect(
-      toEditableProvider({
+      Reflect.apply(toEditableProvider, undefined, [{
         name: ' stub ',
         description: '   ',
-        providerType: ' openai ' as unknown as AgentProviderType,
+        providerType: ' openai ',
         baseUrl: '   ',
         credential: '   ',
         modelCallTimeoutMillis: '   ',
         modelCallIdleTimeoutMillis: '   ',
         modelHttpRetryStatusCodes: null,
-      }),
+      }]),
     ).toEqual({
       name: 'stub',
       description: null,
