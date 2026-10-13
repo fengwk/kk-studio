@@ -1,19 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { HttpClient } from '@/shared/api/client'
 import { createConfigSyncService } from '@/shared/api/config-sync-service'
+import { createMockHttpClient } from '@/test-support/mock-http-client'
 import type {
   ConfigSyncImportCheckDTO,
   ConfigSyncImportResponseDTO,
   ConfigSyncInventoryDTO,
 } from '@/shared/api/contracts/config-sync'
 
-function createClient(): HttpClient {
-  return {
-    get: vi.fn(async () => ({})),
-    post: vi.fn(async () => ({})),
-    put: vi.fn(async () => ({})),
-    delete: vi.fn(async () => ({})),
-  }
+function createClient() {
+  return createMockHttpClient()
 }
 
 describe('configSyncService', () => {

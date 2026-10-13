@@ -12,13 +12,14 @@ import {
   startCanvasFunctionRun,
 } from '@/shared/api/studio-service'
 import { ApiError } from '@/shared/api/client'
+import type { UUIDString } from '@/shared/api/contracts/studio'
 
-const ID = '11111111-1111-4111-8111-111111111111'
-const CANVAS_ID = '22222222-2222-4222-8222-222222222222'
-const NODE_ID = '33333333-3333-4333-8333-333333333333'
-const REQUEST_ID = '55555555-5555-4555-8555-555555555555'
+const ID: UUIDString = '11111111-1111-4111-8111-111111111111'
+const CANVAS_ID: UUIDString = '22222222-2222-4222-8222-222222222222'
+const NODE_ID: UUIDString = '33333333-3333-4333-8333-333333333333'
+const REQUEST_ID: UUIDString = '55555555-5555-4555-8555-555555555555'
 
-const fetchMock = vi.fn()
+const fetchMock = vi.fn<typeof fetch>()
 
 beforeEach(() => {
   fetchMock.mockReset()
@@ -40,11 +41,10 @@ function envelope(data: unknown, overrides: Record<string, unknown> = {}) {
 }
 
 function response(data: unknown, overrides: { ok?: boolean; status?: number } = {}) {
-  return {
-    ok: overrides.ok ?? true,
-    status: overrides.status ?? 200,
-    json: vi.fn().mockResolvedValue(data),
-  }
+  return new Response(JSON.stringify(data), {
+    status: overrides.status ?? (overrides.ok === false ? 500 : 200),
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 function documentPayload() {
@@ -106,7 +106,6 @@ describe('studio service transport adapter', () => {
     expect((await createCanvas('Named')).title).toBe('Canvas')
     expect((await getCanvas(CANVAS_ID)).document.id).toBe(CANVAS_ID)
     expect((await postCanvasCommands(CANVAS_ID, {
-      expectedRevision: '3',
       idempotencyKey: ID,
       commands: [],
     })).revision).toBe('4')
@@ -137,23 +136,25 @@ describe('studio service transport adapter', () => {
     const controller = new AbortController()
     await createCanvas('Named', { signal: controller.signal })
     await getCanvas(CANVAS_ID, { signal: controller.signal })
-    await postCanvasCommands(CANVAS_ID, { expectedRevision: '3', idempotencyKey: ID, commands: [] }, { signal: controller.signal })
+    await postCanvasCommands(CANVAS_ID, { idempotencyKey: ID, commands: [] }, { signal: controller.signal })
     await startCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID }, { signal: controller.signal })
     await getCanvasFunctionRun(CANVAS_ID, NODE_ID, { signal: controller.signal })
     await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID }, { signal: controller.signal })
 
-    const calls = fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) => ({
-      url,
-      method: init.method ?? 'GET',
-      body: init.body,
-      signal: init.signal,
-    }))
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      return {
+        url,
+        method: init?.method ?? 'GET',
+        body: init?.body,
+        signal: init?.signal,
+      }
+    })
     expect(calls[0]).toMatchObject({ url: '/api/canvases', method: 'POST', body: JSON.stringify({ title: 'Named' }) })
     expect(calls[1]).toMatchObject({ url: `/api/canvases/${CANVAS_ID}`, method: 'GET' })
     expect(calls[2]).toMatchObject({
       url: `/api/canvases/${CANVAS_ID}/commands`,
       method: 'POST',
-      body: JSON.stringify({ expectedRevision: '3', idempotencyKey: ID, commands: [] }),
+      body: JSON.stringify({ idempotencyKey: ID, commands: [] }),
     })
     expect(calls[3]).toMatchObject({
       url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
@@ -182,12 +183,12 @@ describe('studio service transport adapter', () => {
     await listCanvases()
     await createCanvas('Named')
 
-    const getInit = fetchMock.mock.calls[0]?.[1] as RequestInit
-    expect(getInit.headers).toEqual({ Accept: 'application/json', 'Accept-Language': 'zh-CN' })
-    expect(getInit.body).toBeUndefined()
+    const getInit = fetchMock.mock.calls[0]?.[1]
+    expect(getInit?.headers).toEqual({ Accept: 'application/json', 'Accept-Language': 'zh-CN' })
+    expect(getInit?.body).toBeUndefined()
 
-    const postInit = fetchMock.mock.calls[1]?.[1] as RequestInit
-    expect(postInit.headers).toEqual({
+    const postInit = fetchMock.mock.calls[1]?.[1]
+    expect(postInit?.headers).toEqual({
       Accept: 'application/json',
       'Accept-Language': 'zh-CN',
       'Content-Type': 'application/json',
@@ -207,11 +208,7 @@ describe('studio service transport adapter', () => {
     fetchMock.mockResolvedValueOnce(response('not-json', { status: 502 }))
     await expect(listCanvases()).rejects.toThrow('invalid Result envelope')
 
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockRejectedValue(new Error('bad json')),
-    })
+    fetchMock.mockResolvedValueOnce(new Response('{'))
     await expect(listCanvases()).rejects.toThrow('invalid JSON')
 
     fetchMock.mockResolvedValueOnce(response(envelope([], { status: 400, code: 'BAD', message: 'bad request' }), { ok: false, status: 400 }))

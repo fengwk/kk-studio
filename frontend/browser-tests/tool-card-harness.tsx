@@ -132,6 +132,7 @@ function unknownTool(
     ...(streaming ? { partialContents: [] } : {}),
     toolCallId: id,
     toolName: 'mcp__filesystem__search_files',
+    rendererKey: 'mcp__filesystem__search_files',
     arguments: rawArguments,
   }
 }

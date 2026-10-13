@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "typecheck:test": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
     "build:layout": "vite build --config vite.layout.config.ts",
     "preview:layout": "vite preview --config vite.layout.config.ts",

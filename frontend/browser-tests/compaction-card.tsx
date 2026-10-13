@@ -87,6 +87,7 @@ export function CompactionCardHarnessApp() {
   if (streamLines > 0) {
     messages.push({
       id: 'streaming-assistant',
+      subjectEntryId: null,
       role: 'assistant',
       text: Array.from({ length: streamLines }, (_, index) => `stream line ${index + 1}`).join('\n\n'),
       createdAt: null,

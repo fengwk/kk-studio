@@ -21,6 +21,7 @@ type HarnessApi = {
   readUnknown(): void
   streamingTail(lines?: number): void
   growTail(lines: number): void
+  shrinkTail(lines?: number): void
   addImageMid(lines: number): void
   unknownLong(chars?: number): void
   restorePosition(offset: number): void
@@ -211,7 +212,7 @@ test('keeps the restored reading position while a tool card image loads', async 
   // 图片按权威 MIME 默认预览；加载完成后卡片确实长高，阅读位置与卡片顶边都不动。
   const image = readCard.locator('img').first()
   await expect(image).toBeVisible()
-  await image.evaluate((element) => element.decode().catch(() => undefined))
+  await image.evaluate((element: HTMLImageElement) => element.decode().catch(() => undefined))
   await page.waitForTimeout(300)
 
   expect(await readCard.boundingBox().then((box) => box?.height ?? 0))
@@ -355,7 +356,7 @@ test('keeps the card anchor while streaming growth runs with expansion, media lo
     scrollMetrics(body).then((m) => m.scrollHeight - m.scrollTop - m.clientHeight)
 
   // 挂载即贴底：外部仍在跟随（此时任何外部增长都会把卡片往上推）。
-  await expect.poll(outerDistance).toBeLessThanOrEqual(1, { timeout: 2500 })
+  await expect.poll(outerDistance, { timeout: 2500 }).toBeLessThanOrEqual(1)
 
   // 1) 用户回看内部日志：内层上滚冒泡阅读意图 → 外层暂停，随后并发增长不得移动卡片。
   await viewport.evaluate((element) => {
@@ -404,7 +405,7 @@ test('keeps the card anchor while streaming growth runs with expansion, media lo
 
   const image = mediaCard.locator('img').first()
   await expect(image).toBeVisible()
-  await image.evaluate((element) => element.decode().catch(() => undefined))
+  await image.evaluate((element: HTMLImageElement) => element.decode().catch(() => undefined))
   await page.waitForTimeout(300)
 
   // 媒体确实加载并改变布局，但外层与卡片顶边都必须原地不动。
@@ -423,7 +424,7 @@ test('does not reopen following when a shrink clamps the outer position to the b
   const viewport = bashViewport(page)
   const outerDistance = () =>
     scrollMetrics(body).then((m) => m.scrollHeight - m.scrollTop - m.clientHeight)
-  await expect.poll(outerDistance).toBeLessThanOrEqual(1, { timeout: 2500 })
+  await expect.poll(outerDistance, { timeout: 2500 }).toBeLessThanOrEqual(1)
 
   // 1) 内层回看（冒泡阅读意图）＋ 用户真实滚轮上滚：外层暂停跟随。
   await viewport.evaluate((element) => {
@@ -447,7 +448,7 @@ test('does not reopen following when a shrink clamps the outer position to the b
   await harness(page, 'growTail', 200)
   await page.waitForTimeout(300)
   expect(await scrollTop(body)).toBe(clampedTop)
-  expect(await outerDistance(body)).toBeGreaterThan(1)
+  expect(await outerDistance()).toBeGreaterThan(1)
 
   // 4) 用户真实滚轮回到新的底部：恢复跟随，后续增长重新贴底。
   await scrollTranscript(page, 10_000)
