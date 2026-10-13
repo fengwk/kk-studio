@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
@@ -48,13 +48,11 @@ public record H3AdapterState(
     Objects.requireNonNull(raw, "raw");
     ObjectNode root = mapper.valueToTree(raw);
     Set<String> unknown = new HashSet<>();
-    root.fieldNames()
-        .forEachRemaining(
-            field -> {
-              if (!FIELDS.contains(field)) {
-                unknown.add(field);
-              }
-            });
+    for (String field : root.propertyNames()) {
+      if (!FIELDS.contains(field)) {
+        unknown.add(field);
+      }
+    }
     if (!unknown.isEmpty()) {
       throw new IllegalArgumentException("H3 adapterState contains unknown fields: " + unknown);
     }
