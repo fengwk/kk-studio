@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.google.re2j.Matcher;
 import com.google.re2j.Pattern;
 import com.google.re2j.PatternSyntaxException;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;

@@ -2,12 +2,12 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.parallel.Resources;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.ExecutableResolver;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -25,7 +25,7 @@ import java.util.Set;
 /** 文件为唯一配置来源；派生路径、bash 解析、秘密保护与内部运行时不变量不能因 CLI 收敛而退化。 */
 class DaemonConfigTest {
   @TempDir Path root;
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   @Test
   void derivesRuntimeFromFileAndFixedSiblingLayout() throws Exception {

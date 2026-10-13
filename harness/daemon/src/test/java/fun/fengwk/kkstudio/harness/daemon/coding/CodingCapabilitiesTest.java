@@ -10,12 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
@@ -388,8 +388,8 @@ class CodingCapabilitiesTest {
     long expectedStart = 0;
     for (EnvironmentCapabilityResult partial : listener.partials) {
       JsonNode details = AbstractCodingCapability.OBJECT_MAPPER.readTree(partial.detailsJson());
-      assertEquals(BashCapability.PARTIAL_KIND, details.path("kind").asText());
-      assertEquals(BashCapability.PARTIAL_MODE_APPEND, details.path("mode").asText());
+      assertEquals(BashCapability.PARTIAL_KIND, details.path("kind").asString());
+      assertEquals(BashCapability.PARTIAL_MODE_APPEND, details.path("mode").asString());
       assertEquals(expectedStart, details.path("startOffset").asLong(), details.toString());
       assertTrue(details.path("endOffset").asLong() >= expectedStart, details.toString());
       expectedStart = details.path("endOffset").asLong();
@@ -438,7 +438,7 @@ class CodingCapabilitiesTest {
                         AbstractCodingCapability.OBJECT_MAPPER
                             .readTree(partial.detailsJson())
                             .path("mode")
-                            .asText());
+                            .asString());
                   } catch (Exception error) {
                     throw new AssertionError(error);
                   }
@@ -455,9 +455,10 @@ class CodingCapabilitiesTest {
         "总数必须完整统计，证明排空没有停止：" + textOutput);
     // seq 1 20000 加上最后一行 tail-marker：总数完整说明命令跑到了最后一行，进程没有被体积或预算终止。
     assertEquals(20001, textOutput.path("totalLines").asLong(), textOutput.toString());
-    assertTrue(textOutput.path("path").asText().endsWith(".log"), "已捕获前缀仍必须发布为可读文件：" + textOutput);
     assertTrue(
-        Files.readString(Path.of(textOutput.path("path").asText()), StandardCharsets.UTF_8)
+        textOutput.path("path").asString().endsWith(".log"), "已捕获前缀仍必须发布为可读文件：" + textOutput);
+    assertTrue(
+        Files.readString(Path.of(textOutput.path("path").asString()), StandardCharsets.UTF_8)
             .startsWith("1\n"),
         "发布文件必须是输出的前缀");
   }
@@ -589,7 +590,7 @@ class CodingCapabilitiesTest {
     assertEquals(20000, textOutput.path("totalLines").asLong());
     assertFalse(textOutput.path("captureTruncated").asBoolean());
 
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(published.isAbsolute());
     assertTrue(text.contains(published.toString()), "预览必须内联绝对路径");
     // durable 全文保留全部 20000 行，模型可继续 read/grep 分页。
@@ -631,7 +632,7 @@ class CodingCapabilitiesTest {
     assertTrue(textOutput.path("totalBytes").asLong() > 16L * 1024 * 1024, textOutput.toString());
     assertFalse(textOutput.path("captureTruncated").asBoolean(), "全文必须完整落盘：" + textOutput);
 
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(Files.isRegularFile(published));
     byte[] served = Files.readAllBytes(published);
     int begin = indexOfPayloadStart(served);
@@ -730,7 +731,7 @@ class CodingCapabilitiesTest {
     // 总数仍然完整统计，说明排空从未停止。
     assertTrue(textOutput.path("totalBytes").asLong() > textOutput.path("capturedBytes").asLong());
 
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(Files.isRegularFile(published), "已捕获的前缀仍必须发布为可读文件");
     assertTrue(
         new String(Files.readAllBytes(published), StandardCharsets.UTF_8).startsWith("1\n"),
@@ -886,11 +887,11 @@ class CodingCapabilitiesTest {
     assertTrue(result.contents().get(0) instanceof JsonResultContent);
     JsonResultContent jsonContent = (JsonResultContent) result.contents().get(0);
     JsonNode parsed = AbstractCodingCapability.OBJECT_MAPPER.readTree(jsonContent.json());
-    assertEquals("demo-skill", parsed.get("packageName").textValue());
-    assertEquals(commitId, parsed.get("installedCommit").textValue());
+    assertEquals("demo-skill", parsed.get("packageName").stringValue());
+    assertEquals(commitId, parsed.get("installedCommit").stringValue());
     assertEquals(
         workspaceRoot.resolve("skills").resolve("demo-skill").toString(),
-        parsed.get("localPath").textValue());
+        parsed.get("localPath").stringValue());
 
     // 测试失败路径：未知 commit 返回 codedError
     String badArgs =

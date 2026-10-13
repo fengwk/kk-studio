@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -229,7 +229,7 @@ class FindGrepCapabilitiesTest {
     JsonNode textOutput =
         AbstractCodingCapability.OBJECT_MAPPER.readTree(res.detailsJson()).path("textOutput");
     assertEquals(2005, textOutput.path("totalLines").asLong());
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(published.isAbsolute());
     assertTrue(out.contains(published.toString()), "预览必须内联绝对路径");
     assertEquals(2005, Files.readAllLines(published).size(), "durable 全文必须保留全部结果行");
@@ -470,7 +470,7 @@ class FindGrepCapabilitiesTest {
     JsonNode textOutput =
         AbstractCodingCapability.OBJECT_MAPPER.readTree(res.detailsJson()).path("textOutput");
     assertEquals(2005, textOutput.path("totalLines").asLong());
-    Path published = Path.of(textOutput.path("path").asText());
+    Path published = Path.of(textOutput.path("path").asString());
     assertTrue(published.isAbsolute());
     assertTrue(text(res).contains(published.toString()), "预览必须内联绝对路径");
     assertEquals(2005, Files.readAllLines(published).size(), "durable 全文必须保留全部匹配行");

@@ -65,7 +65,7 @@ class EnvironmentServerModuleArchitectureTest {
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
-            "com.fasterxml.jackson.core:jackson-databind");
+            "tools.jackson.core:jackson-databind");
     while (matcher.find()) {
       String dependency = matcher.group(1);
       if ("test".equals(optionalTag(dependency, "scope"))) {
@@ -118,7 +118,8 @@ class EnvironmentServerModuleArchitectureTest {
   private static boolean isAllowedImport(String imported) {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
-        || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("com.fasterxml.jackson.annotation.")
+        || imported.startsWith("tools.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.");
   }

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
@@ -419,8 +419,8 @@ final class DaemonConnectionSession {
     ObjectNode payload = envelopeCodec.readPayload(envelope);
     List<String> unexpected = new ArrayList<>();
     payload
-        .fieldNames()
-        .forEachRemaining(
+        .propertyNames()
+        .forEach(
             field -> {
               if (!"message".equals(field) && !"code".equals(field)) {
                 unexpected.add(field);
@@ -433,12 +433,12 @@ final class DaemonConnectionSession {
     if (code == null || code.isNull()) {
       return;
     }
-    if (!code.isTextual()) {
+    if (!code.isString()) {
       throw new DaemonProtocolException("ERROR payload.code is unknown: " + code);
     }
-    String codeValue = code.textValue();
+    String codeValue = code.stringValue();
     if (DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED.equals(codeValue)) {
-      String message = payload.path("message").asText("");
+      String message = payload.path("message").asString("");
       handler.onTerminalFailure(
           "environment registration is rejected" + (message.isBlank() ? "" : ": " + message));
       return;

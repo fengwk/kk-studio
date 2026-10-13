@@ -5,10 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -163,7 +163,7 @@ class LspServiceTest {
             .path("message");
     assertEquals(
         "class App { int value; }\n",
-        changed.path("params").path("contentChanges").get(0).path("text").asText());
+        changed.path("params").path("contentChanges").get(0).path("text").asString());
     assertEquals(1, startedProcesses(transcript));
   }
 
@@ -238,13 +238,13 @@ class LspServiceTest {
   }
 
   private static String methodOf(JsonNode event) {
-    return event.path("message").path("method").asText("");
+    return event.path("message").path("method").asString("");
   }
 
   private static int startedProcesses(Path transcript) {
     int started = 0;
     for (var event : FakeLspServers.events(transcript)) {
-      if (event.path("event").asText().equals("start")) {
+      if (event.path("event").asString().equals("start")) {
         started++;
       }
     }

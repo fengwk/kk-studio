@@ -291,7 +291,7 @@ class LspClientPoolConcurrencyTest {
             .path("params")
             .path("textDocument")
             .path("text")
-            .asText(),
+            .asString(),
         "新实例必须在请求前同步磁盘上的当前正文");
   }
 
@@ -461,7 +461,7 @@ class LspClientPoolConcurrencyTest {
   private static List<Long> startedPids(Path transcript) {
     List<Long> pids = new ArrayList<>();
     for (var event : FakeLspServers.events(transcript)) {
-      if (event.path("event").asText().equals("start")) {
+      if (event.path("event").asString().equals("start")) {
         pids.add(event.path("pid").asLong());
       }
     }

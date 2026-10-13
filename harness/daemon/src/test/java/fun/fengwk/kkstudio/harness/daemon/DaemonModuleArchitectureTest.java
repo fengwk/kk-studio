@@ -198,7 +198,8 @@ class DaemonModuleArchitectureTest {
   private static boolean isAllowedImport(String imported) {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
-        || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("com.fasterxml.jackson.annotation.")
+        || imported.startsWith("tools.jackson.")
         || imported.startsWith("com.sun.jna.")
         || imported.startsWith("okhttp3.")
         || imported.startsWith("okio.")

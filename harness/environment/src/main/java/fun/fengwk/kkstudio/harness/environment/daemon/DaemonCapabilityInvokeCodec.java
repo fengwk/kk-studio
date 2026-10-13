@@ -1,18 +1,18 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.StreamReadConstraints;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 
 import java.time.Duration;
-import java.util.Iterator;
 import java.util.Objects;
 import java.util.Set;
 
@@ -43,24 +43,22 @@ public final class DaemonCapabilityInvokeCodec {
 
   private static final int MAX_DOCUMENT_LENGTH = 16 * 1024 * 1024;
   private static final ObjectMapper MAPPER =
-      new ObjectMapper(
-          JsonFactory.builder()
-              .streamReadConstraints(
-                  StreamReadConstraints.builder()
-                      .maxStringLength(MAX_DOCUMENT_LENGTH)
-                      .maxNestingDepth(100)
-                      .maxNumberLength(1000)
-                      .maxDocumentLength(MAX_DOCUMENT_LENGTH)
-                      .build())
-              .build());
+      JsonMapper.builder(
+              JsonFactory.builder()
+                  .streamReadConstraints(
+                      StreamReadConstraints.builder()
+                          .maxStringLength(MAX_DOCUMENT_LENGTH)
+                          .maxNestingDepth(100)
+                          .maxNumberLength(1000)
+                          .maxDocumentLength(MAX_DOCUMENT_LENGTH)
+                          .build())
+                  .build())
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private static final Set<String> FIELDS =
       Set.of("capabilityId", "capabilityVersion", "arguments", "timeoutMillis");
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   /** 把 request 编码为字段顺序固定且不省略任何字段的 canonical JSON。 */
   public String encode(InvokeRequest request) {
@@ -97,7 +95,7 @@ public final class DaemonCapabilityInvokeCodec {
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("arguments must be valid JSON", error);
     }
     if (value == null || !value.isObject()) {
@@ -113,7 +111,7 @@ public final class DaemonCapabilityInvokeCodec {
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new DaemonProtocolException("capability INVOKE payload must be valid JSON", error);
     }
     if (!(value instanceof ObjectNode object)) {
@@ -123,9 +121,7 @@ public final class DaemonCapabilityInvokeCodec {
   }
 
   private static void rejectUnknownFields(ObjectNode root) {
-    Iterator<String> fields = root.fieldNames();
-    while (fields.hasNext()) {
-      String field = fields.next();
+    for (String field : root.propertyNames()) {
       if (!FIELDS.contains(field)) {
         throw new DaemonProtocolException("capability INVOKE payload has unknown field: " + field);
       }
@@ -134,11 +130,11 @@ public final class DaemonCapabilityInvokeCodec {
 
   private static String requiredText(ObjectNode root, String field) {
     JsonNode value = root.get(field);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new DaemonProtocolException(
           "capability INVOKE payload." + field + " must be a non-blank string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static ObjectNode requiredObjectField(ObjectNode root, String field) {
@@ -192,7 +188,7 @@ public final class DaemonCapabilityInvokeCodec {
         throw new IllegalStateException("canonical arguments JSON is not an object");
       }
       return object;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("canonical arguments JSON cannot be read", error);
     }
   }
@@ -200,7 +196,7 @@ public final class DaemonCapabilityInvokeCodec {
   private static String write(JsonNode value) {
     try {
       return MAPPER.writeValueAsString(value);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode capability INVOKE JSON", error);
     }
   }

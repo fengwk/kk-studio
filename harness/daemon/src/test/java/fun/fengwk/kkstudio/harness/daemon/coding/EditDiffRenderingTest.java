@@ -4,12 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -58,7 +58,7 @@ class EditDiffRenderingTest {
     return new EditCapability(TestCodingConfig.withLsp(workdir), executor);
   }
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   private static String json(String value) {
     try {
@@ -132,7 +132,7 @@ class EditDiffRenderingTest {
     try {
       JsonNode node = MAPPER.readTree(result.detailsJson());
       if (node.has("textOutput") && node.path("textOutput").has("path")) {
-        body = Files.readString(Path.of(node.path("textOutput").path("path").asText()));
+        body = Files.readString(Path.of(node.path("textOutput").path("path").asString()));
       }
     } catch (Exception ignored) {
     }

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;

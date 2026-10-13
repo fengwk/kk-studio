@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
@@ -617,11 +617,12 @@ class DaemonCapabilityResultCodecTest {
   /** 解析一条 COMPLETED payload 中第一个 resource content 的字段名集合，用于断言精确的 wire 形状。 */
   private static Set<String> resourceWireFields(String payload) {
     try {
-      JsonNode contents = new ObjectMapper().readTree(payload).path("result").path("contents");
+      JsonNode contents =
+          JsonMapper.builder().build().readTree(payload).path("result").path("contents");
       for (JsonNode content : contents) {
-        if ("resource".equals(content.path("type").asText())) {
+        if ("resource".equals(content.path("type").asString())) {
           Set<String> fields = new HashSet<>();
-          content.fieldNames().forEachRemaining(fields::add);
+          content.propertyNames().forEach(fields::add);
           return fields;
         }
       }
