@@ -62,8 +62,8 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor</include>
-                                        <include>fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.goal.GoalProgressCodec</include>
                                     </includes>
                                     <limits>
                                         <limit>
