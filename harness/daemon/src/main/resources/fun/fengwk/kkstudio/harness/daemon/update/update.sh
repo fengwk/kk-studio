@@ -9,6 +9,12 @@
 # It fails closed: if the managed service definition is missing, not owned by the
 # installer, or cannot be stopped, it reports failure and leaves the old binary untouched.
 #
+# Failure handling is uniform: `fail_closed` is the single failure entry point, every
+# step that touches the filesystem or the service goes through it (including I/O errors
+# such as a failed backup-directory creation), and an EXIT trap guarantees that any
+# still-unreported non-zero exit also leaves a durable FAILED receipt. Receipt writing is
+# best effort so that a broken disk can never hide the failure or skip the cleanup.
+#
 # Usage: kk-studio-daemon-update.sh <staged-jar> <installed-jar>
 set -euo pipefail
 umask 077
@@ -28,24 +34,44 @@ installed_jar=$2
 update_dir=$(dirname "$staged_jar")
 operation_id=$(basename "$update_dir")
 backup_dir="$update_dir/backup"
+result_path="$update_dir/update-result.json"
+result_written=0
 
 # Durable, minimal evidence: written before any destructive action and preserved on failure.
+# A failed receipt write is reported but never aborts the caller's cleanup.
 write_result() {
-  printf '{"operationId":"%s","phase":"%s","message":"%s"}\n' "$operation_id" "$1" "$2" \
-    >"$update_dir/update-result.json"
+  if printf '{"operationId":"%s","phase":"%s","message":"%s"}\n' "$operation_id" "$1" "$2" \
+    >"$result_path" 2>/dev/null; then
+    result_written=1
+  else
+    echo "update $operation_id could not write the $1 receipt" >&2
+  fi
 }
 
+# Single failure entry point: report the safe reason, then abort. The EXIT trap performs
+# the outcome-independent cleanup for every exit path.
 fail_closed() {
   write_result FAILED "$1"
   echo "update $operation_id failed: $1" >&2
   exit 1
 }
 
+# Outcome-independent cleanup: normal exits leave the success receipt in place, while any
+# other non-zero exit without a receipt (e.g. an unexpected I/O abort under `set -e`) still
+# leaves a durable, de-sensitised FAILED receipt.
+cleanup() {
+  status=$?
+  if [ "$status" -ne 0 ] && [ "$result_written" -eq 0 ]; then
+    write_result FAILED "update aborted unexpectedly (exit $status)"
+  fi
+}
+trap cleanup EXIT
+
 [ -f "$staged_jar" ] || fail_closed "staged artifact is missing"
 [ -f "$installed_jar" ] || fail_closed "installed artifact is missing"
 
 # Give the old daemon a moment to flush its PREPARED receipt before the service is stopped.
-sleep "${KK_STUDIO_UPDATE_GRACE_SECONDS:-3}"
+sleep "${KK_STUDIO_UPDATE_GRACE_SECONDS:-3}" || fail_closed "could not wait for the update grace period"
 
 os=$(uname -s)
 if [ "$os" = "Darwin" ]; then
@@ -75,7 +101,7 @@ else
   done
 fi
 
-mkdir -p "$backup_dir"
+mkdir -p "$backup_dir" || fail_closed "could not create the backup directory"
 cp -p "$installed_jar" "$backup_dir/$(basename "$installed_jar")" ||
   fail_closed "could not back up the installed artifact"
 

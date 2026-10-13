@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.daemon.coding.TestCodingConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.TextOutputStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
+import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
@@ -177,6 +178,69 @@ class DaemonRuntimeTest {
     if (runtime != null) {
       runtime.close();
     }
+  }
+
+  /** 主机用户名缺失时必须启动即失败：环境信息绝不伪造 userName。 */
+  @Test
+  void rejectsAMissingHostUserNameProperty() {
+    String userName = System.getProperty("user.name");
+    try {
+      System.clearProperty("user.name");
+
+      assertThrows(
+          IllegalStateException.class, () -> runtime(new FakeTransport(), new TestCapability()));
+    } finally {
+      System.setProperty("user.name", userName);
+    }
+  }
+
+  /** 家目录在磁盘上不存在时必须仍可启动与关闭：只做规范化，绝不因 toRealPath 失败拒绝启动，也不创建它。 */
+  @Test
+  void startsWithAHomeDirectoryThatDoesNotExistOnDisk() throws Exception {
+    String home = System.getProperty("user.home");
+    Path missingHome = dataDir().resolve("absent-home");
+    try {
+      System.setProperty("user.home", missingHome.toString());
+
+      DaemonRuntime unstarted = runtime(new FakeTransport(), new TestCapability());
+      unstarted.close();
+
+      assertEquals(DaemonRuntimeState.STOPPED, unstarted.state());
+      assertFalse(Files.exists(missingHome), "启动不得要求或创建家目录");
+    } finally {
+      System.setProperty("user.home", home);
+    }
+  }
+
+  /** 必须携带调用关联的控制帧缺少 invocationId 时是协议错误；错误不破坏已 READY 的连接。 */
+  @Test
+  void rejectsInboundFramesWithoutTheRequiredInvocationId() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receiveRaw(envelopeWithoutInvocationId("CANCEL"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receiveRaw(envelopeWithoutInvocationId("RESOURCE_UPLOAD_TICKET"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    // 连接仍然可用：随后的合法控制帧照常生效。
+    transport.receive(policyMessage(120L, 30L));
+    assertEquals(120L, runtime.temporaryResourceTtlSeconds());
+    assertEquals(30L, runtime.temporaryResourceCleanupIntervalSeconds());
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  private static String envelopeWithoutInvocationId(String messageType) {
+    return "{\"protocolVersion\":"
+        + DaemonProtocol.VERSION
+        + ",\"messageType\":\""
+        + messageType
+        + "\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{}}";
   }
 
   /** 注册身份已被另一 live daemon 持有是终态冲突：daemon 进入 FAILED、停止重连并释放终止闩。 */
@@ -2241,6 +2305,77 @@ class DaemonRuntimeTest {
     assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
   }
 
+  /** 关闭等待执行资源时被中断：关闭必须仍然完成，且中断标记被恢复而不是吞掉。 */
+  @Test
+  void closeRestoresInterruptWhileWaitingForExecutors() throws Exception {
+    ExecutorService stuckTasks =
+        Executors.newSingleThreadExecutor(runnable -> daemonThread("stuck-task", runnable));
+    ScheduledExecutorService stuckScheduler =
+        Executors.newScheduledThreadPool(1, runnable -> daemonThread("stuck-scheduler", runnable));
+    stuckTasks.execute(uninterruptibleTask());
+    stuckScheduler.schedule(uninterruptibleTask(), 0L, TimeUnit.MILLISECONDS);
+    DaemonRuntime closing =
+        new DaemonRuntime(
+            new DaemonConfig(
+                URI.create("ws://localhost/gateway"),
+                registrationTokenFile(),
+                Duration.ofMinutes(1),
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                null,
+                dataDir()),
+            new FakeTransport(),
+            new DaemonCapabilityRegistry(),
+            new InMemoryDaemonInvocationJournal(),
+            stuckScheduler,
+            stuckTasks);
+    AtomicBoolean interruptRestored = new AtomicBoolean();
+    AtomicBoolean finished = new AtomicBoolean();
+    Thread closer =
+        new Thread(
+            () -> {
+              closing.close();
+              interruptRestored.set(Thread.currentThread().isInterrupted());
+              finished.set(true);
+            },
+            "closer");
+    closer.start();
+    try {
+      // 关闭已进入等待执行资源终止：此时中断只允许被恢复，绝不允许让关闭悬挂。
+      Thread.sleep(200L);
+      closer.interrupt();
+      closer.join(TimeUnit.SECONDS.toMillis(20));
+
+      assertTrue(finished.get(), "关闭不得因中断而悬挂");
+      assertTrue(interruptRestored.get(), "关闭必须恢复中断标记而不是吞掉它");
+      assertEquals(DaemonRuntimeState.STOPPED, closing.state());
+    } finally {
+      closer.interrupt();
+      stuckTasks.shutdownNow();
+      stuckScheduler.shutdownNow();
+    }
+  }
+
+  private static Thread daemonThread(String name, Runnable runnable) {
+    Thread thread = new Thread(runnable, name);
+    thread.setDaemon(true);
+    return thread;
+  }
+
+  /** 一个忽略中断、无法在关闭超时前终止的任务：用来验证关闭被中断时的收敛行为。 */
+  private static Runnable uninterruptibleTask() {
+    return () -> {
+      long deadline = System.currentTimeMillis() + 1_000L;
+      while (System.currentTimeMillis() < deadline) {
+        try {
+          Thread.sleep(50L);
+        } catch (InterruptedException ignored) {
+          // 故意忽略中断：模拟不配合关闭的本地任务。
+        }
+      }
+    };
+  }
+
   /** close 的两个执行资源必须恰好归 runtime 所有：重复关闭后均 shutdownNow 且在有界时间内终止。 */
   @Test
   void closeTerminatesSchedulerAndSharedTaskExecutorIdempotently() throws Exception {
@@ -2369,6 +2504,111 @@ class DaemonRuntimeTest {
     assertEquals(
         DaemonInvocationState.CANCELLED, journal.find("shutdown-race").orElseThrow().state());
     assertFalse(transport.hasMessages());
+  }
+
+  /**
+   * 单个调用的收尾抛出 RuntimeException 不得跳过其余调用与生命周期资源：其余调用仍被取消并写入 journal 终态， executor、scheduler 与
+   * transport 全部释放，termination 闩照常释放。
+   */
+  @Test
+  void closeConvergesRemainingInvocationsAndResourcesWhenTerminationThrows() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    handshakeTransport = transport;
+    ThrowingTerminateCapability first =
+        new ThrowingTerminateCapability("terminate-throws-a", false);
+    ThrowingTerminateCapability second =
+        new ThrowingTerminateCapability("terminate-throws-b", false);
+    TestCapability surviving =
+        new TestCapability(
+            "surviving", new InputSchema("test arguments", Map.of(), Set.of(), false));
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(first);
+    registry.register(second);
+    registry.register(surviving);
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    ExecutorService taskExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    runtime = new DaemonRuntime(config(), transport, registry, journal, scheduler, taskExecutor);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("call-throws-a", "terminate-throws-a", "1.0.0", 60_000L));
+    transport.receive(invoke("call-throws-b", "terminate-throws-b", "1.0.0", 60_000L));
+    transport.receive(invoke("call-surviving", "surviving", "1.0.0", 60_000L));
+    assertMessageTypes(transport.takeMessages(3), STARTED, STARTED, STARTED);
+
+    runtime.close();
+    runtime.close();
+
+    assertEquals(1, first.terminateCalls(), "the failing wrap-up must be attempted");
+    assertEquals(1, second.terminateCalls(), "the failing wrap-up must be attempted");
+    assertEquals(
+        1, surviving.handle.cancelCalls.get(), "a later invocation must still be cancelled");
+    for (String invocationId : List.of("call-throws-a", "call-throws-b", "call-surviving")) {
+      assertEquals(
+          new DaemonTerminalMessage(
+              DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"),
+          journal.find(invocationId).orElseThrow().terminalMessage(),
+          "every invocation must reach a re-playable terminal even when a wrap-up fails");
+    }
+    assertFalse(transport.hasMessages(), "shutdown must not emit per-invocation wire terminals");
+    assertTrue(transport.closed.get());
+    assertTrue(scheduler.isShutdown());
+    assertTrue(taskExecutor.isShutdown());
+    assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
+    assertTrue(taskExecutor.awaitTermination(1, TimeUnit.SECONDS));
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
+  }
+
+  /** 调用收尾抛出进程级 Error 不得被吞：Error 照常向上传播，且其余生命周期资源与 termination 闩仍被释放。 */
+  @Test
+  void closeReleasesLifecycleResourcesWhenInvocationTerminationThrowsError() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    handshakeTransport = transport;
+    ThrowingTerminateCapability fatal = new ThrowingTerminateCapability("terminate-fatal", true);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(fatal);
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    ExecutorService taskExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    runtime =
+        new DaemonRuntime(
+            config(),
+            transport,
+            registry,
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            taskExecutor);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("fatal-invocation", "terminate-fatal", "1.0.0", 60_000L));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+
+    AssertionError thrown = assertThrows(AssertionError.class, runtime::close);
+
+    assertEquals("capability wrap-up failed", thrown.getMessage());
+    assertTrue(transport.closed.get());
+    assertTrue(scheduler.isShutdown());
+    assertTrue(taskExecutor.isShutdown());
+    assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
+    assertTrue(taskExecutor.awaitTermination(1, TimeUnit.SECONDS));
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
+  }
+
+  /** 测试运行时使用的连接配置：本地网关、真实凭证文件与隔离数据目录。 */
+  private DaemonConfig config() {
+    return new DaemonConfig(
+        URI.create("ws://localhost/gateway"),
+        registrationTokenFile(),
+        Duration.ofMinutes(1),
+        Duration.ZERO,
+        Duration.ofSeconds(1),
+        null,
+        dataDir());
   }
 
   private DaemonRuntime runtime(FakeTransport transport, EnvironmentCapability capability) {
@@ -2576,6 +2816,55 @@ class DaemonRuntimeTest {
     assertEquals(
         TEMPORARY_RESOURCE_CLEANUP_INTERVAL_SECONDS,
         runtime.temporaryResourceCleanupIntervalSeconds());
+  }
+
+  /** 服务端 ERROR 载荷的形状也受协议约束：未知字段与非文本/未知 code 都是协议错误，连接保持可用。 */
+  @Test
+  void rejectsMalformedErrorPayloadsWithoutBreakingTheConnection() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receiveRaw(errorEnvelope("\"message\":\"x\",\"unexpected\":1"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receiveRaw(errorEnvelope("\"code\":7"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    transport.receiveRaw(errorEnvelope("\"code\":\"NOT_A_KNOWN_CODE\""));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    transport.receive(policyMessage(120L, 30L));
+    assertEquals(120L, runtime.temporaryResourceTtlSeconds());
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  /** 同一条连接只能绑定一次 WELCOME：第二次是协议错误，且不得改变已绑定的环境。 */
+  @Test
+  void rejectsASecondWelcomeOnTheSameConnection() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+
+    transport.receive(platformMessage(DaemonMessageType.WELCOME));
+
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  private static String errorEnvelope(String payloadFields) {
+    return "{\"protocolVersion\":"
+        + DaemonProtocol.VERSION
+        + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
+        + "\"payload\":{"
+        + payloadFields
+        + "}}";
   }
 
   private DaemonEnvelope policyMessage(long ttlSeconds, long cleanupIntervalSeconds) {
@@ -2945,6 +3234,66 @@ class DaemonRuntimeTest {
     private void complete() {
       listener.onComplete(
           new EnvironmentCapabilityResult(request.call().id(), List.of(), false, "{}"));
+    }
+  }
+
+  /**
+   * 收尾即抛出 RuntimeException 或进程级 Error 的能力：验证单调用收尾失败与进程级错误都不被吞、也不跳过其余调用与生命周期资源。
+   *
+   * <p>每次收尾都先计数再抛出，因此「其余调用是否仍被收尾」可由计数确定断言。
+   */
+  private static final class ThrowingTerminateCapability implements EnvironmentCapability {
+
+    private final EnvironmentCapabilityDescriptor descriptor;
+    private final AtomicInteger terminateCalls = new AtomicInteger();
+    private final boolean fatal;
+
+    private ThrowingTerminateCapability(String name, boolean fatal) {
+      this.descriptor =
+          new EnvironmentCapabilityDescriptor(
+              new EnvironmentCapabilityId(name),
+              "1.0.0",
+              new InputSchema("throwing arguments", Map.of(), Set.of(), false),
+              Duration.ofSeconds(10));
+      this.fatal = fatal;
+    }
+
+    @Override
+    public EnvironmentCapabilityDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public EnvironmentCapabilityExecutionHandle execute(
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {
+      return new Handle();
+    }
+
+    private int terminateCalls() {
+      return terminateCalls.get();
+    }
+
+    private final class Handle implements EnvironmentCapabilityExecutionHandle {
+
+      @Override
+      public void cancel() {
+        terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+      }
+
+      @Override
+      public boolean isCancelled() {
+        return terminateCalls.get() > 0;
+      }
+
+      @Override
+      public void terminate(EnvironmentCapabilityTerminationCause cause) {
+        terminateCalls.incrementAndGet();
+        if (fatal) {
+          throw new AssertionError("capability wrap-up failed");
+        }
+        throw new IllegalStateException("capability wrap-up failed: secret");
+      }
     }
   }
 
