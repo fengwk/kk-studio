@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -34,7 +36,11 @@ public final class MavisClient {
   private static final Duration RENEWAL_TIMEOUT = Duration.ofSeconds(30);
   private static final int MAX_DETAIL_CHARS = 1_000;
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          // 工具入参与响应是自由 JSON：number 按 BigDecimal 读回并原样写出，避免 1e309 / 1e-324 或高精度小数在 double 中失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private final MavisHttpTransport transport;
   private final Clock clock;
@@ -169,7 +175,7 @@ public final class MavisClient {
     JsonNode payload;
     try {
       payload = MAPPER.readTree(response.body());
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new MavisProtocolException(context + " returned a non-JSON response", error);
     }
     if (payload == null || !payload.isObject()) {
@@ -195,7 +201,7 @@ public final class MavisClient {
     JsonNode payload;
     try {
       payload = MAPPER.readTree(response.body());
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       return Optional.empty();
     }
     if (payload == null || !payload.isObject()) {
@@ -208,7 +214,7 @@ public final class MavisClient {
     try {
       JsonNode payload = MAPPER.readTree(response.body());
       return payload != null && payload.isObject() ? payload : MAPPER.createObjectNode();
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       return MAPPER.createObjectNode();
     }
   }
@@ -227,7 +233,7 @@ public final class MavisClient {
   private static String encode(JsonNode arguments, MavisCapability capability) {
     try {
       return MAPPER.writeValueAsString(arguments);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new MavisValidationException(
           "MiniMax Mavis tool arguments cannot be encoded for " + capability.toolName(), error);
     }
@@ -251,7 +257,7 @@ public final class MavisClient {
     JsonNode payload;
     try {
       payload = MAPPER.readTree(body);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       return "non-JSON error response";
     }
     if (payload == null || !payload.isObject()) {

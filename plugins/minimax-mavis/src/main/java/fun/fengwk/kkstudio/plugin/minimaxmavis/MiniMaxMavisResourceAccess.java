@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.TextNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.StringNode;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -131,7 +132,7 @@ public final class MiniMaxMavisResourceAccess {
       }
       return;
     }
-    if (node.isContainerNode()) {
+    if (node.isContainer()) {
       for (JsonNode child : node) {
         collectUrls(child, collected);
       }
@@ -168,7 +169,7 @@ public final class MiniMaxMavisResourceAccess {
     if (node.isTextual()) {
       return node.textValue().startsWith(SESSION_RESOURCE_SCHEME);
     }
-    if (node.isContainerNode()) {
+    if (node.isContainer()) {
       for (JsonNode child : node) {
         if (containsSessionResource(child)) {
           return true;
@@ -184,7 +185,7 @@ public final class MiniMaxMavisResourceAccess {
       if (!value.startsWith(SESSION_RESOURCE_SCHEME)) {
         return node;
       }
-      return TextNode.valueOf(resolveSessionResource(threadId, value));
+      return StringNode.valueOf(resolveSessionResource(threadId, value));
     }
     if (node.isArray()) {
       ArrayNode resolved = ((ArrayNode) node).arrayNode(node.size());
@@ -195,9 +196,9 @@ public final class MiniMaxMavisResourceAccess {
     }
     if (node.isObject()) {
       ObjectNode resolved = ((ObjectNode) node).objectNode();
-      node.fields()
-          .forEachRemaining(
-              entry -> resolved.set(entry.getKey(), resolve(threadId, entry.getValue())));
+      for (Map.Entry<String, JsonNode> entry : node.properties()) {
+        resolved.set(entry.getKey(), resolve(threadId, entry.getValue()));
+      }
       return resolved;
     }
     return node;

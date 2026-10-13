@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
 
@@ -20,11 +21,8 @@ public record MiniMaxMavisCredentialPayload(
   private static final String CLIENT_UUID_FIELD = "clientUuid";
   private static final String OBTAINED_AT_FIELD = "obtainedAt";
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
-
-  static {
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
 
   public MiniMaxMavisCredentialPayload {
     if (accessToken == null || accessToken.isBlank()) {
@@ -53,7 +51,7 @@ public record MiniMaxMavisCredentialPayload(
               .put(ACCESS_TOKEN_FIELD, accessToken)
               .put(CLIENT_UUID_FIELD, clientUuid)
               .put(OBTAINED_AT_FIELD, obtainedAt.toEpochMilli()));
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode the MiniMax Mavis credential payload", error);
     }
   }
@@ -63,7 +61,7 @@ public record MiniMaxMavisCredentialPayload(
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new MavisValidationException(
           "MiniMax Mavis credential payload is not valid JSON", error);
     }

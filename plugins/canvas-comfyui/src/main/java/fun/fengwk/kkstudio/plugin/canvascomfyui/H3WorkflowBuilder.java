@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.core.io.ClassPathResource;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -36,7 +37,12 @@ public final class H3WorkflowBuilder {
   private final ObjectNode template;
 
   public H3WorkflowBuilder(ObjectMapper objectMapper) {
-    mapper = Objects.requireNonNull(objectMapper, "objectMapper");
+    // H3 模板是自由 JSON 图：number 按 BigDecimal 读回并原样搬运，避免高精度小数被 double 改写或被 strip。
+    mapper =
+        Objects.requireNonNull(objectMapper, "objectMapper")
+            .rebuild()
+            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .build();
     template = readTemplate();
     validateTemplate(template);
   }
@@ -135,7 +141,7 @@ public final class H3WorkflowBuilder {
   private ObjectNode readTemplate() {
     try {
       return (ObjectNode) mapper.readTree(new ClassPathResource(TEMPLATE).getInputStream());
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("H3 workflow template is invalid JSON", error);
     } catch (IOException error) {
       throw new UncheckedIOException("cannot read H3 workflow template", error);

@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
@@ -152,7 +153,12 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     this.comfyClients = Objects.requireNonNull(comfyClients, "comfyClients");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
-    this.mapper = Objects.requireNonNull(mapper, "mapper");
+    // H3 配置状态是自由 JSON：number 按 BigDecimal 读回，避免高精度小数或极值在 double 中失真。
+    this.mapper =
+        Objects.requireNonNull(mapper, "mapper")
+            .rebuild()
+            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .build();
   }
 
   @Override

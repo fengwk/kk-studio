@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,11 +35,7 @@ class MavisClientTest {
   private static final long VALID_EXP = 1_800_000_000L;
 
   private static JsonNode json(String payload) {
-    try {
-      return MAPPER.readTree(payload);
-    } catch (IOException error) {
-      throw new IllegalStateException(error);
-    }
+    return MAPPER.readTree(payload);
   }
 
   private static MavisClient client(RecordingTransport transport) {
@@ -247,6 +243,28 @@ class MavisClientTest {
     assertEquals("application/json", request.headers().get("Content-Type"));
     assertEquals("Bearer " + credential().token(), request.headers().get("Authorization"));
     assertEquals(MavisCapability.WEB_SEARCH.requestTimeout(), request.timeout());
+  }
+
+  /** 工具响应是自由 JSON：number 必须按 BigDecimal 读回，1e309 / 1e-324 与高精度小数不得在 double 中失真。 */
+  @Test
+  void invokePreservesFreeFormResponseNumberPrecision() {
+    RecordingTransport transport =
+        new RecordingTransport()
+            .responder(
+                "{\"base_resp\":{\"status_code\":0},"
+                    + "\"payload\":{\"big\":1e309,\"tiny\":1e-324,"
+                    + "\"precise\":0.12345678901234567890123456789}}");
+
+    JsonNode payload =
+        client(transport)
+            .invoke(credential(), MavisCapability.WEB_SEARCH, json("{\"query\":\"x\"}"));
+
+    JsonNode free = payload.path("payload");
+    assertTrue(free.path("big").isBigDecimal());
+    assertEquals(new BigDecimal("1e309"), free.path("big").decimalValue());
+    assertEquals(new BigDecimal("1e-324"), free.path("tiny").decimalValue());
+    assertEquals(
+        new BigDecimal("0.12345678901234567890123456789"), free.path("precise").decimalValue());
   }
 
   /** 非 object 参数或非 object 响应都不会被接受。 */

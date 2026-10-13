@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
@@ -68,9 +69,14 @@ public final class StandardComfyuiClient {
     baseUri = normalizeBaseUrl(baseUrl);
     this.bearerToken = normalizeBearer(bearerToken);
     this.requestTimeout = requirePositive(requestTimeout, "requestTimeout");
-    mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
-    mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    mapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    // 独立严格 profile：重复键与尾随 token 严格拒绝；自由 workflow / history 树的 number 按 BigDecimal 读回并原样搬运。
+    mapper =
+        Objects.requireNonNull(objectMapper, "objectMapper")
+            .rebuild()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .build();
     client = Objects.requireNonNull(httpClient, "httpClient");
   }
 
@@ -279,7 +285,7 @@ public final class StandardComfyuiClient {
                 + new String(bytes, StandardCharsets.UTF_8));
       }
       return mapper.readTree(bytes);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("cannot parse ComfyUI JSON response", error);
     } catch (IOException error) {
       throw new UncheckedIOException("cannot read ComfyUI response body", error);
@@ -326,7 +332,7 @@ public final class StandardComfyuiClient {
     try {
       byte[] bytes = mapper.writeValueAsBytes(body);
       return HttpRequest.BodyPublishers.ofByteArray(bytes);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot serialize ComfyUI request JSON", error);
     }
   }
