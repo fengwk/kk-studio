@@ -7,10 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -43,7 +44,7 @@ import java.util.UUID;
 /** 验证 OpenAI Responses SSE 流式状态机的事件聚合、截断诊断、用量归一化与回放状态生成。 */
 class OpenAiResponsesStreamAccumulatorTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private ProviderDescriptor createDescriptor() {
     return new ProviderDescriptor(
@@ -127,9 +128,9 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     // 验证 rawUsageJson 保真
     JsonNode rawUsage = MAPPER.readTree(resp.rawUsageJson());
-    assertEquals(100L, rawUsage.path("input_tokens").asLong());
-    assertEquals(50L, rawUsage.path("output_tokens").asLong());
-    assertEquals(150L, rawUsage.path("total_tokens").asLong());
+    assertEquals(100L, rawUsage.path("input_tokens").asLong(0L));
+    assertEquals(50L, rawUsage.path("output_tokens").asLong(0L));
+    assertEquals(150L, rawUsage.path("total_tokens").asLong(0L));
 
     // 验证 replayState 生成
     assertNotNull(accumulator.replayState());
@@ -143,7 +144,7 @@ class OpenAiResponsesStreamAccumulatorTest {
             .get("content")
             .get(0)
             .get("text")
-            .asText());
+            .asString(""));
 
     // 验证事件分发
     assertEquals(2, emittedEvents.size());
@@ -199,8 +200,8 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     JsonNode replayContent =
         accumulator.replayState().payload().path("output").get(0).path("content").get(0);
-    assertEquals("refusal", replayContent.path("type").asText());
-    assertEquals("I cannot help with that.", replayContent.path("refusal").asText());
+    assertEquals("refusal", replayContent.path("type").asString(""));
+    assertEquals("I cannot help with that.", replayContent.path("refusal").asString(""));
   }
 
   /** 测试意图：终态后的已知语义事件拒绝，空帧和 [DONE] 仍可忽略，且原生事件已经记录。 */
@@ -462,8 +463,8 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     // 验证 rawUsageJson 保真不包含 total_tokens
     JsonNode rawUsage = MAPPER.readTree(resp.rawUsageJson());
-    assertEquals(40L, rawUsage.path("input_tokens").asLong());
-    assertEquals(20L, rawUsage.path("output_tokens").asLong());
+    assertEquals(40L, rawUsage.path("input_tokens").asLong(0L));
+    assertEquals(20L, rawUsage.path("output_tokens").asLong(0L));
     assertFalse(
         rawUsage.has("total_tokens"),
         "rawUsageJson must omit total_tokens when absent from native usage");
@@ -612,7 +613,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     // rawUsageJson 保留快照 2
     JsonNode rawUsage = MAPPER.readTree(resp.rawUsageJson());
-    assertEquals(2, rawUsage.path("snapshot_version").asInt());
+    assertEquals(2, rawUsage.path("snapshot_version").asInt(0));
     assertFalse(rawUsage.has("total_tokens"));
     assertFalse(rawUsage.has("input_tokens_details"));
     assertFalse(rawUsage.has("output_tokens_details"));
@@ -637,9 +638,9 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     ProviderResponse resp = accumulator.response();
     JsonNode rawUsage = MAPPER.readTree(resp.rawUsageJson());
-    assertEquals("ext-999", rawUsage.path("vendor_extra_id").asText());
-    assertEquals(123, rawUsage.path("upstream_latency_ms").asInt());
-    assertEquals("us-east-1", rawUsage.path("extra_details").path("region").asText());
+    assertEquals("ext-999", rawUsage.path("vendor_extra_id").asString(""));
+    assertEquals(123, rawUsage.path("upstream_latency_ms").asInt(0));
+    assertEquals("us-east-1", rawUsage.path("extra_details").path("region").asString(""));
   }
 
   /** 意图：验证当响应中完全未携带 usage 块时，rawUsageJson 产出 {}。 */
@@ -773,7 +774,8 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("{}", resp.toolCalls().get(0).argumentsJson());
     assertNotNull(accumulator.replayState());
     assertEquals(
-        "{}", accumulator.replayState().payload().get("output").get(0).get("arguments").asText());
+        "{}",
+        accumulator.replayState().payload().get("output").get(0).get("arguments").asString(""));
   }
 
   /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的合法空对象 "{}" 产出 tool call 与 replay。 */
@@ -796,10 +798,10 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     assertNotNull(accumulator.replayState());
     JsonNode replayOutput = accumulator.replayState().payload().get("output").get(0);
-    assertEquals("function_call", replayOutput.path("type").asText());
-    assertEquals("call_term_1", replayOutput.path("call_id").asText());
-    assertEquals("get_time", replayOutput.path("name").asText());
-    assertEquals("{}", replayOutput.path("arguments").asText());
+    assertEquals("function_call", replayOutput.path("type").asString(""));
+    assertEquals("call_term_1", replayOutput.path("call_id").asString(""));
+    assertEquals("get_time", replayOutput.path("name").asString(""));
+    assertEquals("{}", replayOutput.path("arguments").asString(""));
   }
 
   /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的 tool call 若缺失 arguments 则抛出 INVALID_RESPONSE。 */
@@ -999,7 +1001,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertNotNull(accumulator.replayState());
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asText());
+    assertEquals("message", replayOutput.get(0).path("type").asString(""));
   }
 
   /** 意图：验证当 terminal response 提供 output 时，前序流式 tool 被 terminal output 中的 tool 权威替换。 */
@@ -1039,8 +1041,8 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertNotNull(accumulator.replayState());
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(1, replayOutput.size());
-    assertEquals("call_2", replayOutput.get(0).path("call_id").asText());
-    assertEquals("new_tool", replayOutput.get(0).path("name").asText());
+    assertEquals("call_2", replayOutput.get(0).path("call_id").asString(""));
+    assertEquals("new_tool", replayOutput.get(0).path("name").asString(""));
   }
 
   /** 意图：验证 response 中显式提供非 Array 的 output 字段（如对象、标量或 null）时严格抛出 INVALID_RESPONSE。 */
@@ -1174,8 +1176,8 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertNotNull(accumulator.replayState());
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(2, replayOutput.size());
-    assertEquals("reasoning", replayOutput.get(0).path("type").asText());
-    assertEquals("message", replayOutput.get(1).path("type").asText());
+    assertEquals("reasoning", replayOutput.get(0).path("type").asString(""));
+    assertEquals("message", replayOutput.get(1).path("type").asString(""));
   }
 
   /** 意图：验证 terminal response 显式提供空的 output 数组时，前序流式草稿文本、思考内容与工具调用被完全清空，且无 replayState。 */
@@ -1268,7 +1270,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertNotNull(accumulator.replayState());
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asText());
+    assertEquals("message", replayOutput.get(0).path("type").asString(""));
   }
 
   /**
@@ -1326,9 +1328,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertNotNull(replayOutput);
     assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asText());
+    assertEquals("message", replayOutput.get(0).path("type").asString(""));
     assertEquals(
-        "Hello streamed world", replayOutput.get(0).path("content").get(0).path("text").asText());
+        "Hello streamed world",
+        replayOutput.get(0).path("content").get(0).path("text").asString(""));
   }
 
   /**
@@ -1380,9 +1383,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertNotNull(replayOutput);
     assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asText());
+    assertEquals("message", replayOutput.get(0).path("type").asString(""));
     assertEquals(
-        "Pure streamed delta", replayOutput.get(0).path("content").get(0).path("text").asText());
+        "Pure streamed delta",
+        replayOutput.get(0).path("content").get(0).path("text").asString(""));
   }
 
   /** 意图：验证 terminal output 的兼容文本简写在终态结果与标准化 replay 中均被无损保留。 */
@@ -1412,8 +1416,10 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(
-        "Condensed reasoning", replayOutput.get(0).path("summary").get(0).path("text").asText());
-    assertEquals("Final answer", replayOutput.get(1).path("content").get(0).path("text").asText());
+        "Condensed reasoning",
+        replayOutput.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals(
+        "Final answer", replayOutput.get(1).path("content").get(0).path("text").asString(""));
   }
 
   /**
@@ -1585,7 +1591,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(1, replayOutput.size());
-    assertEquals("enc_terminal", replayOutput.get(0).path("encrypted_content").asText());
+    assertEquals("enc_terminal", replayOutput.get(0).path("encrypted_content").asString(""));
   }
 
   /** 意图：验证 terminal output 的 reasoning summary 权威覆盖流式累积的 summary 内容。 */
@@ -1612,9 +1618,9 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("terminal summary", resp.thinking());
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(
-        "terminal summary", replayOutput.get(0).path("summary").get(0).path("text").asText());
+        "terminal summary", replayOutput.get(0).path("summary").get(0).path("text").asString(""));
     // 同时保留了未被 terminal 显式覆盖的流式 encrypted_content
-    assertEquals("enc_s", replayOutput.get(0).path("encrypted_content").asText());
+    assertEquals("enc_s", replayOutput.get(0).path("encrypted_content").asString(""));
   }
 
   /** 意图：验证当 terminal output 的 reasoning id 与流式不同时判定为冲突，流式项被替换且不继承其 encrypted_content。 */
@@ -1640,7 +1646,8 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     JsonNode replayOutput = accumulator.replayState().payload().get("output");
     assertEquals(1, replayOutput.size());
-    assertEquals("term summary", replayOutput.get(0).path("summary").get(0).path("text").asText());
+    assertEquals(
+        "term summary", replayOutput.get(0).path("summary").get(0).path("text").asString(""));
     // 由于 ID 冲突，不得继承 rs_stream 的 encrypted_content
     assertFalse(replayOutput.get(0).has("encrypted_content"));
   }
@@ -1762,8 +1769,8 @@ class OpenAiResponsesStreamAccumulatorTest {
             "{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\","
                 + "\"action\":{\"type\":\"search\",\"query\":\"weather\"}}"),
         replayOutput.get(0));
-    assertEquals("message", replayOutput.get(1).path("type").asText());
-    assertEquals("sunny", replayOutput.get(1).path("content").get(0).path("text").asText());
+    assertEquals("message", replayOutput.get(1).path("type").asString(""));
+    assertEquals("sunny", replayOutput.get(1).path("content").get(0).path("text").asString(""));
     assertEquals(
         MAPPER.readTree(
             "{\"type\":\"image_generation_call\",\"id\":\"img_1\",\"status\":\"completed\",\"result\":\"aGVsbG8=\"}"),
@@ -1887,7 +1894,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertNotNull(accumulator.replayState());
     ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
     assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asText());
-    assertEquals("streamed", replayOutput.get(0).path("content").get(0).path("text").asText());
+    assertEquals("message", replayOutput.get(0).path("type").asString(""));
+    assertEquals("streamed", replayOutput.get(0).path("content").get(0).path("text").asString(""));
   }
 }

@@ -4,12 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -44,7 +45,7 @@ import java.util.Set;
  */
 class OpenAiChatThinkingTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private ProviderDescriptor descriptor;
   private ModelDescriptor modelDesc;
@@ -153,10 +154,10 @@ class OpenAiChatThinkingTest {
     assertEquals(descriptor.affinity("deepseek-reasoner"), replayState.affinity());
 
     JsonNode payload = replayState.payload();
-    assertEquals("The sum is 2.", payload.path("content").asText());
+    assertEquals("The sum is 2.", payload.path("content").asString(""));
     assertEquals(
-        "Step 1: calculate. Step 2: result is 2.", payload.path("reasoning_content").asText());
-    assertEquals(0.99, payload.path("reasoning_details").path("confidence").asDouble());
+        "Step 1: calculate. Step 2: result is 2.", payload.path("reasoning_content").asString(""));
+    assertEquals(0.99, payload.path("reasoning_details").path("confidence").asDouble(0.0));
 
     // 3. 次轮对话携带 ReplayState，验证 wire 上原位保真
     ProviderMessage turn1Asst =
@@ -187,10 +188,10 @@ class OpenAiChatThinkingTest {
     assertEquals(4, messages2.size());
 
     JsonNode wireAsst = messages2.get(2);
-    assertEquals("assistant", wireAsst.path("role").asText());
-    assertEquals("The sum is 2.", wireAsst.path("content").asText());
+    assertEquals("assistant", wireAsst.path("role").asString(""));
+    assertEquals("The sum is 2.", wireAsst.path("content").asString(""));
     assertEquals(
-        "Step 1: calculate. Step 2: result is 2.", wireAsst.path("reasoning_content").asText());
-    assertEquals(0.99, wireAsst.path("reasoning_details").path("confidence").asDouble());
+        "Step 1: calculate. Step 2: result is 2.", wireAsst.path("reasoning_content").asString(""));
+    assertEquals(0.99, wireAsst.path("reasoning_details").path("confidence").asDouble(0.0));
   }
 }

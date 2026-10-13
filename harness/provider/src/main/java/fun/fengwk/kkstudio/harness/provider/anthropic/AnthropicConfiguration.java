@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
@@ -25,7 +27,13 @@ import java.util.regex.Pattern;
 public record AnthropicConfiguration(
     AnthropicThinkingMode anthropicThinkingMode, List<String> anthropicBetaFeatures) {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
   public static final String FIELD_ANTHROPIC_THINKING_MODE = "anthropicThinkingMode";
   public static final String FIELD_ANTHROPIC_BETA_FEATURES = "anthropicBetaFeatures";
 
@@ -41,11 +49,6 @@ public record AnthropicConfiguration(
   private static final int MAX_BETA_FEATURE_COUNT = 8;
   private static final int MAX_BETA_FEATURE_LENGTH = 64;
   private static final int MAX_BETA_HEADER_LENGTH = 512;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   public AnthropicConfiguration {
     anthropicThinkingMode =
@@ -77,7 +80,7 @@ public record AnthropicConfiguration(
     JsonNode root;
     try {
       root = OBJECT_MAPPER.readTree(configJson);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic configuration JSON");
     }
@@ -95,13 +98,13 @@ public record AnthropicConfiguration(
       return AnthropicThinkingMode.ADAPTIVE;
     }
     JsonNode node = root.get(FIELD_ANTHROPIC_THINKING_MODE);
-    if (!node.isTextual()) {
+    if (!node.isString()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "field " + FIELD_ANTHROPIC_THINKING_MODE + " must be a string");
     }
     try {
-      return AnthropicThinkingMode.valueOf(node.textValue().trim());
+      return AnthropicThinkingMode.valueOf(node.stringValue().trim());
     } catch (IllegalArgumentException ex) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "unsupported anthropicThinkingMode value");
@@ -120,12 +123,12 @@ public record AnthropicConfiguration(
     }
     List<String> features = new ArrayList<>(node.size());
     for (JsonNode item : node) {
-      if (!item.isTextual()) {
+      if (!item.isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             FIELD_ANTHROPIC_BETA_FEATURES + " entries must be strings");
       }
-      features.add(item.textValue());
+      features.add(item.stringValue());
     }
     return features;
   }

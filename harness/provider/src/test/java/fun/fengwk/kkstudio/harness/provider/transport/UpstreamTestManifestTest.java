@@ -5,11 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.InputStream;
 import java.lang.reflect.Method;
@@ -261,14 +262,14 @@ class UpstreamTestManifestTest {
 
   @Test
   void upstreamTestManifestIsCompleteAndSelfContained() throws Exception {
-    ObjectMapper mapper = new ObjectMapper();
+    ObjectMapper mapper = JsonMapper.builder().build();
     JsonNode root;
     try (InputStream in = getClass().getResourceAsStream("upstream-test-manifest.json")) {
       assertNotNull(in, "upstream-test-manifest.json must exist in test resources");
       root = mapper.readTree(in);
     }
 
-    String commit = root.get("upstreamCommit").asText();
+    String commit = root.get("upstreamCommit").asString("");
     assertEquals(
         REQUIRED_UPSTREAM_COMMIT,
         commit,
@@ -277,13 +278,14 @@ class UpstreamTestManifestTest {
     // 校验自报 summary（若存在）
     if (root.has("summary")) {
       JsonNode summary = root.get("summary");
-      assertEquals(EXPECTED_TOTAL_METHODS, summary.get("totalMethods").asInt());
-      assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.get("totalInvocations").asInt());
-      assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.get("portedInvocations").asInt());
-      assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.get("outOfScopeInvocations").asInt());
-      assertEquals(EXPECTED_PORTED_METHODS, summary.get("portedMethods").asInt());
+      assertEquals(EXPECTED_TOTAL_METHODS, summary.get("totalMethods").asInt(0));
+      assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.get("totalInvocations").asInt(0));
+      assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.get("portedInvocations").asInt(0));
       assertEquals(
-          EXPECTED_PURE_OUT_OF_SCOPE_METHODS, summary.get("pureOutOfScopeMethods").asInt());
+          EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.get("outOfScopeInvocations").asInt(0));
+      assertEquals(EXPECTED_PORTED_METHODS, summary.get("portedMethods").asInt(0));
+      assertEquals(
+          EXPECTED_PURE_OUT_OF_SCOPE_METHODS, summary.get("pureOutOfScopeMethods").asInt(0));
     }
 
     JsonNode methods = root.get("methods");
@@ -302,15 +304,15 @@ class UpstreamTestManifestTest {
 
     for (JsonNode methodNode : methods) {
       countedMethods++;
-      String caseId = methodNode.get("caseId").asText();
+      String caseId = methodNode.get("caseId").asString("");
       assertTrue(seenCaseIds.add(caseId), "caseId must be unique: " + caseId);
 
-      String source = methodNode.get("source").asText();
+      String source = methodNode.get("source").asString("");
       assertTrue(
           EXACT_EXPECTED_SOURCES.contains(source),
           "method source must belong to exact expected 15 sources: " + source);
 
-      String methodName = methodNode.get("method").asText();
+      String methodName = methodNode.get("method").asString("");
       Set<String> validMethods = SOURCE_TO_METHODS.get(source);
       assertNotNull(validMethods, "valid methods definition must exist for: " + source);
       assertTrue(
@@ -333,7 +335,7 @@ class UpstreamTestManifestTest {
         List<String> actualInputs = new ArrayList<>();
         for (JsonNode inv : invocations) {
           assertTrue(inv.get("parameters").has("input"), "must contain parameter 'input'");
-          actualInputs.add(inv.get("parameters").get("input").asText());
+          actualInputs.add(inv.get("parameters").get("input").asString(""));
         }
         assertEquals(
             PARSER_SINGLE_LINE_INPUTS,
@@ -351,7 +353,7 @@ class UpstreamTestManifestTest {
         for (JsonNode inv : invocations) {
           assertTrue(
               inv.get("parameters").has("executionMode"), "must contain parameter 'executionMode'");
-          modes.add(inv.get("parameters").get("executionMode").asText());
+          modes.add(inv.get("parameters").get("executionMode").asString(""));
         }
         assertEquals(
             Set.of("SYNC", "ASYNC"), modes, "executionMode must be exactly SYNC and ASYNC");
@@ -367,7 +369,7 @@ class UpstreamTestManifestTest {
         for (JsonNode inv : invocations) {
           assertTrue(
               inv.get("parameters").has("streamingMode"), "must contain parameter 'streamingMode'");
-          modes.add(inv.get("parameters").get("streamingMode").asText());
+          modes.add(inv.get("parameters").get("streamingMode").asString(""));
         }
         assertEquals(
             Set.of("LISTENER", "PUBLISHER"),
@@ -384,7 +386,7 @@ class UpstreamTestManifestTest {
         Set<String> loggingVals = new HashSet<>();
         for (JsonNode inv : invocations) {
           assertTrue(inv.get("parameters").has("logging"), "must contain parameter 'logging'");
-          loggingVals.add(inv.get("parameters").get("logging").asText());
+          loggingVals.add(inv.get("parameters").get("logging").asString(""));
         }
         assertEquals(
             Set.of("false", "true"), loggingVals, "logging must be exactly false and true");
@@ -403,14 +405,14 @@ class UpstreamTestManifestTest {
 
       for (JsonNode inv : invocations) {
         countedInvocations++;
-        String invocationId = inv.get("invocationId").asText();
+        String invocationId = inv.get("invocationId").asString("");
         assertNotNull(invocationId, "invocationId must not be null");
         assertTrue(
             seenInvocationIds.add(invocationId),
             "invocationId must be globally unique: " + invocationId);
 
-        String status = inv.get("status").asText();
-        String executionStatus = inv.get("executionStatus").asText();
+        String status = inv.get("status").asString("");
+        String executionStatus = inv.get("executionStatus").asString("");
 
         if ("PORTED".equals(status)) {
           countedPortedInvocations++;
@@ -421,8 +423,8 @@ class UpstreamTestManifestTest {
               inv.get("capabilityMismatch") == null || inv.get("capabilityMismatch").isNull(),
               "PORTED invocation must not have capabilityMismatch");
 
-          String localClass = inv.get("localClass").asText();
-          String localMethod = inv.get("localMethod").asText();
+          String localClass = inv.get("localClass").asString("");
+          String localMethod = inv.get("localMethod").asString("");
           assertNotNull(localClass, "PORTED invocation must have non-null localClass");
           assertNotNull(localMethod, "PORTED invocation must have non-null localMethod");
 
@@ -465,7 +467,7 @@ class UpstreamTestManifestTest {
           JsonNode mismatchNode = inv.get("capabilityMismatch");
           assertNotNull(mismatchNode, "OUT_OF_SCOPE invocation must specify capabilityMismatch");
           assertFalse(
-              mismatchNode.isNull() || mismatchNode.asText().isBlank(),
+              mismatchNode.isNull() || mismatchNode.asString("").isBlank(),
               "OUT_OF_SCOPE invocation must provide non-blank capabilityMismatch explanation");
 
           assertTrue(

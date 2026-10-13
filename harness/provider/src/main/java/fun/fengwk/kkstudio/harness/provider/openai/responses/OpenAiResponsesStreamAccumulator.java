@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -46,13 +48,14 @@ import java.util.function.Consumer;
  */
 final class OpenAiResponsesStreamAccumulator {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private static final Set<String> KNOWN_SSE_EVENTS =
       Set.of(
@@ -203,8 +206,8 @@ final class OpenAiResponsesStreamAccumulator {
     JsonNode node = tryParseJsonObject(payload);
     if (node != null) {
       JsonNode typeNode = node.get("type");
-      if (typeNode != null && typeNode.isTextual() && !typeNode.textValue().isBlank()) {
-        return new ProviderProtocolEvent(typeNode.textValue(), payload);
+      if (typeNode != null && typeNode.isString() && !typeNode.stringValue().isBlank()) {
+        return new ProviderProtocolEvent(typeNode.stringValue(), payload);
       }
     }
     return new ProviderProtocolEvent(UNKNOWN_PROTOCOL_EVENT_TYPE, payload);
@@ -214,7 +217,7 @@ final class OpenAiResponsesStreamAccumulator {
     if (node == null || !node.isObject()) {
       return;
     }
-    String type = node.path("type").asText();
+    String type = node.path("type").asString("");
 
     if ("response.failed".equals(type) || "response.error".equals(type) || "error".equals(type)) {
       throw OpenAiResponsesErrorMapper.mapSseErrorEnvelope(node);
@@ -254,7 +257,7 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   private void handleTextDelta(JsonNode node) {
-    String delta = node.path("delta").asText("");
+    String delta = node.path("delta").asString("");
     if (!delta.isEmpty()) {
       textBuffer.append(delta);
       bridge.emitEvent(new ProviderStreamEvent.TextDelta(delta));
@@ -262,7 +265,7 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   private void handleThinkingDelta(JsonNode node) {
-    String delta = node.path("delta").asText("");
+    String delta = node.path("delta").asString("");
     if (!delta.isEmpty()) {
       thinkingBuffer.append(delta);
       bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(delta));
@@ -274,17 +277,17 @@ final class OpenAiResponsesStreamAccumulator {
     if (item == null || !item.isObject()) {
       return;
     }
-    String itemType = item.path("type").asText();
+    String itemType = item.path("type").asString("");
     if ("function_call".equals(itemType)) {
-      String id = item.path("id").asText(null);
+      String id = item.path("id").asString(null);
       if (id == null || id.isBlank()) {
         return;
       }
-      String callId = item.path("call_id").asText(null);
+      String callId = item.path("call_id").asString(null);
       if (callId == null || callId.isBlank()) {
         callId = id;
       }
-      String name = item.path("name").asText(null);
+      String name = item.path("name").asString(null);
       // 首次观察到的 function_call 分配下一个连续 ordinal；重复 added 复用既有 ordinal 以避免序号空洞
       WireToolCall previous = toolsById.get(id);
       if (previous != null) {
@@ -308,8 +311,8 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   private void handleArgumentsDelta(JsonNode node) {
-    String itemId = node.path("item_id").asText(null);
-    String delta = node.path("delta").asText("");
+    String itemId = node.path("item_id").asString(null);
+    String delta = node.path("delta").asString("");
     if (itemId != null && toolsById.containsKey(itemId)) {
       WireToolCall tool = toolsById.get(itemId);
       tool.argumentsBuffer.append(delta);
@@ -322,8 +325,8 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   private void handleArgumentsDone(JsonNode node) {
-    String itemId = node.path("item_id").asText(null);
-    String arguments = node.path("arguments").asText(null);
+    String itemId = node.path("item_id").asString(null);
+    String arguments = node.path("arguments").asString(null);
     if (itemId != null && toolsById.containsKey(itemId)) {
       WireToolCall tool = toolsById.get(itemId);
       if (arguments != null) {
@@ -388,20 +391,20 @@ final class OpenAiResponsesStreamAccumulator {
     }
 
     JsonNode terminalId = terminalItem.get("id");
-    if (terminalId == null || !terminalId.isTextual() || terminalId.textValue().isBlank()) {
+    if (terminalId == null || !terminalId.isString() || terminalId.stringValue().isBlank()) {
       return;
     }
 
     for (JsonNode streamedItem : streamedItems) {
       if (!streamedItem.isObject()
-          || !"reasoning".equals(streamedItem.path("type").asText())
-          || !terminalId.textValue().equals(streamedItem.path("id").asText(null))) {
+          || !"reasoning".equals(streamedItem.path("type").asString(""))
+          || !terminalId.stringValue().equals(streamedItem.path("id").asString(null))) {
         continue;
       }
       JsonNode encryptedContent = streamedItem.get("encrypted_content");
       if (encryptedContent != null
-          && encryptedContent.isTextual()
-          && !encryptedContent.textValue().isBlank()) {
+          && encryptedContent.isString()
+          && !encryptedContent.stringValue().isBlank()) {
         terminalItem.set("encrypted_content", encryptedContent.deepCopy());
       }
       return;
@@ -409,8 +412,8 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   private void syncToolFromItem(JsonNode item) {
-    String itemId = item.path("id").asText(null);
-    String callId = item.path("call_id").asText(null);
+    String itemId = item.path("id").asString(null);
+    String callId = item.path("call_id").asString(null);
     WireToolCall tool = findToolCall(itemId, callId);
     if (tool == null) {
       // 未在流中登记过的 function_call（例如只出现在 output_item.done 或 terminal output）在此分配连续 ordinal
@@ -429,15 +432,15 @@ final class OpenAiResponsesStreamAccumulator {
       tool.callId = callId;
     }
     if (item.has("name")) {
-      tool.name = item.path("name").asText(null);
+      tool.name = item.path("name").asString(null);
     }
     if (item.has("arguments")) {
       if (item.get("arguments") != null && !item.get("arguments").isNull()) {
         tool.argumentsPresent = true;
-        tool.argumentsTextual = item.get("arguments").isTextual();
+        tool.argumentsTextual = item.get("arguments").isString();
         if (tool.argumentsTextual) {
           tool.argumentsBuffer.setLength(0);
-          tool.argumentsBuffer.append(item.get("arguments").asText());
+          tool.argumentsBuffer.append(item.get("arguments").asString(""));
         }
         tool.argumentsDone = true;
       } else {
@@ -480,11 +483,11 @@ final class OpenAiResponsesStreamAccumulator {
   private static String opaqueItemSlotKey(JsonNode node, JsonNode item) {
     JsonNode outputIndex = node.get("output_index");
     if (outputIndex != null && outputIndex.isIntegralNumber()) {
-      return "index:" + outputIndex.asInt();
+      return "index:" + outputIndex.asInt(0);
     }
     JsonNode id = item.get("id");
-    if (id != null && id.isTextual() && !id.textValue().isBlank()) {
-      return "id:" + id.textValue();
+    if (id != null && id.isString() && !id.stringValue().isBlank()) {
+      return "id:" + id.stringValue();
     }
     return null;
   }
@@ -494,7 +497,7 @@ final class OpenAiResponsesStreamAccumulator {
     if (item == null || !item.isObject()) {
       return;
     }
-    String itemType = item.path("type").asText();
+    String itemType = item.path("type").asString("");
     if (!isKnownOutputItemType(itemType)) {
       retainStreamedOpaqueItem(node);
       return;
@@ -520,7 +523,7 @@ final class OpenAiResponsesStreamAccumulator {
     JsonNode responseNode = node.get("response");
     String reason = "";
     if (responseNode != null && responseNode.has("incomplete_details")) {
-      reason = responseNode.path("incomplete_details").path("reason").asText("");
+      reason = responseNode.path("incomplete_details").path("reason").asString("");
     }
     if ("content_filter".equals(reason)) {
       stopReason = GenerationStopReason.FILTERED;
@@ -541,7 +544,7 @@ final class OpenAiResponsesStreamAccumulator {
               + fieldName
               + ": must be an integral number within long range");
     }
-    long val = node.asLong();
+    long val = node.asLong(0L);
     if (val < 0) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
@@ -565,11 +568,12 @@ final class OpenAiResponsesStreamAccumulator {
     if (responseNode == null || !responseNode.isObject()) {
       return;
     }
-    if (responseNode.has("id") && !responseNode.path("id").asText().isBlank()) {
-      requestId = responseNode.path("id").asText();
+    if (responseNode.has("id") && !responseNode.path("id").asString("").isBlank()) {
+      requestId = responseNode.path("id").asString("");
     }
-    if (responseNode.has("service_tier") && !responseNode.path("service_tier").asText().isBlank()) {
-      serviceTier = responseNode.path("service_tier").asText();
+    if (responseNode.has("service_tier")
+        && !responseNode.path("service_tier").asString("").isBlank()) {
+      serviceTier = responseNode.path("service_tier").asString("");
     }
 
     if (responseNode.has("usage")) {
@@ -639,7 +643,7 @@ final class OpenAiResponsesStreamAccumulator {
           }
 
           ObjectNode item = (ObjectNode) itemNode.deepCopy();
-          String itemType = item.path("type").asText();
+          String itemType = item.path("type").asString("");
           if ("reasoning".equals(itemType)) {
             retainStreamedReasoningEncryptedContent(item, priorStreamedItems);
             // content 是已知语义输入：捕获阶段即拒绝已知坏形状，避免冻结出下一轮必然失败的 replay。
@@ -681,7 +685,7 @@ final class OpenAiResponsesStreamAccumulator {
     if (!explicitTerminalOutputProcessed) {
       // 从 rawOutputItems 中提取权威文本与思考内容（若有且未在流式 delta 中收到）
       for (JsonNode item : rawOutputItems) {
-        String itemType = item.path("type").asText();
+        String itemType = item.path("type").asString("");
         if ("message".equals(itemType)) {
           JsonNode content = item.get("content");
           if (content != null && textBuffer.isEmpty()) {
@@ -826,7 +830,7 @@ final class OpenAiResponsesStreamAccumulator {
     boolean reasoningSeen = false;
     thinkingBuffer.setLength(0);
     for (JsonNode item : rawOutputItems) {
-      if ("reasoning".equals(item.path("type").asText())) {
+      if ("reasoning".equals(item.path("type").asString(""))) {
         reasoningSeen = true;
         thinkingBuffer.append(
             OpenAiResponsesReasoningText.read(item, ProviderErrorKind.INVALID_RESPONSE));
@@ -861,7 +865,7 @@ final class OpenAiResponsesStreamAccumulator {
       if (!item.isObject()) {
         continue;
       }
-      String type = item.path("type").asText();
+      String type = item.path("type").asString("");
       switch (type) {
         case "message" -> array.add(normalizeReplayMessageItem(item));
         case "reasoning" -> array.add(normalizeReplayReasoningItem(item));
@@ -945,21 +949,21 @@ final class OpenAiResponsesStreamAccumulator {
         if (!c.isObject()) {
           continue;
         }
-        String blockType = c.path("type").asText();
+        String blockType = c.path("type").asString("");
         if ("output_text".equals(blockType)) {
           ObjectNode textNode = (ObjectNode) c.deepCopy();
-          textNode.put("text", c.path("text").asText(""));
+          textNode.put("text", c.path("text").asString(""));
           contentArr.add(textNode);
         } else if ("refusal".equals(blockType)) {
           ObjectNode refusalNode = (ObjectNode) c.deepCopy();
-          refusalNode.put("refusal", c.path("refusal").asText(""));
+          refusalNode.put("refusal", c.path("refusal").asString(""));
           contentArr.add(refusalNode);
         }
       }
-    } else if (srcContent != null && srcContent.isTextual()) {
+    } else if (srcContent != null && srcContent.isString()) {
       ObjectNode textNode = contentArr.addObject();
       textNode.put("type", "output_text");
-      textNode.put("text", srcContent.asText());
+      textNode.put("text", srcContent.asString(""));
     }
     msg.set("content", contentArr);
     return msg;
@@ -984,21 +988,21 @@ final class OpenAiResponsesStreamAccumulator {
     if (summary.isArray()) {
       ArrayNode sumArr = NODES.arrayNode();
       for (JsonNode s : summary) {
-        if (!s.isObject() || !"summary_text".equals(s.path("type").asText())) {
+        if (!s.isObject() || !"summary_text".equals(s.path("type").asString(""))) {
           continue;
         }
         ObjectNode sNode = (ObjectNode) s.deepCopy();
-        sNode.put("text", s.path("text").asText(""));
+        sNode.put("text", s.path("text").asString(""));
         sumArr.add(sNode);
       }
       reasoning.set("summary", sumArr);
       return reasoning;
     }
-    if (summary.isTextual()) {
+    if (summary.isString()) {
       ArrayNode sumArr = NODES.arrayNode();
       ObjectNode sNode = sumArr.addObject();
       sNode.put("type", "summary_text");
-      sNode.put("text", summary.asText());
+      sNode.put("text", summary.asString(""));
       reasoning.set("summary", sumArr);
       return reasoning;
     }
@@ -1030,8 +1034,8 @@ final class OpenAiResponsesStreamAccumulator {
 
     String args = null;
     JsonNode argumentsNode = item.get("arguments");
-    if (argumentsNode != null && argumentsNode.isTextual()) {
-      args = argumentsNode.textValue();
+    if (argumentsNode != null && argumentsNode.isString()) {
+      args = argumentsNode.stringValue();
     } else if (tool != null && tool.argumentsTextual && tool.argumentsBuffer.length() > 0) {
       args = tool.argumentsBuffer.toString();
     }
@@ -1065,10 +1069,10 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   private static String nonBlankText(JsonNode node) {
-    if (node == null || !node.isTextual()) {
+    if (node == null || !node.isString()) {
       return null;
     }
-    return nonBlank(node.textValue());
+    return nonBlank(node.stringValue());
   }
 
   private static String nonBlank(String value) {
@@ -1079,8 +1083,8 @@ final class OpenAiResponsesStreamAccumulator {
     if (content == null || content.isNull()) {
       return;
     }
-    if (content.isTextual()) {
-      textBuffer.append(content.asText());
+    if (content.isString()) {
+      textBuffer.append(content.asString(""));
       return;
     }
     if (!content.isArray()) {
@@ -1090,11 +1094,11 @@ final class OpenAiResponsesStreamAccumulator {
       if (!block.isObject()) {
         continue;
       }
-      String type = block.path("type").asText();
+      String type = block.path("type").asString("");
       if ("output_text".equals(type)) {
-        textBuffer.append(block.path("text").asText(""));
+        textBuffer.append(block.path("text").asString(""));
       } else if ("refusal".equals(type)) {
-        textBuffer.append(block.path("refusal").asText(""));
+        textBuffer.append(block.path("refusal").asString(""));
       }
     }
   }
@@ -1118,7 +1122,7 @@ final class OpenAiResponsesStreamAccumulator {
    */
   private static boolean isOpaqueReplayItem(JsonNode item) {
     JsonNode typeNode = item.get("type");
-    return typeNode != null && typeNode.isTextual() && !typeNode.textValue().isBlank();
+    return typeNode != null && typeNode.isString() && !typeNode.stringValue().isBlank();
   }
 
   /**
@@ -1130,7 +1134,7 @@ final class OpenAiResponsesStreamAccumulator {
   private static boolean replayIsEmptyPlaceholderOnly(ArrayNode replayOutputArray) {
     boolean reasoningItemSeen = false;
     for (JsonNode item : replayOutputArray) {
-      if (!"reasoning".equals(item.path("type").asText())) {
+      if (!"reasoning".equals(item.path("type").asString(""))) {
         continue;
       }
       reasoningItemSeen = true;
@@ -1138,13 +1142,13 @@ final class OpenAiResponsesStreamAccumulator {
       if (item.has("content")) {
         return false;
       }
-      if (!item.path("encrypted_content").asText("").isBlank()) {
+      if (!item.path("encrypted_content").asString("").isBlank()) {
         return false;
       }
       JsonNode summary = item.get("summary");
       if (summary != null) {
         for (JsonNode s : summary) {
-          if (!s.path("text").asText("").isBlank()) {
+          if (!s.path("text").asString("").isBlank()) {
             return false;
           }
         }

@@ -8,14 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -56,7 +57,7 @@ import java.util.stream.Stream;
 /** 验证 OpenAI Responses 请求编码、参数映射、媒体支持、回放与缓存控制规则。 */
 class OpenAiResponsesRequestEncoderTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
 
   private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
@@ -148,18 +149,18 @@ class OpenAiResponsesRequestEncoderTest {
     OpenAiResponsesEncodedRequest encoded = encoder.encode(request, createDescriptor());
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals("gpt-5.4-mini", root.path("model").asText());
-    assertTrue(root.path("stream").asBoolean());
-    assertFalse(root.path("store").asBoolean());
+    assertEquals("gpt-5.4-mini", root.path("model").asString(""));
+    assertTrue(root.path("stream").asBoolean(false));
+    assertFalse(root.path("store").asBoolean(false));
     assertFalse(root.has("previous_response_id"));
-    assertEquals(1024, root.path("max_output_tokens").asInt());
+    assertEquals(1024, root.path("max_output_tokens").asInt(0));
     assertFalse(root.has("temperature"));
     assertFalse(root.has("top_p"));
     assertFalse(root.has("top_k"));
     assertFalse(root.has("stop_sequences"));
-    assertEquals("low", root.path("reasoning").path("effort").asText());
-    assertEquals("auto", root.path("reasoning").path("summary").asText());
-    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
+    assertEquals("low", root.path("reasoning").path("effort").asString(""));
+    assertEquals("auto", root.path("reasoning").path("summary").asString(""));
+    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asString(""));
   }
 
   @Test
@@ -167,7 +168,7 @@ class OpenAiResponsesRequestEncoderTest {
     // 1. effort = "none" -> emit reasoning:{effort:"none"} only; omit summary and omit include
     ProviderRequest reqOff = request(new ModelVariant("v1", "off"));
     JsonNode rootOff = MAPPER.readTree(encoder.encode(reqOff, createDescriptor()).bodyUtf8Bytes());
-    assertEquals("none", rootOff.path("reasoning").path("effort").asText());
+    assertEquals("none", rootOff.path("reasoning").path("effort").asString(""));
     assertFalse(rootOff.path("reasoning").has("summary"));
     assertFalse(rootOff.has("include"));
 
@@ -176,10 +177,10 @@ class OpenAiResponsesRequestEncoderTest {
     ProviderRequest reqEnabled = request(new ModelVariant("v1", "xhigh"));
     JsonNode rootEnabled =
         MAPPER.readTree(encoder.encode(reqEnabled, createDescriptor()).bodyUtf8Bytes());
-    assertEquals("xhigh", rootEnabled.path("reasoning").path("effort").asText());
-    assertEquals("auto", rootEnabled.path("reasoning").path("summary").asText());
+    assertEquals("xhigh", rootEnabled.path("reasoning").path("effort").asString(""));
+    assertEquals("auto", rootEnabled.path("reasoning").path("summary").asString(""));
     assertEquals(1, rootEnabled.path("include").size());
-    assertEquals("reasoning.encrypted_content", rootEnabled.path("include").get(0).asText());
+    assertEquals("reasoning.encrypted_content", rootEnabled.path("include").get(0).asString(""));
 
     // 3. effort = null -> omit reasoning and include
     ProviderRequest reqNull = request(new ModelVariant("v1"));
@@ -204,7 +205,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     JsonNode root = MAPPER.readTree(encoder.encode(request, createDescriptor()).bodyUtf8Bytes());
 
-    assertEquals("wire-model-id", root.path("model").asText());
+    assertEquals("wire-model-id", root.path("model").asString(""));
     assertFalse(root.toString().contains("logical-name"));
   }
 
@@ -230,13 +231,13 @@ class OpenAiResponsesRequestEncoderTest {
     assertNotNull(tools);
     assertEquals(1, tools.size());
     JsonNode t = tools.get(0);
-    assertEquals("function", t.path("type").asText());
-    assertEquals("lookupWeather", t.path("name").asText());
-    assertEquals("Lookup weather by city", t.path("description").asText());
-    assertEquals("object", t.path("parameters").path("type").asText());
-    assertTrue(t.path("strict").asBoolean());
+    assertEquals("function", t.path("type").asString(""));
+    assertEquals("lookupWeather", t.path("name").asString(""));
+    assertEquals("Lookup weather by city", t.path("description").asString(""));
+    assertEquals("object", t.path("parameters").path("type").asString(""));
+    assertTrue(t.path("strict").asBoolean(false));
     assertEquals(List.of("city"), requiredOf(t.path("parameters")));
-    assertFalse(t.path("parameters").path("additionalProperties").asBoolean());
+    assertFalse(t.path("parameters").path("additionalProperties").asBoolean(false));
   }
 
   /** 验证系统指令始终编码为唯一的顶层 instructions 字符串，与模型是否具备推理能力无关。 */
@@ -248,15 +249,15 @@ class OpenAiResponsesRequestEncoderTest {
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
 
     JsonNode reasoningRoot = encodedRoot(request(messages));
-    assertEquals("Test system instruction.", reasoningRoot.path("instructions").asText());
+    assertEquals("Test system instruction.", reasoningRoot.path("instructions").asString(""));
     assertEquals(1, reasoningRoot.get("input").size());
-    assertEquals("user", reasoningRoot.get("input").get(0).path("role").asText());
+    assertEquals("user", reasoningRoot.get("input").get(0).path("role").asString(""));
 
     JsonNode plainRoot =
         encodedRoot(request(nonReasoningModel(), DEFAULT_VARIANT, messages, List.of(), null));
-    assertEquals("Test system instruction.", plainRoot.path("instructions").asText());
+    assertEquals("Test system instruction.", plainRoot.path("instructions").asString(""));
     assertEquals(1, plainRoot.get("input").size());
-    assertEquals("user", plainRoot.get("input").get(0).path("role").asText());
+    assertEquals("user", plainRoot.get("input").get(0).path("role").asString(""));
   }
 
   /** 验证 max_output_tokens 下限：过小的冻结预算明确拒绝，合法预算原样下发。 */
@@ -300,43 +301,47 @@ class OpenAiResponsesRequestEncoderTest {
 
     JsonNode parameters = encodedTools(tool).get(0).path("parameters");
 
-    assertTrue(encodedTools(tool).get(0).path("strict").asBoolean());
-    assertEquals("object", parameters.path("type").asText());
+    assertTrue(encodedTools(tool).get(0).path("strict").asBoolean(false));
+    assertEquals("object", parameters.path("type").asString(""));
     assertEquals(
         List.of("query", "limit", "nullable", "filter", "meta", "tags"), requiredOf(parameters));
-    assertFalse(parameters.path("additionalProperties").asBoolean());
+    assertFalse(parameters.path("additionalProperties").asBoolean(false));
 
     JsonNode properties = parameters.path("properties");
     // 已声明必填的属性保持原 schema。
-    assertEquals("string", properties.path("query").path("type").asText());
+    assertEquals("string", properties.path("query").path("type").asString(""));
     assertFalse(properties.path("query").has("anyOf"));
     // 未声明必填的标量属性改写为任何非 null 值或 null。
-    assertEquals("integer", properties.path("limit").path("anyOf").get(0).path("type").asText());
-    assertEquals("null", properties.path("limit").path("anyOf").get(1).path("type").asText());
+    assertEquals(
+        "integer", properties.path("limit").path("anyOf").get(0).path("type").asString(""));
+    assertEquals("null", properties.path("limit").path("anyOf").get(1).path("type").asString(""));
     // 已经允许 null 的属性不再重复包装。
-    assertEquals("string", properties.path("nullable").path("type").get(0).asText());
+    assertEquals("string", properties.path("nullable").path("type").get(0).asString(""));
     assertFalse(properties.path("nullable").has("anyOf"));
     // 已声明必填的嵌套 object：全量 required + additionalProperties=false，可缺省属性用 anyOf+null 保留语义。
     JsonNode filter = properties.path("filter");
     assertEquals(List.of("tag", "exact"), requiredOf(filter));
-    assertFalse(filter.path("additionalProperties").asBoolean());
+    assertFalse(filter.path("additionalProperties").asBoolean(false));
     assertEquals(
-        "string", filter.path("properties").path("tag").path("anyOf").get(0).path("type").asText());
+        "string",
+        filter.path("properties").path("tag").path("anyOf").get(0).path("type").asString(""));
     assertEquals(
-        "null", filter.path("properties").path("tag").path("anyOf").get(1).path("type").asText());
-    assertEquals("boolean", filter.path("properties").path("exact").path("type").asText());
+        "null",
+        filter.path("properties").path("tag").path("anyOf").get(1).path("type").asString(""));
+    assertEquals("boolean", filter.path("properties").path("exact").path("type").asString(""));
     // 可选 object 属性整体被 anyOf+null 包装，其内部 schema 同样完成归一化。
     JsonNode meta = properties.path("meta").path("anyOf").get(0);
-    assertEquals("object", meta.path("type").asText());
+    assertEquals("object", meta.path("type").asString(""));
     assertEquals(List.of("note"), requiredOf(meta));
-    assertFalse(meta.path("additionalProperties").asBoolean());
+    assertFalse(meta.path("additionalProperties").asBoolean(false));
     assertEquals(
-        "string", meta.path("properties").path("note").path("anyOf").get(0).path("type").asText());
-    assertEquals("null", properties.path("meta").path("anyOf").get(1).path("type").asText());
+        "string",
+        meta.path("properties").path("note").path("anyOf").get(0).path("type").asString(""));
+    assertEquals("null", properties.path("meta").path("anyOf").get(1).path("type").asString(""));
     // array items 内的 object schema 同样归一化。
     JsonNode items = properties.path("tags").path("items");
     assertEquals(List.of("name"), requiredOf(items));
-    assertFalse(items.path("additionalProperties").asBoolean());
+    assertFalse(items.path("additionalProperties").asBoolean(false));
 
     // 共享输入模型不被改写，重复编码结果稳定。
     assertEquals(MAPPER.readTree(schema), MAPPER.readTree(tool.inputSchemaJson()));
@@ -367,26 +372,26 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(choice.has("anyOf") && choice.path("anyOf").size() == 3, "nullable anyOf 不得再包裹");
     JsonNode choiceObject = choice.path("anyOf").get(0);
     assertEquals(List.of("x"), requiredOf(choiceObject));
-    assertFalse(choiceObject.path("additionalProperties").asBoolean());
+    assertFalse(choiceObject.path("additionalProperties").asBoolean(false));
     JsonNode x = choiceObject.path("properties").path("x").path("anyOf").get(0);
-    assertEquals(" keep ", x.path("default").asText());
-    assertEquals(" keep ", x.path("enum").get(0).asText());
+    assertEquals(" keep ", x.path("default").asString(""));
+    assertEquals(" keep ", x.path("enum").get(0).asString(""));
 
     JsonNode oneOfObject =
         parameters.path("properties").path("alt").path("anyOf").get(0).path("oneOf").get(0);
     assertEquals(List.of("y"), requiredOf(oneOfObject));
-    assertFalse(oneOfObject.path("additionalProperties").asBoolean());
+    assertFalse(oneOfObject.path("additionalProperties").asBoolean(false));
     JsonNode allOfObject =
         parameters.path("properties").path("all").path("anyOf").get(0).path("allOf").get(0);
     assertEquals(List.of("z"), requiredOf(allOfObject));
-    assertFalse(allOfObject.path("additionalProperties").asBoolean());
+    assertFalse(allOfObject.path("additionalProperties").asBoolean(false));
 
     JsonNode defsBox = parameters.path("$defs").path("Box");
     assertEquals(List.of("n"), requiredOf(defsBox));
-    assertFalse(defsBox.path("additionalProperties").asBoolean());
+    assertFalse(defsBox.path("additionalProperties").asBoolean(false));
     JsonNode legacy = parameters.path("definitions").path("Legacy");
     assertEquals(List.of("m"), requiredOf(legacy));
-    assertFalse(legacy.path("additionalProperties").asBoolean());
+    assertFalse(legacy.path("additionalProperties").asBoolean(false));
   }
 
   /** 测试意图：allOf 中仅一个分支可空、oneOf 出现多个 null，以及 anyOf 被兄弟 type 禁止 null 时，都不能当成整体已可空；拿不准时安全外包一层 null。 */
@@ -406,14 +411,23 @@ class OpenAiResponsesRequestEncoderTest {
             .path("parameters")
             .path("properties");
 
-    assertEquals("null", properties.path("mixed").path("anyOf").get(1).path("type").asText());
+    assertEquals("null", properties.path("mixed").path("anyOf").get(1).path("type").asString(""));
     assertEquals(
         "null",
-        properties.path("mixed").path("anyOf").get(0).path("allOf").get(1).path("type").asText());
-    assertEquals("null", properties.path("exclusive").path("anyOf").get(1).path("type").asText());
+        properties
+            .path("mixed")
+            .path("anyOf")
+            .get(0)
+            .path("allOf")
+            .get(1)
+            .path("type")
+            .asString(""));
+    assertEquals(
+        "null", properties.path("exclusive").path("anyOf").get(1).path("type").asString(""));
     assertEquals(2, properties.path("exclusive").path("anyOf").get(0).path("oneOf").size());
-    assertEquals("null", properties.path("blocked").path("anyOf").get(1).path("type").asText());
-    assertEquals("string", properties.path("blocked").path("anyOf").get(0).path("type").asText());
+    assertEquals("null", properties.path("blocked").path("anyOf").get(1).path("type").asString(""));
+    assertEquals(
+        "string", properties.path("blocked").path("anyOf").get(0).path("type").asString(""));
   }
 
   /** 验证 prompt_cache_key 直接取 runtime 冻结的会话 key：稳定、可复现、不同 session 不同。 */
@@ -435,14 +449,15 @@ class OpenAiResponsesRequestEncoderTest {
         MAPPER.readTree(encoder.encode(cachedRequest, createDescriptor()).bodyUtf8Bytes());
 
     // 编码器只透出 runtime identity，绝不自造 per-attempt key。
-    assertEquals(sessionKey, first.path("prompt_cache_key").asText());
-    assertEquals(first.path("prompt_cache_key").asText(), second.path("prompt_cache_key").asText());
-    assertEquals("in_memory", first.path("prompt_cache_retention").asText());
+    assertEquals(sessionKey, first.path("prompt_cache_key").asString(""));
+    assertEquals(
+        first.path("prompt_cache_key").asString(""), second.path("prompt_cache_key").asString(""));
+    assertEquals("in_memory", first.path("prompt_cache_retention").asString(""));
 
     ProviderCacheControl otherSession =
         ProviderCacheControl.session(
             PromptCacheRetention.SHORT, "44444444-4444-4444-4444-444444444444");
-    assertNotEquals(otherSession.key(), first.path("prompt_cache_key").asText());
+    assertNotEquals(otherSession.key(), first.path("prompt_cache_key").asString(""));
 
     // runtime 未启用缓存时不得凭空发送 key。
     JsonNode none =
@@ -457,7 +472,7 @@ class OpenAiResponsesRequestEncoderTest {
   private int encodedMaxOutputTokens(int maxOutputTokens) throws Exception {
     JsonNode root =
         encodedRoot(request(createModel(), DEFAULT_VARIANT, maxOutputTokens, null, null, null));
-    return root.path("max_output_tokens").asInt();
+    return root.path("max_output_tokens").asInt(0);
   }
 
   private ArrayNode encodedTools(ProviderToolDefinition tool) throws Exception {
@@ -467,7 +482,7 @@ class OpenAiResponsesRequestEncoderTest {
 
   private static List<String> requiredOf(JsonNode objectSchema) {
     List<String> required = new ArrayList<>();
-    objectSchema.path("required").forEach(node -> required.add(node.asText()));
+    objectSchema.path("required").forEach(node -> required.add(node.asString("")));
     return required;
   }
 
@@ -495,16 +510,16 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode contents = root.get("input").get(0).get("content");
     assertEquals(5, contents.size());
 
-    assertEquals("input_text", contents.get(0).path("type").asText());
-    assertEquals("input_image", contents.get(1).path("type").asText());
-    assertEquals("https://example.com/img.jpg", contents.get(1).path("image_url").asText());
-    assertEquals("input_image", contents.get(2).path("type").asText());
-    assertEquals(dataImage, contents.get(2).path("image_url").asText());
-    assertEquals("input_file", contents.get(3).path("type").asText());
-    assertEquals("https://example.com/doc.pdf", contents.get(3).path("file_url").asText());
-    assertEquals("input_file", contents.get(4).path("type").asText());
-    assertEquals(dataPdf, contents.get(4).path("file_data").asText());
-    assertEquals("document.pdf", contents.get(4).path("filename").asText());
+    assertEquals("input_text", contents.get(0).path("type").asString(""));
+    assertEquals("input_image", contents.get(1).path("type").asString(""));
+    assertEquals("https://example.com/img.jpg", contents.get(1).path("image_url").asString(""));
+    assertEquals("input_image", contents.get(2).path("type").asString(""));
+    assertEquals(dataImage, contents.get(2).path("image_url").asString(""));
+    assertEquals("input_file", contents.get(3).path("type").asString(""));
+    assertEquals("https://example.com/doc.pdf", contents.get(3).path("file_url").asString(""));
+    assertEquals("input_file", contents.get(4).path("type").asString(""));
+    assertEquals(dataPdf, contents.get(4).path("file_data").asString(""));
+    assertEquals("document.pdf", contents.get(4).path("filename").asString(""));
   }
 
   /** 验证不支持的媒体类型（音频、视频、不支持的图片格式、非法 URI）被立即拒绝。 */
@@ -566,8 +581,8 @@ class OpenAiResponsesRequestEncoderTest {
                         ProviderCacheControl.session(PromptCacheRetention.SHORT, "session-uuid")),
                     desc)
                 .bodyUtf8Bytes());
-    assertEquals("session-uuid", shortRoot.path("prompt_cache_key").asText());
-    assertEquals("in_memory", shortRoot.path("prompt_cache_retention").asText());
+    assertEquals("session-uuid", shortRoot.path("prompt_cache_key").asString(""));
+    assertEquals("in_memory", shortRoot.path("prompt_cache_retention").asString(""));
     assertFalse(shortRoot.has("prompt_cache_options"));
 
     // LONG -> 24h
@@ -580,8 +595,8 @@ class OpenAiResponsesRequestEncoderTest {
                         ProviderCacheControl.session(PromptCacheRetention.LONG, "session-uuid")),
                     desc)
                 .bodyUtf8Bytes());
-    assertEquals("session-uuid", longRoot.path("prompt_cache_key").asText());
-    assertEquals("24h", longRoot.path("prompt_cache_retention").asText());
+    assertEquals("session-uuid", longRoot.path("prompt_cache_key").asString(""));
+    assertEquals("24h", longRoot.path("prompt_cache_retention").asString(""));
     assertFalse(longRoot.has("prompt_cache_options"));
 
     // NONE：完全不发 cache hint，明确表达禁用
@@ -637,10 +652,10 @@ class OpenAiResponsesRequestEncoderTest {
 
     JsonNode input = root.get("input");
     assertEquals(3, input.size());
-    assertEquals("message", input.get(0).path("type").asText());
-    assertEquals("function_call", input.get(1).path("type").asText());
-    assertEquals("call_123", input.get(1).path("call_id").asText());
-    assertEquals("function_call_output", input.get(2).path("type").asText());
+    assertEquals("message", input.get(0).path("type").asString(""));
+    assertEquals("function_call", input.get(1).path("type").asString(""));
+    assertEquals("call_123", input.get(1).path("call_id").asString(""));
+    assertEquals("function_call_output", input.get(2).path("type").asString(""));
   }
 
   /** 验证 native replay 的亲和性只由 wire 模型与 provider 代际决定：system instruction 变化、乃至其中的日期戳跨午夜，都不影响原位回放。 */
@@ -679,8 +694,8 @@ class OpenAiResponsesRequestEncoderTest {
               ProviderCacheControl.none());
       JsonNode input = MAPPER.readTree(encoder.encode(request, desc).bodyUtf8Bytes()).get("input");
       assertEquals(1, input.size());
-      assertEquals("message", input.get(0).path("type").asText());
-      assertEquals("hello", input.get(0).path("content").get(0).path("text").asText());
+      assertEquals("message", input.get(0).path("type").asString(""));
+      assertEquals("hello", input.get(0).path("content").get(0).path("text").asString(""));
     }
   }
 
@@ -714,8 +729,8 @@ class OpenAiResponsesRequestEncoderTest {
         MAPPER.readTree(
             encoder.encode(request(List.of(firstUser, refusal, nextUser)), desc).bodyUtf8Bytes());
     JsonNode replayedBlock = root.path("input").get(1).path("content").get(0);
-    assertEquals("refusal", replayedBlock.path("type").asText());
-    assertEquals("I cannot help with that.", replayedBlock.path("refusal").asText());
+    assertEquals("refusal", replayedBlock.path("type").asString(""));
+    assertEquals("I cannot help with that.", replayedBlock.path("refusal").asString(""));
 
     ProviderMessage mismatchedRefusal =
         new ProviderMessage(
@@ -747,9 +762,10 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
     JsonNode input = root.get("input");
     assertEquals(1, input.size());
-    assertEquals("message", input.get(0).path("type").asText());
-    assertEquals("assistant", input.get(0).path("role").asText());
-    assertEquals("fallback response", input.get(0).path("content").get(0).path("text").asText());
+    assertEquals("message", input.get(0).path("type").asString(""));
+    assertEquals("assistant", input.get(0).path("role").asString(""));
+    assertEquals(
+        "fallback response", input.get(0).path("content").get(0).path("text").asString(""));
   }
 
   /**
@@ -938,19 +954,19 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode opaqueReasoning = null;
     boolean readableThinkingInWire = false;
     for (JsonNode item : opaqueInput) {
-      if ("reasoning".equals(item.path("type").asText())) {
+      if ("reasoning".equals(item.path("type").asString(""))) {
         opaqueReasoning = item;
       }
-      if ("message".equals(item.path("type").asText())) {
+      if ("message".equals(item.path("type").asString(""))) {
         for (JsonNode block : item.path("content")) {
-          if (block.path("text").asText().contains("durable thought")) {
+          if (block.path("text").asString("").contains("durable thought")) {
             readableThinkingInWire = true;
           }
         }
       }
     }
     assertNotNull(opaqueReasoning, "native opaque reasoning item must be preserved");
-    assertEquals("opaque_blob", opaqueReasoning.path("encrypted_content").asText());
+    assertEquals("opaque_blob", opaqueReasoning.path("encrypted_content").asString(""));
     assertFalse(
         opaqueReasoning.has("summary"), "must not forge a reasoning summary from durable thinking");
     assertTrue(readableThinkingInWire, "durable readable thinking must survive into the wire");
@@ -1018,8 +1034,8 @@ class OpenAiResponsesRequestEncoderTest {
     OpenAiResponsesEncodedRequest enc4 = encoder.encode(request(List.of(msgMatched)), desc);
     JsonNode root4 = MAPPER.readTree(enc4.bodyUtf8Bytes());
     assertEquals(2, root4.get("input").size());
-    assertEquals("reasoning", root4.get("input").get(0).path("type").asText());
-    assertEquals("message", root4.get("input").get(1).path("type").asText());
+    assertEquals("reasoning", root4.get("input").get(0).path("type").asString(""));
+    assertEquals("message", root4.get("input").get(1).path("type").asString(""));
   }
 
   /** 验证代际（affinity）失配时回退到语义 assistant 编码，不抛出异常。 */
@@ -1051,9 +1067,9 @@ class OpenAiResponsesRequestEncoderTest {
 
     JsonNode input = root.get("input");
     assertEquals(1, input.size());
-    assertEquals("message", input.get(0).path("type").asText());
-    assertEquals("assistant", input.get(0).path("role").asText());
-    assertEquals("hello world", input.get(0).path("content").get(0).path("text").asText());
+    assertEquals("message", input.get(0).path("type").asString(""));
+    assertEquals("assistant", input.get(0).path("role").asString(""));
+    assertEquals("hello world", input.get(0).path("content").get(0).path("text").asString(""));
   }
 
   /** 验证带有 isError 标志的 tool result 正确映射。 */
@@ -1079,8 +1095,8 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
     JsonNode input = root.get("input");
     assertEquals(1, input.size());
-    assertEquals("function_call_output", input.get(0).path("type").asText());
-    assertEquals("division by zero", input.get(0).path("output").asText());
+    assertEquals("function_call_output", input.get(0).path("type").asString(""));
+    assertEquals("division by zero", input.get(0).path("output").asString(""));
   }
 
   /** 验证 Assistant 包含 ProviderThinkingBlock、ToolResult 为空或多块以及非法 Schema 拒绝。 */
@@ -1102,9 +1118,9 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     JsonNode input1 = root1.get("input");
     assertEquals(2, input1.size());
-    assertEquals("reasoning", input1.get(0).path("type").asText());
-    assertEquals("my thoughts", input1.get(0).path("summary").get(0).path("text").asText());
-    assertEquals("message", input1.get(1).path("type").asText());
+    assertEquals("reasoning", input1.get(0).path("type").asString(""));
+    assertEquals("my thoughts", input1.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals("message", input1.get(1).path("type").asString(""));
 
     // 2. ToolResult empty blocks
     ProviderRequest req2 =
@@ -1117,7 +1133,7 @@ class OpenAiResponsesRequestEncoderTest {
                             "call_empty", "tool", List.of(), false, null)))));
     OpenAiResponsesEncodedRequest enc2 = encoder.encode(req2, desc);
     JsonNode root2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
-    assertEquals("", root2.get("input").get(0).path("output").asText());
+    assertEquals("", root2.get("input").get(0).path("output").asString(""));
 
     // 3. ToolResult multiple blocks (text + image)
     ProviderRequest req3 =
@@ -1179,8 +1195,8 @@ class OpenAiResponsesRequestEncoderTest {
     OpenAiResponsesEncodedRequest enc1 = encoder.encode(req1, desc);
     JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     JsonNode output1 = root1.get("input").get(0).path("output");
-    assertTrue(output1.isTextual());
-    assertEquals("{\"temperature\":22,\"unit\":\"C\"}", output1.asText());
+    assertTrue(output1.isString());
+    assertEquals("{\"temperature\":22,\"unit\":\"C\"}", output1.asString(""));
 
     // 2. 单 ProviderTextBlock：保持单文本的简洁 string wire 兼容
     ProviderRequest req2 =
@@ -1198,8 +1214,8 @@ class OpenAiResponsesRequestEncoderTest {
     OpenAiResponsesEncodedRequest enc2 = encoder.encode(req2, desc);
     JsonNode root2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
     JsonNode output2 = root2.get("input").get(0).path("output");
-    assertTrue(output2.isTextual());
-    assertEquals("plain text result", output2.asText());
+    assertTrue(output2.isString());
+    assertEquals("plain text result", output2.asString(""));
 
     // 3. 单 ProviderImageBlock：必须走 output content array
     ProviderRequest req3 =
@@ -1221,10 +1237,11 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode output3 = root3.get("input").get(0).path("output");
     assertTrue(output3.isArray());
     assertEquals(1, output3.size());
-    assertEquals("input_image", output3.get(0).path("type").asText());
+    assertEquals("input_image", output3.get(0).path("type").asString(""));
     // 工具结果图片必须逐字节保留完整 base64 data URI 作为 image_url，且 detail 固定为 auto
-    assertEquals("data:image/png;base64,iVBORw0KGgo=", output3.get(0).path("image_url").asText());
-    assertEquals("auto", output3.get(0).path("detail").asText());
+    assertEquals(
+        "data:image/png;base64,iVBORw0KGgo=", output3.get(0).path("image_url").asString(""));
+    assertEquals("auto", output3.get(0).path("detail").asString(""));
 
     // 3.5 单 ProviderDocumentBlock（PDF）：工具结果 PDF 与用户 PDF 同形，走 input_file + file_data/filename
     ProviderRequest reqPdf =
@@ -1245,10 +1262,11 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode outputPdf = MAPPER.readTree(encPdf.bodyUtf8Bytes()).get("input").get(0).path("output");
     assertTrue(outputPdf.isArray());
     assertEquals(1, outputPdf.size());
-    assertEquals("input_file", outputPdf.get(0).path("type").asText());
+    assertEquals("input_file", outputPdf.get(0).path("type").asString(""));
     assertEquals(
-        "data:application/pdf;base64,JVBERi0xLjQK", outputPdf.get(0).path("file_data").asText());
-    assertEquals("document.pdf", outputPdf.get(0).path("filename").asText());
+        "data:application/pdf;base64,JVBERi0xLjQK",
+        outputPdf.get(0).path("file_data").asString(""));
+    assertEquals("document.pdf", outputPdf.get(0).path("filename").asString(""));
 
     // 4. 多块混合（Text + Json + Image）：按原顺序确定性编码进 output content array
     ProviderRequest req4 =
@@ -1272,12 +1290,12 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode output4 = root4.get("input").get(0).path("output");
     assertTrue(output4.isArray());
     assertEquals(3, output4.size());
-    assertEquals("input_text", output4.get(0).path("type").asText());
-    assertEquals("prefix text", output4.get(0).path("text").asText());
-    assertEquals("input_text", output4.get(1).path("type").asText());
-    assertEquals("{\"reading\":99}", output4.get(1).path("text").asText());
-    assertEquals("input_image", output4.get(2).path("type").asText());
-    assertEquals("https://api.openai.com/image.jpg", output4.get(2).path("image_url").asText());
+    assertEquals("input_text", output4.get(0).path("type").asString(""));
+    assertEquals("prefix text", output4.get(0).path("text").asString(""));
+    assertEquals("input_text", output4.get(1).path("type").asString(""));
+    assertEquals("{\"reading\":99}", output4.get(1).path("text").asString(""));
+    assertEquals("input_image", output4.get(2).path("type").asString(""));
+    assertEquals("https://api.openai.com/image.jpg", output4.get(2).path("image_url").asString(""));
 
     // 5. 不支持的 block（ThinkingBlock、AudioBlock、VideoBlock）：单块与多块均抛出 INVALID_REQUEST
     ProviderRequest reqBadThinking =
@@ -1374,10 +1392,10 @@ class OpenAiResponsesRequestEncoderTest {
             .get(0)
             .path("output");
     assertEquals(3, outputMultiMedia.size());
-    assertEquals("input_text", outputMultiMedia.get(0).path("type").asText());
-    assertEquals("{\"pages\":2}", outputMultiMedia.get(0).path("text").asText());
-    assertEquals("input_file", outputMultiMedia.get(1).path("type").asText());
-    assertEquals("input_image", outputMultiMedia.get(2).path("type").asText());
+    assertEquals("input_text", outputMultiMedia.get(0).path("type").asString(""));
+    assertEquals("{\"pages\":2}", outputMultiMedia.get(0).path("text").asString(""));
+    assertEquals("input_file", outputMultiMedia.get(1).path("type").asString(""));
+    assertEquals("input_image", outputMultiMedia.get(2).path("type").asString(""));
   }
 
   /** 验证同名工具的多次调用按 call_id 分别绑定：两个 function_call_output 各自携带自己的媒体，不会互相覆盖。 */
@@ -1414,12 +1432,12 @@ class OpenAiResponsesRequestEncoderTest {
 
     JsonNode input = MAPPER.readTree(encoder.encode(req, desc).bodyUtf8Bytes()).get("input");
     assertEquals(2, input.size());
-    assertEquals("call_1", input.get(0).path("call_id").asText());
-    assertEquals("call_2", input.get(1).path("call_id").asText());
-    assertEquals("first", input.get(0).path("output").get(0).path("text").asText());
-    assertEquals("second", input.get(1).path("output").get(0).path("text").asText());
-    assertEquals("input_image", input.get(0).path("output").get(1).path("type").asText());
-    assertEquals("input_file", input.get(1).path("output").get(1).path("type").asText());
+    assertEquals("call_1", input.get(0).path("call_id").asString(""));
+    assertEquals("call_2", input.get(1).path("call_id").asString(""));
+    assertEquals("first", input.get(0).path("output").get(0).path("text").asString(""));
+    assertEquals("second", input.get(1).path("output").get(0).path("text").asString(""));
+    assertEquals("input_image", input.get(0).path("output").get(1).path("type").asString(""));
+    assertEquals("input_file", input.get(1).path("output").get(1).path("type").asString(""));
   }
 
   /**
@@ -1522,12 +1540,12 @@ class OpenAiResponsesRequestEncoderTest {
             .get(0)
             .path("output");
     if ("string".equals(itemCase.expectedWireType())) {
-      assertTrue(output.isTextual());
+      assertTrue(output.isString());
       return;
     }
     assertTrue(output.isArray());
     assertEquals(1, output.size());
-    assertEquals(itemCase.expectedWireType(), output.get(0).path("type").asText());
+    assertEquals(itemCase.expectedWireType(), output.get(0).path("type").asString(""));
     // 媒体内容确实进入 wire，而不是被替换为占位文本
     assertTrue(output.get(0).toString().contains(itemCase.expectedSource()));
   }
@@ -1801,7 +1819,7 @@ class OpenAiResponsesRequestEncoderTest {
             desc);
     assertEquals(
         "call_from_id",
-        MAPPER.readTree(encFallback.bodyUtf8Bytes()).get("input").get(0).path("id").asText());
+        MAPPER.readTree(encFallback.bodyUtf8Bytes()).get("input").get(0).path("id").asString(""));
 
     // 9. durable 文本不一致：replay 文本与 durable 文本不匹配
     ObjectNode textMismatchP = MAPPER.createObjectNode();
@@ -2053,23 +2071,23 @@ class OpenAiResponsesRequestEncoderTest {
         MAPPER.readTree(encoder.encode(request(history), createDescriptor()).bodyUtf8Bytes());
 
     // 顶层只多出 cache key/retention，input 逐字一致
-    assertEquals("key", cached.path("prompt_cache_key").asText());
-    assertEquals("in_memory", cached.path("prompt_cache_retention").asText());
+    assertEquals("key", cached.path("prompt_cache_key").asString(""));
+    assertEquals("in_memory", cached.path("prompt_cache_retention").asString(""));
     assertEquals(plain.path("input"), cached.path("input"));
     assertEquals(0, cached.findValues("prompt_cache_breakpoint").size());
 
     // 单文本/JSON 工具结果保持简洁 string 形态；含媒体时使用 output 数组
     JsonNode input = cached.path("input");
-    assertTrue(input.get(2).path("output").isTextual());
-    assertEquals("{\"x\":1}", input.get(2).path("output").asText());
+    assertTrue(input.get(2).path("output").isString());
+    assertEquals("{\"x\":1}", input.get(2).path("output").asString(""));
     assertTrue(input.get(3).path("output").isArray());
-    assertEquals("input_image", input.get(3).path("output").get(1).path("type").asText());
+    assertEquals("input_image", input.get(3).path("output").get(1).path("type").asString(""));
 
     // 空工具与空历史不凭空造输入块
     JsonNode emptyTool =
         explicitRoot(List.of(tool("empty", List.of()))).path("input").get(0).path("output");
-    assertTrue(emptyTool.isTextual());
-    assertEquals("", emptyTool.asText());
+    assertTrue(emptyTool.isString());
+    assertEquals("", emptyTool.asString(""));
     assertTrue(explicitRoot(List.of()).path("input").isEmpty());
     assertTrue(explicitRoot(List.of(assistant(""))).path("input").isEmpty());
   }
@@ -2104,7 +2122,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(output.get(0), input.get(1));
     assertEquals(output.get(1), input.get(2));
     assertEquals(output.get(2), input.get(3));
-    assertEquals("key", root.path("prompt_cache_key").asText());
+    assertEquals("key", root.path("prompt_cache_key").asString(""));
     assertEquals(0, root.findValues("prompt_cache_breakpoint").size());
 
     // durable 与 replay 语义矛盾：无论 affinity 都拒绝
@@ -2132,9 +2150,9 @@ class OpenAiResponsesRequestEncoderTest {
                         ProviderMessageRole.ASSISTANT, nativeAssistant.contents(), wrongAffinity)))
             .path("input");
     assertEquals(2, fallback.size());
-    assertEquals("function_call_output", fallback.get(0).path("type").asText());
-    assertEquals("message", fallback.get(1).path("type").asText());
-    assertEquals("answer", fallback.get(1).path("content").get(0).path("text").asText());
+    assertEquals("function_call_output", fallback.get(0).path("type").asString(""));
+    assertEquals("message", fallback.get(1).path("type").asString(""));
+    assertEquals("answer", fallback.get(1).path("content").get(0).path("text").asString(""));
     assertFalse(fallback.toString().contains("future_native_item"));
 
     // replay payload 不被改写，也不渗入 cache 字段

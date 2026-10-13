@@ -7,12 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import tools.jackson.core.JsonParser;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,7 +42,7 @@ class UpstreamTestManifestTest {
   private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 421;
   private static final int EXPECTED_REAL_CREDENTIAL_INVOCATIONS = 390;
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String TARGET_CLASS_PREFIX =
       "fun.fengwk.kkstudio.harness.provider.openai.chat.";
   private static final String CLASSPATH_FIXTURE_PREFIX = "/fun/fengwk/kkstudio/harness/provider/";
@@ -1096,25 +1097,25 @@ class UpstreamTestManifestTest {
       root = MAPPER.readTree(in);
     }
 
-    String commit = root.get("upstreamCommit").asText();
+    String commit = root.get("upstreamCommit").asString("");
     assertEquals(
         REQUIRED_UPSTREAM_COMMIT, commit, "upstreamCommit must match LangChain4j 1.20.0 commit");
 
-    String version = root.get("upstreamVersion").asText();
+    String version = root.get("upstreamVersion").asString("");
     assertEquals(
         REQUIRED_UPSTREAM_VERSION, version, "upstreamVersion must match LangChain4j 1.20.0");
 
     JsonNode summary = root.get("summary");
     assertNotNull(summary, "summary object must exist");
-    assertEquals(EXPECTED_TOTAL_SOURCES, summary.get("totalSourceFiles").asInt());
-    assertEquals(EXPECTED_TOTAL_METHODS, summary.get("totalMethods").asInt());
-    assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.get("totalInvocations").asInt());
-    assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.get("portedInvocations").asInt());
+    assertEquals(EXPECTED_TOTAL_SOURCES, summary.get("totalSourceFiles").asInt(0));
+    assertEquals(EXPECTED_TOTAL_METHODS, summary.get("totalMethods").asInt(0));
+    assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.get("totalInvocations").asInt(0));
+    assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.get("portedInvocations").asInt(0));
     assertEquals(
-        EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, summary.get("inScopePendingInvocations").asInt());
-    assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.get("outOfScopeInvocations").asInt());
+        EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, summary.get("inScopePendingInvocations").asInt(0));
+    assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.get("outOfScopeInvocations").asInt(0));
     assertEquals(
-        EXPECTED_REAL_CREDENTIAL_INVOCATIONS, summary.get("realCredentialInvocations").asInt());
+        EXPECTED_REAL_CREDENTIAL_INVOCATIONS, summary.get("realCredentialInvocations").asInt(0));
 
     JsonNode methodsNode = root.get("methods");
     assertTrue(methodsNode != null && methodsNode.isArray(), "methods must be an array");
@@ -1132,9 +1133,9 @@ class UpstreamTestManifestTest {
 
     for (JsonNode methodEntry : methodsNode) {
       countedMethods++;
-      String sourcePath = methodEntry.get("sourcePath").asText();
-      String className = methodEntry.get("className").asText();
-      String methodName = methodEntry.get("methodName").asText();
+      String sourcePath = methodEntry.get("sourcePath").asString("");
+      String className = methodEntry.get("className").asString("");
+      String methodName = methodEntry.get("methodName").asString("");
 
       seenSources.add(sourcePath);
       seenMethodsPerSource.computeIfAbsent(sourcePath, k -> new HashSet<>()).add(methodName);
@@ -1151,37 +1152,37 @@ class UpstreamTestManifestTest {
       Set<String> seenParamCasesInMethod = new HashSet<>();
       for (JsonNode inv : invocations) {
         countedInvocations++;
-        String invocationId = inv.get("invocationId").asText();
+        String invocationId = inv.get("invocationId").asString("");
         assertNotNull(invocationId);
         assertTrue(
             seenInvocationIds.add(invocationId), () -> "duplicate invocationId: " + invocationId);
 
-        assertEquals(sourcePath, inv.get("sourcePath").asText());
-        assertEquals(className, inv.get("className").asText());
-        assertEquals(methodName, inv.get("methodName").asText());
+        assertEquals(sourcePath, inv.get("sourcePath").asString(""));
+        assertEquals(className, inv.get("className").asString(""));
+        assertEquals(methodName, inv.get("methodName").asString(""));
 
-        String parameterCase = inv.get("parameterCase").asText();
+        String parameterCase = inv.get("parameterCase").asString("");
         assertNotNull(parameterCase);
         assertTrue(seenParamCasesInMethod.add(parameterCase));
 
-        String upstreamStatus = inv.get("upstreamStatus").asText();
+        String upstreamStatus = inv.get("upstreamStatus").asString("");
         assertTrue(Set.of("ACTIVE", "DISABLED", "CONDITIONAL").contains(upstreamStatus));
 
-        String capability = inv.get("capability").asText();
+        String capability = inv.get("capability").asString("");
         assertNotNull(capability);
         assertFalse(capability.isBlank());
 
-        String validationLayer = inv.get("validationLayer").asText();
+        String validationLayer = inv.get("validationLayer").asString("");
         assertNotNull(validationLayer);
         assertFalse(validationLayer.isBlank());
 
-        String mappingStatus = inv.get("mappingStatus").asText();
-        String executionStatus = inv.get("executionStatus").asText();
+        String mappingStatus = inv.get("mappingStatus").asString("");
+        String executionStatus = inv.get("executionStatus").asString("");
         assertFalse("SKIPPED".equals(executionStatus));
 
         JsonNode realInterop = inv.get("realInteropStatus");
         if (realInterop != null && !realInterop.isNull()) {
-          assertEquals("NOT_EXECUTED_REQUIRES_CREDENTIAL", realInterop.asText());
+          assertEquals("NOT_EXECUTED_REQUIRES_CREDENTIAL", realInterop.asString(""));
           countedRealCredentialInvocations++;
         }
 
@@ -1191,9 +1192,9 @@ class UpstreamTestManifestTest {
           assertTrue(
               inv.get("capabilityMismatch") == null || inv.get("capabilityMismatch").isNull());
           assertNotNull(inv.get("targetTest"));
-          validateTargetTest(inv.get("targetTest").asText());
+          validateTargetTest(inv.get("targetTest").asString(""));
           assertNotNull(inv.get("fixture"));
-          validateFixture(inv.get("fixture").asText());
+          validateFixture(inv.get("fixture").asString(""));
           assertFalse("not-applicable".equals(validationLayer));
         } else if ("PORT_PENDING".equals(mappingStatus)) {
           countedInScopePendingInvocations++;
@@ -1201,16 +1202,16 @@ class UpstreamTestManifestTest {
           assertTrue(
               inv.get("capabilityMismatch") == null || inv.get("capabilityMismatch").isNull());
           assertNotNull(inv.get("targetTest"));
-          assertFalse(inv.get("targetTest").asText().isBlank());
+          assertFalse(inv.get("targetTest").asString("").isBlank());
           assertNotNull(inv.get("fixture"));
-          assertFalse(inv.get("fixture").asText().isBlank());
+          assertFalse(inv.get("fixture").asString("").isBlank());
           assertFalse("not-applicable".equals(validationLayer));
         } else if ("OUT_OF_SCOPE".equals(mappingStatus)) {
           countedOutOfScopeInvocations++;
           assertEquals("NOT_EXECUTED_OUT_OF_SCOPE", executionStatus);
           JsonNode mismatch = inv.get("capabilityMismatch");
           assertNotNull(mismatch);
-          assertFalse(mismatch.isNull() || mismatch.asText().isBlank());
+          assertFalse(mismatch.isNull() || mismatch.asString("").isBlank());
           assertTrue(inv.get("targetTest") == null || inv.get("targetTest").isNull());
           assertTrue(inv.get("fixture") == null || inv.get("fixture").isNull());
           assertEquals("not-applicable", validationLayer);

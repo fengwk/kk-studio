@@ -7,14 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -58,7 +59,7 @@ import java.util.stream.Stream;
 /** Gemini 请求体序列化与请求映射规则测试。 */
 class GeminiRequestEncoderTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
   private final GeminiRequestEncoder encoder = new GeminiRequestEncoder();
 
@@ -103,8 +104,8 @@ class GeminiRequestEncoderTest {
     assertTrue(json.has("contents"));
     ArrayNode contents = (ArrayNode) json.get("contents");
     assertEquals(1, contents.size());
-    assertEquals("user", contents.get(0).get("role").asText());
-    assertEquals("Hello Gemini", contents.get(0).get("parts").get(0).get("text").asText());
+    assertEquals("user", contents.get(0).get("role").asString(""));
+    assertEquals("Hello Gemini", contents.get(0).get("parts").get(0).get("text").asString(""));
   }
 
   /** 验证多轮纯文本历史按 user/model/user 顺序编码，且各轮文本保持不变。 */
@@ -131,12 +132,12 @@ class GeminiRequestEncoderTest {
     ArrayNode contents = (ArrayNode) json.get("contents");
 
     assertEquals(3, contents.size());
-    assertEquals("user", contents.get(0).path("role").asText());
-    assertEquals("First message", contents.get(0).path("parts").get(0).path("text").asText());
-    assertEquals("model", contents.get(1).path("role").asText());
-    assertEquals("First response", contents.get(1).path("parts").get(0).path("text").asText());
-    assertEquals("user", contents.get(2).path("role").asText());
-    assertEquals("Second message", contents.get(2).path("parts").get(0).path("text").asText());
+    assertEquals("user", contents.get(0).path("role").asString(""));
+    assertEquals("First message", contents.get(0).path("parts").get(0).path("text").asString(""));
+    assertEquals("model", contents.get(1).path("role").asString(""));
+    assertEquals("First response", contents.get(1).path("parts").get(0).path("text").asString(""));
+    assertEquals("user", contents.get(2).path("role").asString(""));
+    assertEquals("Second message", contents.get(2).path("parts").get(0).path("text").asString(""));
   }
 
   /** 验证请求的系统指令映射为顶层 systemInstruction 的唯一个 parts[0].text，且不进入 contents。 */
@@ -160,12 +161,12 @@ class GeminiRequestEncoderTest {
     assertTrue(json.has("systemInstruction"));
     ArrayNode sysParts = (ArrayNode) json.get("systemInstruction").get("parts");
     assertEquals(1, sysParts.size());
-    assertEquals("System rule 1.", sysParts.get(0).get("text").asText());
+    assertEquals("System rule 1.", sysParts.get(0).get("text").asString(""));
 
     ArrayNode contents = (ArrayNode) json.get("contents");
     assertEquals(1, contents.size());
-    assertEquals("user", contents.get(0).get("role").asText());
-    assertEquals("User query.", contents.get(0).path("parts").get(0).path("text").asText());
+    assertEquals("user", contents.get(0).get("role").asString(""));
+    assertEquals("User query.", contents.get(0).path("parts").get(0).path("text").asString(""));
     assertFalse(contents.toString().contains("SYSTEM"));
   }
 
@@ -188,7 +189,7 @@ class GeminiRequestEncoderTest {
     JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode gen = json.get("generationConfig");
-    assertEquals(4321, gen.get("maxOutputTokens").asInt());
+    assertEquals(4321, gen.get("maxOutputTokens").asInt(0));
     assertFalse(gen.has("temperature"));
     assertFalse(gen.has("topP"));
     assertFalse(gen.has("topK"));
@@ -218,8 +219,8 @@ class GeminiRequestEncoderTest {
       JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
       JsonNode thinkingConfig = json.path("generationConfig").path("thinkingConfig");
-      assertTrue(thinkingConfig.path("includeThoughts").asBoolean());
-      assertEquals(effort, thinkingConfig.path("thinkingLevel").asText());
+      assertTrue(thinkingConfig.path("includeThoughts").asBoolean(false));
+      assertEquals(effort, thinkingConfig.path("thinkingLevel").asString(""));
     }
   }
 
@@ -243,8 +244,8 @@ class GeminiRequestEncoderTest {
             .readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes())
             .path("generationConfig")
             .path("thinkingConfig");
-    assertFalse(thinkingConfig.path("includeThoughts").asBoolean());
-    assertEquals(0, thinkingConfig.path("thinkingBudget").asInt());
+    assertFalse(thinkingConfig.path("includeThoughts").asBoolean(false));
+    assertEquals(0, thinkingConfig.path("thinkingBudget").asInt(0));
     assertFalse(thinkingConfig.has("thinkingLevel"));
   }
 
@@ -266,7 +267,7 @@ class GeminiRequestEncoderTest {
     GeminiEncodedRequest encoded = encoder.encode(request, descriptor());
     JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
     JsonNode genConfig = json.path("generationConfig");
-    assertEquals(1024, genConfig.path("maxOutputTokens").asInt());
+    assertEquals(1024, genConfig.path("maxOutputTokens").asInt(0));
     assertFalse(genConfig.has("thinkingConfig"));
   }
 
@@ -311,41 +312,42 @@ class GeminiRequestEncoderTest {
 
     // 非 owned 官方顶层字段原样保留
     assertFalse(json.has("cachedContent"));
-    assertEquals("BLOCK_NONE", json.path("safetySettings").get(0).path("threshold").asText());
+    assertEquals("BLOCK_NONE", json.path("safetySettings").get(0).path("threshold").asString(""));
     assertEquals(
-        "ANY", json.path("toolConfig").path("functionCallingConfig").path("mode").asText());
-    assertEquals("ai", json.path("labels").path("team").asText());
+        "ANY", json.path("toolConfig").path("functionCallingConfig").path("mode").asString(""));
+    assertEquals("ai", json.path("labels").path("team").asString(""));
 
     // generationConfig 官方子字段保留；无 reasoningEffort 时 native thinkingConfig 亦保留
     JsonNode gen = json.path("generationConfig");
-    assertEquals(0.4, gen.path("temperature").asDouble());
-    assertEquals(0.9, gen.path("topP").asDouble());
-    assertEquals(20, gen.path("topK").asInt());
-    assertEquals("STOP", gen.path("stopSequences").get(0).asText());
-    assertEquals("application/json", gen.path("responseMimeType").asText());
+    assertEquals(0.4, gen.path("temperature").asDouble(0.0));
+    assertEquals(0.9, gen.path("topP").asDouble(0.0));
+    assertEquals(20, gen.path("topK").asInt(0));
+    assertEquals("STOP", gen.path("stopSequences").get(0).asString(""));
+    assertEquals("application/json", gen.path("responseMimeType").asString(""));
     assertTrue(gen.path("responseSchema").isObject());
     assertTrue(gen.path("responseJsonSchema").isObject());
-    assertEquals("MEDIA_RESOLUTION_LOW", gen.path("mediaResolution").asText());
+    assertEquals("MEDIA_RESOLUTION_LOW", gen.path("mediaResolution").asString(""));
     assertEquals(
         "Kore",
         gen.path("speechConfig")
             .path("voiceConfig")
             .path("prebuiltVoiceConfig")
             .path("voiceName")
-            .asText());
-    assertEquals("1:1", gen.path("imageConfig").path("aspectRatio").asText());
+            .asString(""));
+    assertEquals("1:1", gen.path("imageConfig").path("aspectRatio").asString(""));
     assertEquals(
-        "gemini-2.5-flash", gen.path("routingConfig").path("autoRouting").path("model").asText());
-    assertTrue(gen.path("thinkingConfig").path("includeThoughts").asBoolean());
-    assertEquals(512, gen.path("thinkingConfig").path("thinkingBudget").asInt());
+        "gemini-2.5-flash",
+        gen.path("routingConfig").path("autoRouting").path("model").asString(""));
+    assertTrue(gen.path("thinkingConfig").path("includeThoughts").asBoolean(false));
+    assertEquals(512, gen.path("thinkingConfig").path("thinkingBudget").asInt(0));
     // 输出预算始终由 runtime 写自己的子字段
-    assertEquals(777, gen.path("maxOutputTokens").asInt());
+    assertEquals(777, gen.path("maxOutputTokens").asInt(0));
 
     // runtime facts 仍只由请求决定
     assertEquals(
         "Test system instruction.",
-        json.path("systemInstruction").path("parts").get(0).path("text").asText());
-    assertEquals("Hi", json.path("contents").get(0).path("parts").get(0).path("text").asText());
+        json.path("systemInstruction").path("parts").get(0).path("text").asString(""));
+    assertEquals("Hi", json.path("contents").get(0).path("parts").get(0).path("text").asString(""));
   }
 
   /** 验证 native hosted tools 原样保留并在末尾追加一个 runtime functionDeclarations tool，且合并结果参与 prefix hash。 */
@@ -384,9 +386,9 @@ class GeminiRequestEncoderTest {
     assertTrue(tools.get(2).has("urlContext"));
     assertEquals(
         "projects/p/dataStores/d",
-        tools.get(3).path("retrieval").path("vertexAiSearch").path("datastore").asText());
+        tools.get(3).path("retrieval").path("vertexAiSearch").path("datastore").asString(""));
     assertEquals(
-        "getWeather", tools.get(4).path("functionDeclarations").get(0).path("name").asText());
+        "getWeather", tools.get(4).path("functionDeclarations").get(0).path("name").asString(""));
 
     // hosted tools 属于请求前缀：同一请求去掉 native tools 后 wire tools 只剩 runtime functionDeclarations
     ProviderRequest withoutNativeTools =
@@ -625,9 +627,9 @@ class GeminiRequestEncoderTest {
     ArrayNode fnDecls = (ArrayNode) json.get("tools").get(0).get("functionDeclarations");
     assertEquals(1, fnDecls.size());
     JsonNode fn = fnDecls.get(0);
-    assertEquals("getWeather", fn.get("name").asText());
-    assertEquals("Get current weather", fn.get("description").asText());
-    assertEquals("object", fn.get("parameters").get("type").asText());
+    assertEquals("getWeather", fn.get("name").asString(""));
+    assertEquals("Get current weather", fn.get("description").asString(""));
+    assertEquals("object", fn.get("parameters").get("type").asString(""));
     assertTrue(fn.get("parameters").get("properties").has("location"));
   }
 
@@ -673,11 +675,11 @@ class GeminiRequestEncoderTest {
 
     JsonNode part = json.get("contents").get(0).get("parts").get(0);
     assertTrue(part.has("inlineData"));
-    assertEquals("image/png", part.get("inlineData").get("mimeType").asText());
+    assertEquals("image/png", part.get("inlineData").get("mimeType").asString(""));
     // base64 载荷必须逐字节保留（去除 data URI 前缀后原样进入 inlineData.data）
     assertEquals(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-        part.get("inlineData").get("data").asText());
+        part.get("inlineData").get("data").asString(""));
   }
 
   /** 验证 DOCUMENT/PDF 的 base64 data URI 与 image/audio/video 一样被编码为 inlineData，载荷逐字节保留。 */
@@ -703,15 +705,15 @@ class GeminiRequestEncoderTest {
     ArrayNode parts = (ArrayNode) json.path("contents").get(0).path("parts");
 
     assertEquals(2, parts.size());
-    assertEquals("inspect:", parts.get(0).path("text").asText());
+    assertEquals("inspect:", parts.get(0).path("text").asString(""));
     assertTrue(parts.get(1).has("inlineData"));
-    assertEquals("application/pdf", parts.get(1).path("inlineData").path("mimeType").asText());
+    assertEquals("application/pdf", parts.get(1).path("inlineData").path("mimeType").asString(""));
     assertEquals(
         "JVBERi0xLjQgZHVtbXkgcGRmIGNvbnRlbnQ=",
-        parts.get(1).path("inlineData").path("data").asText());
+        parts.get(1).path("inlineData").path("data").asString(""));
     // base64 文档不得退化为 fileData，也不得保留 data: 前缀
     assertFalse(parts.get(1).has("fileData"));
-    assertFalse(parts.get(1).path("inlineData").path("data").asText().startsWith("data:"));
+    assertFalse(parts.get(1).path("inlineData").path("data").asString("").startsWith("data:"));
   }
 
   /** 验证图片、音频和视频 data URI 的 MIME 类型均从 URI 无损透传。 */
@@ -755,8 +757,8 @@ class GeminiRequestEncoderTest {
     assertEquals(expectedMimeTypes.size(), parts.size());
     for (int i = 0; i < expectedMimeTypes.size(); i++) {
       assertEquals(
-          expectedMimeTypes.get(i), parts.get(i).path("inlineData").path("mimeType").asText());
-      assertEquals("QQ==", parts.get(i).path("inlineData").path("data").asText());
+          expectedMimeTypes.get(i), parts.get(i).path("inlineData").path("mimeType").asString(""));
+      assertEquals("QQ==", parts.get(i).path("inlineData").path("data").asString(""));
     }
   }
 
@@ -829,12 +831,12 @@ class GeminiRequestEncoderTest {
 
     ArrayNode parts = (ArrayNode) json.get("contents").get(0).get("parts");
     assertEquals(4, parts.size());
-    assertEquals("fileData", parts.get(0).fieldNames().next());
+    assertEquals("fileData", parts.get(0).propertyNames().iterator().next());
     assertEquals(
-        "https://example.com/pic.jpg", parts.get(0).get("fileData").get("fileUri").asText());
-    assertEquals("audio/mp3", parts.get(1).get("fileData").get("mimeType").asText());
-    assertEquals("video/mp4", parts.get(2).get("fileData").get("mimeType").asText());
-    assertEquals("gs://bucket/doc.pdf", parts.get(3).get("fileData").get("fileUri").asText());
+        "https://example.com/pic.jpg", parts.get(0).get("fileData").get("fileUri").asString(""));
+    assertEquals("audio/mp3", parts.get(1).get("fileData").get("mimeType").asString(""));
+    assertEquals("video/mp4", parts.get(2).get("fileData").get("mimeType").asString(""));
+    assertEquals("gs://bucket/doc.pdf", parts.get(3).get("fileData").get("fileUri").asString(""));
   }
 
   /** 验证未物化的持久化资源块拒绝并报错，不静默丢弃。 */
@@ -892,17 +894,18 @@ class GeminiRequestEncoderTest {
     ArrayNode contents = (ArrayNode) json.get("contents");
     // contents 应该交替为 3 个：user -> model -> user (合并了 2 个 tool results)
     assertEquals(3, contents.size());
-    assertEquals("user", contents.get(0).get("role").asText());
-    assertEquals("model", contents.get(1).get("role").asText());
-    assertEquals("user", contents.get(2).get("role").asText());
+    assertEquals("user", contents.get(0).get("role").asString(""));
+    assertEquals("model", contents.get(1).get("role").asString(""));
+    assertEquals("user", contents.get(2).get("role").asString(""));
 
     ArrayNode toolParts = (ArrayNode) contents.get(2).get("parts");
     assertEquals(2, toolParts.size());
-    assertEquals("fn1", toolParts.get(0).get("functionResponse").get("name").asText());
-    assertEquals("c1", toolParts.get(0).get("functionResponse").get("id").asText());
+    assertEquals("fn1", toolParts.get(0).get("functionResponse").get("name").asString(""));
+    assertEquals("c1", toolParts.get(0).get("functionResponse").get("id").asString(""));
     assertEquals(
-        "res1", toolParts.get(0).get("functionResponse").get("response").get("result").asText());
-    assertEquals("fn2", toolParts.get(1).get("functionResponse").get("name").asText());
+        "res1",
+        toolParts.get(0).get("functionResponse").get("response").get("result").asString(""));
+    assertEquals("fn2", toolParts.get(1).get("functionResponse").get("name").asString(""));
   }
 
   /** 验证无 replayState 时，ASSISTANT 消息按照 contents 原始顺序进行语义 fallback，不按类别重排。 */
@@ -931,11 +934,11 @@ class GeminiRequestEncoderTest {
     ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
     assertEquals(3, parts.size());
     // 原顺序保持：0 is thought, 1 is text, 2 is functionCall
-    assertEquals("Deep thought", parts.get(0).get("text").asText());
-    assertTrue(parts.get(0).get("thought").asBoolean());
-    assertEquals("Answer text", parts.get(1).get("text").asText());
+    assertEquals("Deep thought", parts.get(0).get("text").asString(""));
+    assertTrue(parts.get(0).get("thought").asBoolean(false));
+    assertEquals("Answer text", parts.get(1).get("text").asString(""));
     assertFalse(parts.get(1).has("thought"));
-    assertEquals("toolA", parts.get(2).get("functionCall").get("name").asText());
+    assertEquals("toolA", parts.get(2).get("functionCall").get("name").asString(""));
   }
 
   /** 验证当 ASSISTANT 具有合法 GEMINI_CONTENT replayState 时，原位回放其 native parts（含 thoughtSignature）。 */
@@ -982,8 +985,8 @@ class GeminiRequestEncoderTest {
 
     ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
     assertEquals(2, parts.size());
-    assertEquals("sig_123", parts.get(0).get("thoughtSignature").asText());
-    assertTrue(parts.get(0).get("thought").asBoolean());
+    assertEquals("sig_123", parts.get(0).get("thoughtSignature").asString(""));
+    assertTrue(parts.get(0).get("thought").asBoolean(false));
   }
 
   /** 意图：affinity 匹配后，未知官方 Part（inlineData）与 part 内未知字段必须 opaque 透传，已知 text 仍与 durable 一致。 */
@@ -1027,10 +1030,10 @@ class GeminiRequestEncoderTest {
     JsonNode json = MAPPER.readTree(encoder.encode(req2, descriptor()).bodyUtf8Bytes());
     ArrayNode wireParts = (ArrayNode) json.get("contents").get(1).get("parts");
     assertEquals(2, wireParts.size());
-    assertEquals("answer", wireParts.get(0).path("text").asText());
-    assertEquals("t-1", wireParts.get(0).path("futurePartField").path("trace").asText());
-    assertEquals("image/png", wireParts.get(1).path("inlineData").path("mimeType").asText());
-    assertEquals("QQ==", wireParts.get(1).path("inlineData").path("data").asText());
+    assertEquals("answer", wireParts.get(0).path("text").asString(""));
+    assertEquals("t-1", wireParts.get(0).path("futurePartField").path("trace").asString(""));
+    assertEquals("image/png", wireParts.get(1).path("inlineData").path("mimeType").asString(""));
+    assertEquals("QQ==", wireParts.get(1).path("inlineData").path("data").asString(""));
   }
 
   /** 意图：payload 的已知 text 与 durable 不一致（历史被改写）时，即使带 opaque 未知字段也绝不回放陈旧 payload，而是退回 durable 语义编码。 */
@@ -1051,7 +1054,7 @@ class GeminiRequestEncoderTest {
     JsonNode json = encodeWithReplay(replayState, List.of(new ProviderTextBlock("durable_text")));
     ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
     assertEquals(1, parts.size());
-    assertEquals("durable_text", parts.get(0).path("text").asText());
+    assertEquals("durable_text", parts.get(0).path("text").asString(""));
     assertFalse(parts.get(0).has("futurePartField"));
   }
 
@@ -1114,7 +1117,7 @@ class GeminiRequestEncoderTest {
     GeminiEncodedRequest encoded = encoder.encode(request, descriptor());
     JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
     assertEquals(
-        "fallback text", json.get("contents").get(1).get("parts").get(0).get("text").asText());
+        "fallback text", json.get("contents").get(1).get("parts").get(0).get("text").asString(""));
   }
 
   /** 验证 affinity（provider / connection generation / wire model）不匹配时安全退回 durable 语义编码。 */
@@ -1132,7 +1135,8 @@ class GeminiRequestEncoderTest {
       ProviderReplayState replayState =
           new ProviderReplayState(ProviderReplayFormat.GEMINI_CONTENT, mismatched, validPayload);
       JsonNode json = encodeWithReplay(replayState, List.of(new ProviderTextBlock("text")));
-      assertEquals("text", json.get("contents").get(1).get("parts").get(0).get("text").asText());
+      assertEquals(
+          "text", json.get("contents").get(1).get("parts").get(0).get("text").asString(""));
     }
   }
 
@@ -1167,9 +1171,9 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(2, fallbackThoughtParts.size());
-    assertTrue(fallbackThoughtParts.get(0).path("thought").asBoolean());
+    assertTrue(fallbackThoughtParts.get(0).path("thought").asBoolean(false));
     assertFalse(fallbackThoughtParts.get(0).has("thoughtSignature"));
-    assertEquals("answer", fallbackThoughtParts.get(1).path("text").asText());
+    assertEquals("answer", fallbackThoughtParts.get(1).path("text").asString(""));
 
     // 2. inlineData 等原生媒体 part 无法用 durable 语义表达：只编码 durable 内容
     ObjectNode inlineDataPayload = MAPPER.createObjectNode();
@@ -1191,7 +1195,7 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(1, fallbackInlineParts.size());
-    assertEquals("answer", fallbackInlineParts.get(0).path("text").asText());
+    assertEquals("answer", fallbackInlineParts.get(0).path("text").asString(""));
 
     // 3. functionCall part 顶层携带 thoughtSignature：只编码 durable 工具调用
     ObjectNode signedCallPayload = MAPPER.createObjectNode();
@@ -1213,7 +1217,7 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(1, fallbackCallParts.size());
-    assertEquals("fn", fallbackCallParts.get(0).path("functionCall").path("name").asText());
+    assertEquals("fn", fallbackCallParts.get(0).path("functionCall").path("name").asString(""));
     assertFalse(fallbackCallParts.get(0).has("thoughtSignature"));
   }
 
@@ -1260,7 +1264,7 @@ class GeminiRequestEncoderTest {
     JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
     ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
     assertEquals(2, parts.size());
-    assertEquals("sig_cross_system", parts.get(0).path("thoughtSignature").asText());
+    assertEquals("sig_cross_system", parts.get(0).path("thoughtSignature").asString(""));
   }
 
   /** 编码一次带 replay 的 assistant 消息并返回 wire 根节点（语义 fallback 路径）。 */
@@ -1304,7 +1308,7 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(1, textParts.size());
-    assertEquals("original text", textParts.get(0).path("text").asText());
+    assertEquals("original text", textParts.get(0).path("text").asString(""));
 
     // 2. 工具调用名称不一致 -> 编码 durable 工具调用
     ObjectNode mismatchToolPayload = MAPPER.createObjectNode();
@@ -1328,8 +1332,8 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(1, callParts.size());
-    assertEquals("tool_real", callParts.get(0).path("functionCall").path("name").asText());
-    assertEquals("c1", callParts.get(0).path("functionCall").path("id").asText());
+    assertEquals("tool_real", callParts.get(0).path("functionCall").path("name").asString(""));
+    assertEquals("c1", callParts.get(0).path("functionCall").path("id").asString(""));
   }
 
   /** 验证未声明 reasoningEffort（null 协议默认）时完全不生成 thinkingConfig。 */
@@ -1400,8 +1404,8 @@ class GeminiRequestEncoderTest {
     JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
     JsonNode resp =
         json.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
-    assertEquals(98, resp.get("score").asInt());
-    assertEquals("ok", resp.get("status").asText());
+    assertEquals(98, resp.get("score").asInt(0));
+    assertEquals("ok", resp.get("status").asString(""));
     assertFalse(resp.has("result"));
   }
 
@@ -1439,7 +1443,7 @@ class GeminiRequestEncoderTest {
     assertTrue(resp.has("result"));
     assertTrue(resp.get("result").isArray());
     assertEquals(3, resp.get("result").size());
-    assertEquals(20, resp.get("result").get(1).asInt());
+    assertEquals(20, resp.get("result").get(1).asInt(0));
   }
 
   /** 验证包含多个 text 与 JSON 块的工具结果按原有顺序组织在有序 results 数组中。 */
@@ -1479,9 +1483,9 @@ class GeminiRequestEncoderTest {
     assertTrue(resp.has("results"));
     ArrayNode results = (ArrayNode) resp.get("results");
     assertEquals(3, results.size());
-    assertEquals("header", results.get(0).asText());
-    assertEquals(5, results.get(1).get("count").asInt());
-    assertEquals("footer", results.get(2).asText());
+    assertEquals("header", results.get(0).asString(""));
+    assertEquals(5, results.get(1).get("count").asInt(0));
+    assertEquals("footer", results.get(2).asString(""));
   }
 
   /** 验证 error=true 时使用明确的 error wrapper，且单 JSON object 原有的 error 字段不被覆盖。 */
@@ -1520,11 +1524,11 @@ class GeminiRequestEncoderTest {
         json.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
 
     // 验证外层包含明确的 error: true wrapper
-    assertTrue(resp.get("error").asBoolean());
+    assertTrue(resp.get("error").asBoolean(false));
     // 验证原始 JSON 作为 result 完整保留，且其内嵌的 "error" 字段未被破坏或覆盖
     JsonNode innerResult = resp.get("result");
-    assertEquals("inner_failure_detail", innerResult.get("error").asText());
-    assertEquals(404, innerResult.get("code").asInt());
+    assertEquals("inner_failure_detail", innerResult.get("error").asString(""));
+    assertEquals(404, innerResult.get("code").asInt(0));
   }
 
   /**
@@ -1672,17 +1676,19 @@ class GeminiRequestEncoderTest {
     // 媒体不是同级 part：该 user content 只有 functionResponse 一个 part
     assertEquals(1, parts.size());
     JsonNode functionResponse = parts.get(0).path("functionResponse");
-    assertEquals("get_media", functionResponse.path("name").asText());
-    assertEquals("c1", functionResponse.path("id").asText());
-    assertEquals("Here is the result:", functionResponse.path("response").path("result").asText());
+    assertEquals("get_media", functionResponse.path("name").asString(""));
+    assertEquals("c1", functionResponse.path("id").asString(""));
+    assertEquals(
+        "Here is the result:", functionResponse.path("response").path("result").asString(""));
 
     JsonNode nested = functionResponse.path("parts");
     assertEquals(1, nested.size());
     assertEquals(
-        mediaCase.expectedMimeType(), nested.get(0).path("inlineData").path("mimeType").asText());
+        mediaCase.expectedMimeType(),
+        nested.get(0).path("inlineData").path("mimeType").asString(""));
     // 载荷逐字节保留，且不引入官方 v1beta schema 之外的命名字段
     assertEquals(
-        mediaCase.expectedBase64(), nested.get(0).path("inlineData").path("data").asText());
+        mediaCase.expectedBase64(), nested.get(0).path("inlineData").path("data").asString(""));
     assertFalse(nested.get(0).path("inlineData").has("displayName"));
   }
 
@@ -1705,13 +1711,13 @@ class GeminiRequestEncoderTest {
 
     assertEquals(1, parts.size());
     JsonNode functionResponse = parts.get(0).path("functionResponse");
-    assertEquals("chart and spec:", functionResponse.path("response").path("result").asText());
+    assertEquals("chart and spec:", functionResponse.path("response").path("result").asString(""));
     JsonNode nested = functionResponse.path("parts");
     assertEquals(2, nested.size());
-    assertEquals("image/png", nested.get(0).path("inlineData").path("mimeType").asText());
-    assertEquals("iVBORw0KGgo=", nested.get(0).path("inlineData").path("data").asText());
-    assertEquals("application/pdf", nested.get(1).path("inlineData").path("mimeType").asText());
-    assertEquals("JVBERi0xLjQK", nested.get(1).path("inlineData").path("data").asText());
+    assertEquals("image/png", nested.get(0).path("inlineData").path("mimeType").asString(""));
+    assertEquals("iVBORw0KGgo=", nested.get(0).path("inlineData").path("data").asString(""));
+    assertEquals("application/pdf", nested.get(1).path("inlineData").path("mimeType").asString(""));
+    assertEquals("JVBERi0xLjQK", nested.get(1).path("inlineData").path("data").asString(""));
   }
 
   /** 验证同名工具的多次调用各自按 id 绑定，媒体只挂在对应的 functionResponse 内且不写 $ref 引用。 */
@@ -1765,14 +1771,14 @@ class GeminiRequestEncoderTest {
 
     JsonNode first = parts.get(0).path("functionResponse");
     JsonNode second = parts.get(1).path("functionResponse");
-    assertEquals("c1", first.path("id").asText());
-    assertEquals("c2", second.path("id").asText());
-    assertEquals("first", first.path("response").path("result").asText());
-    assertEquals("second", second.path("response").path("result").asText());
+    assertEquals("c1", first.path("id").asString(""));
+    assertEquals("c2", second.path("id").asString(""));
+    assertEquals("first", first.path("response").path("result").asString(""));
+    assertEquals("second", second.path("response").path("result").asString(""));
     assertEquals(
-        "iVBORw0KGgo=", first.path("parts").get(0).path("inlineData").path("data").asText());
+        "iVBORw0KGgo=", first.path("parts").get(0).path("inlineData").path("data").asString(""));
     assertEquals(
-        "JVBERi0xLjQK", second.path("parts").get(0).path("inlineData").path("data").asText());
+        "JVBERi0xLjQK", second.path("parts").get(0).path("inlineData").path("data").asString(""));
     // v1beta 的 FunctionResponseBlob 没有 displayName，因此绝不伪造 $ref 引用
     assertFalse(first.path("response").has("$ref"));
     assertFalse(first.path("parts").get(0).path("inlineData").has("displayName"));
@@ -1941,13 +1947,13 @@ class GeminiRequestEncoderTest {
 
     // 连续的 USER, TOOL, TOOL, USER 应该全部合并为一个 role='user' 的 content
     assertEquals(1, contents.size());
-    assertEquals("user", contents.get(0).get("role").asText());
+    assertEquals("user", contents.get(0).get("role").asString(""));
     ArrayNode parts = (ArrayNode) contents.get(0).get("parts");
     assertEquals(4, parts.size());
-    assertEquals("Initial prompt", parts.get(0).get("text").asText());
-    assertEquals("toolA", parts.get(1).get("functionResponse").get("name").asText());
-    assertEquals("toolB", parts.get(2).get("functionResponse").get("name").asText());
-    assertEquals("Follow-up text", parts.get(3).get("text").asText());
+    assertEquals("Initial prompt", parts.get(0).get("text").asString(""));
+    assertEquals("toolA", parts.get(1).get("functionResponse").get("name").asString(""));
+    assertEquals("toolB", parts.get(2).get("functionResponse").get("name").asString(""));
+    assertEquals("Follow-up text", parts.get(3).get("text").asString(""));
   }
 
   /**
@@ -2026,7 +2032,7 @@ class GeminiRequestEncoderTest {
       JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
       ArrayNode modelParts = (ArrayNode) json.get("contents").get(3).get("parts");
       assertEquals(2, modelParts.size());
-      assertEquals("sig_parallel_12345", modelParts.get(0).get("thoughtSignature").asText());
+      assertEquals("sig_parallel_12345", modelParts.get(0).get("thoughtSignature").asString(""));
     }
   }
 
@@ -2129,9 +2135,9 @@ class GeminiRequestEncoderTest {
     JsonNode idFallback =
         MAPPER.readTree(encoder.encode(reqIdMismatch, descriptor()).bodyUtf8Bytes());
     JsonNode idFn = idFallback.get("contents").get(1).get("parts").get(0).get("functionCall");
-    assertEquals("real_id", idFn.path("id").asText());
-    assertEquals("tool_fn", idFn.path("name").asText());
-    assertEquals(1, idFn.path("args").path("k").asInt());
+    assertEquals("real_id", idFn.path("id").asString(""));
+    assertEquals("tool_fn", idFn.path("name").asString(""));
+    assertEquals(1, idFn.path("args").path("k").asInt(0));
 
     // 2. Tool Call arguments 不一致 -> 编码 durable arguments
     ObjectNode payloadArgsMismatch = MAPPER.createObjectNode();
@@ -2166,7 +2172,7 @@ class GeminiRequestEncoderTest {
     JsonNode argsFallback =
         MAPPER.readTree(encoder.encode(reqArgsMismatch, descriptor()).bodyUtf8Bytes());
     JsonNode argsFn = argsFallback.get("contents").get(1).get("parts").get(0).get("functionCall");
-    assertEquals(1, argsFn.path("args").path("k").asInt());
+    assertEquals(1, argsFn.path("args").path("k").asInt(0));
   }
 
   /** 验证工具定义的 inputSchemaJson 必须是 JSON Object，非 Object 时抛出 INVALID_REQUEST。 */
@@ -2329,10 +2335,10 @@ class GeminiRequestEncoderTest {
 
     assertEquals(1, parts.size());
     JsonNode fnCall = parts.get(0).get("functionCall");
-    assertEquals("fn1", fnCall.get("name").asText());
-    assertEquals("c1", fnCall.get("id").asText());
-    assertEquals("Hangzhou", fnCall.get("args").get("city").asText());
-    assertEquals(100, fnCall.get("args").get("score").asInt());
+    assertEquals("fn1", fnCall.get("name").asString(""));
+    assertEquals("c1", fnCall.get("id").asString(""));
+    assertEquals("Hangzhou", fnCall.get("args").get("city").asString(""));
+    assertEquals(100, fnCall.get("args").get("score").asInt(0));
   }
 
   /** 验证 Tool Result 为空及 error 包含多块时的响应组织。 */
@@ -2359,7 +2365,7 @@ class GeminiRequestEncoderTest {
     JsonNode json1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     JsonNode resp1 =
         json1.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
-    assertEquals("", resp1.get("result").asText());
+    assertEquals("", resp1.get("result").asString(""));
 
     // 2. error=true 且 contents 为空列表 -> {error: true, result: ""}
     ProviderRequest reqEmptyErr =
@@ -2382,8 +2388,8 @@ class GeminiRequestEncoderTest {
     JsonNode json2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
     JsonNode resp2 =
         json2.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
-    assertTrue(resp2.get("error").asBoolean());
-    assertEquals("", resp2.get("result").asText());
+    assertTrue(resp2.get("error").asBoolean(false));
+    assertEquals("", resp2.get("result").asString(""));
 
     // 3. error=true 且多块内容 -> {error: true, results: [...]}
     ProviderRequest reqMultiErr =
@@ -2414,12 +2420,12 @@ class GeminiRequestEncoderTest {
     JsonNode json3 = MAPPER.readTree(enc3.bodyUtf8Bytes());
     JsonNode resp3 =
         json3.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
-    assertTrue(resp3.get("error").asBoolean());
+    assertTrue(resp3.get("error").asBoolean(false));
     assertTrue(resp3.has("results"));
     ArrayNode results = (ArrayNode) resp3.get("results");
     assertEquals(2, results.size());
-    assertEquals("failed part 1", results.get(0).asText());
-    assertEquals(2, results.get(1).get("step").asInt());
+    assertEquals("failed part 1", results.get(0).asString(""));
+    assertEquals(2, results.get(1).get("step").asInt(0));
   }
 
   /** 验证 Media Source URI 严格校验（合法 data URI、合法的 scheme）。 */
@@ -2610,8 +2616,8 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(1, thinkingParts.size());
-    assertEquals("durable_different_thinking", thinkingParts.get(0).path("text").asText());
-    assertTrue(thinkingParts.get(0).path("thought").asBoolean());
+    assertEquals("durable_different_thinking", thinkingParts.get(0).path("text").asString(""));
+    assertTrue(thinkingParts.get(0).path("thought").asBoolean(false));
 
     // 2. Tool Calls 数量不一致 -> 退回 durable 语义
     ObjectNode p2 = MAPPER.createObjectNode();
@@ -2633,8 +2639,8 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(2, durableCallParts.size());
-    assertEquals("c1", durableCallParts.get(0).path("functionCall").path("id").asText());
-    assertEquals("c2", durableCallParts.get(1).path("functionCall").path("id").asText());
+    assertEquals("c1", durableCallParts.get(0).path("functionCall").path("id").asString(""));
+    assertEquals("c2", durableCallParts.get(1).path("functionCall").path("id").asString(""));
 
     // 3. Durable 内容中包含不支持的 block (例如 ProviderDocumentBlock) -> 拒绝
     ObjectNode p3 = MAPPER.createObjectNode();

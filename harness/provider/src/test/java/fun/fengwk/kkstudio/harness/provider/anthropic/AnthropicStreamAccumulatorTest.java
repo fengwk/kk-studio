@@ -6,10 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -173,18 +173,18 @@ class AnthropicStreamAccumulatorTest {
     assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, completion.replayState().format());
     assertEquals(descriptor.affinity("claude-3-5-sonnet"), completion.replayState().affinity());
     JsonNode replayPayload = completion.replayState().payload();
-    assertEquals("assistant", replayPayload.path("role").asText());
+    assertEquals("assistant", replayPayload.path("role").asString(""));
     JsonNode replayContent = replayPayload.path("content");
     assertEquals(3, replayContent.size());
-    assertEquals("thinking", replayContent.get(0).path("type").asText());
-    assertEquals("Let me think.", replayContent.get(0).path("thinking").asText());
-    assertEquals("sig_xyz", replayContent.get(0).path("signature").asText());
-    assertEquals("text", replayContent.get(1).path("type").asText());
-    assertEquals("Answer content", replayContent.get(1).path("text").asText());
-    assertEquals("tool_use", replayContent.get(2).path("type").asText());
-    assertEquals("call_abc", replayContent.get(2).path("id").asText());
-    assertEquals("calc", replayContent.get(2).path("name").asText());
-    assertEquals(42, replayContent.get(2).path("input").path("x").asInt());
+    assertEquals("thinking", replayContent.get(0).path("type").asString(""));
+    assertEquals("Let me think.", replayContent.get(0).path("thinking").asString(""));
+    assertEquals("sig_xyz", replayContent.get(0).path("signature").asString(""));
+    assertEquals("text", replayContent.get(1).path("type").asString(""));
+    assertEquals("Answer content", replayContent.get(1).path("text").asString(""));
+    assertEquals("tool_use", replayContent.get(2).path("type").asString(""));
+    assertEquals("call_abc", replayContent.get(2).path("id").asString(""));
+    assertEquals("calc", replayContent.get(2).path("name").asString(""));
+    assertEquals(42, replayContent.get(2).path("input").path("x").asInt(0));
 
     // 校验 emitted events 顺序与内容
     assertEquals(7, emittedEvents.size());
@@ -315,12 +315,12 @@ class AnthropicStreamAccumulatorTest {
     assertEquals(10, response.usage().inputTokens());
     assertEquals(5, response.usage().outputTokens());
 
-    JsonNode rawUsage = new ObjectMapper().readTree(response.rawUsageJson());
-    assertEquals(10, rawUsage.path("input_tokens").asInt());
-    assertEquals(5, rawUsage.path("output_tokens").asInt());
-    assertEquals("priority", rawUsage.path("service_tier").asText());
-    assertEquals(3, rawUsage.path("server_tool_use").path("web_search_requests").asInt());
-    assertEquals(7, rawUsage.path("future_counter").asInt());
+    JsonNode rawUsage = JsonMapper.builder().build().readTree(response.rawUsageJson());
+    assertEquals(10, rawUsage.path("input_tokens").asInt(0));
+    assertEquals(5, rawUsage.path("output_tokens").asInt(0));
+    assertEquals("priority", rawUsage.path("service_tier").asString(""));
+    assertEquals(3, rawUsage.path("server_tool_use").path("web_search_requests").asInt(0));
+    assertEquals(7, rawUsage.path("future_counter").asInt(0));
     // normalized cache 明细照旧补齐
     assertTrue(rawUsage.path("cache_creation").has("ephemeral_5m_input_tokens"));
   }
@@ -426,10 +426,10 @@ class AnthropicStreamAccumulatorTest {
     // 验证 replayState 里包含 redacted_thinking 和 thinking 及其 signature
     assertNotNull(completion.replayState());
     JsonNode replayContent = completion.replayState().payload().path("content");
-    assertEquals("redacted_thinking", replayContent.get(0).path("type").asText());
-    assertEquals("redacted-data", replayContent.get(0).path("data").asText());
-    assertEquals("thinking", replayContent.get(1).path("type").asText());
-    assertEquals("sig-part-1", replayContent.get(1).path("signature").asText());
+    assertEquals("redacted_thinking", replayContent.get(0).path("type").asString(""));
+    assertEquals("redacted-data", replayContent.get(0).path("data").asString(""));
+    assertEquals("thinking", replayContent.get(1).path("type").asString(""));
+    assertEquals("sig-part-1", replayContent.get(1).path("signature").asString(""));
   }
 
   @Test

@@ -6,13 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
@@ -69,7 +70,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /** 测试意图：端到端集成测试，验证本地 HTTP 服务下连续多步工具循环、HTTP 异常分类映射、流终态封闭与回调崩溃的单次终态。 */
 class OpenAiChatModelProviderIntegrationTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private HttpServer server;
   private int port;
@@ -806,26 +807,26 @@ class OpenAiChatModelProviderIntegrationTest {
   }
 
   private static void assertSessionCacheRootOptions(JsonNode req, String expectedKey) {
-    assertEquals("gpt-5.6", req.path("model").asText());
+    assertEquals("gpt-5.6", req.path("model").asString(""));
     // 会话缓存只映射 key 与留存档位，不再有协议私有 options/breakpoint
-    assertEquals(expectedKey, req.path("prompt_cache_key").asText());
-    assertEquals("in_memory", req.path("prompt_cache_retention").asText());
+    assertEquals(expectedKey, req.path("prompt_cache_key").asString(""));
+    assertEquals("in_memory", req.path("prompt_cache_retention").asString(""));
     assertFalse(req.has("prompt_cache_options"));
   }
 
   private static void assertTextContent(JsonNode message, String expectedText) {
-    assertTrue(message.path("content").isTextual(), "content must be plain text");
-    assertEquals(expectedText, message.path("content").asText());
+    assertTrue(message.path("content").isString(), "content must be plain text");
+    assertEquals(expectedText, message.path("content").asString(""));
     assertFalse(message.has("prompt_cache_breakpoint"), "breakpoint must not be present");
   }
 
   private static void assertWireAssistant(
       JsonNode message, String thinking, String customTag, int toolCallsCount) {
-    assertEquals("assistant", message.path("role").asText());
+    assertEquals("assistant", message.path("role").asString(""));
     assertFalse(
         message.has("content"), "assistant without text content must not fabricate content");
-    assertEquals(thinking, message.path("reasoning_content").asText());
-    assertEquals(customTag, message.path("vendor_custom_tag").asText());
+    assertEquals(thinking, message.path("reasoning_content").asString(""));
+    assertEquals(customTag, message.path("vendor_custom_tag").asString(""));
     assertEquals(toolCallsCount, message.path("tool_calls").size());
   }
 

@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -95,7 +95,7 @@ final class OpenAiResponsesStrictSchema {
   }
 
   private static boolean isObjectSchema(ObjectNode node) {
-    return "object".equals(node.path("type").asText()) || node.has("properties");
+    return "object".equals(node.path("type").asString("")) || node.has("properties");
   }
 
   private static void normalizeObjectSchema(ObjectNode object) {
@@ -105,7 +105,7 @@ final class OpenAiResponsesStrictSchema {
     Set<String> declaredRequired = declaredRequired(object);
     List<String> propertyNames = new ArrayList<>();
     if (properties != null) {
-      properties.fieldNames().forEachRemaining(propertyNames::add);
+      propertyNames.addAll(properties.propertyNames());
     }
     for (String name : propertyNames) {
       JsonNode property = properties.get(name);
@@ -130,8 +130,8 @@ final class OpenAiResponsesStrictSchema {
     Set<String> required = new HashSet<>();
     if (requiredNode != null && requiredNode.isArray()) {
       for (JsonNode entry : requiredNode) {
-        if (entry.isTextual()) {
-          required.add(entry.textValue());
+        if (entry.isString()) {
+          required.add(entry.stringValue());
         }
       }
     }
@@ -168,14 +168,14 @@ final class OpenAiResponsesStrictSchema {
     if (type == null) {
       return false;
     }
-    if (type.isTextual()) {
-      return "null".equals(type.textValue());
+    if (type.isString()) {
+      return "null".equals(type.stringValue());
     }
     if (!type.isArray()) {
       return false;
     }
     for (JsonNode variant : type) {
-      if (variant.isTextual() && "null".equals(variant.textValue())) {
+      if (variant.isString() && "null".equals(variant.stringValue())) {
         return true;
       }
     }

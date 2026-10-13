@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
@@ -19,7 +21,11 @@ import java.util.Locale;
  */
 final class AnthropicErrorMapper {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
+          .build();
 
   static final String MSG_AUTH = "Anthropic authentication failed";
   static final String MSG_BILLING = "Anthropic billing or quota error";
@@ -148,10 +154,10 @@ final class AnthropicErrorMapper {
       return null;
     }
     if (node.has("error") && node.get("error").isObject() && node.get("error").has("type")) {
-      return node.get("error").get("type").asText();
+      return node.get("error").get("type").asString("");
     }
-    if (node.has("type") && node.get("type").isTextual()) {
-      return node.get("type").asText();
+    if (node.has("type") && node.get("type").isString()) {
+      return node.get("type").asString("");
     }
     return null;
   }
