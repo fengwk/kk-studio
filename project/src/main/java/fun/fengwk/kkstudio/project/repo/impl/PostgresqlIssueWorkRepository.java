@@ -5,9 +5,9 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.IssueWork;
 import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueWorkCompletion;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueWorkMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueWorkDO;
+import fun.fengwk.kkstudio.project.repo.impl.store.IssueWorkCompletion;
+import fun.fengwk.kkstudio.project.repo.impl.store.IssueWorkJdbcStore;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -23,23 +23,23 @@ import java.util.UUID;
 @Repository
 public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
-  private final IssueWorkMapper mapper;
+  private final IssueWorkJdbcStore store;
   private final PostgresqlIssueWorkNotifier notifier;
 
   @Override
   public IssueWork getById(UUID issueId) {
-    return toModel(mapper.getById(issueId));
+    return toModel(store.getById(issueId));
   }
 
   @Override
   public IssueWork lockById(UUID issueId) {
-    return toModel(mapper.lockById(issueId));
+    return toModel(store.lockById(issueId));
   }
 
   @Override
   public IssueWork requestWork(UUID issueId, Duration delay) {
     PostgresqlIssueWorkNotifier.requireTransaction();
-    IssueWorkDO row = mapper.upsertRequest(issueId, delay);
+    IssueWorkDO row = store.upsertRequest(issueId, delay);
     if (row != null) {
       notifier.notifyIfDue(issueId);
     }
@@ -48,18 +48,18 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public IssueWork claimNext(String leaseToken, Duration leaseDuration) {
-    return toModel(mapper.claimNext(leaseToken, leaseDuration));
+    return toModel(store.claimNext(leaseToken, leaseDuration));
   }
 
   @Override
   public boolean renewLease(UUID issueId, String leaseToken, Duration leaseDuration) {
-    return mapper.renewLease(issueId, leaseToken, leaseDuration) == 1;
+    return store.renewLease(issueId, leaseToken, leaseDuration) == 1;
   }
 
   @Override
   public boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion) {
     PostgresqlIssueWorkNotifier.requireTransaction();
-    IssueWorkCompletion completion = mapper.completeWork(issueId, leaseToken, claimedWakeVersion);
+    IssueWorkCompletion completion = store.completeWork(issueId, leaseToken, claimedWakeVersion);
     if (completion == IssueWorkCompletion.RELEASED) {
       // released 是真实写入：新 wake 已释放租约并把 due 提前到当前时刻，必须提示后续调度。
       notifier.notifyIfDue(issueId);
@@ -71,7 +71,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
   public boolean rescheduleWork(
       UUID issueId, String leaseToken, long claimedWakeVersion, Duration delay) {
     PostgresqlIssueWorkNotifier.requireTransaction();
-    boolean written = mapper.rescheduleWork(issueId, leaseToken, claimedWakeVersion, delay) == 1;
+    boolean written = store.rescheduleWork(issueId, leaseToken, claimedWakeVersion, delay) == 1;
     if (written) {
       notifier.notifyIfDue(issueId);
     }
@@ -80,7 +80,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    return mapper.deleteByIssueId(issueId);
+    return store.deleteByIssueId(issueId);
   }
 
   private static IssueWork toModel(IssueWorkDO row) {

@@ -139,8 +139,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     if (!issue.getProjectId().equals(project.getId())) {
       throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
     }
-    applied =
-        IssueActivityIdempotency.findAppliedUnderLock(issueActivityRepository, issueId, identity);
+    applied = IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity);
     if (applied != null) {
       return replayAcceptedRun(applied);
     }
@@ -616,7 +615,7 @@ public class IssueRunServiceImpl implements IssueRunService {
 
   /** owner 锁内的精确重试判定：同键同指纹返回当前 Run，同键异指纹冲突，未命中才继续版本与状态校验。 */
   private boolean replayedUnderLock(RunLock locked, Identity identity) {
-    return IssueActivityIdempotency.findAppliedUnderLock(
+    return IssueActivityIdempotency.findApplied(
             issueActivityRepository, locked.issue().getId(), identity)
         != null;
   }
@@ -712,12 +711,12 @@ public class IssueRunServiceImpl implements IssueRunService {
   }
 
   /**
-   * 锁前重放返回的权威当前 Run：在观察到 receipt 之后重新读取已提交的行，绕过事务内 MyBatis 一级缓存。
+   * 锁前重放返回的权威当前 Run：在观察到 receipt 之后重新读取已提交的行，不会返回本事务早先读到的旧快照。
    *
-   * <p>本事务早先读到的旧 Run 只是历史快照，不得作为重放结果返回：并发首次收尾完全可能落在那次读取与本事务的 receipt 检查之间。
+   * <p>每次读取都是新的语句快照：并发首次收尾完全可能落在那次读取与本事务的 receipt 检查之间，因此重放结果必须来自这里的权威读。
    */
   private IssueRun currentRun(UUID runId) {
-    IssueRun run = issueRunRepository.getByIdAuthoritative(runId);
+    IssueRun run = issueRunRepository.getById(runId);
     if (run == null) {
       throw new ProjectNotFoundException("issue_run");
     }

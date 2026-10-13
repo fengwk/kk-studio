@@ -5,8 +5,8 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueDO;
+import fun.fengwk.kkstudio.project.repo.impl.store.IssueJdbcStore;
 
 import java.util.List;
 import java.util.UUID;
@@ -15,12 +15,12 @@ import java.util.UUID;
 @Repository
 public class PostgresqlIssueRepository implements IssueRepository {
 
-  private final IssueMapper issueMapper;
+  private final IssueJdbcStore issueStore;
   private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean create(Issue issue) {
-    boolean changed = issueMapper.insert(toDO(issue)) == 1;
+    boolean changed = issueStore.insert(toDO(issue)) == 1;
     if (changed) {
       notifier.projectChanged(issue.getProjectId());
     }
@@ -29,41 +29,36 @@ public class PostgresqlIssueRepository implements IssueRepository {
 
   @Override
   public Issue getById(UUID id) {
-    return toModel(issueMapper.getById(id));
-  }
-
-  @Override
-  public Issue getByIdAuthoritative(UUID id) {
-    return toModel(issueMapper.getByIdAuthoritative(id));
+    return toModel(issueStore.getById(id));
   }
 
   @Override
   public Issue lockById(UUID id) {
-    return toModel(issueMapper.lockById(id));
+    return toModel(issueStore.lockById(id));
   }
 
   @Override
   public Issue getByProjectAndNumber(UUID projectId, long number) {
-    return toModel(issueMapper.getByProjectAndNumber(projectId, number));
+    return toModel(issueStore.getByProjectAndNumber(projectId, number));
   }
 
   @Override
   public List<Issue> listByProjectId(UUID projectId) {
-    return issueMapper.listByProjectId(projectId).stream()
+    return issueStore.listByProjectId(projectId).stream()
         .map(PostgresqlIssueRepository::toModel)
         .toList();
   }
 
   @Override
   public List<Issue> listByProjectIdAndArchived(UUID projectId, boolean archived) {
-    return issueMapper.listByProjectIdAndArchived(projectId, archived).stream()
+    return issueStore.listByProjectIdAndArchived(projectId, archived).stream()
         .map(PostgresqlIssueRepository::toModel)
         .toList();
   }
 
   @Override
   public boolean updateById(Issue issue, long expectedVersion) {
-    boolean changed = issueMapper.updateById(toDO(issue), expectedVersion) == 1;
+    boolean changed = issueStore.updateById(toDO(issue), expectedVersion) == 1;
     if (changed) {
       notifier.projectChanged(issue.getProjectId());
     }
@@ -73,7 +68,7 @@ public class PostgresqlIssueRepository implements IssueRepository {
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
     Issue issue = getById(id);
-    boolean changed = issueMapper.deleteById(id, expectedVersion) == 1;
+    boolean changed = issueStore.deleteById(id, expectedVersion) == 1;
     if (changed) {
       notifier.projectChanged(issue.getProjectId());
     }

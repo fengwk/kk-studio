@@ -14,16 +14,12 @@ public interface IssueActivityRepository {
 
   boolean insert(IssueActivity activity);
 
-  /** 按同 Issue 的请求键读取既有活动；用于请求键去重（fail closed，不静默重放）。 */
-  IssueActivity findByIdempotencyKey(UUID issueId, String idempotencyKey);
-
   /**
-   * 调用方已经取得 Issue 行锁之后再读 receipt。
+   * 按同 Issue 的请求键读取既有活动；用于请求键去重（fail closed，不静默重放）。
    *
-   * <p>这是锁语句之后的另一次查询：READ COMMITTED 会使用新的语句快照，因此能看见锁等待期间提交的活动。实现必须绕过 MyBatis 一级缓存，避免锁前的 negative
-   * cache 把这次读取短路。
+   * <p>锁前快速路径与 owner 锁后的 receipt 判定共用本读取：READ COMMITTED 下每次调用都是新的语句快照，因此锁后这次能看见锁等待期间提交的活动。
    */
-  IssueActivity findByIdempotencyKeyUnderLock(UUID issueId, String idempotencyKey);
+  IssueActivity findByIdempotencyKey(UUID issueId, String idempotencyKey);
 
   List<IssueActivity> listByIssueId(UUID issueId);
 

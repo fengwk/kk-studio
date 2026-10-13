@@ -14,14 +14,8 @@ public interface IssueRunRepository {
 
   boolean insert(IssueRun run);
 
+  /** 按 id 读取 Run；未提交的并发收尾不可见，每次调用都是新的语句快照。 */
   IssueRun getById(UUID id);
-
-  /**
-   * 读取当前已提交的 Run 行，绕过事务内 MyBatis 一级缓存。
-   *
-   * <p>事务早先读到的旧快照不得遮蔽并发已提交的收尾推进：请求键重放必须在观察到 receipt 之后返回这个权威事实。
-   */
-  IssueRun getByIdAuthoritative(UUID id);
 
   IssueRun lockById(UUID id);
 

@@ -7,8 +7,8 @@ import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueActivityMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueActivityDO;
+import fun.fengwk.kkstudio.project.repo.impl.store.IssueActivityJdbcStore;
 
 import java.util.List;
 import java.util.UUID;
@@ -17,12 +17,12 @@ import java.util.UUID;
 @Repository
 public class PostgresqlIssueActivityRepository implements IssueActivityRepository {
 
-  private final IssueActivityMapper mapper;
+  private final IssueActivityJdbcStore store;
   private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueActivity activity) {
-    boolean changed = mapper.insert(toDO(activity)) == 1;
+    boolean changed = store.insert(toDO(activity)) == 1;
     if (changed) {
       notifier.issueChanged(activity.getIssueId());
     }
@@ -31,38 +31,32 @@ public class PostgresqlIssueActivityRepository implements IssueActivityRepositor
 
   @Override
   public IssueActivity findByIdempotencyKey(UUID issueId, String idempotencyKey) {
-    IssueActivityDO row = mapper.findByIdempotencyKey(issueId, idempotencyKey);
-    return row == null ? null : toModel(row);
-  }
-
-  @Override
-  public IssueActivity findByIdempotencyKeyUnderLock(UUID issueId, String idempotencyKey) {
-    IssueActivityDO row = mapper.findByIdempotencyKeyUnderLock(issueId, idempotencyKey);
+    IssueActivityDO row = store.findByIdempotencyKey(issueId, idempotencyKey);
     return row == null ? null : toModel(row);
   }
 
   @Override
   public List<IssueActivity> listByIssueId(UUID issueId) {
-    return mapper.listByIssueId(issueId).stream()
+    return store.listByIssueId(issueId).stream()
         .map(PostgresqlIssueActivityRepository::toModel)
         .toList();
   }
 
   @Override
   public long countByIssueId(UUID issueId) {
-    return mapper.countByIssueId(issueId);
+    return store.countByIssueId(issueId);
   }
 
   @Override
   public List<IssueActivity> listPage(UUID issueId, long afterSequence, int limit) {
-    return mapper.listPage(issueId, afterSequence, limit).stream()
+    return store.listPage(issueId, afterSequence, limit).stream()
         .map(PostgresqlIssueActivityRepository::toModel)
         .toList();
   }
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    int changed = mapper.deleteByIssueId(issueId);
+    int changed = store.deleteByIssueId(issueId);
     if (changed > 0) {
       notifier.issueChanged(issueId);
     }

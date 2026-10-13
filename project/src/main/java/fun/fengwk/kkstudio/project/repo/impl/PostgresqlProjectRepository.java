@@ -5,8 +5,8 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.project.repo.impl.mapper.ProjectMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.ProjectDO;
+import fun.fengwk.kkstudio.project.repo.impl.store.ProjectJdbcStore;
 
 import java.time.Instant;
 import java.util.List;
@@ -16,12 +16,12 @@ import java.util.UUID;
 @Repository
 public class PostgresqlProjectRepository implements ProjectRepository {
 
-  private final ProjectMapper projectMapper;
+  private final ProjectJdbcStore projectStore;
   private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean create(Project project) {
-    boolean changed = projectMapper.insert(toDO(project)) == 1;
+    boolean changed = projectStore.insert(toDO(project)) == 1;
     if (changed) {
       notifier.projectChanged(project.getId());
     }
@@ -30,27 +30,27 @@ public class PostgresqlProjectRepository implements ProjectRepository {
 
   @Override
   public Project getById(UUID id) {
-    return toModel(projectMapper.getById(id));
+    return toModel(projectStore.getById(id));
   }
 
   @Override
   public Project lockById(UUID id) {
-    return toModel(projectMapper.lockById(id));
+    return toModel(projectStore.lockById(id));
   }
 
   @Override
   public Project lockForShare(UUID id) {
-    return toModel(projectMapper.lockForShare(id));
+    return toModel(projectStore.lockForShare(id));
   }
 
   @Override
   public Project lockForKeyShare(UUID id) {
-    return toModel(projectMapper.lockForKeyShare(id));
+    return toModel(projectStore.lockForKeyShare(id));
   }
 
   @Override
   public boolean updateConfiguration(Project project, long expectedVersion) {
-    boolean changed = projectMapper.updateConfiguration(toDO(project), expectedVersion) == 1;
+    boolean changed = projectStore.updateConfiguration(toDO(project), expectedVersion) == 1;
     if (changed) {
       notifier.projectChanged(project.getId());
     }
@@ -59,7 +59,7 @@ public class PostgresqlProjectRepository implements ProjectRepository {
 
   @Override
   public boolean updateArchivedAt(UUID id, Instant archivedAt, long expectedVersion) {
-    boolean changed = projectMapper.updateArchivedAt(id, archivedAt, expectedVersion) == 1;
+    boolean changed = projectStore.updateArchivedAt(id, archivedAt, expectedVersion) == 1;
     if (changed) {
       notifier.projectChanged(id);
     }
@@ -68,7 +68,7 @@ public class PostgresqlProjectRepository implements ProjectRepository {
 
   @Override
   public long allocateNextIssueNumber(UUID projectId) {
-    Long allocated = projectMapper.allocateNextIssueNumber(projectId);
+    Long allocated = projectStore.allocateNextIssueNumber(projectId);
     if (allocated == null) {
       throw new IllegalStateException("project " + projectId + " disappeared during allocation");
     }
@@ -77,19 +77,19 @@ public class PostgresqlProjectRepository implements ProjectRepository {
 
   @Override
   public List<Project> listAll() {
-    return projectMapper.listAll().stream().map(PostgresqlProjectRepository::toModel).toList();
+    return projectStore.listAll().stream().map(PostgresqlProjectRepository::toModel).toList();
   }
 
   @Override
   public List<Project> listByArchived(boolean archived) {
-    return projectMapper.listByArchived(archived).stream()
+    return projectStore.listByArchived(archived).stream()
         .map(PostgresqlProjectRepository::toModel)
         .toList();
   }
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
-    boolean changed = projectMapper.deleteById(id, expectedVersion) == 1;
+    boolean changed = projectStore.deleteById(id, expectedVersion) == 1;
     if (changed) {
       notifier.projectChanged(id);
     }
