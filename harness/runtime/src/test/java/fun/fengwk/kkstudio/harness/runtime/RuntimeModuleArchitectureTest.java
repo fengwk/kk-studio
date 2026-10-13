@@ -88,6 +88,7 @@ class RuntimeModuleArchitectureTest {
         harnessRoot.resolve("mcp/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
+            "tools.jackson.core:jackson-databind",
             "dev.langchain4j:langchain4j-mcp",
             "fun.fengwk.kk-studio:kk-studio-harness-common"));
     assertDirectProductionDependencies(

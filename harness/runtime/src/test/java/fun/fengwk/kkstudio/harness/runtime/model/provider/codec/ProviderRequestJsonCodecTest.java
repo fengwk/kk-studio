@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -623,6 +624,31 @@ class ProviderRequestJsonCodecTest {
     assertTrue(encoded.contains("1e309"), encoded);
     assertTrue(encoded.contains("1e-324"), encoded);
     assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(encoded, codec.encode(codec.decode(encoded)));
+  }
+
+  /**
+   * 测试意图：durable ProviderRequest 的 variant.protocolOptions 是厂商原生自由 JSON；decode 外层 mapper 必须按
+   * BigDecimal 读回，1e309/1e-324 与高精度小数不得在 double 中退化为 Infinity / 0 或改写为字符串。
+   */
+  @Test
+  void preservesVariantProtocolOptionsNumberPrecision() {
+    ObjectNode canonical = canonicalNode();
+    ((ObjectNode) canonical.path("variant"))
+        .putObject("protocolOptions")
+        .put("big", new BigDecimal("1e309"))
+        .put("tiny", new BigDecimal("1e-324"))
+        .put("exact", new BigDecimal("0.1234567890123456789012345678"));
+
+    ProviderRequest decoded = codec.decode(canonical.toString());
+    String encoded = codec.encode(decoded);
+
+    assertTrue(encoded.contains("\"big\":1E+309"), encoded);
+    assertTrue(encoded.contains("\"tiny\":1E-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertEquals(
+        "{\"big\":1E+309,\"tiny\":1E-324,\"exact\":0.1234567890123456789012345678}",
+        decoded.variant().protocolOptions().canonicalJson());
     assertEquals(encoded, codec.encode(codec.decode(encoded)));
   }
 }

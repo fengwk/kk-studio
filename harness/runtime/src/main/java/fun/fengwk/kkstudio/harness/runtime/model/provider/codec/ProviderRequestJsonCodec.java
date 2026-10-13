@@ -5,6 +5,7 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -59,6 +60,8 @@ public final class ProviderRequestJsonCodec {
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // variant.protocolOptions 交给共享 model codec 前必须先按 BigDecimal 读回，否则 1e309 会先退化为 Infinity。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;

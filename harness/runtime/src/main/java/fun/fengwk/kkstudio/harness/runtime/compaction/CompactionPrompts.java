@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.compaction;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate;
@@ -35,7 +36,11 @@ public final class CompactionPrompts {
 
   private static final String ROOT = "fun/fengwk/kkstudio/harness/runtime/compaction/prompts/";
   private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
-  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          // tool arguments 是自由 JSON：按 BigDecimal 读回，摘要里的数值不得退化为 Infinity / 0 或被重新格式化。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   /** 序列化 Tool result 的字符上限。 */
   static final int TOOL_RESULT_MAX_CHARS = 2_000;
