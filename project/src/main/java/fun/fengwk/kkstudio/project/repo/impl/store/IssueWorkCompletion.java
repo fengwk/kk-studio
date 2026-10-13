@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.repo.impl.mapper;
+package fun.fengwk.kkstudio.project.repo.impl.store;
 
 /**
  * {@code completeWork} 单条 CTE 的实际写入结果：区分删除、释放与完全未写。

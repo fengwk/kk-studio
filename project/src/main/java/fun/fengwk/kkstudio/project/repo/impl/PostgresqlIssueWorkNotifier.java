@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.project.repo.impl;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -19,13 +19,13 @@ import java.util.UUID;
 public class PostgresqlIssueWorkNotifier {
 
   private static final String NOTIFY_IF_DUE_SQL =
-      "select pg_notify(?, ?) from project_issue_work"
-          + " where issue_id = ? and due_at <= clock_timestamp()"
+      "select pg_notify(:channel, :payload) from project_issue_work"
+          + " where issue_id = :issueId and due_at <= clock_timestamp()"
           + " and (lease_until is null or lease_until <= clock_timestamp())";
 
-  private final JdbcTemplate jdbc;
+  private final JdbcClient jdbc;
 
-  public PostgresqlIssueWorkNotifier(JdbcTemplate jdbc) {
+  public PostgresqlIssueWorkNotifier(JdbcClient jdbc) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
   }
 
@@ -33,8 +33,12 @@ public class PostgresqlIssueWorkNotifier {
   public void notifyIfDue(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
     requireTransaction();
-    jdbc.queryForList(
-        NOTIFY_IF_DUE_SQL, IssueControllerDispatcher.CHANNEL, issueId.toString(), issueId);
+    jdbc.sql(NOTIFY_IF_DUE_SQL)
+        .param("channel", IssueControllerDispatcher.CHANNEL)
+        .param("payload", issueId.toString())
+        .param("issueId", issueId)
+        .query(String.class)
+        .list();
   }
 
   static void requireTransaction() {
