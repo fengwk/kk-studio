@@ -451,6 +451,10 @@ describe('thread timeline edge branches', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       environmentId: null,
+      requiredEnvironmentId: null,
+      waitingForEnvironment: false,
+      requiredEnvironmentName: null,
+      environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
       approvalJson: null,
       resultJson: null,
@@ -844,12 +848,12 @@ describe('thread timeline edge branches', () => {
   })
 })
 
-function entry(entryId: string, entryType: EntryType, payload: Record<string, unknown>): HarnessSessionEntryDTO {
+function entry(entryId: string, entryType: EntryType | (string & {}), payload: Record<string, unknown>): HarnessSessionEntryDTO {
   return {
     entryId,
     sessionId: 's1',
     parentEntryId: null,
-    entryType,
+    entryType: entryType as EntryType,
     payloadJson: JSON.stringify(payload),
     createTime: '2026-01-01T00:00:00',
   }

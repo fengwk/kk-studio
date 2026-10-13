@@ -7,7 +7,7 @@ import {
 import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
 function projectionContext(): EntryProjectionContext {
-  return { pendingTurnSummary: null }
+  return { pendingTurnSummary: null, lastSettings: null }
 }
 
 function abortedEntry(
@@ -27,6 +27,7 @@ function abortedEntry(
   }
   return {
     entryId,
+    sessionId: 'session-1',
     parentEntryId: '2',
     entryType: 'ASSISTANT_ABORTED',
     payloadJson: JSON.stringify({ message }),
@@ -47,14 +48,19 @@ describe('ASSISTANT_ABORTED entry projection', () => {
       status: 'done',
       aborted: true,
     })
-    expect(msg.thinking).toBe('thinking')
+    if (msg.role === 'assistant') {
+      expect(msg.thinking).toBe('thinking')
+    }
   })
 
   it('renders aborted assistant thinking-only content', () => {
     const messages: DialogueMessage[] = []
     projectDurableEntry(abortedEntry('', 'reasoning'), messages, new Map(), projectionContext())
     expect(messages).toHaveLength(1)
-    expect(messages[0]).toMatchObject({ text: '', aborted: true })
-    expect(messages[0].thinking).toBe('reasoning')
+    const msg = messages[0]
+    expect(msg).toMatchObject({ text: '', aborted: true })
+    if (msg.role === 'assistant') {
+      expect(msg.thinking).toBe('reasoning')
+    }
   })
 })
