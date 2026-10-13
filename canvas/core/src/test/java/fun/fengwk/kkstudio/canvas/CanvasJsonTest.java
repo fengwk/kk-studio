@@ -1,16 +1,22 @@
 package fun.fengwk.kkstudio.canvas;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -66,11 +72,176 @@ class CanvasJsonTest {
     assertInstanceOf(CanvasJson.JsonArray.class, CanvasJson.parse(allowed));
   }
 
-  /** 输入长度上限限制单个节点配置的大小。 */
+  /** 输入长度上限限制单个节点配置的大小；恰好等于预算的输入仍可解析。 */
   @Test
   void boundsInputLength() {
     String tooLong = "{\"a\":\"" + "x".repeat(CanvasJson.MAX_LENGTH) + "\"}";
     assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse(tooLong));
+
+    String content = "x".repeat(CanvasJson.MAX_LENGTH - 8);
+    String exact = "{\"a\":\"" + content + "\"}";
+    assertEquals(CanvasJson.MAX_LENGTH, exact.length());
+    assertEquals(exact, CanvasJson.parse(exact).write());
+  }
+
+  /** 规范化 golden 样本：合法输入写成稳定 canonical，并能原样回读相等（读写闭合）。 */
+  @Test
+  void matchesCanonicalGoldenSamples() throws IOException {
+    for (CanvasJson item : fixtureArray("canonicalizations").values()) {
+      CanvasJson.JsonObject entry = (CanvasJson.JsonObject) item;
+      String input = text(entry, "input");
+      String canonical = text(entry, "canonical");
+      CanvasJson value = CanvasJson.parse(input);
+
+      assertEquals(canonical, value.write(), input);
+      assertEquals(value, CanvasJson.parse(canonical), input);
+    }
+  }
+
+  /** 非法 golden 样本：这些历史非法输入继续被严格拒绝，不做静默兜底。 */
+  @Test
+  void rejectsGoldenInvalidSamples() throws IOException {
+    for (CanvasJson item : fixtureArray("rejections").values()) {
+      String input = ((CanvasJson.JsonText) item).value();
+      assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse(input), input);
+    }
+  }
+
+  /** B06：短指数输入展开后超过预算时必须在分配前拒绝（解析与手工构造一致），不依赖 Jackson 的 scale 限制。 */
+  @Test
+  void rejectsNumberExpansionBeyondLengthBudget() {
+    assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse("1e65536"));
+    assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse("1e-65535"));
+    assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse("{\"n\":1e-65529}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasJson.JsonNumber(new BigDecimal("1e65536")).write());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasJson.JsonNumber(new BigDecimal("1".repeat(CanvasJson.MAX_LENGTH + 1)))
+                .write());
+  }
+
+  /** B06：不再受 Jackson plain BigDecimal 的 ±9999 scale 限制，正负大指数在预算内仍可写回并回读。 */
+  @Test
+  void acceptsLargeExponentWithinLengthBudget() {
+    assertRoundTrip("1e10000", 10_001);
+    assertRoundTrip("1e-10000", 10_002);
+    assertRoundTrip("1e65535", CanvasJson.MAX_LENGTH);
+    assertRoundTrip("1e-65534", CanvasJson.MAX_LENGTH);
+  }
+
+  /** B06：容器结构开销计入同一预算，单值恰好等于预算的容器结构仍可写回。 */
+  @Test
+  void containerBudgetIncludesStructuralCharacters() {
+    CanvasJson value = CanvasJson.parse("{\"n\":1e-65528}");
+    String canonical = value.write();
+
+    assertEquals(CanvasJson.MAX_LENGTH, canonical.length());
+    assertEquals(value, CanvasJson.parse(canonical));
+  }
+
+  /** B06：多个仍在单值预算内的数值累计越界时必须整体拒绝，累计边界两侧都要准确。 */
+  @Test
+  void rejectsAccumulatedNumberExpansion() {
+    // 单值明文各 33000 字符，对象累计 66011 > 预算。
+    assertThrows(
+        IllegalArgumentException.class, () -> CanvasJson.parse("{\"a\":1e-32998,\"b\":1e-32998}"));
+    // 单值明文各 32762 字符，对象累计 65535 ≤ 预算，仍必须接受并闭合。
+    CanvasJson fits = CanvasJson.parse("{\"a\":1e-32760,\"b\":1e-32760}");
+    assertEquals(65535, fits.write().length());
+    assertEquals(fits, CanvasJson.parse(fits.write()));
+    // 手工构造的多值累计同样受同一预算约束。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasJson.JsonArray(
+                    List.of(
+                        new CanvasJson.JsonNumber(new BigDecimal("1".repeat(40_000))),
+                        new CanvasJson.JsonNumber(new BigDecimal("1".repeat(40_000)))))
+                .write());
+  }
+
+  /** B06：长转义串不会放大 canonical，接近预算的合法串仍能稳定写回并回读。 */
+  @Test
+  void longEscapedStringStaysWithinBudgetAndRoundTrips() {
+    String input = "{\"s\":\"" + "\\u0001".repeat(10_000) + "\"}";
+    CanvasJson value = CanvasJson.parse(input);
+
+    assertEquals(input, value.write());
+    assertEquals(value, CanvasJson.parse(value.write()));
+  }
+
+  /** 嵌套深度按容器计数：解析与写回都允许 MAX_DEPTH 层容器、拒绝第 MAX_DEPTH+1 层，空/非空结构一致。 */
+  @Test
+  void containerDepthIsConsistentBetweenParseAndWrite() {
+    String allowedArrays = "[".repeat(CanvasJson.MAX_DEPTH) + "]".repeat(CanvasJson.MAX_DEPTH);
+    assertEquals(allowedArrays, CanvasJson.parse(allowedArrays).write());
+    String tooDeepArrays =
+        "[".repeat(CanvasJson.MAX_DEPTH + 1) + "]".repeat(CanvasJson.MAX_DEPTH + 1);
+    assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse(tooDeepArrays));
+
+    String allowedObjects =
+        "{\"a\":".repeat(CanvasJson.MAX_DEPTH) + "1" + "}".repeat(CanvasJson.MAX_DEPTH);
+    assertEquals(allowedObjects, CanvasJson.parse(allowedObjects).write());
+    String tooDeepObjects =
+        "{\"a\":".repeat(CanvasJson.MAX_DEPTH + 1) + "1" + "}".repeat(CanvasJson.MAX_DEPTH + 1);
+    assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse(tooDeepObjects));
+
+    // 手工构造的同样结构必须与解析同界：MAX_DEPTH 层空数组可写且可回读，第 MAX_DEPTH+1 层拒绝。
+    CanvasJson handBuilt = new CanvasJson.JsonNull();
+    for (int depth = 0; depth < CanvasJson.MAX_DEPTH; depth++) {
+      handBuilt = new CanvasJson.JsonArray(List.of(handBuilt));
+    }
+    CanvasJson handBuiltAllowed = handBuilt;
+    assertDoesNotThrow(handBuiltAllowed::write);
+    assertEquals(handBuiltAllowed, CanvasJson.parse(handBuiltAllowed.write()));
+
+    CanvasJson tooDeep = new CanvasJson.JsonArray(List.of(handBuilt));
+    assertThrows(IllegalArgumentException.class, tooDeep::write);
+  }
+
+  /** 控制字符与对象键统一按小写 hex 转义，保留历史 canonical 字面与命令指纹。 */
+  @Test
+  void escapesControlCharactersAsLowercaseHexInValuesAndKeys() {
+    StringBuilder control = new StringBuilder();
+    for (char character = 0; character < 0x20; character++) {
+      control.append(character);
+    }
+    String escapes =
+        "\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r"
+            + "\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019"
+            + "\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f";
+    CanvasJson.JsonObject value =
+        new CanvasJson.JsonObject(
+            Map.of(control.toString(), new CanvasJson.JsonText(control.toString())));
+
+    String canonical = value.write();
+    assertEquals("{\"" + escapes + "\":\"" + escapes + "\"}", canonical);
+    assertEquals(value, CanvasJson.parse(canonical));
+  }
+
+  private static void assertRoundTrip(String number, int expectedLength) {
+    CanvasJson value = CanvasJson.parse(number);
+    String canonical = value.write();
+
+    assertEquals(expectedLength, canonical.length(), number);
+    assertEquals(value, CanvasJson.parse(canonical), number);
+  }
+
+  private static CanvasJson.JsonArray fixtureArray(String name) throws IOException {
+    try (InputStream stream =
+        CanvasJsonTest.class.getResourceAsStream("canonical-json-cases.json")) {
+      assertNotNull(stream, "golden fixture must exist");
+      CanvasJson.JsonObject fixture =
+          CanvasJson.parseObject(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+      return (CanvasJson.JsonArray) fixture.values().get(name);
+    }
+  }
+
+  private static String text(CanvasJson.JsonObject object, String field) {
+    return ((CanvasJson.JsonText) object.values().get(field)).value();
   }
 
   /** args 必须是非空 object，因此半结构化数组或标量配置在命令构造时就被拒绝。 */

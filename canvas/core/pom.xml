@@ -14,6 +14,11 @@
     <artifactId>kk-studio-canvas-core</artifactId>
 
     <dependencies>
+        <!-- 严格解析/规范序列化的唯一基底：只用 Jackson 3 core/stream，不引入 Spring 或 databind。 -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

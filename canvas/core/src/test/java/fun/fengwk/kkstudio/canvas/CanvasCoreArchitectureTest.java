@@ -17,10 +17,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/** Canvas Core 的轻量级架构守卫，锁定纯领域源码和零生产依赖边界。 */
+/**
+ * Canvas Core 的轻量级架构守卫，锁定纯领域源码和受控生产依赖边界。
+ *
+ * <p>Core 允许的唯一生产依赖是 Jackson 3 core/stream：严格 JSON 由它统一承载，Spring/MyBatis/宿主适配必须留在外层模块。
+ */
 class CanvasCoreArchitectureTest {
 
   private static final String OWN_PACKAGE_PREFIX = "fun.fengwk.kkstudio.canvas.";
+  private static final List<String> ALLOWED_THIRD_PARTY_IMPORT_PREFIXES =
+      List.of("tools.jackson.core.");
+  private static final List<String> ALLOWED_PRODUCTION_DEPENDENCIES =
+      List.of("tools.jackson.core:jackson-core");
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
           "java.sql.",
@@ -39,7 +47,7 @@ class CanvasCoreArchitectureTest {
       Set.of(".git", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
 
   @Test
-  void mainSourcesUseOnlyJdkAndCanvasPackages() throws IOException {
+  void mainSourcesUseOnlyJdkCanvasAndJacksonPackages() throws IOException {
     // 扫描全部主源码，避免领域模块通过新增 package 或全限定名绕过依赖边界。
     Path main = locateModuleRoot().resolve("src/main/java");
     assertTrue(Files.isDirectory(main), "canvas core main sources must exist: " + main);
@@ -53,8 +61,8 @@ class CanvasCoreArchitectureTest {
   }
 
   @Test
-  void pomHasNoProductionDependencies() throws IOException {
-    // 允许测试依赖，但任何 compile/runtime/provided/system 依赖都会破坏纯领域边界。
+  void pomDeclaresOnlyJacksonCoreAsProductionDependency() throws IOException {
+    // 允许测试依赖；生产依赖只允许 Jackson 3 core/stream，其它 compile/runtime/provided/system 依赖都会破坏领域边界。
     Path pom = locateModuleRoot().resolve("pom.xml");
     String text = Files.readString(pom, StandardCharsets.UTF_8);
     assertTrue(
@@ -70,7 +78,10 @@ class CanvasCoreArchitectureTest {
             requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId"));
       }
     }
-    assertEquals(List.of(), productionDependencies, "canvas core production dependencies");
+    assertEquals(
+        ALLOWED_PRODUCTION_DEPENDENCIES,
+        productionDependencies,
+        "canvas core production dependencies");
   }
 
   @Test
@@ -172,7 +183,8 @@ class CanvasCoreArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("jdk.")
-        || imported.startsWith(OWN_PACKAGE_PREFIX);
+        || imported.startsWith(OWN_PACKAGE_PREFIX)
+        || ALLOWED_THIRD_PARTY_IMPORT_PREFIXES.stream().anyMatch(imported::startsWith);
   }
 
   private static boolean isOwnPackage(String packageLine) {
