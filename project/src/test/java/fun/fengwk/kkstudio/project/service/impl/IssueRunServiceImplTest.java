@@ -12,10 +12,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -109,7 +109,7 @@ class IssueRunServiceImplTest {
           workflowCodec,
           agentBranchSettingsPort,
           runtimes,
-          new ObjectMapper());
+          JsonMapper.builder().build());
 
   /**
    * 新 Agent 接受 Run：五条命令按 SET_AGENT→SET_MODEL→SET_ENVIRONMENT→SET_CONTRIBUTOR_STATE→CUSTOM_MESSAGE
