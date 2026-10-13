@@ -160,4 +160,23 @@ class DaemonCapabilityInvokeCodecTest {
   private void assertInvalid(String json) {
     assertThrows(DaemonProtocolException.class, () -> codec.decode(json), json);
   }
+
+  /** arguments 中的自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得退化为 Infinity/0.0。 */
+  @Test
+  void preservesArbitraryArgumentNumberPrecision() {
+    DaemonCapabilityInvokeCodec.InvokeRequest request =
+        new DaemonCapabilityInvokeCodec.InvokeRequest(
+            EnvironmentCapabilityIds.FS_READ,
+            "1",
+            "{\"big\":1e309,\"tiny\":1e-324}",
+            Duration.ZERO);
+
+    String encoded = codec.encode(request);
+
+    assertEquals(
+        "{\"capabilityId\":\"fs.read\",\"capabilityVersion\":\"1\","
+            + "\"arguments\":{\"big\":1E+309,\"tiny\":1E-324},\"timeoutMillis\":0}",
+        encoded);
+    assertEquals(request, codec.decode(encoded));
+  }
 }

@@ -5,6 +5,7 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -25,6 +26,8 @@ public final class DaemonEnvelopeCodec {
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // JSON number 以 BigDecimal 保留树内精度，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的 wire 失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
 
   private static final Set<String> ENVELOPE_FIELDS =
