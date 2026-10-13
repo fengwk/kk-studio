@@ -14,7 +14,8 @@ import type {
   CanvasCommandDTO,
   CanvasFunctionRunDTO,
   CanvasPatchDTO,
-  CanvasResourceKind,
+  CanvasResourceDTO,
+  CanvasResourceInputDTO,
   CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -267,6 +268,38 @@ function diffPatch(snapshotValue: CanvasSnapshotDTO): CanvasPatchDTO {
   }
 }
 
+function materializeResource(
+  current: CanvasSnapshotDTO,
+  nodeId: UUIDString,
+  input: CanvasResourceInputDTO,
+  index: number,
+): CanvasResourceDTO {
+  if (input.kind === 'KEEP') {
+    const existing = current.nodes.flatMap((node) => node.resources)
+      .find((resource) => resource.id === input.resourceId)
+    if (!existing) {
+      throw new Error(`Missing fixture resource: ${input.resourceId}`)
+    }
+    return { ...existing, ownerNodeId: nodeId, resourceIndex: index }
+  }
+  return {
+    id: input.kind === 'BLOB' ? input.blobId : `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    canvasId: current.document.id,
+    ownerNodeId: nodeId,
+    resourceIndex: index,
+    blobId: input.kind === 'BLOB' ? input.blobId : null,
+    name: input.name,
+    textContent: input.kind === 'TEXT' ? input.textContent : null,
+    kind: input.kind === 'BLOB' ? 'IMAGE' : 'TEXT',
+    mediaType: input.kind === 'BLOB' ? 'image/png' : 'text/plain',
+    sizeBytes: 100,
+    width: null,
+    height: null,
+    durationMs: null,
+    createdAt: '2026-08-10T00:00:00Z',
+  }
+}
+
 /** 模拟服务端命令应用：创建节点 + 版本前进（与命令携带的客户端 UUID 保持一致）。 */
 function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDTO[]): CanvasSnapshotDTO {
   let nodes = current.nodes
@@ -279,43 +312,8 @@ function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDT
         name: command.name,
         transform: command.transform,
         groupId: null,
-        resources: (command.resources ?? []).map((r, idx) => {
-          if (r.kind === 'KEEP') {
-            const existing = current.nodes.flatMap((n) => n.resources).find((res) => res.id === r.resourceId)
-            return existing ?? {
-              id: r.resourceId,
-              canvasId: current.document.id,
-              ownerNodeId: command.nodeId,
-              resourceIndex: idx,
-              blobId: null,
-              name: 'resource',
-              textContent: null,
-              kind: 'TEXT' as CanvasResourceKind,
-              mediaType: 'text/plain',
-              sizeBytes: 100,
-              width: null,
-              height: null,
-              durationMs: null,
-              createdAt: '2026-08-10T00:00:00Z',
-            }
-          }
-          return {
-            id: (r.kind === 'BLOB' ? r.blobId : `00000000-0000-4000-8000-0000000000${idx}`) as UUIDString,
-            canvasId: current.document.id,
-            ownerNodeId: command.nodeId,
-            resourceIndex: idx,
-            blobId: r.kind === 'BLOB' ? r.blobId : null,
-            name: r.name,
-            textContent: r.kind === 'TEXT' ? (r.textContent ?? null) : null,
-            kind: r.kind === 'BLOB' ? 'IMAGE' : ('TEXT' as CanvasResourceKind),
-            mediaType: r.kind === 'BLOB' ? 'image/png' : 'text/plain',
-            sizeBytes: 100,
-            width: null,
-            height: null,
-            durationMs: null,
-            createdAt: '2026-08-10T00:00:00Z',
-          }
-        }),
+        resources: command.resources.map((resource, index) =>
+          materializeResource(current, command.nodeId, resource, index)),
         function: null,
         run: null,
       }]
@@ -326,43 +324,8 @@ function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDT
     } else if (command.type === 'SET_NODE_RESOURCES') {
       nodes = nodes.map((n) => n.id === command.nodeId ? {
         ...n,
-        resources: command.resources.map((r, idx) => {
-          if (r.kind === 'KEEP') {
-            const existing = current.nodes.flatMap((item) => item.resources).find((res) => res.id === r.resourceId)
-            return existing ?? {
-              id: r.resourceId,
-              canvasId: current.document.id,
-              ownerNodeId: command.nodeId,
-              resourceIndex: idx,
-              blobId: null,
-              name: 'resource',
-              textContent: null,
-              kind: 'TEXT' as CanvasResourceKind,
-              mediaType: 'text/plain',
-              sizeBytes: 100,
-              width: null,
-              height: null,
-              durationMs: null,
-              createdAt: '2026-08-10T00:00:00Z',
-            }
-          }
-          return {
-            id: (r.kind === 'BLOB' ? r.blobId : `00000000-0000-4000-8000-0000000000${idx}`) as UUIDString,
-            canvasId: current.document.id,
-            ownerNodeId: command.nodeId,
-            resourceIndex: idx,
-            blobId: r.kind === 'BLOB' ? r.blobId : null,
-            name: r.name,
-            textContent: r.kind === 'TEXT' ? (r.textContent ?? null) : null,
-            kind: r.kind === 'BLOB' ? 'IMAGE' : ('TEXT' as CanvasResourceKind),
-            mediaType: 'text/plain',
-            sizeBytes: 100,
-            width: null,
-            height: null,
-            durationMs: null,
-            createdAt: '2026-08-10T00:00:00Z',
-          }
-        }),
+        resources: command.resources.map((resource, index) =>
+          materializeResource(current, command.nodeId, resource, index)),
       } : n)
     } else if (command.type === 'SET_NODE_FUNCTION') {
       nodes = nodes.map((n) => n.id === command.nodeId ? { ...n, function: command.function } : n)
