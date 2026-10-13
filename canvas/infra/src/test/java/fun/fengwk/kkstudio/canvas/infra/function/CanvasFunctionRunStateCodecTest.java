@@ -3,11 +3,12 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
@@ -42,8 +43,8 @@ class CanvasFunctionRunStateCodecTest {
 
   @BeforeEach
   void setUp() {
-    mapper = new ObjectMapper();
-    codec = new CanvasFunctionRunStateCodec(mapper);
+    mapper = JsonMapper.builder().build();
+    codec = new CanvasFunctionRunStateCodec();
     JsonObject schema =
         CanvasJson.parseObject(
             """
@@ -207,5 +208,108 @@ class CanvasFunctionRunStateCodecTest {
             run.stage(),
             oversized);
     assertThrows(IllegalArgumentException.class, () -> codec.encode(oversizedRun));
+  }
+
+  /** Jackson 3 对空白输入返回 MissingNode，必须显式拒绝，不能当作空对象静默通过。 */
+  @Test
+  void rejectsBlankMissingNodeInput() {
+    for (String blank : List.of("", "   ", "\n\t")) {
+      assertThrows(IllegalArgumentException.class, () -> codec.decode(blank, definition));
+      assertThrows(IllegalArgumentException.class, () -> codec.stage(blank));
+      assertThrows(IllegalArgumentException.class, () -> codec.functionName(blank));
+    }
+    // JSON 字面量 null 解析为 NullNode 而非 MissingNode，同样不是合法 state。
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("null", definition));
+  }
+
+  /** 拒绝 plan 内 manifest/outputs 的类型与数量漂移，以及 manifest 成员的 kind/UUID/数值类型漂移。 */
+  @Test
+  void rejectsPlanShapeAndManifestMemberDrift() {
+    ObjectNode root = encodedRoot();
+    ((ObjectNode) root.get("plan")).put("manifest", "x");
+    String manifestNotArray = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(manifestNotArray, definition));
+
+    root = encodedRoot();
+    ((ObjectNode) root.get("plan")).put("outputs", "x");
+    String outputsNotArray = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(outputsNotArray, definition));
+
+    root = encodedRoot();
+    ((ArrayNode) ((ObjectNode) root.get("plan")).get("outputs")).remove(0);
+    String outputsMismatch = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(outputsMismatch, definition));
+
+    root = encodedRoot();
+    firstManifestReference(root).put("kind", "NOT_A_KIND");
+    String invalidKind = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidKind, definition));
+
+    root = encodedRoot();
+    firstManifestReference(root).put("blobId", 5);
+    String nonStringUuid = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonStringUuid, definition));
+
+    root = encodedRoot();
+    firstManifestReference(root).put("sourceNodeId", "not-a-uuid");
+    String malformedUuid = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(malformedUuid, definition));
+
+    root = encodedRoot();
+    firstManifestReference(root).put("sizeBytes", -1);
+    String negativeSize = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(negativeSize, definition));
+
+    root = encodedRoot();
+    firstManifestReference(root).put("width", 0);
+    String nonPositiveWidth = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonPositiveWidth, definition));
+  }
+
+  /** 拒绝缺失 plan 字段、空白文本、decode 侧超限 adapterState、超深 args 以及非法 stage/functionName JSON。 */
+  @Test
+  void rejectsMissingFieldsBlankTextOversizedAdapterStateAndDeepArgs() {
+    ObjectNode root = encodedRoot();
+    ((ObjectNode) root.get("plan")).remove("outputs");
+    String missingOutputs = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingOutputs, definition));
+
+    root = encodedRoot();
+    ((ObjectNode) root.get("plan")).put("nodeName", "");
+    String blankNodeName = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(blankNodeName, definition));
+
+    root = encodedRoot();
+    ObjectNode oversized = mapper.createObjectNode();
+    oversized.put("large", "x".repeat(65 * 1024));
+    root.set("adapterState", oversized);
+    String oversizedAdapterState = root.toString();
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decode(oversizedAdapterState, definition));
+
+    // args 超过 Core 的嵌套深度上限：Jackson 允许解析，但严格 args 解析必须拒绝。
+    root = encodedRoot();
+    ((ObjectNode) root.get("plan")).set("args", nestedObject(CanvasJson.MAX_DEPTH + 1));
+    String deepArgs = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(deepArgs, definition));
+
+    assertThrows(IllegalArgumentException.class, () -> codec.functionName("{"));
+  }
+
+  private ObjectNode encodedRoot() {
+    return (ObjectNode) mapper.readTree(codec.encode(run));
+  }
+
+  private static ObjectNode firstManifestReference(ObjectNode root) {
+    return (ObjectNode) ((ArrayNode) ((ObjectNode) root.get("plan")).get("manifest")).get(0);
+  }
+
+  private ObjectNode nestedObject(int depth) {
+    ObjectNode node = mapper.createObjectNode();
+    ObjectNode current = node;
+    for (int index = 0; index < depth; index++) {
+      current = current.putObject("nested");
+    }
+    return node;
   }
 }
