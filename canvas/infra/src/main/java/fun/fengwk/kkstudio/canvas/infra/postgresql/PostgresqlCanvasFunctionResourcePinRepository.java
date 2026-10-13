@@ -15,10 +15,11 @@ import java.util.UUID;
 public class PostgresqlCanvasFunctionResourcePinRepository
     implements CanvasFunctionResourcePinRepository {
 
-  private final CanvasFunctionResourcePinMapper refMapper;
+  private final CanvasFunctionResourcePinJdbcStore pinStore;
 
-  public PostgresqlCanvasFunctionResourcePinRepository(CanvasFunctionResourcePinMapper refMapper) {
-    this.refMapper = Objects.requireNonNull(refMapper, "refMapper");
+  public PostgresqlCanvasFunctionResourcePinRepository(
+      CanvasFunctionResourcePinJdbcStore pinStore) {
+    this.pinStore = Objects.requireNonNull(pinStore, "pinStore");
   }
 
   @Override
@@ -30,44 +31,44 @@ public class PostgresqlCanvasFunctionResourcePinRepository
     for (CanvasFunctionResourcePin ref : refs) {
       data.add(toDO(ref));
     }
-    if (refMapper.insertAll(data) != data.size()) {
+    if (pinStore.insertAll(data) != data.size()) {
       throw new IllegalStateException("insert canvas function resource refs failed");
     }
   }
 
   @Override
   public List<CanvasFunctionResourcePin> findByRun(UUID canvasId, UUID nodeId, UUID requestId) {
-    return toDomain(refMapper.findByRun(canvasId, nodeId, requestId));
+    return toDomain(pinStore.findByRun(canvasId, nodeId, requestId));
   }
 
   @Override
   public List<CanvasFunctionResourcePin> findByNode(UUID canvasId, UUID nodeId) {
-    return toDomain(refMapper.findByNode(canvasId, nodeId));
+    return toDomain(pinStore.findByNode(canvasId, nodeId));
   }
 
   @Override
   public List<CanvasFunctionResourcePin> findByCanvas(UUID canvasId) {
-    return toDomain(refMapper.findByCanvas(canvasId));
+    return toDomain(pinStore.findByCanvas(canvasId));
   }
 
   @Override
   public int countByResource(UUID canvasId, UUID resourceId) {
-    return refMapper.countByResource(canvasId, resourceId);
+    return pinStore.countByResource(canvasId, resourceId);
   }
 
   @Override
   public boolean deleteByRun(UUID canvasId, UUID nodeId, UUID requestId) {
-    return refMapper.deleteByRun(canvasId, nodeId, requestId) >= 0;
+    return pinStore.deleteByRun(canvasId, nodeId, requestId) >= 0;
   }
 
   @Override
   public int deleteByNode(UUID canvasId, UUID nodeId) {
-    return refMapper.deleteByNode(canvasId, nodeId);
+    return pinStore.deleteByNode(canvasId, nodeId);
   }
 
   @Override
   public int deleteByCanvas(UUID canvasId) {
-    return refMapper.deleteByCanvas(canvasId);
+    return pinStore.deleteByCanvas(canvasId);
   }
 
   private static List<CanvasFunctionResourcePin> toDomain(List<CanvasFunctionResourcePinDO> refs) {

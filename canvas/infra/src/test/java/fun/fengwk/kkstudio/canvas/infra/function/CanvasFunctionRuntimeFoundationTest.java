@@ -1205,11 +1205,6 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   static class FoundationConfiguration {
 
     @Bean
-    Clock canvasFunctionClock() {
-      return Clock.systemUTC();
-    }
-
-    @Bean
     CanvasFunctionAdapter foundationAdapter() {
       return new CanvasFunctionAdapter() {
         @Override

@@ -17,40 +17,42 @@ import java.util.UUID;
 @Repository
 public class PostgresqlCanvasResourceRepository implements CanvasResourceRepository {
 
-  private final CanvasResourceMapper resourceMapper;
+  private final CanvasResourceJdbcStore resourceStore;
 
-  public PostgresqlCanvasResourceRepository(CanvasResourceMapper resourceMapper) {
-    this.resourceMapper = Objects.requireNonNull(resourceMapper, "resourceMapper");
+  public PostgresqlCanvasResourceRepository(CanvasResourceJdbcStore resourceStore) {
+    this.resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
   }
 
   @Override
   public void add(CanvasResource resource) {
-    if (resourceMapper.insert(toDO(resource)) != 1) {
+    if (resourceStore.insert(toDO(resource)) != 1) {
       throw new IllegalStateException("insert canvas resource failed: " + resource.id());
     }
   }
 
   @Override
   public boolean addIfAbsent(CanvasResource resource) {
-    return resourceMapper.insertIfAbsent(toDO(resource)) == 1;
+    return resourceStore.insertIfAbsent(toDO(resource)) == 1;
   }
 
   @Override
   public Optional<CanvasResource> findById(UUID canvasId, UUID resourceId) {
-    return Optional.ofNullable(resourceMapper.getById(canvasId, resourceId))
+    return resourceStore
+        .findById(canvasId, resourceId)
         .map(PostgresqlCanvasResourceRepository::toDomain);
   }
 
   @Override
   public Optional<CanvasResource> findByIdForUpdate(UUID canvasId, UUID resourceId) {
-    return Optional.ofNullable(resourceMapper.getByIdForUpdate(canvasId, resourceId))
+    return resourceStore
+        .findByIdForUpdate(canvasId, resourceId)
         .map(PostgresqlCanvasResourceRepository::toDomain);
   }
 
   @Override
   public List<CanvasResource> findByCanvasId(UUID canvasId) {
     List<CanvasResource> resources = new ArrayList<>();
-    for (CanvasResourceDO resource : resourceMapper.listByCanvas(canvasId)) {
+    for (CanvasResourceDO resource : resourceStore.listByCanvas(canvasId)) {
       resources.add(toDomain(resource));
     }
     return List.copyOf(resources);
@@ -59,7 +61,7 @@ public class PostgresqlCanvasResourceRepository implements CanvasResourceReposit
   @Override
   public List<CanvasResource> findByOwnerNode(UUID canvasId, UUID nodeId) {
     List<CanvasResource> resources = new ArrayList<>();
-    for (CanvasResourceDO resource : resourceMapper.listByOwnerNode(canvasId, nodeId)) {
+    for (CanvasResourceDO resource : resourceStore.listByOwnerNode(canvasId, nodeId)) {
       resources.add(toDomain(resource));
     }
     return List.copyOf(resources);
@@ -67,27 +69,27 @@ public class PostgresqlCanvasResourceRepository implements CanvasResourceReposit
 
   @Override
   public boolean detachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId) {
-    return resourceMapper.detachOwner(canvasId, resourceId, ownerNodeId) == 1;
+    return resourceStore.detachOwner(canvasId, resourceId, ownerNodeId) == 1;
   }
 
   @Override
   public boolean attachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId, int resourceIndex) {
-    return resourceMapper.attachOwner(canvasId, resourceId, ownerNodeId, resourceIndex) == 1;
+    return resourceStore.attachOwner(canvasId, resourceId, ownerNodeId, resourceIndex) == 1;
   }
 
   @Override
   public boolean delete(UUID canvasId, UUID resourceId) {
-    return resourceMapper.delete(canvasId, resourceId) == 1;
+    return resourceStore.delete(canvasId, resourceId) == 1;
   }
 
   @Override
   public int deleteByOwnerNode(UUID canvasId, UUID nodeId) {
-    return resourceMapper.deleteByOwnerNode(canvasId, nodeId);
+    return resourceStore.deleteByOwnerNode(canvasId, nodeId);
   }
 
   @Override
   public int deleteByCanvas(UUID canvasId) {
-    return resourceMapper.deleteByCanvas(canvasId);
+    return resourceStore.deleteByCanvas(canvasId);
   }
 
   private static CanvasResource toDomain(CanvasResourceDO resource) {
