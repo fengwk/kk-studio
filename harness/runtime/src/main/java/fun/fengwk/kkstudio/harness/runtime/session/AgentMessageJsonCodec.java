@@ -310,6 +310,10 @@ public final class AgentMessageJsonCodec {
     } catch (JacksonException error) {
       throw new IllegalArgumentException(name + " must contain JSON", error);
     }
+    // Jackson 3 对空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为缺失文档。
+    if (parsed == null || parsed.isMissingNode()) {
+      throw new IllegalArgumentException(name + " must contain JSON");
+    }
     return parsed;
   }
 

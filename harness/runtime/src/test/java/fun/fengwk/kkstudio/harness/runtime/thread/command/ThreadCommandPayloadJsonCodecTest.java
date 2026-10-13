@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -420,5 +421,40 @@ class ThreadCommandPayloadJsonCodecTest {
 
   private static AgentMessage user(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
+  }
+
+  /**
+   * 测试意图：SET_CONTRIBUTOR_STATE 的 state.data 是 Contributor 自由 JSON；encode 与 decode 都必须按 BigDecimal
+   * 搬运，1e309/1e-324 与高精度小数不得退化为 Infinity / 0 或被改写成字符串，否则 canonical dataJson 与 command request hash
+   * 都会漂移。
+   */
+  @Test
+  void preservesContributorStateDataNumberPrecision() {
+    String dataJson = "{\"big\":1E+309,\"tiny\":1E-324,\"exact\":0.1234567890123456789012345678}";
+    SetContributorStateCommandPayload payload =
+        new SetContributorStateCommandPayload(
+            new CustomEntryPayload("com.example.issue", "issue-scope", 1, dataJson));
+
+    String json = codec.encode(payload);
+
+    assertTrue(json.contains("\"big\":1E+309"), json);
+    assertTrue(json.contains("\"tiny\":1E-324"), json);
+    assertFalse(json.contains("Infinity"), json);
+    assertEquals(
+        "{\"state\":{\"contributorId\":\"com.example.issue\",\"customType\":\"issue-scope\","
+            + "\"schemaVersion\":1,\"data\":"
+            + dataJson
+            + "}}",
+        json);
+
+    SetContributorStateCommandPayload decoded =
+        (SetContributorStateCommandPayload)
+            codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json);
+    assertEquals(payload, decoded);
+    assertEquals(json, codec.encode(decoded));
+    // request hash 只基于 canonical 请求形态：精度丢失会改变 hash。
+    assertEquals(
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
+        ThreadCommandPayloadJsonCodec.requestHash(decoded));
   }
 }

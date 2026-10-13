@@ -2,8 +2,11 @@ package fun.fengwk.kkstudio.harness.infra.postgresql;
 
 import org.springframework.jdbc.core.RowMapper;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -154,7 +157,14 @@ final class PostgresqlHarnessRows {
               JoinPurpose.fromWireName(resultSet.getString("purpose")),
               nullableUuid(resultSet, "superseded_by_invocation_id"));
 
-  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+  /** cancelled_inputs 是本模块自有持久协议：严格读取 + BigDecimal 读回自由 JSON，避免数值退化。 */
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   static final RowMapper<StoppedThreadReceipt> STOPPED_THREAD_RECEIPT =
