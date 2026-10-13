@@ -431,6 +431,32 @@ class LangChainMcpClientTest {
     assertThat(result.detailsJson()).isEqualTo("{}");
   }
 
+  /**
+   * 无可序列化属性的 value（empty bean）在 Jackson 2 约定下必须编码失败并回退为固定空 JSON object，绝不产出 {@code {"bad":{}}}
+   * 这类假合法详情，也不回显 attributes 中的敏感内容。
+   */
+  @Test
+  void fallsBackToEmptyDetailsWhenAttributesContainEmptyBean() {
+    Map<String, Object> attributes = new HashMap<>();
+    attributes.put("bad", new Object());
+    attributes.put("secret", "top-secret");
+    DefaultMcpClient sdk = mock(DefaultMcpClient.class);
+    when(sdk.executeTool(any(ToolExecutionRequest.class)))
+        .thenReturn(
+            ToolExecutionResult.builder()
+                .isError(true)
+                .result("raw")
+                .resultText("failed")
+                .attributes(attributes)
+                .build());
+    LangChainMcpClient client = newClient(sdk, null);
+
+    McpToolCallResult result = client.callTool("tool", "{}", McpDeadline.of(BUDGET), none());
+
+    assertThat(result.error()).isTrue();
+    assertThat(result.detailsJson()).isEqualTo("{}").doesNotContain("top-secret");
+  }
+
   /** 关闭必须释放 worker 池并关闭 SDK 与传输，且任一关闭失败都不得外抛或阻断后续清理。 */
   @Test
   void closeReleasesWorkersAndSwallowsCloseFailures() throws IOException {

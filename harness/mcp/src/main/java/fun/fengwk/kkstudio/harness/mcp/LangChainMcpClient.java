@@ -9,6 +9,7 @@ import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.service.tool.ToolExecutionResult;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
@@ -55,7 +56,14 @@ final class LangChainMcpClient implements McpClient {
   /** 空闲 worker 的回收时间：worker 数量在负载回落后收敛，池不会长期占着线程。 */
   private static final long WORKER_KEEP_ALIVE_SECONDS = 60L;
 
-  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
+  /**
+   * 模块自有 JSON（工具 schema、调用详情）的 Jackson 3 mapper。
+   *
+   * <p>显式开启 {@link SerializationFeature#FAIL_ON_EMPTY_BEANS}：Jackson 3 默认关闭该开关，会把无可序列化属性的 value 写成
+   * {@code {}}；这里保持 Jackson 2 的原有约定，让「无法编码的 attributes」继续走失败回退，而不是产出看似合法的空对象 JSON。
+   */
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder().enable(SerializationFeature.FAIL_ON_EMPTY_BEANS).build();
 
   private final DefaultMcpClient client;
   private final McpTransport transport;
