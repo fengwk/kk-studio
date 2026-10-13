@@ -4,8 +4,8 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
-import fun.fengwk.kkstudio.platform.chat.repo.impl.mapper.ChatSessionMapper;
 import fun.fengwk.kkstudio.platform.chat.repo.impl.model.ChatSessionDO;
+import fun.fengwk.kkstudio.platform.chat.repo.impl.store.ChatSessionJdbcStore;
 
 import java.util.List;
 import java.util.Objects;
@@ -15,30 +15,31 @@ import java.util.UUID;
 @Repository
 public class PostgresqlChatSessionRepository implements ChatSessionRepository {
 
-  private final ChatSessionMapper mapper;
+  private final ChatSessionJdbcStore chatSessionJdbcStore;
 
-  public PostgresqlChatSessionRepository(ChatSessionMapper mapper) {
-    this.mapper = Objects.requireNonNull(mapper, "mapper");
+  public PostgresqlChatSessionRepository(ChatSessionJdbcStore chatSessionJdbcStore) {
+    this.chatSessionJdbcStore =
+        Objects.requireNonNull(chatSessionJdbcStore, "chatSessionJdbcStore");
   }
 
   @Override
   public boolean insert(UUID sessionId, UUID chatId) {
-    return mapper.insert(sessionId, chatId) == 1;
+    return chatSessionJdbcStore.insert(sessionId, chatId) == 1;
   }
 
   @Override
   public List<UUID> listSessionIds(UUID chatId) {
-    return mapper.listSessionIds(chatId);
+    return chatSessionJdbcStore.listSessionIds(chatId);
   }
 
   @Override
   public ChatSession findBySessionId(UUID sessionId) {
-    ChatSessionDO row = mapper.findBySessionId(sessionId);
+    ChatSessionDO row = chatSessionJdbcStore.findBySessionId(sessionId);
     return row == null ? null : new ChatSession(row.getSessionId(), row.getChatId());
   }
 
   @Override
   public int deleteBySessionId(UUID sessionId) {
-    return mapper.deleteBySessionId(sessionId);
+    return chatSessionJdbcStore.deleteBySessionId(sessionId);
   }
 }
