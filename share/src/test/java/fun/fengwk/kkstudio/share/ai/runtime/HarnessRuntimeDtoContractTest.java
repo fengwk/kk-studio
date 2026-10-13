@@ -53,9 +53,8 @@ class HarnessRuntimeDtoContractTest {
   }
 
   /**
-   * 显式宽松的 Jackson mapper：关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES}，复现 wire 上真实 mapper（Jackson3 HTTP
-   * mapper 与 convention4j 共享 Jackson2 bean）默认忽略未知字段的语义，用来证明请求体的 fail-closed 来自 DTO 注解而非 mapper
-   * 默认严格性。
+   * 显式宽松的 Jackson mapper：关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES}，复现 wire 上真实 mapper（Spring Boot 的
+   * Jackson 3 HTTP mapper）默认忽略未知字段的语义，用来证明请求体的 fail-closed 来自 DTO 注解而非 mapper 默认严格性。
    */
   private static final JsonMapper LENIENT_MAPPER =
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
@@ -346,11 +345,10 @@ class HarnessRuntimeDtoContractTest {
   }
 
   /**
-   * 测试意图：wire 上的真实 mapper（Spring Boot 的 Jackson3 HTTP mapper 与 convention4j 的共享 Jackson2
-   * bean）默认都忽略未知 字段，因此请求体的 fail-closed 只能来自 DTO 自己的 {@code @JsonAnySetter}。这里用显式关闭 {@code
-   * FAIL_ON_UNKNOWN_PROPERTIES} 的 Jackson2 mapper 复现同样的宽松语义：无注解的对照类型确实静默忽略未知字段，而 {@link
-   * HarnessToolApprovalDTO} 仍然拒绝，且拒绝原因就是 DTO 自己抛出的 {@link HarnessRequestFormatException}（而非 mapper
-   * 的默认严格性）。
+   * 测试意图：wire 上的真实 mapper（Spring Boot 的 Jackson 3 HTTP mapper）默认忽略未知字段，因此请求体的 fail-closed 只能来自 DTO
+   * 自己的 {@code @JsonAnySetter}。这里用显式关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES} 的 Jackson 3 mapper
+   * 复现同样的宽松语义：无注解的对照类型确实静默忽略未知字段，而 {@link HarnessToolApprovalDTO} 仍然拒绝，且拒绝原因就是 DTO 自己抛出的 {@link
+   * HarnessRequestFormatException}（而非 mapper 的默认严格性）。
    */
   @Test
   void lenientMapperStillRejectsUnknownToolApprovalFieldViaDtoAnnotation() throws Exception {

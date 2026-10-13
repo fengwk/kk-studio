@@ -68,7 +68,10 @@ public final class JsonValues {
   /**
    * 解析非空严格 JSON 文本为 {@link JsonNode}。
    *
-   * @throws IllegalArgumentException 文本为 null、非合法 JSON 或包含重复字段/尾随内容时
+   * <p>Jackson 3 对空/纯空白输入返回 {@link JsonNode#isMissingNode() MissingNode} 而非 {@code null}，因此这里显式拒绝
+   * missing 节点；JSON 字面量 {@code null} 解析为合法的 {@code NullNode}，不属于 missing。
+   *
+   * @throws IllegalArgumentException 文本为 null、空白、非合法 JSON 或包含重复字段/尾随内容时
    */
   public static JsonNode readTree(String json) {
     if (json == null) {
@@ -76,8 +79,8 @@ public final class JsonValues {
     }
     try {
       JsonNode node = OBJECT_MAPPER.readTree(json);
-      if (node == null) {
-        throw new IllegalArgumentException("json must not be null");
+      if (node == null || node.isMissingNode()) {
+        throw new IllegalArgumentException("json must not be blank");
       }
       return node;
     } catch (JacksonException error) {

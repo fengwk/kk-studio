@@ -1,23 +1,35 @@
 package fun.fengwk.kkstudio.harness.common.schema;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /** {@link SchemaJsonCodec} 的 canonical 确定性编解码、字段排序与非法 schema 拦截测试。 */
 class SchemaJsonCodecTest {
 
   private final SchemaJsonCodec codec = new SchemaJsonCodec();
+
+  private static final JsonMapper FIXTURE_MAPPER = JsonMapper.builder().build();
 
   /** 验证各类型 SchemaElement 组成的复杂 InputSchema 能被正确 round-trip 还原。 */
   @Test
@@ -114,8 +126,8 @@ class SchemaJsonCodecTest {
   }
 
   /**
-   * 空白输入必须抛公开契约声明的 {@link IllegalArgumentException}，而不是让 Jackson 的 null 结果穿透成
-   * NullPointerException；null 入参保持原有的 IllegalArgumentException 契约。
+   * 空白输入必须抛公开契约声明的 {@link IllegalArgumentException}（Jackson 3 对空/纯空白返回 MissingNode， 不允许其穿透）；null
+   * 入参保持原有的 IllegalArgumentException 契约。
    */
   @ParameterizedTest
   @NullAndEmptySource
@@ -140,5 +152,42 @@ class SchemaJsonCodecTest {
         () ->
             codec.decode(
                 "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false} {}"));
+  }
+
+  /**
+   * 受控非法 schema fixture：每条用例给出 schema JSON 与期望的错误片段，覆盖 type / properties / required /
+   * additionalProperties / enum / items / 嵌套 object 等真实可达的拒绝分支。
+   */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("invalidSchemas")
+  void rejectsInvalidSchemaFixtures(String name, String schemaJson, String errorFragment) {
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(schemaJson));
+    assertTrue(
+        error.getMessage().contains(errorFragment),
+        () -> name + ": expected <" + errorFragment + "> but was <" + error.getMessage() + ">");
+  }
+
+  /** 从测试资源加载非法 schema 用例，转成 (name, schema JSON 文本, 期望错误片段) 参数。 */
+  private static Stream<Arguments> invalidSchemas() {
+    JsonNode fixtures = readFixture("invalid-schemas.json");
+    List<Arguments> cases = new ArrayList<>();
+    for (JsonNode fixture : fixtures) {
+      cases.add(
+          Arguments.of(
+              fixture.get("name").asString(),
+              FIXTURE_MAPPER.writeValueAsString(fixture.get("schema")),
+              fixture.get("error").asString()));
+    }
+    return cases.stream();
+  }
+
+  private static JsonNode readFixture(String name) {
+    try (InputStream in = SchemaJsonCodecTest.class.getResourceAsStream(name)) {
+      assertNotNull(in, name + " must exist in test resources");
+      return FIXTURE_MAPPER.readTree(in);
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
   }
 }
