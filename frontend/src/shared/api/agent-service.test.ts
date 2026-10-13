@@ -1,14 +1,17 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createAgentService } from '@/shared/api/agent-service'
-import type { HttpClient } from '@/shared/api/client'
+import { createMockHttpClient } from '@/test-support/mock-http-client'
+import type {
+  AgentDefinitionCreateDTO,
+  AgentDefinitionUpdateDTO,
+  AgentModelCreateDTO,
+  AgentModelUpdateDTO,
+  AgentProviderCreateDTO,
+  AgentProviderUpdateDTO,
+} from '@/shared/api/contracts/ai-catalog'
 
-function createClient(): HttpClient {
-  return {
-    get: vi.fn(async () => ({})),
-    post: vi.fn(async () => ({})),
-    put: vi.fn(async () => ({})),
-    delete: vi.fn(async () => ({})),
-  }
+function createClient() {
+  return createMockHttpClient()
 }
 
 describe('agentService', () => {
@@ -47,7 +50,7 @@ describe('agentService', () => {
   it('maps provider, model and agent mutations to name-based CRUD endpoints', async () => {
     const client = createClient()
     const service = createAgentService(client)
-    const providerBody = {
+    const providerBody: AgentProviderCreateDTO = {
       name: 'minimax',
       providerType: 'openai',
       baseUrl: 'https://api.minimax.chat/v1',
@@ -55,9 +58,11 @@ describe('agentService', () => {
       modelCallTimeoutMillis: 1800000,
       modelCallIdleTimeoutMillis: 120000,
     }
-    const modelBody = {
+    const modelBody: AgentModelCreateDTO = {
       providerName: 'minimax',
       name: 'MiniMax-M2.7',
+      modelId: 'wire-minimax',
+      description: null,
       config: {
         limit: { context: 128000, output: 8192 },
         abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
@@ -78,7 +83,7 @@ describe('agentService', () => {
         variants: [{ id: 'default' }],
       },
     }
-    const agentBody = {
+    const agentBody: AgentDefinitionCreateDTO = {
       name: 'default-assistant',
       description: null,
       systemPrompt: null,
@@ -86,10 +91,15 @@ describe('agentService', () => {
       variant: 'default',
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     }
-    const updateProviderBody = { description: 'updated', expectedVersion: '7' }
-    const updateModelBody = {
+    const updateProviderBody: AgentProviderUpdateDTO = {
+      providerType: 'openai',
+      description: 'updated',
+      expectedVersion: '7',
+    }
+    const updateModelBody: AgentModelUpdateDTO = {
       name: 'MiniMax-M2.7-renamed',
       modelId: 'wire-minimax',
+      description: null,
       expectedVersion: '8',
       config: {
         limit: { context: 128000, output: 8192 },
@@ -111,7 +121,14 @@ describe('agentService', () => {
         variants: [{ id: 'fast' }],
       },
     }
-    const updateAgentBody = { description: 'updated', expectedVersion: '9' }
+    const updateAgentBody: AgentDefinitionUpdateDTO = {
+      description: 'updated',
+      expectedVersion: '9',
+      systemPrompt: null,
+      model: 'minimax/MiniMax-M2.7',
+      variant: 'default',
+      config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+    }
 
     await service.createProvider(providerBody)
     await service.updateProvider('minimax', updateProviderBody)

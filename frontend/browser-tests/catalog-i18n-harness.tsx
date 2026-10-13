@@ -108,6 +108,7 @@ export function ModelFormDemo() {
             configured: true,
             modelCallTimeoutMillis: 1800000,
             modelCallIdleTimeoutMillis: 120000,
+            modelHttpRetryStatusCodes: null,
             version: '1',
             createTime: '',
             updateTime: '',

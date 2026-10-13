@@ -30,7 +30,9 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
       RENAME_CMD,
     )
     expect(enqueueRes.ok).toBe(false)
-    expect(enqueueRes.errorMessage).toBe('network down')
+    if (!enqueueRes.ok) {
+      expect(enqueueRes.errorMessage).toBe('network down')
+    }
 
     // 3. 断言 IndexedDB 中存在 1 条待确认操作，记录其 idempotencyKey 与 commands
     const persistedBefore = await page.evaluate(() =>
@@ -229,7 +231,9 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
 
     // 3. 断言 enqueue 抛出 CanvasStorageUnavailableError 异常
     expect(enqueueRes.ok).toBe(false)
-    expect(enqueueRes.errorName).toBe('CanvasStorageUnavailableError')
+    if (!enqueueRes.ok) {
+      expect(enqueueRes.errorName).toBe('CanvasStorageUnavailableError')
+    }
 
     // 4. 断言网络请求未发出 (calls 为空)
     const calls = await page.evaluate(() => window.__canvasDurability.calls())

@@ -23,7 +23,7 @@ export function Harness() {
     node('worker', 'planner', 'Explorer'), node('deep', 'worker', 'Explorer', active, active ? null : 'COMPLETED'),
     node('failed', 'root', 'Reviewer', false, 'FAILED'), node('stopped', 'root', 'Explorer', false, 'STOPPED'),
   ])
-  const tree = { ...projection, activeCount: active ? 1 : 0, rootThreadId: 'root', isLoading: false, isError: false, refreshFailed: false, refetch: () => {} }
+  const tree = { ...projection, activeCount: active ? 1 : 0, rootThreadId: 'root', isLoading: false, isError: false, refreshFailed: false, refetch: () => undefined }
   return <MemoryRouter><ThreadNavigationContext.Provider value={setSelected}>
     <main style={{ maxWidth: 760, margin: '20px auto', padding: 8 }}>
       <button className="ghost-btn" onClick={() => setActive(false)}>finish</button>

@@ -179,12 +179,15 @@ const LONG_MODEL: AgentModelView = {
 const SAMPLE_PROVIDER: AgentProviderDTO = {
   name: 'openai',
   description: 'OpenAI 官方 API 服务提供方',
-  providerType: 'OPENAI',
+  providerType: 'openai',
   baseUrl: 'https://api.openai.com/v1',
   configured: true,
   modelCallTimeoutMillis: 60000,
   modelCallIdleTimeoutMillis: 15000,
   modelHttpRetryStatusCodes: [429, 500, 502, 503],
+  version: '1',
+  createTime: '2026-10-01T00:00:00Z',
+  updateTime: '2026-10-01T00:00:00Z',
 }
 
 function PanelsHarness() {
