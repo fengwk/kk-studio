@@ -4,8 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
@@ -16,7 +16,7 @@ import java.util.List;
 class AgentDefinitionConfigCodecTest {
 
   private final AgentDefinitionConfigCodec codec =
-      new AgentDefinitionConfigCodec(new ObjectMapper());
+      new AgentDefinitionConfigCodec(JsonMapper.builder().build());
 
   /** 测试意图：验证完整配置（含全局 Skill 引用）能够正确往返编解码并保持元素顺序。 */
   @Test

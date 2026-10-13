@@ -4,8 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
@@ -18,7 +18,7 @@ public class AgentDefinitionConverterTest {
   @Test
   public void shouldHandleNullAndRejectInvalidStoredConfiguration() {
     AgentDefinitionConverter converter =
-        new AgentDefinitionConverter(new AgentDefinitionConfigCodec(new ObjectMapper()));
+        new AgentDefinitionConverter(new AgentDefinitionConfigCodec(JsonMapper.builder().build()));
     assertNull(converter.convert(null));
 
     AgentDefinition invalid = new AgentDefinition();

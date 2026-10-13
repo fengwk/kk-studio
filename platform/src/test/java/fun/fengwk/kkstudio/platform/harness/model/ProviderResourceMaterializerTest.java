@@ -17,12 +17,12 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Ticker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -1299,8 +1299,8 @@ class ProviderResourceMaterializerTest {
           format,
           new ProviderReplayAffinity(
               ProviderType.OPENAI, "test-provider", new UUID(0L, 9L), "test-model"),
-          new ObjectMapper().readTree(payload));
-    } catch (JsonProcessingException error) {
+          JsonMapper.builder().build().readTree(payload));
+    } catch (JacksonException error) {
       throw new IllegalStateException(error);
     }
   }

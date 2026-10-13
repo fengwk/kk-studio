@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
@@ -148,6 +148,6 @@ class ChatMutationFactoryTest {
   }
 
   private static ChatMutationFactory factory() {
-    return new ChatMutationFactory(new AgentEditableSupport(new ObjectMapper()));
+    return new ChatMutationFactory(new AgentEditableSupport(JsonMapper.builder().build()));
   }
 }

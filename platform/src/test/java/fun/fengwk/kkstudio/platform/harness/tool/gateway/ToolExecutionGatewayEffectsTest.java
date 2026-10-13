@@ -4,8 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
@@ -269,7 +269,7 @@ class ToolExecutionGatewayEffectsTest {
             catalog,
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new PermissionEvaluator(JsonMapper.builder().build(), new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
@@ -359,7 +359,7 @@ class ToolExecutionGatewayEffectsTest {
             catalog,
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new PermissionEvaluator(JsonMapper.builder().build(), new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
@@ -458,7 +458,7 @@ class ToolExecutionGatewayEffectsTest {
             catalog,
             loader,
             new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new PermissionEvaluator(JsonMapper.builder().build(), new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,

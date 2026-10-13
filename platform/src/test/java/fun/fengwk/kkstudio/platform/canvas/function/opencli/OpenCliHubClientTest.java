@@ -8,14 +8,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
@@ -42,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @ResourceLock("jvm-proxy-selector")
 class OpenCliHubClientTest {
 
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper = JsonMapper.builder().build();
   private HttpServer server;
   private OpenCliHubProperties properties;
   private SystemSettingsSnapshot snapshot;
@@ -468,7 +470,7 @@ class OpenCliHubClientTest {
   private String quote(String value) {
     try {
       return mapper.writeValueAsString(value);
-    } catch (IOException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException(exception);
     }
   }

@@ -1,15 +1,15 @@
 package fun.fengwk.kkstudio.platform.catalog.model.runtime;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
-import com.fasterxml.jackson.databind.cfg.CoercionAction;
-import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
-import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DatabindException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.cfg.CoercionAction;
+import tools.jackson.databind.cfg.CoercionInputShape;
+import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -50,28 +50,37 @@ public final class AgentModelRuntimeConfigParser {
 
   public AgentModelRuntimeConfigParser(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-    ObjectMapper strictMapper = objectMapper.copy();
-    strictMapper.disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
-    strictMapper.enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-    strictMapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    strictMapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    strictMapper
-        .coercionConfigFor(LogicalType.Integer)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
-    strictMapper
-        .coercionConfigFor(LogicalType.Float)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail);
-    strictMapper
-        .coercionConfigFor(LogicalType.Boolean)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
-    strictMapper
-        .coercionConfigFor(LogicalType.Textual)
-        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail);
+    ObjectMapper strictMapper =
+        objectMapper
+            .rebuild()
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .withCoercionConfig(
+                LogicalType.Integer,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            .withCoercionConfig(
+                LogicalType.Float,
+                config -> config.setCoercion(CoercionInputShape.String, CoercionAction.Fail))
+            .withCoercionConfig(
+                LogicalType.Boolean,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            .withCoercionConfig(
+                LogicalType.Textual,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
+            .build();
     this.configReader = strictMapper.readerFor(AgentModelConfigDTO.class);
   }
 
@@ -88,12 +97,12 @@ public final class AgentModelRuntimeConfigParser {
       AgentModelConfigDTO config = configReader.readValue(configJson);
       validate(config);
       return config;
-    } catch (JsonMappingException error) {
+    } catch (DatabindException error) {
       if (mappingPath(error).endsWith(".protocolOptionsJson")) {
         throw invalid(mappingPath(error) + " must be a JSON string");
       }
       throw invalid(mappingPath(error) + " is invalid: " + error.getOriginalMessage(), error);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw invalid("config must be valid JSON object", error);
     }
   }
@@ -103,7 +112,7 @@ public final class AgentModelRuntimeConfigParser {
     validate(config);
     try {
       return objectMapper.writeValueAsString(config);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode agent model config", error);
     }
   }
@@ -312,11 +321,11 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  private static String mappingPath(JsonMappingException error) {
+  private static String mappingPath(DatabindException error) {
     StringBuilder path = new StringBuilder("config");
-    for (JsonMappingException.Reference reference : error.getPath()) {
-      if (reference.getFieldName() != null) {
-        path.append('.').append(reference.getFieldName());
+    for (JacksonException.Reference reference : error.getPath()) {
+      if (reference.getPropertyName() != null) {
+        path.append('.').append(reference.getPropertyName());
       } else if (reference.getIndex() >= 0) {
         path.append('[').append(reference.getIndex()).append(']');
       }

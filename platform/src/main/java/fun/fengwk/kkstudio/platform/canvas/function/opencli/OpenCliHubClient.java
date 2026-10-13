@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -79,7 +79,7 @@ public class OpenCliHubClient {
     this.properties = Objects.requireNonNull(properties, "properties");
     properties.validate();
     this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().openCliHub();
-    mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
+    mapper = Objects.requireNonNull(objectMapper, "objectMapper").rebuild().build();
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
     origin = settings.baseUrl() == null ? null : normalizeOrigin(URI.create(settings.baseUrl()));
   }
@@ -275,7 +275,7 @@ public class OpenCliHubClient {
         throw malformed("Result envelope success must be true");
       }
       return required(root, "data");
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw malformed("Result envelope must be valid JSON", exception);
     } catch (IOException exception) {
       throw new UncheckedIOException("failed to close OpenCLI Hub response", exception);
@@ -607,7 +607,7 @@ public class OpenCliHubClient {
   private String writeJson(JsonNode value) {
     try {
       return mapper.writeValueAsString(value);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new IllegalStateException("failed to encode OpenCLI Hub request", exception);
     }
   }

@@ -14,10 +14,10 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -112,9 +112,10 @@ class ModelRequestDebugServiceTest {
 
   /** required-nullable 字段在真实 NON_NULL 序列化配置下也必须显式发射。 */
   private static final ObjectMapper JSON =
-      new ObjectMapper()
-          .registerModule(new JavaTimeModule())
-          .setSerializationInclusion(JsonInclude.Include.NON_NULL);
+      JsonMapper.builder()
+          .changeDefaultPropertyInclusion(
+              inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+          .build();
 
   private final HarnessRuntime runtime = mock(HarnessRuntime.class);
   private final DatabaseTurnResolver turnResolver = mock(DatabaseTurnResolver.class);
@@ -122,7 +123,7 @@ class ModelRequestDebugServiceTest {
       mock(AgentDefinitionRepository.class);
   // 使用真实 codec：canonical config JSON 的 wire 形状与“无凭据”由真实编码证明，而不是 mock 约定。
   private final AgentDefinitionConfigCodec agentConfigCodec =
-      new AgentDefinitionConfigCodec(new ObjectMapper());
+      new AgentDefinitionConfigCodec(JsonMapper.builder().build());
 
   private final ModelRequestDebugService service =
       new ModelRequestDebugService(

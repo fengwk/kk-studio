@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 
@@ -20,7 +22,7 @@ import java.util.List;
 /** Provider timeout 配置的默认、合并和非法持久数据边界。 */
 class AgentProviderConfigurationCodecTest {
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final ObjectMapper objectMapper = JsonMapper.builder().build();
   private final AgentProviderConfigurationCodec codec =
       new AgentProviderConfigurationCodec(objectMapper);
 
@@ -173,9 +175,13 @@ class AgentProviderConfigurationCodecTest {
 
   private static final class FailingWriteObjectMapper extends ObjectMapper {
 
+    FailingWriteObjectMapper() {
+      super(new JsonFactory());
+    }
+
     @Override
-    public String writeValueAsString(Object value) throws JsonProcessingException {
-      throw new JsonProcessingException("write failed") {};
+    public String writeValueAsString(Object value) throws JacksonException {
+      throw new JacksonException("write failed") {};
     }
   }
 }

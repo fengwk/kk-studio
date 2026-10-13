@@ -1,18 +1,18 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.cfg.CoercionAction;
-import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.cfg.CoercionAction;
+import tools.jackson.databind.cfg.CoercionInputShape;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
@@ -91,9 +91,12 @@ public class SystemSettingsCodec {
     this.settingsReader = strictMapper.readerFor(SystemSettings.class);
 
     this.canonicalMapper =
-        JsonMapper.builder().enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).build();
-    this.canonicalMapper.enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
-    this.canonicalMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        JsonMapper.builder()
+            .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+            .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+            .changeDefaultPropertyInclusion(
+                inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+            .build();
   }
 
   /** 严格解码持久化的 canonical JSON 为领域聚合。 */
@@ -105,7 +108,7 @@ public class SystemSettingsCodec {
       SystemSettings settings = settingsReader.readValue(json);
       assertRequiredFieldsStored(settings, json);
       return settings;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException(
           "stored system settings config is invalid: " + rootMessage(error), rootCause(error));
     }
@@ -119,7 +122,7 @@ public class SystemSettingsCodec {
    * 下这两个开关会连同 nullable 引用 creator 属性一起拒绝，破坏 canonical 的省略 null 语义；因此以已解码聚合的 canonical 重编码定义必须存在的字段。
    */
   private void assertRequiredFieldsStored(SystemSettings settings, String storedJson)
-      throws JsonProcessingException {
+      throws JacksonException {
     JsonNode stored = canonicalMapper.readTree(storedJson);
     JsonNode required = canonicalMapper.valueToTree(settings);
     String missing = firstMissingRequiredField(required, stored);
@@ -153,7 +156,7 @@ public class SystemSettingsCodec {
   public String encode(SystemSettings settings) {
     try {
       return canonicalMapper.writeValueAsString(Objects.requireNonNull(settings, "settings"));
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode system settings", error);
     }
   }

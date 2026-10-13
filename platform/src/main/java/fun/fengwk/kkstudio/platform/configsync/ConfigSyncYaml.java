@@ -1,14 +1,5 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
-import com.fasterxml.jackson.databind.BeanDescription;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JavaType;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.cfg.CoercionAction;
-import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
-import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.LoaderOptions;
@@ -19,6 +10,17 @@ import org.yaml.snakeyaml.error.YAMLException;
 import org.yaml.snakeyaml.nodes.Node;
 import org.yaml.snakeyaml.nodes.ScalarNode;
 import org.yaml.snakeyaml.nodes.Tag;
+import tools.jackson.databind.BeanDescription;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JavaType;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.CoercionAction;
+import tools.jackson.databind.cfg.CoercionInputShape;
+import tools.jackson.databind.cfg.EnumFeature;
+import tools.jackson.databind.introspect.BeanPropertyDefinition;
+import tools.jackson.databind.introspect.ClassIntrospector;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
@@ -50,36 +52,43 @@ public final class ConfigSyncYaml {
   private final ObjectMapper strictMapper;
 
   public ConfigSyncYaml() {
-    JsonMapper mapper =
+    // 契约要求严格类型：不做字符串→数值/布尔/小数、浮点→整数或任意标量→字符串的隐式转换。
+    this.strictMapper =
         JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
-            .enable(DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+            .enable(EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .withCoercionConfig(
+                LogicalType.Integer,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            .withCoercionConfig(
+                LogicalType.Float,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail))
+            .withCoercionConfig(
+                LogicalType.Boolean,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            .withCoercionConfig(
+                LogicalType.Textual,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
             .build();
-    // 契约要求严格类型：不做字符串→数值/布尔/小数、浮点→整数或任意标量→字符串的隐式转换。
-    mapper
-        .coercionConfigFor(LogicalType.Integer)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
-    mapper
-        .coercionConfigFor(LogicalType.Float)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail);
-    mapper
-        .coercionConfigFor(LogicalType.Boolean)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
-    mapper
-        .coercionConfigFor(LogicalType.Textual)
-        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail);
-    this.strictMapper = mapper;
   }
 
   /** 解析 YAML 文档顶层为纯字符串键 Map；任何结构或类型问题都作为导入错误抛出。 */
@@ -240,7 +249,11 @@ public final class ConfigSyncYaml {
       return node;
     }
     Map<String, BeanPropertyDefinition> properties = new LinkedHashMap<>();
-    BeanDescription description = strictMapper.getDeserializationConfig().introspect(type);
+    ClassIntrospector introspector =
+        strictMapper.deserializationConfig().classIntrospectorInstance();
+    BeanDescription description =
+        introspector.introspectForDeserialization(
+            type, introspector.introspectClassAnnotations(type));
     for (BeanPropertyDefinition property : description.findProperties()) {
       if (property.couldDeserialize()) {
         properties.put(property.getName(), property);

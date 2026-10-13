@@ -11,14 +11,15 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
@@ -93,7 +94,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class ProviderReplayMaterializationTransportTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final UUID BLOB_ID = new UUID(0L, 7L);
   private static final String THINKING = "synthetic reasoning";
   private static final String ANSWER = "synthetic answer";
