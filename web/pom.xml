@@ -161,7 +161,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/web/runtime/HarnessRuntimeResponseMapper</include>
+                                        <include>fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper</include>
                                     </includes>
                                     <limits>
                                         <limit>
