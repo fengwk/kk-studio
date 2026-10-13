@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "big": { "type": "number", "const": 1e309 },
+    "tiny": { "type": "number", "const": 1e-324 },
+    "exact": { "type": "number", "const": 0.1234567890123456789012345678 },
+    "ratio": { "type": "number", "const": 1.10 }
+  },
+  "required": ["big", "tiny", "exact", "ratio"],
+  "additionalProperties": false
+}

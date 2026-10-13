@@ -11,6 +11,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderTestFixtures;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -42,12 +43,9 @@ class OpenAiResponsesPrecisionRegressionTest {
       JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private static final String FREE_FORM_SCHEMA =
-      "{\"type\":\"object\",\"properties\":{"
-          + "\"big\":{\"type\":\"number\",\"const\":1e309},"
-          + "\"tiny\":{\"type\":\"number\",\"const\":1e-324},"
-          + "\"exact\":{\"type\":\"number\",\"const\":0.1234567890123456789012345678},"
-          + "\"ratio\":{\"type\":\"number\",\"const\":1.10}},"
-          + "\"required\":[\"big\",\"tiny\",\"exact\",\"ratio\"],\"additionalProperties\":false}";
+      ProviderTestFixtures.read(
+          OpenAiResponsesPrecisionRegressionTest.class,
+          "/fun/fengwk/kkstudio/harness/provider/fixtures/precision/free-form-schema.json");
 
   private final ProviderDescriptor descriptor =
       new ProviderDescriptor(
@@ -123,6 +121,28 @@ class OpenAiResponsesPrecisionRegressionTest {
     assertPreservedScale(replayed.path("ratio"), "1.10");
   }
 
+  /**
+   * 未知 item 的 {@code output_index} 是大整数槽位坐标：不同宽整数（含 64 位）的 item 各自独立保留， 不因 int 截断而落到同一槽位被后到的 item
+   * 覆盖。
+   */
+  @Test
+  void wideOutputIndexItemsDoNotOverwriteEachOther() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            request(List.of(), List.of()), descriptor, event -> {});
+    for (JsonNode frame : eventFrames("fixtures/precision/wide-output-index-items.json")) {
+      accumulator.processEvent(frame);
+    }
+
+    ProviderCompletion completion = accumulator.finish();
+    JsonNode output = completion.replayState().payload().path("output");
+    assertEquals(2, output.size());
+    assertEquals("wide_a", output.get(0).path("id").asString(""));
+    assertExactNumber(output.get(0).path("payload").path("n"), "2147483648");
+    assertEquals("wide_b", output.get(1).path("id").asString(""));
+    assertExactNumber(output.get(1).path("payload").path("n"), "4294967296");
+  }
+
   /** JSON null 的 id/service_tier 回落协议默认（缺省），不被写成 {@code "null"} 文本。 */
   @Test
   void nullIdAndServiceTierFallBackToProtocolDefaults() throws Exception {
@@ -141,6 +161,18 @@ class OpenAiResponsesPrecisionRegressionTest {
     assertNull(completion.response().requestId());
     assertNull(completion.response().serviceTier());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+  }
+
+  /** fixture 存的是 SSE 帧文本，这里还原为 {@code processEvent} 接受的官方事件对象。 */
+  private static JsonNode[] eventFrames(String name) throws Exception {
+    JsonNode array =
+        MAPPER.readTree(
+            ProviderTestFixtures.read(OpenAiResponsesPrecisionRegressionTest.class, name));
+    JsonNode[] events = new JsonNode[array.size()];
+    for (int i = 0; i < events.length; i++) {
+      events[i] = MAPPER.readTree(array.get(i).stringValue());
+    }
+    return events;
   }
 
   private static JsonNode firstWithField(JsonNode array, String field) {

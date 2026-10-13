@@ -482,7 +482,8 @@ final class OpenAiResponsesStreamAccumulator {
   private static String opaqueItemSlotKey(JsonNode node, JsonNode item) {
     JsonNode outputIndex = node.get("output_index");
     if (outputIndex != null && outputIndex.isIntegralNumber()) {
-      return "index:" + outputIndex.asInt(0);
+      // 槽位键取索引的完整十进制文字：任意宽度的整数坐标都不会因 int 截断而与其他 item 共用同一槽位。
+      return "index:" + outputIndex.bigIntegerValue();
     }
     JsonNode id = item.get("id");
     if (id != null && id.isString() && !id.stringValue().isBlank()) {
