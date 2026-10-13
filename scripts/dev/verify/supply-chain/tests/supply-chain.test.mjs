@@ -464,10 +464,11 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<artifactId>convention4j-spring-boot-starter-web<\/artifactId>/)
     assert.match(pom, /<artifactId>convention4j-spring-boot-starter-test<\/artifactId>/)
     assert.match(pom, /<artifactId>convention4j-comfyui<\/artifactId>/)
-    assert.match(
-        pom,
-        /<artifactId>mybatis-spring-boot-starter<\/artifactId>[\s\S]*?<version>\$\{mybatis-spring-boot-starter\.version\}<\/version>/,
-    )
+    for (const source of [pom, canvasInfraPom, platformPom, webPom]) {
+        assert.doesNotMatch(source, /mybatis|org\.apache\.ibatis/)
+    }
+    assert.match(canvasInfraPom, /<artifactId>spring-boot-starter-jdbc<\/artifactId>/)
+    assert.match(platformPom, /<artifactId>spring-boot-starter-jdbc<\/artifactId>/)
     assert.match(
         pom,
         /<artifactId>lombok<\/artifactId>[\s\S]*?<scope>provided<\/scope>/,

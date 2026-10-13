@@ -39,12 +39,6 @@ spring:
         # LISTEN 循环中 getNotifications(pollMillis) 会临时以 poll timeout 覆盖并恢复 SO_TIMEOUT，不破坏通知循环
         socketTimeout: "5"
 
-mybatis:
-  mapper-locations: classpath:**/*Mapper.xml
-  type-aliases-package: fun.fengwk.kkstudio.**.model
-  configuration:
-    map-underscore-to-camel-case: true
-
 server:
   port: 8080
   # Compression

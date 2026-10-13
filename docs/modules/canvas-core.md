@@ -2,7 +2,7 @@
 
 `canvas-core` 用 JDK 类型定义 Canvas 的不可变 graph、typed command、命令规划与冲突语义，以及 Function SPI。持久化端口和应用服务由 [Canvas Infra](canvas-infra.md) 实现；[Platform](platform.md) 提供 Storage 适配，Platform 或构建期插件提供 Function adapter，[Web](web.md) 完成 HTTP/DTO 映射。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
 
-模块的生产依赖为空，只有 JUnit 在 test scope（见 [`canvas/core/pom.xml`](../../canvas/core/pom.xml)）。[`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 扫描全部主源码，禁止 `java.sql`、`javax.sql`、`jakarta.persistence`、Spring、MyBatis 以及 Harness、Platform、Share、Web 包前缀，并断言 Catalog 只有一处事实源。
+模块唯一生产依赖是 Jackson 3 core/stream，规范 JSON 的严格读取与写出由它承载；JUnit 位于 test scope（见 [`canvas/core/pom.xml`](../../canvas/core/pom.xml)）。[`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 扫描全部主源码，禁止 `java.sql`、`javax.sql`、`jakarta.persistence`、Spring、MyBatis 以及 Harness、Platform、Share、Web 包前缀，并断言 Catalog 只有一处事实源。
 
 ## Graph 聚合
 
