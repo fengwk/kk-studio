@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -46,6 +47,8 @@ import java.util.function.BooleanSupplier;
 /**
  * 意图：调用编排的必要核心路径都有确定结论——停机期间不再接受调用且绝不留下无终态的本地执行、已终态调用只重放、未知调用不产生报文、
  * 超时无法登记时立即失败、不匹配的能力结果立即失败、以及收尾预算内的能力正文替换裁决正文但绝不改写裁决类型。
+ *
+ * <p>停机对失败收敛：单个调用的收尾抛出 RuntimeException 不得中断其余调用的取消与 journal 终态。
  */
 class DaemonInvocationCoordinatorTest {
 
@@ -150,11 +153,12 @@ class DaemonInvocationCoordinatorTest {
   /** 能力回报的 callId 与 invocationId 不符是本地执行事实冲突：立即以 FAILED 收敛，绝不把他人结果当成自己的终态。 */
   @Test
   void failsTheInvocationWhenTheCapabilityResultBelongsToAnotherCall() throws InterruptedException {
-    Harness harness = harness(() -> true);
+    StubCapability capability = new StubCapability(Duration.ZERO);
+    Harness harness = harness(() -> true, capability);
     harness.coordinator.handleInvoke(invoke("call-mismatch", Duration.ofSeconds(30)));
     assertEquals(DaemonMessageType.STARTED, harness.sink.await().type());
 
-    harness.capability.partial(EnvironmentCapabilityResult.text("someone-else", "hello"));
+    capability.partial(EnvironmentCapabilityResult.text("someone-else", "hello"));
 
     Outbound failed = harness.sink.await();
     assertEquals(DaemonMessageType.FAILED, failed.type());
@@ -169,15 +173,15 @@ class DaemonInvocationCoordinatorTest {
   /** 裁决后能力在收尾预算内提交结果：终态类型保持运行时裁决，正文换成能力已捕获输出，绝不把超时报告成 COMPLETED； 空正文只保留裁决说明。 */
   @Test
   void wrapsUpWithCapabilityTextInsideTheTerminationGrace() throws Exception {
-    Harness harness = harness(() -> true, Duration.ofSeconds(5));
+    StubCapability capability = new StubCapability(Duration.ofSeconds(5));
+    Harness harness = harness(() -> true, capability);
 
     harness.coordinator.handleInvoke(invoke("call-grace-text", Duration.ofMillis(30)));
     assertEquals(DaemonMessageType.STARTED, harness.sink.await().type());
     // 运行时裁决（超时）已抢占终态并请求能力收尾：此刻处在延迟终态窗口内。
-    assertTrue(
-        harness.capability.awaitTermination(), "the runtime must request capability wrap-up");
+    assertTrue(capability.awaitTermination(), "the runtime must request capability wrap-up");
 
-    harness.capability.complete(
+    capability.complete(
         new EnvironmentCapabilityResult(
             "call-grace-text",
             List.of(new TextResultContent("captured-a"), new TextResultContent("captured-b")),
@@ -198,13 +202,14 @@ class DaemonInvocationCoordinatorTest {
   /** 收尾预算内能力未捕获任何正文：终态只保留运行时裁决说明，不追加空行。 */
   @Test
   void keepsTheRuntimeVerdictWhenNoCapabilityTextWasCaptured() throws Exception {
-    Harness harness = harness(() -> true, Duration.ofSeconds(5));
+    StubCapability capability = new StubCapability(Duration.ofSeconds(5));
+    Harness harness = harness(() -> true, capability);
 
     harness.coordinator.handleInvoke(invoke("call-grace-blank", Duration.ofMillis(30)));
     assertEquals(DaemonMessageType.STARTED, harness.sink.await().type());
-    assertTrue(harness.capability.awaitTermination());
+    assertTrue(capability.awaitTermination());
 
-    harness.capability.complete(
+    capability.complete(
         new EnvironmentCapabilityResult("call-grace-blank", List.of(), false, "{}"));
 
     Outbound terminal = harness.sink.await();
@@ -215,12 +220,44 @@ class DaemonInvocationCoordinatorTest {
         "an empty capability text must not append anything to the runtime verdict");
   }
 
-  private Harness harness(BooleanSupplier started) {
-    return harness(started, Duration.ZERO);
+  /** 单个调用的收尾抛出 RuntimeException 不得中断 shutdown：其余调用仍被取消、各调用分别写入 CANCELLED 终态，且异常不外泄。 */
+  @Test
+  void shutdownConvergesEveryInvocationWhenTerminationThrows() throws Exception {
+    ThrowingTerminateCapability capability = new ThrowingTerminateCapability();
+    Harness harness = harness(() -> true, capability);
+    List<String> invocationIds = List.of("call-a", "call-b", "call-c");
+    invocationIds.forEach(
+        invocationId ->
+            harness.coordinator.handleInvoke(invoke(invocationId, Duration.ofSeconds(30))));
+    assertEquals(
+        invocationIds, harness.sink.drain(3).stream().map(Outbound::invocationId).toList());
+
+    assertDoesNotThrow(harness.coordinator::shutdown);
+
+    assertEquals(1, capability.terminationFailures(), "the throwing wrap-up must be attempted");
+    assertEquals(2, capability.terminations(), "the remaining calls must still be terminated");
+    invocationIds.forEach(
+        invocationId ->
+            assertEquals(
+                new DaemonTerminalMessage(
+                    DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"),
+                harness.journal.find(invocationId).orElseThrow().terminalMessage(),
+                "every invocation must reach a re-playable terminal even when wrap-up fails"));
+    invocationIds.forEach(
+        invocationId ->
+            assertFalse(
+                harness.coordinator.sendControlWhileActive(
+                    DaemonMessageType.RESOURCE_UPLOAD_REQUEST, invocationId, "{}"),
+                "shutdown must clear every in-flight invocation"));
+    assertTrue(harness.sink.isEmpty(), "shutdown must not emit per-invocation wire terminals");
   }
 
-  private Harness harness(BooleanSupplier started, Duration terminationGrace) {
-    Harness harness = new Harness(started, terminationGrace);
+  private Harness harness(BooleanSupplier started) {
+    return harness(started, new StubCapability(Duration.ZERO));
+  }
+
+  private Harness harness(BooleanSupplier started, EnvironmentCapability capability) {
+    Harness harness = new Harness(started, capability);
     harnesses.add(harness);
     return harness;
   }
@@ -255,11 +292,9 @@ class DaemonInvocationCoordinatorTest {
     private final DaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final RecordingSink sink = new RecordingSink();
-    private final StubCapability capability;
     private final DaemonInvocationCoordinator coordinator;
 
-    private Harness(BooleanSupplier started, Duration terminationGrace) {
-      this.capability = new StubCapability(terminationGrace);
+    private Harness(BooleanSupplier started, EnvironmentCapability capability) {
       registry.register(capability);
       this.coordinator =
           new DaemonInvocationCoordinator(registry, journal, scheduler, started, sink, NO_UPLOADS);
@@ -395,6 +430,72 @@ class DaemonInvocationCoordinatorTest {
       @Override
       public Duration terminationGrace() {
         return grace;
+      }
+    }
+  }
+
+  /**
+   * 首个调用的执行句柄在收尾时抛出 RuntimeException、其余句柄正常收尾的能力：用于验证单调用收尾失败不得中断 shutdown。
+   *
+   * <p>首个句柄抛错使失败的调用在两个保证点上都可检测：其 journal 必须仍有 CANCELLED 终态，且其余调用必须继续被收尾。
+   */
+  private static final class ThrowingTerminateCapability implements EnvironmentCapability {
+
+    private final EnvironmentCapabilityDescriptor descriptor =
+        new EnvironmentCapabilityDescriptor(
+            new EnvironmentCapabilityId(CAPABILITY_ID),
+            CAPABILITY_VERSION,
+            new InputSchema("test arguments", Map.of(), Set.of(), false),
+            Duration.ofSeconds(30));
+    private final AtomicInteger executions = new AtomicInteger();
+    private final AtomicInteger terminations = new AtomicInteger();
+    private final AtomicInteger terminationFailures = new AtomicInteger();
+
+    @Override
+    public EnvironmentCapabilityDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public EnvironmentCapabilityExecutionHandle execute(
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener executionListener) {
+      return new Handle(executions.getAndIncrement() == 0);
+    }
+
+    private int terminations() {
+      return terminations.get();
+    }
+
+    private int terminationFailures() {
+      return terminationFailures.get();
+    }
+
+    private final class Handle implements EnvironmentCapabilityExecutionHandle {
+
+      private final boolean failing;
+
+      private Handle(boolean failing) {
+        this.failing = failing;
+      }
+
+      @Override
+      public void cancel() {
+        terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+      }
+
+      @Override
+      public boolean isCancelled() {
+        return false;
+      }
+
+      @Override
+      public void terminate(EnvironmentCapabilityTerminationCause cause) {
+        if (failing) {
+          terminationFailures.incrementAndGet();
+          throw new IllegalStateException("terminate failed: must not leak");
+        }
+        terminations.incrementAndGet();
       }
     }
   }

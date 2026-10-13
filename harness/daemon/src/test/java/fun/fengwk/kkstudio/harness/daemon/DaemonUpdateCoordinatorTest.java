@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -37,10 +38,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 意图：受管更新编排的每条可达路径都收敛为确定回执——未 READY 拒绝、执行器拒绝/停机、同一 operation 幂等与在途互斥、准备失败与准备崩溃都不得谎报成功，
  * 默认准备器/启动器按数据目录惰性构造且启动失败必须回执 FAILED。
+ *
+ * <p>幂等与在途互斥必须对并发重放成立：同一 operation 的「已完成判定」「在途认领」「完成入缓存并释放在途认领」由同一同步门串起，重放绝不触发第二次下载。
  */
 class DaemonUpdateCoordinatorTest {
 
@@ -150,6 +154,157 @@ class DaemonUpdateCoordinatorTest {
     assertEquals(1, preparations.get());
   }
 
+  /** 在途期间的并发重放必须全部幂等忽略：既有调用被确定地阻塞在准备阶段（不持门），所有重放只能看到「在途」，不重复接受、不第二次准备。 */
+  @Test
+  void ignoresConcurrentInFlightReplaysWithoutSecondPreparation() throws Exception {
+    AtomicInteger preparations = new AtomicInteger();
+    CountDownLatch prepareEntered = new CountDownLatch(1);
+    CountDownLatch releasePrepare = new CountDownLatch(1);
+    CountDownLatch replayStart = new CountDownLatch(1);
+    DaemonUpdateCoordinator coordinator =
+        coordinator(singleThread(), true, DaemonOperatingSystem.LINUX);
+    coordinator.setPreparer(
+        command -> {
+          preparations.incrementAndGet();
+          prepareEntered.countDown();
+          awaitRelease(releasePrepare);
+          return preparedOutcome(command.operationId());
+        });
+    coordinator.setLauncher(prepared -> true);
+
+    coordinator.handleUpdate(updateCommand(OP));
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    assertTrue(prepareEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+
+    List<Thread> replays = replayThreads(coordinator, replayStart, 8);
+    replayStart.countDown();
+    joinAll(replays);
+    assertNull(sink.pollNoWait(), "an in-flight replay must not be re-acknowledged");
+
+    releasePrepare.countDown();
+    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+    assertEquals(1, preparations.get(), "in-flight replays must not prepare again");
+    assertEquals(1, sink.acceptedCount(), "an operation may be accepted exactly once");
+  }
+
+  /**
+   * 完成与重放共用同一同步门：测试持门时，完成的「入缓存 + 释放在途认领 + 出站」与重放判定都必须停在门上， 因此两者之间不存在可被重放利用的窗口。用持门加线程状态等待确定地制造竞争，不依赖
+   * sleep 或概率。
+   */
+  @Test
+  void completionAndReplayShareTheUpdateGate() throws Exception {
+    AtomicReference<Thread> runner = new AtomicReference<>();
+    ExecutorService executor =
+        Executors.newSingleThreadExecutor(
+            runnable -> {
+              Thread thread = new Thread(runnable, "run-update");
+              runner.set(thread);
+              return thread;
+            });
+    executors.add(executor);
+    AtomicInteger preparations = new AtomicInteger();
+    CountDownLatch launchEntered = new CountDownLatch(1);
+    CountDownLatch releaseLaunch = new CountDownLatch(1);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(root, DaemonOperatingSystem.LINUX, executor, sink, () -> true);
+    coordinator.setPreparer(
+        command -> {
+          preparations.incrementAndGet();
+          return preparedOutcome(command.operationId());
+        });
+    coordinator.setLauncher(
+        prepared -> {
+          launchEntered.countDown();
+          awaitRelease(releaseLaunch);
+          return true;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    assertTrue(launchEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+
+    Object updateGate = updateGate(coordinator);
+    Thread replay = new Thread(() -> coordinator.handleUpdate(updateCommand(OP)), "replay");
+    synchronized (updateGate) {
+      // runUpdate 已返回 launch，下一步就是「入缓存 + 释放在途认领」：此处持门可确定地把它挡在完成临界区之外。
+      releaseLaunch.countDown();
+      awaitBlocked(runner.get());
+      replay.start();
+      awaitBlocked(replay);
+      assertNull(sink.pollNoWait(), "no receipt may be produced while the update gate is held");
+    }
+    replay.join(TimeUnit.SECONDS.toMillis(ASYNC_TIMEOUT_SECONDS));
+    assertFalse(replay.isAlive());
+
+    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+    assertEquals(1, preparations.get(), "the replay must reuse the frozen receipt");
+    assertEquals(1, sink.acceptedCount(), "an operation may be accepted exactly once");
+  }
+
+  /** 与完成并发的重放不得产生第二次准备或第二次接受：闩栅同时放行，不依赖 sleep。 */
+  @Test
+  void keepsCompletionAtomicAgainstConcurrentReplays() throws Exception {
+    AtomicInteger preparations = new AtomicInteger();
+    CountDownLatch launchEntered = new CountDownLatch(1);
+    CountDownLatch releaseLaunch = new CountDownLatch(1);
+    CountDownLatch replayStart = new CountDownLatch(1);
+    DaemonUpdateCoordinator coordinator =
+        coordinator(singleThread(), true, DaemonOperatingSystem.LINUX);
+    coordinator.setPreparer(
+        command -> {
+          preparations.incrementAndGet();
+          return preparedOutcome(command.operationId());
+        });
+    coordinator.setLauncher(
+        prepared -> {
+          launchEntered.countDown();
+          awaitRelease(releaseLaunch);
+          return true;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    assertTrue(launchEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+
+    List<Thread> replays = replayThreads(coordinator, replayStart, 8);
+    releaseLaunch.countDown();
+    replayStart.countDown();
+    joinAll(replays);
+
+    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+    assertEquals(1, preparations.get(), "concurrent replays must not prepare again");
+    assertEquals(1, sink.acceptedCount(), "an operation may be accepted exactly once");
+  }
+
+  /** 接受回执本身抛出 RuntimeException 时不得留下永久在途：操作尚未提交，释放在途认领并传播异常，Platform 重新提交后只准备一次、不产生重复副作用。 */
+  @Test
+  void releasesTheInFlightGateWhenTheAcceptedReceiptFails() throws InterruptedException {
+    FailingFirstSendSink failingSink = new FailingFirstSendSink();
+    AtomicInteger preparations = new AtomicInteger();
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(
+            root, DaemonOperatingSystem.LINUX, singleThread(), failingSink, () -> true);
+    coordinator.setPreparer(
+        command -> {
+          preparations.incrementAndGet();
+          return preparedOutcome(command.operationId());
+        });
+    coordinator.setLauncher(prepared -> true);
+
+    assertThrows(IllegalStateException.class, () -> coordinator.handleUpdate(updateCommand(OP)));
+    assertEquals(
+        DaemonUpdatePhase.ACCEPTED,
+        failingSink.failedPayloadPhase(),
+        "the failing receipt is the accepted acknowledgement");
+    assertEquals(0, preparations.get(), "a failed acknowledgement must not start a download");
+    assertNull(failingSink.pollNoWait(), "a failed receipt must not be recorded as delivered");
+
+    coordinator.handleUpdate(updateCommand(OP));
+    assertEquals(DaemonUpdatePhase.ACCEPTED, failingSink.await().phase());
+    assertEquals(DaemonUpdatePhase.PREPARED, failingSink.await().phase());
+    assertEquals(1, preparations.get(), "a retried operation must prepare exactly once");
+  }
+
   /** 准备阶段的确定性失败必须把去敏原因原样回执为 FAILED，绝不谎报 PREPARED。 */
   @Test
   void reportsPreparationFailureWithoutClaimingSuccess() throws InterruptedException {
@@ -244,6 +399,51 @@ class DaemonUpdateCoordinatorTest {
     }
   }
 
+  /** 并发重放同一 operation 的线程：在给定闩栅释放后同时发起，用于精确制造与完成过程的竞争。 */
+  private static List<Thread> replayThreads(
+      DaemonUpdateCoordinator coordinator, CountDownLatch start, int count) {
+    List<Thread> threads = new ArrayList<>(count);
+    for (int index = 0; index < count; index++) {
+      Thread thread =
+          new Thread(
+              () -> {
+                awaitRelease(start);
+                coordinator.handleUpdate(updateCommand(OP));
+              },
+              "replay-" + index);
+      thread.start();
+      threads.add(thread);
+    }
+    return threads;
+  }
+
+  private static void joinAll(List<Thread> threads) throws InterruptedException {
+    for (Thread thread : threads) {
+      thread.join(TimeUnit.SECONDS.toMillis(ASYNC_TIMEOUT_SECONDS));
+      assertFalse(thread.isAlive(), "replay must converge within the budget");
+    }
+  }
+
+  /**
+   * 等待线程确定地阻塞在更新同步门上。
+   *
+   * <p>门由测试线程持有，因此该状态必然到达；这里只是自旋读取线程状态，不引入任何基于时间的概率假设。
+   */
+  private static void awaitBlocked(Thread thread) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TIMEOUT_SECONDS);
+    while (thread.getState() != Thread.State.BLOCKED) {
+      assertTrue(System.nanoTime() < deadline, "thread must contend on the update gate");
+      Thread.onSpinWait();
+    }
+  }
+
+  /** 取得协调器的更新同步门：测试持门以确定地制造「完成」与「重放」的竞争。 */
+  private static Object updateGate(DaemonUpdateCoordinator coordinator) throws Exception {
+    Field field = DaemonUpdateCoordinator.class.getDeclaredField("updateGate");
+    field.setAccessible(true);
+    return field.get(coordinator);
+  }
+
   private ManagedUpdateOutcome.Prepared preparedOutcome(String operationId) {
     Path handoff = root.resolve("updates").resolve(operationId);
     return new ManagedUpdateOutcome.Prepared(
@@ -314,7 +514,47 @@ class DaemonUpdateCoordinatorTest {
       }
     }
 
+    /** 已发出的 ACCEPTED 回执条数：同一 operation 只能被接受一次。 */
+    long acceptedCount() {
+      return phasesInOrder().stream().filter(phase -> phase == DaemonUpdatePhase.ACCEPTED).count();
+    }
+
     private record Outbound(
         DaemonMessageType type, String invocationId, DaemonUpdateResult result) {}
+  }
+
+  /** 第一条回执抛出 RuntimeException、之后正常记录的出站端口：用于验证接受回执发送失败不会冻结在途认领。 */
+  private static final class FailingFirstSendSink implements DaemonMessageSink {
+
+    private final DaemonUpdateResultCodec codec = new DaemonUpdateResultCodec();
+    private final BlockingQueue<DaemonUpdateResult> pending = new LinkedBlockingQueue<>();
+    private boolean firstSendFails = true;
+    private DaemonUpdateResult failedSend;
+
+    @Override
+    public boolean send(DaemonMessageType messageType, String invocationId, String payloadJson) {
+      DaemonUpdateResult result = codec.decode(payloadJson);
+      if (firstSendFails) {
+        firstSendFails = false;
+        failedSend = result;
+        throw new IllegalStateException("accepted receipt send failed");
+      }
+      pending.add(result);
+      return true;
+    }
+
+    DaemonUpdatePhase failedPayloadPhase() {
+      return failedSend.phase();
+    }
+
+    DaemonUpdateResult await() throws InterruptedException {
+      DaemonUpdateResult result = pending.poll(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      assertNotNull(result, "no UPDATE_RESULT within " + ASYNC_TIMEOUT_SECONDS + "s");
+      return result;
+    }
+
+    DaemonUpdateResult pollNoWait() {
+      return pending.poll();
+    }
   }
 }

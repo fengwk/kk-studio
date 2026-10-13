@@ -26,6 +26,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -45,6 +47,8 @@ import java.util.function.BooleanSupplier;
  * 在终态编码时直传资源，因此不持有连接、资源或更新状态。
  */
 final class DaemonInvocationCoordinator {
+
+  private static final Logger LOG = System.getLogger(DaemonInvocationCoordinator.class.getName());
 
   private final DaemonCapabilityRegistry capabilityRegistry;
   private final DaemonInvocationJournal journal;
@@ -151,18 +155,25 @@ final class DaemonInvocationCoordinator {
         EnvironmentCapabilityTerminationCause.CANCELLED);
   }
 
-  /** 关闭：取消全部在途调用并为其记录可重放的 CANCELLED，绝不留下无终态的本地执行。 */
+  /**
+   * 关闭：取消全部在途调用并为其记录可重放的 CANCELLED，绝不留下无终态的本地执行。
+   *
+   * <p>单个调用的收尾失败（RuntimeException）不得中断其余调用：每个调用独立收尾、独立写 journal 终态，失败只记录异常类型；进程级 Error 仍向上传播。
+   */
   void shutdown() {
-    running
-        .values()
-        .forEach(
-            invocation -> {
-              invocation.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
-              journal.complete(
-                  invocation.invocationId(),
-                  new DaemonTerminalMessage(
-                      DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
-            });
+    for (DaemonRunningInvocation invocation : running.values()) {
+      try {
+        invocation.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+      } catch (RuntimeException error) {
+        // 释放失败不阻断 shutdown，也不回显底层正文。
+        LOG.log(
+            Level.DEBUG, "daemon invocation terminate failed: " + error.getClass().getSimpleName());
+      }
+      journal.complete(
+          invocation.invocationId(),
+          new DaemonTerminalMessage(
+              DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
+    }
     running.clear();
   }
 
