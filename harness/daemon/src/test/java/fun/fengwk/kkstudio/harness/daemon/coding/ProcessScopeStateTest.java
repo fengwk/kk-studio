@@ -89,32 +89,32 @@ class ProcessScopeStateTest {
     }
   }
 
-  /** 目录里存在删不掉的成员时，清理必须无副作用地放弃，而不是把异常抛给调用方。 */
+  /** 目录里存在删不掉的成员时，清理必须无副作用地放弃并如实报告未删干净，而不是把异常抛给调用方。 */
   @Test
   void deleteQuietlyToleratesMembersThatCannotBeRemoved() throws Exception {
     Path directory = unwritableDirectory();
     Path member = directory.resolve(MEMBER_FILE);
     try {
-      assertDoesNotThrow(() -> ProcessScopeState.deleteQuietly(directory));
+      assertFalse(ProcessScopeState.deleteQuietly(directory), "还有成员没删掉时必须如实返回未清理完成");
       assertTrue(Files.exists(member), "删不掉的成员必须原样留下，而不是被报告为已清理");
     } finally {
       restoreWritable(directory);
-      ProcessScopeState.deleteQuietly(directory);
+      assertTrue(ProcessScopeState.deleteQuietly(directory), "恢复可写后清理必须完成");
       assertFalse(Files.exists(directory));
     }
   }
 
-  /** 清理是幂等的：没有目录、目录已经消失都不算失败。 */
+  /** 清理是幂等的：没有目录、目录已经消失都不算失败，并如实返回已清理完成。 */
   @Test
   void deleteQuietlyIsIdempotentForMissingDirectories() throws Exception {
     Path directory = stateDir.resolve("already-gone");
-    assertDoesNotThrow(() -> ProcessScopeState.deleteQuietly(null));
-    assertDoesNotThrow(() -> ProcessScopeState.deleteQuietly(directory));
+    assertTrue(ProcessScopeState.deleteQuietly(null), "null 目录视为已经清理完成");
+    assertTrue(ProcessScopeState.deleteQuietly(directory), "不存在的目录视为已经清理完成");
     Files.createDirectories(directory.resolve("nested"));
     Files.writeString(directory.resolve("nested").resolve("file"), "x", StandardCharsets.UTF_8);
-    ProcessScopeState.deleteQuietly(directory);
+    assertTrue(ProcessScopeState.deleteQuietly(directory), "现有目录必须被完整清理");
     assertFalse(Files.exists(directory));
-    assertDoesNotThrow(() -> ProcessScopeState.deleteQuietly(directory));
+    assertTrue(ProcessScopeState.deleteQuietly(directory), "重复清理仍然报告已经清理完成");
   }
 
   private static final String MEMBER_FILE = "member";

@@ -4,12 +4,11 @@ import fun.fengwk.kkstudio.harness.daemon.DaemonOperatingSystemDetector;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
@@ -19,44 +18,35 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 一次调用的操作系统级执行范围，父进程侧的唯一入口。
  *
- * <p>{@link #start(Path, List, StartGate)} 启动独立的 scope helper JVM：helper 先取得 OS 所有权（POSIX 新 session
- * 与进程组、Windows 命名 Job），再等父进程确认，然后才让用户命令运行。因此父进程不需要枚举后代，也不需要 {@code ProcessHandle.descendants()}
- * 这类「看运气」的收敛依据。
+ * <p>{@link #start(Path, List, StartGate)} 让独立的 scope helper JVM 先取得 OS 所有权（POSIX 新 session 与进程组、
+ * Windows 命名 Job），再等父进程确认，然后才让用户命令运行。因此父进程不需要枚举后代，也不需要 {@code ProcessHandle.descendants()}
+ * 这类「看运气」的收敛依据。「怎样把 helper 拉起来」（JVM 命令、标准流接线、覆盖率注入）属于 {@link ProcessScopeHelperLauncher}，本类只看启动结果。
  *
  * <p>顺序是这里唯一的安全性来源：范围确认 -> 父进程登记自己的收敛手段（POSIX 进程组 id / Windows Job 句柄）-> 放行用户
  * 命令。所以「许可之前失败」永远等价于「用户命令没有产生任何副作用」，此时直接强杀 helper 是安全的；许可之后则一律走完整 收敛。scope id 在使用前必须校验：POSIX 侧它必须等于
  * helper 自己的 pid，否则父进程宁可失败也不向一个不属于本次调用的 进程组发信号。
  *
+ * <p>生命周期按平台分岔但语义一致。POSIX 侧一次调用就是一个新 session 里的进程组：scope id 是组长（= helper）的 pid， 父进程自己持有收敛手段就是这个组
+ * id，收敛以「组里没有非僵尸成员」为准。Windows 侧一次调用就是一个命名 Job：scope id 只是 首个进程的 pid，收敛判定只看 Job
+ * 是否报告没有活动进程，父进程为此独立持有第二个 Job 句柄。两者的句柄/所有权都在本类显式 生命周期内释放：父进程拿到「整组没有活着的成员」的证据之后才关闭自己的 Job
+ * 句柄，句柄关闭只是兜底，不是收敛依据；helper 自己创建的挂起进程与 Job 句柄由 helper 的失败关闭与收尾释放。
+ *
  * <p>标准流不经过本类：用户命令继承 helper 的 stdin/stdout（stdout 也是父进程排空的捕获管道），helper 自己的诊断只写调用 私有的诊断文件，因此 JVM
  * 启动噪声不会混进命令输出。自然退出码由 helper 原子发布，父进程据此恢复精确退出码——helper 自身 的退出码（收尾时通常被强杀）永远不是命令的事实。
  *
  * <p>收敛语义：POSIX 对整组先温和后强杀，并确认组里没有活着的成员（僵尸不算）；Windows 显式 {@code TerminateJobObject} 并等到 Job
- * 报告没有活动进程。收敛失败一律显式传播（{@link #terminate()} 返回 {@code false}），绝不声称已经收敛。
+ * 报告没有活动进程。收敛失败一律显式传播（{@link #terminate()} 返回 {@code false}），绝不声称已经收敛；未收敛时留下只报
+ * 平台与状态字段的去敏诊断，不回显命令内容。
  *
- * <p>本类的状态目录是一次调用私有的临时目录，{@link #close()} 保证在调用结束时删除。
+ * <p>本类的状态目录是一次调用私有的临时目录，{@link #close()} 保证在调用结束时删除；删不干净时留下诊断，但不改变调用结果。
  */
 final class ProcessScope implements AutoCloseable {
 
   /** 父进程私有状态目录前缀：定位残留时一眼可辨，且不落在数据目录内。 */
   static final String STATE_DIR_PREFIX = "kk-studio-daemon-process-scope-";
 
-  /**
-   * 标准流模式：用户命令的 stdin/stdout/stderr 接到哪里。
-   *
-   * <p>{@link #CAPTURE} 是默认：命令的 stdin 是一条只有 keeper 持有写端的空管道（命令因此读到确定性 EOF），stderr 合并进
-   * stdout，父进程按捕获管道排空——「命令的输出就是调用结果」的模式。
-   *
-   * <p>{@link #DUPLEX} 供常驻双向协议（LSP）：命令的 stdin/stdout/stderr 直接继承 keeper 自己的三条流，stderr 保持独立，
-   * 父进程因此可以像直接 {@code ProcessBuilder.start()} 那样与命令对话。命令的 stdin 不创建、也不关闭，EOF 只在父进程关闭自己
-   * 那一端时到达；stderr 由父进程按自己的诊断需要排空。
-   */
-  enum Stdio {
-    CAPTURE,
-    DUPLEX
-  }
-
-  /** 把 stdio 模式转发给 helper 的属性名。 */
-  private static final String STDIO_PROPERTY = "kk-studio.process-scope.stdio";
+  /** 父进程侧的诊断 logger：收敛未能证明、状态目录删不干净时留去敏诊断；只报平台/状态字段，不回显命令内容。 */
+  private static final Logger LOG = System.getLogger(ProcessScope.class.getName());
 
   /** 启动许可：父进程在确认范围之后、放行用户命令之前询问调用方是否仍然允许启动。 */
   @FunctionalInterface
@@ -92,18 +82,6 @@ final class ProcessScope implements AutoCloseable {
   /** 失败说明里附带的 helper 诊断长度上限。 */
   private static final int DIAGNOSTICS_LIMIT = 400;
 
-  /** 显式要求给 helper 挂覆盖率代理的开关：默认关闭，避免改变正常调用与测试的启动开销。 */
-  private static final String HELPER_COVERAGE_PROPERTY = "kk-studio.process-scope.helper-coverage";
-
-  /**
-   * 仅测试使用的派生闸门：显式设置时转发给 helper，让它在启动命令之前等待释放文件。
-   *
-   * <p>用来确定性地构造「父进程取消与 helper 派生命令同时发生」这一窗口，生产路径不设置该属性。
-   */
-  static final String SPAWN_LATCH_PROPERTY = "kk-studio.process-scope.spawn-latch";
-
-  private static final String HELPER_COVERAGE_FILE = "jacoco-helper.exec";
-
   private final Process helper;
   private final Path stateDir;
   private final boolean windows;
@@ -131,7 +109,7 @@ final class ProcessScope implements AutoCloseable {
   }
 
   static ProcessScope start(Path workdir, List<String> command, StartGate gate) throws IOException {
-    return start(workdir, command, gate, Stdio.CAPTURE);
+    return start(workdir, command, gate, ProcessScopeHelperLauncher.Stdio.CAPTURE);
   }
 
   /**
@@ -145,10 +123,11 @@ final class ProcessScope implements AutoCloseable {
 
   static ProcessScope startDuplex(Path workdir, List<String> command, StartGate gate)
       throws IOException {
-    return start(workdir, command, gate, Stdio.DUPLEX);
+    return start(workdir, command, gate, ProcessScopeHelperLauncher.Stdio.DUPLEX);
   }
 
-  private static ProcessScope start(Path workdir, List<String> command, StartGate gate, Stdio stdio)
+  private static ProcessScope start(
+      Path workdir, List<String> command, StartGate gate, ProcessScopeHelperLauncher.Stdio stdio)
       throws IOException {
     Objects.requireNonNull(gate, "gate");
     Objects.requireNonNull(stdio, "stdio");
@@ -157,9 +136,9 @@ final class ProcessScope implements AutoCloseable {
     Path stateDir = Files.createTempDirectory(STATE_DIR_PREFIX);
     Process helper;
     try {
-      helper = spawnHelper(stateDir, workdir, command, windows, stdio);
+      helper = ProcessScopeHelperLauncher.launch(stateDir, workdir, command, windows, stdio);
     } catch (IOException | RuntimeException error) {
-      ProcessScopeState.deleteQuietly(stateDir);
+      deleteStateDirectory(stateDir);
       throw error;
     }
     ProcessScope scope = new ProcessScope(helper, stateDir, windows);
@@ -168,65 +147,22 @@ final class ProcessScope implements AutoCloseable {
     } catch (RuntimeException error) {
       // 范围可能已经建立（命令可能已经运行），因此统一走收敛路径；未建立时它只是强杀 keeper。
       scope.terminate();
-      ProcessScopeState.deleteQuietly(stateDir);
+      deleteStateDirectory(stateDir);
       throw error;
     }
     return scope;
   }
 
-  private static Process spawnHelper(
-      Path stateDir, Path workdir, List<String> command, boolean windows, Stdio stdio)
-      throws IOException {
-    String classpath = System.getProperty("java.class.path");
-    if (classpath == null || classpath.isBlank()) {
-      throw new IOException(
-          "cannot locate the daemon classpath required to launch the process scope helper");
+  /**
+   * 删除调用私有的状态目录；删不干净时留下「没有清理干净」这一去敏诊断，但不改变调用结果。
+   *
+   * <p>目录只承载调用私有的握手文件，删除失败不影响命令事实；不过残留会一直占着临时目录，所以要让收尾的失败可见。
+   */
+  private static void deleteStateDirectory(Path stateDir) {
+    if (!ProcessScopeState.deleteQuietly(stateDir)) {
+      // 只报「删不干净」这一事实：诊断绝不回显私有路径或命令参数。
+      LOG.log(Level.WARNING, "cannot fully remove the process scope state directory");
     }
-    List<String> argv = new ArrayList<>();
-    argv.add(javaBinary(windows));
-    // helper 的输出必须只有用户命令的输出：关掉 JVM 统一日志，并容忍陌生 VM 选项。
-    argv.add("-XX:+IgnoreUnrecognizedVMOptions");
-    argv.add("-XX:TieredStopAtLevel=1");
-    argv.add("-Xlog:disable");
-    argv.addAll(helperCoverageArguments(stateDir));
-    argv.addAll(spawnLatchArguments());
-    argv.addAll(stdioArguments(stdio));
-    argv.add("-cp");
-    argv.add(classpath);
-    argv.add(ProcessScopeHelper.class.getName());
-    argv.add(stateDir.toString());
-    argv.add(workdir.toString());
-    argv.addAll(command);
-    ProcessBuilder builder = new ProcessBuilder(argv);
-    if (stdio == Stdio.DUPLEX) {
-      // 双向模式下 helper 的 stderr 必须是管道：命令继承它，父进程按需排空（helper 自己的 Java 输出仍然写调用私有的诊断
-      // 文件，因此不会混进命令的 stderr）。
-      builder.redirectError(ProcessBuilder.Redirect.PIPE);
-    } else {
-      // 捕获模式下 helper 的 stderr（JVM 启动提示、诊断）只进调用私有的诊断文件，绝不混进用户命令的输出。
-      builder.redirectError(stateDir.resolve(ProcessScopeState.DIAGNOSTICS_FILE).toFile());
-    }
-    return builder.start();
-  }
-
-  /** {@link Stdio#DUPLEX} 时把模式转发给 helper；默认模式不传参数。 */
-  private static List<String> stdioArguments(Stdio stdio) {
-    return stdio == Stdio.DUPLEX ? List.of("-D" + STDIO_PROPERTY + "=duplex") : List.of();
-  }
-
-  private static String javaBinary(boolean windows) {
-    return Path.of(System.getProperty("java.home"))
-        .resolve("bin")
-        .resolve(windows ? "java.exe" : "java")
-        .toString();
-  }
-
-  /** {@link #SPAWN_LATCH_PROPERTY} 设置时把闸门目录转发给 helper；未设置时参数里什么都不加。 */
-  private static List<String> spawnLatchArguments() {
-    String latch = System.getProperty(SPAWN_LATCH_PROPERTY);
-    return latch == null || latch.isBlank()
-        ? List.of()
-        : List.of("-D" + SPAWN_LATCH_PROPERTY + "=" + latch);
   }
 
   /** helper 的进程对象：父进程只从它读取用户命令的输出并等待收敛。 */
@@ -294,12 +230,25 @@ final class ProcessScope implements AutoCloseable {
       } finally {
         terminationDone.countDown();
       }
+      if (!convergenceProven) {
+        LOG.log(Level.WARNING, "the process scope did not converge: " + scopeStateSummary());
+      }
       return convergenceProven;
     }
     if (!awaitTerminationDone()) {
       return false;
     }
     return convergenceProven;
+  }
+
+  /** 收敛失败时的去敏诊断上下文：只报平台与范围状态字段，绝不回显私有路径、命令参数或命令内容。 */
+  private String scopeStateSummary() {
+    return "windows="
+        + windows
+        + ", scopeEstablished="
+        + scopeEstablished
+        + ", helperAlive="
+        + helper.isAlive();
   }
 
   /** 范围是否已经收敛；已建立的范围绝不因为「发过信号」或「首个进程退出」就算收敛。 */
@@ -317,8 +266,8 @@ final class ProcessScope implements AutoCloseable {
   @Override
   public void close() {
     terminate();
-    collectHelperCoverage();
-    ProcessScopeState.deleteQuietly(stateDir);
+    ProcessScopeHelperLauncher.collectCoverage(stateDir);
+    deleteStateDirectory(stateDir);
   }
 
   /**
@@ -547,77 +496,6 @@ final class ProcessScope implements AutoCloseable {
       throw new IllegalStateException(
           "process scope helper published an unreadable scope id: " + value, error);
     }
-  }
-
-  /**
-   * 父进程自己带覆盖率代理且显式打开 helper 覆盖率时，给 helper 挂同一个代理并写到调用私有的文件。
-   *
-   * <p>helper 的逻辑是执行范围的核心，不能因为「在另一个 JVM 里」就没有覆盖数据；默认关闭是为了不让正常调用承担插桩开销。
-   */
-  private static List<String> helperCoverageArguments(Path stateDir) {
-    if (!Boolean.getBoolean(HELPER_COVERAGE_PROPERTY)) {
-      return List.of();
-    }
-    String argument = jacocoAgentArgument();
-    if (argument == null) {
-      return List.of();
-    }
-    String agent = argument.substring("-javaagent:".length());
-    int options = agent.indexOf('=');
-    String jar = options < 0 ? agent : agent.substring(0, options);
-    return List.of(
-        "-javaagent:"
-            + jar
-            + "=destfile="
-            + stateDir.resolve(HELPER_COVERAGE_FILE)
-            + ",append=false,dumponexit=true");
-  }
-
-  /** 把 helper 的覆盖数据搬到父进程覆盖数据旁边，便于合并报告；任何失败都不影响调用结果。 */
-  private void collectHelperCoverage() {
-    Path exec = stateDir.resolve(HELPER_COVERAGE_FILE);
-    if (!Files.isRegularFile(exec)) {
-      return;
-    }
-    Path directory = helperCoverageDirectory();
-    if (directory == null) {
-      return;
-    }
-    try {
-      Files.createDirectories(directory);
-      Files.copy(
-          exec,
-          directory.resolve(stateDir.getFileName() + ".exec"),
-          StandardCopyOption.REPLACE_EXISTING);
-    } catch (IOException ignored) {
-      // 覆盖数据只是度量工具：收集失败不影响调用结果。
-    }
-  }
-
-  /** 父进程自己的 JaCoCo 代理参数；没有代理时返回 {@code null}。 */
-  private static String jacocoAgentArgument() {
-    for (String argument : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
-      if (argument.startsWith("-javaagent:") && argument.contains("jacoco")) {
-        return argument;
-      }
-    }
-    return null;
-  }
-
-  /** helper 覆盖数据的落地目录：父进程覆盖数据文件旁边的 {@code jacoco-helper/}。 */
-  private static Path helperCoverageDirectory() {
-    String argument = jacocoAgentArgument();
-    if (argument == null) {
-      return null;
-    }
-    int destfile = argument.indexOf("destfile=");
-    if (destfile < 0) {
-      return null;
-    }
-    String value = argument.substring(destfile + "destfile=".length());
-    int end = value.indexOf(',');
-    Path parent = Path.of(end < 0 ? value : value.substring(0, end)).toAbsolutePath().getParent();
-    return parent == null ? null : parent.resolve("jacoco-helper");
   }
 
   private static void sleepQuietly(long millis) {
