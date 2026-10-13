@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
@@ -407,5 +409,38 @@ class ToolResultJsonCodecTest {
         IllegalArgumentException.class,
         () -> ToolResultJsonCodec.exceedsEncodedUtf8Bytes(binary, 1024));
     assertThrows(IllegalArgumentException.class, () -> ToolResultJsonCodec.encode(binary));
+  }
+
+  /**
+   * 超 double 范围、下溢与高精度 decimal 必须经严格 JSON 语义精确还原：encode→decode 后与原始 JSON 读树相等，不得出现 Infinity 或下溢成
+   * 0；bounded 计数的 UTF-8 字节必须与 encode 在 exact / exact±1 完全一致。
+   */
+  @Test
+  void preservesExactDecimalNumbersAcrossEncodeDecodeAndCounting() {
+    String decimals =
+        "{\"big\":1e309,\"tiny\":1e-324,\"precise\":0.12345678901234567890123456789,"
+            + "\"wholeBig\":123456789012345678901234567890}";
+    ToolResult source =
+        new ToolResult("call", List.of(new JsonResultContent(decimals)), false, decimals);
+
+    String encoded = ToolResultJsonCodec.encode(source);
+    assertFalse(encoded.contains("Infinity"), encoded);
+    assertFalse(encoded.contains("NaN"), encoded);
+
+    ToolResult decoded = ToolResultJsonCodec.decode(encoded);
+    JsonNode expected = JsonValues.readTree(decimals);
+    JsonNode decodedJson =
+        JsonValues.readTree(((JsonResultContent) decoded.contents().getFirst()).json());
+    assertEquals(expected, decodedJson);
+    assertEquals(expected, JsonValues.readTree(decoded.detailsJson()));
+    // 下溢不得变成 0，超范围不得变成 Infinity：两侧都按精确 decimal 读回。
+    assertTrue(decodedJson.get("tiny").isNumber());
+    assertTrue(decodedJson.get("big").isNumber());
+    assertTrue(decodedJson.get("precise").isNumber());
+
+    int exact = encoded.getBytes(StandardCharsets.UTF_8).length;
+    assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(source, exact));
+    assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(source, exact - 1));
+    assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(source, exact + 1));
   }
 }

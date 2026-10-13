@@ -7,14 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
@@ -203,7 +203,7 @@ class ToolDescriptorJsonCodecTest {
     // 显式验证 required 数组在文本中按字典序出现（"alpha" 在 "items" 之前）。
     ArrayNode required = (ArrayNode) schemaNode.get("required");
     assertEquals(
-        List.of("alpha", "items"), List.of(required.get(0).asText(), required.get(1).asText()));
+        List.of("alpha", "items"), List.of(required.get(0).asString(), required.get(1).asString()));
   }
 
   /** descriptor wire 只包含模型契约，不携带执行路由；schema 自身的 type 保留。 */
@@ -212,7 +212,7 @@ class ToolDescriptorJsonCodecTest {
     ObjectNode node = codec.encodeNode(simpleDescriptor("wire", "wire"));
 
     assertFalse(node.has("type"));
-    assertEquals("object", node.path("inputSchema").path("type").asText());
+    assertEquals("object", node.path("inputSchema").path("type").asString());
   }
 
   /** unknown top-level field 必须拒绝。 */
@@ -1070,13 +1070,15 @@ class ToolDescriptorJsonCodecTest {
     JsonNode outerProperties = inputSchema.get("properties").get("outer");
     JsonNode outerRequired = outerProperties.get("required");
     assertEquals(
-        List.of("x", "y"), List.of(outerRequired.get(0).asText(), outerRequired.get(1).asText()));
+        List.of("x", "y"),
+        List.of(outerRequired.get(0).asString(), outerRequired.get(1).asString()));
 
     // 同时验证 outer.properties 字段按字典序输出：x 在 y 之前。
     ArrayNode outerPropNames = new ObjectMapper().createArrayNode();
-    outerProperties.get("properties").fieldNames().forEachRemaining(outerPropNames::add);
+    outerProperties.get("properties").propertyNames().forEach(outerPropNames::add);
     assertEquals(
-        List.of("x", "y"), List.of(outerPropNames.get(0).asText(), outerPropNames.get(1).asText()));
+        List.of("x", "y"),
+        List.of(outerPropNames.get(0).asString(), outerPropNames.get(1).asString()));
   }
 
   private static ToolDescriptor simpleDescriptor(String name, String description) {
