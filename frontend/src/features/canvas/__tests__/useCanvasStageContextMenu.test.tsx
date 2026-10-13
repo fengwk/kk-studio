@@ -112,7 +112,10 @@ function mouseEvent(clientX = 100, clientY = 120): ReactMouseEvent<Element> {
     eventPhase: 0,
     isTrusted: true,
     detail: 0,
-    view: window as unknown as ReactMouseEvent['view'],
+    view: {
+      document,
+      styleMedia: { type: 'screen', matchMedium: () => true },
+    },
     preventDefault: vi.fn(),
     isDefaultPrevented: () => false,
     stopPropagation: vi.fn(),

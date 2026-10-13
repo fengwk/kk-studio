@@ -116,8 +116,12 @@ describe('useFunctionConfigSync', () => {
       await vi.advanceTimersByTimeAsync(120)
     })
     expect(executeCommands).toHaveBeenCalledTimes(1)
-    const cmd = executeCommands.mock.calls[0]?.[0]?.[0] as Extract<CanvasCommandDTO, { type: 'SET_NODE_FUNCTION' }> | undefined
-    expect(cmd?.function?.args?.prompt).toBe('version 2')
+    const cmd = executeCommands.mock.calls[0]?.[0]?.[0]
+    expect(cmd?.type).toBe('SET_NODE_FUNCTION')
+    if (cmd?.type !== 'SET_NODE_FUNCTION') {
+      throw new Error('Expected SET_NODE_FUNCTION')
+    }
+    expect(cmd.function?.args.prompt).toBe('version 2')
   })
 
   it('flushFunctionConfig flushes immediately and cancels pending timer', async () => {
@@ -169,8 +173,12 @@ describe('useFunctionConfigSync', () => {
     })
 
     expect(executeCommands).toHaveBeenCalledTimes(1)
-    const cmd = executeCommands.mock.calls[0]?.[0]?.[0] as Extract<CanvasCommandDTO, { type: 'SET_NODE_FUNCTION' }> | undefined
-    expect(cmd?.expectedFunction).toEqual({
+    const cmd = executeCommands.mock.calls[0]?.[0]?.[0]
+    expect(cmd?.type).toBe('SET_NODE_FUNCTION')
+    if (cmd?.type !== 'SET_NODE_FUNCTION') {
+      throw new Error('Expected SET_NODE_FUNCTION')
+    }
+    expect(cmd.expectedFunction).toEqual({
       name: 'old-func',
       args: { old: true },
     })

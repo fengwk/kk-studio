@@ -6,7 +6,8 @@ import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
-import type { UseQueryResult } from '@tanstack/react-query'
+import { QueryClient, QueryObserver, type UseQueryResult } from '@tanstack/react-query'
+import { ApiError } from '@/shared/api/client'
 
 const CANVAS_ID: UUIDString = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
@@ -17,7 +18,7 @@ vi.mock('@/features/canvas/CanvasStage', () => ({
 
 interface EditorQueryState {
   isError: boolean
-  error: unknown
+  error: Error | null
   isLoading: boolean
   refetch: () => Promise<unknown>
 }
@@ -26,102 +27,26 @@ function buildSnapshotQuery(
   options: Partial<EditorQueryState> = {},
   snapshot: CanvasSnapshotDTO | null = null,
 ): UseQueryResult<CanvasSnapshotDTO, Error> {
-  const isError = Boolean(options.isError)
-  const isLoading = options.isLoading ?? !isError
-  const error = (options.error as Error | null) ?? null
-  const refetch = (options.refetch ?? vi.fn(async () => ({} as never))) as UseQueryResult<CanvasSnapshotDTO, Error>['refetch']
-
-  if (isError) {
-    const errorPromise = Promise.reject(error)
-    errorPromise.catch(() => undefined)
-    return {
-      status: 'error',
-      fetchStatus: 'idle',
-      isEnabled: true,
-      isPending: false,
-      isSuccess: false,
-      isError: true,
-      isLoading: false,
-      isLoadingError: true,
-      isRefetchError: false,
-      data: undefined,
-      error: error ?? new Error('Query failed'),
-      dataUpdatedAt: 0,
-      errorUpdatedAt: Date.now(),
-      failureCount: 1,
-      failureReason: error,
-      errorUpdateCount: 1,
-      isFetched: true,
-      isFetchedAfterMount: true,
-      isFetching: false,
-      isInitialLoading: false,
-      isPaused: false,
-      isPlaceholderData: false,
-      isRefetching: false,
-      isStale: true,
-      refetch,
-      promise: errorPromise,
-    }
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } })
+  const queryOptions = {
+    queryKey: ['editor-snapshot'],
+    queryFn: async () => snapshot ?? snapshotDTO(),
   }
-
-  if (isLoading) {
-    return {
-      status: 'pending',
-      fetchStatus: 'fetching',
-      isEnabled: true,
-      isPending: true,
-      isSuccess: false,
-      isError: false,
-      isLoading: true,
-      isLoadingError: false,
-      isRefetchError: false,
-      data: undefined,
-      error: null,
-      dataUpdatedAt: 0,
-      errorUpdatedAt: 0,
-      failureCount: 0,
-      failureReason: null,
-      errorUpdateCount: 0,
-      isFetched: false,
-      isFetchedAfterMount: false,
-      isFetching: true,
-      isInitialLoading: true,
-      isPaused: false,
-      isPlaceholderData: false,
-      isRefetching: false,
-      isStale: true,
-      refetch,
-      promise: new Promise(() => {}),
-    }
+  const query = client.getQueryCache().build(client, queryOptions)
+  if (options.isError) {
+    query.setState({ status: 'error', error: options.error ?? new Error('Query failed') })
+  } else if (snapshot && options.isLoading === false) {
+    query.setData(snapshot)
+  } else {
+    query.setState({ fetchStatus: options.isLoading === false ? 'idle' : 'fetching' })
   }
-
+  const result = new QueryObserver(client, queryOptions).getCurrentResult()
   return {
-    status: 'success',
-    fetchStatus: 'idle',
-    isEnabled: true,
-    isPending: false,
-    isSuccess: true,
-    isError: false,
-    isLoading: false,
-    isLoadingError: false,
-    isRefetchError: false,
-    data: snapshot ?? snapshotDTO(),
-    error: null,
-    dataUpdatedAt: Date.now(),
-    errorUpdatedAt: 0,
-    failureCount: 0,
-    failureReason: null,
-    errorUpdateCount: 0,
-    isFetched: true,
-    isFetchedAfterMount: true,
-    isFetching: false,
-    isInitialLoading: false,
-    isPaused: false,
-    isPlaceholderData: false,
-    isRefetching: false,
-    isStale: false,
-    refetch,
-    promise: Promise.resolve(snapshot ?? snapshotDTO()),
+    ...result,
+    refetch: async () => {
+      await options.refetch?.()
+      return result
+    },
   }
 }
 
@@ -143,7 +68,10 @@ function createController(
     dockAddRef: { current: null },
     closeContextMenuRef: { current: vi.fn() },
     snapshotQuery,
-    modelsQuery: { data: [] } as never,
+    modelsQuery: new QueryObserver<CanvasController['models'], Error>(
+      new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } }),
+      { queryKey: ['editor-models'], initialData: [] },
+    ).getCurrentResult(),
     models: [],
     nodeCallbacks: { editTextNode: vi.fn() },
     initialFitPending: false,
@@ -286,7 +214,7 @@ describe('CanvasEditor state rendering', () => {
 
   it('renders the not-found state without a retry action', () => {
     renderEditor({
-      query: { isError: true, error: { status: 404, message: 'canvas gone' } },
+      query: { isError: true, error: new ApiError('canvas gone', 404) },
     })
     expect(screen.getByRole('alert')).toHaveTextContent('画布不存在')
     expect(screen.getByText('canvas gone')).toBeInTheDocument()
@@ -297,7 +225,7 @@ describe('CanvasEditor state rendering', () => {
   it('renders the load-failed state and retries on demand', async () => {
     const user = userEvent.setup()
     const { refetch } = renderEditor({
-      query: { isError: true, error: { message: 'network down' } },
+      query: { isError: true, error: new Error('network down') },
     })
     expect(screen.getByRole('alert')).toHaveTextContent('画布加载失败')
     expect(screen.getByText('network down')).toBeInTheDocument()
@@ -308,7 +236,7 @@ describe('CanvasEditor state rendering', () => {
   it('navigates back to the library from an error state', async () => {
     const user = userEvent.setup()
     renderEditor({
-      query: { isError: true, error: { status: 404, message: 'canvas gone' } },
+      query: { isError: true, error: new ApiError('canvas gone', 404) },
       withLibraryRoute: true,
     })
     await user.click(screen.getByRole('button', { name: '返回画布库' }))
