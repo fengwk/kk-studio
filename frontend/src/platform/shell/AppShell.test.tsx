@@ -356,7 +356,7 @@ describe('AppShell locale selector', () => {
 
     expect(screen.getByRole('listbox', { name: '语言' })).toBeInTheDocument()
     expect(screen.getAllByRole('option')).toHaveLength(2)
-    expect(screen.getByRole('option', { name: 'English', exact: true })).toHaveAttribute(
+    expect(screen.getByRole('option', { name: 'English' })).toHaveAttribute(
       'aria-selected',
       'false',
     )
@@ -401,21 +401,34 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValueOnce({
       items: [
         {
+          type: 'INPUT',
           interactionId: 'int-1',
           status: 'WAITING_INPUT',
           threadId: 'th-1',
           rootThreadId: 'th-1',
           sessionId: 'sess-1',
-          owner: { type: 'CHAT', chatId: 'c-1', issueId: null, agentName: null },
+          owner: {
+            type: 'CHAT',
+            chatId: 'c-1',
+            chatTitle: null,
+            issueId: null,
+            issueTitle: null,
+            agentName: null,
+            rootThreadName: null,
+          },
           toolCallId: 'call-1',
           toolName: 'ask_user',
           argumentsJson: '{}',
           approvalJson: null,
+          environmentId: null,
+          environmentName: null,
+          waitingCount: null,
           createTime: '2026-01-01T00:00:00Z',
         },
       ],
       nextCursor: null,
       total: 7,
+      freshnessAt: null,
     })
 
     renderShell('/chats')
@@ -430,8 +443,8 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
     // 测试意图：pending 变化只由服务端事件提示回读，因此角标不需要轮询也能及时更新。
     const listSpy = vi
       .spyOn(interactionService, 'listInteractions')
-      .mockResolvedValueOnce({ items: [], nextCursor: null, total: 0 })
-      .mockResolvedValueOnce({ items: [], nextCursor: null, total: 3 })
+      .mockResolvedValueOnce({ items: [], nextCursor: null, total: 0, freshnessAt: null })
+      .mockResolvedValueOnce({ items: [], nextCursor: null, total: 3, freshnessAt: null })
 
     const { sockets } = renderShell('/chats')
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(1))

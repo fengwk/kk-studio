@@ -40,6 +40,7 @@ function catalogModel(): AgentModelDTO {
   return {
     providerName: 'minimax',
     name: 'MiniMax',
+    modelId: 'minimax-model-id',
     description: null,
     config: {
       limit: { context: 128000, output: 8192 },
@@ -61,8 +62,8 @@ function catalogModel(): AgentModelDTO {
       variants: [{ id: 'default' }, { id: 'fast' }],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: '2026-09-27T10:00:00Z',
+    updateTime: '2026-09-27T10:00:00Z',
   }
 }
 
@@ -136,7 +137,7 @@ describe('system settings schema renderer', () => {
     const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
-    const sectionElement = container.querySelector('[data-settings-section="aiRuntime"]')!
+    const sectionElement = container.querySelector<HTMLElement>('[data-settings-section="aiRuntime"]')!
     expect(within(sectionElement).queryByText('共享调用重试、压缩回退与子代理预算。')).toBeNull()
   })
 

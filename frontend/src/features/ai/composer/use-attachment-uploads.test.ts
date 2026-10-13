@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import type { StorageUploadDTO, StorageUploadReserveRequestDTO } from '@/shared/api/contracts/storage'
+import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 import type { StorageService } from '@/shared/api/storage-service'
 import { createAttachmentPart } from '@/features/ai/composer/composer-parts'
 import { loadUnknownUploads, persistPendingUnknownUpload } from '@/features/ai/composer/composer-draft'
@@ -16,31 +16,19 @@ type EventCallback = (event: unknown) => void
 
 function createFakeStorageService(overrides?: Partial<StorageService>): StorageService {
   return {
-    reserveUpload: vi.fn().mockImplementation(async (req: StorageUploadReserveRequestDTO): Promise<StorageUploadDTO> => ({
+    reserveUpload: vi.fn().mockImplementation(async (): Promise<StorageUploadDTO> => ({
       id: 'res-1',
       blobId: 'blob-1',
-      mediaKind: 'image',
       state: 'PENDING',
       presignedPut: { url: 'https://upload.example.com/put', method: 'PUT', headers: {} },
-      filename: req.filename,
-      mediaType: req.mediaType,
-      sizeBytes: req.sizeBytes,
-      sha256: req.sha256,
       expiresAt: '2026-01-01T00:00:00Z',
-      createTime: '2026-01-01T00:00:00Z',
     })),
     completeUpload: vi.fn().mockImplementation(async (id: string): Promise<StorageUploadDTO> => ({
       id,
       blobId: 'blob-1',
-      mediaKind: 'image',
       state: 'READY',
-      presignedPut: { url: 'https://upload.example.com/put', method: 'PUT', headers: {} },
-      filename: 'test.png',
-      mediaType: 'image/png',
-      sizeBytes: 100,
-      sha256: 'hash-1',
+      presignedPut: null,
       expiresAt: '2026-01-01T00:00:00Z',
-      createTime: '2026-01-01T00:00:00Z',
     })),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
     uploadFile: vi.fn().mockResolvedValue(undefined),
@@ -286,8 +274,7 @@ describe('Attachment uploads lifecycle & safety', () => {
     it('preserves READY upload on unmount if draft still references it, and deletes orphaned READY upload', async () => {
       // 测试意图：验证草稿仍持有该 uploadId 时 unmount 保留至 TTL（不破坏草稿恢复契约）；完全未引用的孤立就绪附件主动释放
       const service = createFakeStorageService()
-      const referencedPart = createAttachmentPart('loc-ref', 'referenced.png')
-      referencedPart.uploadId = 'res-ref'
+      const referencedPart = createAttachmentPart('res-ref', 'referenced.png')
 
       // Case 1: 草稿持有 uploadId，unmount 不调用 deleteUpload
       const { unmount: unmountReferenced } = renderHook(() =>
@@ -587,15 +574,9 @@ describe('Attachment uploads lifecycle & safety', () => {
         resolveOldComplete({
           id: 'res-alpha',
           blobId: 'b',
-          mediaKind: 'image',
           state: 'READY',
-          presignedPut: { url: 'put', method: 'PUT', headers: {} },
-          filename: 'alpha.png',
-          mediaType: 'image/png',
-          sizeBytes: 100,
-          sha256: 'sha-1',
-          expiresAt: '2026',
-          createTime: '2026',
+          presignedPut: null,
+          expiresAt: '2026-01-01T00:00:00Z',
         })
       })
 
@@ -741,15 +722,9 @@ describe('Attachment uploads lifecycle & safety', () => {
         resolveSlowComplete({
           id: 'upload-a-1',
           blobId: 'blob-a-1',
-          mediaKind: 'image',
           state: 'READY',
           presignedPut: null,
-          filename: 'fileA.png',
-          mediaType: 'image/png',
-          sizeBytes: 1234,
-          sha256: 'sha-a',
           expiresAt: '2026-01-01T00:00:00Z',
-          createTime: '2026-01-01T00:00:00Z',
         })
       })
 
@@ -826,15 +801,9 @@ describe('Attachment uploads lifecycle & safety', () => {
         resolveSlowComplete({
           id: 'upload-cancel-1',
           blobId: 'blob-cancel-1',
-          mediaKind: 'image',
           state: 'READY',
           presignedPut: null,
-          filename: 'cancel.png',
-          mediaType: 'image/png',
-          sizeBytes: 5678,
-          sha256: 'sha-cancel',
           expiresAt: '2026-01-01T00:00:00Z',
-          createTime: '2026-01-01T00:00:00Z',
         })
       })
 

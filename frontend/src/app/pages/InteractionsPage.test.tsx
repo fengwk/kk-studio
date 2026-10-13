@@ -237,7 +237,7 @@ describe('InteractionsPage', () => {
       createTime: '2026-09-27T10:05:00Z',
       updateTime: '2026-09-27T10:06:00Z',
     })
-    fireEvent.click(screen.getByRole('button', { name: '允许', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: '允许' }))
     await waitFor(() => expect(screen.queryByText('write')).not.toBeInTheDocument())
     expect(decision).toHaveBeenCalledWith('th-2', 'int-2', {
       decision: 'ALLOW', reason: null, decisionId: expect.any(String),
@@ -386,6 +386,8 @@ describe('InteractionsPage', () => {
           },
         ],
         nextCursor: null,
+        total: 3,
+        freshnessAt: null,
       }
     })
 
