@@ -32,7 +32,12 @@ class ProjectRunScopeJsonCodecTest {
     String json = codec.encode(scope);
 
     assertEquals(json, codec.encode(scope));
-    assertEquals(scope, codec.decode(json));
+    ProjectRunScope decoded = codec.decode(json);
+    assertEquals(scope, decoded);
+    // 业务身份契约：runId 与 issueNumber 原值往返，nextStates 保持声明顺序而不是集合去重/重排。
+    assertEquals(RUN_ID, decoded.runId());
+    assertEquals(7L, decoded.issueNumber());
+    assertEquals(List.of("REVIEW", "DONE"), decoded.nextStates());
   }
 
   /** 可空字段允许为 null，但字段本身必须存在：缺失 issueDescription 是损坏快照，而不是"没有描述"。 */
@@ -99,11 +104,31 @@ class ProjectRunScopeJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(json + " {}"));
   }
 
-  /** 非对象 JSON 与非法 JSON 均拒绝，避免把数组/标量当成合法快照。 */
+  /** 非对象 JSON、空白文档（Jackson 3 解析为 MissingNode）与非法 JSON 均拒绝，避免把数组/标量/空文档当成合法快照。 */
   @Test
   void rejectsNonObjectAndMalformedJson() {
     assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("{oops}"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(""));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("   "));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("null"));
+  }
+
+  /** issueNumber 必须落在 long 范围内：超出 long 的整数字面量即使语法合法也必须拒绝，不能截断成任意值。 */
+  @Test
+  void rejectsIssueNumberBeyondLongRange() {
+    String json = codec.encode(scope("设计", "做事", List.of("REVIEW")));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(json.replace("\"issueNumber\":7", "\"issueNumber\":9223372036854775808")));
+    // long 上界本身仍然合法，证明边界拒绝的是溢出而不是范围上限。
+    assertEquals(
+        Long.MAX_VALUE,
+        codec
+            .decode(json.replace("\"issueNumber\":7", "\"issueNumber\":9223372036854775807"))
+            .issueNumber());
   }
 
   /** 关闭副本与活跃快照共用同一严格格式，只通过 active 区分，且必须无损往返。 */
