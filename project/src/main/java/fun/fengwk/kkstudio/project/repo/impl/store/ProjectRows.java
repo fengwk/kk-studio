@@ -31,10 +31,6 @@ final class ProjectRows {
     return resultSet.getObject(column, Boolean.class);
   }
 
-  static Instant instant(ResultSet resultSet, String column) throws SQLException {
-    return resultSet.getTimestamp(column).toInstant();
-  }
-
   static Instant nullableInstant(ResultSet resultSet, String column) throws SQLException {
     Timestamp value = resultSet.getTimestamp(column);
     return value == null ? null : value.toInstant();
