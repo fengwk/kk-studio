@@ -8,6 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -96,5 +100,78 @@ class PromptTemplateTest {
   void rendersValuesWithoutSecondPassSubstitution() {
     PromptTemplate template = new PromptTemplate("inline", "${a}");
     assertEquals("${b}", template.render(Map.of("a", "${b}")));
+  }
+
+  /**
+   * 验证从注入的 ClassLoader 读取资源发生 IOException 时：包装为 IllegalArgumentException 并保留 IO 根因、关闭底层流、
+   * 失败结果不污染缓存（同一 loader 再次读取成功）。
+   */
+  @Test
+  void surfacesReadFailureWithoutPoisoningCache() {
+    String resource = "fun/fengwk/kkstudio/harness/common/prompt/retryable.txt";
+    RetryableClassLoader classLoader = new RetryableClassLoader(resource, "Hello ${name}.\n");
+    PromptTemplateLoader failingLoader = new PromptTemplateLoader(classLoader);
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> failingLoader.load(resource));
+    assertTrue(error.getMessage().contains("cannot read classpath prompt template resource"));
+    assertTrue(error.getCause() instanceof IOException, "IO root cause must be preserved");
+    assertEquals(1, classLoader.failuresDelivered, "first read must fail");
+    assertTrue(classLoader.failingStreamClosed, "failing stream must be closed");
+    assertEquals(
+        0, classLoader.liveFailingStreams, "no read failure may leak the underlying stream");
+
+    PromptTemplate template = failingLoader.load(resource);
+    assertEquals("Hello ${name}.\n", template.raw());
+    assertEquals(List.of("name"), template.variables());
+    assertEquals(1, classLoader.successfulReads, "cache must not retain the failure");
+  }
+
+  /** 真实 ClassLoader 边界：首个读取返回抛 IOException 的流，之后返回正常内容；用于验证 IO 失败路径。 */
+  private static final class RetryableClassLoader extends ClassLoader {
+
+    private final String resource;
+    private final String content;
+    private boolean failNext = true;
+    private int failuresDelivered;
+    private int liveFailingStreams;
+    private boolean failingStreamClosed;
+    private int successfulReads;
+
+    RetryableClassLoader(String resource, String content) {
+      this.resource = resource;
+      this.content = content;
+    }
+
+    @Override
+    public InputStream getResourceAsStream(String name) {
+      if (!resource.equals(name)) {
+        return null;
+      }
+      if (failNext) {
+        failNext = false;
+        failuresDelivered++;
+        liveFailingStreams++;
+        return new InputStream() {
+          @Override
+          public int read() throws IOException {
+            throw new IOException("simulated prompt template read failure");
+          }
+
+          @Override
+          public int read(byte[] buffer, int offset, int length) throws IOException {
+            throw new IOException("simulated prompt template read failure");
+          }
+
+          @Override
+          public void close() {
+            failingStreamClosed = true;
+            liveFailingStreams--;
+          }
+        };
+      }
+      successfulReads++;
+      return new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
+    }
   }
 }
