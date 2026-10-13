@@ -511,24 +511,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('deduplicates exact TOOL_PARTIAL redelivery by eventId and resets seen eventIds on attempt change', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const active = toolInvocation()
     const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -563,24 +546,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('evicts only the oldest TOOL_PARTIAL eventId at the capacity boundary (FIFO)', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const active = toolInvocation()
     const { result, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -611,24 +577,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('appends same-millisecond identical-payload partials by eventId and ignores non-canonical eventIds', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const active = toolInvocation()
     const { result, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -699,24 +648,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('aggregates TOOL_PARTIAL overlays per invocation and clears when the invocation disappears with the durable result Entry', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const active = toolInvocation()
     const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -765,24 +697,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('ignores TOOL_PARTIAL after the terminal projection and for unknown/retry-attempt invocations', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const active = toolInvocation()
     const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -834,24 +749,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('projects terminal errorJson (error text) while the durable result Entry is pending', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const active = toolInvocation()
     const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -875,29 +773,14 @@ describe('useHarnessThreadRealtime', () => {
     // 稳定引用：过渡 render 期间 reconcile effect 依赖不变，不会重新播种。
     const invocation = modelInvocation()
     const noInvocations: ToolInvocationDTO[] = []
-    const terminal: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
+    const terminal = toolInvocation({
       resultJson: JSON.stringify({
         toolCallId: 'call-1',
         contents: [{ type: 'text', text: 'terminal answer' }],
         error: false,
         details: null,
       }),
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    })
 
     // disabled 期不订阅；首次 snapshot（终态 resultJson）与 ready 同批到达：
     // reconcile effect 播种终态 tool overlay，随后订阅 state 尚为
@@ -1132,24 +1015,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('ignores TOOL_PARTIAL events from other threads', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
-      toolName: 'web-search',
-      rendererKey: 'web-search',
-      environment: null,
-      argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const active = toolInvocation()
     const { result, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -1250,19 +1116,7 @@ describe('useHarnessThreadRealtime', () => {
     })
     const caf = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const toolInv: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      threadId: THREAD_ID,
-      turnStartEntryId: 'entry-1',
-      requestHeadEntryId: 'entry-1',
-      status: 'RUNNING',
-      attempt: 1,
-      name: 'testTool',
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const toolInv = toolInvocation({ toolName: 'testTool', rendererKey: 'testTool' })
     const { result, sockets } = renderRealtime(client, {
       invocation: modelInvocation(),
       invocations: [toolInv],
@@ -1419,19 +1273,7 @@ describe('useHarnessThreadRealtime', () => {
     const raf = vi.fn((_cb: FrameRequestCallback) => 104)
     const caf = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const toolInv: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      threadId: THREAD_ID,
-      turnStartEntryId: 'entry-1',
-      requestHeadEntryId: 'entry-1',
-      status: 'RUNNING',
-      attempt: 1,
-      name: 'testTool',
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    const toolInv = toolInvocation({ toolName: 'testTool', rendererKey: 'testTool' })
     const { result, rerender, sockets } = renderRealtime(client, {
       invocation: modelInvocation(),
       invocations: [toolInv],
@@ -1484,24 +1326,11 @@ describe('useHarnessThreadRealtime', () => {
 
   it('handles process.output streaming with contiguous APPEND, duplicate/overlap dedup, and gap healing via SNAPSHOT', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
+    const active = toolInvocation({
       toolName: 'bash',
       rendererKey: 'bash',
-      environment: null,
       argumentsJson: '{"command":"build.sh"}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    })
     const { result, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -1544,24 +1373,11 @@ describe('useHarnessThreadRealtime', () => {
 
   it('handles high-volume process.output chunks batching and keeps UI budget bounded', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
+    const active = toolInvocation({
       toolName: 'bash',
       rendererKey: 'bash',
-      environment: null,
       argumentsJson: '{"command":"generate-lots-of-logs.sh"}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    })
     const { result, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -1593,24 +1409,11 @@ describe('useHarnessThreadRealtime', () => {
 
   it('replaces transient process.output progress immediately when durable terminal result arrives and ignores late progress', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const active: ToolInvocationDTO = {
-      id: 'inv-tool-1',
-      modelInvocationId: 'inv-1',
-      assistantEntryId: 'entry-2',
-      callIndex: 0,
-      status: 'RUNNING',
-      attempt: 1,
-      toolCallId: 'call-1',
+    const active = toolInvocation({
       toolName: 'bash',
       rendererKey: 'bash',
-      environment: null,
       argumentsJson: '{"command":"test.sh"}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
-      createTime: '2026-01-01T00:00:00Z',
-      updateTime: '2026-01-01T00:00:00Z',
-    }
+    })
     const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
@@ -1777,5 +1580,31 @@ function modelInvocation(
     resultEntryId: null,
     createTime: '2026-01-01T00:00:00Z',
     updateTime: '2026-01-01T00:00:00Z',
+  }
+}
+
+function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
+  return {
+    id: 'inv-tool-1',
+    modelInvocationId: 'inv-1',
+    assistantEntryId: 'entry-2',
+    callIndex: 0,
+    status: 'RUNNING',
+    attempt: 1,
+    toolCallId: 'call-1',
+    toolName: 'web-search',
+    rendererKey: 'web-search',
+    environmentId: null,
+    requiredEnvironmentId: null,
+    waitingForEnvironment: false,
+    requiredEnvironmentName: null,
+    environmentWaitFreshnessAt: null,
+    argumentsJson: '{}',
+    approvalJson: null,
+    resultJson: null,
+    errorJson: null,
+    createTime: '2026-01-01T00:00:00Z',
+    updateTime: '2026-01-01T00:00:00Z',
+    ...overrides,
   }
 }
