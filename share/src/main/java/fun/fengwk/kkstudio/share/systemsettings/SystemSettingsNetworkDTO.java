@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.share.systemsettings;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.Data;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /** Backend 全局代理（新 HTTP 请求生效）；null proxyUrl 表示明确直连，不支持认证或模块覆盖。 */
 @Data

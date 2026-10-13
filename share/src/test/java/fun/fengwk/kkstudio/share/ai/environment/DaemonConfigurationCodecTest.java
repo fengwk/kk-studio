@@ -2,12 +2,12 @@ package fun.fengwk.kkstudio.share.ai.environment;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.net.URI;
 import java.nio.file.Files;
@@ -16,7 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 class DaemonConfigurationCodecTest {
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
   @TempDir Path temp;
 
   @Test
@@ -38,7 +38,7 @@ class DaemonConfigurationCodecTest {
     assertEquals(List.of(".java"), parsed.getLsp().getServers().get("z").getExtensions());
     assertEquals(
         " argument with spaces ", parsed.getLsp().getServers().get("z").getCommand().get(1));
-    assertEquals("\u2003 trusted note \u2003", json.get("note").textValue());
+    assertEquals("\u2003 trusted note \u2003", json.get("note").stringValue());
     assertEquals(
         URI.create("wss://studio.example/api/harness/environment-daemon/v1"),
         DaemonConfigurationCodec.gatewayUri(parsed.getStudioUrl()));

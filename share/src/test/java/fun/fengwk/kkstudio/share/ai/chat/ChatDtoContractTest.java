@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 
@@ -26,7 +26,7 @@ class ChatDtoContractTest {
   /** environmentName 省略保留、显式 null 清空：JSON Setter 必须区分两者。 */
   @Test
   void updateDtoTracksEnvironmentNameProvidedSemantics() throws Exception {
-    ObjectMapper mapper = new ObjectMapper();
+    JsonMapper mapper = JsonMapper.builder().build();
 
     ChatUpdateDTO omitted = mapper.readValue("{\"expectedVersion\":\"1\"}", ChatUpdateDTO.class);
     assertFalse(omitted.isEnvironmentNameProvided());

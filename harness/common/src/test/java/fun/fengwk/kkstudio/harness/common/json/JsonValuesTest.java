@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 
 /** {@link JsonValues} 的严格 JSON 校验、顶层对象约束、重复字段与尾随 token 拦截测试。 */
 class JsonValuesTest {
@@ -79,7 +79,7 @@ class JsonValuesTest {
     JsonNode node = JsonValues.readTree("{\"k\": \"v\"}");
     assertNotNull(node);
     assertTrue(node.isObject());
-    assertEquals("v", node.get("k").asText());
+    assertEquals("v", node.get("k").asString());
 
     String written = JsonValues.write(node);
     assertEquals("{\"k\":\"v\"}", written);
