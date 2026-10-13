@@ -2,23 +2,23 @@
 
 `canvas-infra` 实现 [Canvas Core](canvas-core.md) 的持久化与应用服务端口，将命令批、Snapshot 一致性读、资源生命周期和 Function Run 保存为 `canvas_*` 行。Run 行承担 durable queue；claim、lease 与短事务 CAS 支持多节点执行和崩溃恢复，提交结果不确定时转为 UNKNOWN 等待人工核对。Web 装配 Infra，Platform 提供 Storage 与 Function adapter。
 
-生产依赖固定为 Core、`convention4j-spring-boot-starter`、`spring-boot-starter-aspectj`、`mybatis-spring-boot-starter` 与 `jackson-databind`（见 [`canvas/infra/pom.xml`](../../canvas/infra/pom.xml)）；PostgreSQL、Flyway、Testcontainers 只在 test scope。[`CanvasInfraArchitectureTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraArchitectureTest.java) 同时扫描 import 前缀与 POM，禁止反向依赖 Platform/Harness/Web。自动配置入口是 [`CanvasInfraAutoConfiguration.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraAutoConfiguration.java)，[`AutoConfiguration.imports`](../../canvas/infra/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports) 指向它，并显式启用 `CanvasFunctionRuntimeProperties`。
+生产依赖固定为 Core、`convention4j-spring-boot-starter`、`spring-boot-starter-aspectj`、`spring-boot-starter-jdbc` 与 `jackson-databind`（见 [`canvas/infra/pom.xml`](../../canvas/infra/pom.xml)）；PostgreSQL、Flyway、Testcontainers 只在 test scope。[`CanvasInfraArchitectureTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraArchitectureTest.java) 同时扫描 import 前缀与 POM，禁止反向依赖 Platform/Harness/Web。自动配置入口是 [`CanvasInfraAutoConfiguration.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraAutoConfiguration.java)，[`AutoConfiguration.imports`](../../canvas/infra/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports) 指向它，并显式启用 `CanvasFunctionRuntimeProperties`。
 
 ## Graph 投影到行
 
-持久化由 Repository 与 Store 实现，底层注入各个 MyBatis mapper：
+持久化由 Repository 与 Store 实现，底层 JdbcStore 使用 `JdbcClient` 命名参数与显式 `RowMapper`：
 
-| 组件 / mapper | 关键职责与 SQL |
+| 组件 / JdbcStore | 关键职责与 SQL |
 | --- | --- |
 | [`PostgresqlCanvasStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) | 实现 [`CanvasStore`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasStore.java)，聚合 document、node、group 与 dedup 的行级操作 |
-| [`CanvasDocumentMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasDocumentMapper.java) | `FOR UPDATE` / `FOR KEY SHARE` 行锁读、`advanceRevision` CAS 推进、document 插入与删除 |
-| [`CanvasNodeMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasNodeMapper.java) | node 行 CRUD、`FOR UPDATE` 锁、名称/几何/分组/Function 更新 |
-| [`CanvasGroupMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasGroupMapper.java) | group 行 CRUD 与按画布查询；按画布删除由命令服务逐行调用 |
-| [`CanvasResourceMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasResourceMapper.java) | 由 [`PostgresqlCanvasResourceRepository`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceRepository.java) 使用：owner attach/detach、按节点与按画布删除、`FOR UPDATE` 读 |
-| [`CanvasCommandDedupMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasCommandDedupMapper.java) | `(canvas_id, idempotency_key)` 的 request hash 与 accepted revision 记账 |
-| [`CanvasFunctionRunMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionRunMapper.java) | 由 [`PostgresqlCanvasFunctionRunRepository`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasFunctionRunRepository.java) 使用：READY 插入、`replaceTerminalWithReady`、`checkpoint`、`transitionTerminal`、`markUnknown`、`resumeUnknown`、`resolveUnknownTerminal`、`cancelActive` |
-| [`CanvasFunctionResourcePinMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionResourcePinMapper.java) | 由 [`PostgresqlCanvasFunctionResourcePinRepository`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasFunctionResourcePinRepository.java) 使用：Run INPUT/OUTPUT 资源 pin 批量写入、按 run/node/canvas 查删、按 resource 计数 |
-| [`CanvasFunctionWorkMapper`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkMapper.java) | 由 [`CanvasFunctionWorkStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStore.java) 使用：单条 CTE `claimNext`（`FOR UPDATE SKIP LOCKED`）、`renew`、`reschedule`、`countOwned` |
+| [`CanvasDocumentJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasDocumentJdbcStore.java) | `FOR UPDATE` / `FOR KEY SHARE` 行锁读、`advanceRevision` CAS 推进、document 插入与删除 |
+| [`CanvasNodeJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasNodeJdbcStore.java) | node 行 CRUD、`FOR UPDATE` 锁、名称/几何/分组/Function 更新 |
+| [`CanvasGroupJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasGroupJdbcStore.java) | group 行 CRUD 与按画布查询；按画布删除由命令服务逐行调用 |
+| [`CanvasResourceJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasResourceJdbcStore.java) | 由 [`PostgresqlCanvasResourceRepository`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceRepository.java) 使用：owner attach/detach、按节点与按画布删除、`FOR UPDATE` 读 |
+| [`CanvasCommandDedupJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasCommandDedupJdbcStore.java) | `(canvas_id, idempotency_key)` 的 request hash 与 accepted revision 记账 |
+| [`CanvasFunctionRunJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionRunJdbcStore.java) | 由 [`PostgresqlCanvasFunctionRunRepository`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasFunctionRunRepository.java) 使用：READY 插入、`replaceTerminalWithReady`、`checkpoint`、`transitionTerminal`、`markUnknown`、`resumeUnknown`、`resolveUnknownTerminal`、`cancelActive` |
+| [`CanvasFunctionResourcePinJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionResourcePinJdbcStore.java) | 由 [`PostgresqlCanvasFunctionResourcePinRepository`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasFunctionResourcePinRepository.java) 使用：Run INPUT/OUTPUT 资源 pin 批量写入、按 run/node/canvas 查删、按 resource 计数 |
+| [`CanvasFunctionLeaseJdbcStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionLeaseJdbcStore.java) | 由 [`CanvasFunctionWorkStore`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStore.java) 使用：单条 CTE `claimNext`（`FOR UPDATE SKIP LOCKED`）、`renew`、`reschedule`、`countOwned` |
 
 命令写服务由 [`PostgresqlCanvasCommandService`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java) 实现。写路径锁定 `canvas_document` 短事务：
 1. 校验幂等性：同一 `idempotencyKey` 已存在且 `requestHash` 一致时直接返回记录的接受回执（`Accepted(CanvasPatch.receipt(acceptedRevision))`），指纹不一致时抛 `CanvasConflictException(IDEMPOTENCY_CONFLICT)`；
@@ -56,7 +56,7 @@ lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
 
 ### claim：数据库就是队列
 
-`canvas_function_run` 的主键是 `node_id`，每个 Function 节点只有一行「当前/最后一次」Run。[`CanvasFunctionWorkMapper.claimNext`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkMapper.java) 用单条 CTE 完成认领：
+`canvas_function_run` 的主键是 `node_id`，每个 Function 节点只有一行「当前/最后一次」Run。[`CanvasFunctionLeaseJdbcStore.claimNext`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionLeaseJdbcStore.java) 用单条 CTE 完成认领：
 
 ```sql
 -- READY 且 available_at <= now，或 RUNNING 且 lease_until <= now（过期租约）
@@ -120,7 +120,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 
 ## 从哪里改
 
-- 改 SQL 或加列：先看 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 canvas 段与 [Schema](schema.md) 的重建规则，再改对应 mapper 与集成测试；`canvas_*` 的外键全部 RESTRICT，删除顺序不能靠 cascade。
+- 改 SQL 或加列：先看 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 canvas 段与 [Schema](schema.md) 的重建规则，再改对应 JdbcStore 与集成测试；`canvas_*` 的外键全部 RESTRICT，删除顺序不能靠 cascade。
 - 改命令写路径与读模型：[`PostgresqlCanvasCommandService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java)、[`PostgresqlCanvasQueryService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java)、[`PostgresqlCanvasStore.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 与 [`PostgresqlCanvasResourceLifecycle.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceLifecycle.java)。
 - 改 Runtime：[`function` 目录](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/) 下的 dispatcher、worker、transactions、properties、codec 是一个整体；改动 lease 语义时同步检查 `claimNext` 的 `where` 与 `CanvasFunctionRunTransactions` 的 lock order。
 - 新增模型能力：在 [Platform](platform.md) 或插件模块实现 `CanvasFunctionAdapter`，由 Catalog 启动冻结。

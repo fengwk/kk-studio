@@ -6,13 +6,13 @@ Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实
 [Canvas Infra](canvas-infra.md)，Issue 工作流见 [Project](project.md)。
 
 [`PlatformAutoConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java)
-通过 Boot 自动配置扫描 service 和 mapper。生产组合根是 [Web](web.md)。
+扫描 service、repository 和 JdbcStore。生产组合根是 [Web](web.md)。
 PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可重建的运行状态。
 
 [`PostgresqlPersistenceConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration.java)
-提供共享的 `SqlSessionTemplate`，在 MyBatis 默认模板条件判断前注册。异常翻译固定唯一数据库产品
+提供 PostgreSQL 异常翻译器，Boot 自动配置的 `JdbcTemplate`、`NamedParameterJdbcTemplate` 和
+`JdbcClient` 共用它。普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
 `PostgreSQL`，保留 Spring 的 SQLState 分类，不在故障期间取连接读取元数据。
-executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `defaultExecutorType`。
 
 ## 按用例定位源码
 

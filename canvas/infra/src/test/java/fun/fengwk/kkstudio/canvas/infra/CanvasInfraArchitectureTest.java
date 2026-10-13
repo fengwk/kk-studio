@@ -55,7 +55,7 @@ class CanvasInfraArchitectureTest {
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
   }
 
-  /** Infra 的直接生产依赖只允许 Core、Jackson、Spring（含 AspectJ）与 MyBatis 装配能力。 */
+  /** Infra 的直接生产依赖只允许 Core、Jackson、Spring（含 JDBC、AspectJ）与通用装配能力。 */
   @Test
   void pomDeclaresOnlyCanvasInfraProductionDependencies() throws IOException {
     String text = Files.readString(locateModuleRoot().resolve("pom.xml"), StandardCharsets.UTF_8);
