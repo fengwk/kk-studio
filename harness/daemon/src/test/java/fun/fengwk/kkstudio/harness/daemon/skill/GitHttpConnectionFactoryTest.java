@@ -337,14 +337,12 @@ class GitHttpConnectionFactoryTest {
     String[] keywords = {
       "not authorized",
       "Authentication is required",
+      "authentication not supported",
       "not permitted",
-      "401",
-      "403",
       "NOT AUTHORIZED",
       "AUTHENTICATION IS REQUIRED",
-      "Not Permitted",
-      "HTTP 401 Unauthorized",
-      "Remote returned 403 Forbidden"
+      "AUTHENTICATION NOT SUPPORTED",
+      "Not Permitted"
     };
 
     for (String keyword : keywords) {
@@ -366,6 +364,16 @@ class GitHttpConnectionFactoryTest {
     IOException plainIo = new IOException("401");
     assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(plainIo));
 
+    // 裸状态码数字或 URL/端口样式文本不是 JGit 鉴权短语，不得冒充 GIT_AUTHENTICATION_FAILED。
+    String[] nonAuthenticationTexts = {
+      "401", "403", "HTTP 401 Unauthorized", "Remote returned 403 Forbidden"
+    };
+    for (String text : nonAuthenticationTexts) {
+      TransportException transport = new TransportException(text);
+      assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(transport));
+      assertFalse(GitHttpConnectionFactory.canFallback(transport));
+    }
+
     // 普通 TransportException 无 auth 关键字时不被误判为 auth failure
     TransportException genericTransport = new TransportException("remote server closed connection");
     assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(genericTransport));
@@ -374,6 +382,54 @@ class GitHttpConnectionFactoryTest {
     assertEquals(
         "GIT_AUTHENTICATION_FAILED",
         EnvironmentCapabilityResultCodes.requireCode("GIT_AUTHENTICATION_FAILED"));
+  }
+
+  /**
+   * 意图：鉴权分类只认 JGit 鉴权短语；URL/端口/对象哈希中的 401、403 数字不得冒充鉴权失败。含此类哈希的 missing want ref 必须保留精确 commit
+   * fetch 回退，超时仍按超时分类。
+   */
+  @Test
+  void classifiesAuthenticationByJGitPhraseNotStatusCodeDigits() {
+    // 地址里的 401/403 只是端口或路径数字，不能触发鉴权分类。
+    TransportException portLikeDigits =
+        new TransportException("http://127.0.0.1:40319/repo401.git: connection reset");
+    assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(portLikeDigits));
+
+    TransportException serverError =
+        new TransportException("http://127.0.0.1:50000/repo.git: 500 Internal Server Error");
+    assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(serverError));
+
+    // 同一地址上的读取超时仍必须分类为超时，而不是鉴权失败，也不得回退重试。
+    TransportException readTimeout =
+        new TransportException(
+            "http://127.0.0.1:40319/repo401.git: read timed out",
+            new SocketTimeoutException("GIT_READ_TIMEOUT"));
+    assertEquals("GIT_READ_TIMEOUT", GitHttpConnectionFactory.failureCode(readTimeout));
+    assertFalse(GitHttpConnectionFactory.canFallback(readTimeout));
+
+    // 对象哈希含 401/403 的 missing want ref 必须仍可精确 commit 回退（此前被裸数字误判为鉴权失败）。
+    TransportException missingWantWith401 =
+        new TransportException("want " + "a".repeat(37) + "401 not valid");
+    assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(missingWantWith401));
+    assertTrue(GitHttpConnectionFactory.canFallback(missingWantWith401));
+    TransportException missingWantWith403 =
+        new TransportException("want " + "b".repeat(37) + "403 not valid");
+    assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(missingWantWith403));
+    assertTrue(GitHttpConnectionFactory.canFallback(missingWantWith403));
+
+    // 真实 JGit 鉴权短语（403 服务拒绝与无 challenge 的认证不支持）仍分类为 GIT_AUTHENTICATION_FAILED。
+    TransportException forbiddenService =
+        new TransportException("git-upload-pack not permitted on 'http://127.0.0.1:80/repo.git/'");
+    assertEquals(
+        "GIT_AUTHENTICATION_FAILED", GitHttpConnectionFactory.failureCode(forbiddenService));
+    assertFalse(GitHttpConnectionFactory.canFallback(forbiddenService));
+
+    TransportException authenticationNotSupported =
+        new TransportException("authentication not supported");
+    assertEquals(
+        "GIT_AUTHENTICATION_FAILED",
+        GitHttpConnectionFactory.failureCode(authenticationNotSupported));
+    assertFalse(GitHttpConnectionFactory.canFallback(authenticationNotSupported));
   }
 
   /** 意图：取消无限总等待时实际断开网络，不等 production read idle 到期。 */
