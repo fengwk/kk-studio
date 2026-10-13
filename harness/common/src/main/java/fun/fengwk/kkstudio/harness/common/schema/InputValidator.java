@@ -1,10 +1,9 @@
 package fun.fengwk.kkstudio.harness.common.schema;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 
@@ -37,9 +36,7 @@ public final class InputValidator {
       }
     }
     if (!additionalProperties) {
-      Iterator<String> names = node.fieldNames();
-      while (names.hasNext()) {
-        String name = names.next();
+      for (String name : node.propertyNames()) {
         if (!properties.containsKey(name)) {
           throw mismatch(path + "." + name, "is not allowed");
         }
@@ -54,7 +51,7 @@ public final class InputValidator {
 
   private static void validateElement(String path, JsonNode node, SchemaElement schema) {
     if (schema instanceof StringSchema) {
-      requireType(path, node.isTextual(), "string");
+      requireType(path, node.isString(), "string");
     } else if (schema instanceof IntegerSchema) {
       requireType(path, node.isIntegralNumber(), "integer");
     } else if (schema instanceof NumberSchema) {
@@ -62,8 +59,8 @@ public final class InputValidator {
     } else if (schema instanceof BooleanSchema) {
       requireType(path, node.isBoolean(), "boolean");
     } else if (schema instanceof EnumSchema enumSchema) {
-      requireType(path, node.isTextual(), "string enum");
-      if (!enumSchema.values().contains(node.asText())) {
+      requireType(path, node.isString(), "string enum");
+      if (!enumSchema.values().contains(node.asString())) {
         throw mismatch(path, "must be one of " + enumSchema.values());
       }
     } else if (schema instanceof ArraySchema arraySchema) {

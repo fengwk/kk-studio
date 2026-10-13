@@ -84,7 +84,7 @@ class CommonModuleArchitectureTest {
       productionDependencies.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
     }
     assertEquals(
-        List.of("com.fasterxml.jackson.core:jackson-databind"),
+        List.of("tools.jackson.core:jackson-databind"),
         productionDependencies,
         "common module must only declare jackson-databind as production dependency");
   }
@@ -126,6 +126,7 @@ class CommonModuleArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("tools.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.");
   }
 

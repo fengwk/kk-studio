@@ -1,21 +1,21 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonDeserializer;
-import com.fasterxml.jackson.databind.JsonMappingException;
-
-import java.io.IOException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
+import tools.jackson.databind.DatabindException;
+import tools.jackson.databind.DeserializationContext;
+import tools.jackson.databind.ValueDeserializer;
 
 /** 局部禁用 Jackson 对字符串字段的标量强制转换，不影响 catalog 其他字段。 */
-public final class ProtocolOptionsJsonStringDeserializer extends JsonDeserializer<String> {
+public final class ProtocolOptionsJsonStringDeserializer extends ValueDeserializer<String> {
 
   @Override
-  public String deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+  public String deserialize(JsonParser parser, DeserializationContext context)
+      throws JacksonException {
     if (parser.currentToken() != JsonToken.VALUE_STRING) {
-      throw JsonMappingException.from(parser, "protocolOptionsJson must be a JSON string");
+      throw DatabindException.from(parser, "protocolOptionsJson must be a JSON string");
     }
-    return parser.getText();
+    return parser.getString();
   }
 }

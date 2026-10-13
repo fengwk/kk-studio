@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.share.ai.environment;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.URI;
@@ -24,9 +26,10 @@ import java.util.Set;
  */
 public final class DaemonConfigurationCodec {
   private static final ObjectMapper MAPPER =
-      new ObjectMapper()
-          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private DaemonConfigurationCodec() {}
 
@@ -35,7 +38,7 @@ public final class DaemonConfigurationCodec {
     JsonNode node;
     try {
       node = MAPPER.readTree(Files.readAllBytes(file));
-    } catch (IOException error) {
+    } catch (IOException | JacksonException error) {
       throw invalid("daemon", "cannot read valid JSON (duplicate keys are forbidden)");
     }
     return parse(node);
@@ -229,8 +232,8 @@ public final class DaemonConfigurationCodec {
     if (node == null || !node.isObject()) {
       throw invalid(path, "must be an object");
     }
-    node.fieldNames()
-        .forEachRemaining(
+    node.propertyNames()
+        .forEach(
             field -> {
               if (!fields.contains(field)) {
                 String suffix = field.matches("[A-Za-z0-9_.-]+") ? "." + field : "";
@@ -243,10 +246,10 @@ public final class DaemonConfigurationCodec {
     if (absent(node)) {
       return null;
     }
-    if (!node.isTextual()) {
+    if (!node.isString()) {
       throw invalid(path, "must be a string");
     }
-    return node.textValue();
+    return node.stringValue();
   }
 
   private static List<String> textList(JsonNode node, String path) {

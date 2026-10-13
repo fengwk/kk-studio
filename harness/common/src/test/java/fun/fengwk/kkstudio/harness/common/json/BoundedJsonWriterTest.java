@@ -6,17 +6,19 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 /** {@link BoundedJsonWriter} 的有界 UTF-8 编码、临界字节判定与提前中止测试。 */
 class BoundedJsonWriterTest {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
   /** 验证未超限返回与全量序列化完全一致的文本，超限一字节返回 null。 */
   @Test
@@ -78,6 +80,21 @@ class BoundedJsonWriterTest {
     assertNull(BoundedJsonWriter.write(node, 1024));
   }
 
+  /**
+   * 超限识别必须沿 cause 链只认有界输出流自身的 {@link BoundedOutputStream.LimitExceededException}；其它序列化/IO 失败不得被
+   * 误判为超限，否则会把真实编码错误静默变成 null。
+   */
+  @Test
+  void isOverLimitOnlyMatchesOwnLimitExceededCause() throws Exception {
+    BoundedOutputStream.LimitExceededException limit = limitExceeded();
+    assertTrue(BoundedJsonWriter.isOverLimit(limit));
+    assertTrue(BoundedJsonWriter.isOverLimit(new IllegalStateException("wrapper", limit)));
+
+    assertFalse(BoundedJsonWriter.isOverLimit(new IOException("generic io failure")));
+    assertFalse(BoundedJsonWriter.isOverLimit(new IllegalStateException(new IOException("io"))));
+    assertFalse(BoundedJsonWriter.isOverLimit(new IllegalStateException("no cause")));
+  }
+
   /** 验证非法参数校验：maxBytes 非正数抛 IllegalArgumentException，node 为 null 抛 NullPointerException。 */
   @Test
   void validatesArguments() {
@@ -88,5 +105,16 @@ class BoundedJsonWriterTest {
     assertThrows(NullPointerException.class, () -> BoundedJsonWriter.write(null, 1024));
     assertThrows(IllegalArgumentException.class, () -> BoundedJsonWriter.fits(node, 0));
     assertThrows(NullPointerException.class, () -> BoundedJsonWriter.fits(null, 1024));
+  }
+
+  /** 使用真实有界输出流产生一个超限中止异常，供超限识别断言使用。 */
+  private static BoundedOutputStream.LimitExceededException limitExceeded() throws IOException {
+    BoundedOutputStream out = new BoundedOutputStream(1);
+    try {
+      out.write(new byte[] {1, 2});
+    } catch (BoundedOutputStream.LimitExceededException error) {
+      return error;
+    }
+    throw new AssertionError("expected BoundedOutputStream to abort over limit");
   }
 }

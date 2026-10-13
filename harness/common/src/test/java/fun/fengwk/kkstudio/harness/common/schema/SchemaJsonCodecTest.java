@@ -3,11 +3,11 @@ package fun.fengwk.kkstudio.harness.common.schema;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -69,13 +69,12 @@ class SchemaJsonCodecTest {
     ObjectNode node = codec.encodeNode(schema);
 
     // 校验 properties key 顺序
-    List<String> propertyKeys = new ArrayList<>();
-    node.get("properties").fieldNames().forEachRemaining(propertyKeys::add);
+    List<String> propertyKeys = new ArrayList<>(node.get("properties").propertyNames());
     assertEquals(List.of("alpha", "beta", "zeta"), propertyKeys);
 
     // 校验 required 元素顺序
     List<String> requiredList = new ArrayList<>();
-    node.get("required").forEach(item -> requiredList.add(item.asText()));
+    node.get("required").forEach(item -> requiredList.add(item.asString()));
     assertEquals(List.of("alpha", "zeta"), requiredList);
   }
 

@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.common.schema;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
@@ -88,10 +88,10 @@ public final class InputNormalizer {
   }
 
   private static Long parseInteger(JsonNode node) {
-    if (!node.isTextual()) {
+    if (!node.isString()) {
       return null;
     }
-    String text = node.asText();
+    String text = node.asString();
     if (!INTEGER_TEXT.matcher(text).matches()) {
       return null;
     }
@@ -103,10 +103,10 @@ public final class InputNormalizer {
   }
 
   private static BigDecimal parseNumber(JsonNode node) {
-    if (!node.isTextual()) {
+    if (!node.isString()) {
       return null;
     }
-    String text = node.asText();
+    String text = node.asString();
     if (!NUMBER_TEXT.matcher(text).matches()) {
       return null;
     }

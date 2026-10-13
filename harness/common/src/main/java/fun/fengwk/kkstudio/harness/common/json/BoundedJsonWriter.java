@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.harness.common.json;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
-import java.io.IOException;
 import java.util.Objects;
 
 /**
@@ -11,10 +12,13 @@ import java.util.Objects;
  *
  * <p>将任意 {@link JsonNode} 序列化为 JSON 文本并施加 UTF-8 字节上限：超过 {@code maxBytes} 字节即在中止点停止并返回 {@code
  * null}（不物化完整输出）；未超限时返回完整 JSON 文本。上限判定由共享的 {@link BoundedOutputStream} 承担。
+ *
+ * <p>Jackson 会把 {@link BoundedOutputStream} 抛出的 {@link BoundedOutputStream.LimitExceededException}
+ * 包装成 {@link JacksonException}，因此超限识别必须沿 cause 链定位本类专属异常， 不能把任意序列化/IO 失败都当作超限。
  */
 public final class BoundedJsonWriter {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
   private BoundedJsonWriter() {}
 
@@ -49,11 +53,22 @@ public final class BoundedJsonWriter {
     BoundedOutputStream out = new BoundedOutputStream(maxBytes, retainBytes);
     try {
       OBJECT_MAPPER.writeValue(out, node);
-    } catch (BoundedOutputStream.LimitExceededException error) {
-      return null;
-    } catch (IOException exception) {
-      throw new IllegalArgumentException("cannot encode JSON", exception);
+    } catch (JacksonException error) {
+      if (isOverLimit(error)) {
+        return null;
+      }
+      throw new IllegalArgumentException("cannot encode JSON", error);
     }
     return out;
+  }
+
+  /** 仅当 cause 链中出现有界输出流自身的超限中止时判定为超限；其它序列化/IO 失败不视为超限。 */
+  static boolean isOverLimit(Throwable error) {
+    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (cause instanceof BoundedOutputStream.LimitExceededException) {
+        return true;
+      }
+    }
+    return false;
   }
 }

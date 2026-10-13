@@ -8,8 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.util.List;
@@ -17,7 +17,7 @@ import java.util.List;
 /** Skill Package wire 契约：严格请求字段、十进制 version、required-nullable 检查事实与正文缺席。 */
 class SkillPackageDtoContractTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   @Test
   void createRequestCarriesOnlyRepositoryFacts() throws Exception {
