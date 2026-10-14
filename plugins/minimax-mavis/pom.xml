@@ -43,6 +43,10 @@
             <artifactId>kk-studio-harness-contributor-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-canvas-plugin-api</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
@@ -85,6 +89,8 @@
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisRedaction</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisRenewalRequest</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisStatus</include>
+                                        <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisInstance</include>
+                                        <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisPlugin</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.tool.MavisToolDefinitions</include>
                                     </includes>
                                     <limits>

@@ -21,12 +21,10 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
@@ -96,7 +94,7 @@ class MiniMaxMavisToolFailureTest {
   @EnumSource(PluginCredentialUnavailableReason.class)
   void credentialUnavailableFailsDeterministicallyWithoutTransportCalls(
       PluginCredentialUnavailableReason reason) {
-    PluginCredentialStore credentialStore = new FailingCredentialStore(reason);
+    PluginCredentialAccess credentialAccess = new FailingCredentialAccess(reason);
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
@@ -105,7 +103,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.WEB_SEARCH,
             MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             access,
@@ -139,7 +137,7 @@ class MiniMaxMavisToolFailureTest {
     // 目录返回不包含 web_search 的列表
     transport.setCatalogResponse("{\"tools\":[{\"endpoint\":\"synthesize_speech\"}]}");
 
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
@@ -148,7 +146,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.WEB_SEARCH,
             MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             access,
@@ -182,7 +180,7 @@ class MiniMaxMavisToolFailureTest {
       value = MavisCapability.class,
       names = {"TTS", "TTS_BATCH", "GENERATE_IMAGE", "GENERATE_MUSIC"})
   void nonIdempotentGenerationFailsBeforeSendWhenGatewayUnbound(MavisCapability capability) {
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     // 无资源网关
@@ -192,7 +190,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             capability,
             MavisToolDefinitions.load(capability),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             accessWithoutGateway,
@@ -225,7 +223,7 @@ class MiniMaxMavisToolFailureTest {
    */
   @Test
   void sessionResourceWithoutGatewayFailsDeterministicallyWithoutTransport() {
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess accessWithoutGateway = new MiniMaxMavisResourceAccess(null);
@@ -234,7 +232,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.REVERSE_IMAGE,
             MavisToolDefinitions.load(MavisCapability.REVERSE_IMAGE),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             accessWithoutGateway,
@@ -264,7 +262,7 @@ class MiniMaxMavisToolFailureTest {
    */
   @Test
   void sessionResourceWithGatewayIsResolvedToHttpsInRequestBody() {
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess accessWithGateway = new MiniMaxMavisResourceAccess(gateway);
@@ -273,7 +271,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.REVERSE_IMAGE,
             MavisToolDefinitions.load(MavisCapability.REVERSE_IMAGE),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             accessWithGateway,
@@ -313,7 +311,7 @@ class MiniMaxMavisToolFailureTest {
    */
   @Test
   void sessionResourceExplicitlyPassesThreadIdToResourceGateway() {
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess accessWithGateway = new MiniMaxMavisResourceAccess(gateway);
@@ -322,7 +320,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.REVERSE_IMAGE,
             MavisToolDefinitions.load(MavisCapability.REVERSE_IMAGE),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             accessWithGateway,
@@ -360,7 +358,7 @@ class MiniMaxMavisToolFailureTest {
    */
   @Test
   void sessionResourceWithGatewayButMissingContextFailsBeforeSend() {
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess accessWithGateway = new MiniMaxMavisResourceAccess(gateway);
@@ -369,7 +367,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.REVERSE_IMAGE,
             MavisToolDefinitions.load(MavisCapability.REVERSE_IMAGE),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             accessWithGateway,
@@ -417,7 +415,7 @@ class MiniMaxMavisToolFailureTest {
         "kkstudio:/other/11111111-2222-3333-4444-555555555555" // 非 resources 路径
       })
   void malformedSessionResourceUriFailsDeterministically(String malformedUri) {
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess accessWithGateway = new MiniMaxMavisResourceAccess(gateway);
@@ -426,7 +424,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.REVERSE_IMAGE,
             MavisToolDefinitions.load(MavisCapability.REVERSE_IMAGE),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             accessWithGateway,
@@ -470,7 +468,7 @@ class MiniMaxMavisToolFailureTest {
   void transportExceptionFailsWithMavisCallFailedAndRedactsToken() {
     transport.setInvokeFailure(new MavisTransportException("connect timeout to upstream provider"));
 
-    PluginCredentialStore credentialStore = validCredentialStore();
+    PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
@@ -479,7 +477,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.WEB_SEARCH,
             MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             access,
@@ -505,23 +503,23 @@ class MiniMaxMavisToolFailureTest {
 
   /**
    * 调用期 HTTP 401 是已证认证拒绝：结果仍是确定性 MAVIS_CALL_FAILED，但必须把**本次解析出的**凭据（同一快照实例，携带自己的 version 与原始密文）交给
-   * credentialStore 收敛，且错误文本不含 token。
+   * credentialAccess 收敛，且错误文本不含 token。
    */
   @Test
   void authenticatedRejectionInvalidatesExactlyTheResolvedCredential() {
     transport.setInvokeResponse(new MavisHttpResponse(401, "{}"));
     PluginCredentialSnapshot snapshot = snapshot();
-    RejectionTrackingCredentialStore credentialStore =
-        new RejectionTrackingCredentialStore(snapshot);
+    RejectionTrackingCredentialAccess credentialAccess =
+        new RejectionTrackingCredentialAccess(snapshot);
 
-    ToolResult result = executeWebSearch(credentialStore);
+    ToolResult result = executeWebSearch(credentialAccess);
 
     assertTrue(result.error());
     assertTrue(resultText(result).startsWith("MAVIS_CALL_FAILED"));
     assertFalse(resultText(result).contains(IDENTIFIABLE_SECRET_TOKEN));
     assertEquals(
         List.of(snapshot),
-        credentialStore.rejected(),
+        credentialAccess.rejected(),
         "rejectUsed must receive exactly the credential resolved for this call");
   }
 
@@ -531,8 +529,8 @@ class MiniMaxMavisToolFailureTest {
     transport.setInvokeResponse(
         new MavisHttpResponse(
             403, "{\"base_resp\":{\"status_code\":1006,\"status_msg\":\"permission denied\"}}"));
-    RejectionTrackingCredentialStore forbiddenStore =
-        new RejectionTrackingCredentialStore(snapshot());
+    RejectionTrackingCredentialAccess forbiddenStore =
+        new RejectionTrackingCredentialAccess(snapshot());
     assertTrue(executeWebSearch(forbiddenStore).error());
     assertTrue(
         forbiddenStore.rejected().isEmpty(),
@@ -540,8 +538,8 @@ class MiniMaxMavisToolFailureTest {
 
     transport.setInvokeResponse(
         new MavisHttpResponse(403, "{\"base_resp\":{\"status_code\":1004}}"));
-    RejectionTrackingCredentialStore rejectedStore =
-        new RejectionTrackingCredentialStore(snapshot());
+    RejectionTrackingCredentialAccess rejectedStore =
+        new RejectionTrackingCredentialAccess(snapshot());
     assertTrue(executeWebSearch(rejectedStore).error());
     assertEquals(1, rejectedStore.rejected().size());
   }
@@ -550,14 +548,14 @@ class MiniMaxMavisToolFailureTest {
   @Test
   void transportFailureNeverInvalidatesCredential() {
     transport.setInvokeFailure(new MavisTransportException("connect timeout to upstream provider"));
-    RejectionTrackingCredentialStore credentialStore =
-        new RejectionTrackingCredentialStore(snapshot());
+    RejectionTrackingCredentialAccess credentialAccess =
+        new RejectionTrackingCredentialAccess(snapshot());
 
-    assertTrue(executeWebSearch(credentialStore).error());
-    assertTrue(credentialStore.rejected().isEmpty());
+    assertTrue(executeWebSearch(credentialAccess).error());
+    assertTrue(credentialAccess.rejected().isEmpty());
   }
 
-  private ToolResult executeWebSearch(PluginCredentialStore credentialStore) {
+  private ToolResult executeWebSearch(PluginCredentialAccess credentialAccess) {
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
@@ -565,7 +563,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.WEB_SEARCH,
             MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
-            credentialStore,
+            credentialAccess,
             client,
             cache,
             access,
@@ -606,7 +604,7 @@ class MiniMaxMavisToolFailureTest {
         new MiniMaxMavisTool(
             MavisCapability.GENERATE_IMAGE,
             MavisToolDefinitions.load(MavisCapability.GENERATE_IMAGE),
-            validCredentialStore(),
+            validCredentialAccess(),
             client,
             cache,
             access,
@@ -641,7 +639,7 @@ class MiniMaxMavisToolFailureTest {
         UUID.randomUUID(), threadId, Instant.now(), mock(BranchView.class));
   }
 
-  private PluginCredentialStore validCredentialStore() {
+  private PluginCredentialAccess validCredentialAccess() {
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
             MiniMaxMavisPlugin.PLUGIN_ID,
@@ -651,35 +649,22 @@ class MiniMaxMavisToolFailureTest {
             new byte[0],
             new MiniMaxMavisCredentialPayload(IDENTIFIABLE_SECRET_TOKEN, CLIENT_UUID, Instant.now())
                 .toJson());
-    return new MiniMaxMavisToolExecutionTest.FakeCredentialStore(snapshot);
+    return new MiniMaxMavisToolExecutionTest.FakeCredentialAccess(snapshot);
   }
 
-  /** 产生凭据不可用异常的假凭据 Store。 */
-  static final class FailingCredentialStore implements PluginCredentialStore {
+  /** 产生凭据不可用异常的假 scoped 凭据访问。 */
+  static final class FailingCredentialAccess implements PluginCredentialAccess {
     private final PluginCredentialUnavailableReason reason;
 
-    FailingCredentialStore(PluginCredentialUnavailableReason reason) {
+    FailingCredentialAccess(PluginCredentialUnavailableReason reason) {
       this.reason = reason;
     }
 
     @Override
-    public PluginCredentialProjection projection(String pluginId) {
-      return null;
-    }
-
-    @Override
-    public PluginCredentialSnapshot resolve(String pluginId) {
+    public PluginCredentialSnapshot resolve() {
       throw new PluginCredentialUnavailableException(
           reason, "Credential unavailable due to: " + reason);
     }
-
-    @Override
-    public PluginCredentialProjection save(String pluginId, PluginCredentialMaterial material) {
-      return null;
-    }
-
-    @Override
-    public void delete(String pluginId) {}
 
     @Override
     public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
@@ -687,33 +672,20 @@ class MiniMaxMavisToolFailureTest {
     }
   }
 
-  /** 记录 rejectUsed 入参的假凭据 Store。 */
-  static final class RejectionTrackingCredentialStore implements PluginCredentialStore {
+  /** 记录 rejectUsed 入参的假 scoped 凭据访问。 */
+  static final class RejectionTrackingCredentialAccess implements PluginCredentialAccess {
     private final PluginCredentialSnapshot snapshot;
     private final List<PluginCredentialSnapshot> rejected =
         Collections.synchronizedList(new ArrayList<>());
 
-    RejectionTrackingCredentialStore(PluginCredentialSnapshot snapshot) {
+    RejectionTrackingCredentialAccess(PluginCredentialSnapshot snapshot) {
       this.snapshot = snapshot;
     }
 
     @Override
-    public PluginCredentialProjection projection(String pluginId) {
-      return null;
-    }
-
-    @Override
-    public PluginCredentialSnapshot resolve(String pluginId) {
+    public PluginCredentialSnapshot resolve() {
       return snapshot;
     }
-
-    @Override
-    public PluginCredentialProjection save(String pluginId, PluginCredentialMaterial material) {
-      return null;
-    }
-
-    @Override
-    public void delete(String pluginId) {}
 
     @Override
     public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {

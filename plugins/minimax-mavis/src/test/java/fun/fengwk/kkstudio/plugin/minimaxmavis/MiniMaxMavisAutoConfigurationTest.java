@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.plugin.minimaxmavis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -11,9 +10,8 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
-import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,9 +24,9 @@ import java.util.List;
 /**
  * MiniMax Mavis Plugin 自动配置边界与架构证据测试。
  *
- * <p>验证通过 ApplicationContextRunner 加载 MiniMaxMavisAutoConfiguration 时完整装配
- * StudioPlugin、MiniMaxMavisHarnessContributor、HarnessContributor 与全部 15 个工具，且启动不触发任何网络调用； 验证不加载
- * MiniMaxMavisAutoConfiguration 时容器无残留 Plugin 语义与工具； 验证 AutoConfiguration.imports
+ * <p>验证通过 ApplicationContextRunner 加载 MiniMaxMavisAutoConfiguration 时只装配安装定义及其无状态认证依赖，且启动不触发任何网络调用；
+ * 验证 15 个工具、capability 缓存与工具执行器都不是容器 bean，而由 {@code configure} 按配置装配为实例资源；验证不加载
+ * MiniMaxMavisAutoConfiguration 时容器无残留 Plugin 语义与工具；验证 AutoConfiguration.imports
  * 文件精确声明了该配置类（加回即出现、去掉即消失）。
  */
 class MiniMaxMavisAutoConfigurationTest {
@@ -36,14 +34,11 @@ class MiniMaxMavisAutoConfigurationTest {
   private static final String IMPORTS_PATH =
       "META-INF/spring/" + "org.springframework.boot.autoconfigure." + "AutoConfiguration.imports";
 
-  private final ApplicationContextRunner baseRunner =
-      new ApplicationContextRunner()
-          .withBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class))
-          .withBean(PluginResourceGateway.class, () -> mock(PluginResourceGateway.class));
+  private final ApplicationContextRunner baseRunner = new ApplicationContextRunner();
 
-  /** 验证加载自动配置时，正确注入 StudioPlugin、HarnessContributor 与 15 项工具，且启动过程完全不触碰网络传输。 */
+  /** 自动配置只出现安装定义与无状态认证 bean；工具/缓存/执行器由实例私有，且启动完全不触碰网络传输。 */
   @Test
-  void autoConfigurationBindsPluginAndToolsWithoutTransportCalls() {
+  void autoConfigurationBindsOnlyTheDefinitionWithoutTransportCalls() {
     RecordingTransport recordingTransport = new RecordingTransport();
 
     baseRunner
@@ -55,19 +50,18 @@ class MiniMaxMavisAutoConfigurationTest {
 
               assertThat(context).hasSingleBean(StudioPlugin.class);
               assertThat(context).hasSingleBean(MiniMaxMavisPlugin.class);
-              assertThat(context).hasSingleBean(HarnessContributor.class);
-              assertThat(context).hasSingleBean(MiniMaxMavisHarnessContributor.class);
 
-              MiniMaxMavisHarnessContributor contributor =
-                  context.getBean(MiniMaxMavisHarnessContributor.class);
-              assertEquals(
-                  15, contributor.toolCount(), "Contributor must provide exactly 15 tools");
+              // 旧装配路径必须彻底消失：没有独立 Contributor、工具执行器、capability 缓存或资源访问 bean。
+              assertThat(context).doesNotHaveBean(MiniMaxMavisHarnessContributor.class);
+              assertThat(context).doesNotHaveBean(MiniMaxMavisCapabilityCache.class);
+              assertThat(context).doesNotHaveBean(MiniMaxMavisResourceAccess.class);
+              assertThat(context.containsBean("mavisToolExecutor")).isFalse();
+              assertThat(context.getBeansOfType(HarnessContributor.class)).isEmpty();
+              assertThat(context.getBeansOfType(Tool.class)).isEmpty();
 
-              for (MavisCapability capability : MavisCapability.values()) {
-                Tool tool = contributor.tools().get(capability);
-                assertThat(tool).isNotNull();
-                assertEquals(capability.toolName(), tool.descriptor().name());
-              }
+              // 唯一注册点仍是安装定义：默认配置由它装配出完整 15 工具的实例。
+              StudioPlugin plugin = context.getBean(StudioPlugin.class);
+              assertEquals(MiniMaxMavisPlugin.PLUGIN_ID, plugin.descriptor().pluginId());
 
               // 启动期断言：绝不触发任何 HTTP 传输调用（未联网启动）
               assertTrue(
@@ -87,6 +81,7 @@ class MiniMaxMavisAutoConfigurationTest {
           assertThat(context).hasNotFailed();
           assertThat(context).doesNotHaveBean(StudioPlugin.class);
           assertThat(context).doesNotHaveBean(MiniMaxMavisPlugin.class);
+          assertThat(context).doesNotHaveBean(PluginInstance.class);
           assertThat(context).doesNotHaveBean(HarnessContributor.class);
           assertThat(context).doesNotHaveBean(MiniMaxMavisHarnessContributor.class);
           assertThat(context.getBeansOfType(Tool.class)).isEmpty();
