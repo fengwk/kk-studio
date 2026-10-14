@@ -25,7 +25,8 @@ Canvas 使用 Function SPI 执行具体能力。两者通过 Storage Blob 保存
 flowchart LR
     Browser["Browser<br/>frontend"]
     Web["web<br/>HTTP / WebSocket / lifecycle"]
-    Platform["platform<br/>application services / adapters"]
+    PlatformApi["platform-plugin-api<br/>plugin SPI contracts"]
+    PlatformRuntime["platform-runtime<br/>application services / adapters"]
     Harness["Harness<br/>Runtime / Provider / Contributor"]
     Plugins["Plugins<br/>auto-configuration / tools / functions"]
     Infra["Harness Infra<br/>Store / Work / Realtime"]
@@ -37,21 +38,24 @@ flowchart LR
     Daemon["Environment Daemon<br/>host capabilities"]
 
     Browser -->|REST + events| Web
-    Web --> Platform
+    Web --> PlatformRuntime
+    Web --> PlatformApi
     Web --> Harness
     Web --> Infra
     Web --> Canvas
     Web --> Project
     Web --> Plugins
-    Plugins --> Platform
+    Plugins --> PlatformApi
+    Plugins -->|ComfyUI host services| PlatformRuntime
     Plugins --> Harness
     Plugins --> Canvas
-    Platform --> Harness
-    Platform --> Canvas
-    Platform --> Project
+    PlatformRuntime --> PlatformApi
+    PlatformRuntime --> Harness
+    PlatformRuntime --> Canvas
+    PlatformRuntime --> Project
     Project --> Harness
-    Platform --> PG
-    Platform --> S3
+    PlatformRuntime --> PG
+    PlatformRuntime --> S3
     Infra --> PG
     Canvas --> PG
     Project --> PG
@@ -65,13 +69,16 @@ flowchart LR
 Worker 与生命周期。领域契约和状态机位于内层，数据库、主机、网络和产品适配位于外层：
 
 ```text
-frontend -> web -> platform
-web -(runtime)-> selected plugins -> platform / harness-contributor-api / canvas-plugin-api / canvas-core
+frontend -> web -> platform-runtime
+web -> platform-plugin-api
+web -(runtime)-> selected plugins -> platform-plugin-api / harness-contributor-api / canvas-plugin-api / canvas-core
+canvas-comfyui -> platform-runtime（提示词任务与资源服务）
 web -> canvas-infra -> canvas-plugin-api -> canvas-core
 web -> project -> harness-runtime
 web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
-platform -> Canvas / Harness contracts / harness-mcp
-platform -> project（实现宿主端口）
+platform-runtime -> platform-plugin-api
+platform-runtime -> Canvas / Harness contracts / harness-mcp
+platform-runtime -> project（实现宿主端口）
 harness-daemon -> harness-environment
 ```
 
@@ -185,7 +192,8 @@ Plugin 通过 Spring Boot auto-configuration 注册以下能力：
 拥有相同 JVM 权限，部署者须信任其代码。Web 收集 Spring 容器中的
 `HarnessContributor` bean，校验依赖与名称后冻结为不可变 HarnessCatalog。
 Contributor 契约和 Plugin 装配见
-[Contributor API](modules/harness-contributor-api.md)和 [Platform](modules/platform.md)。
+[Contributor API](modules/harness-contributor-api.md)、[Platform Plugin API](modules/platform-plugin-api.md)
+和 [Platform](modules/platform.md)。
 MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消见
 [Harness MCP](modules/harness-mcp.md)。
 

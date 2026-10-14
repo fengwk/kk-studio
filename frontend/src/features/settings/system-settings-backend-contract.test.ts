@@ -44,7 +44,7 @@ describe('settings backend field contract', () => {
   // 服务端 schema 路径必须与前端 mock 和运行时草稿分别一致，不能只让 mock 自洽。
   it('matches the server schema field paths without weakening validation', () => {
     const source = backendSource(
-      'platform/src/main/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsSchemaProvider.java',
+      'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsSchemaProvider.java',
     )
     const paths = [...source.matchAll(/\bfield\(\s*"([^"]+)"/g)]
       .map((match) => match[1])

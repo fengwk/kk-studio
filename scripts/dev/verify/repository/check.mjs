@@ -52,6 +52,7 @@ const moduleDocuments = [
   'harness-runtime.md',
   'harness-tool.md',
   'platform.md',
+  'platform-plugin-api.md',
   'project.md',
   'schema.md',
   'share.md',

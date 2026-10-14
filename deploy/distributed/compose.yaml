@@ -119,7 +119,7 @@ services:
     volumes:
       - ../test/mock/server.py:/mock/server.py:ro
       - ${DISTRIBUTED_MOCK_ROUTES:-../test/mock/routes.json}:/config/routes.json:ro
-      - ../../platform/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource:/fixtures:ro
+      - ../../platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource:/fixtures:ro
     healthcheck:
       test:
         - CMD

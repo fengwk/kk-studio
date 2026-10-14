@@ -39,7 +39,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/builtin -am test \
   -Dtest='TaskToolTest,SubagentTaskRequestTest,SubagentTaskMessagesTest,SubagentConfigTest,BuiltinHarnessContributorTest'
 
 # Platform 接受编排、Agent 物化、设置、归属与清理
-env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform -am test \
+env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform/runtime -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dtest='SubagentTaskRunnerTest,AgentBranchSettingsMaterializerTest,AgentPromptComposerTest,HarnessOneShotServiceTest,DatabaseTurnResolverTest,BuiltinHarnessContributorConfigurationTest,SystemSettingsTest,SessionDeletionOrchestratorTest,HarnessOwnerQueryServiceTest,IssueReconcilerIntegrationTest'
 

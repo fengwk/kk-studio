@@ -40,7 +40,7 @@ const PI_MODEL_NAMES = JSON.parse(
   readFileSync(
     path.join(
       REPO_ROOT,
-      'platform/src/test/resources/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/pi-model-catalog.json',
+      'platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/pi-model-catalog.json',
     ),
     'utf8',
   ),

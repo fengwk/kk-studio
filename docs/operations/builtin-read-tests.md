@@ -16,7 +16,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/common -am verify
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am test \
   -Dtest='ReadCapabilityTest,LocalTextReadWindowTest,ReadWriteEditCapabilitiesTest,EnvironmentCapabilityCatalogTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
-env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform -am test \
+env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform/runtime -am test \
   -Dtest='ReadTextWindowTest,PlatformReadToolExecutorTest,PlatformResourceContentReaderTest,PlatformSkillContentReaderTest,S3StorageDeadlineIntegrationTest,ToolResultFinalizerTest,GlobalStorageToolResultHistoryMaterializerIntegrationTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
@@ -40,7 +40,7 @@ Daemon 没有绑定该门禁。筛选测试得到的报告不能代表整个模�
 验证共享核心；
 [`LocalTextReadWindowTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalTextReadWindowTest.java)
 与 Platform 的
-[`ReadTextWindowTest`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/read/ReadTextWindowTest.java)
+[`ReadTextWindowTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/read/ReadTextWindowTest.java)
 验证两个适配器。同名近似的类不要混为一层。
 
 | 要验证的行为 | 主要证据 |
@@ -87,14 +87,14 @@ read 不等待进程内文件变更队列，也没有成功 observer 回调；�
 
 `PlatformReadToolExecutorTest`、`PlatformResourceContentReaderTest`、`PlatformSkillContentReaderTest`
 验证 Resource/Skill 读取进入同一窗口投影；
-[`S3StorageDeadlineIntegrationTest`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/S3StorageDeadlineIntegrationTest.java)
+[`S3StorageDeadlineIntegrationTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/storage/S3StorageDeadlineIntegrationTest.java)
 验证响应头前与响应体内阻塞时存储截止时间生效及错误翻译。
 `PlatformResourceContentReader` 的 30 秒预算与线程中断是两种约束，应分别观察超时与取消路径。
 `ToolResultFinalizerTest` 验证可信 read 身份专属的 **320 KiB / 2020 物理行**内联预算：
 2000 行与 60000 码点的最坏文本窗口连同行号、header 仍在预算内，因此文本不产生 resource 预览。
 图片等二进制结果的外部化不是这条内联保证。
 
-[`GlobalStorageToolResultHistoryMaterializerIntegrationTest`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/GlobalStorageToolResultHistoryMaterializerIntegrationTest.java)
+[`GlobalStorageToolResultHistoryMaterializerIntegrationTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/GlobalStorageToolResultHistoryMaterializerIntegrationTest.java)
 另行守卫工具结果外部化到全局 Blob、Session 引用转移与权威文件名。
 E2E `tool.read_turn` 只证明非 YOLO 审批、ALLOW 后完整 canonical 文本内联进入 durable `tool_result`，
 以及后续模型轮次成功；它不提供真实模型 tool→blob 的端到端证据。
