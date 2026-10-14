@@ -30,12 +30,12 @@ class MavisPluginModuleArchitectureTest {
   private static final String PLUGIN_ARTIFACT = "kk-studio-plugin-minimax-mavis";
   private static final List<String> EXPECTED_PRODUCTION_DEPENDENCIES =
       List.of(
-          "com.fasterxml.jackson.core:jackson-databind",
           "fun.fengwk.kk-studio:kk-studio-harness-common",
           "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
           "fun.fengwk.kk-studio:kk-studio-harness-tool",
           "fun.fengwk.kk-studio:kk-studio-platform",
-          "org.springframework.boot:spring-boot-autoconfigure");
+          "org.springframework.boot:spring-boot-autoconfigure",
+          "tools.jackson.core:jackson-databind");
   private static final Set<String> ALLOWED_TEST_DEPENDENCIES =
       Set.of(
           "fun.fengwk.convention4j:convention4j-spring-boot-starter-test",
@@ -46,7 +46,8 @@ class MavisPluginModuleArchitectureTest {
       List.of(
           "java.",
           "javax.",
-          "com.fasterxml.jackson.",
+          "com.fasterxml.jackson.annotation.",
+          "tools.jackson.",
           "lombok.",
           "org.springframework.beans.",
           "org.springframework.boot.autoconfigure.",

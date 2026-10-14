@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis.tool;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
@@ -99,7 +101,11 @@ public final class MiniMaxMavisTool implements Tool {
   /** 通用 renderer key：与 MCP 工具一致，插件工具没有专属前端渲染器。 */
   private static final String RENDERER_KEY = "tool";
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          // 工具入参是自由 JSON：number 按 BigDecimal 读回，避免 1e309 / 1e-324 或高精度小数在 double 中失真。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private final MavisCapability capability;
   private final ToolDescriptor descriptor;
@@ -214,7 +220,7 @@ public final class MiniMaxMavisTool implements Tool {
       arguments = resourceAccess.resolveInputs(threadId(request), arguments);
     } catch (PluginResourceUnavailableException error) {
       return failed(listener, toolCallId, CODE_RESOURCE_UNAVAILABLE, error.getMessage());
-    } catch (JsonProcessingException | IllegalArgumentException error) {
+    } catch (JacksonException | IllegalArgumentException error) {
       return failed(listener, toolCallId, CODE_CALL_FAILED, "invalid tool arguments");
     }
 

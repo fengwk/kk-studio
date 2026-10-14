@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis.tool;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
@@ -14,7 +15,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.EnumMap;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
@@ -32,13 +32,12 @@ public final class MavisToolDefinitions {
   private static final String DESCRIPTION_FIELD = "description";
   private static final String INPUT_SCHEMA_FIELD = "inputSchema";
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private MavisToolDefinitions() {}
 
@@ -73,14 +72,13 @@ public final class MavisToolDefinitions {
     JsonNode root;
     try {
       root = MAPPER.readTree(content);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("malformed MiniMax Mavis tool resource: " + context, error);
     }
     if (root == null || !root.isObject()) {
       throw new IllegalStateException("tool resource must be a JSON object: " + context);
     }
-    for (Iterator<String> names = root.fieldNames(); names.hasNext(); ) {
-      String name = names.next();
+    for (String name : root.propertyNames()) {
       if (!ALLOWED_FIELDS.contains(name)) {
         throw new IllegalStateException(
             "unexpected field '" + name + "' in tool resource: " + context);
