@@ -1,0 +1,4 @@
+[
+  "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}],\"vendor_opaque\":{\"big\":1e309,\"tiny\":1e-324,\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}}}",
+  "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"
+]

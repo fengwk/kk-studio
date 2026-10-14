@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
@@ -79,24 +81,13 @@ class OpenAiResponsesPrecisionRegressionTest {
     assertPreservedScale(consts.path("ratio").path("const"), "1.10");
   }
 
-  /** 原生 message item 的未知字段穿过 stream -> replay -> encoder 后数值类型与值仍精确。 */
+  /** 原生 message item 的未知字段穿过 SSE 解析 -> stream -> replay -> encoder 后数值类型与值仍精确。 */
   @Test
   void streamAndReplayPreserveOpaqueItemNumberPrecision() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
             request(List.of(), List.of()), descriptor, event -> {});
-    accumulator.processEvent(
-        MAPPER.readTree(
-            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{"
-                + "\"type\":\"message\",\"role\":\"assistant\","
-                + "\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}],"
-                + "\"vendor_opaque\":{\"big\":1e309,\"tiny\":1e-324,"
-                + "\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}}}"));
-    accumulator.processEvent(
-        MAPPER.readTree(
-            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\","
-                + "\"status\":\"completed\","
-                + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
+    feedSseFrames(accumulator, "fixtures/precision/opaque-item-precision-frames.json");
 
     ProviderCompletion completion = accumulator.finish();
     JsonNode opaque =
@@ -130,9 +121,7 @@ class OpenAiResponsesPrecisionRegressionTest {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
             request(List.of(), List.of()), descriptor, event -> {});
-    for (JsonNode frame : eventFrames("fixtures/precision/wide-output-index-items.json")) {
-      accumulator.processEvent(frame);
-    }
+    feedSseFrames(accumulator, "fixtures/precision/wide-output-index-items.json");
 
     ProviderCompletion completion = accumulator.finish();
     JsonNode output = completion.replayState().payload().path("output");
@@ -141,6 +130,18 @@ class OpenAiResponsesPrecisionRegressionTest {
     assertExactNumber(output.get(0).path("payload").path("n"), "2147483648");
     assertEquals("wide_b", output.get(1).path("id").asString(""));
     assertExactNumber(output.get(1).path("payload").path("n"), "4294967296");
+
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("")),
+            completion.replayState());
+    JsonNode input = wire(request(List.of(assistant), List.of())).path("input");
+    assertEquals(2, input.size());
+    assertEquals("wide_a", input.get(0).path("id").asString(""));
+    assertExactNumber(input.get(0).path("payload").path("n"), "2147483648");
+    assertEquals("wide_b", input.get(1).path("id").asString(""));
+    assertExactNumber(input.get(1).path("payload").path("n"), "4294967296");
   }
 
   /** JSON null 的 id/service_tier 回落协议默认（缺省），不被写成 {@code "null"} 文本。 */
@@ -149,13 +150,7 @@ class OpenAiResponsesPrecisionRegressionTest {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
             request(List.of(), List.of()), descriptor, event -> {});
-    accumulator.processEvent(
-        MAPPER.readTree(
-            "{\"type\":\"response.created\",\"response\":{\"id\":null,\"service_tier\":null}}"));
-    accumulator.processEvent(
-        MAPPER.readTree(
-            "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\","
-                + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
+    feedSseFrames(accumulator, "fixtures/precision/null-id-frames.json");
 
     ProviderCompletion completion = accumulator.finish();
     assertNull(completion.response().requestId());
@@ -163,16 +158,42 @@ class OpenAiResponsesPrecisionRegressionTest {
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
   }
 
-  /** fixture 存的是 SSE 帧文本，这里还原为 {@code processEvent} 接受的官方事件对象。 */
-  private static JsonNode[] eventFrames(String name) throws Exception {
+  /** 逐帧走生产 SSE 入口 {@code handleEvent}：事件名按帧身份读取，payload 文本原样交给生产解析，数值不预先经过测试 mapper。 */
+  private static void feedSseFrames(OpenAiResponsesStreamAccumulator accumulator, String fixture)
+      throws Exception {
+    for (JsonNode frame : frames(fixture)) {
+      String text = frame.stringValue();
+      accumulator.handleEvent(eventName(text), text);
+    }
+  }
+
+  private static JsonNode[] frames(String fixture) throws Exception {
     JsonNode array =
         MAPPER.readTree(
-            ProviderTestFixtures.read(OpenAiResponsesPrecisionRegressionTest.class, name));
-    JsonNode[] events = new JsonNode[array.size()];
-    for (int i = 0; i < events.length; i++) {
-      events[i] = MAPPER.readTree(array.get(i).stringValue());
+            ProviderTestFixtures.read(OpenAiResponsesPrecisionRegressionTest.class, fixture));
+    JsonNode[] frames = new JsonNode[array.size()];
+    for (int i = 0; i < frames.length; i++) {
+      frames[i] = array.get(i);
     }
-    return events;
+    return frames;
+  }
+
+  /** 只按 token 读取帧的原生事件名（等价于 transport 提供的 SSE {@code event} 名），不读取任何数值。 */
+  private static String eventName(String frame) throws Exception {
+    try (JsonParser parser = MAPPER.createParser(frame)) {
+      if (parser.nextToken() != JsonToken.START_OBJECT) {
+        throw new AssertionError("SSE frame is not a JSON object: " + frame);
+      }
+      while (parser.nextToken() != JsonToken.END_OBJECT) {
+        String field = parser.currentName();
+        JsonToken value = parser.nextToken();
+        if ("type".equals(field) && value == JsonToken.VALUE_STRING) {
+          return parser.getString();
+        }
+        parser.skipChildren();
+      }
+    }
+    throw new AssertionError("SSE frame has no event type: " + frame);
   }
 
   private static JsonNode firstWithField(JsonNode array, String field) {
