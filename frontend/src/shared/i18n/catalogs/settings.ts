@@ -161,6 +161,10 @@ export const settingsCatalog = {
     'en-US': 'Deployment master key is unavailable. Credential operations are locked.',
     'zh-CN': '部署主密钥不可用，凭据操作已锁定。',
   },
+  'plugins.noRegionsAvailable': {
+    'en-US': 'No regions available for this plugin',
+    'zh-CN': '该插件无可用区域',
+  },
   'plugins.configure': {
     'en-US': 'Configure',
     'zh-CN': '配置',
@@ -244,6 +248,34 @@ export const settingsCatalog = {
   'plugins.secrets.inputPlaceholder': {
     'en-US': 'Enter secret value',
     'zh-CN': '输入秘密值',
+  },
+  'plugins.configDialog.deepLinkSecretHint': {
+    'en-US': 'Credentials for this plugin are managed via official login authorization.',
+    'zh-CN': '此插件通过官方登录授权管理凭据。',
+  },
+  'plugins.configDialog.mustConfirmClear': {
+    'en-US': 'You must explicitly confirm clearing secret "{{key}}".',
+    'zh-CN': '必须确认清除秘密凭据 “{{key}}”。',
+  },
+  'plugins.configDialog.secretRequired': {
+    'en-US': 'Secret "{{key}}" requires a non-empty value.',
+    'zh-CN': '秘密凭据 “{{key}}” 需要非空值。',
+  },
+  'plugins.configDialog.missingRevision': {
+    'en-US': 'Missing configuration revision. Configuration cannot be saved.',
+    'zh-CN': '缺少配置修订版本，无法保存配置。',
+  },
+  'plugins.configDialog.invalidInteger': {
+    'en-US': 'Invalid integer format.',
+    'zh-CN': '无效的整数格式。',
+  },
+  'plugins.configDialog.invalidNumber': {
+    'en-US': 'Invalid number format.',
+    'zh-CN': '无效的数字格式。',
+  },
+  'plugins.configDialog.invalidContainerJson': {
+    'en-US': 'Invalid JSON container: {{error}}',
+    'zh-CN': '无效的 JSON 容器格式：{{error}}',
   },
   'plugins.epochAndRevision': {
     'en-US': 'Epoch & Revision',

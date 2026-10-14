@@ -9,40 +9,43 @@ import {
   printParseErrorCode,
 } from 'jsonc-parser'
 
-export interface StrictParseResult {
-  ok: boolean
-  tree?: Node
-  error?: string
-}
+export type StrictJsonParseResult =
+  | { ok: true; tree: Node }
+  | { ok: false; error: string }
+
+export type StrictJsonUpdateResult =
+  | { ok: true; newJson: string }
+  | { ok: false; error: string }
 
 /**
  * 递归检查对象属性是否存在重复键。
+ * 返回具体的重复键名（可能为 ""），若无重复返回 null。
  */
-function findDuplicateKeyInNode(node: Node, text: string): string | null {
+function findDuplicateKeyInNode(node: Node): string | null {
   if (node.type === 'object' && node.children) {
     const seenKeys = new Set<string>()
     for (const child of node.children) {
       if (child.type === 'property' && child.children && child.children.length > 0) {
         const keyNode = child.children[0]
-        const rawKey =
-          typeof keyNode.value === 'string'
-            ? keyNode.value
-            : text.slice(keyNode.offset, keyNode.offset + keyNode.length).replace(/^"|"$/g, '')
-        if (seenKeys.has(rawKey)) {
-          return rawKey
+        if (typeof keyNode.value !== 'string') {
+          return ''
         }
-        seenKeys.add(rawKey)
+        const key = keyNode.value
+        if (seenKeys.has(key)) {
+          return key
+        }
+        seenKeys.add(key)
         // 递归检查属性值
         if (child.children.length > 1) {
-          const dup = findDuplicateKeyInNode(child.children[1], text)
-          if (dup) return dup
+          const dup = findDuplicateKeyInNode(child.children[1])
+          if (dup !== null) return dup
         }
       }
     }
   } else if (node.type === 'array' && node.children) {
     for (const item of node.children) {
-      const dup = findDuplicateKeyInNode(item, text)
-      if (dup) return dup
+      const dup = findDuplicateKeyInNode(item)
+      if (dup !== null) return dup
     }
   }
   return null
@@ -54,9 +57,9 @@ function findDuplicateKeyInNode(node: Node, text: string): string | null {
  * - 禁止尾随逗号 (allowTrailingComma: false)
  * - 禁止空内容 (allowEmptyContent: false)
  * - 必须为严格 JSON object 根节点
- * - 递归拒绝重复键
+ * - 递归拒绝重复键（包含空键 "" 和转义等价键）
  */
-export function parseStrictJsonObject(text: string): StrictParseResult {
+export function parseStrictJsonObject(text: string): StrictJsonParseResult {
   if (!text || text.trim().length === 0) {
     return { ok: false, error: 'JSON text must not be empty' }
   }
@@ -84,8 +87,8 @@ export function parseStrictJsonObject(text: string): StrictParseResult {
     return { ok: false, error: `Root JSON value must be an object, got ${tree.type}` }
   }
 
-  const duplicateKey = findDuplicateKeyInNode(tree, text)
-  if (duplicateKey) {
+  const duplicateKey = findDuplicateKeyInNode(tree)
+  if (duplicateKey !== null) {
     return { ok: false, error: `Duplicate key detected: "${duplicateKey}"` }
   }
 
@@ -136,7 +139,14 @@ export function isValidJsonNumberLiteral(val: string): boolean {
 }
 
 /**
- * 修改 JSON 对象中的标量或原始数值文本。
+ * 校验给定的字符串是否符合严格的 JSON 整数格式（无小数部分）。
+ */
+export function isValidJsonIntegerLiteral(val: string): boolean {
+  return /^-?(?:0|[1-9]\d*)(?:[eE]\+?\d+)?$/.test(val.trim())
+}
+
+/**
+ * 修改 JSON 对象中的标量、原始数值或复杂 rawSnippet 片段。
  * 保持未修改属性的原字节和数字精度。
  */
 export function updateStrictJsonField({
@@ -144,63 +154,35 @@ export function updateStrictJsonField({
   path,
   value,
   rawNumberString,
+  rawSnippetString,
 }: {
   rawJson: string
   path: JSONPath
   value?: unknown
   rawNumberString?: string
-}): { ok: boolean; newJson?: string; error?: string } {
+  rawSnippetString?: string
+}): StrictJsonUpdateResult {
   const parseResult = parseStrictJsonObject(rawJson)
-  if (!parseResult.ok || !parseResult.tree) {
+  if (!parseResult.ok) {
     return { ok: false, error: parseResult.error }
   }
 
-  // 1. 如果传了 rawNumberString，需要保留原数字字面量，不走 JS number 精度转换
+  // 1. 如果传了 rawNumberString，需要保留原数字字面量
   if (rawNumberString !== undefined) {
     const trimmed = rawNumberString.trim()
     if (!isValidJsonNumberLiteral(trimmed)) {
       return { ok: false, error: `Invalid JSON number literal: "${trimmed}"` }
     }
-
-    const existingNode = findNodeAtLocation(parseResult.tree, path)
-    if (existingNode) {
-      // 原位替换该 token
-      const nextJson =
-        rawJson.slice(0, existingNode.offset) +
-        trimmed +
-        rawJson.slice(existingNode.offset + existingNode.length)
-      const verify = parseStrictJsonObject(nextJson)
-      if (!verify.ok) {
-        return { ok: false, error: verify.error }
-      }
-      return { ok: true, newJson: nextJson }
-    } else {
-      // 字段尚不存在，先用占位数字 0 modify 插入，再将其替换为 rawNumberString
-      const edits = modify(rawJson, path, 0, {
-        formattingOptions: DEFAULT_FORMATTING,
-      })
-      const intermediate = applyEdits(rawJson, edits)
-      const repParsed = parseStrictJsonObject(intermediate)
-      if (!repParsed.ok || !repParsed.tree) {
-        return { ok: false, error: repParsed.error }
-      }
-      const insertedNode = findNodeAtLocation(repParsed.tree, path)
-      if (!insertedNode) {
-        return { ok: false, error: 'Failed to locate inserted number node' }
-      }
-      const finalJson =
-        intermediate.slice(0, insertedNode.offset) +
-        trimmed +
-        intermediate.slice(insertedNode.offset + insertedNode.length)
-      const verify = parseStrictJsonObject(finalJson)
-      if (!verify.ok) {
-        return { ok: false, error: verify.error }
-      }
-      return { ok: true, newJson: finalJson }
-    }
+    return replaceOrInsertRawSlice(rawJson, parseResult.tree, path, trimmed, 0)
   }
 
-  // 2. 普通值（boolean, string, null, 或复杂对象/数组）通过 modify/applyEdits 更改
+  // 2. 如果传了 rawSnippetString（复杂容器数组或对象），直接替换原始文本切片
+  if (rawSnippetString !== undefined) {
+    const trimmed = rawSnippetString.trim()
+    return replaceOrInsertRawSlice(rawJson, parseResult.tree, path, trimmed, null)
+  }
+
+  // 3. 普通值（boolean, string, null）通过 jsonc-parser modify/applyEdits 更改
   try {
     const edits = modify(rawJson, path, value, {
       formattingOptions: DEFAULT_FORMATTING,
@@ -211,6 +193,57 @@ export function updateStrictJsonField({
       return { ok: false, error: verify.error }
     }
     return { ok: true, newJson: nextJson }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+function replaceOrInsertRawSlice(
+  rawJson: string,
+  tree: Node,
+  path: JSONPath,
+  rawReplacement: string,
+  placeholder: unknown,
+): StrictJsonUpdateResult {
+  const existingNode = findNodeAtLocation(tree, path)
+  if (existingNode) {
+    const nextJson =
+      rawJson.slice(0, existingNode.offset) +
+      rawReplacement +
+      rawJson.slice(existingNode.offset + existingNode.length)
+    const verify = parseStrictJsonObject(nextJson)
+    if (!verify.ok) {
+      return { ok: false, error: verify.error }
+    }
+    return { ok: true, newJson: nextJson }
+  }
+
+  // 字段尚不存在，先用占位值 modify 插入，再将其切片替换为 rawReplacement
+  try {
+    const edits = modify(rawJson, path, placeholder, {
+      formattingOptions: DEFAULT_FORMATTING,
+    })
+    const intermediate = applyEdits(rawJson, edits)
+    const repParsed = parseStrictJsonObject(intermediate)
+    if (!repParsed.ok) {
+      return { ok: false, error: repParsed.error }
+    }
+    const insertedNode = findNodeAtLocation(repParsed.tree, path)
+    if (!insertedNode) {
+      return { ok: false, error: 'Failed to locate inserted node' }
+    }
+    const finalJson =
+      intermediate.slice(0, insertedNode.offset) +
+      rawReplacement +
+      intermediate.slice(insertedNode.offset + insertedNode.length)
+    const verify = parseStrictJsonObject(finalJson)
+    if (!verify.ok) {
+      return { ok: false, error: verify.error }
+    }
+    return { ok: true, newJson: finalJson }
   } catch (err) {
     return {
       ok: false,

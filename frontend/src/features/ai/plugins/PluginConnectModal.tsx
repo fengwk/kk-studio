@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, useState, type ComponentPropsWithRef } from 'react'
-import { useMutation } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -31,13 +30,20 @@ function PluginConnection({
   const candidates =
     plugin.authKind?.type === 'DEEP_LINK'
       ? plugin.authKind.regionCandidates
-      : ['CN']
-  const [selectedRegion, setSelectedRegion] = useState(plugin.region || candidates[0] || 'CN')
+      : []
+
+  const [selectedRegion, setSelectedRegion] = useState(
+    plugin.region && candidates.includes(plugin.region)
+      ? plugin.region
+      : candidates[0] || '',
+  )
   const [authAttemptId, setAuthAttemptId] = useState<string | null>(null)
   const [callbackUrl, setCallbackUrl] = useState('')
   const [prepareError, setPrepareError] = useState<string | null>(null)
   const [completeError, setCompleteError] = useState<string | null>(null)
   const [loginOpened, setLoginOpened] = useState(false)
+  const [preparePending, setPreparePending] = useState(false)
+  const [completePending, setCompletePending] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const inputRefProps: ComponentPropsWithRef<'input'> = { ref: inputRef }
@@ -48,65 +54,47 @@ function PluginConnection({
     mountedRef.current = true
     return () => {
       mountedRef.current = false
-      // 卸载时销毁敏感内存状态
+      // 卸载时立即销毁所有临时敏感内存状态，绝不进入全局缓存
       setAuthAttemptId(null)
       setCallbackUrl('')
     }
   }, [])
 
-  const prepareMutation = useMutation({
-    mutationFn: (region: string) =>
-      pluginsService.prepareAuth(plugin.pluginId, { region }),
-    retry: false,
-    onSuccess: (data) => {
+  const pending = preparePending || completePending
+  const isKeyUnavailable = plugin.status === 'KEY_UNAVAILABLE'
+  const hasNoCandidates = candidates.length === 0
+
+  async function handleOpenLogin() {
+    if (pending || busyRef.current || isKeyUnavailable || hasNoCandidates || !selectedRegion) {
+      return
+    }
+    busyRef.current = true
+    setPreparePending(true)
+    setPrepareError(null)
+    // 开始新 prepare 时清空旧 nonce，绝不复活旧 attemptId
+    setAuthAttemptId(null)
+
+    try {
+      const data = await pluginsService.prepareAuth(plugin.pluginId, { region: selectedRegion })
       if (!mountedRef.current) return
-      setPrepareError(null)
       setAuthAttemptId(data.authAttemptId)
       if (data.loginUrl) {
         window.open(data.loginUrl, '_blank', 'noopener,noreferrer')
         setLoginOpened(true)
       }
-    },
-    onError: (err: unknown) => {
+    } catch (err) {
       if (!mountedRef.current) return
       setPrepareError(err instanceof Error ? err.message : String(err))
       setAuthAttemptId(null)
-    },
-    onSettled: () => {
+    } finally {
+      if (mountedRef.current) {
+        setPreparePending(false)
+      }
       busyRef.current = false
-    },
-  })
-
-  const completeMutation = useMutation({
-    mutationFn: (payload: { authAttemptId: string; callbackUrl: string }) =>
-      pluginsService.completeAuth(plugin.pluginId, payload),
-    retry: false,
-    onSuccess: () => {
-      if (!mountedRef.current) return
-      setAuthAttemptId(null)
-      setCallbackUrl('')
-      onSuccess()
-    },
-    onError: (err: unknown) => {
-      if (!mountedRef.current) return
-      setCompleteError(err instanceof Error ? err.message : String(err))
-    },
-    onSettled: () => {
-      busyRef.current = false
-    },
-  })
-
-  const pending = prepareMutation.isPending || completeMutation.isPending
-  const isKeyUnavailable = plugin.status === 'KEY_UNAVAILABLE'
-
-  function handleOpenLogin() {
-    if (pending || busyRef.current || isKeyUnavailable) return
-    busyRef.current = true
-    setPrepareError(null)
-    prepareMutation.mutate(selectedRegion)
+    }
   }
 
-  function handleComplete(event: React.FormEvent) {
+  async function handleComplete(event: React.FormEvent) {
     event.preventDefault()
     if (pending || busyRef.current || isKeyUnavailable) return
     const trimmed = callbackUrl.trim()
@@ -117,126 +105,174 @@ function PluginConnection({
       setCompleteError(t('plugins.connectDialog.beforeLoginHint'))
       return
     }
-    busyRef.current = true
-    if (inputRef.current) inputRef.current.value = ''
-    setCallbackUrl('')
-    setCompleteError(null)
-    completeMutation.mutate({ authAttemptId, callbackUrl: trimmed })
-  }
 
-  function handleClose() {
-    if (!pending && !busyRef.current) {
-      setAuthAttemptId(null)
+    const currentAttemptId = authAttemptId
+    busyRef.current = true
+    setCompletePending(true)
+    setCompleteError(null)
+    // complete 消费该 nonce，一旦尝试提交立即作废旧 attemptId，防止重试使用已污染 nonce
+    setAuthAttemptId(null)
+    // 提交后立即清字段，不在屏幕常驻
+    setCallbackUrl('')
+
+    try {
+      await pluginsService.completeAuth(plugin.pluginId, {
+        authAttemptId: currentAttemptId,
+        callbackUrl: trimmed,
+      })
+      if (!mountedRef.current) return
+      onSuccess()
+    } catch (err) {
+      if (!mountedRef.current) return
+      setCompleteError(err instanceof Error ? err.message : String(err))
       setCallbackUrl('')
-      onClose()
+      inputRef.current?.focus()
+    } finally {
+      if (mountedRef.current) {
+        setCompletePending(false)
+      }
+      busyRef.current = false
     }
   }
 
   return (
     <Dialog
-      className="resource-modal-card"
       title={t('plugins.connectDialog.title', { name: plugin.name })}
-      onClose={handleClose}
+      onClose={() => {
+        if (!pending) {
+          setAuthAttemptId(null)
+          setCallbackUrl('')
+          onClose()
+        }
+      }}
       pending={pending}
+      className="plugin-connect-modal"
     >
-      <div className="modal-body">
+      <div className="plugin-connect-body">
         {isKeyUnavailable ? (
-          <div className="form-error-banner" role="alert">
+          <div className="callout callout-warning" role="alert">
             {t('plugins.connectDialog.keyUnavailableHint')}
           </div>
         ) : null}
 
-        {prepareError ? (
-          <div className="form-error-banner" role="alert">
-            {prepareError}
+        {hasNoCandidates ? (
+          <div className="callout callout-warning" role="alert">
+            {t('plugins.noRegionsAvailable')}
           </div>
         ) : null}
 
-        {completeError ? (
-          <div className="form-error-banner" role="alert">
-            {completeError}
+        {candidates.length > 1 ? (
+          <div className="form-group">
+            <FieldLabel>{t('plugins.region')}</FieldLabel>
+            <Select
+              value={selectedRegion}
+              options={candidates.map((c) => ({ value: c, label: c }))}
+              onChange={(next) => {
+                setSelectedRegion(next)
+                setAuthAttemptId(null)
+                setLoginOpened(false)
+              }}
+              disabled={pending || isKeyUnavailable}
+              aria-label={t('plugins.region')}
+            />
           </div>
         ) : null}
 
-        {/* 步骤 1：选择区域并获取登录链接 */}
-        <div className="form-group plugin-connect-step">
-          <FieldLabel required>{t('plugins.connectDialog.step1')}</FieldLabel>
-          <div className="plugin-connect-login">
-            <div className="plugin-connect-region">
-              <Select
-                aria-label={t('plugins.region')}
-                value={selectedRegion}
-                disabled={isKeyUnavailable || pending}
-                options={candidates.map((candidate) => ({ value: candidate, label: candidate }))}
-                onChange={(region) => {
-                  if (!pending && !busyRef.current && !isKeyUnavailable) {
-                    setSelectedRegion(region)
-                    setAuthAttemptId(null)
-                    setLoginOpened(false)
-                  }
-                }}
-              />
-            </div>
+        {/* 第一步：打开官方登录页面 */}
+        <div className="plugin-connect-step">
+          <div className="step-badge">1</div>
+          <div className="step-content">
+            <p className="step-desc">
+              {t('plugins.connectDialog.step1')}
+            </p>
             <Button
-              disabled={isKeyUnavailable || pending}
+              type="button"
+              variant="ghost"
+              className="btn-outline"
+              disabled={pending || isKeyUnavailable || hasNoCandidates || !selectedRegion}
               onClick={handleOpenLogin}
+              aria-label={
+                preparePending
+                  ? t('plugins.connectDialog.preparing')
+                  : t('plugins.connectDialog.openLogin')
+              }
             >
-              <ExternalLink size={16} aria-hidden="true" />
-              {prepareMutation.isPending
+              <ExternalLink size={14} aria-hidden="true" style={{ marginRight: 6 }} />
+              {preparePending
                 ? t('plugins.connectDialog.preparing')
                 : t('plugins.connectDialog.openLogin')}
             </Button>
+            {prepareError ? (
+              <span className="inline-hint danger" role="alert">
+                {prepareError}
+              </span>
+            ) : null}
           </div>
         </div>
 
-        {/* 步骤 2：粘贴回调 Deep Link */}
-        <form onSubmit={handleComplete} noValidate>
-          <div className="form-group">
-            <FieldLabel required>{t('plugins.connectDialog.step2')}</FieldLabel>
-            <TextInput
-              {...inputRefProps}
-              type="password"
-              aria-label={t('plugins.connectDialog.step2')}
-              autoComplete="off"
-              data-testid="plugin-callback-input"
-              value={callbackUrl}
-              disabled={isKeyUnavailable || pending}
-              placeholder={t('plugins.connectDialog.callbackPlaceholder')}
-              onChange={(e) => {
-                if (!pending && !busyRef.current && !isKeyUnavailable) {
+        {/* 第二步：填入回跳 URL 并完成连接 */}
+        <form onSubmit={handleComplete} className="plugin-connect-step">
+          <div className="step-badge">2</div>
+          <div className="step-content">
+            <p className="step-desc">
+              {t('plugins.connectDialog.step2')}
+            </p>
+            <div className="form-group">
+              <FieldLabel required>{t('plugins.connectDialog.step2')}</FieldLabel>
+              <TextInput
+                {...inputRefProps}
+                type="password"
+                autoComplete="off"
+                data-testid="plugin-callback-input"
+                aria-label={t('plugins.connectDialog.step2')}
+                placeholder={t('plugins.connectDialog.callbackPlaceholder')}
+                value={callbackUrl}
+                disabled={pending || isKeyUnavailable}
+                onChange={(e) => {
                   setCallbackUrl(e.target.value)
-                }
-              }}
-              required
-            />
-            <span className="inline-hint plugin-connect-hint">
-              {loginOpened
-                ? t('plugins.connectDialog.afterLoginHint')
-                : t('plugins.connectDialog.beforeLoginHint')}
-            </span>
-          </div>
+                  setCompleteError(null)
+                }}
+              />
+              <span className="inline-hint">
+                {loginOpened
+                  ? t('plugins.connectDialog.afterLoginHint')
+                  : t('plugins.connectDialog.beforeLoginHint')}
+              </span>
+              {completeError ? (
+                <span className="inline-hint danger" role="alert">
+                  {completeError}
+                </span>
+              ) : null}
+            </div>
 
-          <div className="modal-footer plugin-connect-footer">
-            <Button
-              variant="inline"
-              onClick={handleClose}
-              disabled={pending}
-            >
-              {t('plugins.connectDialog.cancel')}
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                isKeyUnavailable ||
-                !authAttemptId ||
-                !callbackUrl.trim() ||
-                pending
-              }
-            >
-              {completeMutation.isPending
-                ? t('plugins.connectDialog.completing')
-                : t('plugins.connectDialog.complete')}
-            </Button>
+            <div className="modal-footer plugin-connect-footer">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => {
+                  setAuthAttemptId(null)
+                  setCallbackUrl('')
+                  onClose()
+                }}
+              >
+                {t('plugins.connectDialog.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={
+                  pending ||
+                  isKeyUnavailable ||
+                  !callbackUrl.trim() ||
+                  !authAttemptId
+                }
+              >
+                {completePending
+                  ? t('plugins.connectDialog.completing')
+                  : t('plugins.connectDialog.complete')}
+              </Button>
+            </div>
           </div>
         </form>
       </div>

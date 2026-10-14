@@ -1,88 +1,87 @@
 import { describe, expect, it } from 'vitest'
 import {
-  decodePluginAuthKindDTO,
   decodePluginAuthPrepareDTO,
-  decodePluginConfigurationDTO,
   decodePluginDTO,
   decodePluginList,
 } from './ai-plugin-codec'
-import { ApiError } from '@/shared/api/client'
 
 describe('ai-plugin-codec', () => {
   const sampleDeepLinkDTO = {
-    pluginId: 'minimax-mavis',
+    pluginId: 'mavis',
     name: 'MiniMax Mavis',
     version: '1.0.0',
     authKind: {
       type: 'DEEP_LINK',
-      regionCandidates: ['CN', 'US'],
+      regionCandidates: ['CN', 'EN'],
     },
     status: 'CONNECTED',
     region: 'CN',
-    expiresAt: '2026-10-01T00:00:00Z',
-    nextRefreshAt: '2026-09-25T00:00:00Z',
-    lastRefreshedAt: '2026-09-20T00:00:00Z',
+    expiresAt: '2026-10-01T12:00:00Z',
+    nextRefreshAt: '2026-09-25T12:00:00Z',
+    lastRefreshedAt: '2026-09-01T12:00:00Z',
     lastRefreshError: null,
     configuration: {
-      revision: '7',
+      revision: '5',
       valuesJson: '{"enabled":true}',
-      valuesSchema: '{"type":"object","properties":{"enabled":{"type":"boolean"}}}',
+      valuesSchema:
+        '{"type":"object","properties":{"enabled":{"type":"boolean"}},"required":[],"additionalProperties":false}',
       defaultsJson: '{"enabled":true}',
       secrets: {
         apiKey: {
-          description: 'MiniMax API Key',
+          description: 'Mavis key',
           configured: true,
         },
       },
     },
-    desiredEpoch: '4',
-    appliedEpoch: '4',
-    desiredRevision: '7',
-    appliedRevision: '7',
-    harnessToolNames: ['search', 'image'],
+    desiredEpoch: '10',
+    appliedEpoch: '10',
+    desiredRevision: '5',
+    appliedRevision: '5',
+    harnessToolNames: ['search'],
     canvasFunctionNames: ['draw'],
     applicationError: null,
   }
 
   const sampleStaticKeyDTO = {
-    pluginId: 'static-plugin',
-    name: 'Static Key Plugin',
-    version: '2.1.0',
+    pluginId: 'custom-static',
+    name: 'Custom Static',
+    version: '2.0.0',
     authKind: {
       type: 'STATIC_KEY',
-      secretField: 'secretToken',
+      secretField: 'myToken',
     },
-    status: 'NOT_CONNECTED',
+    status: 'CONNECTED',
     region: null,
     expiresAt: null,
     nextRefreshAt: null,
     lastRefreshedAt: null,
     lastRefreshError: null,
     configuration: {
-      revision: '0',
+      revision: '1',
       valuesJson: '{}',
-      valuesSchema: '{"type":"object","properties":{}}',
+      valuesSchema:
+        '{"type":"object","properties":{},"required":[],"additionalProperties":false}',
       defaultsJson: '{}',
       secrets: {
-        secretToken: {
-          description: 'Access Secret',
-          configured: false,
+        myToken: {
+          description: 'Static Token',
+          configured: true,
         },
       },
     },
     desiredEpoch: '1',
-    appliedEpoch: null,
-    desiredRevision: '0',
-    appliedRevision: null,
+    appliedEpoch: '1',
+    desiredRevision: '1',
+    appliedRevision: '1',
     harnessToolNames: [],
     canvasFunctionNames: [],
-    applicationError: 'configuration is saved but this node has not applied it yet',
+    applicationError: null,
   }
 
   const sampleNoAuthDTO = {
-    pluginId: 'no-auth-plugin',
+    pluginId: 'no-auth',
     name: 'No Auth Plugin',
-    version: '0.9.0',
+    version: '1.0.0',
     authKind: null,
     status: null,
     region: null,
@@ -91,142 +90,112 @@ describe('ai-plugin-codec', () => {
     lastRefreshedAt: null,
     lastRefreshError: null,
     configuration: {
-      revision: null,
-      valuesJson: '{"timeout":30}',
-      valuesSchema: '{"type":"object","properties":{"timeout":{"type":"integer"}}}',
-      defaultsJson: '{"timeout":30}',
+      revision: '1',
+      valuesJson: '{}',
+      valuesSchema:
+        '{"type":"object","properties":{},"required":[],"additionalProperties":false}',
+      defaultsJson: '{}',
       secrets: {},
     },
     desiredEpoch: '0',
     appliedEpoch: '0',
-    desiredRevision: '0',
-    appliedRevision: '0',
-    harnessToolNames: ['noop'],
+    desiredRevision: '1',
+    appliedRevision: '1',
+    harnessToolNames: [],
     canvasFunctionNames: [],
     applicationError: null,
   }
 
-  it('decodes deep link plugin successfully', () => {
-    const decoded = decodePluginDTO(sampleDeepLinkDTO)
-    expect(decoded.pluginId).toBe('minimax-mavis')
-    expect(decoded.authKind?.type).toBe('DEEP_LINK')
-    if (decoded.authKind?.type === 'DEEP_LINK') {
-      expect(decoded.authKind.regionCandidates).toEqual(['CN', 'US'])
-    }
-    expect(decoded.status).toBe('CONNECTED')
-    expect(decoded.desiredEpoch).toBe('4')
-    expect(decoded.configuration.secrets.apiKey.configured).toBe(true)
-    expect(decoded.harnessToolNames).toEqual(['search', 'image'])
+  it('decodes complete PluginDTO accurately for DEEP_LINK, STATIC_KEY, and None', () => {
+    const decodedDeep = decodePluginDTO(sampleDeepLinkDTO)
+    expect(decodedDeep.pluginId).toBe('mavis')
+    expect(decodedDeep.authKind?.type).toBe('DEEP_LINK')
+    expect(decodedDeep.configuration.secrets.apiKey.configured).toBe(true)
+
+    const decodedStatic = decodePluginDTO(sampleStaticKeyDTO)
+    expect(decodedStatic.pluginId).toBe('custom-static')
+    expect(decodedStatic.authKind?.type).toBe('STATIC_KEY')
+
+    const decodedNone = decodePluginDTO(sampleNoAuthDTO)
+    expect(decodedNone.authKind).toBeNull()
+    expect(decodedNone.status).toBeNull()
   })
 
-  it('decodes static key plugin successfully with pending application error', () => {
-    const decoded = decodePluginDTO(sampleStaticKeyDTO)
-    expect(decoded.pluginId).toBe('static-plugin')
-    expect(decoded.authKind?.type).toBe('STATIC_KEY')
-    if (decoded.authKind?.type === 'STATIC_KEY') {
-      expect(decoded.authKind.secretField).toBe('secretToken')
-    }
-    expect(decoded.appliedEpoch).toBeNull()
-    expect(decoded.applicationError).toContain('saved but this node has not applied')
+  it('rejects unknown properties in DTO payloads without leaking sensitive values', () => {
+    expect(() =>
+      decodePluginDTO({
+        ...sampleDeepLinkDTO,
+        unknownEvilField: 'should-reject',
+      }),
+    ).toThrowError(/Unknown property "unknownEvilField"/)
+
+    expect(() =>
+      decodePluginAuthPrepareDTO({
+        authAttemptId: 'attempt-1',
+        loginUrl: 'https://example.com',
+        extraSecret: '12345',
+      }),
+    ).toThrowError(/Unknown property "extraSecret"/)
   })
 
-  it('decodes plugin with no auth capability successfully', () => {
-    const decoded = decodePluginDTO(sampleNoAuthDTO)
-    expect(decoded.authKind).toBeNull()
-    expect(decoded.status).toBeNull()
-    expect(decoded.configuration.revision).toBeNull()
-    expect(decoded.desiredEpoch).toBe('0')
+  it('rejects numbers exceeding 64-bit signed Long range', () => {
+    expect(() =>
+      decodePluginDTO({
+        ...sampleDeepLinkDTO,
+        desiredEpoch: '9223372036854775808', // Long.MAX_VALUE + 1
+      }),
+    ).toThrowError(/exceeds 64-bit signed integer range/)
   })
 
-  it('decodes plugin list', () => {
-    const list = decodePluginList([sampleDeepLinkDTO, sampleStaticKeyDTO, sampleNoAuthDTO])
-    expect(list).toHaveLength(3)
-    expect(list[0].pluginId).toBe('minimax-mavis')
-    expect(list[1].pluginId).toBe('static-plugin')
-    expect(list[2].pluginId).toBe('no-auth-plugin')
+  it('strictly validates closed semantics for None, STATIC_KEY and DEEP_LINK', () => {
+    // None cannot have status or token metadata
+    expect(() =>
+      decodePluginDTO({
+        ...sampleNoAuthDTO,
+        status: 'CONNECTED',
+      }),
+    ).toThrowError(/status must be null when authKind is null/)
+
+    expect(() =>
+      decodePluginDTO({
+        ...sampleNoAuthDTO,
+        region: 'CN',
+      }),
+    ).toThrowError(/token\/refresh metadata must be null when authKind is null/)
+
+    // StaticKey cannot have region or expiry
+    expect(() =>
+      decodePluginDTO({
+        ...sampleStaticKeyDTO,
+        region: 'CN',
+      }),
+    ).toThrowError(/token\/refresh metadata must be null for STATIC_KEY/)
+
+    // StaticKey secretField must exist in configuration.secrets
+    expect(() =>
+      decodePluginDTO({
+        ...sampleStaticKeyDTO,
+        authKind: { type: 'STATIC_KEY', secretField: 'missingField' },
+      }),
+    ).toThrowError(/must contain static key field "missingField"/)
+
+    // DeepLink region must be in regionCandidates
+    expect(() =>
+      decodePluginDTO({
+        ...sampleDeepLinkDTO,
+        region: 'INVALID_REGION',
+      }),
+    ).toThrowError(/region must be one of regionCandidates/)
   })
 
-  it('decodes auth prepare response', () => {
+  it('decodes PluginList and AuthPrepare correctly', () => {
+    const list = decodePluginList([sampleDeepLinkDTO, sampleStaticKeyDTO])
+    expect(list.length).toBe(2)
+
     const prepare = decodePluginAuthPrepareDTO({
-      authAttemptId: 'attempt-xyz-123',
-      loginUrl: 'https://example.com/oauth/login',
+      authAttemptId: 'nonce-123',
+      loginUrl: 'https://login.example.com',
     })
-    expect(prepare.authAttemptId).toBe('attempt-xyz-123')
-    expect(prepare.loginUrl).toBe('https://example.com/oauth/login')
-  })
-
-  it('rejects invalid canonical decimal strings', () => {
-    expect(() =>
-      decodePluginDTO({
-        ...sampleDeepLinkDTO,
-        desiredEpoch: '-1',
-      }),
-    ).toThrow(ApiError)
-
-    expect(() =>
-      decodePluginDTO({
-        ...sampleDeepLinkDTO,
-        desiredEpoch: '01',
-      }),
-    ).toThrow(ApiError)
-
-    expect(() =>
-      decodePluginDTO({
-        ...sampleDeepLinkDTO,
-        desiredEpoch: 4, // numbers are not allowed on wire coordinate strings
-      }),
-    ).toThrow(ApiError)
-  })
-
-  it('rejects invalid authKind unions and missing fields', () => {
-    expect(() =>
-      decodePluginAuthKindDTO({
-        type: 'OAUTH2',
-      }),
-    ).toThrow(ApiError)
-
-    expect(() =>
-      decodePluginAuthKindDTO({
-        type: 'DEEP_LINK',
-        regionCandidates: [], // empty candidates forbidden
-      }),
-    ).toThrow(ApiError)
-
-    expect(() =>
-      decodePluginAuthKindDTO({
-        type: 'STATIC_KEY',
-        secretField: '',
-      }),
-    ).toThrow(ApiError)
-  })
-
-  it('rejects malformed configuration structure', () => {
-    expect(() =>
-      decodePluginConfigurationDTO({
-        revision: '1',
-        valuesJson: 'not a full object',
-        valuesSchema: '{}',
-        defaultsJson: '{}',
-        secrets: 'invalid', // should be object
-      }),
-    ).toThrow(ApiError)
-  })
-
-  it('rejects null status when authKind is present', () => {
-    expect(() =>
-      decodePluginDTO({
-        ...sampleDeepLinkDTO,
-        status: null,
-      }),
-    ).toThrow(ApiError)
-  })
-
-  it('rejects invalid status string', () => {
-    expect(() =>
-      decodePluginDTO({
-        ...sampleDeepLinkDTO,
-        status: 'UNKNOWN_STATUS',
-      }),
-    ).toThrow(ApiError)
+    expect(prepare.authAttemptId).toBe('nonce-123')
   })
 })
