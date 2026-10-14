@@ -205,7 +205,30 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 
 `PluginCatalogSnapshot` 逐个配置实例，聚合内置贡献，并在返回前验证两域完整目录；
 任一配置、贡献或目录失败时释放全部已建实例。Web 从同一快照提供两域 Catalog，
-当前启动配置来自 Schema 的默认值，revision 为 0。
+配置由权威 manifest 指定，目录在启动时冻结。
+
+### Plugin 配置存储
+
+[`PluginCatalogBootstrap`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogBootstrap.java)
+从单行 `plugin_catalog_state` 读取全局 epoch 与完整 manifest，再按其中的 revision
+读取不可变 `plugin_configuration_revision`。全新库的 epoch 0 只表示未初始化：
+宿主以所有安装定义的 Schema 默认值构建完整候选，通过 CAS 写入 epoch 1 与配置历史；
+首次启动的竞争败方释放候选、回读赢家，不重复初始化。
+
+配置 revision 取该插件最后一次写入的全局 epoch，不另设插件计数器。
+[`PluginConfigurationRepository`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/persistence/PluginConfigurationRepository.java)
+在同一短事务中核验权威基线、CAS 推进 epoch、插入配置历史、复核完整 manifest 引用，
+最后发出 `plugin_catalog_changed` 提示。未修改条目必须与基线相同，不能丢失已登记插件或回退到旧 revision；
+任何失败都回滚 epoch、历史与通知。
+
+普通值以受 64 KiB UTF-8 预算约束的严格 JSON 文本保存，数据库同时拒绝非对象与重复键；
+不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置历史。
+manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖完整两域目录及内置贡献；
+指纹只由冻结定义派生，不序列化运行实例。
+
+重启必须按持久版本恢复：安装集合、历史引用、代码/Schema 身份及两域能力指纹均须一致，
+缺失或漂移直接启动失败，不采用新 defaults 替换旧配置。当前没有公开配置写入接口，
+也没有运行期目录切换；数据库提交提示不代表所有节点已经应用。
 
 ### 新增 Plugin
 

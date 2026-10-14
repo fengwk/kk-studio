@@ -1,0 +1,109 @@
+package fun.fengwk.kkstudio.web.runtime;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+
+import javax.sql.DataSource;
+
+import java.util.List;
+
+/**
+ * 真实 Web 启动链路的 PostgreSQL 集成测试：V1 未初始化行上的首次初始化与同版本重启恢复。
+ *
+ * <p>直接复用容器中真实的 {@link StudioPluginRegistry}、{@link PluginConfigurationRepository} 与事务管理器驱动 {@link
+ * PluginCatalogBootstrap}，因此覆盖真实发行物的 Mavis 安装定义、真实 jsonb 持久化与真实指纹计算。Mavis 未配置凭据时仍可安装与冻结贡献，
+ * 启动绝不解析凭据或发起远端请求。
+ */
+class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSupport {
+
+  private static final String MAVIS = "minimax-mavis";
+
+  @Autowired private StudioPluginRegistry registry;
+  @Autowired private PluginConfigurationRepository repository;
+  @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private PluginCredentialStore credentials;
+  @Autowired private ObjectProvider<PluginResourceGateway> resourceGateways;
+  @Autowired private PluginCatalogSnapshot liveSnapshot;
+  @Autowired private DataSource dataSource;
+
+  /** 容器启动期缓存的冻结快照：从 V1 未初始化形态初始化到 epoch 1 并覆盖全部安装定义。 */
+  @Test
+  void contextStartupInitializesTheAuthoritativeCatalog() {
+    assertEquals(List.of(MAVIS), registry.pluginIds());
+    assertEquals(1, liveSnapshot.epoch());
+    assertEquals(
+        List.of(MAVIS),
+        liveSnapshot.configuredPlugins().stream()
+            .map(configured -> configured.descriptor().pluginId())
+            .toList());
+    assertTrue(liveSnapshot.harnessCatalog().findDescriptor(new ContributorId(MAVIS)).isPresent());
+    assertNotNull(liveSnapshot.catalogFingerprint());
+  }
+
+  /** 同版本重启必须按持久 revision 恢复：epoch 不推进、历史不新增、值来自已持久 config 而不是当前默认值。 */
+  @Test
+  void restartRestoresThePersistedRevisionWithoutRewriting() {
+    PluginCatalogSnapshot first = bootstrap();
+    try {
+      assertEquals(1, first.epoch());
+      assertEquals(1, epoch());
+      assertEquals(1, historyRows());
+    } finally {
+      first.close();
+    }
+
+    PluginCatalogSnapshot second = bootstrap();
+    try {
+      assertEquals(1, second.epoch(), "restart must restore, never re-initialize");
+      assertEquals(1, epoch(), "restart must not advance the epoch");
+      assertEquals(1, historyRows(), "restart must not append history");
+      assertEquals(first.catalogFingerprint(), second.catalogFingerprint());
+      assertTrue(second.harnessCatalog().findDescriptor(new ContributorId(MAVIS)).isPresent());
+      assertNotNull(second.capabilityFingerprints().get(MAVIS));
+    } finally {
+      second.close();
+    }
+  }
+
+  private PluginCatalogSnapshot bootstrap() {
+    return new PluginCatalogBootstrap(registry, repository, transactionManager)
+        .bootstrap(
+            PluginCatalogConfiguration.pluginContexts(credentials, resourceGateways),
+            List.of(),
+            List.of());
+  }
+
+  private long epoch() {
+    return jdbc()
+        .sql("select epoch from plugin_catalog_state where id = 1")
+        .query(Long.class)
+        .single();
+  }
+
+  private int historyRows() {
+    return jdbc()
+        .sql("select count(*) from plugin_configuration_revision")
+        .query(Integer.class)
+        .single();
+  }
+
+  private JdbcClient jdbc() {
+    return JdbcClient.create(dataSource);
+  }
+}

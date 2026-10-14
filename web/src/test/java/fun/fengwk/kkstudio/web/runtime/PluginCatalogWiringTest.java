@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 
 import java.lang.reflect.Proxy;
 import java.util.Set;
@@ -128,6 +130,8 @@ class PluginCatalogWiringTest {
     new ApplicationContextRunner()
         .withUserConfiguration(PluginCatalogConfiguration.class, RegistryConfiguration.class)
         .withBean(PluginCredentialStore.class, () -> credentials)
+        .withBean(PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository)
+        .withBean(PlatformTransactionManager.class, InMemoryPluginCatalogFakes::transactionManager)
         .withInitializer(
             context -> context.getBeanFactory().registerSingleton("mavisHttpTransport", transport))
         .withConfiguration(AutoConfigurations.of(autoConfiguration))
@@ -152,6 +156,10 @@ class PluginCatalogWiringTest {
   private static void registerHost(AnnotationConfigApplicationContext context) {
     context.register(PluginCatalogConfiguration.class, RegistryConfiguration.class);
     context.registerBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class));
+    context.registerBean(
+        PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository);
+    context.registerBean(
+        PlatformTransactionManager.class, InMemoryPluginCatalogFakes::transactionManager);
   }
 
   @Configuration(proxyBeanMethods = false)

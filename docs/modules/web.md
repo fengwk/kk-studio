@@ -11,9 +11,11 @@ Controller 解析 DTO、调用用例、映射结果；领域行为与事务由�
 Builtin/Common 经 Platform compile 依赖传递进入发行物。
 Plugin JAR 通过自己的 AutoConfiguration.imports 创建 bean，
 [`PluginCatalogConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/PluginCatalogConfiguration.java)
-将插件定义配置一次，并收集真正内置的 Contributor / Adapter，构建一个完整
-`PluginCatalogSnapshot`；HarnessCatalog 与 CanvasFunctionCatalog 来自该快照。
-两域目录校验全部通过后才提供给运行时，失败会释放已建插件实例。
+通过 Platform 的 `PluginCatalogBootstrap` 初始化或按持久 manifest 恢复插件配置，
+并收集真正内置的 Contributor / Adapter，构建一个完整 `PluginCatalogSnapshot`；
+HarnessCatalog 与 CanvasFunctionCatalog 来自同一 epoch。安装集合、版本身份与两域目录
+指纹全部通过后才提供给运行时，失败会释放已建插件实例；缺失历史不回退到默认值。
+目录当前在启动时冻结，权威存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
 Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录。
 
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
@@ -29,7 +31,7 @@ timer 只唤醒和分派，heartbeat worker 执行续租事务，flush executor 
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
 | ApplicationEventHub、sender 与 heartbeat scheduler | 关闭订阅与发送围栏，释放连接和 timer |
 | StorageMaintenance、PluginCredentialRefreshDispatcher | 各自持有调度器与在途任务的收尾责任 |
-| PluginCatalogSnapshot | 唯一拥有配置实例，应用关闭时逐个释放实例资源 |
+| PluginCatalogSnapshot | 持有启动恢复的完整 epoch 与配置实例，应用关闭时逐个释放实例资源 |
 
 ## HTTP 入口
 
