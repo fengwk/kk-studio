@@ -88,10 +88,12 @@ class PlatformIssueThreadExecutionPortTest {
   /** 读取失败原样传播宿主异常，不吞掉也不换成空视图。 */
   @Test
   void readThreadPropagatesMissingThread() {
-    when(runtime.getThreadSnapshot(THREAD_ID))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread missing"));
+    HarnessRuntimeNotFoundException missing = new HarnessRuntimeNotFoundException("thread missing");
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenThrow(missing);
 
-    assertThrows(HarnessRuntimeNotFoundException.class, () -> port.readThread(THREAD_ID));
+    assertSame(
+        missing,
+        assertThrows(HarnessRuntimeNotFoundException.class, () -> port.readThread(THREAD_ID)));
   }
 
   /** 部署缺少运行时（平台只装配上下文）时确定失败，绝不退回本地假执行或空视图。 */
@@ -174,9 +176,12 @@ class PlatformIssueThreadExecutionPortTest {
     assertEquals(Optional.empty(), port.findThreadCommand(THREAD_ID, idempotencyKey));
   }
 
-  /** 适配器自身不做任何跨方法共享状态：未使用的运行时入口保持零交互。 */
+  /** 构造适配器不会提前解析运行时，避免把执行依赖拉进宿主装配顺序。 */
   @Test
-  void unusedRuntimeEntriesStayUntouched() {
-    verifyNoInteractions(runtime);
+  @SuppressWarnings("unchecked")
+  void constructionDoesNotResolveRuntime() {
+    ObjectProvider<HarnessRuntime> lazyRuntime = mock(ObjectProvider.class);
+    new PlatformIssueThreadExecutionPort(lazyRuntime);
+    verifyNoInteractions(lazyRuntime);
   }
 }

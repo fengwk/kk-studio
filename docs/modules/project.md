@@ -39,9 +39,15 @@ PostgreSQL 持久化与 REST 调度，经
 | [`EvidenceBlobPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/EvidenceBlobPort.java) | 锁定并消费一次已 READY 上传、对 Blob 引用做 retain/release、判定 Blob 是否仍可引用 | 必须加入调用方已有事务；失败不得吞成「不可用」 |
 | [`AgentBranchSettingsPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/AgentBranchSettingsPort.java) | 按宿主 Agent/Model catalog 物化分支设置 | 只读 |
 | [`IssueAgentSessionDeletionPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/IssueAgentSessionDeletionPort.java) | 深删除该 `Issue + Agent` 名下的 Harness Session 与 Blob 引用 | 在调用方锁序内，逐 owner 调用 |
+| [`IssueThreadExecutionPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/IssueThreadExecutionPort.java) | 读取线程事实、接受命令与 Join、停止并取得权威 head、查询固定回执 | 控制操作加入调用方已有事务；权威版本冲突原样传播 |
 
 端口用领域类型声明语义。宿主适配器将平台异常译为 Project 错误，例如上传不存在为
 not found，未 READY/已 cleanup 为 validation。
+
+执行端口返回 [`IssueThreadView`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/IssueThreadView.java)：
+Session、head、version、下一命令序号、历史路径与统一执行事实。Project 不取得完整 Runtime 或
+Model/工具队列快照；Platform 适配器从一次一致读取投影这些字段。预算、等待、停止和证据发布政策仍由
+Project 决定，停止区间以本次回执的权威 head 为界。
 
 ## 工作流配置
 
