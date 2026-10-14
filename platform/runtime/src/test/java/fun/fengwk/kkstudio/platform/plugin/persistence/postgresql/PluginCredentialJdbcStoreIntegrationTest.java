@@ -1173,9 +1173,13 @@ class PluginCredentialJdbcStoreIntegrationTest {
     assertNull(rejected.refreshLeaseUntil());
     assertEquals(2L, rejected.version(), "rejection advances the version once");
 
-    // 2. 密文匹配：重新登录推进了 version，但本次调用用的密文没变，仍必须作废。
+    // 2. 同代际 claim 推进了 version，但本次调用用的密文没变，仍必须作废。
     assertTrue(repository.upsert(rowWithPayload(byCiphertext, used, now)));
-    assertTrue(repository.upsert(rowWithPayload(byCiphertext, used, now)));
+    assertEquals(
+        1,
+        repository
+            .claimDue(List.of(byCiphertext), now, now.plusSeconds(60), "cipher-lease", 1)
+            .size());
     assertEquals(1L, repository.find(byCiphertext).orElseThrow().version());
     assertTrue(
         repository.rejectUsedCredential(
@@ -1187,7 +1191,8 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 3. 并发重新登录同时换了 version 与密文：迟到的作废必须是 0 行，且新凭据原样保留。
     assertTrue(repository.upsert(rowWithPayload(relogged, used, now)));
-    assertTrue(repository.upsert(rowWithPayload(relogged, fresh, now)));
+    UUID newGeneration = UUID.randomUUID();
+    assertTrue(repository.upsert(rowWithGeneration(relogged, newGeneration, fresh, now)));
     assertFalse(
         repository.rejectUsedCredential(
             relogged, AUTH_GENERATION, 0L, used, "provider rejected the access token", now),

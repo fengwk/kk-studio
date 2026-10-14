@@ -179,6 +179,7 @@ class PluginCredentialRefreshServiceTest {
             snapshot -> {
               callCount.incrementAndGet();
               assertEquals(OLD_PAYLOAD, snapshot.payloadJson());
+              assertEquals(AUTH_GENERATION, snapshot.authGeneration());
               return new PluginCredentialMaterial(
                   REGION, newExpiresAt, newNextRefresh, NEW_PAYLOAD);
             });
@@ -204,6 +205,7 @@ class PluginCredentialRefreshServiceTest {
 
     PluginCredentialRow updated = repository.getDirect(PLUGIN_ID);
     assertEquals(PluginCredentialStatus.CONNECTED, updated.status());
+    assertEquals(initialRow.authGeneration(), updated.authGeneration());
     assertNull(updated.refreshLeaseToken());
     assertNull(updated.refreshLeaseUntil());
     assertEquals(

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.crypto.AesGcmEnvelope;
+import fun.fengwk.kkstudio.platform.crypto.LengthPrefixedAad;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 
@@ -21,7 +22,7 @@ import java.util.UUID;
 /**
  * AES-256-GCM 凭据 envelope 的认证加密契约。
  *
- * <p>这些测试是「密文只能在其 pluginId / region / 认证代际上解密一次」这一安全属性的可执行证据：任何把 envelope 搬运到其它身份、代际、翻转 任一
+ * <p>密文只能在其 pluginId / region / 认证代际上认证解密：任何把 envelope 搬运到其它身份、代际、翻转任一
  * bit、截断、改版本或换密钥的尝试都必须在解密阶段失败，而不是返回部分明文。
  */
 class PluginCredentialCodecTest {
@@ -139,8 +140,10 @@ class PluginCredentialCodecTest {
   @Test
   void rejectsLegacyFormatOneEnvelope() {
     SecretKey key = key((byte) 1);
-    byte[] envelope = codec.encrypt(key, PLUGIN_ID, GENERATION, REGION, PAYLOAD);
-    envelope[0] = 1;
+    byte[] legacyAad =
+        LengthPrefixedAad.create().field(PLUGIN_ID).field(REGION).intValue(1).build();
+    byte[] envelope =
+        AesGcmEnvelope.encrypt(key, 1, legacyAad, PAYLOAD.getBytes(StandardCharsets.UTF_8));
 
     assertThrows(
         PluginCredentialIntegrityException.class,
