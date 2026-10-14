@@ -1,14 +1,15 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.Map;
 
 /** {@code mcp_server.headers} JSON 文本与 header 映射之间的最小编解码。 */
 final class McpHeadersJson {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
   private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
 
   private McpHeadersJson() {}

@@ -5,11 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -86,7 +87,7 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
   @Test
   public void credentialIsWriteOnlyForGenericJsonSerialization() throws Exception {
     AgentProviderCreateDTO input = provider("provider-json", "secret");
-    ObjectMapper objectMapper = new ObjectMapper();
+    ObjectMapper objectMapper = JsonMapper.builder().build();
 
     String json = objectMapper.writeValueAsString(input);
 

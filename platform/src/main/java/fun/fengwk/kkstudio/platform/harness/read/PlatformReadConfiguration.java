@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;

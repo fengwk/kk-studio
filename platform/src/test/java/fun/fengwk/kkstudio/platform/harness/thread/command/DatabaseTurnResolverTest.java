@@ -15,9 +15,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
@@ -1639,13 +1640,13 @@ class DatabaseTurnResolverTest {
     DatabaseProviderResolutionService resolution =
         new DatabaseProviderResolutionService(
             fixture.providers,
-            new AgentProviderConfigurationCodec(new ObjectMapper()),
+            new AgentProviderConfigurationCodec(JsonMapper.builder().build()),
             new ProviderFactories(List.of(factory)),
             new ProviderResourceMaterializer(blobs, content));
     ResolvedExecution execution =
         resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
     assertEquals(spec.cacheControl(), execution.effectiveRequest().cacheControl());
-    ObjectMapper mapper = new ObjectMapper();
+    ObjectMapper mapper = JsonMapper.builder().build();
     JsonNode wire = mapper.readTree(execution.encodeRequestBody());
     assertEquals("gpt-5.6", wire.path("model").asText());
     // session key 直接映射为 prompt_cache_key，不再派生哈希。

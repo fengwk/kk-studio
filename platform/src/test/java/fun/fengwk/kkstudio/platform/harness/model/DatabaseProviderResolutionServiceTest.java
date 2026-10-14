@@ -16,11 +16,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -75,7 +75,7 @@ class DatabaseProviderResolutionServiceTest {
 
   private final AgentProviderRepository repository = mock(AgentProviderRepository.class);
   private final AgentProviderConfigurationCodec configurationCodec =
-      new AgentProviderConfigurationCodec(new ObjectMapper());
+      new AgentProviderConfigurationCodec(JsonMapper.builder().build());
 
   // ---------- resolve 失败路径 ----------
 
@@ -439,9 +439,10 @@ class DatabaseProviderResolutionServiceTest {
       return new ProviderReplayState(
           format,
           new ProviderReplayAffinity(ProviderType.OPENAI, PROVIDER_NAME, GENERATION_ID, "model"),
-          new ObjectMapper()
+          JsonMapper.builder()
+              .build()
               .readTree("{\"output\":[{\"type\":\"opaque-" + format.name() + "\"}]}"));
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException(error);
     }
   }

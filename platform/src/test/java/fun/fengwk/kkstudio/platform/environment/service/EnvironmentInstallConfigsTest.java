@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
@@ -16,7 +17,7 @@ import java.util.Map;
 
 /** 安装输入边界严格类型、宿主路径和深层配置校验，且保存序列化可往返。 */
 class EnvironmentInstallConfigsTest {
-  private final ObjectMapper json = new ObjectMapper();
+  private final ObjectMapper json = JsonMapper.builder().build();
 
   @Test
   void canonicalConfigRoundtripsForEachOperatingSystem() {

@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.platform.environment.skill;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
@@ -66,9 +67,10 @@ public class EnvironmentSkillSyncOrchestrator {
   public static final String CHANNEL = "skill_package_changed";
 
   private static final ObjectMapper JSON =
-      new ObjectMapper()
-          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private static final Pattern ERROR_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
   private static final Pattern COMMIT_PATTERN = Pattern.compile("^[0-9a-f]{40}$|^[0-9a-f]{64}$");
@@ -364,14 +366,14 @@ public class EnvironmentSkillSyncOrchestrator {
     JsonNode node;
     try {
       node = JSON.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       return SyncOutcome.failure(RESULT_FAILURE);
     }
     if (!node.isObject() || node.size() != RESULT_FIELDS.size()) {
       return SyncOutcome.failure(RESULT_FAILURE);
     }
     Set<String> names = new HashSet<>();
-    node.fieldNames().forEachRemaining(names::add);
+    node.propertyNames().forEach(names::add);
     if (!names.equals(RESULT_FIELDS)) {
       return SyncOutcome.failure(RESULT_FAILURE);
     }
@@ -416,7 +418,7 @@ public class EnvironmentSkillSyncOrchestrator {
     JsonNode code;
     try {
       code = JSON.readTree(detailsJson).path("code");
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       return RESULT_FAILURE;
     }
     if (!code.isTextual() || !ERROR_CODE_PATTERN.matcher(code.textValue()).matches()) {
@@ -438,7 +440,7 @@ public class EnvironmentSkillSyncOrchestrator {
     }
     try {
       return JSON.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode skill.sync arguments", error);
     }
   }
