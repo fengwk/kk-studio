@@ -182,7 +182,7 @@ async function expectNoHorizontalOverflow(widget: ReturnType<Page['getByRole']>)
  */
 async function expectBoundRootIdentity(page: Page) {
   await expect(page.getByRole('button', { name: 'Model 与 Variant' }))
-    .toHaveText('minimax/minimax-m2.7 · default')
+    .toHaveText('minimax/minimax-m2.7 (default)')
   await expect(page.getByRole('button', { name: '环境' })).toHaveText('dev-node')
 }
 

@@ -36,6 +36,7 @@ export type ThreadEventSource = 'entry' | 'active-model' | 'active-tool' | 'atte
 export type ThreadEventKind =
   | 'ROOT'
   | 'TURN_START'
+  | 'SETTINGS'
   | 'USER_MESSAGE'
   | 'ASSISTANT_MESSAGE'
   | 'TOOL_CALL'
@@ -418,6 +419,15 @@ function projectEntryRecord(
         status: 'completed',
         title: kindTitle('TURN_START'),
         summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
+        details: withTime(base.details, entry.createTime),
+      }
+    case 'SETTINGS':
+      return {
+        ...base,
+        kind: 'SETTINGS',
+        status: 'completed',
+        title: kindTitle('SETTINGS'),
+        summary: '',
         details: withTime(base.details, entry.createTime),
       }
     case 'COMPACTION':

@@ -1,11 +1,15 @@
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
-import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import {
+  formatModelLabel,
+  modelRef,
+  type AgentModelView,
+} from '@/features/ai/catalog/AgentModelView'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { translate, useI18n } from '@/shared/i18n'
 
 /**
- * Agent 展示的必须是实际生效的 model + variant：显式 override 优先，否则回退 model 的 defaultVariant。model 未加载时
- * 无法解析 variant，按引用原样回退并标注未解析，绝不静默编造一个 variant。BUILTIN 的 null model 明确显示未配置，
+ * Agent 展示实际生效的 model + variant：显式 override 优先，否则使用 model 的 defaultVariant。model 未加载且没有
+ * override 时标注未解析，不编造 variant。BUILTIN 的 null model 明确显示未配置，
  * 不回退父模型或 catalog 中的第一个 model。
  */
 function formatEffectiveModel(
@@ -19,13 +23,12 @@ function formatEffectiveModel(
   const label = model ? modelRef(model) : modelRefValue
   const override = variantOverride?.trim()
   if (override) {
-    return `${label} · ${override}`
+    return formatModelLabel(null, label, override)
   }
-  const defaultVariant = model?.config?.defaultVariant?.trim()
-  if (!defaultVariant) {
-    return `${label} · ${translate('ai.catalog.card.unknownVariant')}`
-  }
-  return `${label} · ${defaultVariant}${translate('ai.catalog.card.modelDefaultSuffix')}`
+  const defaultVariant = model?.config.defaultVariant.trim()
+  return defaultVariant
+    ? `${formatModelLabel(null, label, defaultVariant)}${translate('ai.catalog.card.modelDefaultSuffix')}`
+    : `${label} · ${translate('ai.catalog.card.unknownVariant')}`
 }
 
 export function AgentResourceCard({
