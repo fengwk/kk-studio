@@ -190,7 +190,7 @@ class StandardComfyuiClientTest {
                 CANVAS));
   }
 
-  /** ComfyUI 自由 workflow/history 树：number 必须按 BigDecimal 原样搬运，极值与高精度小数不得在 double 中失真。 */
+  /** ComfyUI 自由 workflow 树：number 必须按 BigDecimal 原样搬运，极值与高精度小数不得在 double 中失真。 */
   @Test
   void preservesFreeFormWorkflowAndHistoryNumbers() {
     ObjectNode workflow =
@@ -209,8 +209,10 @@ class StandardComfyuiClientTest {
     assertTrue(body.contains("1E-324"), body);
     assertTrue(body.contains("0.12345678901234567890123456789"), body);
     assertFalse(body.contains("Infinity"), body);
-    assertTrue(
-        client.history("precise-numbers").error().contains("0.12345678901234567890123456789"));
+    // 高精度 messages number 仍按 BigDecimal 解析（不抛精度错误），但不回显到受控分类之外。
+    H3ComfyHistory precise = client.history("precise-numbers");
+    assertEquals(H3ComfyHistory.Status.ERROR, precise.status());
+    assertEquals("ComfyUI execution failed with status=error", precise.error());
   }
 
   @Test
@@ -429,14 +431,20 @@ class StandardComfyuiClientTest {
     H3ComfyHistory success = client.history("success");
     assertEquals(H3ComfyHistory.Status.SUCCESS, success.status());
     assertEquals("result.mp4", success.output().filename());
-    assertEquals(H3ComfyHistory.Status.ERROR, client.history("error").status());
-    assertTrue(client.history("error").error().contains("boom"));
+    H3ComfyHistory error = client.history("error");
+    assertEquals(H3ComfyHistory.Status.ERROR, error.status());
+    // 受控分类不解析回显远端 messages 内容。
+    assertEquals("ComfyUI execution failed with status=error", error.error());
+    assertFalse(error.error().contains("boom"));
     assertThrows(IllegalArgumentException.class, () -> client.history("mismatch"));
     assertThrows(IllegalArgumentException.class, () -> client.history("bad-completed"));
     assertThrows(IllegalArgumentException.class, () -> client.history("bad-terminal"));
     assertThrows(IllegalArgumentException.class, () -> client.history("two-videos"));
     assertThrows(IllegalArgumentException.class, () -> client.history("invalid-json"));
-    assertThrows(IllegalStateException.class, () -> client.history("http-error"));
+    IllegalStateException httpError =
+        assertThrows(IllegalStateException.class, () -> client.history("http-error"));
+    // 非 2xx 只保留 HTTP 数值事实，不拼接远端错误正文。
+    assertEquals("ComfyUI request failed with HTTP 500", httpError.getMessage());
     assertThrows(IllegalArgumentException.class, () -> client.history("../bad"));
   }
 

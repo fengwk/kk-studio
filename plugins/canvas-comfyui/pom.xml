@@ -23,6 +23,10 @@
             <artifactId>spring-boot-autoconfigure</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-canvas-core</artifactId>
         </dependency>
@@ -37,6 +41,10 @@
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-common</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
