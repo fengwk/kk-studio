@@ -10,10 +10,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.project.domain.IssueStageBudget;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
@@ -474,17 +471,16 @@ public class IssueServiceImpl implements IssueService {
     HarnessRuntime runtime = runtimes != null ? runtimes.getIfAvailable() : null;
     ThreadSnapshot snapshot =
         runtime != null ? runtime.getThreadSnapshot(activeRun.getThreadId()) : null;
-    if (snapshot != null && isUndeterminedInFlight(snapshot)) {
-      UUID headId =
-          snapshot.thread() != null ? snapshot.thread().headEntryId() : activeRun.getStartEntryId();
+    if (isUndeterminedInFlight(snapshot)) {
       issueRunService.markUnknown(
-          activeRun.getId(), activeRun.getVersion(), key + ":unknown", headId, validDetail);
+          activeRun.getId(),
+          activeRun.getVersion(),
+          key + ":unknown",
+          snapshot.thread().headEntryId(),
+          validDetail);
       return issueRepository.getById(issueId);
     }
-    UUID endId =
-        snapshot != null && snapshot.thread() != null
-            ? snapshot.thread().headEntryId()
-            : activeRun.getStartEntryId();
+    UUID endId = snapshot != null ? snapshot.thread().headEntryId() : activeRun.getStartEntryId();
     issueRunService.cancelRun(activeRun.getId(), activeRun.getVersion(), key + ":cancel", endId);
     return issueRepository.getById(issueId);
   }
@@ -634,34 +630,16 @@ public class IssueServiceImpl implements IssueService {
     return persist(locked, expectedVersion);
   }
 
+  /**
+   * 停止必须在「执行尚未收敛」时收敛为 UNKNOWN 而不是直接取消：本地仍有工作（命令 / Model / 工具 / owned continuation） 或已有结果未定的 UNKNOWN
+   * 工具都表示外部状态无法安全判定。事实由 Runtime 统一投影，本类不再自行推导「在途」。
+   */
   private static boolean isUndeterminedInFlight(ThreadSnapshot snapshot) {
     if (snapshot == null) {
       return false;
     }
-    if (snapshot.queuedCommands() != null && !snapshot.queuedCommands().isEmpty()) {
-      return true;
-    }
-    if (snapshot.model() != null
-        && (snapshot.model().status() == null || !snapshot.model().status().isTerminal())) {
-      return true;
-    }
-    for (ToolInvocation tool : snapshot.toolSiblings()) {
-      ToolInvocationStatus status = tool.status();
-      if (status == null
-          || status == ToolInvocationStatus.READY
-          || status == ToolInvocationStatus.DISPATCHING
-          || status == ToolInvocationStatus.RUNNING
-          || status == ToolInvocationStatus.UNKNOWN) {
-        return true;
-      }
-    }
-    if (snapshot.entryPath() != null) {
-      Entry head = snapshot.entryPath().head();
-      if (head != null && head.payload() instanceof TurnEndPayload end && end.continueModel()) {
-        return true;
-      }
-    }
-    return false;
+    ThreadExecutionFacts facts = snapshot.executionFacts();
+    return facts.hasWork() || facts.hasUnknownToolOutcome();
   }
 
   @Override
