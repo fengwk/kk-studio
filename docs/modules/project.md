@@ -122,7 +122,9 @@ Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 
 [`controller`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/package-info.java)
 承载 Issue 的部署级配置与确定性推进：`IssueControllerDispatcher` 只做 `project_issue_work` 的
-claim、bounded handoff 与 poll 生命周期，
+claim、bounded handoff 与 poll 生命周期，合并 wake 的单 drain、容量计数、stop 收尾与 executor
+拒绝/失败分型复用 [`harness/common`](../../harness/common/) 的
+[`BoundedWorkDispatcher`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/concurrent/BoundedWorkDispatcher.java)，
 [`IssueReconciler`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/IssueReconciler.java)
 在固定锁序下一次推进一个有界动作。调度只依赖数据库中的 work 行与 lease token，通知与 poll
 提供发现入口；租约参数见 [Platform](platform.md) 的配置表。

@@ -8,6 +8,7 @@
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
+| `fun.fengwk.kkstudio.harness.common.concurrent` | 与业务无关的有界调度骨架：合并 wake 的单 drain、bounded worker handoff、周期 poll 与 stop 生命周期 | 只做同步调度与容量计数；claim / execute / 未接手归还三个回调的语义与 executor 生命周期由调用方注入并持有 |
 | `fun.fengwk.kkstudio.harness.common.prompt` | classpath prompt 模板的严格解析、缓存与精确变量渲染 | 只支持 `${name}`，要求变量集合精确相等；表达式求值与业务编排由调用方承接 |
 | `fun.fengwk.kkstudio.harness.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 校验语法与体积，超限中止编码；业务结构由调用方定义 |
 | `fun.fengwk.kkstudio.harness.common.io` | send 前冻结预算的响应体 deadline 包装：到期主动关闭底层流并把超时统一为超时失败 | 纯 JDK 流包装，不构造 HTTP 客户端、不持有凭据；协议与凭据分类由调用方适配 |
