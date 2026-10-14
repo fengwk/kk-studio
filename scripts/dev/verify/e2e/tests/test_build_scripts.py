@@ -274,6 +274,56 @@ class TestE2EBuildScripts(unittest.TestCase):
         self.assertNotIn("sync_e2e_provider_credentials", ensure_stack)
 
 
+class TestE2ERealCredentialGate(unittest.TestCase):
+    """Real mode requires all protocol pairs before stack startup or HTTP requests."""
+
+    def test_missing_protocol_inputs_fail_before_startup(self):
+        credential_names = (
+            "TEST_GOOGLE_BASE_URL",
+            "TEST_GOOGLE_API_KEY",
+            "TEST_OPENAI_RESPONSES_BASE_URL",
+            "TEST_OPENAI_RESPONSES_API_KEY",
+            "TEST_ANTHROPIC_BASE_URL",
+            "TEST_ANTHROPIC_API_KEY",
+            "TEST_OPENAI_BASE_URL",
+            "TEST_OPENAI_API_KEY",
+        )
+        clean_env = {
+            name: value
+            for name, value in os.environ.items()
+            if not name.startswith("TEST_")
+        }
+        # A gate regression must fail JDK resolution rather than launch the real stack.
+        clean_env["JAVA_HOME_21"] = str(E2E_ENTRY)
+        inputs = {
+            name: "https://cpa.example" if name.endswith("BASE_URL") else "fixture-cpa-key"
+            for name in credential_names
+        }
+        for flag in ("--real", "--with-branch"):
+            for missing in credential_names:
+                for blank in (False, True):
+                    with self.subTest(flag=flag, missing=missing, blank=blank):
+                        env = {**clean_env, **inputs}
+                        if blank:
+                            env[missing] = ""
+                        else:
+                            del env[missing]
+                        result = subprocess.run(
+                            ["bash", str(E2E_ENTRY), flag],
+                            cwd=REPOSITORY_ROOT,
+                            env=env,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                            timeout=10,
+                        )
+                        self.assertNotEqual(0, result.returncode)
+                        self.assertIn(f"missing: {missing}\n", result.stderr)
+                        self.assertEqual("", result.stdout)
+                        self.assertNotIn("fixture-cpa-key", result.stderr)
+                        self.assertNotIn("https://cpa.example", result.stderr)
+
+
 class TestE2ERuntimeCredentialScrubbing(unittest.TestCase):
     """The E2E stack must never leak host provider credentials into long-lived processes."""
 

@@ -287,7 +287,7 @@ registerCase({
           await ctx.call('POST', '/api/ai/catalog/providers', {
             name: `e2e-provider-image-${suffix}`,
             description: 'Local Responses probe for attachment materialization.',
-            providerType: 'openai_response',
+            providerType: 'openai_responses',
             baseUrl: mock.baseUrl,
             credential: `e2e-image-${suffix}`,
             modelCallTimeoutMillis: 30_000,

@@ -71,7 +71,7 @@ Provider 与 Agent 以不可变 `name` 寻址；Model 以 `(providerName, name)`
 
 Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
 [`ProviderType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)：
-`openai`、`openai_response`、`anthropic`、`google`，按精确 wire value 解析。
+`openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
 Model 配置保存 limit、abilities、variants、pricing 和 default variant。
 Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
 （默认 true）；工具候选和 Skill 引用在写入时校验。

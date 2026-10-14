@@ -515,9 +515,26 @@ Backend 启动还要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 buc
 E2E 矩阵只有 `--real` 会读取并同步宿主凭据，且必须提供四组完整 pair，缺一或只给一半都会在同步前失败：
 
 - `TEST_GOOGLE_BASE_URL` + `TEST_GOOGLE_API_KEY`
-- `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
+- `TEST_OPENAI_RESPONSES_BASE_URL` + `TEST_OPENAI_RESPONSES_API_KEY`
 - `TEST_ANTHROPIC_BASE_URL` + `TEST_ANTHROPIC_API_KEY`
-- `TEST_DEEPSEEK_BASE_URL` + `TEST_DEEPSEEK_API_KEY`
+- `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
+
+变量按协议区分：`TEST_OPENAI_RESPONSES_*` 写入 `openai` Responses Provider，
+`TEST_OPENAI_*` 写入 `deepseek` Chat Completions Provider；Provider 名称与模型身份不变。
+使用同一个 CPA 网关时，先设置不含版本路径的 `CPA_BASE_URL` 和 `CPA_API_KEY`，再导出：
+
+```bash
+export TEST_GOOGLE_BASE_URL="${CPA_BASE_URL%/}/v1beta"
+export TEST_GOOGLE_API_KEY="$CPA_API_KEY"
+export TEST_OPENAI_RESPONSES_BASE_URL="${CPA_BASE_URL%/}/v1"
+export TEST_OPENAI_RESPONSES_API_KEY="$CPA_API_KEY"
+export TEST_ANTHROPIC_BASE_URL="${CPA_BASE_URL%/}"
+export TEST_ANTHROPIC_API_KEY="$CPA_API_KEY"
+export TEST_OPENAI_BASE_URL="${CPA_BASE_URL%/}/v1"
+export TEST_OPENAI_API_KEY="$CPA_API_KEY"
+```
+
+Runner 只读取导出的 `TEST_*`，不直接读取 `CPA_*`。
 
 对应模型固定为 `google/gemini-3.8-flash`、`openai/gpt-5.6-luna`、
 `minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4.1-flash`，不会静默换 provider/model。OpenAI
@@ -1122,7 +1139,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
 | Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
 | E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
-| 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI,ANTHROPIC,DEEPSEEK}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
+| 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI_RESPONSES,ANTHROPIC,OPENAI}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
 | 敏感数据门禁失败 | `python3 scripts/dev/verify/repository/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |

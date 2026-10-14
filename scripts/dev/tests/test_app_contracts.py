@@ -157,12 +157,12 @@ class TestDevRuntimeCredentialScrubbing(unittest.TestCase):
         e2e_names = [
             "TEST_GOOGLE_BASE_URL",
             "TEST_GOOGLE_API_KEY",
-            "TEST_OPENAI_BASE_URL",
-            "TEST_OPENAI_API_KEY",
+            "TEST_OPENAI_RESPONSES_BASE_URL",
+            "TEST_OPENAI_RESPONSES_API_KEY",
             "TEST_ANTHROPIC_BASE_URL",
             "TEST_ANTHROPIC_API_KEY",
-            "TEST_DEEPSEEK_BASE_URL",
-            "TEST_DEEPSEEK_API_KEY",
+            "TEST_OPENAI_BASE_URL",
+            "TEST_OPENAI_API_KEY",
         ]
 
         for name in e2e_names:

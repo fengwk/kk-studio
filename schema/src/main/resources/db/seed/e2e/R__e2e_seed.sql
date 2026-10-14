@@ -20,15 +20,15 @@ insert into agent_provider (
     name, description, provider_type, base_url, credential, config, connection_generation_id,
     created_at, updated_at, version
 ) values
-    ('minimax', 'MiniMax (OpenAI Responses).', 'openai_response', null, null,
+    ('minimax', 'MiniMax (OpenAI Responses).', 'openai_responses', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
      '00000000-0000-0000-0000-000000000001'::uuid,
      current_timestamp, current_timestamp, 0),
-    ('openai', 'OpenAI (OpenAI Responses).', 'openai_response', null, null,
+    ('openai', 'OpenAI (OpenAI Responses).', 'openai_responses', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000,"promptCacheRetention":"SHORT"}',
      '00000000-0000-0000-0000-000000000002'::uuid,
      current_timestamp, current_timestamp, 0),
-    ('xai', 'xAI / Grok (OpenAI Responses).', 'openai_response', null, null,
+    ('xai', 'xAI / Grok (OpenAI Responses).', 'openai_responses', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
      '00000000-0000-0000-0000-000000000003'::uuid,
      current_timestamp, current_timestamp, 0),
