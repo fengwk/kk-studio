@@ -261,6 +261,9 @@ OpenCLI 每次 HTTP send 前冻结单调时钟 deadline，同一预算覆盖握�
 拒绝短读和超长。响应体 watchdog 到期主动关闭流，关闭在独立线程执行以免阻塞共享调度器；
 EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关闭；JDK 若在交付响应前
 拒绝非法 header，此路径无客户端可关闭的流，只返回不回显 header 原值的安全错误。
+非 2xx 响应、未知 execution/asset 状态与提交失败只暴露固定分类、HTTP 状态和阶段名；
+远端 body、status、URL/header 以及底层 IO/Jackson/URI 异常的 message/cause/suppressed
+都不进入公开异常与诊断日志，诊断只记录受控阶段与异常类型。
 
 ## 配置
 

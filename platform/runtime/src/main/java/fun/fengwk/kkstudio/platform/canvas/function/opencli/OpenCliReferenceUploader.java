@@ -47,7 +47,9 @@ final class OpenCliReferenceUploader {
         uploads.add(
             new OpenCliAdapterState.UploadedInput(reference.resourceId(), uploaded.resourcePath()));
       } catch (IOException exception) {
-        throw new UncheckedIOException("failed to close frozen Canvas Resource stream", exception);
+        // 次要关闭失败的原始 IOException 可能含 URI/path；只抛出固定文案。
+        throw new UncheckedIOException(
+            new IOException("failed to close frozen Canvas Resource stream"));
       }
       OpenCliAdapterState.putUploads(state, uploads);
       context.checkpoint("INPUT_UPLOADING", state);

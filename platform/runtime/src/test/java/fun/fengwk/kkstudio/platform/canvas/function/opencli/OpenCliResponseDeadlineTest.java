@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -149,7 +150,7 @@ class OpenCliResponseDeadlineTest {
 
   @Test
   void normalJsonErrorAndResourcePreserveContracts() throws Exception {
-    // 正常响应、错误详情和媒体 EOF 均须保留原契约，同时及时移除看门狗。
+    // 正常响应、媒体 EOF 与看门狗注销须保留原契约；远端错误只保留 HTTP 状态。
     String json =
         """
         {"status":200,"code":"OK","data":{"id":"exec-1","status":"SUCCEEDED",
@@ -165,7 +166,8 @@ class OpenCliResponseDeadlineTest {
       var error =
           assertThrows(
               OpenCliHubException.class, () -> endpoint.client().getExecution("exec-1", 0));
-      assertEquals("OpenCLI Hub HTTP 503: busy", error.getMessage());
+      assertEquals("OpenCLI Hub HTTP 503", error.getMessage());
+      assertNull(error.getCause());
     }
     try (Endpoint endpoint = new Endpoint(200, "3", "image/png", "abc", false);
         var resource = endpoint.client().openResource(resource(3))) {
@@ -236,6 +238,38 @@ class OpenCliResponseDeadlineTest {
     }
   }
 
+  @Test
+  void remoteErrorBodyAndUnknownStatusNeverEchoIntoSafeFailure() throws Exception {
+    // 真实 loopback 响应携带合成凭据 marker：公开消息只保留 HTTP 状态，异常链不出现 marker。
+    String secret = "sk-live-loopback-9f3a2b";
+    try (Endpoint endpoint =
+        new Endpoint(502, Integer.toString(secret.length()), "text/plain", secret, false)) {
+      OpenCliHubException error =
+          assertThrows(
+              OpenCliHubException.class, () -> endpoint.client().getExecution("exec-1", 0));
+      assertEquals("OpenCLI Hub HTTP 502", error.getMessage());
+      assertNull(error.getCause());
+      assertFalse(chainText(error).contains(secret));
+      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
+    }
+
+    String status = "sk-live-status-4c1d";
+    String json =
+        "{\"status\":200,\"code\":\"OK\",\"data\":{\"id\":\"exec-1\",\"status\":\""
+            + status
+            + "\",\"stdout\":\"\",\"stderr\":\"\",\"stdoutTruncated\":false,"
+            + "\"stderrTruncated\":false}}";
+    try (Endpoint endpoint =
+        new Endpoint(200, Integer.toString(json.length()), "application/json", json, false)) {
+      OpenCliHubException error =
+          assertThrows(
+              OpenCliHubException.class, () -> endpoint.client().getExecution("exec-1", 0));
+      assertTrue(error.getMessage().contains("unknown OpenCLI Hub execution status"));
+      assertNull(error.getCause());
+      assertFalse(chainText(error).contains(status));
+    }
+  }
+
   private static boolean hasTimeout(Throwable failure) {
     for (Throwable current = failure; current != null; current = current.getCause()) {
       if (current instanceof HttpTimeoutException) {
@@ -243,6 +277,21 @@ class OpenCliResponseDeadlineTest {
       }
     }
     return false;
+  }
+
+  private static String chainText(Throwable failure) {
+    StringBuilder text = new StringBuilder();
+    for (Throwable current = failure; current != null; current = current.getCause()) {
+      if (current.getMessage() != null) {
+        text.append(current.getMessage()).append('\n');
+      }
+      for (Throwable suppressed : current.getSuppressed()) {
+        if (suppressed.getMessage() != null) {
+          text.append(suppressed.getMessage()).append('\n');
+        }
+      }
+    }
+    return text.toString();
   }
 
   private static ExecutionResource resource(long size) {

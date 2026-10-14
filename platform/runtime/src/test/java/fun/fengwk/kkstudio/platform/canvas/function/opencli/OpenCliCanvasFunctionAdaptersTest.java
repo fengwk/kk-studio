@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -207,6 +208,57 @@ class OpenCliCanvasFunctionAdaptersTest {
     assertThrows(
         OpenCliHubException.class,
         () -> secondAdapter.execute(new RecordingContext(Map.of()), run));
+  }
+
+  @Test
+  void adaptersNeverEchoProviderFailureIntoUnknownResolution() {
+    // 提交时从 Hub 抛出的失败可能含 URL/凭据；UNKNOWN 决议只保留固定文案，不带原始 message/cause。
+    String marker = "https://user:s3cr3t@hub.test/exec?token=abcdef";
+    Map<UUID, byte[]> inputs = Map.of(RESOURCE_100, bytes(1));
+
+    OpenCliHubClient gptClient = mock(OpenCliHubClient.class);
+    when(gptClient.upload(anyString(), anyString(), anyLong(), any(InputStream.class)))
+        .thenReturn(new UploadedResource("/resources/u/a.png"));
+    when(gptClient.execute(any(), anyLong()))
+        .thenThrow(new OpenCliHubException("OpenCLI Hub request failed: " + marker));
+    GptImage2CanvasFunctionAdapter gpt = gptAdapter(gptClient);
+    CanvasFunctionFrozenRun gptRun =
+        run(
+            gpt.functions().get(0),
+            "draw",
+            Map.of("ratio", "auto"),
+            List.of(image(10L, 0, 100L, "a.png")),
+            "QUEUED",
+            Map.of());
+    CanvasFunctionUnknownException gptError =
+        assertThrows(
+            CanvasFunctionUnknownException.class,
+            () -> gpt.submit(new RecordingContext(inputs), gptRun));
+    assertTrue(gptError.getMessage().contains("outcome unknown"));
+    assertFalse(gptError.getMessage().contains("s3cr3t"));
+    assertNull(gptError.getCause());
+
+    OpenCliHubClient seedanceClient = mock(OpenCliHubClient.class);
+    when(seedanceClient.upload(anyString(), anyString(), anyLong(), any(InputStream.class)))
+        .thenReturn(new UploadedResource("/resources/u/a.png"));
+    when(seedanceClient.execute(any(), anyLong()))
+        .thenThrow(new OpenCliHubException("OpenCLI Hub request failed: " + marker));
+    SeedanceCanvasFunctionAdapter seedance = seedanceAdapter(seedanceClient, ignored -> {});
+    CanvasFunctionFrozenRun seedanceRun =
+        run(
+            seedance.functions().get(0),
+            "draw",
+            Map.of("ratio", "16:9", "duration", 5),
+            List.of(image(10L, 0, 100L, "a.png")),
+            "QUEUED",
+            Map.of());
+    CanvasFunctionUnknownException seedanceError =
+        assertThrows(
+            CanvasFunctionUnknownException.class,
+            () -> seedance.submit(new RecordingContext(inputs), seedanceRun));
+    assertTrue(seedanceError.getMessage().contains("outcome unknown"));
+    assertFalse(seedanceError.getMessage().contains("s3cr3t"));
+    assertNull(seedanceError.getCause());
   }
 
   @Test

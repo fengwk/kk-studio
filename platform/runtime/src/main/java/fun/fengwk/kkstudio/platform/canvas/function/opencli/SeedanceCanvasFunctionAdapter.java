@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -41,6 +42,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /** 通过 OpenCLI Hub + jimeng-agent 执行 Seedance 2.0 系列。 */
+@Slf4j
 public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private static final Pattern ASSET_ID = Pattern.compile("[0-9a-f]{16}");
@@ -241,8 +243,9 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
             client.execute(
                 buildSubmitArgv(run, uploads), integrations.seedance().hubExecutionTimeoutMillis());
       } catch (RuntimeException failure) {
-        throw new CanvasFunctionUnknownException(
-            "Seedance submission outcome unknown: " + failure.getMessage());
+        // 提交失败意味着外部任务可能已创建；只按 type 记录，不把原始 message/cause 交给人工决议。
+        log.warn("Seedance submission outcome unknown type={}", failure.getClass().getSimpleName());
+        throw new CanvasFunctionUnknownException(UNKNOWN_SUBMISSION);
       }
       executionId = submitted.id();
       state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
@@ -318,8 +321,8 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
           state.remove(OpenCliAdapterState.EXECUTION_ID);
           context.checkpoint("SEEDANCE_STATUS_WAITING", state);
         }
-        case "failed", "cancelled" -> throw new OpenCliHubException(
-            "Seedance asset ended as " + status);
+        case "failed" -> throw new OpenCliHubException("Seedance asset ended as failed");
+        case "cancelled" -> throw new OpenCliHubException("Seedance asset ended as cancelled");
         case "ready" -> {
           if (!requiredBoolean(row, "downloaded")) {
             throw new OpenCliHubException("ready Seedance asset was not downloaded");
@@ -341,10 +344,15 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
             UUID resourceId = context.materializeOutput(run.output(0), stream.content());
             return List.of(resourceId);
           } catch (IOException exception) {
-            throw new UncheckedIOException("failed to close Seedance Hub resource", exception);
+            // 次要关闭失败的原始 IOException 可能含 URI/path；只按 type 记录并抛出固定文案。
+            log.warn(
+                "failed to close Seedance Hub resource type={}",
+                exception.getClass().getSimpleName());
+            throw new UncheckedIOException(
+                new IOException("failed to close Seedance Hub resource"));
           }
         }
-        default -> throw new OpenCliHubException("unsupported Seedance asset status: " + status);
+        default -> throw new OpenCliHubException("unsupported Seedance asset status");
       }
     }
   }
@@ -439,7 +447,9 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       throw new OpenCliHubException(
           "Seedance stdout must be one object or a single-element object array");
     } catch (JacksonException exception) {
-      throw new OpenCliHubException("Seedance stdout must be valid JSON", exception);
+      // 原始 Jackson 失败可能含 stdout 片段，只按 type 记录并抛出固定文案。
+      log.warn("Seedance stdout is not valid JSON type={}", exception.getClass().getSimpleName());
+      throw new OpenCliHubException("Seedance stdout must be valid JSON");
     }
   }
 

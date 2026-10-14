@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -117,7 +120,7 @@ class OpenCliHubClientContractTest {
   }
 
   @Test
-  void boundsJsonAndErrorBodiesAndPreservesSanitizedHttpDetail() {
+  void boundsJsonAndErrorBodiesWithoutEchoingRemoteDetail() {
     SystemSettingsSnapshot limitedJson = snapshot(hub(1024, 1024, 4096, 65_535));
     OpenCliHubClient jsonClient =
         new OpenCliHubClient(
@@ -141,9 +144,55 @@ class OpenCliHubClientContractTest {
             new StubHttpClient(request -> response(500, "text/plain", "bad\n" + "x".repeat(300))));
     OpenCliHubException error =
         assertThrows(OpenCliHubException.class, () -> errorClient.getExecution("exec-1", 0));
-    assertTrue(error.getMessage().contains("bad"));
-    assertTrue(error.getMessage().contains("[truncated]"));
-    assertFalse(error.getMessage().contains("\n"));
+    // 远端错误正文无论是否超限都不进入公开消息，只保留 HTTP 状态。
+    assertEquals("OpenCLI Hub HTTP 500", error.getMessage());
+    assertFalse(error.getMessage().contains("bad"));
+    assertFalse(error.getMessage().contains("[truncated]"));
+    assertNull(error.getCause());
+  }
+
+  @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void localTransportThrowableSecretNeverReachesPublicErrorOrLogs(CapturedOutput output) {
+    // 本地 transport 失败 message 携带合成凭据 URL：公开异常链与诊断日志都不得出现该 marker。
+    String marker = "https://user:s3cr3t@hub.test/private/path?token=abcdef";
+    OpenCliHubClient client =
+        new OpenCliHubClient(
+            properties(),
+            snapshot(),
+            MAPPER,
+            new StubHttpClient(
+                request -> {
+                  throw new IOException("cannot connect to " + marker);
+                }));
+
+    OpenCliHubException error =
+        assertThrows(OpenCliHubException.class, () -> client.getExecution("exec-1", 0));
+
+    assertEquals("OpenCLI Hub request failed", error.getMessage());
+    assertNull(error.getCause());
+    assertFalse(chainText(error).contains("s3cr3t"));
+    // 诊断只记录受控 stage 与异常 class，不含 marker、cause 或 suppressed。
+    assertTrue(output.getAll().contains("type=IOException"));
+    assertFalse(output.getAll().contains("s3cr3t"));
+  }
+
+  @Test
+  void unknownExecutionStatusMarkerIsNotEchoed() {
+    String marker = "sk-live-unknown-status-marker";
+    String data =
+        "{\"id\":\"exec-1\",\"status\":\""
+            + marker
+            + "\",\"stdout\":\"\",\"stderr\":\"\",\"stdoutTruncated\":false,"
+            + "\"stderrTruncated\":false,\"resources\":[]}";
+    OpenCliHubClient client = clientReturning(jsonResponse(200, envelope(data)));
+
+    OpenCliHubException error =
+        assertThrows(OpenCliHubException.class, () -> client.getExecution("exec-1", 0));
+
+    assertTrue(error.getMessage().contains("unknown OpenCLI Hub execution status"));
+    assertFalse(error.getMessage().contains(marker));
+    assertNull(error.getCause());
   }
 
   @Test
@@ -232,6 +281,7 @@ class OpenCliHubClientContractTest {
     assertTrue(messageChain(replayError[0]).contains("cannot be replayed"));
 
     TrackingInputStream shortInput = new TrackingInputStream(new byte[] {1, 2});
+    Throwable[] publisherError = new Throwable[1];
     OpenCliHubClient earlyEofClient =
         new OpenCliHubClient(
             properties(),
@@ -241,13 +291,18 @@ class OpenCliHubClientContractTest {
                 request -> {
                   RecordingSubscriber subscriber = new RecordingSubscriber(Long.MAX_VALUE, false);
                   request.bodyPublisher().orElseThrow().subscribe(subscriber);
+                  publisherError[0] = subscriber.error;
                   throw new IOException("send failed", subscriber.error);
                 }));
     OpenCliHubException earlyEof =
         assertThrows(
             OpenCliHubException.class,
             () -> earlyEofClient.upload("a.png", "image/png", 3L, shortInput));
-    assertTrue(messageChain(earlyEof).contains("ended before declared Content-Length"));
+    // publisher 的真实早期 EOF 结果由 subscriber 观察；客户端只暴露固定阶段，不传播原始 cause。
+    assertNotNull(publisherError[0]);
+    assertTrue(publisherError[0].getMessage().contains("ended before declared Content-Length"));
+    assertEquals("OpenCLI Hub request failed", earlyEof.getMessage());
+    assertNull(earlyEof.getCause());
     assertTrue(shortInput.closed);
   }
 
@@ -491,6 +546,18 @@ class OpenCliHubClientContractTest {
       }
     }
     return messages.toString();
+  }
+
+  private static String chainText(Throwable error) {
+    StringBuilder text = new StringBuilder(messageChain(error));
+    for (Throwable current = error; current != null; current = current.getCause()) {
+      for (Throwable suppressed : current.getSuppressed()) {
+        if (suppressed.getMessage() != null) {
+          text.append(suppressed.getMessage()).append('\n');
+        }
+      }
+    }
+    return text.toString();
   }
 
   @FunctionalInterface
