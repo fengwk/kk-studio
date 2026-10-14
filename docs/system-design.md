@@ -66,8 +66,8 @@ Worker 与生命周期。领域契约和状态机位于内层，数据库、主�
 
 ```text
 frontend -> web -> platform
-web -(runtime)-> selected plugins -> platform / harness-contributor-api / canvas-core
-web -> canvas-infra -> canvas-core
+web -(runtime)-> selected plugins -> platform / harness-contributor-api / canvas-plugin-api / canvas-core
+web -> canvas-infra -> canvas-plugin-api -> canvas-core
 web -> project -> harness-runtime
 web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
 platform -> Canvas / Harness contracts / harness-mcp

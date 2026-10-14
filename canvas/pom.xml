@@ -15,6 +15,7 @@
 
     <modules>
         <module>core</module>
+        <module>plugin-api</module>
         <module>infra</module>
     </modules>
 </project>
