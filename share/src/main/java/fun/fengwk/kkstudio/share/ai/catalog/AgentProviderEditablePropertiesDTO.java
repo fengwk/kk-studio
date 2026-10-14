@@ -20,7 +20,7 @@ public class AgentProviderEditablePropertiesDTO {
   private String description;
 
   /**
-   * 必填供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_response}、{@code anthropic}、{@code google}。
+   * 必填供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_responses}、{@code anthropic}、{@code google}。
    */
   private String providerType;
 

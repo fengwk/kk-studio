@@ -1,7 +1,7 @@
 import type { BackendLong, CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
 
 /** Provider Catalog / HTTP 使用的稳定 wire 值。 */
-export type AgentProviderType = 'openai' | 'openai_response' | 'anthropic' | 'google'
+export type AgentProviderType = 'openai' | 'openai_responses' | 'anthropic' | 'google'
 
 export interface AgentProviderDTO {
   name: string

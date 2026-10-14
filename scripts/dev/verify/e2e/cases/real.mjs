@@ -248,7 +248,7 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
       break
     }
 
-    case 'openai_response': {
+    case 'openai_responses': {
       // OpenAI Responses 协议：
       // rawInputTokens = inputTokens + cacheReadTokens + cacheWriteTokens
       // rawOutputTokens = outputTokens + reasoningTokens
@@ -381,7 +381,7 @@ export function assertAssistantUsage(
         usage.providerTotalTokens === 0,
         `Anthropic providerTotalTokens must be 0: ${safeDiagnosticJson(usage)}`,
       )
-    } else if (providerType === 'openai_response') {
+    } else if (providerType === 'openai_responses') {
       const totalInput =
         usage.inputTokens
         + usage.cacheReadTokens
@@ -815,7 +815,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             firstUsage.cacheWriteLongTokens === 0,
             `${def.providerType} cacheWriteLongTokens must be 0`,
           )
-        } else if (def.providerType === 'openai_response' || def.providerType === 'anthropic') {
+        } else if (def.providerType === 'openai_responses' || def.providerType === 'anthropic') {
           assert(
             firstUsage.cacheWriteTokens >= 0,
             `${def.providerType} cacheWriteTokens must be non-negative`,
@@ -1037,7 +1037,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
     title: `${def.title} 真实工具调用与 terminal replay`,
     requires: ['real', 'tools'],
     docs:
-      def.providerType === 'openai_response' || def.providerType === 'anthropic'
+      def.providerType === 'openai_responses' || def.providerType === 'anthropic'
         ? `验证 ${def.providerName}/${def.modelName}：在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数（${def.title} 的 reasoning/replay 结构由确定性 provider 单测覆盖），写脱敏 artifact`
         : `验证 ${def.providerName}/${def.modelName}：在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、首轮推理证据、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数与 replay 证据，写脱敏 artifact`,
     async run(ctx) {

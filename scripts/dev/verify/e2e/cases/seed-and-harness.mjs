@@ -145,9 +145,9 @@ registerCase({
     )
     const providers = pageResults(providersJson)
     const expectedProviderTypes = new Map([
-      ['minimax', 'openai_response'],
-      ['openai', 'openai_response'],
-      ['xai', 'openai_response'],
+      ['minimax', 'openai_responses'],
+      ['openai', 'openai_responses'],
+      ['xai', 'openai_responses'],
       ['deepseek', 'openai'],
       ['google', 'google'],
       ['anthropic', 'anthropic'],

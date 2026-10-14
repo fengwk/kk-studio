@@ -142,7 +142,7 @@ class TestBuildPayload(unittest.TestCase):
             "test-secret",
             {
                 "description": "Custom Description",
-                "providerType": "openai_response",
+                "providerType": "openai_responses",
                 "modelCallTimeoutMillis": 600000,
                 "modelCallIdleTimeoutMillis": 50000,
                 "version": "7",
@@ -150,7 +150,7 @@ class TestBuildPayload(unittest.TestCase):
         )
 
         self.assertEqual("Custom Description", payload["description"])
-        self.assertEqual("openai_response", payload["providerType"])
+        self.assertEqual("openai_responses", payload["providerType"])
         self.assertEqual("7", payload["expectedVersion"])
         self.assertEqual(600000, payload["modelCallTimeoutMillis"])
         self.assertEqual(50000, payload["modelCallIdleTimeoutMillis"])
@@ -239,7 +239,7 @@ class TestSyncProviderSpecs(unittest.TestCase):
     def setUp(self):
         self.spec_a = ProviderSpec(
             name="prov-a",
-            provider_type="openai_response",
+            provider_type="openai_responses",
             base_url_env="TEST_A_BASE_URL",
             api_key_env="TEST_A_API_KEY",
             requires_v1_suffix=True,
@@ -301,7 +301,7 @@ class TestSyncProviderSpecs(unittest.TestCase):
         # 意图：在发起任何 PUT 请求前，后端必须存在对应的 seeded provider 记录，否则报错且不执行任何 PUT。
         fake_http, calls = make_mock_http(
             rows=[
-                {"name": "prov-a", "providerType": "openai_response", "version": "1"}
+                {"name": "prov-a", "providerType": "openai_responses", "version": "1"}
             ]
         )
         env = {
@@ -321,7 +321,7 @@ class TestSyncProviderSpecs(unittest.TestCase):
         # 意图：若后端行缺失乐观锁 version 字段，在发起任何 PUT 之前必须阻断并报错。
         fake_http, calls = make_mock_http(
             rows=[
-                {"name": "prov-a", "providerType": "openai_response", "version": ""},
+                {"name": "prov-a", "providerType": "openai_responses", "version": ""},
             ]
         )
         env = {

@@ -246,7 +246,7 @@ constraint	agent_model	fk_agent_model_provider	FOREIGN KEY (provider_name) REFER
 constraint	agent_model	pk_agent_model	PRIMARY KEY (provider_name, name)
 constraint	agent_provider	agent_provider_pkey	PRIMARY KEY (name)
 constraint	agent_provider	ck_agent_provider_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
-constraint	agent_provider	ck_agent_provider_provider_type	CHECK (((provider_type)::text = ANY ((ARRAY['openai'::character varying, 'openai_response'::character varying, 'anthropic'::character varying, 'google'::character varying])::text[])))
+constraint	agent_provider	ck_agent_provider_provider_type	CHECK (((provider_type)::text = ANY ((ARRAY['openai'::character varying, 'openai_responses'::character varying, 'anthropic'::character varying, 'google'::character varying])::text[])))
 constraint	agent_provider	ck_agent_provider_version_nonneg	CHECK ((version >= 0))
 constraint	chat	chat_pkey	PRIMARY KEY (id)
 constraint	chat	ck_chat_agent_name	CHECK ((((agent_name)::text !~ '^[[:space:]]'::text) AND ((agent_name)::text !~ '[[:space:]]$'::text) AND (char_length((agent_name)::text) > 0) AND (POSITION(('/'::text) IN (agent_name)) = 0)))
