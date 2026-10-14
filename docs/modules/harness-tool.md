@@ -40,7 +40,7 @@ ToolCall normalized = call.validateFor(descriptor);
 
 值模型允许 `BinaryResultContent`，但可持久化的 [`ToolResultJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolResultJsonCodec.java) 在编码与解码两个方向都拒绝 Binary：内存中的二进制必须在执行边界先外部化为 managed Resource。字节预算同样不在本模块决定——[`harness-runtime`](harness-runtime.md) 的 [`ToolResultSizeLimits`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolResultSizeLimits.java) 以 canonical JSON 字节数计，终态 1 MiB、partial 256 KiB，超限的 partial 不会被发布为实时事件；本模块只提供做这件事所需的精确编码器。
 
-Resource 可以携带不超过 16 KiB 的 `preview` 和 `textMetadata`。它们是值契约，不是可信内容的证明：Platform 的 [`ToolResultFinalizer`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolResultFinalizer.java) 对声明了文本元数据的受管资源校验实际字节，并重算 preview，覆盖工具自报的预览；未声明文本元数据时才保留原 preview。瞬时 `blob-upload:` 引用不得携带文本元数据。partial 阶段只允许文本与 JSON，不能携带 Binary 或 Resource。
+Resource 可以携带不超过 16 KiB 的 `preview` 和 `textMetadata`。它们是值契约，不是可信内容的证明：Platform 的 [`ToolResultFinalizer`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolResultFinalizer.java) 对声明了文本元数据的受管资源校验实际字节，并重算 preview，覆盖工具自报的预览；未声明文本元数据时才保留原 preview。瞬时 `blob-upload:` 引用不得携带文本元数据。partial 阶段只允许文本与 JSON，不能携带 Binary 或 Resource。
 
 ## JSON 编解码器
 

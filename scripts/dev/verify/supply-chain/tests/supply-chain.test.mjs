@@ -40,7 +40,7 @@ const REPOSITORY_ROOT = repositoryRoot()
 const SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/supply-chain/run.sh')
 const POM = path.join(REPOSITORY_ROOT, 'pom.xml')
 const CANVAS_INFRA_POM = path.join(REPOSITORY_ROOT, 'canvas/infra/pom.xml')
-const PLATFORM_POM = path.join(REPOSITORY_ROOT, 'platform/pom.xml')
+const PLATFORM_POM = path.join(REPOSITORY_ROOT, 'platform/runtime/pom.xml')
 const WEB_POM = path.join(REPOSITORY_ROOT, 'web/pom.xml')
 const SUPPRESSIONS = path.join(
     REPOSITORY_ROOT,

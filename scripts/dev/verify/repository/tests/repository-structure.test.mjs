@@ -708,12 +708,12 @@ const CORE_STATE_ENUMS = [
     constants: ['NOT_FOUND', 'CONFLICT'],
   },
   {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/LiveEnvironmentStatus.java',
+    path: 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/LiveEnvironmentStatus.java',
     enumName: 'LiveEnvironmentStatus',
     constants: ['CONNECTING', 'READY'],
   },
   {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/storage/service/model/StorageBlobState.java',
+    path: 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/service/model/StorageBlobState.java',
     enumName: 'StorageBlobState',
     constants: ['ACTIVE', 'DELETING'],
   },
@@ -728,12 +728,12 @@ const CORE_STATE_ENUMS = [
     constants: ['PENDING', 'SUCCESS', 'ERROR'],
   },
   {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliHubClient.java',
+    path: 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliHubClient.java',
     enumName: 'ExecutionStatus',
     constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELLED'],
   },
   {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',
+    path: 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',
     enumName: 'SignalKind',
     constants: ['PARTIAL', 'COMPLETE', 'ERROR'],
   },

@@ -212,7 +212,12 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-platform</artifactId>
+                <artifactId>kk-studio-platform-plugin-api</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-platform-runtime</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

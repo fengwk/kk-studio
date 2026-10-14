@@ -55,9 +55,9 @@ class WebModuleArchitectureTest {
    * <ul>
    *   <li>{@code kk-studio-harness-tool} / {@code kk-studio-harness-daemon}：避免组合根直接耦合底层执行与守护实现。
    *   <li>{@code kk-studio-harness-builtin} / {@code kk-studio-harness-common}：必须由 {@code
-   *       kk-studio-platform} 在 compile scope 传递引入；严禁在 web 声明任何 scope（特别是 test scope）的直接依赖。若声明更近的
-   *       test 依赖，Maven 最近依赖优先原则会遮蔽 platform 的 compile-scope 传递依赖，导致 Spring Boot repackage 将其视为
-   *       test 依赖而从 Fat JAR 的 BOOT-INF/lib 中剔除。
+   *       kk-studio-platform-runtime} 在 compile scope 传递引入；严禁在 web 声明任何 scope（特别是 test
+   *       scope）的直接依赖。若声明更近的 test 依赖，Maven 最近依赖优先原则会遮蔽 platform 的 compile-scope 传递依赖，导致 Spring Boot
+   *       repackage 将其视为 test 依赖而从 Fat JAR 的 BOOT-INF/lib 中剔除。
    * </ul>
    */
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
@@ -69,7 +69,8 @@ class WebModuleArchitectureTest {
 
   private static final List<String> REQUIRED_POM_ARTIFACTS =
       List.of(
-          "kk-studio-platform",
+          "kk-studio-platform-plugin-api",
+          "kk-studio-platform-runtime",
           "kk-studio-canvas-infra",
           "kk-studio-harness-infra",
           "kk-studio-harness-environment",

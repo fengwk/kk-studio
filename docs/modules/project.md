@@ -152,5 +152,5 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -pl project -am verify
 `verify` 对本模块的 domain 包做 ≥90% 行覆盖检查，并运行
 [`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
 与确定性调度单测。事务、锁序与宿主适配的端到端语义由
-[platform 侧的 Project/Issue 集成测试](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/)
+[platform 侧的 Project/Issue 集成测试](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/project/)
 以真实 PostgreSQL 加真实适配器覆盖：同一份用例在两侧各自验证自己拥有的部分，不互相复制。
