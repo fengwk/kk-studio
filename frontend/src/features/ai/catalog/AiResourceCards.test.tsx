@@ -78,6 +78,29 @@ function provider(overrides: Partial<AgentProviderDTO> = {}): AgentProviderDTO {
 }
 
 describe('AI resource cards', () => {
+  it('uses parentheses for inherited variants and explicit overrides on unresolved models', () => {
+    const { rerender } = render(
+      <AgentResourceCard
+        agent={agent({ variant: null })}
+        models={[model()]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        deletePending={false}
+      />,
+    )
+    expect(screen.getByText('minimax/MiniMax (quality)（模型默认）')).toBeInTheDocument()
+    rerender(
+      <AgentResourceCard
+        agent={agent({ model: 'xai/grok-4.7', variant: 'xhigh' })}
+        models={[]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        deletePending={false}
+      />,
+    )
+    expect(screen.getByText('xai/grok-4.7 (xhigh)')).toBeInTheDocument()
+  })
+
   it('renders complete agent metadata and action states', async () => {
     const user = userEvent.setup()
     const onEdit = vi.fn()
@@ -92,7 +115,7 @@ describe('AI resource cards', () => {
       />,
     )
 
-    expect(screen.getByText(/minimax\/MiniMax · quality/)).toBeInTheDocument()
+    expect(screen.getByText(/minimax\/MiniMax \(quality\)/)).toBeInTheDocument()
     // 卡片对 tools 和 skills 做截断展示；超出部分（3 个中的 2 个）折叠为 +1。
     expect(screen.getByText('+1')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 assistant' }))
@@ -245,7 +268,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText(/minimax\/MiniMax · quality/)).toBeInTheDocument()
+    expect(screen.getByText(/minimax\/MiniMax \(quality\)/)).toBeInTheDocument()
     expect(screen.getAllByText('assistant')).toHaveLength(2)
   })
 

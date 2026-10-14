@@ -152,6 +152,15 @@ describe('buildThreadEventTimeline', () => {
       }),
       entry('compact-1', 'COMPACTION', { reason: 'COMPACTION' }),
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED', reason: 'no-continuation' }),
+      entry('settings-1', 'SETTINGS', {
+        settings: {
+          agentName: 'JIJI',
+          model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+          environmentName: null,
+          goal: null,
+        },
+        ownerThreadId: 't1',
+      }),
       entry('custom-1', 'CUSTOM', { contributorId: 'c1', customType: 'note', schemaVersion: 1, data: {} }),
       entry('unknown-1', 'UNKNOWN_TYPE' as EntryType, {}),
     ]
@@ -168,6 +177,7 @@ describe('buildThreadEventTimeline', () => {
       'entry:aborted-1',
       'entry:compact-1',
       'entry:end-1',
+      'entry:settings-1',
       'entry:custom-1',
       'entry:unknown-1',
     ])
@@ -183,6 +193,7 @@ describe('buildThreadEventTimeline', () => {
       'ASSISTANT_ABORTED',
       'COMPACTION',
       'TURN_END',
+      'SETTINGS',
       'CUSTOM',
       'CUSTOM',
     ])
@@ -194,6 +205,7 @@ describe('buildThreadEventTimeline', () => {
       'failed',
       'failed',
       'stopped',
+      'completed',
       'completed',
       'completed',
       'completed',
@@ -216,6 +228,7 @@ describe('buildThreadEventTimeline', () => {
       'ASSISTANT_ABORTED',
       'COMPACTION',
       'TURN_END',
+      'SETTINGS',
       'CUSTOM',
       '未知条目：UNKNOWN_TYPE',
     ])
@@ -1092,6 +1105,59 @@ describe('buildThreadEventTimeline', () => {
         { label: '来源', value: 'source-thread-1' },
       ]),
     )
+  })
+
+  it('recognizes SETTINGS events and preserves valid or malformed payloads for inspection', () => {
+    // 已知类型保留原始事实；损坏快照也不冒充未知类型。
+    const validEntry = entry('settings-valid', 'SETTINGS', {
+      settings: {
+        agentName: 'architect',
+        model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+        environmentName: 'prod-env',
+        goal: null,
+      },
+      ownerThreadId: 't-root',
+    })
+    const invalidEntry = entry('settings-invalid', 'SETTINGS', {
+      settings: { invalid: true },
+      ownerThreadId: 't-root',
+    })
+
+    const events = build([validEntry, invalidEntry])
+    expect(events).toHaveLength(2)
+
+    const validEvent = events[0]!
+    expect(validEvent.id).toBe('entry:settings-valid')
+    expect(validEvent.kind).toBe('SETTINGS')
+    expect(validEvent.title).toBe('SETTINGS')
+    expect(validEvent.status).toBe('completed')
+    expect(JSON.parse(validEvent.summary)).toEqual({
+      settings: {
+        agentName: 'architect',
+        model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+        environmentName: 'prod-env',
+        goal: null,
+      },
+      ownerThreadId: 't-root',
+    })
+    expect(JSON.parse(validEvent.rawJson!)).toEqual({
+      settings: {
+        agentName: 'architect',
+        model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+        environmentName: 'prod-env',
+        goal: null,
+      },
+      ownerThreadId: 't-root',
+    })
+
+    const invalidEvent = events[1]!
+    expect(invalidEvent.id).toBe('entry:settings-invalid')
+    expect(invalidEvent.kind).toBe('SETTINGS')
+    expect(invalidEvent.title).toBe('SETTINGS')
+    expect(JSON.parse(invalidEvent.summary)).toEqual({
+      settings: { invalid: true },
+      ownerThreadId: 't-root',
+    })
   })
 })
 

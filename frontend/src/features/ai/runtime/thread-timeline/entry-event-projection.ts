@@ -3,6 +3,7 @@ import type {
   EntryEventDialogueMessage,
   EntryEventKind,
 } from '@/features/ai/runtime/thread-timeline-types'
+import { formatModelLabel } from '@/features/ai/catalog'
 import { translate } from '@/shared/i18n'
 
 export type SettingsSnapshot = {
@@ -37,11 +38,6 @@ export function parseSettingsSnapshot(value: unknown): SettingsSnapshot | null {
   }
 }
 
-function modelLabel(settings: SettingsSnapshot): string {
-  const { providerName, modelName, variant } = settings.model
-  return `${providerName}/${modelName} (${variant})`
-}
-
 export function projectRootSettings(
   entry: HarnessSessionEntryDTO,
   settings: SettingsSnapshot,
@@ -51,7 +47,11 @@ export function projectRootSettings(
     'root',
     translate('ai.runtime.entry.rootSettings', {
       agent: settings.agentName,
-      model: modelLabel(settings),
+      model: formatModelLabel(
+        settings.model.providerName,
+        settings.model.modelName,
+        settings.model.variant,
+      ),
       environment: settings.environmentName ?? translate('ai.runtime.entry.noEnvironment'),
     }),
     '',
@@ -79,7 +79,11 @@ export function projectSettingsChanges(
     || before.model.variant !== after.model.variant
   ) {
     changes.push({ ...event(entry, 'settings_change', translate('ai.runtime.entry.modelChanged', {
-      model: modelLabel(after),
+      model: formatModelLabel(
+        after.model.providerName,
+        after.model.modelName,
+        after.model.variant,
+      ),
     }), ''), id: `entry:${entry.entryId}:model` })
   }
   if (before.environmentName !== after.environmentName) {

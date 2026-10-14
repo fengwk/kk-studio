@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { Check, ChevronDown, ChevronLeft } from 'lucide-react'
+import { formatModelLabel } from '@/features/ai/catalog'
 import { useI18n } from '@/shared/i18n'
 
 export interface ThreadComposerModelSelection {
@@ -110,7 +111,7 @@ export function ThreadComposerControls({
     if (menu === 'model') {
       const needle = query.trim().toLowerCase()
       return models.flatMap((model) => {
-        const label = `${model.providerName}/${model.name}`
+        const label = formatModelLabel(model.providerName, model.name)
         if (needle && !label.toLowerCase().includes(needle)) {
           return []
         }
@@ -298,7 +299,11 @@ export function ThreadComposerControls({
   const environmentLabel = settings.environmentName ?? t('ai.runtime.composer.environmentNone')
   const modelLabel =
     settings.model.providerName && settings.model.modelName
-      ? `${settings.model.providerName}/${settings.model.modelName} · ${settings.model.variant}`
+      ? formatModelLabel(
+        settings.model.providerName,
+        settings.model.modelName,
+        settings.model.variant,
+      )
       : t('ai.runtime.composer.model')
   const settingsStatus = settings.status ?? null
 
@@ -379,7 +384,7 @@ export function ThreadComposerControls({
               <ChevronLeft aria-hidden="true" />
               {variantTarget == null
                 ? t('ai.runtime.composer.model')
-                : `${variantTarget.providerName}/${variantTarget.name}`}
+                : formatModelLabel(variantTarget.providerName, variantTarget.name)}
             </button>
           ) : null}
           {menu === 'model' ? (

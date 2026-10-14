@@ -67,7 +67,7 @@ AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投
 单顶栏左上角提供“关闭 Debug”，不导航 `/chats`，不渲染会话返回行；退出即完整恢复原 layout、
 可见 pane、滚动与焦点。Escape 优先由内部检查器或弹层消费，未消费时才触发外层退出 Debug。
 根面板与草稿 pane 不自渲染标题，工作区内子代理同样不渲染第二层标题栏或只读 badge，
-真实身份（agent/provider/model 及变体定义的真实 reasoningEffort；默认 main 不作身份）汇入顶栏。
+真实身份（agent 名称与 `provider/model (variant)`；默认 main 不作身份）汇入顶栏。
 资源解析和 Footer 由 ThreadPane 组装，不增加重复参数转发层。
 
 `ThreadComposer` 保留 `contenteditable + ComposerPart[]` 的输入协议，负责附件注册、

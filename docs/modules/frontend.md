@@ -157,8 +157,14 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
 根面板与草稿 pane 不再渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
-其真实身份（agent 名称、provider/model，以及变体定义的真实 reasoningEffort；默认 main
+其真实身份（agent 名称与 `provider/model (variant)`；默认 main
 不作为独立身份）与只读动作直接汇入工作区顶栏，并提供返回直属父 Agent 入口。
+模型与变体组合统一使用括号格式，包括输入区底栏及其提示、设置变更记录、执行树和 Agent 卡片；
+变体来自实际选择，不换算为 reasoningEffort。模型引用和单独选择模型的选项仍使用 `provider/model`。
+
+对话按持久 ROOT、SETTINGS 与普通 TURN_START 的设置快照计算 Agent、模型及环境变更。
+回合间的 SETTINGS 成为最新 head 时立即展示变化；后续相同快照不重复展示。
+无效快照明确提示并中断差值基准，Debug 仍保留一条已识别的 SETTINGS 事件及完整原始数据。
 
 命令批在发送前冻结 idempotency keys、payload、顺序和 cursor，连同本地草稿写入 pending storage；
 写入失败中止发送。容器创建用带 owner/target 的 `kk-studio.agent-pane-acceptance` 记录，
