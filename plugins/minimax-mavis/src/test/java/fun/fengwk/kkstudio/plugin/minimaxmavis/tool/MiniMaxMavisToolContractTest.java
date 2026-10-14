@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisClient;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisHttpTransport;
@@ -46,7 +46,7 @@ class MiniMaxMavisToolContractTest {
 
   @BeforeEach
   void setUp() {
-    PluginCredentialStore credentialStore = mock(PluginCredentialStore.class);
+    PluginCredentialAccess credentialAccess = mock(PluginCredentialAccess.class);
     MavisHttpTransport transport = mock(MavisHttpTransport.class);
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache capabilityCache = new MiniMaxMavisCapabilityCache(client);
@@ -55,7 +55,7 @@ class MiniMaxMavisToolContractTest {
 
     MiniMaxMavisHarnessContributor.ToolDependencies dependencies =
         new MiniMaxMavisHarnessContributor.ToolDependencies(
-            credentialStore, client, capabilityCache, resourceAccess, executor);
+            credentialAccess, client, capabilityCache, resourceAccess, executor);
     this.contributor = MiniMaxMavisHarnessContributor.create(dependencies);
     this.tools = contributor.tools();
   }

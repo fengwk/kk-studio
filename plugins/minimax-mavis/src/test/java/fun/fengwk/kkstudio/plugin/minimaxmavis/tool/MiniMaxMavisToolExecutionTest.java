@@ -19,10 +19,8 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
@@ -85,7 +83,7 @@ class MiniMaxMavisToolExecutionTest {
   private FakeMavisTransport transport;
   private FakeResourceGateway gateway;
   private DirectExecutor executor;
-  private PluginCredentialStore credentialStore;
+  private PluginCredentialAccess credentialAccess;
   private MiniMaxMavisHarnessContributor contributor;
   private Map<MavisCapability, Tool> tools;
 
@@ -103,7 +101,7 @@ class MiniMaxMavisToolExecutionTest {
             0L,
             new byte[0],
             new MiniMaxMavisCredentialPayload(TEST_TOKEN, CLIENT_UUID, Instant.now()).toJson());
-    this.credentialStore = new FakeCredentialStore(snapshot);
+    this.credentialAccess = new FakeCredentialAccess(snapshot);
 
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache capabilityCache = new MiniMaxMavisCapabilityCache(client);
@@ -111,7 +109,7 @@ class MiniMaxMavisToolExecutionTest {
 
     MiniMaxMavisHarnessContributor.ToolDependencies dependencies =
         new MiniMaxMavisHarnessContributor.ToolDependencies(
-            credentialStore, client, capabilityCache, resourceAccess, executor);
+            credentialAccess, client, capabilityCache, resourceAccess, executor);
     this.contributor = MiniMaxMavisHarnessContributor.create(dependencies);
     this.tools = contributor.tools();
   }
@@ -127,7 +125,7 @@ class MiniMaxMavisToolExecutionTest {
     MiniMaxMavisHarnessContributor freshContributor =
         MiniMaxMavisHarnessContributor.create(
             new MiniMaxMavisHarnessContributor.ToolDependencies(
-                credentialStore, client, cache, access, executor));
+                credentialAccess, client, cache, access, executor));
 
     assertEquals(15, freshContributor.toolCount());
     assertTrue(
@@ -328,33 +326,20 @@ class MiniMaxMavisToolExecutionTest {
     }
   }
 
-  /** 假凭据持久化存储：记录被判定失效的本次已用凭据。 */
-  static final class FakeCredentialStore implements PluginCredentialStore {
+  /** 假 scoped 凭据访问：记录被判定失效的本次已用凭据。 */
+  static final class FakeCredentialAccess implements PluginCredentialAccess {
     private final PluginCredentialSnapshot snapshot;
     private final List<PluginCredentialSnapshot> rejected =
         Collections.synchronizedList(new ArrayList<>());
 
-    FakeCredentialStore(PluginCredentialSnapshot snapshot) {
+    FakeCredentialAccess(PluginCredentialSnapshot snapshot) {
       this.snapshot = snapshot;
     }
 
     @Override
-    public PluginCredentialProjection projection(String pluginId) {
-      return null;
-    }
-
-    @Override
-    public PluginCredentialSnapshot resolve(String pluginId) {
+    public PluginCredentialSnapshot resolve() {
       return snapshot;
     }
-
-    @Override
-    public PluginCredentialProjection save(String pluginId, PluginCredentialMaterial material) {
-      return null;
-    }
-
-    @Override
-    public void delete(String pluginId) {}
 
     @Override
     public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {

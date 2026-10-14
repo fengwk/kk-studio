@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisAuthException;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisException;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisRegion;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisCapabilityCache;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisCredentialPayload;
-import fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisPlugin;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisResourceAccess;
 
 import java.nio.charset.StandardCharsets;
@@ -110,7 +109,7 @@ public final class MiniMaxMavisTool implements Tool {
   private final MavisCapability capability;
   private final ToolDescriptor descriptor;
   private final ToolSideEffect sideEffect;
-  private final PluginCredentialStore credentialStore;
+  private final PluginCredentialAccess credentialAccess;
   private final MavisClient client;
   private final MiniMaxMavisCapabilityCache capabilityCache;
   private final MiniMaxMavisResourceAccess resourceAccess;
@@ -119,7 +118,7 @@ public final class MiniMaxMavisTool implements Tool {
   public MiniMaxMavisTool(
       MavisCapability capability,
       MavisToolDefinition definition,
-      PluginCredentialStore credentialStore,
+      PluginCredentialAccess credentialAccess,
       MavisClient client,
       MiniMaxMavisCapabilityCache capabilityCache,
       MiniMaxMavisResourceAccess resourceAccess,
@@ -135,7 +134,7 @@ public final class MiniMaxMavisTool implements Tool {
             definition.inputSchema(),
             sideEffect,
             capability.requestTimeout());
-    this.credentialStore = Objects.requireNonNull(credentialStore, "credentialStore");
+    this.credentialAccess = Objects.requireNonNull(credentialAccess, "credentialAccess");
     this.client = Objects.requireNonNull(client, "client");
     this.capabilityCache = Objects.requireNonNull(capabilityCache, "capabilityCache");
     this.resourceAccess = Objects.requireNonNull(resourceAccess, "resourceAccess");
@@ -293,7 +292,7 @@ public final class MiniMaxMavisTool implements Tool {
   }
 
   private ToolResult invoke(JsonNode arguments, String toolCallId) {
-    PluginCredentialSnapshot snapshot = credentialStore.resolve(MiniMaxMavisPlugin.PLUGIN_ID);
+    PluginCredentialSnapshot snapshot = credentialAccess.resolve();
     MavisCredential credential = toCredential(snapshot);
 
     MavisCapabilityCatalog catalog;
@@ -333,7 +332,7 @@ public final class MiniMaxMavisTool implements Tool {
    */
   private void rejectUsed(PluginCredentialSnapshot snapshot) {
     try {
-      credentialStore.rejectUsed(snapshot, MavisAuthException.REJECTED_MESSAGE);
+      credentialAccess.rejectUsed(snapshot, MavisAuthException.REJECTED_MESSAGE);
     } catch (RuntimeException error) {
       log.debug("Cannot mark the rejected MiniMax Mavis credential for re-authentication");
     }
