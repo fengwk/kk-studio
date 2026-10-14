@@ -14,15 +14,21 @@ import org.junit.jupiter.api.io.TempDir;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
+import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 import fun.fengwk.kkstudio.platform.plugin.testing.InMemoryPluginCredentialRepository;
+import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
@@ -165,7 +171,9 @@ class PluginManagementServiceTest {
         region -> {
           throw new RuntimeException("upstream network failure");
         });
-    assertThrows(AiValidationException.class, () -> service.prepareAuth(PLUGIN_ID, REGION_CN));
+    AiValidationException loginFailure =
+        assertThrows(AiValidationException.class, () -> service.prepareAuth(PLUGIN_ID, REGION_CN));
+    assertNull(loginFailure.getCause(), "raw login exception must not be attached as a cause");
 
     // 6. 合法返回
     authPlugin.setLoginUrlSupplier(region -> "https://auth.example.com/login?region=" + region);
@@ -184,12 +192,13 @@ class PluginManagementServiceTest {
     assertThrows(AiValidationException.class, () -> service.completeAuth(PLUGIN_ID, null));
     assertThrows(AiValidationException.class, () -> service.completeAuth(PLUGIN_ID, "   "));
 
-    // 2. handler 抛异常：断言异常消息与 toString() 不包含回调原文中的敏感参数
+    // 2. handler 抛异常：断言异常本身及整条 cause/suppressed 链都不含回调原文中的敏感参数
     String sensitiveCallback =
         "https://example.com/callback?code=abc&secret_token=" + SECRET_TOKEN_MARKER;
     authPlugin.setCompleteHandler(
         url -> {
-          throw new RuntimeException("failed callback parsing");
+          // 模拟 Plugin 直接把回调原文写进异常消息：宿主必须不把它作为 cause 透出。
+          throw new RuntimeException("failed callback parsing: " + url);
         });
 
     AiValidationException ex =
@@ -202,6 +211,10 @@ class PluginManagementServiceTest {
     assertFalse(
         ex.toString().contains(SECRET_TOKEN_MARKER),
         "error toString() must not contain callback token");
+    assertNull(ex.getCause(), "raw callback exception must not be attached as a cause");
+    assertFalse(
+        leaksMarker(ex, SECRET_TOKEN_MARKER),
+        "no throwable in the cause/suppressed chain may leak the callback");
 
     // 3. handler 返回 region 不在 descriptor 声明内（如 "FR"）
     authPlugin.setCompleteHandler(
@@ -256,11 +269,31 @@ class PluginManagementServiceTest {
     assertThrows(AiResourceNotFoundException.class, () -> service.disconnect("uninstalled-plugin"));
   }
 
+  /** 遍历整条 cause/suppressed 链，判断是否有任意 Throwable 的 message/toString 泄漏标记。 */
+  private static boolean leaksMarker(Throwable root, String marker) {
+    Throwable current = root;
+    while (current != null) {
+      if (current.getMessage() != null && current.getMessage().contains(marker)) {
+        return true;
+      }
+      if (current.toString().contains(marker)) {
+        return true;
+      }
+      for (Throwable suppressed : current.getSuppressed()) {
+        if (leaksMarker(suppressed, marker)) {
+          return true;
+        }
+      }
+      current = current.getCause();
+    }
+    return false;
+  }
+
   // --- 测试辅助桩对象 ---
 
   private static class TestAuthPlugin implements StudioPlugin {
     private final PluginDescriptor descriptor =
-        new PluginDescriptor(PLUGIN_ID, "Auth Plugin", "1.0", List.of(REGION_CN, REGION_US));
+        new PluginDescriptor(PLUGIN_ID, "Auth Plugin", "1.0");
 
     private Function<String, String> loginUrlSupplier =
         region -> "https://login.example.com/" + region;
@@ -278,6 +311,21 @@ class PluginManagementServiceTest {
     @Override
     public PluginDescriptor descriptor() {
       return descriptor;
+    }
+
+    @Override
+    public PluginConfigSchema configurationSchema() {
+      return TestPluginFixtures.EMPTY_SCHEMA;
+    }
+
+    @Override
+    public PluginAuthSpec authenticationSpec() {
+      return new PluginAuthSpec.DeepLink(List.of(REGION_CN, REGION_US));
+    }
+
+    @Override
+    public PluginInstance configure(PluginConfig config, PluginContext context) {
+      return TestPluginFixtures.emptyInstance();
     }
 
     @Override
@@ -299,11 +347,26 @@ class PluginManagementServiceTest {
 
   private static class TestNoAuthPlugin implements StudioPlugin {
     private final PluginDescriptor descriptor =
-        new PluginDescriptor(NO_AUTH_PLUGIN_ID, "No Auth Plugin", "1.0", List.of());
+        new PluginDescriptor(NO_AUTH_PLUGIN_ID, "No Auth Plugin", "1.0");
 
     @Override
     public PluginDescriptor descriptor() {
       return descriptor;
+    }
+
+    @Override
+    public PluginConfigSchema configurationSchema() {
+      return TestPluginFixtures.EMPTY_SCHEMA;
+    }
+
+    @Override
+    public PluginAuthSpec authenticationSpec() {
+      return new PluginAuthSpec.None();
+    }
+
+    @Override
+    public PluginInstance configure(PluginConfig config, PluginContext context) {
+      return TestPluginFixtures.emptyInstance();
     }
   }
 }

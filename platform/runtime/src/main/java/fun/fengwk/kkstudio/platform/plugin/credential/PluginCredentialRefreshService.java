@@ -3,11 +3,11 @@ package fun.fengwk.kkstudio.platform.plugin.credential;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthRejectedException;
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
-import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.plugin.PluginRenewalNotSentException;
@@ -96,7 +96,7 @@ public final class PluginCredentialRefreshService {
    * 返回值因此也是调度器判断「本轮是否有进展」的依据。
    */
   public int refreshOnce() {
-    List<String> installed = registry.pluginIds();
+    List<String> installed = refreshablePluginIds();
     if (installed.isEmpty()) {
       return 0;
     }
@@ -136,11 +136,24 @@ public final class PluginCredentialRefreshService {
 
   /** 已安装 Plugin 中下一次可调度刷新时刻；没有可调度行时为空。 */
   public Optional<Instant> earliestRefreshAt() {
-    List<String> installed = registry.pluginIds();
+    List<String> installed = refreshablePluginIds();
     if (installed.isEmpty()) {
       return Optional.empty();
     }
     return repository.earliestRefreshAt(installed, clock.instant());
+  }
+
+  /**
+   * 实际声明 {@link PluginCredentialRefresher} 的已安装 id。
+   *
+   * <p>刷新只领取这些 id 的行：没有刷新能力的 Plugin（None/StaticKey 等）即使存在到期行也保持 dormant，绝不先被 claim 再释放，
+   * 从而避免队头无效刷新反复占用每一轮领取窗口。
+   */
+  private List<String> refreshablePluginIds() {
+    return registry.plugins().stream()
+        .filter(plugin -> plugin.refresher().isPresent())
+        .map(plugin -> plugin.descriptor().pluginId())
+        .toList();
   }
 
   private PluginCredentialRow claimOne(List<String> installed) {
@@ -227,7 +240,7 @@ public final class PluginCredentialRefreshService {
     Instant completedAt = clock.instant();
     byte[] envelope;
     try {
-      requireUsable(plugin.descriptor(), row, material, completedAt);
+      requireUsable(plugin, row, material, completedAt);
       envelope = codec.encrypt(key, row.pluginId(), material.region(), material.payloadJson());
     } catch (IllegalArgumentException error) {
       return finalizeFailure(
@@ -254,24 +267,32 @@ public final class PluginCredentialRefreshService {
   }
 
   /**
-   * 校验 Plugin 交还的材料仍属于同一条凭据：region 必须与行一致，时间必须自洽。
+   * 校验 Plugin 交还的材料仍属于同一条凭据：region 必须与行一致，且落在 Plugin 声明的 DeepLink 候选内（None/StaticKey 没有 region
+   * 候选），时间必须自洽。
    *
    * <p>不满足时**不替换**任何旧凭据，并按「已收到但不可用的刷新结果」收敛为有界延迟重试：它既不是结果未知（响应是确定的），也不应该永久阻断一个 可能只是服务端临时异常的 Plugin。
    */
   private static void requireUsable(
-      PluginDescriptor descriptor,
+      StudioPlugin plugin,
       PluginCredentialRow row,
       PluginCredentialMaterial material,
       Instant now) {
     if (material == null) {
       throw new IllegalArgumentException(INVALID_RENEWAL_ERROR);
     }
-    if (!material.region().equals(row.region()) || !descriptor.acceptsRegion(material.region())) {
+    if (!material.region().equals(row.region())
+        || !acceptsCredentialRegion(plugin, material.region())) {
       throw new IllegalArgumentException(INVALID_RENEWAL_ERROR);
     }
     if (!material.expiresAt().isAfter(now)) {
       throw new IllegalArgumentException(INVALID_RENEWAL_ERROR);
     }
+  }
+
+  /** region 候选只由 DeepLink 承接；其它认证形态没有候选，仅要求与凭据行 region 一致。 */
+  private static boolean acceptsCredentialRegion(StudioPlugin plugin, String region) {
+    return !(plugin.authenticationSpec() instanceof PluginAuthSpec.DeepLink deepLink)
+        || deepLink.acceptsRegion(region);
   }
 
   /** 终结为失败状态，返回是否真的写入了终态（CAS 竞争失败时为 {@code false}）。 */

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.plugin.credential;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -9,15 +10,21 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
+import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.plugin.testing.InMemoryPluginCredentialRepository;
+import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 
 import javax.crypto.SecretKey;
 
@@ -288,8 +295,8 @@ class PluginCredentialRefreshDispatcherTest {
   @Test
   void stalledDueRowBacksOffToPollDelay() throws InterruptedException {
     properties.getRefresh().setPollDelay(Duration.ofMillis(200));
-    // 该 Plugin 没有刷新器：claim 之后只能 releaseLease，行仍然到期。
-    dispatcher = dispatcherWithoutRefresher();
+    // 有刷新器但主密钥不可用：claim 之后只能 releaseLease，行仍然到期。
+    dispatcher = dispatcherWithUnavailableKey();
     repository.setDirect(
         row(PluginCredentialStatus.CONNECTED, now.plusSeconds(7200), now.minusSeconds(10)));
 
@@ -306,6 +313,34 @@ class PluginCredentialRefreshDispatcherTest {
     awaitCondition(() -> repository.claimCalls.get() >= 2, 2_000);
 
     dispatcher.stop();
+  }
+
+  /** 没有声明 refresher 的 Plugin 的到期行永不 claim：它保持 dormant，绝不因队头无效领取而反复占用每一轮领取窗口。 */
+  @Test
+  void dueRowOfPluginWithoutRefresherIsNeverClaimed() throws InterruptedException {
+    properties.getRefresh().setPollDelay(Duration.ofMillis(50));
+    PluginCredentialRefreshService refreshService =
+        new PluginCredentialRefreshService(
+            new StudioPluginRegistry(List.of(plugin(PLUGIN_ID, null))),
+            repository,
+            codec,
+            keyLoader,
+            properties,
+            clock);
+    dispatcher = new PluginCredentialRefreshDispatcher(refreshService, properties, clock);
+    repository.setDirect(
+        row(PluginCredentialStatus.CONNECTED, now.plusSeconds(7200), now.minusSeconds(10)));
+
+    dispatcher.start();
+    Thread.sleep(250);
+    dispatcher.stop();
+
+    assertEquals(
+        0, repository.claimCalls.get(), "a plugin without a refresher must never be claimed");
+    PluginCredentialRow current = repository.getDirect(PLUGIN_ID);
+    assertEquals(PluginCredentialStatus.CONNECTED, current.status(), "row must stay dormant");
+    assertEquals(0L, current.version(), "dormant row version must not change");
+    assertNull(current.refreshLeaseToken(), "dormant row must not carry a lease");
   }
 
   /**
@@ -423,8 +458,7 @@ class PluginCredentialRefreshDispatcherTest {
 
   /** 固定 region、带刷新器的插件装配。 */
   private static StudioPlugin plugin(String pluginId, PluginCredentialRefresher refresher) {
-    PluginDescriptor descriptor =
-        new PluginDescriptor(pluginId, "Dispatcher Plugin", "1.0", List.of(REGION));
+    PluginDescriptor descriptor = new PluginDescriptor(pluginId, "Dispatcher Plugin", "1.0");
     return new StudioPlugin() {
       @Override
       public PluginDescriptor descriptor() {
@@ -432,8 +466,23 @@ class PluginCredentialRefreshDispatcherTest {
       }
 
       @Override
+      public PluginConfigSchema configurationSchema() {
+        return TestPluginFixtures.EMPTY_SCHEMA;
+      }
+
+      @Override
+      public PluginAuthSpec authenticationSpec() {
+        return new PluginAuthSpec.DeepLink(List.of(REGION));
+      }
+
+      @Override
+      public PluginInstance configure(PluginConfig config, PluginContext context) {
+        return TestPluginFixtures.emptyInstance();
+      }
+
+      @Override
       public Optional<PluginCredentialRefresher> refresher() {
-        return Optional.of(refresher);
+        return Optional.ofNullable(refresher);
       }
     };
   }
@@ -442,17 +491,16 @@ class PluginCredentialRefreshDispatcherTest {
     return dispatcher(List.of(plugin(PLUGIN_ID, refresher)));
   }
 
-  /** 没有刷新器的 Plugin：claim 后只能释放 lease，用于验证「无法推进时退避」。 */
-  private PluginCredentialRefreshDispatcher dispatcherWithoutRefresher() {
-    PluginDescriptor descriptor =
-        new PluginDescriptor(PLUGIN_ID, "Dispatcher Plugin", "1.0", List.of(REGION));
-    StudioPlugin plugin = () -> descriptor;
+  /** 有刷新器但主密钥不可用：claim 后只能 releaseLease，行仍然到期，用于验证「无法推进时退回兜底轮询」。 */
+  private PluginCredentialRefreshDispatcher dispatcherWithUnavailableKey() {
+    PluginCredentialKeyLoader missingKeyLoader =
+        new PluginCredentialKeyLoader(tempDir.resolve("missing.key").toAbsolutePath().toString());
     PluginCredentialRefreshService refreshService =
         new PluginCredentialRefreshService(
-            new StudioPluginRegistry(List.of(plugin)),
+            new StudioPluginRegistry(List.of(plugin(PLUGIN_ID, snapshot -> refreshedMaterial()))),
             repository,
             codec,
-            keyLoader,
+            missingKeyLoader,
             properties,
             clock);
     return new PluginCredentialRefreshDispatcher(refreshService, properties, clock);
