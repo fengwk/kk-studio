@@ -10,16 +10,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthRejectedException;
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
+import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.plugin.PluginRenewalNotSentException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.plugin.testing.InMemoryPluginCredentialRepository;
+import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 
 import javax.crypto.SecretKey;
 
@@ -106,9 +112,9 @@ class PluginCredentialRefreshServiceTest {
 
   private TestStudioPlugin createPlugin(
       String pluginId, String region, PluginCredentialRefresher refresher) {
-    PluginDescriptor descriptor =
-        new PluginDescriptor(pluginId, "Plugin " + pluginId, "1.0", List.of(region));
-    return new TestStudioPlugin(descriptor, refresher);
+    PluginDescriptor descriptor = new PluginDescriptor(pluginId, "Plugin " + pluginId, "1.0");
+    return new TestStudioPlugin(
+        descriptor, new PluginAuthSpec.DeepLink(List.of(region)), refresher);
   }
 
   /** 只领取已安装 Plugin 的行：未安装 Plugin 的到期行不被 claim，后续仍保持 dormant（status/version/lease 不变）。 */
@@ -1028,16 +1034,34 @@ class PluginCredentialRefreshServiceTest {
 
   private static class TestStudioPlugin implements StudioPlugin {
     private final PluginDescriptor descriptor;
+    private final PluginAuthSpec authSpec;
     private final PluginCredentialRefresher refresher;
 
-    TestStudioPlugin(PluginDescriptor descriptor, PluginCredentialRefresher refresher) {
+    TestStudioPlugin(
+        PluginDescriptor descriptor, PluginAuthSpec authSpec, PluginCredentialRefresher refresher) {
       this.descriptor = descriptor;
+      this.authSpec = authSpec;
       this.refresher = refresher;
     }
 
     @Override
     public PluginDescriptor descriptor() {
       return descriptor;
+    }
+
+    @Override
+    public PluginConfigSchema configurationSchema() {
+      return TestPluginFixtures.EMPTY_SCHEMA;
+    }
+
+    @Override
+    public PluginAuthSpec authenticationSpec() {
+      return authSpec;
+    }
+
+    @Override
+    public PluginInstance configure(PluginConfig config, PluginContext context) {
+      return TestPluginFixtures.emptyInstance();
     }
 
     @Override

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
@@ -52,15 +53,18 @@ public final class PluginManagementService {
   /** 选择固定 region 并返回该 region 的官方登录地址。 */
   public PluginAuthPrepareDTO prepareAuth(String pluginId, String region) {
     StudioPlugin plugin = requirePlugin(pluginId);
+    PluginAuthSpec.DeepLink deepLink = requireDeepLink(plugin);
     PluginAuthHandler handler = requireAuthHandler(plugin);
-    if (!plugin.descriptor().acceptsRegion(region)) {
+    if (!deepLink.acceptsRegion(region)) {
       throw new AiValidationException(RESOURCE, "region must be one of the declared candidates");
     }
     String loginUrl;
     try {
       loginUrl = handler.loginUrl(region);
     } catch (RuntimeException error) {
-      throw new AiValidationException(RESOURCE, "plugin rejected the selected region", error);
+      log.debug(
+          "Plugin {} rejected the selected region: {}", pluginId, error.getClass().getSimpleName());
+      throw new AiValidationException(RESOURCE, "plugin rejected the selected region");
     }
     if (loginUrl == null || loginUrl.isBlank()) {
       throw new AiValidationException(RESOURCE, "plugin did not provide a login url");
@@ -73,10 +77,12 @@ public final class PluginManagementService {
   /**
    * 校验回调、把 opaque 凭据材料加密落库，并返回新的安全投影。
    *
-   * <p>Plugin 抛出的任何异常都收敛为一次校验失败：回调原文绝不进入异常消息或日志。
+   * <p>封闭协议与 region 候选在调用 handler 之前先判定，绝不先做远端动作再校验；Plugin 抛出的任何异常都收敛为固定校验失败： 回调原文绝不进入异常消息、cause
+   * 链或日志。
    */
   public PluginDTO completeAuth(String pluginId, String callbackUrl) {
     StudioPlugin plugin = requirePlugin(pluginId);
+    PluginAuthSpec.DeepLink deepLink = requireDeepLink(plugin);
     PluginAuthHandler handler = requireAuthHandler(plugin);
     if (callbackUrl == null || callbackUrl.isBlank()) {
       throw new AiValidationException(RESOURCE, "callbackUrl must not be blank");
@@ -87,9 +93,9 @@ public final class PluginManagementService {
     } catch (RuntimeException error) {
       log.debug(
           "Plugin {} rejected the auth callback: {}", pluginId, error.getClass().getSimpleName());
-      throw new AiValidationException(RESOURCE, "plugin rejected the auth callback", error);
+      throw new AiValidationException(RESOURCE, "plugin rejected the auth callback");
     }
-    if (material == null || !plugin.descriptor().acceptsRegion(material.region())) {
+    if (material == null || !deepLink.acceptsRegion(material.region())) {
       throw new AiValidationException(
           RESOURCE, "plugin returned a credential outside its declared regions");
     }
@@ -116,6 +122,14 @@ public final class PluginManagementService {
                     RESOURCE, "plugin does not provide interactive authentication"));
   }
 
+  /** 只有 {@link PluginAuthSpec.DeepLink} 承接 region 候选与交互式登录；None/StaticKey 不假冒。 */
+  private static PluginAuthSpec.DeepLink requireDeepLink(StudioPlugin plugin) {
+    if (plugin.authenticationSpec() instanceof PluginAuthSpec.DeepLink deepLink) {
+      return deepLink;
+    }
+    throw new AiValidationException(RESOURCE, "plugin does not provide interactive authentication");
+  }
+
   private PluginDTO describe(StudioPlugin plugin) {
     PluginDescriptor descriptor = plugin.descriptor();
     PluginCredentialProjection projection = credentialStore.projection(descriptor.pluginId());
@@ -123,10 +137,7 @@ public final class PluginManagementService {
     dto.setPluginId(descriptor.pluginId());
     dto.setName(descriptor.name());
     dto.setVersion(descriptor.version());
-    dto.setAuthKind(
-        descriptor.supportsAuthentication()
-            ? new PluginAuthKindDTO.DeepLink(descriptor.regions())
-            : null);
+    dto.setAuthKind(authKindOf(plugin.authenticationSpec()));
     dto.setStatus(projection.status().name());
     dto.setRegion(projection.region());
     dto.setExpiresAt(projection.expiresAt());
@@ -134,5 +145,13 @@ public final class PluginManagementService {
     dto.setLastRefreshedAt(projection.lastRefreshedAt());
     dto.setLastRefreshError(projection.lastRefreshError());
     return dto;
+  }
+
+  /** 交互登录投影只由 DeepLink 声明；其它形态不提供登录候选。 */
+  private static PluginAuthKindDTO authKindOf(PluginAuthSpec authSpec) {
+    if (authSpec instanceof PluginAuthSpec.DeepLink deepLink) {
+      return new PluginAuthKindDTO.DeepLink(deepLink.regions());
+    }
+    return null;
   }
 }
