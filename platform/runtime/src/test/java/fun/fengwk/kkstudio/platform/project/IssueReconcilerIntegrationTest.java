@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -41,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -91,7 +91,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         .thenAnswer(invocation -> createSnapshot(invocation.getArgument(0)));
   }
 
-  /** 构造完整的受控 ThreadSnapshot，使 entryPath.head() 与 entry.payload() 具备合法的非空结构。 */
+  /**
+   * 构造受控的 Harness 投影假件（Thread 行来自真实 {@code harness_thread}）：{@code thread}/{@code entryPath} 具备合法
+   * 非空结构，执行事实默认投影为「无工作、无等待、无未定结果」。需要其它执行事实的用例经 {@link #overlay} 显式覆写。
+   */
   private ThreadSnapshot createSnapshot(UUID threadId) {
     Map<String, Object> row =
         jdbc.queryForMap(
@@ -134,7 +137,14 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     if (!entries.isEmpty()) {
       when(path.head()).thenReturn(entries.get(entries.size() - 1));
     }
-    return new ThreadSnapshot(thread, path, List.of(), null, List.of(), List.of(), List.of());
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    when(snapshot.thread()).thenReturn(thread);
+    when(snapshot.entryPath()).thenReturn(path);
+    when(snapshot.queuedCommands()).thenReturn(List.of());
+    when(snapshot.model()).thenReturn(null);
+    when(snapshot.toolSiblings()).thenReturn(List.of());
+    when(snapshot.executionFacts()).thenReturn(new ThreadExecutionFacts(false, false, false));
+    return snapshot;
   }
 
   /** 获取指定 Issue 的调度工作 Claim，保证在调谐前该工作已到期并被成功锁定。 */
@@ -186,24 +196,58 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 在真实 Thread 行之上投影一组受控命令/模型/工具状态。
+   * 在真实 Thread 行之上投影一组受控命令/模型/工具状态，并在 Harness 投影边界给出对应的执行事实。
    *
-   * <p>真实 {@link ThreadSnapshot} 构造会校验 live context 形状不变量，而这些测试只需要驱动 Reconciler 对状态分类的读取， 因此用 mock
-   * 只覆盖被消费的访问器。
+   * <p>受控假件只模拟 Harness 的执行事实投影，不冒充 Harness 的真实恢复/分类验证：状态矩阵（Model 各态、工具
+   * READY/DISPATCHING/RUNNING/等待/UNKNOWN、owned continuation 与尾部控制 Entry）由 Runtime 的真实 store 测试覆盖，
+   * 本类只验证 Project 事务、Join 与 Stop 政策对三个正交事实的消费。
    */
   private ThreadSnapshot overlay(
       UUID threadId,
       List<ThreadCommand> commands,
       ModelInvocation model,
       List<ToolInvocation> tools) {
+    return overlay(threadId, commands, model, tools, facts(commands, model, tools));
+  }
+
+  /** 在真实 Thread 行之上投影受控状态，并由用例显式指定执行事实（如 owned continuation）。 */
+  private ThreadSnapshot overlay(
+      UUID threadId,
+      List<ThreadCommand> commands,
+      ModelInvocation model,
+      List<ToolInvocation> tools,
+      ThreadExecutionFacts executionFacts) {
     ThreadSnapshot base = createSnapshot(threadId);
+    ThreadState thread = base.thread();
+    EntryPath entryPath = base.entryPath();
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-    when(snapshot.thread()).thenReturn(base.thread());
-    when(snapshot.entryPath()).thenReturn(base.entryPath());
+    when(snapshot.thread()).thenReturn(thread);
+    when(snapshot.entryPath()).thenReturn(entryPath);
     when(snapshot.queuedCommands()).thenReturn(commands);
     when(snapshot.model()).thenReturn(model);
     when(snapshot.toolSiblings()).thenReturn(tools);
+    when(snapshot.executionFacts()).thenReturn(executionFacts);
     return snapshot;
+  }
+
+  /** 受控假件在投影边界给出的执行事实：与 Runtime 的真实推导语义一致，仅用于驱动 Project 政策分支。 */
+  private static ThreadExecutionFacts facts(
+      List<ThreadCommand> commands, ModelInvocation model, List<ToolInvocation> tools) {
+    boolean hasWork =
+        !commands.isEmpty()
+            || (model != null && (model.status() == null || !model.status().isTerminal()))
+            || hasStatus(tools, ToolInvocationStatus.READY)
+            || hasStatus(tools, ToolInvocationStatus.DISPATCHING)
+            || hasStatus(tools, ToolInvocationStatus.RUNNING);
+    boolean waitingForHuman =
+        hasStatus(tools, ToolInvocationStatus.WAITING_APPROVAL)
+            || hasStatus(tools, ToolInvocationStatus.WAITING_INPUT);
+    boolean hasUnknownToolOutcome = hasStatus(tools, ToolInvocationStatus.UNKNOWN);
+    return new ThreadExecutionFacts(hasWork, waitingForHuman, hasUnknownToolOutcome);
+  }
+
+  private static boolean hasStatus(List<ToolInvocation> tools, ToolInvocationStatus status) {
+    return tools.stream().anyMatch(tool -> tool.status() == status);
   }
 
   private MessagePayload assistantMessage(AgentMessageContent... contents) {
@@ -1175,7 +1219,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
   }
 
-  /** 测试意图：TurnEnd 要求继续驱动模型时，reconcile 判定为在途执行尚未静止，返回 DEFERRED_PROCESSING 延后重检。 */
+  /**
+   * 测试意图：受控假件在投影边界报告存在 owned continuation 工作事实时，reconcile 判定为在途执行尚未静止，返回 DEFERRED_PROCESSING。owner
+   * 归属/尾部控制 Entry 的真实契约由 Runtime {@code ThreadExecutionFactsTest} 覆盖。
+   */
   @Test
   void activeRunProcessingDefersProcessingWithContinueModel() {
     String agent = createAgent();
@@ -1184,12 +1231,14 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
-    ThreadSnapshot base = createSnapshot(run.getThreadId());
-    TurnEndPayload turnEnd =
-        new TurnEndPayload(UUID.randomUUID(), TurnEndOutcome.COMPLETED, true, null, null);
-    Entry headEntry = base.entryPath().head();
-    when(headEntry.payload()).thenReturn(turnEnd);
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(base);
+    ThreadSnapshot continuable =
+        overlay(
+            run.getThreadId(),
+            List.of(),
+            null,
+            List.of(),
+            new ThreadExecutionFacts(true, false, false));
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(continuable);
 
     IssueWorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -1506,16 +1555,19 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             new TextMessageContent("中间报告"),
             ResourceMessageContent.media(blobId, "should-stay-private.pdf")));
 
-    // 真实快照构造会校验 tool sibling 形状；这里只覆盖 Reconciler 消费的工具列表。
+    // 受控假件在投影边界模拟：存在排队命令（工作）与结果未定工具（UNKNOWN），由用例显式给出事实。
     ThreadSnapshot settled = createSnapshot(run.getThreadId());
+    ThreadState settledThread = settled.thread();
+    EntryPath settledPath = settled.entryPath();
     List<ToolInvocation> unknownTools =
         List.of(unknownTool("shell", "call-z"), unknownTool("http", "call-a"));
     ThreadSnapshot stillRunning = mock(ThreadSnapshot.class);
-    when(stillRunning.thread()).thenReturn(settled.thread());
-    when(stillRunning.entryPath()).thenReturn(settled.entryPath());
+    when(stillRunning.thread()).thenReturn(settledThread);
+    when(stillRunning.entryPath()).thenReturn(settledPath);
     when(stillRunning.queuedCommands()).thenReturn(List.of(mock(ThreadCommand.class)));
     when(stillRunning.model()).thenReturn(null);
     when(stillRunning.toolSiblings()).thenReturn(unknownTools);
+    when(stillRunning.executionFacts()).thenReturn(new ThreadExecutionFacts(true, false, true));
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(stillRunning);
 
     IssueReconcileOutcome deferred = reconciler.reconcile(claimWork(issue.getId()));

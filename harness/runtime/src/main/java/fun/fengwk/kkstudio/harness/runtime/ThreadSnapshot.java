@@ -9,11 +9,14 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -63,6 +66,40 @@ public record ThreadSnapshot(
       return local;
     }
     return queuedCommands.isEmpty() ? ThreadRuntimeStatus.IDLE : ThreadRuntimeStatus.QUEUED;
+  }
+
+  /**
+   * 本 Thread 的统一执行事实投影：由排队命令与 {@link ThreadContextClassifier} 对本 Thread 当前适用 Model/Tool 的
+   * 分类结果唯一决定，不递归查询后代、不接触 Store。
+   *
+   * <p>三个事实彼此正交：{@code hasWork} 覆盖排队命令、合法本地非终态 Model、本地 READY/DISPATCHING/RUNNING 工具与 owner 归属本
+   * Thread 的 continuation（忽略 TURN_END 后的尾部控制 Entry）；{@code waitingForHuman} 只覆盖本地工具的 {@code
+   * WAITING_APPROVAL}/{@code WAITING_INPUT}；{@code hasUnknownToolOutcome} 只覆盖本地工具的 {@code UNKNOWN}
+   * 终态。投影不读取持久执行控制：{@link ThreadExecutionControl#STOPPED} 只影响 {@link #runtimeStatus()}
+   * 对外状态，不影响本投影，因此停止方仍能判断外部执行是否尚未收敛。
+   */
+  public ThreadExecutionFacts executionFacts() {
+    ThreadContext context =
+        new ThreadContextClassifier().classify(thread, entryPath, model, toolSiblings);
+    boolean hasWork =
+        !queuedCommands.isEmpty()
+            || context instanceof ThreadContext.ModelActive
+            || context instanceof ThreadContext.ContinuationDue;
+    boolean waitingForHuman = false;
+    boolean hasUnknownToolOutcome = false;
+    // 分类器已经核验 siblings 的当前适用性；历史或非 Tool 上下文不允许携带 siblings。
+    for (ToolInvocation sibling : toolSiblings) {
+      ToolInvocationStatus status = sibling.status();
+      hasWork |=
+          status == ToolInvocationStatus.READY
+              || status == ToolInvocationStatus.DISPATCHING
+              || status == ToolInvocationStatus.RUNNING;
+      waitingForHuman |=
+          status == ToolInvocationStatus.WAITING_APPROVAL
+              || status == ToolInvocationStatus.WAITING_INPUT;
+      hasUnknownToolOutcome |= status == ToolInvocationStatus.UNKNOWN;
+    }
+    return new ThreadExecutionFacts(hasWork, waitingForHuman, hasUnknownToolOutcome);
   }
 
   /**
