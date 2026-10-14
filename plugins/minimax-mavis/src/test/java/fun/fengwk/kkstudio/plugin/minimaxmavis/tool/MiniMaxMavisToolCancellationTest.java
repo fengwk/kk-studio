@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisClient;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisHttpRequest;
@@ -56,13 +56,13 @@ class MiniMaxMavisToolCancellationTest {
 
   private ExecutorService executor;
   private BlockingTransport transport;
-  private PluginCredentialStore credentialStore;
+  private PluginCredentialAccess credentialAccess;
 
   @BeforeEach
   void setUp() {
     executor = Executors.newCachedThreadPool();
     transport = new BlockingTransport();
-    credentialStore = new MiniMaxMavisToolExecutionTest.FakeCredentialStore(snapshot());
+    credentialAccess = new MiniMaxMavisToolExecutionTest.FakeCredentialAccess(snapshot());
   }
 
   @AfterEach
@@ -158,7 +158,7 @@ class MiniMaxMavisToolCancellationTest {
     return new MiniMaxMavisTool(
         MavisCapability.WEB_SEARCH,
         MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
-        credentialStore,
+        credentialAccess,
         client,
         new MiniMaxMavisCapabilityCache(client),
         new MiniMaxMavisResourceAccess(null),

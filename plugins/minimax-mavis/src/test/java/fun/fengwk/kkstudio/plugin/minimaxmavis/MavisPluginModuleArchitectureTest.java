@@ -20,10 +20,10 @@ import java.util.stream.Stream;
 /**
  * 构建期可选 Plugin 模块的依赖方向守卫。
  *
- * <p>Plugin 是可选依赖，因此必须保持两个方向同时成立：模块内部只用 JDK、Jackson 与 Harness 的 schema / tool 契约，不依赖 Spring、数据库或
- * Platform 宿主实现（只能依赖 {@code kk-studio-platform-plugin-api} 暴露的 SPI）；仓库其他模块（尤其 web）不在源码中引用
- * Plugin，只通过 runtime dependency 决定是否把它装进 发行物。这样删除 {@code web/pom.xml} 的 runtime dependency
- * 后应用不会残留任何 Plugin 语义。
+ * <p>Plugin 是可选依赖，因此必须保持两个方向同时成立：模块内部只用 JDK、Jackson、Harness 的 schema / tool 契约与 Canvas Function
+ * adapter 契约，不依赖 Spring、数据库或 Platform 宿主实现（只能依赖 {@code kk-studio-platform-plugin-api} 暴露的
+ * SPI）；仓库其他模块（尤其 web）不在源码中引用 Plugin，只通过 runtime dependency 决定是否把它装进 发行物。这样删除 {@code web/pom.xml} 的
+ * runtime dependency 后应用不会残留任何 Plugin 语义。
  */
 class MavisPluginModuleArchitectureTest {
 
@@ -31,6 +31,7 @@ class MavisPluginModuleArchitectureTest {
   private static final String PLUGIN_ARTIFACT = "kk-studio-plugin-minimax-mavis";
   private static final List<String> EXPECTED_PRODUCTION_DEPENDENCIES =
       List.of(
+          "fun.fengwk.kk-studio:kk-studio-canvas-plugin-api",
           "fun.fengwk.kk-studio:kk-studio-harness-common",
           "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
           "fun.fengwk.kk-studio:kk-studio-harness-tool",
@@ -57,6 +58,7 @@ class MavisPluginModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.contributor.api.",
           "fun.fengwk.kkstudio.harness.tool.",
           "fun.fengwk.kkstudio.harness.common.",
+          "fun.fengwk.kkstudio.canvas.function.",
           "fun.fengwk.kkstudio.platform.plugin.",
           "fun.fengwk.kkstudio.plugin.minimaxmavis.");
 
