@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -19,6 +20,7 @@ import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
@@ -39,7 +41,11 @@ import java.util.regex.Pattern;
  *
  * <p>远端资源 URL 必须与 Hub 同源并位于 {@code /api/resources/} 下。客户端还会规范化上传文件名，校验响应
  * envelope、输出长度和截断标记，避免把不完整结果交给下游。
+ *
+ * <p>公开错误只暴露固定分类、HTTP 状态与阶段名。远端 body/status、请求 URI/header 以及底层 Jackson/IO 的
+ * message/cause/suppressed 可能含凭据，绝不进入异常链；原始失败仅按 type 记录到本地日志。
  */
+@Slf4j
 public class OpenCliHubClient {
 
   private static final Pattern EXECUTION_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
@@ -198,13 +204,13 @@ public class OpenCliHubClient {
     try {
       response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException exception) {
-      throw new OpenCliHubException("OpenCLI Hub resource request failed", exception);
+      throw hubFailure("OpenCLI Hub resource request failed", exception);
     } catch (IllegalArgumentException exception) {
       // JDK 可能在返回 body 前解析非法 Content-Length；不回显 header 原值。
       throw new OpenCliHubException("OpenCLI Hub resource response headers are invalid");
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
-      throw new OpenCliHubException("OpenCLI Hub resource request interrupted", exception);
+      throw hubFailure("OpenCLI Hub resource request interrupted", exception);
     }
     DeadlineResponseBody body = new DeadlineResponseBody(response.body(), deadline);
     try {
@@ -245,12 +251,12 @@ public class OpenCliHubClient {
     try {
       response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException exception) {
-      throw new OpenCliHubException("OpenCLI Hub request failed", exception);
+      throw hubFailure("OpenCLI Hub request failed", exception);
     } catch (IllegalArgumentException exception) {
       throw new OpenCliHubException("OpenCLI Hub response headers are invalid");
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
-      throw new OpenCliHubException("OpenCLI Hub request interrupted", exception);
+      throw hubFailure("OpenCLI Hub request interrupted", exception);
     }
     try (InputStream body = new DeadlineResponseBody(response.body(), deadline)) {
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -278,7 +284,7 @@ public class OpenCliHubClient {
     } catch (JacksonException exception) {
       throw malformed("Result envelope must be valid JSON", exception);
     } catch (IOException exception) {
-      throw new UncheckedIOException("failed to close OpenCLI Hub response", exception);
+      throw closeFailure("OpenCLI Hub response", exception);
     }
   }
 
@@ -289,7 +295,7 @@ public class OpenCliHubClient {
     try {
       status = ExecutionStatus.valueOf(rawStatus);
     } catch (IllegalArgumentException exception) {
-      throw malformed("unknown OpenCLI Hub execution status: " + rawStatus, exception);
+      throw malformed("unknown OpenCLI Hub execution status", exception);
     }
     if (requiredBoolean(data, "stdoutTruncated") || requiredBoolean(data, "stderrTruncated")) {
       throw malformed("truncated OpenCLI Hub execution output is not accepted");
@@ -328,32 +334,30 @@ public class OpenCliHubClient {
   }
 
   private OpenCliHubException httpError(int status, InputStream body) {
-    TruncatedBytes truncated = readTruncated(body, settings.maxErrorResponseBytes());
-    String detail =
-        new String(truncated.bytes(), StandardCharsets.UTF_8).replaceAll("\\p{Cntrl}", " ").strip();
-    if (truncated.truncated()) {
-      detail += " [truncated]";
+    String message = "OpenCLI Hub HTTP " + status;
+    try {
+      drainErrorBody(body, settings.maxErrorResponseBytes());
+    } catch (IOException exception) {
+      // 错误正文只在统一 deadline 内消费，绝不进入公开消息；读取失败也仅暴露状态与阶段。
+      return hubFailure(message + " error response read failed", exception);
     }
-    return new OpenCliHubException(
-        "OpenCLI Hub HTTP " + status + (detail.isEmpty() ? "" : ": " + detail));
+    return new OpenCliHubException(message);
   }
 
-  private TruncatedBytes readTruncated(InputStream input, int limit) {
-    try {
-      ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
-      byte[] buffer = new byte[Math.min(settings.streamBufferBytes(), 8192)];
-      int remaining = limit;
-      while (remaining > 0) {
-        int read = input.read(buffer, 0, Math.min(buffer.length, remaining));
-        if (read == -1) {
-          return new TruncatedBytes(output.toByteArray(), false);
-        }
-        output.write(buffer, 0, read);
-        remaining -= read;
+  /** 按上限丢弃错误正文；仍受 response deadline 约束，超时/断流会作为失败上抛。 */
+  private void drainErrorBody(InputStream input, int limit) throws IOException {
+    byte[] buffer = new byte[Math.min(settings.streamBufferBytes(), 8192)];
+    int remaining = limit;
+    while (remaining > 0) {
+      int read = input.read(buffer, 0, Math.min(buffer.length, remaining));
+      if (read == -1) {
+        return;
       }
-      return new TruncatedBytes(output.toByteArray(), input.read() != -1);
-    } catch (IOException exception) {
-      throw new OpenCliHubException("failed to read OpenCLI Hub error response", exception);
+      remaining -= read;
+    }
+    // 达到上限后再确认一次，确保超出上限的挂起响应同样受 deadline 约束。
+    if (input.read() != -1) {
+      log.debug("OpenCLI Hub error response exceeded local limit");
     }
   }
 
@@ -372,7 +376,7 @@ public class OpenCliHubClient {
       }
       return output.toByteArray();
     } catch (IOException exception) {
-      throw new OpenCliHubException("failed to read OpenCLI Hub " + description, exception);
+      throw hubFailure("failed to read OpenCLI Hub " + description, exception);
     }
   }
 
@@ -608,7 +612,12 @@ public class OpenCliHubClient {
     try {
       return mapper.writeValueAsString(value);
     } catch (JacksonException exception) {
-      throw new IllegalStateException("failed to encode OpenCLI Hub request", exception);
+      // 原始 Jackson 失败可能含请求正文（含 prompt 等），只暴露固定阶段与固定 cause。
+      log.warn(
+          "failed to encode OpenCLI Hub request type={}", exception.getClass().getSimpleName());
+      throw new IllegalStateException(
+          "failed to encode OpenCLI Hub request",
+          new IllegalStateException("OpenCLI Hub request encoding failed"));
     }
   }
 
@@ -630,8 +639,43 @@ public class OpenCliHubClient {
     return new OpenCliHubException("Malformed OpenCLI Hub response: " + message);
   }
 
+  /**
+   * 记录失败 type 后返回固定文案的 malformed 错误。
+   *
+   * <p>原始异常可能携带 URI、header 或正文片段，不能进入公开异常链，因此只保留分类日志。
+   */
   private static OpenCliHubException malformed(String message, Throwable cause) {
-    return new OpenCliHubException("Malformed OpenCLI Hub response: " + message, cause);
+    log.warn(
+        "Malformed OpenCLI Hub response: {} type={}", message, cause.getClass().getSimpleName());
+    return new OpenCliHubException("Malformed OpenCLI Hub response: " + message);
+  }
+
+  /**
+   * 记录失败 type 后返回固定文案的传输/读取错误。
+   *
+   * <p>仅保留本进程以固定文案构造的超时信号作为 cause；请求 URI、header、正文以及 Jackson/IO 原始 message/cause/suppressed
+   * 都不进入公开异常。
+   */
+  private static OpenCliHubException hubFailure(String message, Throwable cause) {
+    log.warn("OpenCLI Hub failure: {} type={}", message, cause.getClass().getSimpleName());
+    return new OpenCliHubException(message, timeoutCause(cause));
+  }
+
+  private static UncheckedIOException closeFailure(String description, IOException cause) {
+    log.warn("failed to close {} type={}", description, cause.getClass().getSimpleName());
+    return new UncheckedIOException(new IOException("failed to close " + description));
+  }
+
+  /**
+   * 只把超时信号重建为受控异常：类型可观测，但不携带原始 message/cause/suppressed。
+   *
+   * <p>其余底层异常（请求 IO、Jackson、URI 解析）可能含 URI、header 或正文片段，返回 {@code null}。
+   */
+  private static Throwable timeoutCause(Throwable cause) {
+    if (cause instanceof HttpTimeoutException) {
+      return new HttpTimeoutException("OpenCLI Hub response deadline exceeded");
+    }
+    return null;
   }
 
   private static void closeQuietly(InputStream input) {
@@ -677,8 +721,6 @@ public class OpenCliHubClient {
 
   public record ExecutionResource(
       String fileName, String mimeType, long size, String contentUrl, String downloadUrl) {}
-
-  private record TruncatedBytes(byte[] bytes, boolean truncated) {}
 
   /** 调用方必须关闭的 Hub 媒体响应。 */
   public static final class HubResourceStream implements AutoCloseable {

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
@@ -29,6 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** 通过 OpenCLI Hub + chatgpt-agent 执行 GPT Image 2。 */
+@Slf4j
 public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   static final long MAX_REFERENCE_SIZE = 20L * 1024 * 1024;
@@ -145,8 +148,9 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
           client.execute(
               buildArgv(run, uploads), integrations.gptImage2().hubExecutionTimeoutMillis());
     } catch (RuntimeException failure) {
-      throw new CanvasFunctionUnknownException(
-          "GPT Image submission outcome unknown: " + failure.getMessage());
+      // 提交失败意味着外部任务可能已创建；只按 type 记录，不把原始 message/cause 交给人工决议。
+      log.warn("GPT Image submission outcome unknown type={}", failure.getClass().getSimpleName());
+      throw new CanvasFunctionUnknownException(UNKNOWN_SUBMISSION);
     }
     executionId = submitted.id();
     state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
@@ -183,7 +187,10 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
       UUID resourceId = context.materializeOutput(run.output(0), stream.content());
       return List.of(resourceId);
     } catch (IOException exception) {
-      throw new UncheckedIOException("failed to close GPT Image Hub resource", exception);
+      // 次要关闭失败的原始 IOException 可能含 URI/path；只按 type 记录并抛出固定文案。
+      log.warn(
+          "failed to close GPT Image Hub resource type={}", exception.getClass().getSimpleName());
+      throw new UncheckedIOException(new IOException("failed to close GPT Image Hub resource"));
     }
   }
 

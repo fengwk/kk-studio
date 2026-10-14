@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -371,11 +373,16 @@ class OpenCliHubClientTest {
         });
 
     assertThrows(OpenCliHubException.class, () -> client.getExecution("bad", 0));
-    assertThrows(
-        OpenCliHubException.class,
-        () ->
-            client.openResource(
-                new ExecutionResource("x", "image/png", 1, null, "/api/resources/redirect")));
+    OpenCliHubException redirect =
+        assertThrows(
+            OpenCliHubException.class,
+            () ->
+                client.openResource(
+                    new ExecutionResource("x", "image/png", 1, null, "/api/resources/redirect")));
+    // 重定向只有 HTTP 状态进入公开错误，Location header 不回显，也不被跟随。
+    assertEquals("OpenCLI Hub HTTP 302", redirect.getMessage());
+    assertFalse(redirect.getMessage().contains("/api/resources/target"));
+    assertNull(redirect.getCause());
 
     // Hub 部署信息（base 配置）由 SystemSettings.integrations.openCliHub 判定：
     // 带凭据/查询串的 base URL、超限超时都在聚合构造时 fail fast。
