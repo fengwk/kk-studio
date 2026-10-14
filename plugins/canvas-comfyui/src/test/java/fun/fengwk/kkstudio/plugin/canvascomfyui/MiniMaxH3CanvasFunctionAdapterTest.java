@@ -265,6 +265,57 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   }
 
   @Test
+  void promptAgentFailureCauseSecretNeverAppearsInUnknownMessage() {
+    // 真实 H3 失败 cause 可能带 synthetic key/路径/URL 原文；UNKNOWN 分类只声明结果未知。
+    String secret = "synthetic-secret path/to/agent.conf https://evil.example/leak";
+    when(oneShot.submit(anyString(), anyString(), any(), any()))
+        .thenThrow(new IllegalStateException(secret));
+
+    CanvasFunctionUnknownException unknown =
+        assertThrows(
+            CanvasFunctionUnknownException.class,
+            () -> adapter.submit(new RecordingContext(), run("QUEUED", Map.of())));
+
+    assertEquals("H3 Prompt Agent submission outcome unknown", unknown.getMessage());
+    assertFalse(unknown.getMessage().contains("synthetic-secret"));
+    assertNull(unknown.getCause());
+  }
+
+  @Test
+  void comfySubmitFailureCauseSecretNeverAppearsInUnknownMessage() {
+    // ComfyUI 提交失败同样不得把远端/请求原文拼进 UNKNOWN，且 checkpoint 停在提交前。
+    String secret = "synthetic-secret path/to/agent.conf https://evil.example/leak";
+    when(comfy.upload(anyString(), anyString(), anyLong(), any(), any()))
+        .thenReturn(new H3UploadedFile("11.png", "kk-studio/7", "input"));
+    when(comfy.submit(any(), anyString())).thenThrow(new IllegalStateException(secret));
+
+    RecordingContext context = new RecordingContext();
+    CanvasFunctionUnknownException unknown =
+        assertThrows(
+            CanvasFunctionUnknownException.class,
+            () ->
+                adapter.submit(
+                    context,
+                    run(
+                        "QUEUED",
+                        H3AdapterState.empty()
+                            .withSeed(1L)
+                            .withEnhancedPrompt("enhanced")
+                            .encode())));
+
+    assertEquals("H3 ComfyUI submission outcome unknown", unknown.getMessage());
+    assertFalse(unknown.getMessage().contains("synthetic-secret"));
+    assertNull(unknown.getCause());
+    assertEquals(
+        List.of(
+            MiniMaxH3CanvasFunctionAdapter.COMFY_UPLOADING,
+            MiniMaxH3CanvasFunctionAdapter.COMFY_UPLOADING,
+            MiniMaxH3CanvasFunctionAdapter.COMFY_SUBMITTING),
+        context.stages);
+    verify(comfy, never()).history(anyString());
+  }
+
+  @Test
   void validationBeforeSubmitStillFailsAndCleansStagedMedia() {
     CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
     InputStream first = new ByteArrayInputStream(new byte[] {1, 2, 3});

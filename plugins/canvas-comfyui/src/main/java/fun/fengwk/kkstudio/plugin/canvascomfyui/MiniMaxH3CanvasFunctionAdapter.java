@@ -222,8 +222,8 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
           if (failure instanceof CanvasFunctionUnknownException unknown) {
             throw unknown;
           }
-          throw new CanvasFunctionUnknownException(
-              "H3 Prompt Agent submission outcome unknown: " + failure.getMessage());
+          // 只声明结果未知，不回显可能的远端 URI/凭据/Cause。
+          throw new CanvasFunctionUnknownException("H3 Prompt Agent submission outcome unknown");
         }
         state = state.withHarnessThreadId(threadId);
         checkpoint(context, PROMPT_WAITING, state);
@@ -279,8 +279,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       promptId =
           comfy.submit(workflow, "kk-studio-" + run.nodeId() + "-" + run.output(0).resourceId());
     } catch (RuntimeException failure) {
-      throw new CanvasFunctionUnknownException(
-          "H3 ComfyUI submission outcome unknown: " + failure.getMessage());
+      throw new CanvasFunctionUnknownException("H3 ComfyUI submission outcome unknown");
     }
     state = state.withPromptId(promptId);
     checkpoint(context, COMFY_WAITING, state);
