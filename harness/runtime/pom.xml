@@ -86,6 +86,7 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.processor.ModelExecution</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner</include>
@@ -99,6 +100,7 @@
                                         <include>fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadState</include>
                                     </includes>
                                     <limits>

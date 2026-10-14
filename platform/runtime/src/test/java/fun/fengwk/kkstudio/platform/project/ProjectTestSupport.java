@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
@@ -775,6 +776,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
       when(snapshot.thread()).thenReturn(thread);
       when(snapshot.entryPath()).thenReturn(path);
+      // 受控假件在 Harness 投影边界模拟执行事实：静默投影为三个事实全 false；需要其它事实的用例覆写 executionFacts。
+      when(snapshot.executionFacts()).thenReturn(new ThreadExecutionFacts(false, false, false));
       return snapshot;
     }
 

@@ -16,9 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -27,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
@@ -228,8 +226,11 @@ public class IssueReconciler {
       return closeMatchedJoin(issue, run, binding, snapshot, join, current, claim);
     }
 
+    // 统一执行事实：本地工作（命令/Model/工具/continuation）与人工等待各由唯一投影给出，本类只决定预算、等待与停止政策。
+    ThreadExecutionFacts facts = snapshot.executionFacts();
+
     if (!bindingValid) {
-      if (isProcessing(snapshot)) {
+      if (facts.hasWork()) {
         return finish(
             claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
       }
@@ -243,7 +244,7 @@ public class IssueReconciler {
     }
     if (!stageStillOwned || !stateStillCurrent) {
       // 迟到回调：旧 Run 的同名阶段或旧归属不得刷新当前职责，只做安全收尾，绝不提交交接目标。
-      if (isProcessing(snapshot)) {
+      if (facts.hasWork()) {
         return finish(
             claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
       }
@@ -281,15 +282,15 @@ public class IssueReconciler {
       chargeActiveTime(run, now);
     }
 
-    if (isProcessing(snapshot)) {
-      // 未处理命令或在途调用：不投递、不等待、不收尾。
+    if (facts.hasWork()) {
+      // 未处理命令、合法在途 Model/Tool 或 owned continuation：不投递、不等待、不收尾。已收敛的 UNKNOWN 工具不计为工作。
       return finish(
           claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
     }
 
     // Issue 控制暂停只阻止新 Run 调度，不挂起已接受的 Thread；只有业务阻塞或安全工具等待才暂停本 Run。
     boolean blocked = issue.isBlocked();
-    boolean waitingTool = hasWaitingTool(snapshot);
+    boolean waitingTool = facts.waitingForHuman();
 
     if (run.getStatus() == IssueRunStatus.WAITING) {
       if (issue.isGateClosed() || waitingTool) {
@@ -598,59 +599,9 @@ public class IssueReconciler {
     return evidenceBlobPort.isBlobActive(res.blobId());
   }
 
-  /**
-   * 在途命令、模型或工具仍未静止时，Run 不得投递指示或收尾。
-   *
-   * <p>结果未定（UNKNOWN）的工具是已收敛的 Loop 反馈，会由 Runtime 交给下一轮模型，因此这里不再把它升级为阻塞 Thread 的人工核查门禁； 永久子树的忙碌也不阻塞本
-   * Run 收尾。
-   */
-  private boolean isProcessing(ThreadSnapshot snapshot) {
-    if (snapshot == null) {
-      return false;
-    }
-    if (!snapshot.queuedCommands().isEmpty()) {
-      return true;
-    }
-    if (snapshot.model() != null
-        && (snapshot.model().status() == null || !snapshot.model().status().isTerminal())) {
-      return true;
-    }
-    for (ToolInvocation tool : snapshot.toolSiblings()) {
-      ToolInvocationStatus status = tool.status();
-      if (status == null
-          || status == ToolInvocationStatus.READY
-          || status == ToolInvocationStatus.DISPATCHING
-          || status == ToolInvocationStatus.RUNNING) {
-        return true;
-      }
-    }
-    if (snapshot.entryPath() != null) {
-      Entry head = snapshot.entryPath().head();
-      if (head != null && head.payload() instanceof TurnEndPayload end && end.continueModel()) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /** 本次 Run 的 root Join 已冻结结果时返回它，否则返回 {@code null}。 */
   private ThreadJoin matchedJoin(UUID invocationId) {
     return requireRuntime().findJoin(invocationId).filter(ThreadJoin::matched).orElse(null);
-  }
-
-  /** 判断是否存在处于安全等待点（等待输入或等待审批）的工具调用。 */
-  private static boolean hasWaitingTool(ThreadSnapshot snapshot) {
-    if (snapshot == null) {
-      return false;
-    }
-    for (ToolInvocation tool : snapshot.toolSiblings()) {
-      ToolInvocationStatus status = tool.status();
-      if (status == ToolInvocationStatus.WAITING_APPROVAL
-          || status == ToolInvocationStatus.WAITING_INPUT) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /**
