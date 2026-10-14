@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.platform.environment.registry;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -23,9 +24,10 @@ import java.util.Set;
 public final class EnvironmentStateCodec {
 
   private static final ObjectMapper MAPPER =
-      new ObjectMapper()
-          .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
 
   private static final Set<String> SKILL_STATE_FIELDS =
       Set.of("packageName", "status", "installedCommit", "localPath", "error");
@@ -138,8 +140,8 @@ public final class EnvironmentStateCodec {
     if (!(element instanceof ObjectNode node)) {
       throw new IllegalStateException(column + " elements must be objects");
     }
-    node.fieldNames()
-        .forEachRemaining(
+    node.propertyNames()
+        .forEach(
             field -> {
               if (!fields.contains(field)) {
                 throw new IllegalStateException("unexpected " + column + " field: " + field);
@@ -152,7 +154,7 @@ public final class EnvironmentStateCodec {
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("malformed " + column + " JSON", error);
     }
     if (!(value instanceof ArrayNode array)) {
@@ -164,7 +166,7 @@ public final class EnvironmentStateCodec {
   private static String write(JsonNode node, String column) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode " + column, error);
     }
   }

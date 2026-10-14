@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -56,7 +57,7 @@ import java.util.UUID;
 /** 配置同步单测共用 fixture：用真实 codec 生成可被生产 parser 解码的模型/Agent 配置。 */
 final class ConfigSyncFixtures {
 
-  static final ObjectMapper MAPPER = new ObjectMapper();
+  static final ObjectMapper MAPPER = JsonMapper.builder().build();
   static final AgentDefinitionConfigCodec AGENT_CONFIG_CODEC =
       new AgentDefinitionConfigCodec(MAPPER);
   static final AgentModelRuntimeConfigParser MODEL_CONFIG_PARSER =

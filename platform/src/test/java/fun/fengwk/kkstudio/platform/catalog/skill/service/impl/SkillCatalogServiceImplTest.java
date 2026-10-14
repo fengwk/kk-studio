@@ -12,7 +12,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -22,6 +21,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
@@ -735,7 +735,7 @@ public class SkillCatalogServiceImplTest {
                   git,
                   new SkillCatalogConverter(),
                   new SkillPackageGuard(repository, agentDefinitionRepository),
-                  new AgentEditableSupport(new ObjectMapper()),
+                  new AgentEditableSupport(JsonMapper.builder().build()),
                   transactional(new SkillCatalogWrites(), transactions),
                   tokenCipher),
               transactions);

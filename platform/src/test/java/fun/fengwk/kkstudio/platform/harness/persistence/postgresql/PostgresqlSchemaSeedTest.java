@@ -7,11 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
@@ -38,7 +39,7 @@ import java.util.Objects;
 /** 验证 dev 与 e2e seed 都具备幂等性，并且 e2e seed 永不存储真实凭据。重新执行不能改变确定性列的行内容。 */
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
   private static final String VERSIONED_MIGRATIONS = "1";
 
   @BeforeEach

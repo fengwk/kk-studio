@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.discovery;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -74,9 +73,7 @@ public final class McpInputSchemaConverter {
     Set<String> required = new LinkedHashSet<>();
     JsonNode propertiesNode = node.get("properties");
     if (propertiesNode != null && propertiesNode.isObject()) {
-      Iterator<Map.Entry<String, JsonNode>> fields = propertiesNode.fields();
-      while (fields.hasNext()) {
-        Map.Entry<String, JsonNode> field = fields.next();
+      for (Map.Entry<String, JsonNode> field : propertiesNode.properties()) {
         properties.put(field.getKey(), convertElement(field.getValue()));
       }
     }

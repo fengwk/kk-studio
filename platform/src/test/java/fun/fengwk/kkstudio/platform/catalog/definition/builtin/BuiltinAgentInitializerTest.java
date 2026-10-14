@@ -10,10 +10,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -27,7 +27,7 @@ class BuiltinAgentInitializerTest {
 
   private final AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
   private final AgentDefinitionConfigCodec codec =
-      new AgentDefinitionConfigCodec(new ObjectMapper());
+      new AgentDefinitionConfigCodec(JsonMapper.builder().build());
   private final BuiltinAgentInitializer initializer =
       new BuiltinAgentInitializer(repository, codec);
 
