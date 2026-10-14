@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -12,31 +12,24 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
-/** DB 唯一队列的 wake + single drain + 固定 worker 并发 dispatcher。 */
-@Slf4j
+/**
+ * DB 唯一队列的 wake + single drain + 固定 worker 并发 dispatcher。
+ *
+ * <p>合并 wake 的单 drain、bounded handoff、容量计数、stop 生命周期与 fail-fast executor 契约由共享的 {@link
+ * BoundedWorkDispatcher} 提供；本类只注入 Canvas 专有的 claim、{@link CanvasFunctionWorker#run} handoff 与
+ * ownership-fenced reschedule 归还。
+ */
 public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoCloseable {
 
   public static final String CHANNEL = "canvas_function_work";
 
+  private static final String NAME = "canvas function dispatcher";
+
   private final CanvasFunctionWorkStore workStore;
   private final CanvasFunctionRuntimeProperties properties;
   private final Clock clock;
-  private final Executor drainExecutor;
-  private final Executor workerExecutor;
-  private final ScheduledExecutorService pollScheduler;
-  private final CanvasFunctionWorker worker;
-  private final AtomicBoolean wakeRequested = new AtomicBoolean();
-  private final AtomicBoolean drainRunning = new AtomicBoolean();
-  private final AtomicInteger capacity = new AtomicInteger();
-  private final Object lifecycleLock = new Object();
-  private volatile boolean running;
-  private volatile boolean stopped;
-  private ScheduledFuture<?> pollFuture;
+  private final BoundedWorkDispatcher<ClaimedRun> dispatcher;
 
   public CanvasFunctionDispatcher(
       CanvasFunctionWorkStore workStore,
@@ -50,127 +43,31 @@ public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoClose
     this.properties = Objects.requireNonNull(properties, "properties");
     this.properties.validate();
     this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
-    this.drainExecutor = Objects.requireNonNull(drainExecutor, "drainExecutor");
-    this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
-    this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");
-    this.worker = Objects.requireNonNull(worker, "worker");
+    this.dispatcher =
+        new BoundedWorkDispatcher<>(
+            NAME,
+            properties.getMaxDispatchTasks(),
+            Duration.ofMillis(properties.getPollIntervalMillis()),
+            drainExecutor,
+            workerExecutor,
+            pollScheduler,
+            this::claimNext,
+            Objects.requireNonNull(worker, "worker")::run,
+            this::returnClaim);
   }
 
   @Override
   public void start() {
-    synchronized (lifecycleLock) {
-      if (stopped) {
-        throw new IllegalStateException("dispatcher is already stopped");
-      }
-      if (running) {
-        return;
-      }
-      running = true;
-      long pollMillis = properties.getPollIntervalMillis();
-      pollFuture =
-          pollScheduler.scheduleWithFixedDelay(
-              this::wake, pollMillis, pollMillis, TimeUnit.MILLISECONDS);
-    }
-    wake();
+    dispatcher.start();
   }
 
   public void wake() {
-    if (!running || stopped) {
-      return;
-    }
-    wakeRequested.set(true);
-    if (drainRunning.compareAndSet(false, true)) {
-      submitDrain();
-    }
-  }
-
-  private void submitDrain() {
-    try {
-      drainExecutor.execute(this::runDrain);
-    } catch (RuntimeException error) {
-      drainRunning.set(false);
-      log.warn("Canvas Function drain executor rejected wake; poll will retry", error);
-    }
-  }
-
-  private void runDrain() {
-    try {
-      do {
-        wakeRequested.set(false);
-        drainOnce();
-      } while (!stopped && wakeRequested.get());
-    } catch (RuntimeException error) {
-      log.warn("Canvas Function drain failed; poll will retry", error);
-    } finally {
-      drainRunning.set(false);
-      if (!stopped && wakeRequested.get() && drainRunning.compareAndSet(false, true)) {
-        submitDrain();
-      }
-    }
-  }
-
-  private void drainOnce() {
-    while (!stopped && capacity.get() < properties.getMaxDispatchTasks()) {
-      Instant now = clock.instant();
-      ClaimedRun claim =
-          workStore
-              .claimNext(
-                  now,
-                  Duration.ofMillis(properties.getLeaseDurationMillis()),
-                  UUID.randomUUID().toString())
-              .orElse(null);
-      if (claim == null) {
-        return;
-      }
-      if (stopped || !handoff(claim)) {
-        workStore.reschedule(
-            claim, clock.instant(), Duration.ofMillis(properties.getRejectionDelayMillis()));
-        return;
-      }
-    }
-  }
-
-  private boolean handoff(ClaimedRun claim) {
-    AtomicBoolean taskStarted = new AtomicBoolean();
-    capacity.incrementAndGet();
-    try {
-      workerExecutor.execute(
-          () -> {
-            taskStarted.set(true);
-            try {
-              worker.run(claim);
-            } finally {
-              capacity.decrementAndGet();
-              wake();
-            }
-          });
-      return true;
-    } catch (RuntimeException error) {
-      if (taskStarted.get()) {
-        throw error;
-      }
-      capacity.decrementAndGet();
-      log.warn(
-          "Canvas Function worker executor rejected claim nodeId={} requestId={}",
-          claim.nodeId(),
-          claim.requestId(),
-          error);
-      return false;
-    }
+    dispatcher.wake();
   }
 
   @Override
   public void stop() {
-    synchronized (lifecycleLock) {
-      if (stopped) {
-        return;
-      }
-      stopped = true;
-      running = false;
-      if (pollFuture != null) {
-        pollFuture.cancel(false);
-      }
-    }
+    dispatcher.stop();
   }
 
   @Override
@@ -184,7 +81,7 @@ public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoClose
 
   @Override
   public boolean isRunning() {
-    return running;
+    return dispatcher.isRunning();
   }
 
   @Override
@@ -200,5 +97,21 @@ public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoClose
   @Override
   public void close() {
     stop();
+  }
+
+  private ClaimedRun claimNext() {
+    Instant now = clock.instant();
+    return workStore
+        .claimNext(
+            now,
+            Duration.ofMillis(properties.getLeaseDurationMillis()),
+            UUID.randomUUID().toString())
+        .orElse(null);
+  }
+
+  /** ownership-fenced 归还：只把仍持有的 RUNNING claim 按 rejectionDelay 重排回 READY。 */
+  private void returnClaim(ClaimedRun claim) {
+    workStore.reschedule(
+        claim, clock.instant(), Duration.ofMillis(properties.getRejectionDelayMillis()));
   }
 }

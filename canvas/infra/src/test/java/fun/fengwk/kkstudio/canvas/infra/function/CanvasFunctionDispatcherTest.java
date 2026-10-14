@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -126,6 +127,51 @@ class CanvasFunctionDispatcherTest {
     assertTrue(secondDispatched.await(5, TimeUnit.SECONDS));
     assertSame(fatal, escaped.get());
     verify(worker).run(first);
+    dispatcher.stop();
+  }
+
+  /**
+   * worker executor 在「接收 task 之前」同步抛 Error（例如池内部故障）时必须归还 claim 并释放 permit：共享调度骨架把这种 接收前失败与接收后
+   * worker 失败区分开。maxDispatchTasks=1 时，只有 permit 释放后 drain 才可能再 claim 并派遣下一个 run，因此 second
+   * 被派遣即可观察归还与放行。
+   */
+  @Test
+  void workerExecutorErrorBeforeAcceptReturnsTheClaimAndReleasesThePermit() throws Exception {
+    CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
+    CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
+    ClaimedRun first = claim("executor-rejected");
+    ClaimedRun second = claim("after-executor-error");
+    when(store.claimNext(any(), any(), anyString()))
+        .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
+    AssertionError fatal = new AssertionError("worker executor failed before accepting the task");
+    AtomicBoolean rejectFirst = new AtomicBoolean(true);
+    Executor workers =
+        task -> {
+          if (rejectFirst.compareAndSet(true, false)) {
+            throw fatal;
+          }
+          task.run();
+        };
+    // 内联 drain：接收前 Error 直接在 start() 调用栈上被观察到。
+    CanvasFunctionDispatcher dispatcher =
+        new CanvasFunctionDispatcher(
+            store,
+            properties(1_000),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            Runnable::run,
+            workers,
+            poll,
+            worker);
+
+    assertSame(fatal, assertThrows(AssertionError.class, dispatcher::start));
+    // claim 被 ownership-fenced 归还，且 permit 未泄漏。
+    verify(store).reschedule(eq(first), any(), any());
+    dispatcher.wake();
+    await(
+        () -> {
+          verify(worker).run(second);
+          return true;
+        });
     dispatcher.stop();
   }
 

@@ -90,6 +90,8 @@ wake merge -> round-robin claim THREAD/MODEL/TOOL（携带 nodeInstanceId）
 
 调度器持有实例级 `nodeInstanceId` 并把它传进每次 `claimNextWork`，这正是环境路由围栏判定的输入。`wakeRequested` 与 `drainRunning` 两个原子标志以 CAS 合并唤醒，保证同一时刻只有一个 drain 在跑，并在收尾时再检一次新唤醒；THREAD / MODEL / TOOL 之间用实例级 round-robin 游标轮转，避免类型饥饿；`start()` 注册 fixed-delay poll 并立即触发首次唤醒，运行期间重复调用是 no-op，`stop()` 后再调用则抛 `IllegalStateException`。外部注入的 drain / worker / poll 执行器由调用方管理，`stop()` 只取消 poll future 并立即返回，已进入数据库的 claim 可能提交但会在 handoff 前归还。
 
+合并 wake 的单 drain、bounded handoff、容量计数、executor 拒绝归还、接收前拒绝与接收后失败的区分、stop 收尾与 fail-fast executor 校验收敛在 [`harness/common`](../../harness/common/) 的 [`BoundedWorkDispatcher`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/concurrent/BoundedWorkDispatcher.java)；Harness 只保留 round-robin 类型 claim、按类型路由的 Processor handoff 与 ownership-fenced 归还，因此同一份调度骨架被 Harness / Issue / Canvas 三个域复用，而各自的 claim、fencing 与失败策略仍在域内。
+
 worker 线程池必须是 fail-fast 拒绝策略（`AbortPolicy` 一类），构造时显式检查，拒绝 `CallerRunsPolicy` / `DiscardPolicy` / `DiscardOldestPolicy`。容量打满抛拒绝异常时，Dispatcher 先 `lockClaimedWork` 确认本节点仍持有有效租约，再按 `executorRejectionDelay` 延迟 `rescheduleWork` 归还租约并终止当前 drain，避免在过载下陷入 claim-拒绝的紧密循环。Processor 抛 `RuntimeException` 时只记日志、保留数据库租约，等租约自然过期后由后续调度重新认领并按持久化状态恢复。
 
 Work 完成与业务写入在同一事务提交：[`completeWork`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 在排他锁下校验 `lease_token` 与认领时的 `wake_version`——版本未变说明期间没有新唤醒，直接删除该行；被新唤醒推进过则清空租约保留行交给下一轮；所有权已失效则抛异常回滚整个事务。

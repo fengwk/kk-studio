@@ -55,6 +55,7 @@
                                         <include>fun.fengwk.kkstudio.harness.common.text.TextReadWindow</include>
                                         <include>fun.fengwk.kkstudio.harness.common.io.DeadlineResponseBody</include>
                                         <include>fun.fengwk.kkstudio.harness.common.network.HttpProxySelector*</include>
+                                        <include>fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher</include>
                                     </includes>
                                     <limits>
                                         <limit>

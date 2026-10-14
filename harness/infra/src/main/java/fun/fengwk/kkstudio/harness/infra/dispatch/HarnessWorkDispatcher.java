@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -20,13 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
-import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -44,10 +39,8 @@ import java.util.function.Consumer;
  * {@code rescheduleWork}，lost 则 no-op；清理失败只 log，保留 lease 待过期后由其他实例恢复）。 executor rejection 后立即结束当前
  * drain，禁止 claim-&gt;reject 热循环。
  *
- * <p>单 drain 协议：drain 任务由注入的单线程 {@code drainExecutor} 串行执行；{@code wakeRequested} + {@code
- * drainRunning} CAS + finally recheck 保证并发 wake 合并为单 drain 且不丢 wake —— drain 开始即清
- * wakeRequested，drain 内到达的 wake 由 do-while 吸收， drain 收尾窗口到达的 wake 由 finally recheck 重新提交。periodic
- * poll 用 fixed-delay 调度，{@link #stop} 取消 future。
+ * <p>调度骨架（合并 wake 的单 drain、bounded handoff、stop 回收、容量计数与 fail-fast executor 契约）由共享的 {@link
+ * BoundedWorkDispatcher} 提供；本类只注入 Harness 专有的 claim 轮转、Processor handoff 与 ownership-fenced 归还。
  *
  * <p>Processor handoff task 语义：task finally 总是释放本地 capacity 并再次 wake；Processor {@code process} 抛
  * RuntimeException 时只在 dispatcher 边界记录一条 ERROR（target type/id、lease token/deadline、claimed wake
@@ -68,6 +61,8 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
 
   public static final String CHANNEL = "harness_runtime_work";
 
+  private static final String NAME = "harness work dispatcher";
+
   private static final List<WorkTargetType> ROUND_ROBIN_TYPES =
       List.of(WorkTargetType.THREAD, WorkTargetType.MODEL, WorkTargetType.TOOL);
 
@@ -77,18 +72,9 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   private final HarnessStore store;
   private final HarnessWorkDispatcherConfig config;
   private final Clock clock;
-  private final Executor drainExecutor;
-  private final Executor workerExecutor;
-  private final ScheduledExecutorService pollScheduler;
   private final Map<WorkTargetType, Consumer<ClaimedWork>> handlers;
-  private final AtomicBoolean wakeRequested = new AtomicBoolean();
-  private final AtomicBoolean drainRunning = new AtomicBoolean();
-  private final AtomicInteger dispatchCapacity = new AtomicInteger();
-  private final Object lifecycleLock = new Object();
-  private volatile boolean started;
-  private volatile boolean stopped;
+  private final BoundedWorkDispatcher<ClaimedWork> dispatcher;
   private int roundRobinCursor;
-  private ScheduledFuture<?> pollFuture;
 
   /**
    * 生产 wiring 构造：按 {@link WorkTargetType} 把 claim 路由给对应 Processor 的 {@code process}；返回值
@@ -206,10 +192,18 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     this.store = Objects.requireNonNull(store, "store");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
-    this.drainExecutor = requireFailFastExecutor(drainExecutor, "drainExecutor");
-    this.workerExecutor = requireFailFastExecutor(workerExecutor, "workerExecutor");
-    this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");
     this.handlers = handlers;
+    this.dispatcher =
+        new BoundedWorkDispatcher<>(
+            NAME,
+            config.maxDispatchTasks(),
+            config.periodicPollInterval(),
+            drainExecutor,
+            workerExecutor,
+            pollScheduler,
+            this::claimNext,
+            this::runHandoff,
+            this::returnClaim);
   }
 
   public UUID nodeInstanceId() {
@@ -232,31 +226,12 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
    * IllegalStateException}。
    */
   public void start() {
-    synchronized (lifecycleLock) {
-      if (stopped) {
-        throw new IllegalStateException("dispatcher is already stopped");
-      }
-      if (pollFuture != null) {
-        return;
-      }
-      long intervalMillis = config.periodicPollInterval().toMillis();
-      pollFuture =
-          pollScheduler.scheduleWithFixedDelay(
-              this::poll, intervalMillis, intervalMillis, TimeUnit.MILLISECONDS);
-      started = true;
-      wake();
-    }
+    dispatcher.start();
   }
 
   /** 请求一次 drain；start 前或 stop 后为 no-op。 */
   public void wake() {
-    if (!started || stopped) {
-      return;
-    }
-    wakeRequested.set(true);
-    if (drainRunning.compareAndSet(false, true)) {
-      submitDrain();
-    }
+    dispatcher.wake();
   }
 
   /**
@@ -264,97 +239,28 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
    * shutdown 注入 executor、不 interrupt 已接受 task、不等待 Processor task 完成。幂等。
    */
   public void stop() {
-    synchronized (lifecycleLock) {
-      if (stopped) {
-        return;
-      }
-      stopped = true;
-      started = false;
-      ScheduledFuture<?> future = pollFuture;
-      if (future != null) {
-        future.cancel(false);
-      }
-    }
+    dispatcher.stop();
   }
 
   @Override
   public void close() {
-    stop();
+    dispatcher.close();
   }
 
-  private void poll() {
-    wake();
-  }
-
-  private void submitDrain() {
-    AtomicBoolean taskStarted = new AtomicBoolean();
-    try {
-      drainExecutor.execute(
-          () -> {
-            taskStarted.set(true);
-            runDrain();
-          });
-    } catch (RuntimeException error) {
-      if (taskStarted.get()) {
-        throw error;
-      }
-      drainRunning.set(false);
-      log.warn(
-          "drain executor failed to accept a drain task; the next wake or poll will retry", error);
-    } catch (Error error) {
-      if (!taskStarted.get()) {
-        drainRunning.set(false);
-      }
-      throw error;
-    }
-  }
-
-  private void runDrain() {
-    try {
-      do {
-        wakeRequested.set(false);
-        drainOnce();
-      } while (!stopped && wakeRequested.get());
-    } catch (RuntimeException error) {
-      log.warn("work drain failed; the next wake or poll will retry", error);
-    } finally {
-      drainRunning.set(false);
-      // drain 收尾窗口内到达的 wake：drainRunning 已清，必须由 recheck 重新提交，否则 wake 丢失。
-      if (!stopped && wakeRequested.get() && drainRunning.compareAndSet(false, true)) {
-        submitDrain();
-      }
-    }
-  }
-
-  /** 单次 drain 扫描：按 round-robin 顺序 claim，直到 capacity 满、无 due 或需要结束。 */
-  private void drainOnce() {
-    int consecutiveEmpty = 0;
-    while (!stopped && dispatchCapacity.get() < config.maxDispatchTasks()) {
-      WorkTargetType type = nextRoundRobinType();
+  /**
+   * 按实例级 round-robin 游标扫描 THREAD / MODEL / TOOL：单次调用最多扫描三种类型，返回首个成功 claim；全部无 due 时返回 {@code
+   * null}。游标每扫描一个类型即前进一格，命中时已指向其后一个类型，全 empty 时回到原值并跨 wake / drain 保留。
+   */
+  private ClaimedWork claimNext() {
+    for (int scanned = 0; scanned < ROUND_ROBIN_TYPES.size(); scanned++) {
+      WorkTargetType type = ROUND_ROBIN_TYPES.get(roundRobinCursor);
+      roundRobinCursor = (roundRobinCursor + 1) % ROUND_ROBIN_TYPES.size();
       ClaimedWork claim = claimNext(type);
-      if (claim == null) {
-        if (++consecutiveEmpty == ROUND_ROBIN_TYPES.size()) {
-          break;
-        }
-        continue;
-      }
-      consecutiveEmpty = 0;
-      if (stopped) {
-        returnClaim(claim);
-        break;
-      }
-      if (!handoff(claim)) {
-        // worker executor rejection：结束当前 drain，禁止 claim -> reject 热循环。
-        returnClaim(claim);
-        break;
+      if (claim != null) {
+        return claim;
       }
     }
-  }
-
-  private WorkTargetType nextRoundRobinType() {
-    WorkTargetType type = ROUND_ROBIN_TYPES.get(roundRobinCursor);
-    roundRobinCursor = (roundRobinCursor + 1) % ROUND_ROBIN_TYPES.size();
-    return type;
+    return null;
   }
 
   private ClaimedWork claimNext(WorkTargetType type) {
@@ -366,65 +272,23 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
                 .orElse(null));
   }
 
-  private boolean handoff(ClaimedWork claim) {
-    AtomicBoolean taskStarted = new AtomicBoolean();
-    dispatchCapacity.incrementAndGet();
-    try {
-      workerExecutor.execute(
-          () -> {
-            taskStarted.set(true);
-            runHandoff(claim);
-          });
-      return true;
-    } catch (RuntimeException error) {
-      if (taskStarted.get()) {
-        throw error;
-      }
-      dispatchCapacity.decrementAndGet();
-      log.warn(
-          "worker executor failed to accept dispatch task for {}; returning the claim",
-          claim.target(),
-          error);
-      return false;
-    } catch (Error error) {
-      if (!taskStarted.get()) {
-        dispatchCapacity.decrementAndGet();
-        log.error(
-            "worker executor failed before accepting dispatch task for {}; returning the claim",
-            claim.target(),
-            error);
-        try {
-          returnClaim(claim);
-        } finally {
-          throw error;
-        }
-      }
-      throw error;
-    }
-  }
-
   private void runHandoff(ClaimedWork claim) {
     try {
       Consumer<ClaimedWork> handler = handlers.get(claim.target().type());
-      try {
-        handler.accept(claim);
-      } catch (RuntimeException error) {
-        // 绝不猜测 complete / reschedule / delete：保留 lease 待过期后由后续 claim 恢复。
-        log.error(
-            "processor failed for target type={} id={}; leaseToken={} leaseUntil={} "
-                + "claimedWakeVersion={} requiredEnvironmentId={}; its lease is left to expire so "
-                + "the work can be recovered",
-            claim.target().type(),
-            claim.target().id(),
-            claim.leaseToken(),
-            claim.leaseUntil(),
-            claim.claimedWakeVersion(),
-            claim.requiredEnvironmentId(),
-            error);
-      }
-    } finally {
-      dispatchCapacity.decrementAndGet();
-      wake();
+      handler.accept(claim);
+    } catch (RuntimeException error) {
+      // 绝不猜测 complete / reschedule / delete：保留 lease 待过期后由后续 claim 恢复。
+      log.error(
+          "processor failed for target type={} id={}; leaseToken={} leaseUntil={} "
+              + "claimedWakeVersion={} requiredEnvironmentId={}; its lease is left to expire so "
+              + "the work can be recovered",
+          claim.target().type(),
+          claim.target().id(),
+          claim.leaseToken(),
+          claim.leaseUntil(),
+          claim.claimedWakeVersion(),
+          claim.requiredEnvironmentId(),
+          error);
     }
   }
 
@@ -446,18 +310,5 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
           claim.target(),
           error);
     }
-  }
-
-  private static Executor requireFailFastExecutor(Executor executor, String name) {
-    Objects.requireNonNull(executor, name);
-    if (executor instanceof ThreadPoolExecutor threadPool) {
-      RejectedExecutionHandler handler = threadPool.getRejectedExecutionHandler();
-      if (handler instanceof ThreadPoolExecutor.CallerRunsPolicy
-          || handler instanceof ThreadPoolExecutor.DiscardPolicy
-          || handler instanceof ThreadPoolExecutor.DiscardOldestPolicy) {
-        throw new IllegalArgumentException(name + " must use a fail-fast rejection policy");
-      }
-    }
-    return executor;
   }
 }

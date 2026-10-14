@@ -185,6 +185,50 @@ class HarnessWorkDispatcherDrainTest {
     assertNull(work(store, new WorkTarget(WorkTargetType.TOOL, tool2.toolInvocationId())));
   }
 
+  /** THREAD 无 due 时，round-robin 必须跳过空类型而不偏置紧随其后的类型：maxDispatchTasks=1 下按 MODEL / TOOL 交替。 */
+  @Test
+  void roundRobinSkipsEmptyThreadWithoutBiasingTowardTheNextType() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    seedModel(store);
+    seedModel(store);
+    seedModel(store);
+    seedTool(store);
+    seedTool(store);
+    seedTool(store);
+    CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
+    Consumer<ClaimedWork> completingRecorder =
+        claim -> {
+          claims.add(claim);
+          store.transaction(
+              tx -> {
+                tx.completeWork(claim, NOW);
+                return null;
+              });
+        };
+    HarnessWorkDispatcher dispatcher =
+        newDispatcher(
+            store,
+            clock(),
+            singleThread(),
+            singleThread(),
+            new RecordingScheduler(),
+            1,
+            completingRecorder);
+
+    dispatcher.start();
+    awaitTrue(() -> claims.size() == 6);
+
+    assertEquals(
+        List.of(
+            WorkTargetType.MODEL,
+            WorkTargetType.TOOL,
+            WorkTargetType.MODEL,
+            WorkTargetType.TOOL,
+            WorkTargetType.MODEL,
+            WorkTargetType.TOOL),
+        claims.stream().map(claim -> claim.target().type()).toList());
+  }
+
   @Test
   void capacityIsBoundedByMaxDispatchTasks() throws InterruptedException {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
