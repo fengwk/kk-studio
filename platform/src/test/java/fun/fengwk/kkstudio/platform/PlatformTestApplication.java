@@ -27,19 +27,13 @@ import tools.jackson.databind.ser.std.ToStringSerializer;
  *
  * <p>提供测试专用 {@code S3Client} mock 假件，使启动期 S3 readiness probe 顺利通过而不进行真实网络调用。
  *
- * <p>Platform 依赖宿主注入的 JSON mapper（迁移前由旧宿主与 HTTP profile 提供）：Platform 自身不声明 Jackson 自动配置，以免抢占 Web
- * 组合根的 Bean；测试上下文用本 Bean 复刻宿主实际注入的序列化 profile——禁用字母序（保持声明序）、省略 null、按时间戳写时间、Long 写为字符串。HTTP 的严格
- * wire 约束（重复键、DTO mixin 等）由 Web 层测试覆盖，不在此处重复。
+ * <p>Platform 集成测试由测试宿主提供 JSON mapper；HTTP wire 严格性由 Web 负责。
  */
 @SpringBootApplication
 @Import(PlatformHarnessTestConfiguration.class)
 public class PlatformTestApplication {
 
-  /**
-   * 复刻宿主注入的 JSON mapper profile，供依赖 {@code tools.jackson.databind.ObjectMapper} 的 Platform Bean 装配。
-   *
-   * <p>只保留旧宿主与 Web 实际生效的差异项：Jackson 3 默认按字母序输出，这里显式关闭以维持声明序；不额外添加 Platform 自行发明的约束。
-   */
+  /** 测试宿主注入的 JSON mapper：禁用字母序（保持声明序）、省略 null、按时间戳写时间、Long 写为字符串。 */
   @Bean
   @Primary
   public JsonMapper testJsonMapper() {

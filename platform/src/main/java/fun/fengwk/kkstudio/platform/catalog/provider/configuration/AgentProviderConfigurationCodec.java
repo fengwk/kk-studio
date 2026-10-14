@@ -4,6 +4,8 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -15,7 +17,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** 读写 Provider 内部配置 JSON 中的模型调用超时策略与 Provider HTTP 重试白名单覆盖。 */
+/**
+ * 读写 Provider 内部配置 JSON 中的模型调用超时策略与 Provider HTTP 重试白名单覆盖。
+ *
+ * <p>读取入口启用自己的 {@code USE_BIG_DECIMAL_FOR_FLOATS} profile（从注入 mapper 派生，不修改它），使 merge 保留 Provider
+ * 扩展值的高精度与极值；等价判断额外规范化尾零，保持「同值不同 scale 相等」的既有数值语义。
+ */
 @Component
 public final class AgentProviderConfigurationCodec {
 
@@ -24,9 +31,16 @@ public final class AgentProviderConfigurationCodec {
   public static final String MODEL_HTTP_RETRY_STATUS_CODES = "modelHttpRetryStatusCodes";
 
   private final ObjectMapper objectMapper;
+  private final ObjectReader configReader;
+  private final ObjectReader comparisonReader;
 
   public AgentProviderConfigurationCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+    // 读取必须按 BigDecimal 保真：宿主 HTTP mapper 的默认 profile 会把 1e309 读成 Infinity、把不同高精度小数折叠成同一个
+    // double，导致 merge 改写扩展值与协议等价判断都失真。只增强本读取入口，写仍走注入 mapper 以保留真实写入失败语义。
+    this.configReader = objectMapper.reader().with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+    // 等价判断保持迁移前的数值语义：同值不同 scale 视为相等（先规范化尾零，再比较结构）；仅用于比较，不影响写出文本。
+    this.comparisonReader = configReader.with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
   }
 
   /** 读取策略；未配置的字段使用产品默认值。 */
@@ -69,8 +83,8 @@ public final class AgentProviderConfigurationCodec {
 
   /** 比较两份配置在剔除超时字段与 HTTP 重试覆盖后是否在结构上完全等价（用于判断是否需要轮换 connection_generation_id）。 */
   public boolean isProtocolConfigEqual(String configJson1, String configJson2) {
-    ObjectNode node1 = readObject(configJson1).deepCopy();
-    ObjectNode node2 = readObject(configJson2).deepCopy();
+    ObjectNode node1 = readObject(comparisonReader, configJson1).deepCopy();
+    ObjectNode node2 = readObject(comparisonReader, configJson2).deepCopy();
     node1.remove(MODEL_CALL_TIMEOUT_MILLIS);
     node1.remove(MODEL_CALL_IDLE_TIMEOUT_MILLIS);
     node1.remove(MODEL_HTTP_RETRY_STATUS_CODES);
@@ -141,11 +155,15 @@ public final class AgentProviderConfigurationCodec {
   }
 
   private ObjectNode readObject(String configJson) {
+    return readObject(configReader, configJson);
+  }
+
+  private ObjectNode readObject(ObjectReader reader, String configJson) {
     if (configJson == null || configJson.isBlank()) {
       return objectMapper.createObjectNode();
     }
     try {
-      JsonNode config = objectMapper.readTree(configJson);
+      JsonNode config = reader.readTree(configJson);
       if (config == null || !config.isObject()) {
         throw new IllegalArgumentException("persisted provider configJson must be an object");
       }

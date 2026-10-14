@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.settings;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
@@ -39,8 +40,8 @@ import java.util.Objects;
  * <p>职责：
  *
  * <ul>
- *   <li>{@link #decode}：严格解码持久化的 canonical JSON（未知字段、尾随 token、错误类型、缺失/null required 字段、Boolean
- *       标量强制转换全部拒绝），失败即存储数据损坏；
+ *   <li>{@link #decode}：严格解码持久化的 canonical JSON（未知字段、重复字段、尾随 token、错误类型、缺失/null required 字段、
+ *       Boolean 标量强制转换全部拒绝），失败即存储数据损坏；
  *   <li>{@link #encode}：把聚合编码为确定性 canonical JSON（键排序、map 键排序、省略 null），语义从不依赖键顺序；
  *   <li>{@link #fromDto} / {@link #toSections}：share 层 DTO 与领域聚合之间的显式双向映射，DTO 缺失字段给出精确的 field 级错误。
  * </ul>
@@ -62,6 +63,8 @@ public class SystemSettingsCodec {
         JsonMapper.builder()
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            // 存储边界自身拒绝重复字段：同一字段出现两次时无法判断哪份值生效，属损坏数据。
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             // 显式 null 的 required primitive 必须拒绝，而不是回退到 0/false。
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
