@@ -12,8 +12,6 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -52,6 +50,8 @@ import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.port.AgentBranchSettingsPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadExecutionPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
@@ -109,7 +109,7 @@ public class IssueRunServiceImpl implements IssueRunService {
   private final IssueWorkStore issueWorkStore;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final AgentBranchSettingsPort agentBranchSettingsPort;
-  private final ObjectProvider<HarnessRuntime> runtimes;
+  private final ObjectProvider<IssueThreadExecutionPort> threadExecutions;
   private final ObjectMapper objectMapper;
 
   @Override
@@ -209,12 +209,10 @@ public class IssueRunServiceImpl implements IssueRunService {
               sessionId, threadId, settings, project.isYoloEnabled());
     } else {
       threadId = binding.threadId();
-      ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(threadId);
-      sessionId = snapshot.thread().sessionId();
-      existingHead = snapshot.thread().headEntryId();
-      target =
-          new AcceptCommandsTarget.Thread(
-              threadId, existingHead, snapshot.thread().nextCommandSequence());
+      IssueThreadView view = requireThreadExecution().readThread(threadId);
+      sessionId = view.sessionId();
+      existingHead = view.headEntryId();
+      target = new AcceptCommandsTarget.Thread(threadId, existingHead, view.nextCommandSequence());
     }
 
     ProjectRunScope scope = runScope(issue, stage, agentName, runId, threadId);
@@ -224,7 +222,7 @@ public class IssueRunServiceImpl implements IssueRunService {
         new ThreadJoinRequest(
             runId, null, null, taskInput.requestHash(), agentName, null, 1, 1, 1, JoinPurpose.TASK);
     AcceptedCommands accepted =
-        requireRuntime()
+        requireThreadExecution()
             .acceptCommandsAndJoin(
                 new AcceptCommandsCommand(target, commands), join, AcceptancePreflight.IDENTITY);
     UUID startEntryId;
@@ -556,10 +554,10 @@ public class IssueRunServiceImpl implements IssueRunService {
    * Run 收尾必须持有活动 Run 锁，因此不可能在关闭后覆盖新 Run 的 scope。
    */
   private void closeRunScope(IssueRun run) {
-    HarnessRuntime runtime = requireRuntime();
+    IssueThreadExecutionPort threadExecutions = requireThreadExecution();
     UUID threadId = run.getThreadId();
     ThreadCommand source =
-        runtime
+        threadExecutions
             .findThreadCommand(threadId, commandKey(run.getId(), "contributor-state"))
             .orElseThrow(
                 () ->
@@ -581,11 +579,11 @@ public class IssueRunServiceImpl implements IssueRunService {
                     ProjectRunScope.SCHEMA_VERSION,
                     RUN_SCOPE_CODEC.encode(scope.closed()))),
             commandKey(run.getId(), "scope-closed"));
-    ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-    runtime.acceptCommands(
+    IssueThreadView view = threadExecutions.readThread(threadId);
+    threadExecutions.acceptCommands(
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(
-                threadId, snapshot.thread().headEntryId(), snapshot.thread().nextCommandSequence()),
+                threadId, view.headEntryId(), view.nextCommandSequence()),
             List.of(closeCommand)),
         AcceptancePreflight.IDENTITY);
   }
@@ -653,7 +651,7 @@ public class IssueRunServiceImpl implements IssueRunService {
    * <p>只读快照，不产生锁；部署缺少 Harness Runtime 时确定失败，绝不退化为"无区间校验"的接受。
    */
   private EntryPath entryPath(UUID threadId) {
-    return requireRuntime().getThreadSnapshot(threadId).entryPath();
+    return requireThreadExecution().readThread(threadId).entryPath();
   }
 
   /**
@@ -849,12 +847,12 @@ public class IssueRunServiceImpl implements IssueRunService {
         requestKey, "requestKey", MAX_REQUEST_KEY_LENGTH);
   }
 
-  private HarnessRuntime requireRuntime() {
-    HarnessRuntime runtime = runtimes.getIfAvailable();
-    if (runtime == null) {
+  private IssueThreadExecutionPort requireThreadExecution() {
+    IssueThreadExecutionPort port = threadExecutions.getIfAvailable();
+    if (port == null) {
       throw new IllegalStateException("harness runtime is not available in this deployment");
     }
-    return runtime;
+    return port;
   }
 
   private record RunLock(IssueRun run, Issue issue, long issueVersion, Project project) {}

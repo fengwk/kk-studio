@@ -20,15 +20,13 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -44,6 +42,8 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.port.AgentBranchSettingsPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadExecutionPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
@@ -92,10 +92,10 @@ class IssueRunServiceImplTest {
   private final ProjectWorkflowJsonCodec workflowCodec = new ProjectWorkflowJsonCodec();
   private final AgentBranchSettingsPort agentBranchSettingsPort =
       mock(AgentBranchSettingsPort.class);
-  private final HarnessRuntime runtime = mock(HarnessRuntime.class);
+  private final IssueThreadExecutionPort threadExecutions = mock(IssueThreadExecutionPort.class);
 
   @SuppressWarnings("unchecked")
-  private final ObjectProvider<HarnessRuntime> runtimes = mock(ObjectProvider.class);
+  private final ObjectProvider<IssueThreadExecutionPort> executions = mock(ObjectProvider.class);
 
   private final IssueRunServiceImpl service =
       new IssueRunServiceImpl(
@@ -108,7 +108,7 @@ class IssueRunServiceImplTest {
           issueWorkStore,
           workflowCodec,
           agentBranchSettingsPort,
-          runtimes,
+          executions,
           JsonMapper.builder().build());
 
   /**
@@ -144,8 +144,8 @@ class IssueRunServiceImplTest {
     when(agentBranchSettingsPort.materializeBranchSettings("worker")).thenReturn(settings);
     when(rootEntry.id()).thenReturn(rootEntryId);
     when(accepted.rootEntry()).thenReturn(rootEntry);
-    when(runtime.acceptCommandsAndJoin(any(), any(), any())).thenReturn(accepted);
-    when(runtimes.getIfAvailable()).thenReturn(runtime);
+    when(threadExecutions.acceptCommandsAndJoin(any(), any(), any())).thenReturn(accepted);
+    when(executions.getIfAvailable()).thenReturn(threadExecutions);
     when(issueAgentThreadRepository.insert(any())).thenReturn(true);
     when(issueRunRepository.insert(any()))
         .thenAnswer(
@@ -162,7 +162,8 @@ class IssueRunServiceImplTest {
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
     ArgumentCaptor<ThreadJoinRequest> joinCaptor = ArgumentCaptor.forClass(ThreadJoinRequest.class);
-    verify(runtime).acceptCommandsAndJoin(commandCaptor.capture(), joinCaptor.capture(), any());
+    verify(threadExecutions)
+        .acceptCommandsAndJoin(commandCaptor.capture(), joinCaptor.capture(), any());
 
     AcceptCommandsTarget.NewRootSession target =
         assertInstanceOf(
@@ -272,12 +273,14 @@ class IssueRunServiceImplTest {
     when(endEntry.id()).thenReturn(endEntryId);
     EntryPath path = mock(EntryPath.class);
     when(path.entries()).thenReturn(List.of(startEntry, endEntry));
-    ThreadState thread = mock(ThreadState.class);
-    when(thread.headEntryId()).thenReturn(endEntryId);
-    when(thread.nextCommandSequence()).thenReturn(5L);
-    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-    when(snapshot.thread()).thenReturn(thread);
-    when(snapshot.entryPath()).thenReturn(path);
+    IssueThreadView view =
+        new IssueThreadView(
+            run.getSessionId(),
+            endEntryId,
+            4L,
+            5L,
+            path,
+            new ThreadExecutionFacts(false, false, false));
 
     when(issueRunRepository.getById(runId)).thenReturn(run);
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue());
@@ -287,16 +290,16 @@ class IssueRunServiceImplTest {
     when(issueActivityRepository.insert(any())).thenReturn(true);
     when(issueRunRepository.updateById(any(), anyLong())).thenReturn(true);
     when(issueRepository.updateById(any(), anyLong())).thenReturn(true);
-    when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(runtime.findThreadCommand(eq(threadId), any())).thenReturn(Optional.of(source));
-    when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
-    when(runtime.acceptCommands(any(), any())).thenReturn(mock(AcceptedCommands.class));
+    when(executions.getIfAvailable()).thenReturn(threadExecutions);
+    when(threadExecutions.findThreadCommand(eq(threadId), any())).thenReturn(Optional.of(source));
+    when(threadExecutions.readThread(threadId)).thenReturn(view);
+    when(threadExecutions.acceptCommands(any(), any())).thenReturn(mock(AcceptedCommands.class));
 
     service.completeRun(runId, 3L, "complete-1", endEntryId, null, null);
 
     ArgumentCaptor<AcceptCommandsCommand> captor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(runtime).acceptCommands(captor.capture(), any());
+    verify(threadExecutions).acceptCommands(captor.capture(), any());
     AcceptCommandsTarget.Thread target =
         assertInstanceOf(AcceptCommandsTarget.Thread.class, captor.getValue().target());
     assertEquals(threadId, target.threadId());
