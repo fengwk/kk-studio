@@ -206,6 +206,9 @@ class HarnessCatalogArchitectureTest {
             main.resolve("fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogSnapshot.java")
                 .normalize(),
             main.resolve(
+                    "fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogFingerprint.java")
+                .normalize(),
+            main.resolve(
                     "fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java")
                 .normalize(),
             main.resolve(

@@ -75,6 +75,7 @@ class PluginCatalogSnapshotTest {
 
     PluginCatalogSnapshot snapshot =
         PluginCatalogSnapshot.build(
+            1L,
             registry,
             initialConfigurations(registry),
             PluginCatalogSnapshotTest::contextFor,
@@ -91,6 +92,22 @@ class PluginCatalogSnapshotTest {
     assertTrue(
         snapshot.harnessCatalog().findDescriptor(new ContributorId("builtin.contrib")).isPresent());
     assertEquals(Set.of("alpha.run", "beta.run", "builtin.run"), canvasFunctionNames(snapshot));
+    assertEquals(1, snapshot.epoch());
+    assertEquals(
+        Map.of(
+            PLUGIN_ALPHA,
+            new PluginCatalogSnapshot.PluginOwnership(
+                Set.of(new ContributorId("alpha.contrib")), Set.of("alpha.run")),
+            PLUGIN_BETA,
+            new PluginCatalogSnapshot.PluginOwnership(
+                Set.of(new ContributorId("beta.contrib")), Set.of("beta.run"))),
+        snapshot.pluginOwnership(),
+        "builtins must not be attributed to a plugin");
+    assertTrue(PluginCatalogFingerprint.isFingerprint(snapshot.catalogFingerprint()));
+    assertEquals(Set.of(PLUGIN_ALPHA, PLUGIN_BETA), snapshot.capabilityFingerprints().keySet());
+    assertThrows(UnsupportedOperationException.class, () -> snapshot.pluginOwnership().clear());
+    assertThrows(
+        UnsupportedOperationException.class, () -> snapshot.capabilityFingerprints().clear());
     snapshot.close();
   }
 
@@ -107,6 +124,7 @@ class PluginCatalogSnapshotTest {
     StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
     try (PluginCatalogSnapshot snapshot =
         PluginCatalogSnapshot.build(
+            7L,
             registry,
             Map.of(PLUGIN_ALPHA, new PluginConfig(7, "{}")),
             PluginCatalogSnapshotTest::contextFor,
@@ -115,6 +133,30 @@ class PluginCatalogSnapshotTest {
       assertEquals(new PluginConfig(7, "{\"enabled\":true}"), plugin.receivedConfig);
       assertEquals(plugin.receivedConfig, snapshot.configuredPlugins().get(0).config());
     }
+  }
+
+  /** 配置 revision 不得晚于快照 epoch：领先 epoch 说明记录已损坏。 */
+  @Test
+  void buildRejectsConfigurationRevisionBeyondEpoch() {
+    TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
+    RecordingInstance alphaInstance = new RecordingInstance(List.of(), List.of());
+    alpha.configure = () -> alphaInstance;
+    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha));
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                PluginCatalogSnapshot.build(
+                    1L,
+                    registry,
+                    Map.of(PLUGIN_ALPHA, new PluginConfig(2, "{}")),
+                    PluginCatalogSnapshotTest::contextFor,
+                    List.of(),
+                    List.of()));
+
+    assertTrue(failure.getMessage().contains("stage=configuration"), failure.getMessage());
+    assertEquals(0, alphaInstance.closeCount, "no instance may be built for a corrupt revision");
   }
 
   /** 配置必须精确覆盖安装集合：缺少已安装 id 或带有未知 id 都固定失败。 */
@@ -129,6 +171,7 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     registry,
                     Map.of(PLUGIN_ALPHA, PluginConfig.initial(SCHEMA)),
                     PluginCatalogSnapshotTest::contextFor,
@@ -143,6 +186,7 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     registry,
                     withUnknown,
                     PluginCatalogSnapshotTest::contextFor,
@@ -170,6 +214,7 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contextFor,
@@ -200,6 +245,7 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contextFor,
@@ -226,6 +272,7 @@ class PluginCatalogSnapshotTest {
         IllegalStateException.class,
         () ->
             PluginCatalogSnapshot.build(
+                1L,
                 canvasRegistry,
                 initialConfigurations(canvasRegistry),
                 PluginCatalogSnapshotTest::contextFor,
@@ -251,6 +298,7 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contextFor,
@@ -280,6 +328,7 @@ class PluginCatalogSnapshotTest {
             Error.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contextFor,
@@ -303,6 +352,7 @@ class PluginCatalogSnapshotTest {
             Error.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     secondRegistry,
                     initialConfigurations(secondRegistry),
                     PluginCatalogSnapshotTest::contextFor,
@@ -328,6 +378,7 @@ class PluginCatalogSnapshotTest {
             Error.class,
             () ->
                 PluginCatalogSnapshot.build(
+                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contextFor,
@@ -354,6 +405,7 @@ class PluginCatalogSnapshotTest {
 
     PluginCatalogSnapshot snapshot =
         PluginCatalogSnapshot.build(
+            1L,
             registry,
             initialConfigurations(registry),
             PluginCatalogSnapshotTest::contextFor,

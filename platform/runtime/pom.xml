@@ -246,6 +246,39 @@
                             </rules>
                         </configuration>
                     </execution>
+                    <execution>
+                        <!-- 配置版本、完整目录与恢复逻辑的定向覆盖率门禁。 -->
+                        <id>check-plugin-configuration-class-line-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot*</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogFingerprint</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest*</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
         </plugins>

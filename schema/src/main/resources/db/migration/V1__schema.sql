@@ -332,6 +332,84 @@ create index idx_plugin_credential_refresh_due
 
 comment on index idx_plugin_credential_refresh_due is 'refresh dispatcher 按 next_refresh_at 扫描到期行';
 
+-- -----------------------------------------------------------------------------
+-- Plugin 配置权威存储
+--
+-- 恒单行 id=1，以 epoch CAS 推进唯一全局修订。manifest 记录全部插件配置身份及两域目录指纹；
+-- epoch=0、空 plugins 与 null catalogFingerprint 是唯一未初始化形态。
+-- -----------------------------------------------------------------------------
+
+create table plugin_catalog_state (
+    id            bigint       primary key,
+    epoch         bigint       not null,
+    manifest_json jsonb        not null,
+    created_at    timestamptz(3) not null default current_timestamp,
+    updated_at    timestamptz(3) not null default current_timestamp,
+    constraint ck_plugin_catalog_state_id check (id = 1),
+    constraint ck_plugin_catalog_state_epoch check (epoch >= 0),
+    constraint ck_plugin_catalog_state_manifest_object check (
+        jsonb_typeof(manifest_json) = 'object'
+    ),
+    constraint ck_plugin_catalog_state_time_order check (updated_at >= created_at)
+);
+
+comment on table plugin_catalog_state is 'Plugin catalog 权威单行聚合（id=1）：epoch 是唯一全局修订，manifest_json 是完整冻结两域目录的 catalog manifest';
+comment on column plugin_catalog_state.id is '恒为 1 的单行聚合键';
+comment on column plugin_catalog_state.epoch is '唯一全局修订（非负 bigint）：每次成功提交 +1；CAS 只通过 where epoch = :expectedEpoch 的 epoch = epoch + 1 完成';
+comment on column plugin_catalog_state.manifest_json is '完整冻结两域目录的 catalog manifest JSON object：plugins 是按 pluginId 排序的冻结映射，catalogFingerprint 绑定完整两域目录；epoch=0 时为 {"plugins":{},"catalogFingerprint":null}';
+comment on column plugin_catalog_state.created_at is '创建时间（毫秒精度）';
+comment on column plugin_catalog_state.updated_at is '最后更新时间（毫秒精度），应用侧维护';
+
+insert into plugin_catalog_state (id, epoch, manifest_json)
+values (1, 0, '{"plugins":{},"catalogFingerprint":null}'::jsonb);
+
+-- -----------------------------------------------------------------------------
+-- Plugin 普通配置历史的不可变权威存储
+--
+-- 每个 (plugin_id, revision) 保存一份不可变普通配置，revision 取写入时的全局 epoch。
+-- values_json 按严格 JSON 文本保存，保留数值表示与 UTF-8 预算；SQL/JSON 谓词兜底对象与唯一键。
+-- code/schema/capability 身份用于恢复核验；秘密不进入普通配置。
+-- -----------------------------------------------------------------------------
+
+create table plugin_configuration_revision (
+    plugin_id               varchar(64)  not null,
+    revision                bigint       not null,
+    code_version            varchar(64)  not null,
+    schema_fingerprint      char(64)     not null,
+    capability_fingerprint  char(64)     not null,
+    values_json             text         not null,
+    created_at              timestamptz(3) not null default current_timestamp,
+    constraint pk_plugin_configuration_revision primary key (plugin_id, revision),
+    constraint ck_plugin_configuration_revision_plugin_id check (
+        plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
+    ),
+    constraint ck_plugin_configuration_revision_revision check (revision > 0),
+    constraint ck_plugin_configuration_revision_code_version check (
+        code_version = btrim(code_version) and char_length(code_version) > 0
+    ),
+    constraint ck_plugin_configuration_revision_schema_fingerprint check (
+        schema_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_plugin_configuration_revision_capability_fingerprint check (
+        capability_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_plugin_configuration_revision_values_object check (
+        values_json is json object with unique keys
+    ),
+    constraint ck_plugin_configuration_revision_values_budget check (
+        octet_length(values_json) <= 65536
+    )
+);
+
+comment on table plugin_configuration_revision is 'Plugin 普通配置的不可变 append-only 历史：每个 (plugin_id, revision) 一行，revision 即该插件最后一次写入的全局 epoch';
+comment on column plugin_configuration_revision.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），与 classpath 中的 StudioPlugin.pluginId 对齐';
+comment on column plugin_configuration_revision.revision is '配置修订号：正整数，等于撰写该 revision 时的全局 epoch';
+comment on column plugin_configuration_revision.code_version is '撰写该 revision 时 StudioPlugin descriptor.version 的快照，启动恢复据此比对当前 JAR';
+comment on column plugin_configuration_revision.schema_fingerprint is '撰写该 revision 时的配置定义指纹（values schema + defaults + secrets + authSpec），64 位小写 SHA-256';
+comment on column plugin_configuration_revision.capability_fingerprint is '撰写该 revision 时该插件冻结两域贡献的能力指纹，64 位小写 SHA-256';
+comment on column plugin_configuration_revision.values_json is '严格 JSON object 的普通配置值原文（不含秘密）：text 存储以整段原样读回，DB 只强制 object、唯一键与 ≤65536 字节，不做 jsonb 规范化';
+comment on column plugin_configuration_revision.created_at is '创建时间（毫秒精度）';
+
 -- Platform MCP Server 配置：name 是主键与唯一路由身份，创建后不可变。Backend 只通过
 -- Streamable HTTP 连接 Server；请求 header 可能内嵌凭据，绝不进入列表投影与日志。
 create table mcp_server (

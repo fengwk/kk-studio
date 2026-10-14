@@ -62,6 +62,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_work",
           "mcp_server",
           "mcp_tool",
+          "plugin_catalog_state",
+          "plugin_configuration_revision",
           "plugin_credential",
           "project",
           "project_issue",
@@ -271,6 +273,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at",
         "version");
     assertColumns("mcp_tool", "name", "server_name", "source_name", "description", "input_schema");
+    assertColumns(
+        "plugin_catalog_state", "id", "epoch", "manifest_json", "created_at", "updated_at");
+    assertColumns(
+        "plugin_configuration_revision",
+        "plugin_id",
+        "revision",
+        "code_version",
+        "schema_fingerprint",
+        "capability_fingerprint",
+        "values_json",
+        "created_at");
     assertColumns(
         "plugin_credential",
         "plugin_id",
@@ -550,12 +563,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_tool_invocation.result",
             "mcp_server.headers",
             "mcp_tool.input_schema",
+            "plugin_catalog_state.manifest_json",
             "project.workflow",
             "project_issue_activity.data",
             "skill_package.skills",
             "system_setting.config"),
         jsonbColumns,
-        "jsonb columns must exactly match the 32 declared structured payloads");
+        "jsonb columns must exactly match the 33 declared structured payloads");
+
+    // 文本保存指数与字节预算，不触发 jsonb 数值展开。
+    assertColumnType("text", "plugin_configuration_revision", "values_json");
 
     // 自由文本字段不受列宽限制，使用 text
     assertColumnType("text", "agent_provider", "description");
@@ -654,6 +671,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_work.lease_until",
             "mcp_server.created_at",
             "mcp_server.updated_at",
+            "plugin_catalog_state.created_at",
+            "plugin_catalog_state.updated_at",
+            "plugin_configuration_revision.created_at",
             "plugin_credential.create_time",
             "plugin_credential.expires_at",
             "plugin_credential.last_refreshed_at",
@@ -691,7 +711,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 77 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 80 timestamptz(3) columns");
 
     assertEquals(
         128L,

@@ -134,8 +134,9 @@ public abstract class PostgresSchemaSupport {
     }
   }
 
+  /** 在 {@link #assertTransactionConstraintViolation} 中执行 SQL 的命令式回调，跨包测试可复用。 */
   @FunctionalInterface
-  interface SqlCommand {
+  public interface SqlCommand {
     /** 在断言辅助类所管理的事务中执行 SQL。 */
     void run() throws SQLException;
   }

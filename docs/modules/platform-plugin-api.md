@@ -16,7 +16,7 @@
 
 [`PluginConfigSchema`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfigSchema.java) 复用受控 `InputSchema` 类型，普通字段、唯一默认值与秘密字段分离。每层对象拒绝未知字段；只为缺失字段递归补默认，显式 null 不视作缺失，数字和布尔字符串不做容错，用户数组不与默认数组逐项合并。原始、默认和归一化 JSON 均受 64 KiB UTF-8 预算约束，严格拒绝重复键与尾随内容，数值按 BigDecimal / BigInteger 保真。
 
-[`PluginConfig`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfig.java) 只保存普通值和非负修订号；秘密不进入普通配置。当前初始装配使用 Schema 默认值与 revision 0，目录在启动时冻结。
+[`PluginConfig`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfig.java) 只保存普通值和非负修订号；秘密不进入普通配置。宿主在全新库以 Schema 默认值初始化为 revision 1，已有库按完整 manifest 指定的持久 revision 恢复；revision 取该插件最后一次写入的全局 epoch。目录仍在启动时冻结，存取与身份校验见 [Plugin 配置存储](platform.md#plugin-配置存储)。
 
 [`PluginAuthSpec`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginAuthSpec.java) 的封闭形态为 None、StaticKey 和 DeepLink。只有 DeepLink 声明 region 候选并提供 [`PluginAuthHandler`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginAuthHandler.java)；StaticKey 必须引用 Schema 声明的秘密字段。当前 HTTP 交互入口采用 DeepLink。[`PluginCredentialRefresher`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialRefresher.java) 是独立可选能力，宿主只领取实际声明刷新器的插件凭据。
 

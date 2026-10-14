@@ -25,7 +25,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | 区域 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
 | Catalog | agent_provider/model/definition、skill_package | [Platform Catalog](platform.md#catalog) |
-| Plugin | plugin_credential：认证密文、状态、refresh lease | [Plugin credential](platform.md#plugin-credential) |
+| Plugin | plugin_catalog_state：全局 epoch 与完整 manifest；plugin_configuration_revision：不可变普通配置历史；plugin_credential：认证密文、状态、refresh lease | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | Environment | environment、environment_connection：注册与路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
@@ -43,6 +43,13 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 实体 UUID 和业务版本由应用生成。复合外键保持 Entry 父链、Thread head、
 Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
+
+Plugin catalog 恒为 `id = 1` 单行；epoch 0 的空 manifest 只表示未初始化，
+应用在完整目录验证后以 CAS 推进 epoch。配置历史主键为 `(plugin_id, revision)`，
+revision 是写入时的全局 epoch，只有插入入口。`values_json` 是 text：
+数据库要求严格 JSON object、每层对象键唯一及最多 65,536 UTF-8 字节，
+避免 jsonb 数值展开改变普通值的字节预算和恢复形态。manifest 引用、代码/Schema/能力身份、
+未修改条目的基线一致性由应用在同一提交事务核验；秘密仍只在 credential 密文中。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
 Run 以 node_id 保存当前/最后执行，状态与 lease/available/error 字段组合匹配；
@@ -63,17 +70,22 @@ PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外�
 存储写入本身的阻断仍属于对象存储能力边界。
 
 通知只作提交后回读/唤醒提示。应用推进 Thread/Canvas 版本与 Project/Issue 事实，并由该写路径在同一事务内对数据库连接执行内建 `pg_notify`（提交后才投递，回滚静默）。
+Plugin 配置提交也在同一事务发出 `plugin_catalog_changed`，通知不推进 epoch。
 执行树与工具交互提示（`harness_thread_tree`、`harness_tool_interaction`）的 payload 定位真实执行根；环境失效提示 `environment_changed` 的 payload 是 Environment ID。它们同样由写入口发布，通知本身不推进、也不伪造任何 Thread version。恢复依赖权威行、poll 和租约，而非通知保存。
 
 ## 修改结构
 
 修改 V1 后同步领域校验、mapper、结构测试与新库安装测试。
 已有数据库记录 Flyway checksum，源码变更须通过批准的数据库维护操作才能应用；
+当前 V1 的插件表结构变化需要空库初始化或批准的迁移与备份，不能用 `flyway repair`
+代替结构转换。
 共享环境的 Review、维护窗口、备份保密与恢复步骤以
 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。
 本模块文档描述最终结构，操作指南负责数据库变更流程。
 需要重建时，通过产品 YAML 同步保留配置，在空库应用当前 Schema 后导入；
 UUID、行版本、连接和执行状态不随配置文件恢复，完整运行数据恢复仍依赖数据库与对象存储备份。
+当前产品 YAML 不包含 Plugin 配置历史与认证密文；这部分保留与恢复需要数据库备份
+或明确批准的转换方案，不能只导出 YAML 后删除数据库。
 
 新增 seed 数据放入对应 repeatable SQL，保持幂等并使用公开占位值。
 并发或旁路写入可违反的不变量用 CHECK/unique/FK 兜底，策略校验保留在应用层。
