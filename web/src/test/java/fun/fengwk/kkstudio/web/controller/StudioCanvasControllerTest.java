@@ -16,15 +16,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
@@ -55,6 +54,7 @@ import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasResourceInputDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasTransformDTO;
 import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.time.Instant;
@@ -78,7 +78,7 @@ class StudioCanvasControllerTest {
   private static final UUID REQUEST = new UUID(0L, 9L);
 
   private MockMvc mockMvc;
-  private ObjectMapper objectMapper;
+  private JsonMapper objectMapper;
   private CanvasQueryService queryService;
   private CanvasCommandService commandService;
   private StorageBlobManager blobManager;
@@ -86,9 +86,8 @@ class StudioCanvasControllerTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    // 使用 convention4j 生产 ObjectMapper：long/Long 输出十进制字符串、默认 NON_NULL、FAIL_ON_UNKNOWN_PROPERTIES
-    // 关闭（未知字段由 DTO @JsonAnySetter 拒绝），与真实 wire 一致。
-    objectMapper = ObjectMapperHolder.getInstance();
+    // 与生产 HTTP 一致：Long 输出十进制字符串、默认 NON_NULL、DTO 声明顺序，未知字段由 DTO @JsonAnySetter 拒绝。
+    objectMapper = StrictHttpJsonMapperTestSupport.get();
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
     blobManager = mock(StorageBlobManager.class);
@@ -103,7 +102,7 @@ class StudioCanvasControllerTest {
         standaloneSetup(
                 new StudioCanvasController(
                     queryService, commandService, new WebDtoMapper(blobManager)))
-            .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
 

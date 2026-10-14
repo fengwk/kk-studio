@@ -12,7 +12,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +22,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
@@ -207,7 +207,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult existingResult = checkRequest(existingYaml);
     JsonNode existingCheck = data(existingResult);
     assertTrue(existingCheck.path("created").isEmpty());
-    assertTrue(existingCheck.path("updated").findValuesAsText("name").contains(existing));
+    assertTrue(existingCheck.path("updated").findValuesAsString("name").contains(existing));
     String existingBody = body(existingResult);
     assertFalse(
         existingBody.contains("sk-configsync-" + existing), "check must not echo credential");
@@ -216,7 +216,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     String newYaml = "providers:\n  - name: " + created + "\n    providerType: openai\n";
     JsonNode newCheck = checkData(newYaml);
-    assertTrue(newCheck.path("created").findValuesAsText("name").contains(created));
+    assertTrue(newCheck.path("created").findValuesAsString("name").contains(created));
     assertTrue(newCheck.path("updated").isEmpty());
     assertNull(findProvider(created), "check must not write");
 
@@ -350,7 +350,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         modelVariantDocument(provider, model, credential, fileConfig, agent, fileOnly);
     JsonNode check = checkData(accepted);
     assertTrue(
-        check.path("created").findValuesAsText("name").contains(agent),
+        check.path("created").findValuesAsString("name").contains(agent),
         "file-only variant must pass precheck: " + check);
     assertNull(findAgent(agent), "check must not write");
 
@@ -370,8 +370,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "providers:\n  - name: " + provider + "\n    providerType: openai\nunknownThing: []\n";
 
     JsonNode check = checkData(yaml);
-    assertTrue(check.path("skipped").findValuesAsText("kind").contains("unknownThing"));
-    assertTrue(check.path("created").findValuesAsText("name").contains(provider));
+    assertTrue(check.path("skipped").findValuesAsString("kind").contains("unknownThing"));
+    assertTrue(check.path("created").findValuesAsString("name").contains(provider));
     assertNull(findProvider(provider), "check must not write");
 
     // 客户端已看到 skip 也不能省略授权：执行重跑并拒绝。
@@ -379,8 +379,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertNull(findProvider(provider), "rejected partial import must not write");
 
     JsonNode imported = importYaml(yaml, true);
-    assertTrue(imported.path("imported").findValuesAsText("name").contains(provider));
-    assertTrue(imported.path("skipped").findValuesAsText("kind").contains("unknownThing"));
+    assertTrue(imported.path("imported").findValuesAsString("name").contains(provider));
+    assertTrue(imported.path("skipped").findValuesAsString("kind").contains("unknownThing"));
     assertNotNull(findProvider(provider));
 
     deleteOk(
@@ -428,15 +428,15 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + unknownProvider
             + "\n    providerType: openai\n    bogus: 1\n";
     JsonNode check = checkData(mixed);
-    assertTrue(check.path("created").findValuesAsText("name").contains(provider));
-    assertTrue(check.path("skipped").findValuesAsText("kind").contains("providers"));
+    assertTrue(check.path("created").findValuesAsString("name").contains(provider));
+    assertTrue(check.path("skipped").findValuesAsString("kind").contains("providers"));
     assertNull(findProvider(provider), "check must not write");
     assertNull(findProvider(unknownProvider), "check must not write");
     importRejected(mixed);
     assertNull(findProvider(provider), "partial import without confirmation must not write");
     JsonNode imported = importYaml(mixed, true);
-    assertTrue(imported.path("imported").findValuesAsText("name").contains(provider));
-    assertTrue(imported.path("skipped").findValuesAsText("kind").contains("providers"));
+    assertTrue(imported.path("imported").findValuesAsString("name").contains(provider));
+    assertTrue(imported.path("skipped").findValuesAsString("kind").contains("providers"));
     assertNull(
         findProvider(unknownProvider),
         "entry carrying an unknown field must be skipped, not imported");
@@ -563,7 +563,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode reA = findAgent(agentA);
     assertEquals(provider + "/" + model, reA.path("model").asText());
     assertEquals(List.of(mcpTool), listText(reA.path("config").path("tools")));
-    assertEquals(List.of("dev"), reA.path("config").path("skills").findValuesAsText("name"));
+    assertEquals(List.of("dev"), reA.path("config").path("skills").findValuesAsString("name"));
     assertEquals(pkg, reA.path("config").path("skills").get(0).path("packageName").asText());
     assertEquals(List.of(agentB), listText(reA.path("config").path("subagents")));
     assertEquals(List.of(agentA), listText(findAgent(agentB).path("config").path("subagents")));
@@ -684,7 +684,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     deleteOk("/api/ai/catalog/skill-packages/" + pkg, skillDto.path("version").asText());
     JsonNode importResult = importYaml(yaml);
     assertTrue(
-        importResult.path("imported").findValuesAsText("name").contains(pkg),
+        importResult.path("imported").findValuesAsString("name").contains(pkg),
         "skill package must be imported");
 
     JsonNode reSkill = getData("/api/ai/catalog/skill-packages/" + pkg);
@@ -836,7 +836,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             document -> settingsSection(document, "aiRuntime").put("retryBaseDelayMillis", 9999L));
     JsonNode imported = importYaml(changed);
     assertTrue(
-        imported.path("imported").findValuesAsText("name").contains("settings"),
+        imported.path("imported").findValuesAsString("name").contains("settings"),
         "full settings must be imported");
     JsonNode after = getData("/api/settings");
     assertEquals("9999", after.path("aiRuntime").path("retryBaseDelayMillis").asText());
@@ -851,7 +851,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             changed, document -> settingsMap(document).put("unknownSection", Map.of("x", 1)));
     JsonNode mixedResult = importYaml(mixed, true);
     assertTrue(
-        mixedResult.path("skipped").findValuesAsText("kind").contains("settings"),
+        mixedResult.path("skipped").findValuesAsString("kind").contains("settings"),
         "unknown settings section must be reported");
     assertEquals(
         "9999",
@@ -937,7 +937,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     // 未知顶层类别是条目级 skip，而不是整份文档错误。
     JsonNode unknownCategory = importYaml("unknownThing: []\n", true);
     assertTrue(
-        unknownCategory.path("skipped").findValuesAsText("kind").contains("unknownThing"),
+        unknownCategory.path("skipped").findValuesAsString("kind").contains("unknownThing"),
         "unknown top-level category must be reported as skip");
   }
 
@@ -1046,7 +1046,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "      subagents: []\n";
     JsonNode result = importYaml(yaml, true);
     assertTrue(
-        result.path("skipped").findValuesAsText("name").contains(bad),
+        result.path("skipped").findValuesAsString("name").contains(bad),
         "agent with unsupported tool must be skipped: " + result);
     assertNull(findAgent(bad), "skipped agent must not be created");
     assertNotNull(findAgent(good), "a skipped entry must not mutate other agents");
@@ -1062,7 +1062,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "    credential: c\n";
     JsonNode result = importYaml(yaml, true);
     assertTrue(
-        result.path("skipped").findValuesAsText("name").contains("unsupported_provider"),
+        result.path("skipped").findValuesAsString("name").contains("unsupported_provider"),
         "unsupported provider protocol must be reported as skip, got: " + result);
   }
 
@@ -1087,7 +1087,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "    enabled: true\n";
     JsonNode result = importYaml(yaml, true);
     assertTrue(
-        result.path("skipped").findValuesAsText("name").contains("broken_mcp"),
+        result.path("skipped").findValuesAsString("name").contains("broken_mcp"),
         "MCP discovery failure must be reported as skip, got: " + result);
   }
 

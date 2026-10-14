@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.web.project;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
@@ -293,8 +294,12 @@ public class ProjectDtoMapper {
       return null;
     }
     try {
-      return objectMapper.readValue(data, Object.class);
-    } catch (JsonProcessingException error) {
+      // 活动扩展数据按 BigDecimal 读取；其整数写出仍使用宿主 HTTP profile。
+      return objectMapper
+          .readerFor(Object.class)
+          .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .readValue(data);
+    } catch (JacksonException error) {
       return null;
     }
   }

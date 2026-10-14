@@ -11,7 +11,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -26,6 +25,7 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -53,7 +53,8 @@ class ProjectSnapshotAssemblerTest {
     projectService = mock(ProjectService.class);
     issueService = mock(IssueService.class);
     issueRunService = mock(IssueRunService.class);
-    mapper = new ProjectDtoMapper(new ProjectWorkflowJsonCodec(), ObjectMapperHolder.getInstance());
+    mapper =
+        new ProjectDtoMapper(new ProjectWorkflowJsonCodec(), StrictHttpJsonMapperTestSupport.get());
     assembler = new ProjectSnapshotAssembler(projectService, issueService, issueRunService, mapper);
   }
 
@@ -161,9 +162,9 @@ class ProjectSnapshotAssemblerTest {
         snapshot.getIssues().stream()
             .map(item -> item.getIssue().getId())
             .collect(Collectors.toSet()));
-    var json = ObjectMapperHolder.getInstance().valueToTree(snapshot);
+    var json = StrictHttpJsonMapperTestSupport.get().valueToTree(snapshot);
     assertEquals(
-        ObjectMapperHolder.getInstance()
+        StrictHttpJsonMapperTestSupport.get()
             .valueToTree(List.of("BLOCKED", "DONE", "INIT", "REVIEW", "WORK")),
         json.get("referencedStateCodes"));
     verify(issueRunService).listRuns(active.getId());
@@ -185,7 +186,7 @@ class ProjectSnapshotAssemblerTest {
 
     assertEquals(List.of(), snapshot.getReferencedStateCodes());
     assertEquals(List.of(), snapshot.getIssues());
-    var json = ObjectMapperHolder.getInstance().valueToTree(snapshot);
+    var json = StrictHttpJsonMapperTestSupport.get().valueToTree(snapshot);
     assertTrue(json.get("referencedStateCodes").isArray());
     assertEquals(0, json.get("referencedStateCodes").size());
     verifyNoInteractions(issueRunService);

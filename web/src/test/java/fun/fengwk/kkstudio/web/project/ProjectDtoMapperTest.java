@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.web.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
@@ -33,7 +33,10 @@ import fun.fengwk.kkstudio.share.project.IssueStageBudgetDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
 import fun.fengwk.kkstudio.share.project.ProjectWorkflowDTO;
 import fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -43,9 +46,9 @@ import java.util.UUID;
 class ProjectDtoMapperTest {
 
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
-  // 依赖显式提供：ObjectMapperHolder.getInstance() 即生产 ObjectMapper bean 的同一实例。
+  // 依赖显式提供：生产 HTTP Jackson 3 mapper。
   private final ProjectDtoMapper mapper =
-      new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance());
+      new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get());
 
   @Test
   void testParseUuidValidAndInvalid() {
@@ -324,6 +327,38 @@ class ProjectDtoMapperTest {
     assertEquals("Input body", dto.getBody());
     assertTrue(dto.getData() instanceof Map);
     assertEquals(now.toString(), dto.getCreatedAt());
+  }
+
+  @Test
+  void activityDataRetainsExactNumbersThroughTheHttpProfile() {
+    // 活动扩展数据不得经 Double 损失精度；整数仍遵循 HTTP Long 字符串规则。
+    IssueActivity activity =
+        IssueActivity.builder()
+            .data(
+                """
+                {"precise":0.123456789012345678901234567890,"huge":1e309,"tiny":1e-324,
+                 "scaled":1.5000,"long":9007199254740993,"wide":9223372036854775808,
+                 "nested":[0.123456789012345678901234567890]}
+                """)
+            .build();
+    IssueActivityDTO dto = mapper.toDto(activity);
+    Map<?, ?> data = assertInstanceOf(Map.class, dto.getData());
+    BigDecimal precise = new BigDecimal("0.123456789012345678901234567890");
+    assertEquals(precise, data.get("precise"));
+    assertEquals(new BigDecimal("1e309"), data.get("huge"));
+    assertEquals(new BigDecimal("1e-324"), data.get("tiny"));
+    assertEquals(new BigDecimal("1.5000"), data.get("scaled"));
+    assertEquals(9007199254740993L, data.get("long"));
+    assertEquals(new BigInteger("9223372036854775808"), data.get("wide"));
+    assertEquals(List.of(precise), data.get("nested"));
+
+    String wire = StrictHttpJsonMapperTestSupport.get().writeValueAsString(dto);
+    assertTrue(wire.contains("\"precise\":" + precise));
+    assertTrue(wire.contains("\"huge\":1E+309"));
+    assertTrue(wire.contains("\"tiny\":1E-324"));
+    assertTrue(wire.contains("\"scaled\":1.5000"));
+    assertTrue(wire.contains("\"long\":\"9007199254740993\""));
+    assertTrue(wire.contains("\"wide\":9223372036854775808"));
   }
 
   @Test

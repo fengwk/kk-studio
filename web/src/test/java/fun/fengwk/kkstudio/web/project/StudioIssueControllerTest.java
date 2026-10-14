@@ -13,14 +13,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
@@ -54,6 +53,7 @@ import fun.fengwk.kkstudio.share.project.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Instant;
@@ -70,7 +70,7 @@ class StudioIssueControllerTest {
   private IssueActivityRepository issueActivityRepository;
 
   private MockMvc mockMvc;
-  private final ObjectMapper objectMapper = ObjectMapperHolder.getInstance();
+  private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.get();
   private final UUID projectId = UUID.randomUUID();
   private final UUID issueId = UUID.randomUUID();
   private final Instant now = Instant.now();
@@ -84,26 +84,26 @@ class StudioIssueControllerTest {
     projectService = mock(ProjectService.class);
     issueActivityRepository = mock(IssueActivityRepository.class);
 
-    // ProjectDtoMapper 的依赖在测试 fixture 显式提供，与生产注入同一 ObjectMapper 实例。
+    // ProjectDtoMapper 的依赖在测试 fixture 显式提供，与生产注入同一 Jackson 3 mapper 实例。
     IssueDetailAssembler issueDetailAssembler =
         new IssueDetailAssembler(
             issueService,
             issueRunService,
             projectService,
-            new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance()),
+            new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get()),
             codec);
     StudioIssueController controller =
         new StudioIssueController(
             issueService,
             issueEvidenceService,
-            new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance()),
+            new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get()),
             issueActivityRepository,
             issueDetailAssembler);
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new StudioProjectErrorAdvice(new StudioMessageService()))
-            .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
 

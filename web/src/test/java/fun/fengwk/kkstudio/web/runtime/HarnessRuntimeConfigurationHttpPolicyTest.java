@@ -4,10 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
@@ -25,7 +25,7 @@ import java.util.Map;
 class HarnessRuntimeConfigurationHttpPolicyTest {
 
   private final AgentProviderConfigurationCodec codec =
-      new AgentProviderConfigurationCodec(new ObjectMapper());
+      new AgentProviderConfigurationCodec(JsonMapper.builder().build());
   private final Map<String, AgentProvider> providers = new HashMap<>();
 
   @Test
