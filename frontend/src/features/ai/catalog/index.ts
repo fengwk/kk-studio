@@ -3,6 +3,7 @@ export {
   extractDefaultVariantFromModel,
 } from '@/features/ai/catalog/ai-resource-draft-codecs'
 export {
+  formatModelLabel,
   formatModelRef,
   modelRef,
   toAgentModelViews,

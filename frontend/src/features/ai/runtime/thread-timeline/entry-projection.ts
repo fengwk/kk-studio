@@ -59,6 +59,20 @@ export function projectDurableEntry(
     messages.push(settings ? projectRootSettings(entry, settings) : projectInvalidSettings(entry))
     return
   }
+  if (entryType === 'SETTINGS') {
+    // 安全点快照更新差值基准，不改变回合或用量上下文。
+    const settings = parseSettingsSnapshot(payload.settings)
+    if (settings === null) {
+      context.lastSettings = null
+      messages.push(projectInvalidSettings(entry))
+    } else {
+      if (context.lastSettings !== null) {
+        messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
+      }
+      context.lastSettings = settings
+    }
+    return
+  }
   if (entryType === 'TURN_START' || entryType === 'COMPACTION' || entryType === 'TURN_END') {
     // 控制边界：不显示成 unknown entry，也不进入对话时间线。
     if (entryType === 'TURN_END') {

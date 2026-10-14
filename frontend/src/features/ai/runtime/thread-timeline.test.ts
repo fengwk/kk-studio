@@ -112,6 +112,166 @@ describe('thread timeline', () => {
     expect(projected[2]).toMatchObject({ title: '环境已解除' })
   })
 
+  it('projects SETTINGS at the head once and preserves the preceding turn usage', () => {
+    // 安全点变更立即生效，相同 SETTINGS 和下一 TURN_START 不重复展示。
+    const rootSettings = {
+      agentName: 'JIJI',
+      model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+      environmentName: 'linux-env',
+    }
+    const realPayloadSettings = {
+      agentName: 'reviewer',
+      model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'max' },
+      environmentName: null,
+      goal: { id: 'goal-1', text: 'code review' },
+    }
+    const entries = [
+      entry('root-1', 'ROOT', { settings: rootSettings }),
+      entry('turn-1', 'TURN_START', { reason: 'INPUT', settings: rootSettings }),
+      entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'hello' }])),
+      entry('assistant-1', 'MESSAGE', {
+        ...messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }]),
+        assistantMetadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+      }),
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED', turnStartEntryId: 'turn-1' }),
+      entry('settings-head', 'SETTINGS', {
+        settings: realPayloadSettings,
+        ownerThreadId: 'thread-root-1',
+      }),
+    ]
+
+    const headTimeline = buildThreadTimeline(entries, [], [])
+    const headMessages = headTimeline.messages
+    expect(headMessages.map((m) => m.id)).toEqual([
+      'entry:root-1',
+      'user-1',
+      'assistant-1',
+      'meta-usage-entry-assistant-1',
+      'entry:settings-head:agent',
+      'entry:settings-head:model',
+      'entry:settings-head:environment',
+    ])
+    expect(headMessages.some((m) => m.role === 'entry' && m.kind === 'unknown_entry')).toBe(false)
+    const settingsChanges = headMessages.filter((m) => m.role === 'entry' && m.kind === 'settings_change')
+    expect(settingsChanges).toHaveLength(3)
+    expect(settingsChanges.map((m) => (m.role === 'entry' ? m.title : ''))).toEqual([
+      'Agent 改为 reviewer',
+      '模型改为 commandcode/glm-5.3-flash (max)',
+      '环境已解除',
+    ])
+    // 变更的 subjectEntryId 和 createdAt 严格来自该 SETTINGS entry
+    for (const change of settingsChanges) {
+      expect(change.subjectEntryId).toBe('settings-head')
+      expect(change.createdAt).toBe('2026-01-01T00:00:00')
+    }
+
+    const extendedEntries = [
+      ...entries,
+      entry('same-settings', 'SETTINGS', {
+        settings: realPayloadSettings,
+        ownerThreadId: 'thread-root-1',
+      }),
+      entry('turn-2', 'TURN_START', { reason: 'INPUT', settings: realPayloadSettings }),
+      entry('user-2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'continue' }])),
+    ]
+    const extendedMessages = buildThreadTimeline(extendedEntries, [], []).messages
+    const turnEndMeta = extendedMessages.find(
+      (m) => m.id === 'meta-usage-entry-assistant-1',
+    )
+    expect(turnEndMeta).toMatchObject({
+      endEntryId: 'end-1',
+      turnUsage: { input: 100, output: 50 },
+      details: { input: 100, output: 50 },
+    })
+
+    // 确认后续同一个 SETTINGS 快照和同配置 TURN_START 没有重复发射任何 settings_change
+    const allChanges = extendedMessages.filter((m) => m.role === 'entry' && m.kind === 'settings_change')
+    expect(allChanges).toHaveLength(3)
+    expect(allChanges.map((m) => m.id)).toEqual([
+      'entry:settings-head:agent',
+      'entry:settings-head:model',
+      'entry:settings-head:environment',
+    ])
+
+    // 真正未知的类型仍保留兜底。
+    const withUnknown = buildThreadTimeline([
+      ...extendedEntries,
+      entry('unknown-entry-1', 'SOMETHING_NEW' as EntryType, { data: 123 }),
+    ], [], []).messages
+    const unknownMsg = withUnknown.find((m) => m.id === 'entry:unknown-entry-1')
+    expect(unknownMsg).toBeDefined()
+    expect(unknownMsg).toMatchObject({
+      role: 'entry',
+      kind: 'unknown_entry',
+      title: '未识别 Entry：SOMETHING_NEW',
+    })
+  })
+
+  it('establishes a SETTINGS baseline without inventing changes and applies it after compaction', () => {
+    const settings = {
+      agentName: 'JIJI',
+      model: { providerName: 'xai', modelName: 'grok-4.7', variant: 'high' },
+      environmentName: null,
+    }
+    const messages = buildThreadTimeline([
+      entry('baseline', 'SETTINGS', { settings }),
+      entry('compact', 'TURN_START', {
+        reason: 'COMPACTION', settings, compaction: { phase: 'FULL' },
+      }),
+      entry('summary', 'COMPACTION', { summaryText: 'Earlier work' }),
+      entry('compact-end', 'TURN_END', {
+        outcome: 'COMPLETED', turnStartEntryId: 'compact',
+      }),
+      entry('changed', 'SETTINGS', {
+        settings: { ...settings, model: { ...settings.model, variant: 'xhigh' } },
+      }),
+    ], [], []).messages
+    expect(messages.map(({ id }) => id)).toEqual(['entry:summary', 'entry:changed:model'])
+    expect(messages[1]).toMatchObject({
+      kind: 'settings_change', title: '模型改为 xai/grok-4.7 (xhigh)',
+    })
+  })
+
+  it('handles invalid SETTINGS snapshot by clearing baseline and recovers safely on next valid settings', () => {
+    // 测试意图：无效的 SETTINGS 快照产生 invalid_settings 事件并清空 baseline，
+    // 下一次有效 SETTINGS 仅重新建立 baseline，绝不伪造虚假变更。
+    const initial = {
+      agentName: 'initial-agent',
+      model: { providerName: 'p', modelName: 'm', variant: 'v1' },
+      environmentName: null,
+    }
+    const next = {
+      agentName: 'next-agent',
+      model: { providerName: 'p', modelName: 'm', variant: 'v2' },
+      environmentName: 'env-1',
+    }
+    const timeline = buildThreadTimeline([
+      entry('root-1', 'ROOT', { settings: initial }),
+      // 损坏快照
+      entry('bad-settings', 'SETTINGS', { settings: { broken: true } }),
+      // 恢复快照：baseline 被重置，不再能产出与 initial 的 diff，重新建立 baseline
+      entry('recover-settings', 'SETTINGS', { settings: next }),
+      // 下一有效变更正常计算与 recover-settings 的差异
+      entry('third-settings', 'SETTINGS', {
+        settings: { ...next, agentName: 'third-agent' },
+      }),
+    ], [], []).messages
+
+    expect(timeline.map((m) => m.id)).toEqual([
+      'entry:root-1',
+      'entry:bad-settings',
+      'entry:third-settings:agent',
+    ])
+    expect(timeline[1]).toMatchObject({
+      kind: 'invalid_settings',
+      title: '配置快照不可解析',
+    })
+    expect(timeline[2]).toMatchObject({
+      kind: 'settings_change',
+      title: 'Agent 改为 third-agent',
+    })
+  })
+
   it('appends a transient assistant modelStream overlay after durable entries', () => {
     const stream: RealtimeModelStream = {
       threadId: 'thread-1',

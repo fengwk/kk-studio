@@ -164,6 +164,20 @@ describe('ThreadComposerControls permission menu', () => {
 })
 
 describe('ThreadComposerControls model/variant menus', () => {
+  it('uses the same canonical model label for the button text and tooltip', () => {
+    render(
+      <Harness
+        settings={createSettings({
+          model: { providerName: 'xai', modelName: 'grok-4.7', variant: 'xhigh' },
+        })}
+        menu={null}
+      />,
+    )
+    const button = screen.getByRole('button', { name: 'Model 与 Variant' })
+    expect(button).toHaveTextContent('xai/grok-4.7 (xhigh)')
+    expect(button).toHaveAttribute('title', 'xai/grok-4.7 (xhigh)')
+  })
+
   it('lists all models with current one marked', () => {
     renderOpen('model')
     expect(screen.getByRole('listbox', { name: 'Model 选项' })).toBeInTheDocument()

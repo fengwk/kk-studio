@@ -1,4 +1,5 @@
 import { useI18n } from '@/shared/i18n'
+import { formatModelLabel } from '@/features/ai/catalog'
 import { ThreadLink } from '@/features/ai/runtime/ThreadLink'
 import { formatThreadStatusLabel } from './thread-status-format'
 import { threadTreeOutcome, type ActiveThreadTreeRow } from './active-thread-tree'
@@ -37,7 +38,9 @@ export function ThreadTreeRows({ rows, currentThreadId }: {
                 <span className="thread-tree-counts">
                   {t('ai.runtime.agentTree.counts', { turns: node.turnCount, tools: node.toolCallCount })}
                 </span>
-                <span className="thread-tree-detail">{node.model.providerName}/{node.model.modelName}</span>
+                <span className="thread-tree-detail">
+                  {formatModelLabel(node.model.providerName, node.model.modelName, node.model.variant)}
+                </span>
               </span>
             </ThreadLink>
           </li>

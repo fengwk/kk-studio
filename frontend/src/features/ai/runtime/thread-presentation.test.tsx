@@ -50,19 +50,22 @@ describe('visible thread presentation', () => {
     expect(paneTargetViewKey({ kind: 'FORK_SESSION_DRAFT', sessionId: 's', sourceThreadId: 't', startEntryId: 'e' })).toBe('fork-session:s:t:e')
   })
 
-  it('only reports real matching model reasoning effort, never the variant id', () => {
-    expect(threadIdentity({ thread, models: [model] })).toBe('researcher · provider/model · high')
-    expect(threadIdentity({ thread, models: [] })).toBe('researcher · provider/model')
-    expect(threadIdentity({ thread: undefined, models: [model] })).toBeNull()
+  it('uses the real branch variant as identity without consulting catalog reasoning facts', () => {
+    // 身份只来自 branch settings 快照，catalog 未加载（无 models）也不改变结果。
+    expect(threadIdentity({ thread })).toBe('researcher · provider/model (deep)')
+    expect(threadIdentity({ thread: undefined })).toBeNull()
     // 在运行时边界注入非法 null，验证空值保护。
-    expect(Reflect.apply(threadIdentity, undefined, [{ thread: null, models: [model] }])).toBeNull()
-    for (const config of [
-      { ...model.config, variants: [{ id: 'deep' }] },
-      { ...model.config, variants: [{ id: 'other', reasoningEffort: 'low' }] },
-      { ...model.config, abilities: { ...model.config.abilities, reasoning: false } },
-    ]) {
-      expect(threadIdentity({ thread, models: [{ ...model, config }] })).toBe('researcher · provider/model')
-    }
+    expect(Reflect.apply(threadIdentity, undefined, [{ thread: null }])).toBeNull()
+    // variant 全空白时只显示规范 model ref，不伪造 default variant，也不换算 reasoningEffort。
+    expect(threadIdentity({
+      thread: {
+        ...thread,
+        branchSettings: {
+          ...thread.branchSettings,
+          model: { providerName: 'provider', modelName: 'model', variant: '  ' },
+        },
+      },
+    })).toBe('researcher · provider/model')
   })
 
   it('reports only selected views and keeps callbacks stable without render loops', () => {
@@ -139,7 +142,7 @@ describe('visible thread presentation', () => {
     expect(result.current.parentHref).toBe('/threads/parent')
     render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
     expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', '/threads/parent')
-    expect(screen.getByText('researcher · provider/model · high')).toHaveAttribute('title', 'researcher · provider/model · high')
+    expect(screen.getByText('researcher · provider/model (deep)')).toHaveAttribute('title', 'researcher · provider/model (deep)')
     trigger.remove()
   })
 
@@ -172,9 +175,9 @@ describe('visible thread presentation', () => {
       ...initial, projection: { ...initial.projection, thread: { ...thread, name: 'main' } },
     } })
     expect(result.current.name).toBeNull()
-    expect(result.current.identity).toBe('researcher · provider/model · high')
+    expect(result.current.identity).toBe('researcher · provider/model (deep)')
     rerender({ ...initial, projection: { models: [], thread: { ...thread, name: 'main' } } })
-    expect(result.current.identity).toBe('researcher · provider/model')
+    expect(result.current.identity).toBe('researcher · provider/model (deep)')
   })
 
   it('offers only direct-parent navigation, never topbar Debug or subagent actions', () => {

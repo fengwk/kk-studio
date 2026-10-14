@@ -113,12 +113,18 @@ function interactionItems() {
         threadId: CHILD_ID,
         rootThreadId: ROOT_ID,
         sessionId: 'b1000000-0000-4000-8000-0000000000b1',
-        owner: { type: 'CHAT', chatId: 'chat-pane-harness', issueId: null, agentName: null },
+        owner: {
+          type: 'CHAT', chatId: 'chat-pane-harness', chatTitle: 'Pane harness',
+          issueId: null, issueTitle: null, agentName: null, rootThreadName: '根 Thread',
+        },
         toolCallId: 'call-pane-1',
         type: 'APPROVAL',
         toolName: 'bash',
         argumentsJson: JSON.stringify({ command: 'npm test' }),
         approvalJson: JSON.stringify({ required: true, reason: '需要确认' }),
+        environmentId: null,
+        environmentName: null,
+        waitingCount: null,
         createTime: '2026-10-05T09:57:00Z',
       },
     ],
@@ -128,7 +134,13 @@ function interactionItems() {
   }
 }
 
-async function installPaneApi(page: Page): Promise<Recorded> {
+async function installPaneApi(
+  page: Page,
+  options: {
+    rootEntries?: Array<Record<string, unknown>>
+    rootThreadOverrides?: Record<string, unknown>
+  } = {},
+): Promise<Recorded> {
   const recorded: Recorded = {
     stopRequests: [],
     commandRequests: [],
@@ -165,7 +177,12 @@ async function installPaneApi(page: Page): Promise<Recorded> {
       return
     }
     if (path === `/api/harness/threads/${ROOT_ID}`) {
-      await route.fulfill({ json: { status: 200, data: snapshot(rootThread()) } })
+      const thread = rootThread(options.rootThreadOverrides)
+      const data = {
+        ...snapshot(thread),
+        entries: options.rootEntries ?? [],
+      }
+      await route.fulfill({ json: { status: 200, data } })
       return
     }
     if (path === `/api/harness/threads/${CHILD_ID}`) {
@@ -461,4 +478,111 @@ test('the goal panel closes on Escape and restores focus to the editable compose
   await expect(editor).toContainText('继续输入')
   expect(recorded.commandRequests).toEqual([])
   expect(recorded.stopRequests).toEqual([])
+})
+
+test('recognizes SETTINGS once and uses the same model label in the footer', async ({ page }, testInfo) => {
+  // 安全点立即展示变更；后续相同回合快照不重复，底栏文字与提示同源。
+  const rootSettings = {
+    agentName: 'assistant',
+    model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+    environmentName: null,
+  }
+  const changedSettings = {
+    agentName: 'researcher',
+    model: { providerName: 'xai', modelName: 'grok-4.7', variant: 'xhigh' },
+    environmentName: null,
+    goal: null,
+  }
+  const rootEntries = [
+    {
+      entryId: 'entry-root',
+      sessionId: 'b1000000-0000-4000-8000-0000000000b1',
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: JSON.stringify({ settings: rootSettings }),
+      createTime: '2026-10-01T00:00:00Z',
+    },
+    {
+      entryId: 'entry-turn-1',
+      sessionId: 'b1000000-0000-4000-8000-0000000000b1',
+      parentEntryId: 'entry-root',
+      entryType: 'TURN_START',
+      payloadJson: JSON.stringify({ reason: 'INPUT', settings: rootSettings }),
+      createTime: '2026-10-01T00:00:01Z',
+    },
+    {
+      entryId: 'entry-user-1',
+      sessionId: 'b1000000-0000-4000-8000-0000000000b1',
+      parentEntryId: 'entry-turn-1',
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: { role: 'USER', contents: [{ type: 'text', text: 'hi' }] },
+      }),
+      createTime: '2026-10-01T00:00:02Z',
+    },
+    {
+      entryId: 'entry-turn-end-1',
+      sessionId: 'b1000000-0000-4000-8000-0000000000b1',
+      parentEntryId: 'entry-user-1',
+      entryType: 'TURN_END',
+      payloadJson: JSON.stringify({ outcome: 'COMPLETED', turnStartEntryId: 'entry-turn-1' }),
+      createTime: '2026-10-01T00:00:03Z',
+    },
+    {
+      entryId: 'entry-settings-head',
+      sessionId: 'b1000000-0000-4000-8000-0000000000b1',
+      parentEntryId: 'entry-turn-end-1',
+      entryType: 'SETTINGS',
+      payloadJson: JSON.stringify({
+        settings: changedSettings,
+        ownerThreadId: ROOT_ID,
+      }),
+      createTime: '2026-10-01T00:00:04Z',
+    },
+  ]
+
+  const threadOverrides = {
+    branchSettings: changedSettings,
+    headEntryId: 'entry-settings-head',
+    version: '1',
+  }
+  const recorded = await installPaneApi(page, {
+    rootEntries,
+    rootThreadOverrides: threadOverrides,
+  })
+
+  await openRootPane(page, recorded)
+
+  await expect(page.getByText(/未识别 Entry|未知条目/)).toHaveCount(0)
+  await expect(page.getByText('SETTINGS', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  const agentChange = page.getByText('Agent 改为 researcher', { exact: true })
+  const modelChange = page.getByText('模型改为 xai/grok-4.7 (xhigh)', { exact: true })
+  await expect(agentChange).toBeVisible()
+  await expect(agentChange).toHaveCount(1)
+  await expect(modelChange).toBeVisible()
+  await expect(modelChange).toHaveCount(1)
+
+  const modelControl = page.locator('.thread-composer-model-control')
+  await expect(modelControl).toBeVisible()
+  await expect(modelControl).toHaveText('xai/grok-4.7 (xhigh)')
+  await expect(modelControl).toHaveAttribute('title', 'xai/grok-4.7 (xhigh)')
+
+  rootEntries.push({
+    entryId: 'entry-next-turn',
+    sessionId: 'b1000000-0000-4000-8000-0000000000b1',
+    parentEntryId: 'entry-settings-head',
+    entryType: 'TURN_START',
+    payloadJson: JSON.stringify({ reason: 'INPUT', settings: changedSettings }),
+    createTime: '2026-10-01T00:00:05Z',
+  })
+  threadOverrides.headEntryId = 'entry-next-turn'
+  threadOverrides.version = '2'
+  await page.reload()
+  await expect(agentChange).toHaveCount(1)
+  await expect(modelChange).toHaveCount(1)
+  await expect(page.getByText(/未识别 Entry|未知条目/)).toHaveCount(0)
+  await expect(modelControl).toHaveText('xai/grok-4.7 (xhigh)')
+  await page.screenshot({ path: testInfo.outputPath('settings-model-label.png'), fullPage: true })
 })

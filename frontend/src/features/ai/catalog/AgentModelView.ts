@@ -41,6 +41,23 @@ export function modelRef(
 }
 
 /**
+ * 组合 model + variant 的统一展示标签：{@code provider/model (variant)}。
+ *
+ * <p>variant 缺失或全空白时退回 {@link formatModelRef} 的规范引用，绝不伪造 default
+ * variant。配置身份与引用仍然只由 {@link formatModelRef}/{@link modelRef} 表达，本函数
+ * 只承担显示。
+ */
+export function formatModelLabel(
+  providerName: string | null | undefined,
+  modelName: string | null | undefined,
+  variant?: string | null,
+): string {
+  const ref = formatModelRef(providerName, modelName)
+  const resolved = variant?.trim() ?? ''
+  return resolved ? `${ref} (${resolved})` : ref
+}
+
+/**
  * Model 已经携带规范的 provider name；为同样需要 model 专属辅助函数的调用方保留特性局部视图，
  * 而无需重新引入 resource-id 关联。
  */
