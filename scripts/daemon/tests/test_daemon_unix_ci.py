@@ -24,8 +24,8 @@ class TestUnixDaemonCI(unittest.TestCase):
     def workflow(self, name):
         return (REPOSITORY_ROOT / ".github" / "workflows" / name).read_text()
 
-    def test_both_workflows_use_native_unix_matrix_and_only_installer_tests(self):
-        """Both publication paths must exercise BSD/GNU tools with actual system Bash."""
+    def test_both_workflows_use_native_unix_matrix_and_release_script_tests(self):
+        """Both publication paths must cover installation and update with system Bash."""
         for name in ("docker-publish.yml", "daemon-release.yml"):
             with self.subTest(workflow=name):
                 job = job_block(self.workflow(name), "validate_unix_daemon")
@@ -39,6 +39,7 @@ class TestUnixDaemonCI(unittest.TestCase):
                     "-m unittest discover -s scripts/daemon/tests -p test_daemon_install.py",
                     "-m unittest discover -s scripts/daemon/tests -p test_daemon_install_macos.py",
                     "-m unittest discover -s scripts/daemon/tests -p test_daemon_download.py",
+                    "-m unittest discover -s scripts/daemon/tests -p 'test_daemon_update*.py'",
                 ], commands)
                 self.assertNotRegex(job, r"\b(brew|sudo|systemctl|launchctl)\b")
 

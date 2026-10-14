@@ -82,7 +82,7 @@ UUID、行版本、连接和执行状态不随配置文件恢复，完整运行�
 
 [`FreshInstallSchemaContractTest`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)
 在隔离 PostgreSQL 执行 baseline，检查快照与 SQL 探针。
-[Platform schema 测试](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql)
+[Platform schema 测试](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql)
 覆盖精确表/列/外键/索引、非法事实、Blob 引用、删除语义和 seed 幂等；
 [Web bootstrap 测试](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java)
 验证依赖 scope 与 profile 入口。命令和数据库测试基座见 [开发与测试](../operations/development-and-testing.md)。

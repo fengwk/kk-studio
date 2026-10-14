@@ -49,7 +49,7 @@ class FlywayBootstrapArchitectureTest {
           PROD_CONFIG,
           "web/src/main/resources/application-dev.yml",
           "web/src/main/resources/application-e2e.yml",
-          "platform/src/test/resources/application.yml",
+          "platform/runtime/src/test/resources/application.yml",
           "web/src/test/resources/application.yml",
           "deploy/local/compose.yaml");
   private static final List<String> FORBIDDEN_BOOTSTRAPS =
@@ -182,7 +182,8 @@ class FlywayBootstrapArchitectureTest {
             "<artifactId>kk-studio-schema</artifactId>\n            <scope>runtime</scope>"),
         "web must depend on the schema module at runtime");
 
-    String platformPom = Files.readString(root.resolve("platform/pom.xml"), StandardCharsets.UTF_8);
+    String platformPom =
+        Files.readString(root.resolve("platform/runtime/pom.xml"), StandardCharsets.UTF_8);
     assertTrue(
         platformPom.contains(
             "<artifactId>kk-studio-schema</artifactId>\n            <scope>test</scope>"),
@@ -227,7 +228,7 @@ class FlywayBootstrapArchitectureTest {
     for (Path candidate : List.of(cwd, cwd.getParent())) {
       if (candidate != null
           && Files.isRegularFile(candidate.resolve("pom.xml"))
-          && Files.isDirectory(candidate.resolve("platform/src/main/java"))
+          && Files.isDirectory(candidate.resolve("platform/runtime/src/main/java"))
           && Files.isDirectory(candidate.resolve("web/src/main/java"))) {
         return candidate;
       }

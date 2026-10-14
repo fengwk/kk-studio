@@ -42,7 +42,7 @@ function moduleOf(fqcn) {
     return 'harness/infra'
   }
   if (fqcn.startsWith('fun.fengwk.kkstudio.platform.')) {
-    return 'platform'
+    return 'platform/runtime'
   }
   throw new Error(`unknown target module: ${fqcn}`)
 }
