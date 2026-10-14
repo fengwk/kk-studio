@@ -4,11 +4,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 
@@ -19,7 +22,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Function;
+import java.util.UUID;
+import java.util.function.BiFunction;
 
 /**
  * Plugin catalog 的启动初始化与按持久版本恢复。
@@ -67,7 +71,7 @@ public final class PluginCatalogBootstrap {
    * @throws IllegalStateException 权威行缺失、身份漂移或指纹不符时（只带受控 stage，不含底层 cause）
    */
   public PluginCatalogSnapshot bootstrap(
-      Function<String, PluginContext> contexts,
+      BiFunction<String, PluginCredentialReference, PluginContext> contexts,
       List<HarnessContributor> builtins,
       List<CanvasFunctionAdapter> builtinAdapters) {
     Objects.requireNonNull(contexts, "contexts");
@@ -85,7 +89,7 @@ public final class PluginCatalogBootstrap {
   }
 
   private PluginCatalogSnapshot initialize(
-      Function<String, PluginContext> contexts,
+      BiFunction<String, PluginCredentialReference, PluginContext> contexts,
       List<HarnessContributor> builtins,
       List<CanvasFunctionAdapter> builtinAdapters) {
     PluginCatalogSnapshot candidate =
@@ -125,7 +129,7 @@ public final class PluginCatalogBootstrap {
 
   private PluginCatalogSnapshot restore(
       PluginCatalogRecord catalog,
-      Function<String, PluginContext> contexts,
+      BiFunction<String, PluginCredentialReference, PluginContext> contexts,
       List<HarnessContributor> builtins,
       List<CanvasFunctionAdapter> builtinAdapters) {
     PluginCatalogManifest manifest = catalog.manifest();
@@ -133,7 +137,7 @@ public final class PluginCatalogBootstrap {
       throw failure("restore-install-set", null, null);
     }
 
-    Map<String, PluginConfig> configurations = new LinkedHashMap<>();
+    Map<String, PluginConfigurationState> configurations = new LinkedHashMap<>();
     for (StudioPlugin plugin : registry.plugins()) {
       String pluginId = plugin.descriptor().pluginId();
       PluginCatalogManifest.Entry entry = manifest.plugins().get(pluginId);
@@ -152,7 +156,18 @@ public final class PluginCatalogBootstrap {
       if (!row.schemaFingerprint().equals(schemaFingerprintFor(plugin))) {
         throw failure("restore-schema-fingerprint", pluginId, null);
       }
-      configurations.put(pluginId, new PluginConfig(entry.configRevision(), row.valuesJson()));
+      // 恢复必须重新派生认证上下文指纹并与持久值逐字段核对：配置或定义漂移不偷偷采用。
+      String derivedContext =
+          contextFingerprintFor(plugin, row.schemaFingerprint(), row.valuesJson());
+      if (!derivedContext.equals(row.contextFingerprint())) {
+        throw failure("restore-context-fingerprint", pluginId, null);
+      }
+      configurations.put(
+          pluginId,
+          new PluginConfigurationState(
+              new PluginConfig(entry.configRevision(), row.valuesJson()),
+              new PluginCredentialReference(
+                  pluginId, row.authGeneration(), row.contextFingerprint())));
     }
 
     PluginCatalogSnapshot candidate =
@@ -176,24 +191,40 @@ public final class PluginCatalogBootstrap {
     return candidate;
   }
 
-  /** history row 必须与 manifest entry 在 id/revision/code/schema/capability 上逐字段相等。 */
+  /**
+   * history row 必须与 manifest entry 在 id/revision/code/schema/capability/generation/context 上逐字段相等。
+   */
   private static void requireRowMatchesEntry(
       String pluginId, PluginCatalogManifest.Entry entry, PluginConfigurationRow row) {
     if (!row.pluginId().equals(pluginId)
         || row.revision() != entry.configRevision()
         || !row.codeVersion().equals(entry.pluginCodeVersion())
         || !row.schemaFingerprint().equals(entry.schemaFingerprint())
-        || !row.capabilityFingerprint().equals(entry.capabilityFingerprint())) {
+        || !row.capabilityFingerprint().equals(entry.capabilityFingerprint())
+        || !row.authGeneration().equals(entry.authGeneration())
+        || !row.contextFingerprint().equals(entry.contextFingerprint())) {
       throw failure("restore-history-identity", pluginId, null);
     }
   }
 
-  private Map<String, PluginConfig> defaultConfigurations() {
-    Map<String, PluginConfig> configurations = new LinkedHashMap<>();
+  /** 首次初始化配置身份：每个初始插件都用 schema 默认值，并生成一个全新认证代际（即便当前没有凭据，也绝不用 0 UUID 或 rowVersion 模拟身份）。 */
+  private Map<String, PluginConfigurationState> defaultConfigurations() {
+    Map<String, PluginConfigurationState> configurations = new LinkedHashMap<>();
     for (StudioPlugin plugin : registry.plugins()) {
+      String pluginId = plugin.descriptor().pluginId();
+      PluginConfig config =
+          new PluginConfig(INITIAL_EPOCH, plugin.configurationSchema().defaultsJson());
+      String contextFingerprint =
+          contextFingerprintFor(
+              plugin,
+              PluginCatalogFingerprint.schema(
+                  plugin.configurationSchema(), plugin.authenticationSpec()),
+              config.valuesJson());
       configurations.put(
-          plugin.descriptor().pluginId(),
-          new PluginConfig(INITIAL_EPOCH, plugin.configurationSchema().defaultsJson()));
+          pluginId,
+          new PluginConfigurationState(
+              config,
+              new PluginCredentialReference(pluginId, UUID.randomUUID(), contextFingerprint)));
     }
     return configurations;
   }
@@ -210,7 +241,9 @@ public final class PluginCatalogBootstrap {
               configured.config().revision(),
               configured.descriptor().version(),
               schemaFingerprintFor(plugin),
-              snapshot.capabilityFingerprints().get(pluginId)));
+              snapshot.capabilityFingerprints().get(pluginId),
+              configured.credentialReference().authGeneration(),
+              configured.credentialReference().contextFingerprint()));
     }
     return new PluginCatalogManifest(plugins, snapshot.catalogFingerprint());
   }
@@ -228,6 +261,9 @@ public final class PluginCatalogBootstrap {
               configured.descriptor().version(),
               entry.schemaFingerprint(),
               entry.capabilityFingerprint(),
+              configured.credentialReference().authGeneration(),
+              configured.credentialReference().contextFingerprint(),
+              List.of(),
               configured.config().valuesJson()));
     }
     return rows;
@@ -236,6 +272,18 @@ public final class PluginCatalogBootstrap {
   private static String schemaFingerprintFor(StudioPlugin plugin) {
     return PluginCatalogFingerprint.schema(
         plugin.configurationSchema(), plugin.authenticationSpec());
+  }
+
+  /** 从已归一化普通值派生认证上下文指纹：与持久值同源，绝不使用未归一化原文。 */
+  private static String contextFingerprintFor(
+      StudioPlugin plugin, String schemaFingerprint, String valuesJson) {
+    String normalized = plugin.configurationSchema().resolveValues(valuesJson);
+    return PluginAuthContextFingerprint.derive(
+        plugin.descriptor().pluginId(),
+        plugin.descriptor().version(),
+        schemaFingerprint,
+        plugin.authenticationSpec(),
+        JsonValues.readTree(normalized));
   }
 
   /**

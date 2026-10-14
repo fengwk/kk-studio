@@ -4,10 +4,11 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 
 /**
- * 单个已安装 Plugin 的凭据访问视图：绑定安装 {@code pluginId}，没有 pluginId 参数。
+ * 单个已安装 Plugin 的凭据访问视图：绑定安装 {@code pluginId} 与其冻结的 {@link PluginCredentialReference}，没有 pluginId
+ * 参数。
  *
- * <p>它是 {@link PluginCredentialStore} 的 scoped 投影：Plugin 只能读取自己的凭据快照与作废自己本次已用的快照，拿不到
- * store、repository 或主密钥，也无法读写其它 Plugin 的凭据。实现必须拒绝不属于本 Plugin 的快照。
+ * <p>它是 {@link PluginCredentialStore} 的 scoped 投影：Plugin 只能读取自己冻结引用对应的凭据快照与作废自己本次已用的快照，拿不到
+ * store、repository 或主密钥，也无法读写其它 Plugin 的凭据。实现必须拒绝不属于本 Plugin 的快照，并在每次解析时核对引用仍是权威状态。
  */
 public interface PluginCredentialAccess {
 

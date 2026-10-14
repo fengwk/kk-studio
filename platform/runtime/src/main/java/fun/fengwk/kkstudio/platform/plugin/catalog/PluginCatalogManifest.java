@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -54,12 +55,14 @@ public record PluginCatalogManifest(Map<String, Entry> plugins, String catalogFi
     }
   }
 
-  /** 单个 plugin 的冻结目录条目：配置修订号与撰写时的定义/能力身份指纹。 */
+  /** 单个 plugin 的冻结目录条目：配置修订号、撰写时的定义/能力身份指纹，以及该 epoch 的凭据身份（认证代际与认证上下文指纹）。 */
   public record Entry(
       long configRevision,
       String pluginCodeVersion,
       String schemaFingerprint,
-      String capabilityFingerprint) {
+      String capabilityFingerprint,
+      UUID authGeneration,
+      String contextFingerprint) {
 
     /** 与 {@link PluginDescriptor#version()} 同一来源的版本长度上限，不引入更窄的第二套限制。 */
     public static final int MAX_CODE_VERSION_LENGTH = PluginDescriptor.MAX_VERSION_CHARS;
@@ -80,6 +83,12 @@ public record PluginCatalogManifest(Map<String, Entry> plugins, String catalogFi
       if (!PluginCatalogFingerprint.isFingerprint(capabilityFingerprint)) {
         throw new IllegalArgumentException(
             "capabilityFingerprint must be a 64-char lowercase SHA-256");
+      }
+      // 每个条目都必须携带真实认证代际：绝不用 0 UUID 或 rowVersion 模拟身份。
+      authGeneration = Objects.requireNonNull(authGeneration, "authGeneration");
+      if (!PluginCatalogFingerprint.isFingerprint(contextFingerprint)) {
+        throw new IllegalArgumentException(
+            "contextFingerprint must be a 64-char lowercase SHA-256");
       }
     }
   }

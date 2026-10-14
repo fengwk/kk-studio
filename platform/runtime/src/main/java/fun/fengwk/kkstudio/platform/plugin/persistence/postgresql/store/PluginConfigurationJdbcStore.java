@@ -7,9 +7,12 @@ import org.springframework.stereotype.Repository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model.PluginCatalogStateDO;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model.PluginConfigurationRowDO;
 
+import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /** {@code plugin_catalog_state} 与 {@code plugin_configuration_revision} 的 JdbcClient 入口。 */
 @Repository
@@ -27,9 +30,11 @@ public class PluginConfigurationJdbcStore {
   static final String INSERT_REVISION_SQL =
       """
       insert into plugin_configuration_revision
-          (plugin_id, revision, code_version, schema_fingerprint, capability_fingerprint, values_json)
+          (plugin_id, revision, code_version, schema_fingerprint, capability_fingerprint,
+           auth_generation, context_fingerprint, configured_secret_fields, values_json)
       values
           (:pluginId, :revision, :codeVersion, :schemaFingerprint, :capabilityFingerprint,
+           :authGeneration, :contextFingerprint, cast(:configuredSecretFields as text[]),
            :valuesJson)
       """;
 
@@ -40,12 +45,15 @@ public class PluginConfigurationJdbcStore {
           and code_version = :codeVersion
           and schema_fingerprint = :schemaFingerprint
           and capability_fingerprint = :capabilityFingerprint
+          and auth_generation = :authGeneration
+          and context_fingerprint = :contextFingerprint
       """;
 
   private static final String CATALOG_COLUMNS = "id, epoch, manifest_json";
 
   private static final String REVISION_COLUMNS =
-      "plugin_id, revision, code_version, schema_fingerprint, capability_fingerprint, values_json";
+      "plugin_id, revision, code_version, schema_fingerprint, capability_fingerprint, "
+          + "auth_generation, context_fingerprint, configured_secret_fields, values_json";
 
   private static final RowMapper<PluginCatalogStateDO> CATALOG_ROW_MAPPER =
       PluginConfigurationJdbcStore::mapCatalogRow;
@@ -92,6 +100,9 @@ public class PluginConfigurationJdbcStore {
         .param("codeVersion", row.getCodeVersion())
         .param("schemaFingerprint", row.getSchemaFingerprint())
         .param("capabilityFingerprint", row.getCapabilityFingerprint())
+        .param("authGeneration", row.getAuthGeneration())
+        .param("contextFingerprint", row.getContextFingerprint())
+        .param("configuredSecretFields", toTextArrayLiteral(row.getConfiguredSecretFields()))
         .param("valuesJson", row.getValuesJson())
         .update();
   }
@@ -115,7 +126,9 @@ public class PluginConfigurationJdbcStore {
       long revision,
       String codeVersion,
       String schemaFingerprint,
-      String capabilityFingerprint) {
+      String capabilityFingerprint,
+      UUID authGeneration,
+      String contextFingerprint) {
     return jdbcClient
         .sql(REFERENCE_COUNT_SQL)
         .param("pluginId", pluginId)
@@ -123,8 +136,34 @@ public class PluginConfigurationJdbcStore {
         .param("codeVersion", codeVersion)
         .param("schemaFingerprint", schemaFingerprint)
         .param("capabilityFingerprint", capabilityFingerprint)
+        .param("authGeneration", authGeneration)
+        .param("contextFingerprint", contextFingerprint)
         .query(Integer.class)
         .single();
+  }
+
+  /**
+   * 把字段名列表编码为 PostgreSQL {@code text[]} 字面量（元素加双引号并转义 {@code \} 与 {@code "}）。
+   *
+   * <p>显式字面量加 {@code cast(... as text[])} 不依赖驱动对 Java 数组的隐式支持，空列表编码为 {@code {}}。
+   */
+  static String toTextArrayLiteral(List<String> fields) {
+    StringBuilder literal = new StringBuilder("{");
+    for (int index = 0; index < fields.size(); index++) {
+      if (index > 0) {
+        literal.append(',');
+      }
+      literal.append('"');
+      for (int i = 0; i < fields.get(index).length(); i++) {
+        char character = fields.get(index).charAt(i);
+        if (character == '\\' || character == '"') {
+          literal.append('\\');
+        }
+        literal.append(character);
+      }
+      literal.append('"');
+    }
+    return literal.append('}').toString();
   }
 
   private static PluginCatalogStateDO mapCatalogRow(ResultSet rs, int rowNum) throws SQLException {
@@ -143,7 +182,24 @@ public class PluginConfigurationJdbcStore {
     row.setCodeVersion(rs.getString("code_version"));
     row.setSchemaFingerprint(rs.getString("schema_fingerprint"));
     row.setCapabilityFingerprint(rs.getString("capability_fingerprint"));
+    row.setAuthGeneration(rs.getObject("auth_generation", UUID.class));
+    row.setContextFingerprint(rs.getString("context_fingerprint"));
+    row.setConfiguredSecretFields(readTextArray(rs, "configured_secret_fields"));
     row.setValuesJson(rs.getString("values_json"));
     return row;
+  }
+
+  /** 读取 {@code text[]} 列；空数组与 NULL 都归一为空列表。 */
+  private static List<String> readTextArray(ResultSet rs, String column) throws SQLException {
+    Array array = rs.getArray(column);
+    if (array == null) {
+      return List.of();
+    }
+    try {
+      String[] elements = (String[]) array.getArray();
+      return List.of(elements);
+    } finally {
+      array.free();
+    }
   }
 }

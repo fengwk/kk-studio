@@ -17,6 +17,12 @@ public final class TestPluginFixtures {
   public static final PluginConfigSchema EMPTY_SCHEMA =
       new PluginConfigSchema(new InputSchema("config", Map.of(), Set.of(), false), "{}", Map.of());
 
+  /** 无普通值、无默认值、但声明若干秘密字段的配置 schema。 */
+  public static PluginConfigSchema emptySchemaWithSecrets(Map<String, String> secrets) {
+    return new PluginConfigSchema(
+        new InputSchema("config", Map.of(), Set.of(), false), "{}", secrets);
+  }
+
   private TestPluginFixtures() {}
 
   /** 两域贡献均为空的实例；close 无资源可释放。 */

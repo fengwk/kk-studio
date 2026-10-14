@@ -40,6 +40,8 @@ class MiniMaxMavisCredentialRefresherTest {
   private static final UUID AUTH_GENERATION =
       UUID.fromString("00000000-0000-0000-0000-0000000000b1");
 
+  private static final String AUTH_CONTEXT = "a1".repeat(32);
+
   private static final Instant FIXED_NOW = Instant.ofEpochSecond(1_700_000_000L);
   private static final Clock CLOCK = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
   private static final String OLD_TOKEN = MavisTestTokens.withExp(1_700_000_000L + 3600L);
@@ -55,6 +57,7 @@ class MiniMaxMavisCredentialRefresherTest {
         new PluginCredentialSnapshot(
             MiniMaxMavisPlugin.PLUGIN_ID,
             AUTH_GENERATION,
+            AUTH_CONTEXT,
             "CN",
             FIXED_NOW.plusSeconds(3600),
             0L,
@@ -179,6 +182,7 @@ class MiniMaxMavisCredentialRefresherTest {
         new PluginCredentialSnapshot(
             MiniMaxMavisPlugin.PLUGIN_ID,
             AUTH_GENERATION,
+            AUTH_CONTEXT,
             "UNKNOWN_REGION",
             FIXED_NOW.plusSeconds(3600),
             0L,

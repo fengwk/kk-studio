@@ -22,10 +22,10 @@ import java.util.UUID;
  *
  * <ul>
  *   <li>{@link #find(String)}：单行读取权威行，返回行快照；行不存在时返回空。
- *   <li>{@link #upsert(PluginCredentialRow)}：行不存在则以 {@code version = 0}
- *       插入；已存在则在单条原子操作内覆盖载荷、认证代际与元数据， 清空在途 lease（token 与 until 置空），推进 {@code version + 1}，无条件成功并返回
- *       true。认证代际始终取传入值，因此人工完整替换必然换代际。
- *   <li>{@link #delete(String)}：删除指定 pluginId 的行并返回是否实际删除了一行。
+ *   <li>{@link #insert(PluginCredentialRow)}：仅在当前无行时写入整行并以 {@code version = 0} 落库，行已存在返回 false。
+ *   <li>{@link #replace(PluginCredentialRow, UUID, String, long)}：仅在当前行的认证代际、上下文指纹与 version
+ *       三者都匹配时覆盖整行并推进 {@code version + 1}；不匹配返回 false 且不修改任何字段。
+ *   <li>{@link #delete(String, UUID, String, long)}：同一组匹配条件下删除整行。
  *   <li>{@link #markExpiredLeasesUncertain(List, Instant, String)}：对列表内且 {@code refresh_lease_token
  *       != null && refresh_lease_until <= now} 的过期 in-flight 行生效，将状态置为 {@code
  *       REFRESH_UNCERTAIN}、记录错误、清空 lease、{@code version + 1}，保持代际不变，返回影响行数。
@@ -48,53 +48,84 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
   }
 
   @Override
-  public synchronized boolean upsert(PluginCredentialRow row) {
+  public synchronized boolean insert(PluginCredentialRow row) {
     Objects.requireNonNull(row, "row");
-    PluginCredentialRow existing = storage.get(row.pluginId());
-    Instant now = row.updateTime() != null ? row.updateTime() : Instant.now();
-    if (existing == null) {
-      PluginCredentialRow inserted =
-          new PluginCredentialRow(
-              row.pluginId(),
-              row.authGeneration(),
-              row.encryptedPayload(),
-              row.region(),
-              row.expiresAt(),
-              row.nextRefreshAt(),
-              row.status(),
-              null,
-              null,
-              null,
-              null,
-              0L,
-              row.createTime() != null ? row.createTime() : now,
-              now);
-      storage.put(row.pluginId(), inserted);
-    } else {
-      PluginCredentialRow updated =
-          new PluginCredentialRow(
-              row.pluginId(),
-              row.authGeneration(),
-              row.encryptedPayload(),
-              row.region(),
-              row.expiresAt(),
-              row.nextRefreshAt(),
-              row.status(),
-              null,
-              null,
-              null,
-              null,
-              existing.version() + 1L,
-              existing.createTime(),
-              now);
-      storage.put(row.pluginId(), updated);
+    if (storage.containsKey(row.pluginId())) {
+      return false;
     }
+    Instant now = row.updateTime() != null ? row.updateTime() : Instant.now();
+    storage.put(
+        row.pluginId(),
+        new PluginCredentialRow(
+            row.pluginId(),
+            row.authGeneration(),
+            row.contextFingerprint(),
+            row.encryptedPayload(),
+            row.region(),
+            row.expiresAt(),
+            row.nextRefreshAt(),
+            row.status(),
+            row.lastRefreshedAt(),
+            row.lastRefreshError(),
+            row.refreshLeaseToken(),
+            row.refreshLeaseUntil(),
+            0L,
+            row.createTime() != null ? row.createTime() : now,
+            now));
     return true;
   }
 
   @Override
-  public synchronized boolean delete(String pluginId) {
-    return storage.remove(pluginId) != null;
+  public synchronized boolean replace(
+      PluginCredentialRow row,
+      UUID expectedAuthGeneration,
+      String expectedContextFingerprint,
+      long expectedVersion) {
+    Objects.requireNonNull(row, "row");
+    PluginCredentialRow existing = storage.get(row.pluginId());
+    if (existing == null
+        || !existing.authGeneration().equals(expectedAuthGeneration)
+        || !existing.contextFingerprint().equals(expectedContextFingerprint)
+        || existing.version() != expectedVersion) {
+      return false;
+    }
+    Instant now = row.updateTime() != null ? row.updateTime() : Instant.now();
+    storage.put(
+        row.pluginId(),
+        new PluginCredentialRow(
+            row.pluginId(),
+            row.authGeneration(),
+            row.contextFingerprint(),
+            row.encryptedPayload(),
+            row.region(),
+            row.expiresAt(),
+            row.nextRefreshAt(),
+            row.status(),
+            row.lastRefreshedAt(),
+            row.lastRefreshError(),
+            row.refreshLeaseToken(),
+            row.refreshLeaseUntil(),
+            existing.version() + 1L,
+            existing.createTime(),
+            now));
+    return true;
+  }
+
+  @Override
+  public synchronized boolean delete(
+      String pluginId,
+      UUID expectedAuthGeneration,
+      String expectedContextFingerprint,
+      long expectedVersion) {
+    PluginCredentialRow existing = storage.get(pluginId);
+    if (existing == null
+        || !existing.authGeneration().equals(expectedAuthGeneration)
+        || !existing.contextFingerprint().equals(expectedContextFingerprint)
+        || existing.version() != expectedVersion) {
+      return false;
+    }
+    storage.remove(pluginId);
+    return true;
   }
 
   @Override
@@ -114,6 +145,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
             new PluginCredentialRow(
                 row.pluginId(),
                 row.authGeneration(),
+                row.contextFingerprint(),
                 row.encryptedPayload(),
                 row.region(),
                 row.expiresAt(),
@@ -146,7 +178,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
         boolean statusMatch =
             row.status() == PluginCredentialStatus.CONNECTED
                 || row.status() == PluginCredentialStatus.REFRESH_FAILED;
-        boolean due = !row.nextRefreshAt().isAfter(now);
+        boolean due = row.nextRefreshAt() != null && !row.nextRefreshAt().isAfter(now);
         boolean leaseFreeOrExpired =
             row.refreshLeaseToken() == null
                 || (row.refreshLeaseUntil() != null && !row.refreshLeaseUntil().isAfter(now));
@@ -168,6 +200,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
           new PluginCredentialRow(
               row.pluginId(),
               row.authGeneration(),
+              row.contextFingerprint(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -190,6 +223,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
   public synchronized boolean finalizeSuccess(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       String leaseToken,
       long version,
       byte[] encryptedPayload,
@@ -201,6 +235,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     PluginCredentialRow row = storage.get(pluginId);
     if (row == null
         || !row.authGeneration().equals(authGeneration)
+        || !row.contextFingerprint().equals(contextFingerprint)
         || !Objects.equals(row.refreshLeaseToken(), leaseToken)
         || row.version() != version) {
       return false;
@@ -209,6 +244,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
         new PluginCredentialRow(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             encryptedPayload,
             region,
             expiresAt,
@@ -229,6 +265,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
   public synchronized boolean finalizeFailure(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       String leaseToken,
       long version,
       PluginCredentialStatus status,
@@ -238,6 +275,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     PluginCredentialRow row = storage.get(pluginId);
     if (row == null
         || !row.authGeneration().equals(authGeneration)
+        || !row.contextFingerprint().equals(contextFingerprint)
         || !Objects.equals(row.refreshLeaseToken(), leaseToken)
         || row.version() != version) {
       return false;
@@ -246,6 +284,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
         new PluginCredentialRow(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -264,10 +303,16 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
 
   @Override
   public synchronized boolean releaseLease(
-      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String leaseToken,
+      long version,
+      Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
     if (row == null
         || !row.authGeneration().equals(authGeneration)
+        || !row.contextFingerprint().equals(contextFingerprint)
         || !Objects.equals(row.refreshLeaseToken(), leaseToken)
         || row.version() != version) {
       return false;
@@ -276,6 +321,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
         new PluginCredentialRow(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -294,10 +340,16 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
 
   @Override
   public synchronized boolean ownsUnexpiredLease(
-      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String leaseToken,
+      long version,
+      Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
     return row != null
         && row.authGeneration().equals(authGeneration)
+        && row.contextFingerprint().equals(contextFingerprint)
         && Objects.equals(row.refreshLeaseToken(), leaseToken)
         && row.version() == version
         && row.refreshLeaseUntil() != null
@@ -321,6 +373,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
                 row.refreshLeaseToken() == null
                     || (row.refreshLeaseUntil() != null && !row.refreshLeaseUntil().isAfter(now)))
         .map(PluginCredentialRow::nextRefreshAt)
+        .filter(Objects::nonNull)
         .min(Comparator.naturalOrder());
   }
 
@@ -328,12 +381,15 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
   public synchronized boolean rejectUsedCredential(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       long version,
       byte[] encryptedPayload,
       String error,
       Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
-    if (row == null || !row.authGeneration().equals(authGeneration)) {
+    if (row == null
+        || !row.authGeneration().equals(authGeneration)
+        || !row.contextFingerprint().equals(contextFingerprint)) {
       return false;
     }
     boolean matches =
@@ -346,6 +402,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
         new PluginCredentialRow(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -383,6 +440,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
           new PluginCredentialRow(
               row.pluginId(),
               row.authGeneration(),
+              row.contextFingerprint(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -407,6 +465,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
           new PluginCredentialRow(
               row.pluginId(),
               row.authGeneration(),
+              row.contextFingerprint(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -435,6 +494,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     return new PluginCredentialRow(
         row.pluginId(),
         row.authGeneration(),
+        row.contextFingerprint(),
         row.encryptedPayload(),
         row.region(),
         row.expiresAt(),

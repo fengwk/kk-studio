@@ -95,13 +95,13 @@ class PluginCatalogFingerprintTest {
     String baseline = PluginCatalogFingerprint.schema(schema, NONE);
     String staticKeyFingerprint =
         PluginCatalogFingerprint.schema(
-            declaredSecretsSchema(), new PluginAuthSpec.StaticKey("token"));
+            declaredSecretsSchema(), new PluginAuthSpec.StaticKey("token", Set.of()));
 
     assertNotEquals(baseline, staticKeyFingerprint, "authSpec must participate in the fingerprint");
     assertEquals(
         staticKeyFingerprint,
         PluginCatalogFingerprint.schema(
-            declaredSecretsSchema(), new PluginAuthSpec.StaticKey("token")));
+            declaredSecretsSchema(), new PluginAuthSpec.StaticKey("token", Set.of())));
 
     String otherSecretDescription =
         PluginCatalogFingerprint.schema(
@@ -113,7 +113,12 @@ class PluginCatalogFingerprintTest {
     String deepLink =
         PluginCatalogFingerprint.schema(schema, new PluginAuthSpec.DeepLink(List.of("cn", "us")));
     assertNotEquals(baseline, deepLink);
-    assertNotEquals(staticKeyFingerprint, deepLink);
+
+    String withContext =
+        PluginCatalogFingerprint.schema(
+            declaredSecretsSchema(), new PluginAuthSpec.StaticKey("token", Set.of("region")));
+    assertNotEquals(
+        staticKeyFingerprint, withContext, "static key context fields must be fingerprinted");
   }
 
   /** values schema 与默认值的内容变化必须改变指纹。 */

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
@@ -33,6 +34,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 
 import java.util.ArrayList;
@@ -56,6 +58,9 @@ class PluginCatalogSnapshotTest {
   private static final String PLUGIN_ALPHA = "alpha.plugin";
   private static final String PLUGIN_BETA = "beta.plugin";
   private static final String PLUGIN_GAMMA = "gamma.plugin";
+  private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
+  private static final String CONTEXT =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   /** 真实两域聚合：按安装 id 顺序冻结实例，并合并插件贡献与容器内置贡献。 */
   @Test
@@ -78,7 +83,7 @@ class PluginCatalogSnapshotTest {
             1L,
             registry,
             initialConfigurations(registry),
-            PluginCatalogSnapshotTest::contextFor,
+            PluginCatalogSnapshotTest::contexts,
             List.of(contributor("builtin.contrib")),
             List.of(adapter("builtin.run")));
 
@@ -126,8 +131,8 @@ class PluginCatalogSnapshotTest {
         PluginCatalogSnapshot.build(
             7L,
             registry,
-            Map.of(PLUGIN_ALPHA, new PluginConfig(7, "{}")),
-            PluginCatalogSnapshotTest::contextFor,
+            Map.of(PLUGIN_ALPHA, state(PLUGIN_ALPHA, new PluginConfig(7, "{}"))),
+            PluginCatalogSnapshotTest::contexts,
             List.of(),
             List.of())) {
       assertEquals(new PluginConfig(7, "{\"enabled\":true}"), plugin.receivedConfig);
@@ -150,8 +155,8 @@ class PluginCatalogSnapshotTest {
                 PluginCatalogSnapshot.build(
                     1L,
                     registry,
-                    Map.of(PLUGIN_ALPHA, new PluginConfig(2, "{}")),
-                    PluginCatalogSnapshotTest::contextFor,
+                    Map.of(PLUGIN_ALPHA, state(PLUGIN_ALPHA, new PluginConfig(2, "{}"))),
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
 
@@ -173,14 +178,15 @@ class PluginCatalogSnapshotTest {
                 PluginCatalogSnapshot.build(
                     1L,
                     registry,
-                    Map.of(PLUGIN_ALPHA, PluginConfig.initial(SCHEMA)),
-                    PluginCatalogSnapshotTest::contextFor,
+                    Map.of(PLUGIN_ALPHA, state(PLUGIN_ALPHA, PluginConfig.initial(SCHEMA))),
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
     assertTrue(missing.getMessage().contains("stage=configuration"), missing.getMessage());
 
-    Map<String, PluginConfig> withUnknown = new LinkedHashMap<>(initialConfigurations(registry));
-    withUnknown.put("ghost.plugin", PluginConfig.initial(SCHEMA));
+    Map<String, PluginConfigurationState> withUnknown =
+        new LinkedHashMap<>(initialConfigurations(registry));
+    withUnknown.put("ghost.plugin", state("ghost.plugin", PluginConfig.initial(SCHEMA)));
     IllegalStateException unknown =
         assertThrows(
             IllegalStateException.class,
@@ -189,7 +195,7 @@ class PluginCatalogSnapshotTest {
                     1L,
                     registry,
                     withUnknown,
-                    PluginCatalogSnapshotTest::contextFor,
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
     assertTrue(unknown.getMessage().contains("ghost.plugin"), unknown.getMessage());
@@ -217,7 +223,7 @@ class PluginCatalogSnapshotTest {
                     1L,
                     registry,
                     initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contextFor,
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
 
@@ -248,7 +254,7 @@ class PluginCatalogSnapshotTest {
                     1L,
                     registry,
                     initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contextFor,
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
     assertTrue(
@@ -275,7 +281,7 @@ class PluginCatalogSnapshotTest {
                 1L,
                 canvasRegistry,
                 initialConfigurations(canvasRegistry),
-                PluginCatalogSnapshotTest::contextFor,
+                PluginCatalogSnapshotTest::contexts,
                 List.of(),
                 List.of()));
     assertEquals(1, gammaInstance.closeCount);
@@ -301,7 +307,7 @@ class PluginCatalogSnapshotTest {
                     1L,
                     registry,
                     initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contextFor,
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
 
@@ -331,7 +337,7 @@ class PluginCatalogSnapshotTest {
                     1L,
                     registry,
                     initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contextFor,
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
     assertSame(fatal, propagated, "original fatal Error must be propagated unchanged");
@@ -355,7 +361,7 @@ class PluginCatalogSnapshotTest {
                     1L,
                     secondRegistry,
                     initialConfigurations(secondRegistry),
-                    PluginCatalogSnapshotTest::contextFor,
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
     assertSame(original, second, "cleanup Error must not replace the original Error");
@@ -381,7 +387,7 @@ class PluginCatalogSnapshotTest {
                     1L,
                     registry,
                     initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contextFor,
+                    PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
     assertSame(instance.closeError, fatal);
@@ -408,7 +414,7 @@ class PluginCatalogSnapshotTest {
             1L,
             registry,
             initialConfigurations(registry),
-            PluginCatalogSnapshotTest::contextFor,
+            PluginCatalogSnapshotTest::contexts,
             List.of(),
             List.of());
 
@@ -475,16 +481,24 @@ class PluginCatalogSnapshotTest {
     };
   }
 
-  private static Map<String, PluginConfig> initialConfigurations(StudioPluginRegistry registry) {
-    Map<String, PluginConfig> configurations = new LinkedHashMap<>();
+  private static Map<String, PluginConfigurationState> initialConfigurations(
+      StudioPluginRegistry registry) {
+    Map<String, PluginConfigurationState> configurations = new LinkedHashMap<>();
     for (StudioPlugin plugin : registry.plugins()) {
+      String pluginId = plugin.descriptor().pluginId();
       configurations.put(
-          plugin.descriptor().pluginId(), PluginConfig.initial(plugin.configurationSchema()));
+          pluginId, state(pluginId, PluginConfig.initial(plugin.configurationSchema())));
     }
     return configurations;
   }
 
-  private static PluginContext contextFor(String pluginId) {
+  private static PluginConfigurationState state(String pluginId, PluginConfig config) {
+    return new PluginConfigurationState(
+        config, new PluginCredentialReference(pluginId, GENERATION, CONTEXT));
+  }
+
+  private static PluginContext contexts(String pluginId, PluginCredentialReference reference) {
+    assertEquals(pluginId, reference.pluginId(), "contexts must be keyed by the frozen plugin id");
     return new PluginContext(
         new PluginCredentialAccess() {
           @Override

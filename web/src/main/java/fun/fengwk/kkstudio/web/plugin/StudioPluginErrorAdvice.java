@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -50,6 +51,12 @@ public class StudioPluginErrorAdvice {
     return build(HttpStatus.NOT_FOUND, error);
   }
 
+  /** 期望坐标或凭据行 CAS 冲突：固定 409，响应体只含 resource 与冲突坐标，绝不回显秘密或请求正文。 */
+  @ExceptionHandler(AiVersionConflictException.class)
+  public ResponseEntity<Result<Void>> handleVersionConflict(AiVersionConflictException error) {
+    return build(HttpStatus.CONFLICT, error);
+  }
+
   @ExceptionHandler(PluginKeyUnavailableException.class)
   public ResponseEntity<Result<Void>> handlePluginKeyUnavailable(
       PluginKeyUnavailableException error) {
@@ -74,7 +81,8 @@ public class StudioPluginErrorAdvice {
     Map<String, Object> errorContext = new LinkedHashMap<>();
     errorContext.put("type", "about:blank");
     errorContext.put("title", messageService.httpTitle(status));
-    errorContext.put("detail", extractReadableDetail(error));
+    // 固定去敏文案：Jackson 的 cause/message 可能内嵌请求正文片段（含秘密补丁值），绝不回显。
+    errorContext.put("detail", DEFAULT_READABLE_ERROR_DETAIL);
     ImmutableResolvedConventionErrorCode code =
         new ImmutableResolvedConventionErrorCode(
             status,
@@ -94,18 +102,5 @@ public class StudioPluginErrorAdvice {
         new ImmutableResolvedConventionErrorCode(
             status.getStatus(), error.code().code(), message, errorContext);
     return ResponseEntity.status(status.getStatus()).body(Results.error(code));
-  }
-
-  private static String extractReadableDetail(HttpMessageNotReadableException error) {
-    for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
-      if (cause instanceof IllegalArgumentException illegalArgumentException) {
-        String message = illegalArgumentException.getMessage();
-        if (message != null && !message.isBlank()) {
-          return message;
-        }
-      }
-    }
-    String message = error.getMessage();
-    return message != null && !message.isBlank() ? message : DEFAULT_READABLE_ERROR_DETAIL;
   }
 }

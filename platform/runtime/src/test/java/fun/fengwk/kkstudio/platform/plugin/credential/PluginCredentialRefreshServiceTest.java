@@ -55,9 +55,11 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class PluginCredentialRefreshServiceTest {
 
-  /** 本测试使用的固定认证代际：仓库/CAS 断言只要求同代际内一致。 */
+  /** 本测试使用的固定认证代际与上下文指纹：仓库/CAS 断言只要求同代际同上下文内一致。 */
   private static final UUID AUTH_GENERATION =
       UUID.fromString("00000000-0000-0000-0000-0000000000b1");
+
+  private static final String AUTH_CONTEXT = "a1".repeat(32);
 
   @TempDir Path tempDir;
 
@@ -98,10 +100,11 @@ class PluginCredentialRefreshServiceTest {
       Instant expiresAt,
       Instant nextRefreshAt) {
     SecretKey key = keyLoader.load().orElseThrow();
-    byte[] encrypted = codec.encrypt(key, pluginId, AUTH_GENERATION, region, payload);
+    byte[] encrypted = codec.encrypt(key, pluginId, AUTH_GENERATION, AUTH_CONTEXT, region, payload);
     return new PluginCredentialRow(
         pluginId,
         AUTH_GENERATION,
+        AUTH_CONTEXT,
         encrypted,
         region,
         expiresAt,
@@ -217,7 +220,8 @@ class PluginCredentialRefreshServiceTest {
     // 验证新密文解密出新载荷
     SecretKey key = keyLoader.load().orElseThrow();
     String decrypted =
-        codec.decrypt(key, PLUGIN_ID, AUTH_GENERATION, REGION, updated.encryptedPayload());
+        codec.decrypt(
+            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated.encryptedPayload());
     assertEquals(NEW_PAYLOAD, decrypted);
 
     // 下一次扫描该行不再被 claim
@@ -427,7 +431,8 @@ class PluginCredentialRefreshServiceTest {
     SecretKey key = keyLoader.load().orElseThrow();
     assertEquals(
         OLD_PAYLOAD,
-        codec.decrypt(key, PLUGIN_ID, AUTH_GENERATION, REGION, updated1.encryptedPayload()));
+        codec.decrypt(
+            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated1.encryptedPayload()));
 
     // 场景 2: region 不一致，验证旧密文绝对没有被替换
     repository.setDirect(initialRow);
@@ -452,7 +457,8 @@ class PluginCredentialRefreshServiceTest {
     assertEquals(REGION, updated2.region(), "不可用材料绝不能改变行的 region 元数据");
     assertEquals(
         OLD_PAYLOAD,
-        codec.decrypt(key, PLUGIN_ID, AUTH_GENERATION, REGION, updated2.encryptedPayload()));
+        codec.decrypt(
+            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated2.encryptedPayload()));
 
     // 场景 3: expiresAt 不晚于 now
     repository.setDirect(initialRow);
@@ -476,7 +482,8 @@ class PluginCredentialRefreshServiceTest {
     assertEquals(PluginCredentialStatus.REFRESH_FAILED, updated3.status());
     assertEquals(
         OLD_PAYLOAD,
-        codec.decrypt(key, PLUGIN_ID, AUTH_GENERATION, REGION, updated3.encryptedPayload()));
+        codec.decrypt(
+            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated3.encryptedPayload()));
 
     // 延迟到达后必须真的重试一次（有界重试而不是静默丢弃），且仍然不替换旧凭据。
     clock.advance(properties.getRefresh().getPollDelay());
@@ -485,7 +492,8 @@ class PluginCredentialRefreshServiceTest {
     assertEquals(PluginCredentialStatus.REFRESH_FAILED, retried.status());
     assertEquals(
         OLD_PAYLOAD,
-        codec.decrypt(key, PLUGIN_ID, AUTH_GENERATION, REGION, retried.encryptedPayload()));
+        codec.decrypt(
+            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, retried.encryptedPayload()));
   }
 
   /** 主密钥不可用：只 releaseLease，status 不变、lease 清空、refresher 未被调用； 随后主密钥恢复可用时，同一行可被重新 claim 并成功刷新。 */
@@ -585,6 +593,7 @@ class PluginCredentialRefreshServiceTest {
         new PluginCredentialRow(
             initialRow.pluginId(),
             initialRow.authGeneration(),
+            initialRow.contextFingerprint(),
             tampered,
             initialRow.region(),
             initialRow.expiresAt(),
@@ -638,6 +647,7 @@ class PluginCredentialRefreshServiceTest {
         new PluginCredentialRow(
             PLUGIN_ID,
             AUTH_GENERATION,
+            AUTH_CONTEXT,
             createRow(
                     PLUGIN_ID,
                     REGION,
@@ -705,7 +715,12 @@ class PluginCredentialRefreshServiceTest {
                       PluginCredentialStatus.CONNECTED,
                       clock.instant().plusSeconds(7200),
                       clock.instant().plusSeconds(3600));
-              repository.upsert(reLoginRow);
+              PluginCredentialRow claimed = repository.getDirect(PLUGIN_ID);
+              repository.replace(
+                  reLoginRow,
+                  claimed.authGeneration(),
+                  claimed.contextFingerprint(),
+                  claimed.version());
               competitorRow.set(repository.getDirect(PLUGIN_ID));
               return new PluginCredentialMaterial(
                   REGION,
@@ -741,7 +756,8 @@ class PluginCredentialRefreshServiceTest {
         "version must not be altered by stale finalizer");
     SecretKey key = keyLoader.load().orElseThrow();
     String decrypted =
-        codec.decrypt(key, PLUGIN_ID, AUTH_GENERATION, REGION, finalRow.encryptedPayload());
+        codec.decrypt(
+            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, finalRow.encryptedPayload());
     assertEquals(competitorPayload, decrypted, "payload must belong to the competitor re-login");
   }
 
@@ -894,6 +910,7 @@ class PluginCredentialRefreshServiceTest {
         new PluginCredentialRow(
             PLUGIN_ID,
             AUTH_GENERATION,
+            AUTH_CONTEXT,
             repository.getDirect(PLUGIN_ID).encryptedPayload(),
             REGION,
             clock.instant().plusSeconds(3600),
@@ -982,7 +999,9 @@ class PluginCredentialRefreshServiceTest {
     assertEquals(PluginCredentialStatus.CONNECTED, rowB.status());
     SecretKey key = keyLoader.load().orElseThrow();
     assertEquals(
-        NEW_PAYLOAD, codec.decrypt(key, pluginB, AUTH_GENERATION, REGION, rowB.encryptedPayload()));
+        NEW_PAYLOAD,
+        codec.decrypt(
+            key, pluginB, AUTH_GENERATION, AUTH_CONTEXT, REGION, rowB.encryptedPayload()));
   }
 
   /** boundedError() 去敏错误摘要契约：4096 字节上限、换行转空格、空/空白回退为 fallback。 */

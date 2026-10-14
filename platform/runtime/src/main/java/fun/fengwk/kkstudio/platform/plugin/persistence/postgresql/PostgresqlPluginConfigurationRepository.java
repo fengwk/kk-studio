@@ -91,7 +91,9 @@ public class PostgresqlPluginConfigurationRepository implements PluginConfigurat
               identity.configRevision(),
               identity.pluginCodeVersion(),
               identity.schemaFingerprint(),
-              identity.capabilityFingerprint())
+              identity.capabilityFingerprint(),
+              identity.authGeneration(),
+              identity.contextFingerprint())
           != 1) {
         throw new IllegalStateException(
             "plugin catalog manifest references a missing or drifted history row: pluginId="
@@ -123,7 +125,9 @@ public class PostgresqlPluginConfigurationRepository implements PluginConfigurat
       }
       if (!entry.pluginCodeVersion().equals(row.codeVersion())
           || !entry.schemaFingerprint().equals(row.schemaFingerprint())
-          || !entry.capabilityFingerprint().equals(row.capabilityFingerprint())) {
+          || !entry.capabilityFingerprint().equals(row.capabilityFingerprint())
+          || !entry.authGeneration().equals(row.authGeneration())
+          || !entry.contextFingerprint().equals(row.contextFingerprint())) {
         throw new IllegalArgumentException(
             "changed configuration identity must match the manifest entry");
       }
@@ -174,6 +178,9 @@ public class PostgresqlPluginConfigurationRepository implements PluginConfigurat
         row.getCodeVersion(),
         row.getSchemaFingerprint(),
         row.getCapabilityFingerprint(),
+        row.getAuthGeneration(),
+        row.getContextFingerprint(),
+        row.getConfiguredSecretFields(),
         row.getValuesJson());
   }
 
@@ -184,6 +191,9 @@ public class PostgresqlPluginConfigurationRepository implements PluginConfigurat
     data.setCodeVersion(row.codeVersion());
     data.setSchemaFingerprint(row.schemaFingerprint());
     data.setCapabilityFingerprint(row.capabilityFingerprint());
+    data.setAuthGeneration(row.authGeneration());
+    data.setContextFingerprint(row.contextFingerprint());
+    data.setConfiguredSecretFields(row.configuredSecretFields());
     data.setValuesJson(row.valuesJson());
     return data;
   }

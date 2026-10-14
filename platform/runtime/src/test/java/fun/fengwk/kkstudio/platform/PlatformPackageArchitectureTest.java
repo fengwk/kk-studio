@@ -24,6 +24,7 @@ class PlatformPackageArchitectureTest {
             "catalog",
             "chat",
             "configsync",
+            "crypto",
             "environment",
             "error",
             "harness",

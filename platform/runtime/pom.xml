@@ -280,6 +280,41 @@
                         </configuration>
                     </execution>
                     <execution>
+                        <!-- S3-B2 秘密与配置管理的定向覆盖率门禁：唯一提交入口、管理面用例、候选上下文与 attempt 单次消费。 -->
+                        <id>check-plugin-secret-management-class-line-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationHistory</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginAuthNonce</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.FixedPluginCredentialAccess</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginAuthContextFingerprint</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.PluginAuthAttemptRow</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginAuthAttemptRepository</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginAuthAttemptJdbcStore</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <!-- 凭据认证代际与共享 crypto 原语的定向覆盖率门禁。 -->
                         <id>check-plugin-credential-class-line-coverage</id>
                         <phase>verify</phase>

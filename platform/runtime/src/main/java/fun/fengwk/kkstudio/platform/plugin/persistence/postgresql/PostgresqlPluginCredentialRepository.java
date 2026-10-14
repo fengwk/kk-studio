@@ -27,13 +27,30 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
   }
 
   @Override
-  public boolean upsert(PluginCredentialRow row) {
-    return pluginCredentialJdbcStore.upsert(toDO(row)) == 1;
+  public boolean insert(PluginCredentialRow row) {
+    return pluginCredentialJdbcStore.insert(toDO(row)) == 1;
   }
 
   @Override
-  public boolean delete(String pluginId) {
-    return pluginCredentialJdbcStore.deleteByPluginId(pluginId) == 1;
+  public boolean replace(
+      PluginCredentialRow row,
+      UUID expectedAuthGeneration,
+      String expectedContextFingerprint,
+      long expectedVersion) {
+    return pluginCredentialJdbcStore.replace(
+            toDO(row), expectedAuthGeneration, expectedContextFingerprint, expectedVersion)
+        == 1;
+  }
+
+  @Override
+  public boolean delete(
+      String pluginId,
+      UUID expectedAuthGeneration,
+      String expectedContextFingerprint,
+      long expectedVersion) {
+    return pluginCredentialJdbcStore.deleteByReference(
+            pluginId, expectedAuthGeneration, expectedContextFingerprint, expectedVersion)
+        == 1;
   }
 
   @Override
@@ -61,6 +78,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
   public boolean finalizeSuccess(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       String leaseToken,
       long version,
       byte[] encryptedPayload,
@@ -72,6 +90,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
     return pluginCredentialJdbcStore.finalizeSuccess(
             pluginId,
             authGeneration,
+            contextFingerprint,
             leaseToken,
             version,
             encryptedPayload,
@@ -87,6 +106,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
   public boolean finalizeFailure(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       String leaseToken,
       long version,
       PluginCredentialStatus status,
@@ -94,23 +114,41 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
       String error,
       Instant now) {
     return pluginCredentialJdbcStore.finalizeFailure(
-            pluginId, authGeneration, leaseToken, version, status.name(), nextRefreshAt, error, now)
+            pluginId,
+            authGeneration,
+            contextFingerprint,
+            leaseToken,
+            version,
+            status.name(),
+            nextRefreshAt,
+            error,
+            now)
         == 1;
   }
 
   @Override
   public boolean releaseLease(
-      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String leaseToken,
+      long version,
+      Instant now) {
     return pluginCredentialJdbcStore.releaseLease(
-            pluginId, authGeneration, leaseToken, version, now)
+            pluginId, authGeneration, contextFingerprint, leaseToken, version, now)
         == 1;
   }
 
   @Override
   public boolean ownsUnexpiredLease(
-      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String leaseToken,
+      long version,
+      Instant now) {
     return pluginCredentialJdbcStore.countOwnedUnexpiredLease(
-            pluginId, authGeneration, leaseToken, version, now)
+            pluginId, authGeneration, contextFingerprint, leaseToken, version, now)
         == 1;
   }
 
@@ -126,12 +164,13 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
   public boolean rejectUsedCredential(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       long version,
       byte[] encryptedPayload,
       String error,
       Instant now) {
     return pluginCredentialJdbcStore.rejectUsedCredential(
-            pluginId, authGeneration, version, encryptedPayload, error, now)
+            pluginId, authGeneration, contextFingerprint, version, encryptedPayload, error, now)
         == 1;
   }
 
@@ -139,6 +178,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
     return new PluginCredentialRow(
         row.getPluginId(),
         row.getAuthGeneration(),
+        row.getContextFingerprint(),
         row.getEncryptedPayload(),
         row.getRegion(),
         row.getExpiresAt(),
@@ -157,6 +197,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
     PluginCredentialDO data = new PluginCredentialDO();
     data.setPluginId(row.pluginId());
     data.setAuthGeneration(row.authGeneration());
+    data.setContextFingerprint(row.contextFingerprint());
     data.setEncryptedPayload(row.encryptedPayload());
     data.setRegion(row.region());
     data.setExpiresAt(row.expiresAt());

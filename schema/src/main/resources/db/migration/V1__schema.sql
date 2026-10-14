@@ -266,10 +266,11 @@ comment on column skill_package.update_time is '最后更新时间（毫秒精�
 create table plugin_credential (
     plugin_id           varchar(64)   not null,
     auth_generation     uuid          not null,
+    context_fingerprint char(64)      not null,
     encrypted_payload   bytea         not null,
-    region              varchar(64)   not null,
-    expires_at          timestamptz(3) not null,
-    next_refresh_at     timestamptz(3) not null,
+    region              varchar(64),
+    expires_at          timestamptz(3),
+    next_refresh_at     timestamptz(3),
     status              varchar(32)   not null,
     last_refreshed_at   timestamptz(3),
     last_refresh_error  text,
@@ -282,12 +283,22 @@ create table plugin_credential (
     constraint ck_plugin_credential_plugin_id check (
         plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
     ),
+    constraint ck_plugin_credential_context_fingerprint check (
+        context_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
     constraint ck_plugin_credential_encrypted_payload check (
         octet_length(encrypted_payload) > 0
     ),
     constraint ck_plugin_credential_region check (
-        region = btrim(region)
-        and char_length(region) > 0
+        region is null
+        or (
+            region = btrim(region)
+            and char_length(region) > 0
+        )
+    ),
+    constraint ck_plugin_credential_route_metadata check (
+        (region is null) = (expires_at is null)
+        and (region is null) = (next_refresh_at is null)
     ),
     constraint ck_plugin_credential_status check (
         status in ('CONNECTED', 'REFRESH_FAILED', 'REFRESH_UNCERTAIN', 'REAUTH_REQUIRED')
@@ -314,26 +325,27 @@ create table plugin_credential (
     constraint ck_plugin_credential_time_order check (update_time >= create_time)
 );
 
-comment on table plugin_credential is '构建期 Plugin 的加密凭据权威行：每个已认证 Plugin 一行，未认证时无行，断连即删除行';
+comment on table plugin_credential is '构建期 Plugin 的加密凭据权威行：每个已认证 Plugin 一行，未认证时无行，断连即删除行；交互凭据与静态密钥共用本表';
 comment on column plugin_credential.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），与 classpath 中的 StudioPlugin.pluginId 对齐';
-comment on column plugin_credential.auth_generation is '认证代际（应用生成 UUID）：每次人工完整替换凭据都重新生成，用于区分断连重建后的同 version 新行；finalize/release/reject 必须匹配它';
-comment on column plugin_credential.encrypted_payload is 'AES-256-GCM 二进制 envelope（格式版本 2 + 96-bit 随机 nonce + 认证密文，AAD 绑定 pluginId/region/authGeneration/formatVersion）；任何查询投影都不得返回';
-comment on column plugin_credential.region is '非秘密 region 路由元数据（无环绕空白、≤64），只允许 Plugin descriptor 声明的固定 region 候选';
-comment on column plugin_credential.expires_at is 'access token 失效时刻（毫秒精度）';
-comment on column plugin_credential.next_refresh_at is '下一次 refresh claim 时刻（毫秒精度）；仅当该时刻已到且 lease 为空或过期时可被 claim';
+comment on column plugin_credential.auth_generation is '认证代际（应用生成 UUID）：每次人工完整替换凭据、SET/CLEAR 或 context 字段变化都重新生成，用于区分断连重建后的同 version 新行与旧上下文；finalize/release/reject 必须匹配它';
+comment on column plugin_credential.context_fingerprint is '认证上下文指纹（64 位小写 SHA-256）：绑定 plugin id/code version/schema 身份与 contextFields 严格规范值；与 auth_generation 一起作为旧引用拒读与 CAS 围栏';
+comment on column plugin_credential.encrypted_payload is 'AES-256-GCM 二进制 envelope（格式版本 2 + 96-bit 随机 nonce + 认证密文，AAD 绑定 pluginId/authGeneration/contextFingerprint/region 存在性与值/formatVersion）；任何查询投影都不得返回';
+comment on column plugin_credential.region is '非秘密 region 路由元数据（无环绕空白、≤64），只允许 Plugin descriptor 声明的固定 region 候选；静态密钥行为 null';
+comment on column plugin_credential.expires_at is 'access token 失效时刻（毫秒精度）；静态密钥行为 null（没有本地过期语义）';
+comment on column plugin_credential.next_refresh_at is '下一次 refresh claim 时刻（毫秒精度）；仅当该时刻已到且 lease 为空或过期时可被 claim；静态密钥行为 null，因此永不被领取';
 comment on column plugin_credential.status is '状态：CONNECTED, REFRESH_FAILED, REFRESH_UNCERTAIN, REAUTH_REQUIRED';
 comment on column plugin_credential.last_refreshed_at is '最近一次成功刷新时刻（毫秒精度）；从未成功刷新时为 null';
 comment on column plugin_credential.last_refresh_error is '最近一次刷新失败的有界去敏错误摘要（非空、无环绕空白、≤4096 字节）；成功时为 null';
 comment on column plugin_credential.refresh_lease_token is '跨节点 refresh lease 令牌（与 refresh_lease_until 同时存在或同时缺失）';
 comment on column plugin_credential.refresh_lease_until is 'refresh lease 到期时刻（毫秒精度）；过期 lease 视为结果未知';
-comment on column plugin_credential.version is 'CAS 乐观锁版本：非负，从 0 开始，每次写入 +1；finalize 必须匹配认证代际、lease token 与 version';
+comment on column plugin_credential.version is 'CAS 乐观锁版本：非负，从 0 开始，每次写入 +1；finalize 必须匹配认证代际、上下文指纹、lease token 与 version';
 comment on column plugin_credential.create_time is '创建时间（毫秒精度）';
 comment on column plugin_credential.update_time is '最后更新时间（毫秒精度），应用侧维护';
 
 create index idx_plugin_credential_refresh_due
     on plugin_credential (next_refresh_at);
 
-comment on index idx_plugin_credential_refresh_due is 'refresh dispatcher 按 next_refresh_at 扫描到期行';
+comment on index idx_plugin_credential_refresh_due is 'refresh dispatcher 按 next_refresh_at 扫描到期行；静态密钥行的 null 不参与扫描';
 
 -- -----------------------------------------------------------------------------
 -- Plugin 配置权威存储
@@ -380,6 +392,9 @@ create table plugin_configuration_revision (
     code_version            varchar(64)  not null,
     schema_fingerprint      char(64)     not null,
     capability_fingerprint  char(64)     not null,
+    auth_generation         uuid         not null,
+    context_fingerprint     char(64)     not null,
+    configured_secret_fields text[]      not null default '{}',
     values_json             text         not null,
     created_at              timestamptz(3) not null default current_timestamp,
     constraint pk_plugin_configuration_revision primary key (plugin_id, revision),
@@ -396,6 +411,12 @@ create table plugin_configuration_revision (
     constraint ck_plugin_configuration_revision_capability_fingerprint check (
         capability_fingerprint ~ '^[0-9a-f]{64}$'
     ),
+    constraint ck_plugin_configuration_revision_context_fingerprint check (
+        context_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_plugin_configuration_revision_configured_secret_fields check (
+        array_position(configured_secret_fields, null) is null
+    ),
     constraint ck_plugin_configuration_revision_values_object check (
         values_json is json object with unique keys
     ),
@@ -404,14 +425,63 @@ create table plugin_configuration_revision (
     )
 );
 
-comment on table plugin_configuration_revision is 'Plugin 普通配置的不可变 append-only 历史：每个 (plugin_id, revision) 一行，revision 即该插件最后一次写入的全局 epoch';
+comment on table plugin_configuration_revision is 'Plugin 普通配置的不可变 append-only 历史：每个 (plugin_id, revision) 一行，revision 即该插件最后一次写入的全局 epoch；同时冻结该 revision 的凭据身份与已录入秘密字段名';
 comment on column plugin_configuration_revision.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），与 classpath 中的 StudioPlugin.pluginId 对齐';
 comment on column plugin_configuration_revision.revision is '配置修订号：正整数，等于撰写该 revision 时的全局 epoch';
 comment on column plugin_configuration_revision.code_version is '撰写该 revision 时 StudioPlugin descriptor.version 的快照，启动恢复据此比对当前 JAR';
 comment on column plugin_configuration_revision.schema_fingerprint is '撰写该 revision 时的配置定义指纹（values schema + defaults + secrets + authSpec），64 位小写 SHA-256';
 comment on column plugin_configuration_revision.capability_fingerprint is '撰写该 revision 时该插件冻结两域贡献的能力指纹，64 位小写 SHA-256';
+comment on column plugin_configuration_revision.auth_generation is '该 revision 的认证代际：与 manifest entry 逐字段相等；初始插件即使无凭据也持有新 UUID，绝不用 0 UUID 或 rowVersion 模拟身份';
+comment on column plugin_configuration_revision.context_fingerprint is '该 revision 的认证上下文指纹（64 位小写 SHA-256）：恢复时重新派生并逐字段核对';
+comment on column plugin_configuration_revision.configured_secret_fields is '该 revision 已录入的声明秘密字段名（text[]，排序去重）：只有字段名，绝无明文值或长度；管理投影的 configured 布尔由此派生，主密钥不可用也不谎称未录入';
 comment on column plugin_configuration_revision.values_json is '严格 JSON object 的普通配置值原文（不含秘密）：text 存储以整段原样读回，DB 只强制 object、唯一键与 ≤65536 字节，不做 jsonb 规范化';
 comment on column plugin_configuration_revision.created_at is '创建时间（毫秒精度）';
+
+-- -----------------------------------------------------------------------------
+-- Plugin 交互式认证的待完成 attempt
+--
+-- 每个 Plugin 至多一个 pending attempt：plugin_id 即主键，新的 prepare 直接替换旧的。
+-- 只存 nonce 的 SHA-256 摘要、期望的认证身份（代际 + 上下文指纹）、期望配置修订、
+-- 选定 region 与过期时刻；绝不保存回调地址、token、明文秘密或登录 URL。
+-- complete 以带摘要与未过期条件的单条 delete ... returning 原子单次消费，重放、
+-- 过期与已被新 prepare 取代的旧 attempt 都只能消费失败。
+-- -----------------------------------------------------------------------------
+
+create table plugin_auth_attempt (
+    plugin_id           varchar(64)    not null,
+    nonce_hash          char(64)       not null,
+    auth_generation     uuid           not null,
+    context_fingerprint char(64)       not null,
+    config_revision     bigint         not null,
+    region              varchar(64)    not null,
+    expires_at          timestamptz(3) not null,
+    created_at          timestamptz(3) not null default current_timestamp,
+    constraint pk_plugin_auth_attempt primary key (plugin_id),
+    constraint ck_plugin_auth_attempt_plugin_id check (
+        plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
+    ),
+    constraint ck_plugin_auth_attempt_nonce_hash check (
+        nonce_hash ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_plugin_auth_attempt_context_fingerprint check (
+        context_fingerprint ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_plugin_auth_attempt_config_revision check (config_revision > 0),
+    constraint ck_plugin_auth_attempt_region check (
+        region = btrim(region)
+        and char_length(region) between 1 and 64
+    )
+);
+
+comment on table plugin_auth_attempt is 'Plugin 交互式认证的唯一 pending attempt（每个 Plugin 至多一行，新的 prepare 替换旧的）：只承载一次性 nonce 摘要、期望认证身份与配置修订、选定 region 与过期时刻，不保存回调、token 或明文秘密';
+comment on column plugin_auth_attempt.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），同时是主键：每个 Plugin 至多一个 pending attempt';
+comment on column plugin_auth_attempt.nonce_hash is '一次性认证 nonce 的 64 位小写 SHA-256 摘要：complete 必须提供同一 nonce 才算命中，原始 nonce 不落库，数据库泄露也无法伪造或重放已完成 attempt';
+comment on column plugin_auth_attempt.auth_generation is 'prepare 时该 Plugin 的认证代际：complete 前必须仍与当前 manifest 一致，否则迟到回调被拒';
+comment on column plugin_auth_attempt.context_fingerprint is 'prepare 时该 Plugin 的认证上下文指纹（64 位小写 SHA-256）：与代际一起绑定 prepare 时的认证上下文';
+comment on column plugin_auth_attempt.config_revision is 'prepare 时该 Plugin 的配置修订：complete 前配置已变化即拒绝迟到回调';
+comment on column plugin_auth_attempt.region is 'prepare 时用户选定的 region：complete 返回的材料必须与它逐字相等，不接受 handler 自行改写';
+comment on column plugin_auth_attempt.expires_at is 'attempt 失效时刻（毫秒精度）：消费语句要求它严格晚于当前时刻，过期 attempt 不可再消费';
+comment on column plugin_auth_attempt.created_at is '创建时间（毫秒精度）';
 
 -- Platform MCP Server 配置：name 是主键与唯一路由身份，创建后不可变。Backend 只通过
 -- Streamable HTTP 连接 Server；请求 header 可能内嵌凭据，绝不进入列表投影与日志。
