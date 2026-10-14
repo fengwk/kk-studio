@@ -16,7 +16,7 @@ Function 能力在启动装配时由 [`CanvasFunctionCatalog.from(...)`](../../c
 
 ## 冻结运行与执行上下文
 
-Run 启动时冻结的东西写在 [`CanvasFunctionFrozenRun`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenRun.java) 里：canvas/node identity、function definition、args、manifest、**输出计划**（[`CanvasFunctionFrozenOutput`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenOutput.java) 按槽位保存预分配的 resource id、节点内 index、kind 与解析后的资源名）、submitState、stage 与 adapter state。[`CanvasFunctionFrozenReference`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenReference.java) 保存的是启动瞬间的 source node、resource 与 blob identity，外加权威媒体事实快照——因此执行期间引用关系、source 资源或 Function 配置的变化都不会改变该 Run 的输入。所有目标资源先以无 owner 形式物化，成功时再按计划顺序原子挂接。
+Run 启动时冻结的东西写在 [`CanvasFunctionFrozenRun`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenRun.java) 里：canvas/node identity、function definition、args、manifest、**输出计划**（[`CanvasFunctionFrozenOutput`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenOutput.java) 按槽位保存预分配的 resource id、节点内 index、kind 与解析后的资源名）、submitState、stage 与 adapter state。[`CanvasFunctionFrozenReference`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenReference.java) 保存的是启动瞬间的 source node、resource 与 blob identity，外加权威媒体事实快照；图中的引用关系或源资源变化不会改写这些已冻结的身份与媒体事实。所有目标资源先以无 owner 形式物化，成功时再按计划顺序原子挂接。
 
 Adapter 分为两阶段执行：`submit` 提交外部异步任务并返回初始状态；`execute` 查询与物化输出计划槽位，并必须按计划顺序返回 `run.outputResourceIds()`。Adapter 通过 [`CanvasFunctionExecutionContext`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 拿到最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读 frozen 原件的 `openOriginal`/`presignOriginal`，以及只接受计划内槽位的 `materializeOutput(output, stream)`（媒体 Blob）与 `materializeTextOutput(output, text)`（`TEXT` 内联文本）；槽位 id/index/kind 与冻结计划不一致、或物化入口与槽位类型不匹配时立即拒绝。媒体事实与字节走 [`CanvasFunctionBlobAccess`](../../canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionBlobAccess.java)，它只暴露 `BlobFacts`、原件 stream 和短期 URL。adapter 看不到数据库、对象 key 或 pin 表。
 
@@ -33,7 +33,7 @@ Adapter 分为两阶段执行：`submit` 提交外部异步任务并返回初始
 
 测试入口：
 
-- [`CanvasPluginApiArchitectureTest.java`](../../canvas/plugin-api/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasPluginApiArchitectureTest.java) 守卫零第三方依赖、包边界与 Catalog 单一事实源。
+- [`CanvasPluginApiArchitectureTest.java`](../../canvas/plugin-api/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasPluginApiArchitectureTest.java) 锁定只依赖 Core 的 SPI 包边界与 Catalog 单一事实源。
 - [`CanvasFunctionCatalogTest.java`](../../canvas/plugin-api/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalogTest.java) 锁定可用性声明与冻结排序；[`CanvasFunctionDefinitionTest.java`](../../canvas/plugin-api/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionDefinitionTest.java)、[`CanvasFunctionArgsSchemaTest.java`](../../canvas/plugin-api/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionArgsSchemaTest.java) 与 [`CanvasFunctionFrozenTest.java`](../../canvas/plugin-api/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenTest.java) 锁定 Function 定义、参数 Schema 校验与冻结引用的媒体事实。
 
 ---

@@ -93,7 +93,7 @@ Function 节点持有 [`CanvasFunction`](../../canvas/core/src/main/java/fun/fen
 
 测试入口：
 
-- [`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 守卫零生产依赖、包边界与禁止反向依赖 canvas-plugin-api 的 `function` 包；新增第三方 import 会直接失败。
+- [`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 锁定唯一生产依赖 Jackson core、领域包边界，并禁止反向依赖 canvas-plugin-api 的 `function` 包。
 - [`CanvasValueObjectTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasValueObjectTest.java) 覆盖 document/resource/reference/snapshot 的构造约束、集合 defensive copy、命令严格性与结果形态；节点与分组一致性另由命令规划测试覆盖。
 - [`CanvasCommandPlannerTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerTest.java)、[`CanvasCommandPlannerGroupTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerGroupTest.java) 与 [`CanvasCommandPlannerResourceTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerResourceTest.java) 覆盖节点、资源与分组的命令规划、前置条件校验与冲突判定。
 - [`CanvasJsonTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasJsonTest.java) 覆盖 JSON AST 解析与语义比较。
