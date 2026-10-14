@@ -253,10 +253,12 @@ manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖�
 代际随之写入快照、加密 AAD 与所有 CAS 条件，因此断连删除后按 version 0 重建的行
 不会被旧调用或迟到 finalize 误伤。主密钥留在部署文件，
 Plugin 只通过 `PluginCredentialAccess` 获得本次调用快照，不持有完整 Store。
-key 缺失或解密失败为 KEY_UNAVAILABLE，读写失败关闭。fmt1 密文不再兼容读取，
-需按离线备份批准流程转换。
+key 缺失或解密失败为 KEY_UNAVAILABLE，读路径不返回未认证载荷；主密钥不可用时禁止写入。
+Plugin fmt1 密文不再兼容读取，已有凭据须在备份并批准迁移后离线转换。
+Skill 令牌共用 AES-GCM 与 AAD 编码原语，但独立保持既有 fmt1 与 Package 身份绑定，不引入插件认证代际。
 
-刷新以短事务 claim lease，事务外一次 renewal，再按代际、token、version 和截止时刻 finalize。
+刷新以短事务 claim lease，请求前核验代际、token、version 与有效截止时刻，
+事务外只执行一次 renewal，再按代际、token、version finalize。
 只扫描已声明刷新器的插件，按最早 nextRefreshAt 安排，保存后唤醒，poll 是最慢兜底。
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；
 已发而无确定响应、过期在途 lease 为 REFRESH_UNCERTAIN，要求重新认证。

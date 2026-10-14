@@ -34,7 +34,7 @@ import java.util.UUID;
  * <pre>
  * due row
  *   -> 单语句短事务：claim 恰好一行 refresh lease（version + 1）
- *   -> 发请求前核验当前 lease token / version 仍属于自己且截止有效
+ *   -> 发请求前核验认证代际、lease token / version 仍属于自己且截止有效
  *   -> 事务外 external refresh exactly once
  *   -> 单语句短事务：
  *        success -> replace encrypted payload + expiry + nextRefreshAt

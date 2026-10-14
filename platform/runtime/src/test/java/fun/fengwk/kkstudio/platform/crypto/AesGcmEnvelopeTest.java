@@ -35,6 +35,20 @@ class AesGcmEnvelopeTest {
     assertTrue(envelope.length > AesGcmEnvelope.NONCE_BYTES);
   }
 
+  /** 空明文仍有完整认证 tag，不等于截断密文。 */
+  @Test
+  void authenticatesEmptyPlaintext() throws GeneralSecurityException {
+    byte[] envelope = AesGcmEnvelope.encrypt(key((byte) 1), FORMAT, AAD, new byte[0]);
+    assertArrayEquals(new byte[0], AesGcmEnvelope.decrypt(key((byte) 1), FORMAT, AAD, envelope));
+    assertThrows(
+        GeneralSecurityException.class,
+        () -> AesGcmEnvelope.decrypt(key((byte) 1), FORMAT, AAD, Arrays.copyOf(envelope, 28)));
+    envelope[envelope.length - 1] ^= 0x01;
+    assertThrows(
+        GeneralSecurityException.class,
+        () -> AesGcmEnvelope.decrypt(key((byte) 1), FORMAT, AAD, envelope));
+  }
+
   @Test
   void usesFreshNoncePerEncryption() {
     byte[] first = AesGcmEnvelope.encrypt(key((byte) 1), FORMAT, AAD, PLAINTEXT);

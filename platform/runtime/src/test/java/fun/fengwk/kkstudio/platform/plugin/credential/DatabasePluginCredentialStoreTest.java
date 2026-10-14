@@ -142,6 +142,34 @@ class DatabasePluginCredentialStoreTest {
     assertNull(repository.getDirect(PLUGIN_ID), "repository must remain unmodified on key failure");
   }
 
+  /** 密文不能通过修改代际元数据搬运到另一代际；读路径必须失败关闭。 */
+  @Test
+  void changedGenerationMetadataCannotAuthenticateTheOldCiphertext() {
+    store.save(PLUGIN_ID, validMaterial());
+    PluginCredentialRow row = repository.getDirect(PLUGIN_ID);
+    repository.setDirect(
+        new PluginCredentialRow(
+            row.pluginId(),
+            UUID.randomUUID(),
+            row.encryptedPayload(),
+            row.region(),
+            row.expiresAt(),
+            row.nextRefreshAt(),
+            row.status(),
+            row.lastRefreshedAt(),
+            row.lastRefreshError(),
+            row.refreshLeaseToken(),
+            row.refreshLeaseUntil(),
+            row.version(),
+            row.createTime(),
+            row.updateTime()));
+    assertEquals(PluginCredentialStatus.KEY_UNAVAILABLE, store.projection(PLUGIN_ID).status());
+    PluginCredentialUnavailableException error =
+        assertThrows(PluginCredentialUnavailableException.class, () -> store.resolve(PLUGIN_ID));
+    assertEquals(PluginCredentialUnavailableReason.KEY_UNAVAILABLE, error.reason());
+    assertFalse(error.getMessage().contains(SECRET_TOKEN));
+  }
+
   /** resolve() 状态矩阵与不泄露明文 payload 断言： 无行、无密钥、密文篡改、REAUTH_REQUIRED、REFRESH_UNCERTAIN、已过期。 */
   @Test
   void resolveStatusMatrixEnforcesSecurityAndCorrectReasons() {

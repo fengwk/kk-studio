@@ -73,7 +73,7 @@ public final class AesGcmEnvelope {
     requireAes256Key(key);
     requireFormatVersion(formatVersion);
     Objects.requireNonNull(aad, "aad");
-    if (envelope == null || envelope.length <= OVERHEAD_BYTES) {
+    if (envelope == null || envelope.length < OVERHEAD_BYTES) {
       throw new GeneralSecurityException("credential envelope is truncated");
     }
     if (envelope[0] != (byte) formatVersion) {
