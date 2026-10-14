@@ -161,6 +161,138 @@ export const settingsCatalog = {
     'en-US': 'Deployment master key is unavailable. Credential operations are locked.',
     'zh-CN': '部署主密钥不可用，凭据操作已锁定。',
   },
+  'plugins.configure': {
+    'en-US': 'Configure',
+    'zh-CN': '配置',
+  },
+  'plugins.configDialog.title': {
+    'en-US': 'Configure Plugin: {{name}}',
+    'zh-CN': '配置插件：{{name}}',
+  },
+  'plugins.configDialog.revision': {
+    'en-US': 'Current Revision',
+    'zh-CN': '当前配置修订',
+  },
+  'plugins.configDialog.generalSettings': {
+    'en-US': 'Configuration',
+    'zh-CN': '普通配置',
+  },
+  'plugins.configDialog.secrets': {
+    'en-US': 'Secrets',
+    'zh-CN': '秘密配置',
+  },
+  'plugins.configDialog.jsonEditor': {
+    'en-US': 'JSON Editor',
+    'zh-CN': 'JSON 编辑',
+  },
+  'plugins.configDialog.formEditor': {
+    'en-US': 'Form Editor',
+    'zh-CN': '表单编辑',
+  },
+  'plugins.configDialog.save': {
+    'en-US': 'Save Configuration',
+    'zh-CN': '保存配置',
+  },
+  'plugins.configDialog.saving': {
+    'en-US': 'Saving…',
+    'zh-CN': '正在保存…',
+  },
+  'plugins.configDialog.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'plugins.configDialog.conflict': {
+    'en-US': 'Configuration was modified by another operation (version conflict). Please refresh and review latest changes.',
+    'zh-CN': '配置已被其他操作修改（版本冲突），请刷新并查看最新改动。',
+  },
+  'plugins.configDialog.savePending': {
+    'en-US': 'Configuration is saved but this node has not applied it yet.',
+    'zh-CN': '配置已保存，但本节点尚未应用。',
+  },
+  'plugins.configDialog.unsupportedSchema': {
+    'en-US': 'Schema contains unsupported keywords: {{error}}. Switched to JSON editor mode.',
+    'zh-CN': 'Schema 包含不支持的关键字：{{error}}。已自动切换至 JSON 编辑模式。',
+  },
+  'plugins.configDialog.jsonSyntaxError': {
+    'en-US': 'Invalid JSON format: {{error}}',
+    'zh-CN': 'JSON 格式无效：{{error}}',
+  },
+  'plugins.secrets.configured': {
+    'en-US': 'Configured',
+    'zh-CN': '已配置',
+  },
+  'plugins.secrets.notConfigured': {
+    'en-US': 'Not Configured',
+    'zh-CN': '未配置',
+  },
+  'plugins.secrets.keep': {
+    'en-US': 'Keep',
+    'zh-CN': '保持不变',
+  },
+  'plugins.secrets.set': {
+    'en-US': 'Set',
+    'zh-CN': '设置新值',
+  },
+  'plugins.secrets.clear': {
+    'en-US': 'Clear',
+    'zh-CN': '清除',
+  },
+  'plugins.secrets.clearConfirmPrompt': {
+    'en-US': 'Confirm clearing this secret upon save?',
+    'zh-CN': '确认保存时清除此秘密凭据？',
+  },
+  'plugins.secrets.inputPlaceholder': {
+    'en-US': 'Enter secret value',
+    'zh-CN': '输入秘密值',
+  },
+  'plugins.epochAndRevision': {
+    'en-US': 'Epoch & Revision',
+    'zh-CN': '版本坐标',
+  },
+  'plugins.desiredEpoch': {
+    'en-US': 'Desired Epoch',
+    'zh-CN': '期望 Epoch',
+  },
+  'plugins.appliedEpoch': {
+    'en-US': 'Applied Epoch',
+    'zh-CN': '已应用 Epoch',
+  },
+  'plugins.desiredRevision': {
+    'en-US': 'Desired Revision',
+    'zh-CN': '期望修订',
+  },
+  'plugins.appliedRevision': {
+    'en-US': 'Applied Revision',
+    'zh-CN': '已应用修订',
+  },
+  'plugins.applicationStatus': {
+    'en-US': 'Application Status',
+    'zh-CN': '应用状态',
+  },
+  'plugins.applicationStatus.applied': {
+    'en-US': 'Applied',
+    'zh-CN': '已生效',
+  },
+  'plugins.applicationStatus.pending': {
+    'en-US': 'Pending Application',
+    'zh-CN': '待应用',
+  },
+  'plugins.capabilities': {
+    'en-US': 'Active Capabilities',
+    'zh-CN': '生效能力',
+  },
+  'plugins.capabilities.tools': {
+    'en-US': 'Tools',
+    'zh-CN': '模型工具',
+  },
+  'plugins.capabilities.canvasFunctions': {
+    'en-US': 'Canvas Functions',
+    'zh-CN': 'Canvas 函数',
+  },
+  'plugins.capabilities.none': {
+    'en-US': 'None',
+    'zh-CN': '无',
+  },
   'settings.tabs.aiRuntime': {
     'en-US': 'AI Runtime',
     'zh-CN': 'AI 运行时',

@@ -9,11 +9,13 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { PluginCard } from '@/features/ai/plugins/PluginCard'
 import { PluginConnectModal } from '@/features/ai/plugins/PluginConnectModal'
+import { PluginConfigModal } from '@/features/ai/plugins/PluginConfigModal'
 import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
 
 export function PluginsTab() {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const [configureTarget, setConfigureTarget] = useState<PluginDTO | null>(null)
   const [connectTarget, setConnectTarget] = useState<PluginDTO | null>(null)
   const [disconnectTarget, setDisconnectTarget] = useState<PluginDTO | null>(null)
   const [disconnectError, setDisconnectError] = useState<string | null>(null)
@@ -64,6 +66,7 @@ export function PluginsTab() {
             <PluginCard
               key={plugin.pluginId}
               plugin={plugin}
+              onConfigure={() => setConfigureTarget(plugin)}
               onConnect={() => setConnectTarget(plugin)}
               onDisconnect={() => {
                 setDisconnectError(null)
@@ -72,6 +75,17 @@ export function PluginsTab() {
             />
           ))}
         </ResourceGrid>
+      )}
+
+      {configureTarget && (
+        <PluginConfigModal
+          plugin={configureTarget}
+          onClose={() => setConfigureTarget(null)}
+          onSuccess={() => {
+            setConfigureTarget(null)
+            void queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all })
+          }}
+        />
       )}
 
       {connectTarget && (

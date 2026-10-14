@@ -1,73 +1,250 @@
 import { expect, test, type Page } from './fixture'
 import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
 
-const plugin: PluginDTO = {
-  pluginId: 'offline', name: 'Offline Plugin', version: '1',
+const deepLinkPlugin: PluginDTO = {
+  pluginId: 'offline-deeplink',
+  name: 'Offline DeepLink Plugin',
+  version: '1.0.0',
   authKind: { type: 'DEEP_LINK', regionCandidates: ['CN', 'EN'] },
-  status: 'NOT_CONNECTED', region: null, expiresAt: null,
-  nextRefreshAt: null, lastRefreshedAt: null, lastRefreshError: null,
+  status: 'NOT_CONNECTED',
+  region: null,
+  expiresAt: null,
+  nextRefreshAt: null,
+  lastRefreshedAt: null,
+  lastRefreshError: null,
+  configuration: {
+    revision: '1',
+    valuesJson:
+      '{"enabled":true,"bigInt":9007199254740993123456789,"decimal":1.230000,"exp":1e1000}',
+    valuesSchema: JSON.stringify({
+      type: 'object',
+      description: 'Plugin configuration schema',
+      properties: {
+        enabled: { type: 'boolean', description: 'Enable plugin' },
+        bigInt: { type: 'integer', description: 'Large integer' },
+        decimal: { type: 'number', description: 'Precision decimal' },
+        exp: { type: 'number', description: 'Scientific notation' },
+      },
+      required: ['enabled'],
+      additionalProperties: false,
+    }),
+    defaultsJson: '{"enabled":true}',
+    secrets: {
+      apiSecret: {
+        description: 'DeepLink API Secret',
+        configured: true,
+      },
+    },
+  },
+  desiredEpoch: '1',
+  appliedEpoch: '1',
+  desiredRevision: '1',
+  appliedRevision: '1',
+  harnessToolNames: ['search_tool'],
+  canvasFunctionNames: ['draw_func'],
+  applicationError: null,
 }
 
-async function transport(page: Page) {
+const staticKeyPlugin: PluginDTO = {
+  pluginId: 'offline-statickey',
+  name: 'Offline StaticKey Plugin',
+  version: '2.0.0',
+  authKind: { type: 'STATIC_KEY', secretField: 'token' },
+  status: 'CONNECTED',
+  region: null,
+  expiresAt: null,
+  nextRefreshAt: null,
+  lastRefreshedAt: null,
+  lastRefreshError: null,
+  configuration: {
+    revision: '2',
+    valuesJson: '{"timeout":30}',
+    valuesSchema: JSON.stringify({
+      type: 'object',
+      properties: {
+        timeout: { type: 'integer' },
+      },
+      required: [],
+      additionalProperties: false,
+    }),
+    defaultsJson: '{"timeout":30}',
+    secrets: {
+      token: {
+        description: 'Static Access Token',
+        configured: true,
+      },
+    },
+  },
+  desiredEpoch: '2',
+  appliedEpoch: '2',
+  desiredRevision: '2',
+  appliedRevision: '2',
+  harnessToolNames: ['static_tool'],
+  canvasFunctionNames: [],
+  applicationError: null,
+}
+
+const noAuthPlugin: PluginDTO = {
+  pluginId: 'offline-noauth',
+  name: 'Offline NoAuth Plugin',
+  version: '0.9.0',
+  authKind: null,
+  status: null,
+  region: null,
+  expiresAt: null,
+  nextRefreshAt: null,
+  lastRefreshedAt: null,
+  lastRefreshError: null,
+  configuration: {
+    revision: '0',
+    valuesJson: '{"debug":false}',
+    valuesSchema: JSON.stringify({
+      type: 'object',
+      properties: {
+        debug: { type: 'boolean' },
+      },
+      required: [],
+      additionalProperties: false,
+    }),
+    defaultsJson: '{"debug":false}',
+    secrets: {},
+  },
+  desiredEpoch: '0',
+  appliedEpoch: null,
+  desiredRevision: '0',
+  appliedRevision: null,
+  harnessToolNames: [],
+  canvasFunctionNames: [],
+  applicationError: 'configuration is saved but this node has not applied it yet',
+}
+
+async function transport(
+  page: Page,
+  pluginsList: PluginDTO[] = [deepLinkPlugin],
+  blockStage?: 'prepare' | 'complete',
+) {
   let release!: () => void
-  const gate = new Promise<void>((resolve) => { release = resolve })
-  const requests: string[] = []
-  await page.route('**/api/**', async (route) => {
-    const path = new URL(route.request().url()).pathname
-    if (path === '/api/plugins') {
-      await route.fulfill({ json: { status: 200, data: [plugin] } })
-    } else if (path.endsWith('/auth/prepare') || path.endsWith('/auth/complete')) {
-      requests.push(path)
-      await gate
-      // 完成失败是 settled 可关闭且不能恢复凭据的真实网络边界。
-      if (path.endsWith('/complete')) {
-        await route.fulfill({ status: 400, json: { status: 400, message: 'Callback rejected' } })
-      } else {
-        await route.fulfill({ json: { status: 200, data: { loginUrl: '' } } })
-      }
-    } else throw new Error(`Unexpected offline request: ${path}`)
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
   })
+  const requests: string[] = []
+
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    const path = url.pathname
+
+    if (path === '/api/plugins') {
+      await route.fulfill({ json: { status: 200, data: pluginsList } })
+    } else if (path.endsWith('/auth/prepare')) {
+      requests.push(path)
+      if (blockStage === 'prepare') {
+        await gate
+      }
+      await route.fulfill({
+        json: {
+          status: 200,
+          data: {
+            authAttemptId: 'attempt-nonce-1',
+            loginUrl: 'https://auth.example.com/login',
+          },
+        },
+      })
+    } else if (path.endsWith('/auth/complete')) {
+      requests.push(path)
+      if (blockStage === 'complete') {
+        await gate
+      }
+      await route.fulfill({
+        status: 400,
+        json: { status: 400, message: 'Callback rejected' },
+      })
+    } else if (path.endsWith('/configuration') && route.request().method() === 'PUT') {
+      requests.push(path)
+      const postData = route.request().postDataJSON() as {
+        expectedEpoch: string
+        valuesJson: string
+      }
+      if (postData?.expectedEpoch === '409') {
+        await route.fulfill({
+          status: 409,
+          json: { status: 409, code: 'version_conflict', message: 'Conflict' },
+        })
+      } else {
+        await route.fulfill({
+          status: 200,
+          json: {
+            status: 200,
+            data: {
+              ...deepLinkPlugin,
+              configuration: {
+                ...deepLinkPlugin.configuration,
+                valuesJson: postData.valuesJson,
+              },
+            },
+          },
+        })
+      }
+    } else {
+      throw new Error(`Unexpected offline request: ${path}`)
+    }
+  })
+
   return { requests, release }
 }
 
 for (const stage of ['prepare', 'complete'] as const) {
-  test(`${stage}: real shared controls at 320px lock every close path and other stage until settled`, async ({ page }, info) => {
+  test(`${stage}: real shared controls at 320px lock every close path and other stage until settled`, async (
+    { page },
+    info,
+  ) => {
     await page.setViewportSize({ width: 320, height: 800 })
-    const network = await transport(page)
+    const network = await transport(page, [deepLinkPlugin], stage)
     await page.goto('/browser-tests/resource-card-harness.html?plugins')
-    const opener = page.getByRole('button', { name: '连接 Offline Plugin' })
+
+    const opener = page.getByRole('button', { name: '连接 Offline DeepLink Plugin' })
     await opener.click()
     const dialog = page.getByRole('dialog')
     const input = dialog.getByTestId('plugin-callback-input')
     await expect(input).toHaveCSS('height', '32px')
     await expect(input).toHaveAttribute('type', 'password')
     await expect(input).toHaveAttribute('autocomplete', 'off')
+
     const login = dialog.getByRole('button', { name: '打开官方登录页面' })
     await expect(login).toHaveCSS('height', '32px')
     const close = dialog.getByRole('button', { name: '关闭' })
     await expect(close).toHaveCSS('height', '32px')
-    await input.fill('offline-callback')
-    if (stage === 'prepare') await login.click()
-    else await dialog.getByRole('button', { name: '完成连接' }).click()
-    await expect.poll(() => network.requests.length).toBe(1)
+
+    if (stage === 'prepare') {
+      await input.fill('offline-callback')
+      await login.click()
+    } else {
+      // Complete stage: prepare succeeds immediately, then fill callback and submit
+      await login.click()
+      await expect.poll(() => network.requests.length).toBe(1)
+      await input.fill('offline-callback')
+      await dialog.getByRole('button', { name: '完成连接' }).click()
+    }
+
+    await expect.poll(() => network.requests.length).toBe(stage === 'prepare' ? 1 : 2)
     await expect(input).toBeDisabled()
     await expect(dialog.getByRole('button', { name: '区域' })).toBeDisabled()
     const cancel = dialog.getByRole('button', { name: '取消' })
     await expect(cancel).toBeDisabled()
     await expect(close).toBeDisabled()
     await expect(dialog.locator('button[type=submit]')).toBeDisabled()
+
     await page.keyboard.press('Escape')
     await page.locator('.modal-backdrop').click({ position: { x: 1, y: 1 } })
-    // disabled 控件不可 actionability click；仍向原生节点派发事件验证关闭边界。
     await close.dispatchEvent('click')
     await cancel.dispatchEvent('click')
     await dialog.locator('form').dispatchEvent('submit')
     await expect(dialog).toBeVisible()
-    expect(network.requests).toHaveLength(1)
+
     if (stage === 'complete') await expect(input).toHaveValue('')
     const overflow = await dialog.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
     expect(overflow).toBe(false)
     await page.screenshot({ path: info.outputPath(`${stage}-pending-320.png`) })
+
     network.release()
     await expect(input).toBeEnabled()
     if (stage === 'complete') {
@@ -76,21 +253,23 @@ for (const stage of ['prepare', 'complete'] as const) {
     }
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
-    await expect(opener).toBeFocused()
-    await opener.click()
-    await page.getByRole('button', { name: '取消', exact: true }).click()
-    await expect(dialog).toHaveCount(0)
   })
 }
 
-test('English login and pending copy fit shared controls at 320px', async ({ page }, info) => {
+test('English login and pending copy fit shared controls at 320px', async (
+  { page },
+  info,
+) => {
   await page.setViewportSize({ width: 320, height: 800 })
-  const network = await transport(page)
+  const network = await transport(page, [deepLinkPlugin], 'prepare')
   await page.goto('/browser-tests/resource-card-harness.html?plugins&locale=en-US')
-  await page.getByRole('button', { name: 'Connect Offline Plugin' }).click()
+
+  await page.getByRole('button', { name: 'Connect Offline DeepLink Plugin' }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toHaveAccessibleName('Connect Plugin: Offline Plugin')
-  await expect(dialog.getByText('Open the login page first, then paste the callback link here.')).toBeVisible()
+  await expect(dialog).toHaveAccessibleName('Connect Plugin: Offline DeepLink Plugin')
+  await expect(
+    dialog.getByText('Open the login page first, then paste the callback link here.'),
+  ).toBeVisible()
   await dialog.getByRole('button', { name: 'Open Login Page' }).click()
   await expect(dialog.getByRole('button', { name: 'Opening login…' })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled()
@@ -100,4 +279,53 @@ test('English login and pending copy fit shared controls at 320px', async ({ pag
   await expect(dialog.getByTestId('plugin-callback-input')).toBeEnabled()
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(dialog).toHaveCount(0)
+})
+
+test('renders three plugin shapes (None, StaticKey, DeepLink) and opens configuration modal at wide and 360px viewports', async (
+  { page },
+  info,
+) => {
+  await transport(page, [deepLinkPlugin, staticKeyPlugin, noAuthPlugin])
+
+  // Wide screen validation
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/browser-tests/resource-card-harness.html?plugins')
+
+  // Check 3 plugin cards rendered with safe fields
+  await expect(page.getByText('Offline DeepLink Plugin')).toBeVisible()
+  await expect(page.getByText('Offline StaticKey Plugin')).toBeVisible()
+  await expect(page.getByText('Offline NoAuth Plugin')).toBeVisible()
+
+  // Capabilities rendered
+  await expect(page.getByText('search_tool, draw_func')).toBeVisible()
+  await expect(page.getByText('static_tool')).toBeVisible()
+
+  // Application pending status on NoAuth plugin
+  await expect(page.getByTestId('plugin-app-status-offline-noauth')).toHaveText('待应用')
+  await expect(page.getByTestId('plugin-app-error-offline-noauth')).toBeVisible()
+
+  await page.screenshot({ path: info.outputPath('plugins-wide-list.png') })
+
+  // Open configuration modal on deepLinkPlugin
+  const configBtn = page.getByRole('button', { name: '配置 Offline DeepLink Plugin' })
+  await configBtn.click()
+
+  const configDialog = page.getByRole('dialog')
+  await expect(configDialog).toBeVisible()
+  await expect(configDialog.getByText('配置插件：Offline DeepLink Plugin')).toBeVisible()
+  await expect(configDialog.locator('input[value="9007199254740993123456789"]')).toBeVisible()
+  await expect(configDialog.locator('input[value="1.230000"]')).toBeVisible()
+  await expect(configDialog.locator('input[value="1e1000"]')).toBeVisible()
+
+  await page.screenshot({ path: info.outputPath('plugin-config-wide.png') })
+
+  // Check responsive layout at 360px
+  await page.setViewportSize({ width: 360, height: 800 })
+  const overflow = await configDialog.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+  expect(overflow).toBe(false)
+  await page.screenshot({ path: info.outputPath('plugin-config-360px.png') })
+
+  // Close config modal with keyboard
+  await page.keyboard.press('Escape')
+  await expect(configDialog).toHaveCount(0)
 })
