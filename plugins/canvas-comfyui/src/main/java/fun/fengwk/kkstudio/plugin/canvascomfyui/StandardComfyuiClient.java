@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -8,6 +9,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.common.io.DeadlineResponseBody;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
@@ -18,12 +21,12 @@ import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -31,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /** 只使用标准 ComfyUI HTTP API 的有界、流式客户端。 */
+@Slf4j
 public final class StandardComfyuiClient {
 
   static final int MAX_JSON_BYTES = 1024 * 1024;
@@ -156,14 +160,15 @@ public final class StandardComfyuiClient {
     }
     boolean completed = completedValue.booleanValue();
     if ("error".equals(statusText) || "failed".equals(statusText)) {
-      return H3ComfyHistory.error(errorMessage(status));
+      // 只回传受控分类，不回显远端 messages 等不受控字段。
+      return H3ComfyHistory.error("ComfyUI execution failed with status=" + statusText);
     }
     if (!completed) {
       return H3ComfyHistory.pending();
     }
     if (!"success".equals(statusText)) {
-      throw new IllegalArgumentException(
-          "unsupported terminal ComfyUI history status: " + statusText);
+      // 远端 status_str 不受控：只回传固定分类，不记录也不回显原值。
+      throw new IllegalArgumentException("ComfyUI history terminal status is not supported");
     }
     return H3ComfyHistory.success(extractOutput(entry));
   }
@@ -178,28 +183,36 @@ public final class StandardComfyuiClient {
                 + query(output.subfolder())
                 + "&type="
                 + query(output.type()));
-    HttpResponse<InputStream> response = sendStream(request(uri).GET().build());
-    if (response.statusCode() / 100 != 2) {
+    ComfyResponse response = open(request(uri).GET().build());
+    try {
+      if (response.statusCode() / 100 != 2) {
+        throw new IllegalStateException("ComfyUI view failed with HTTP " + response.statusCode());
+      }
+      long length;
+      try {
+        length =
+            response
+                .headers()
+                .firstValueAsLong("Content-Length")
+                .orElseThrow(
+                    () ->
+                        new IllegalArgumentException(
+                            "ComfyUI view response requires Content-Length"));
+      } catch (NumberFormatException error) {
+        // NumberFormatException 的消息包含远端原值，不传播到错误消息。
+        throw new IllegalArgumentException("ComfyUI view Content-Length is invalid");
+      }
+      if (length <= 0L) {
+        throw new IllegalArgumentException("ComfyUI view Content-Length must be positive");
+      }
+      String mediaType =
+          response.headers().firstValue("Content-Type").orElse("application/octet-stream");
+      response.body().expectLength(length);
+      return new H3ComfyDownload(response.body(), length, mediaType);
+    } catch (RuntimeException error) {
       closeQuietly(response.body());
-      throw new IllegalStateException("ComfyUI view failed with HTTP " + response.statusCode());
+      throw error;
     }
-    long length =
-        response
-            .headers()
-            .firstValueAsLong("Content-Length")
-            .orElseThrow(
-                () -> {
-                  closeQuietly(response.body());
-                  return new IllegalArgumentException(
-                      "ComfyUI view response requires Content-Length");
-                });
-    if (length <= 0L) {
-      closeQuietly(response.body());
-      throw new IllegalArgumentException("ComfyUI view Content-Length must be positive");
-    }
-    String mediaType =
-        response.headers().firstValue("Content-Type").orElse("application/octet-stream");
-    return new H3ComfyDownload(response.body(), length, mediaType);
   }
 
   public boolean cancelPending(String promptId) {
@@ -215,15 +228,15 @@ public final class StandardComfyuiClient {
     body.putArray("delete").add(promptId);
     HttpRequest request =
         request("queue").header("Content-Type", "application/json").POST(jsonBody(body)).build();
-    HttpResponse<InputStream> response = send(request);
-    try (InputStream content = response.body()) {
+    ComfyResponse response = open(request);
+    try (DeadlineResponseBody content = response.body()) {
+      if (response.statusCode() / 100 != 2) {
+        throw new IllegalStateException(
+            "ComfyUI queue delete failed with HTTP " + response.statusCode());
+      }
       readBounded(content, MAX_JSON_BYTES);
     } catch (IOException error) {
-      throw new UncheckedIOException("cannot read ComfyUI queue response", error);
-    }
-    if (response.statusCode() / 100 != 2) {
-      throw new IllegalStateException(
-          "ComfyUI queue delete failed with HTTP " + response.statusCode());
+      throw readFailure(error);
     }
     return true;
   }
@@ -255,57 +268,77 @@ public final class StandardComfyuiClient {
     return new H3OutputDescriptor(filename, subfolder, type);
   }
 
-  private String errorMessage(ObjectNode status) {
-    JsonNode messages = status.get("messages");
-    if (messages instanceof ArrayNode array && !array.isEmpty()) {
-      List<String> details = new ArrayList<>(array.size());
-      for (JsonNode item : array) {
-        if (item.isTextual()) {
-          details.add(item.textValue());
-        } else if (item != null) {
-          details.add(item.toString());
-        }
-      }
-      if (!details.isEmpty()) {
-        return String.join("; ", details);
-      }
-    }
-    return "unspecified ComfyUI execution failure";
-  }
-
   private JsonNode sendJson(HttpRequest request) {
-    HttpResponse<InputStream> response = send(request);
-    try (InputStream content = response.body()) {
-      byte[] bytes = readBounded(content, MAX_JSON_BYTES);
+    ComfyResponse response = open(request);
+    try (DeadlineResponseBody content = response.body()) {
       if (response.statusCode() / 100 != 2) {
+        // 远端正文不受控，公开错误只保留 HTTP 数值事实。
         throw new IllegalStateException(
-            "ComfyUI request failed with HTTP "
-                + response.statusCode()
-                + ": "
-                + new String(bytes, StandardCharsets.UTF_8));
+            "ComfyUI request failed with HTTP " + response.statusCode());
       }
+      byte[] bytes = readBounded(content, MAX_JSON_BYTES);
       return mapper.readTree(bytes);
     } catch (JacksonException error) {
-      throw new IllegalArgumentException("cannot parse ComfyUI JSON response", error);
+      // 解析错误可能带 body 字段名/片段，公开错误只给固定事实，不串原始 cause。
+      throw new IllegalArgumentException("cannot parse ComfyUI JSON response");
     } catch (IOException error) {
-      throw new UncheckedIOException("cannot read ComfyUI response body", error);
+      throw readFailure(error);
     }
   }
 
-  private HttpResponse<InputStream> send(HttpRequest request) {
+  /**
+   * 在 send 前冻结剩余预算，并把同一截止点延伸到响应体读取；headers 与 body 共享一份 requestTimeout。
+   *
+   * <p>返回的 body 由调用方负责关闭，以便注销看门狗并释放连接。
+   */
+  private ComfyResponse open(HttpRequest request) {
+    long deadlineNanos = System.nanoTime() + request.timeout().orElseThrow().toNanos();
+    HttpResponse<InputStream> response;
     try {
-      return client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+      response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException error) {
-      throw new UncheckedIOException("cannot complete ComfyUI HTTP request", error);
+      throw transportFailure(error);
+    } catch (IllegalArgumentException error) {
+      // JDK 可能在返回 body 前解析非法 Content-Length；不回显 header 原值或原始 cause。
+      throw new IllegalStateException("ComfyUI response headers are invalid");
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("ComfyUI HTTP request was interrupted", error);
+      throw new IllegalStateException("ComfyUI HTTP request was interrupted");
     }
+    return new ComfyResponse(
+        response.statusCode(),
+        response.headers(),
+        new DeadlineResponseBody(response.body(), deadlineNanos));
   }
 
-  private HttpResponse<InputStream> sendStream(HttpRequest request) {
-    return send(request);
+  /**
+   * send 自身 IOException 的 class/message 可能含 URI 或 header 值，公开错误只给固定事实，不串原始 cause。
+   *
+   * <p>调用方上传流的长度诊断由本地事实构成，剥离 JDK 传输 cause 后仍按原样保留。
+   */
+  private static RuntimeException transportFailure(IOException error) {
+    for (Throwable current = error; current != null; current = current.getCause()) {
+      if (current instanceof UploadContentException upload) {
+        return new UncheckedIOException(new UploadContentException(upload.getMessage()));
+      }
+    }
+    if (error instanceof HttpTimeoutException) {
+      return new UncheckedIOException(
+          new HttpTimeoutException("ComfyUI request timed out waiting for response headers"));
+    }
+    return new UncheckedIOException(new IOException("ComfyUI HTTP transport failed"));
   }
+
+  /** body 读取失败：超时仍是 HttpTimeoutException，其余只给固定信息，不回显远端正文或原始 cause。 */
+  private static RuntimeException readFailure(IOException error) {
+    if (error instanceof HttpTimeoutException) {
+      return new UncheckedIOException(
+          new HttpTimeoutException("ComfyUI response read exceeded the request deadline"));
+    }
+    return new UncheckedIOException(new IOException("cannot read ComfyUI response body"));
+  }
+
+  private record ComfyResponse(int statusCode, HttpHeaders headers, DeadlineResponseBody body) {}
 
   private HttpRequest.Builder request(String relativePath) {
     return request(endpoint(relativePath));
@@ -333,7 +366,8 @@ public final class StandardComfyuiClient {
       byte[] bytes = mapper.writeValueAsBytes(body);
       return HttpRequest.BodyPublishers.ofByteArray(bytes);
     } catch (JacksonException error) {
-      throw new IllegalStateException("cannot serialize ComfyUI request JSON", error);
+      // 序列化错误可能带 prompt 片段，公开错误只给固定事实，不串原始 cause。
+      throw new IllegalStateException("cannot serialize ComfyUI request JSON");
     }
   }
 
@@ -410,14 +444,14 @@ public final class StandardComfyuiClient {
       if (remaining == 0L) {
         int extra = in.read(buffer, offset, length);
         if (extra > 0) {
-          throw new IOException("upload content is longer than declared contentLength");
+          throw new UploadContentException("upload content is longer than declared contentLength");
         }
         return extra;
       }
       int requested = (int) Math.min(length, remaining);
       int read = in.read(buffer, offset, requested);
       if (read < 0) {
-        throw new IOException(shortContent());
+        throw new UploadContentException(shortContent());
       }
       remaining -= read;
       return read;
@@ -425,6 +459,14 @@ public final class StandardComfyuiClient {
 
     private String shortContent() {
       return "upload content ended after " + (declared - remaining) + " of " + declared + " bytes";
+    }
+  }
+
+  /** 只描述调用方自己声明的长度事实，不含 URI、header 或远端内容；让上传长度诊断在剥离 JDK 传输 cause 后仍可保留。 */
+  private static final class UploadContentException extends IOException {
+
+    private UploadContentException(String message) {
+      super(message);
     }
   }
 
@@ -489,7 +531,14 @@ public final class StandardComfyuiClient {
     if (raw == null || raw.isBlank()) {
       throw new IllegalArgumentException("baseUrl must not be blank");
     }
-    URI uri = URI.create(raw.strip());
+    String trimmed = raw.strip();
+    URI uri;
+    try {
+      uri = URI.create(trimmed);
+    } catch (IllegalArgumentException error) {
+      // URI.create 的消息会带原始串（可能含 userInfo 凭据）；只给固定分类。
+      throw new IllegalArgumentException("baseUrl must be a valid URI");
+    }
     String scheme = uri.getScheme();
     if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
       throw new IllegalArgumentException("baseUrl must use http or https scheme");
@@ -567,12 +616,13 @@ public final class StandardComfyuiClient {
     return path(value == null ? "" : value);
   }
 
+  /** 清理阶段的释放失败不影响主流程，也绝不记录原始 Throwable/消息；只记录受控类型，Error 继续上抛。 */
   private static void closeQuietly(AutoCloseable closeable) {
     if (closeable != null) {
       try {
         closeable.close();
-      } catch (Exception ignored) {
-        // quiet
+      } catch (Exception error) {
+        log.debug("ComfyUI client cleanup close failed type={}", error.getClass().getSimpleName());
       }
     }
   }
