@@ -6,6 +6,7 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -72,6 +73,11 @@ final class AnthropicRequestEncoder {
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
+
+  /** 语义比对专用读取器：数值按 scale 无关归一，只用于 replay 与 durable 的一致性比对，不参与 wire 输出。 */
+  private static final ObjectReader COMPARISON_READER =
+      OBJECT_MAPPER.reader().with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> ALLOWED_IMAGE_TYPES =
@@ -702,12 +708,14 @@ final class AnthropicRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST,
             "replay payload tool call id/name does not match durable content");
       }
-      JsonNode pInput =
-          parseJsonObject(pCall.argumentsJson(), "replay tool call input must be a JSON object");
-      JsonNode dInput =
-          parseJsonObject(
-              dCall.argumentsJson(), "durable tool call arguments must be a JSON object");
-      if (!pInput.equals(dInput)) {
+      // 合法性边界不变：两侧参数仍按 wire 同款严格对象校验。
+      parseJsonObject(pCall.argumentsJson(), "replay tool call input must be a JSON object");
+      parseJsonObject(dCall.argumentsJson(), "durable tool call arguments must be a JSON object");
+      // 语义一致性按数值 scale 无关比对（1.0 与 1.00 同值）；比较专用 reader 只读取比较树，
+      // wire 仍使用 replay 原生 input，输出形态不被改写。
+      if (!COMPARISON_READER
+          .readTree(pCall.argumentsJson())
+          .equals(COMPARISON_READER.readTree(dCall.argumentsJson()))) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "replay payload tool call arguments do not match durable content");

@@ -6,6 +6,7 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -65,6 +66,11 @@ final class GeminiRequestEncoder {
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
+
+  /** 语义比对专用读取器：数值按 scale 无关归一，只用于 replay 与 durable 的一致性比对，不参与 wire 输出。 */
+  private static final ObjectReader COMPARISON_READER =
+      OBJECT_MAPPER.reader().with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
+
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   // data:<mediatype>;base64,<data>：用户内容与工具结果统一只接受内联 Base64 媒体
@@ -824,8 +830,9 @@ final class GeminiRequestEncoder {
       JsonNode pArgs;
       JsonNode dArgs;
       try {
-        pArgs = OBJECT_MAPPER.readTree(pCall.argsJson());
-        dArgs = OBJECT_MAPPER.readTree(dCall.argumentsJson());
+        // 数值按 scale 无关比对（1.0 与 1.00 同值）；比较专用 reader 只读取比较树，wire 仍用 replay 原生 args。
+        pArgs = COMPARISON_READER.readTree(pCall.argsJson());
+        dArgs = COMPARISON_READER.readTree(dCall.argumentsJson());
       } catch (Exception e) {
         // durable 参数本身无法解析属于请求事实损坏，必须明确拒绝而非静默 fallback。
         throw new ProviderException(
