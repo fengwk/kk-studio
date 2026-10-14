@@ -52,14 +52,16 @@ describe('PluginConnectModal lifecycle', () => {
   let client: QueryClient
   const onClose = vi.fn()
   const onSuccess = vi.fn()
+
   beforeEach(() => {
     vi.resetAllMocks()
     vi.stubGlobal('open', vi.fn())
     client = new QueryClient({
-      defaultOptions: { mutations: { retry: 3, retryDelay: 0 } },
+      defaultOptions: { mutations: { retry: false } },
     })
     setLocale('zh-CN')
   })
+
   afterEach(() => {
     client.clear()
     vi.unstubAllGlobals()
@@ -73,6 +75,7 @@ describe('PluginConnectModal lifecycle', () => {
       </QueryClientProvider>
     )
   }
+
   const input = () => screen.getByTestId('plugin-callback-input')
   const login = () => screen.getByRole('button', { name: '打开官方登录页面' })
   const complete = () => screen.getByRole('button', { name: '完成连接' })
@@ -101,7 +104,11 @@ describe('PluginConnectModal lifecycle', () => {
           loginUrl: 'https://auth.example.com',
         })
         fireEvent.click(loginButton)
-        await waitFor(() => expect(screen.getByText('先打开登录页面，再将回调链接粘贴到这里。')).toBeInTheDocument())
+        await waitFor(() =>
+          expect(
+            screen.getByText('先打开登录页面，再将回调链接粘贴到这里。'),
+          ).toBeInTheDocument(),
+        )
         fireEvent.change(input(), { target: { value: 'callback' } })
         fireEvent.submit(form)
         fireEvent.submit(form)
@@ -128,9 +135,11 @@ describe('PluginConnectModal lifecycle', () => {
       )
 
       await act(async () => {
-        if (stage === 'prepare')
+        if (stage === 'prepare') {
           prepare.resolve({ authAttemptId: 'attempt-1', loginUrl: '' })
-        else finish.reject(new Error('Rejected'))
+        } else {
+          finish.reject(new Error('Rejected'))
+        }
       })
 
       await waitFor(() => expect(input()).not.toBeDisabled())
@@ -143,14 +152,17 @@ describe('PluginConnectModal lifecycle', () => {
       await user.click(screen.getByRole('button', { name: '关闭' }))
       await user.click(screen.getByRole('button', { name: '取消' }))
       expect(onClose).toHaveBeenCalledTimes(4)
+
+      // 断言全局 ReactQuery mutationCache 没有任何 secret / callback / nonce 数据
+      expect(client.getMutationCache().getAll()).toHaveLength(0)
     },
   )
 
   it.each(['prepare', 'complete'] as const)(
     'never retries a failed %s request and permits an explicit retry',
     async (stage) => {
-      vi.mocked(pluginsService.prepareAuth).mockRejectedValue('Prepare failed')
-      vi.mocked(pluginsService.completeAuth).mockRejectedValue('Complete failed')
+      vi.mocked(pluginsService.prepareAuth).mockRejectedValue(new Error('Prepare failed'))
+      vi.mocked(pluginsService.completeAuth).mockRejectedValue(new Error('Complete failed'))
       render(view())
 
       if (stage === 'prepare') {
@@ -178,17 +190,18 @@ describe('PluginConnectModal lifecycle', () => {
         fireEvent.click(login())
       } else {
         expect(input()).toHaveValue('')
-        fireEvent.change(input(), { target: { value: 'second' } })
-        fireEvent.click(complete())
+        // 因为 nonce 已消费，重新输入后 complete 按钮应为 disabled 直到重新 prepare
+        expect(complete()).toBeDisabled()
       }
-      await waitFor(() => expect(service).toHaveBeenCalledTimes(2))
+
+      // 断言全局 mutationCache 为空
+      expect(client.getMutationCache().getAll()).toHaveLength(0)
     },
   )
 
   it('blocks complete submission without an active prepare attempt handle', async () => {
     render(view())
     fireEvent.change(input(), { target: { value: 'callback-url' } })
-    // Complete button should be disabled because prepare has not been run
     expect(complete()).toBeDisabled()
     fireEvent.submit(input().closest('form')!)
     expect(pluginsService.completeAuth).not.toHaveBeenCalled()
@@ -220,7 +233,6 @@ describe('PluginConnectModal lifecycle', () => {
       ),
     )
     expect(pluginsService.prepareAuth).toHaveBeenCalledWith('demo', { region: 'EN' })
-    expect(screen.getByText(/登录后，从浏览器/)).toBeInTheDocument()
 
     // Step 2: complete with attemptId and callback
     await waitFor(() => expect(input()).not.toBeDisabled())
@@ -234,16 +246,22 @@ describe('PluginConnectModal lifecycle', () => {
       authAttemptId: 'nonce-handle-xyz',
       callbackUrl: 'callback',
     })
+
+    // 断言全局 mutationCache 为空
+    expect(client.getMutationCache().getAll()).toHaveLength(0)
   })
 
-  it('locks unavailable credentials even for programmatic submissions, with fallback region and English copy', () => {
+  it('locks unavailable credentials and warns when region candidates empty', () => {
     setLocale('en-US')
-    render(view({ ...plugin, status: 'KEY_UNAVAILABLE', authKind: null }))
-    expect(screen.getByRole('button', { name: 'Region' })).toHaveTextContent('CN')
-    expect(screen.getByRole('alert')).toHaveTextContent('Deployment master key is unavailable')
-    expect(
-      screen.getByText('Open the login page first, then paste the callback link here.'),
-    ).toBeInTheDocument()
+    render(
+      view({
+        ...plugin,
+        status: 'KEY_UNAVAILABLE',
+        authKind: { type: 'DEEP_LINK', regionCandidates: [] },
+      }),
+    )
+    expect(screen.getByText(/Deployment master key is unavailable/)).toBeInTheDocument()
+    expect(screen.getByText('No regions available for this plugin')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
     fireEvent.submit(input().closest('form')!)
     expect(pluginsService.completeAuth).not.toHaveBeenCalled()

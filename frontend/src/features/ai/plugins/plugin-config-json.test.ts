@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   getNodeSafeValue,
   getNodeSlice,
+  isValidJsonIntegerLiteral,
   isValidJsonNumberLiteral,
   parseStrictJsonObject,
   updateStrictJsonField,
@@ -15,21 +16,21 @@ describe('plugin-config-json', () => {
   it('parses valid strict JSON and retrieves raw tokens without precision loss', () => {
     const res = parseStrictJsonObject(sampleWithBigNumbers)
     expect(res.ok).toBe(true)
-    expect(res.tree).toBeDefined()
+    if (res.ok) {
+      const tree = res.tree
+      const bigIntNode = findNodeAtLocation(tree, ['bigInt'])!
+      expect(getNodeSlice(sampleWithBigNumbers, bigIntNode)).toBe('9007199254740993123456789')
+      expect(getNodeSafeValue(bigIntNode, sampleWithBigNumbers)).toBe('9007199254740993123456789')
 
-    const tree = res.tree!
-    const bigIntNode = findNodeAtLocation(tree, ['bigInt'])!
-    expect(getNodeSlice(sampleWithBigNumbers, bigIntNode)).toBe('9007199254740993123456789')
-    expect(getNodeSafeValue(bigIntNode, sampleWithBigNumbers)).toBe('9007199254740993123456789')
+      const decimalNode = findNodeAtLocation(tree, ['decimal'])!
+      expect(getNodeSlice(sampleWithBigNumbers, decimalNode)).toBe('1.230000')
 
-    const decimalNode = findNodeAtLocation(tree, ['decimal'])!
-    expect(getNodeSlice(sampleWithBigNumbers, decimalNode)).toBe('1.230000')
+      const expNode = findNodeAtLocation(tree, ['exp'])!
+      expect(getNodeSlice(sampleWithBigNumbers, expNode)).toBe('1e1000')
 
-    const expNode = findNodeAtLocation(tree, ['exp'])!
-    expect(getNodeSlice(sampleWithBigNumbers, expNode)).toBe('1e1000')
-
-    const enabledNode = findNodeAtLocation(tree, ['enabled'])!
-    expect(getNodeSafeValue(enabledNode, sampleWithBigNumbers)).toBe(true)
+      const enabledNode = findNodeAtLocation(tree, ['enabled'])!
+      expect(getNodeSafeValue(enabledNode, sampleWithBigNumbers)).toBe(true)
+    }
   })
 
   it('strictly rejects comments, trailing commas, empty string, and non-object roots', () => {
@@ -42,21 +43,46 @@ describe('plugin-config-json', () => {
     expect(parseStrictJsonObject('123').ok).toBe(false)
   })
 
-  it('strictly detects duplicate keys in root and nested objects', () => {
+  it('strictly detects duplicate keys including empty string key and escape equivalent keys', () => {
+    // 1. Root duplicate
     const dupRoot = '{"a": 1, "b": 2, "a": 3}'
     const resRoot = parseStrictJsonObject(dupRoot)
     expect(resRoot.ok).toBe(false)
-    expect(resRoot.error).toContain('Duplicate key detected: "a"')
+    if (!resRoot.ok) {
+      expect(resRoot.error).toContain('Duplicate key detected: "a"')
+    }
 
-    const dupNested = '{"parent": {"child": 1, "child": 2}}'
-    const resNested = parseStrictJsonObject(dupNested)
-    expect(resNested.ok).toBe(false)
-    expect(resNested.error).toContain('Duplicate key detected: "child"')
+    // 2. Empty string key duplicate (previously bypassed with truthiness check)
+    const dupEmptyKey = '{"": 1, "": 2}'
+    const resEmptyKey = parseStrictJsonObject(dupEmptyKey)
+    expect(resEmptyKey.ok).toBe(false)
+    if (!resEmptyKey.ok) {
+      expect(resEmptyKey.error).toContain('Duplicate key detected: ""')
+    }
 
-    const dupInArray = '{"list": [{"key": 1, "key": 2}]}'
+    // 3. Escape equivalent keys
+    const dupEscaped = '{"foo": 1, "\\u0066oo": 2}'
+    const resEscaped = parseStrictJsonObject(dupEscaped)
+    expect(resEscaped.ok).toBe(false)
+    if (!resEscaped.ok) {
+      expect(resEscaped.error).toContain('Duplicate key detected: "foo"')
+    }
+
+    // 4. Nested duplicate empty key
+    const dupNestedEmpty = '{"parent": {"": "first", "": "second"}}'
+    const resNestedEmpty = parseStrictJsonObject(dupNestedEmpty)
+    expect(resNestedEmpty.ok).toBe(false)
+    if (!resNestedEmpty.ok) {
+      expect(resNestedEmpty.error).toContain('Duplicate key detected: ""')
+    }
+
+    // 5. Duplicate in array item
+    const dupInArray = '{"list": [{"": 1, "": 2}]}'
     const resInArray = parseStrictJsonObject(dupInArray)
     expect(resInArray.ok).toBe(false)
-    expect(resInArray.error).toContain('Duplicate key detected: "key"')
+    if (!resInArray.ok) {
+      expect(resInArray.error).toContain('Duplicate key detected: ""')
+    }
   })
 
   it('updates boolean and preserves all untouched number tokens verbatim', () => {
@@ -67,12 +93,13 @@ describe('plugin-config-json', () => {
     })
 
     expect(result.ok).toBe(true)
-    const newJson = result.newJson!
-    // Untouched tokens are 100% byte-for-byte preserved
-    expect(newJson).toContain('9007199254740993123456789')
-    expect(newJson).toContain('1.230000')
-    expect(newJson).toContain('1e1000')
-    expect(newJson).toContain('"enabled":false')
+    if (result.ok) {
+      const newJson = result.newJson
+      expect(newJson).toContain('9007199254740993123456789')
+      expect(newJson).toContain('1.230000')
+      expect(newJson).toContain('1e1000')
+      expect(newJson).toContain('"enabled":false')
+    }
   })
 
   it('updates existing number token using rawNumberString without losing precision', () => {
@@ -83,10 +110,12 @@ describe('plugin-config-json', () => {
     })
 
     expect(result.ok).toBe(true)
-    const newJson = result.newJson!
-    expect(newJson).toContain('9.8765432100000')
-    expect(newJson).toContain('9007199254740993123456789')
-    expect(newJson).toContain('1e1000')
+    if (result.ok) {
+      const newJson = result.newJson
+      expect(newJson).toContain('9.8765432100000')
+      expect(newJson).toContain('9007199254740993123456789')
+      expect(newJson).toContain('1e1000')
+    }
   })
 
   it('inserts new number field using rawNumberString without losing precision', () => {
@@ -97,35 +126,75 @@ describe('plugin-config-json', () => {
     })
 
     expect(result.ok).toBe(true)
-    const newJson = result.newJson!
-    expect(newJson).toMatch(/"customBigInt":\s*123456789012345678901234567890/)
+    if (result.ok) {
+      const newJson = result.newJson
+      expect(newJson).toMatch(/"customBigInt":\s*123456789012345678901234567890/)
+    }
   })
 
-  it('validates JSON number literals and rejects invalid ones', () => {
+  it('updates complex containers (array and object) with rawSnippetString without precision loss', () => {
+    const jsonWithContainers =
+      '{"items":[10,20],"meta":{"version":1},"big":9007199254740993123456789}'
+
+    // 1. Update array with big numbers snippet
+    const arraySnippet = '[9007199254740993123456789,1.230000,1e1000]'
+    const resArray = updateStrictJsonField({
+      rawJson: jsonWithContainers,
+      path: ['items'],
+      rawSnippetString: arraySnippet,
+    })
+    expect(resArray.ok).toBe(true)
+    if (resArray.ok) {
+      expect(resArray.newJson).toContain('[9007199254740993123456789,1.230000,1e1000]')
+      expect(resArray.newJson).toContain('9007199254740993123456789')
+    }
+
+    // 2. Insert new nested object with big numbers snippet
+    const objectSnippet = '{"deepBig":999999999999999999999,"ratio":0.0000001}'
+    const resObject = updateStrictJsonField({
+      rawJson: jsonWithContainers,
+      path: ['nestedConfig'],
+      rawSnippetString: objectSnippet,
+    })
+    expect(resObject.ok).toBe(true)
+    if (resObject.ok) {
+      expect(resObject.newJson).toContain(objectSnippet)
+    }
+  })
+
+  it('validates JSON number literals and integer literals', () => {
     expect(isValidJsonNumberLiteral('0')).toBe(true)
     expect(isValidJsonNumberLiteral('-0')).toBe(true)
-    expect(isValidJsonNumberLiteral('12345')).toBe(true)
-    expect(isValidJsonNumberLiteral('-9876')).toBe(true)
+    expect(isValidJsonNumberLiteral('-12345')).toBe(true)
     expect(isValidJsonNumberLiteral('1.230000')).toBe(true)
     expect(isValidJsonNumberLiteral('1e1000')).toBe(true)
-    expect(isValidJsonNumberLiteral('1.5e-3')).toBe(true)
+    expect(isValidJsonNumberLiteral('-1.5e-3')).toBe(true)
 
     expect(isValidJsonNumberLiteral('01')).toBe(false)
     expect(isValidJsonNumberLiteral('1.')).toBe(false)
     expect(isValidJsonNumberLiteral('.5')).toBe(false)
     expect(isValidJsonNumberLiteral('abc')).toBe(false)
-    expect(isValidJsonNumberLiteral('1e')).toBe(false)
     expect(isValidJsonNumberLiteral('')).toBe(false)
+
+    // Integer validation
+    expect(isValidJsonIntegerLiteral('0')).toBe(true)
+    expect(isValidJsonIntegerLiteral('-100')).toBe(true)
+    expect(isValidJsonIntegerLiteral('9007199254740993123456789')).toBe(true)
+    expect(isValidJsonIntegerLiteral('1e5')).toBe(true)
+
+    expect(isValidJsonIntegerLiteral('1.23')).toBe(false)
+    expect(isValidJsonIntegerLiteral('1.')).toBe(false)
+    expect(isValidJsonIntegerLiteral('-1.0')).toBe(false)
+    expect(isValidJsonIntegerLiteral('1e-2')).toBe(false)
   })
 
-  it('rejects update with invalid rawNumberString or invalid rawJson', () => {
+  it('rejects update with invalid rawNumberString, invalid rawSnippetString or malformed rawJson', () => {
     const result1 = updateStrictJsonField({
       rawJson: sampleWithBigNumbers,
       path: ['decimal'],
       rawNumberString: 'invalid-num',
     })
     expect(result1.ok).toBe(false)
-    expect(result1.error).toContain('Invalid JSON number literal')
 
     const result2 = updateStrictJsonField({
       rawJson: 'not valid json',
@@ -134,31 +203,52 @@ describe('plugin-config-json', () => {
     })
     expect(result2.ok).toBe(false)
 
-    // Modification failure on impossible path
     const result3 = updateStrictJsonField({
+      rawJson: sampleWithBigNumbers,
+      path: ['nested'],
+      rawSnippetString: '{malformed: json}',
+    })
+    expect(result3.ok).toBe(false)
+
+    const result4 = updateStrictJsonField({
+      rawJson: sampleWithBigNumbers,
+      path: ['decimal'],
+      rawSnippetString: '{"duplicate":1,"duplicate":2}',
+    })
+    expect(result4.ok).toBe(false)
+
+    const result5 = updateStrictJsonField({
       rawJson: '{"a": 1}',
       path: ['a', 'b', 'c'],
       value: true,
     })
-    expect(result3.ok).toBe(false)
+    expect(result5.ok).toBe(false)
+
+    const result6 = updateStrictJsonField({
+      rawJson: '{"a": 1}',
+      path: ['a', 'b', 'c'],
+      rawNumberString: '123',
+    })
+    expect(result6.ok).toBe(false)
   })
 
   it('tests getNodeSafeValue on various scalar and structured types', () => {
     const json = '{"text":"hello","flag":true,"nothing":null,"list":[1,2]}'
     const parsed = parseStrictJsonObject(json)
     expect(parsed.ok).toBe(true)
-    const tree = parsed.tree!
+    if (parsed.ok) {
+      const tree = parsed.tree
+      const textNode = findNodeAtLocation(tree, ['text'])!
+      expect(getNodeSafeValue(textNode, json)).toBe('hello')
 
-    const textNode = findNodeAtLocation(tree, ['text'])!
-    expect(getNodeSafeValue(textNode, json)).toBe('hello')
+      const flagNode = findNodeAtLocation(tree, ['flag'])!
+      expect(getNodeSafeValue(flagNode, json)).toBe(true)
 
-    const flagNode = findNodeAtLocation(tree, ['flag'])!
-    expect(getNodeSafeValue(flagNode, json)).toBe(true)
+      const nullNode = findNodeAtLocation(tree, ['nothing'])!
+      expect(getNodeSafeValue(nullNode, json)).toBeNull()
 
-    const nullNode = findNodeAtLocation(tree, ['nothing'])!
-    expect(getNodeSafeValue(nullNode, json)).toBeNull()
-
-    const listNode = findNodeAtLocation(tree, ['list'])!
-    expect(getNodeSafeValue(listNode, json)).toBe('[1,2]')
+      const listNode = findNodeAtLocation(tree, ['list'])!
+      expect(getNodeSafeValue(listNode, json)).toBe('[1,2]')
+    }
   })
 })

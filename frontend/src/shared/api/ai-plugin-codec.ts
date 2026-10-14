@@ -12,6 +12,18 @@ function invalidPayload(detail: string): ApiError {
   return new ApiError(`Plugin API returned an invalid payload: ${detail}`)
 }
 
+function checkUnknownKeys(
+  record: Record<string, unknown>,
+  allowed: Set<string>,
+  path: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw invalidPayload(`Unknown property "${key}" at ${path}`)
+    }
+  }
+}
+
 function requireRecord(value: unknown, path: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw invalidPayload(`${path} must be an object`)
@@ -49,11 +61,20 @@ function requireNullableString(value: unknown, path: string): string | null {
 }
 
 const CANONICAL_DECIMAL = /^(?:0|[1-9]\d*)$/
+const MAX_LONG = 9223372036854775807n
 
 function requireCanonicalDecimalString(value: unknown, path: string): string {
   const text = requireString(value, path)
   if (!CANONICAL_DECIMAL.test(text)) {
-    throw invalidPayload(`${path} must be a canonical non-negative decimal string, got ${text}`)
+    throw invalidPayload(`${path} must be a canonical non-negative decimal string`)
+  }
+  try {
+    const big = BigInt(text)
+    if (big > MAX_LONG) {
+      throw invalidPayload(`${path} exceeds 64-bit signed integer range`)
+    }
+  } catch {
+    throw invalidPayload(`${path} exceeds 64-bit signed integer range`)
   }
   return text
 }
@@ -90,6 +111,9 @@ function isPluginStatus(value: unknown): value is PluginStatus {
   return typeof value === 'string' && (PLUGIN_STATUSES as readonly string[]).includes(value)
 }
 
+const ALLOWED_AUTH_DEEP_LINK_KEYS = new Set(['type', 'regionCandidates'])
+const ALLOWED_AUTH_STATIC_KEY_KEYS = new Set(['type', 'secretField'])
+
 export function decodePluginAuthKindDTO(value: unknown, path = 'authKind'): PluginAuthKindDTO | null {
   if (value === null || value === undefined) {
     return null
@@ -97,6 +121,7 @@ export function decodePluginAuthKindDTO(value: unknown, path = 'authKind'): Plug
   const rec = requireRecord(value, path)
   const type = requireString(rec.type, `${path}.type`)
   if (type === 'DEEP_LINK') {
+    checkUnknownKeys(rec, ALLOWED_AUTH_DEEP_LINK_KEYS, path)
     const rawCandidates = requireArray(rec.regionCandidates, `${path}.regionCandidates`)
     if (rawCandidates.length === 0) {
       throw invalidPayload(`${path}.regionCandidates must be a non-empty array`)
@@ -110,40 +135,55 @@ export function decodePluginAuthKindDTO(value: unknown, path = 'authKind'): Plug
     }
   }
   if (type === 'STATIC_KEY') {
+    checkUnknownKeys(rec, ALLOWED_AUTH_STATIC_KEY_KEYS, path)
     const secretField = requireNonEmptyString(rec.secretField, `${path}.secretField`)
     return {
       type: 'STATIC_KEY',
       secretField,
     }
   }
-  throw invalidPayload(`${path}.type must be DEEP_LINK or STATIC_KEY, got ${type}`)
+  throw invalidPayload(`${path}.type must be DEEP_LINK or STATIC_KEY`)
 }
+
+const ALLOWED_SECRET_PROJECTION_KEYS = new Set(['description', 'configured'])
 
 export function decodePluginSecretProjectionDTO(
   value: unknown,
   path = 'secrets',
 ): PluginSecretProjectionDTO {
   const rec = requireRecord(value, path)
+  checkUnknownKeys(rec, ALLOWED_SECRET_PROJECTION_KEYS, path)
   const description = requireString(rec.description, `${path}.description`)
   const configured = requireBoolean(rec.configured, `${path}.configured`)
   return { description, configured }
 }
+
+const ALLOWED_CONFIG_KEYS = new Set([
+  'revision',
+  'valuesJson',
+  'valuesSchema',
+  'defaultsJson',
+  'secrets',
+])
 
 export function decodePluginConfigurationDTO(
   value: unknown,
   path = 'configuration',
 ): PluginConfigurationDTO {
   const rec = requireRecord(value, path)
+  checkUnknownKeys(rec, ALLOWED_CONFIG_KEYS, path)
   const revision = requireNullableCanonicalDecimalString(rec.revision, `${path}.revision`)
   const valuesJson = requireString(rec.valuesJson, `${path}.valuesJson`)
   const valuesSchema = requireString(rec.valuesSchema, `${path}.valuesSchema`)
   const defaultsJson = requireString(rec.defaultsJson, `${path}.defaultsJson`)
   const secretsRecord = requireRecord(rec.secrets, `${path}.secrets`)
 
-  const secrets: Record<string, PluginSecretProjectionDTO> = {}
-  for (const [key, secretVal] of Object.entries(secretsRecord)) {
-    secrets[key] = decodePluginSecretProjectionDTO(secretVal, `${path}.secrets.${key}`)
-  }
+  const secrets: Record<string, PluginSecretProjectionDTO> = Object.fromEntries(
+    Object.entries(secretsRecord).map(([key, val]) => [
+      key,
+      decodePluginSecretProjectionDTO(val, `${path}.secrets.${key}`),
+    ]),
+  )
 
   return {
     revision,
@@ -154,8 +194,30 @@ export function decodePluginConfigurationDTO(
   }
 }
 
+const ALLOWED_PLUGIN_KEYS = new Set([
+  'pluginId',
+  'name',
+  'version',
+  'authKind',
+  'status',
+  'region',
+  'expiresAt',
+  'nextRefreshAt',
+  'lastRefreshedAt',
+  'lastRefreshError',
+  'configuration',
+  'desiredEpoch',
+  'appliedEpoch',
+  'desiredRevision',
+  'appliedRevision',
+  'harnessToolNames',
+  'canvasFunctionNames',
+  'applicationError',
+])
+
 export function decodePluginDTO(value: unknown, path = 'plugin'): PluginDTO {
   const rec = requireRecord(value, path)
+  checkUnknownKeys(rec, ALLOWED_PLUGIN_KEYS, path)
   const pluginId = requireNonEmptyString(rec.pluginId, `${path}.pluginId`)
   const name = requireNonEmptyString(rec.name, `${path}.name`)
   const version = requireNonEmptyString(rec.version, `${path}.version`)
@@ -164,11 +226,9 @@ export function decodePluginDTO(value: unknown, path = 'plugin'): PluginDTO {
   let status: PluginStatus | null = null
   if (rec.status !== null && rec.status !== undefined) {
     if (!isPluginStatus(rec.status)) {
-      throw invalidPayload(`${path}.status must be a valid PluginStatus or null, got ${String(rec.status)}`)
+      throw invalidPayload(`${path}.status must be a valid PluginStatus or null`)
     }
     status = rec.status
-  } else if (authKind !== null) {
-    throw invalidPayload(`${path}.status must not be null when authKind is present`)
   }
 
   const region = requireNullableString(rec.region, `${path}.region`)
@@ -184,6 +244,47 @@ export function decodePluginDTO(value: unknown, path = 'plugin'): PluginDTO {
   const harnessToolNames = requireStringArray(rec.harnessToolNames, `${path}.harnessToolNames`)
   const canvasFunctionNames = requireStringArray(rec.canvasFunctionNames, `${path}.canvasFunctionNames`)
   const applicationError = requireNullableString(rec.applicationError, `${path}.applicationError`)
+
+  // 严格闭合语义校验
+  if (authKind === null) {
+    if (status !== null) {
+      throw invalidPayload(`${path}.status must be null when authKind is null`)
+    }
+    if (
+      region !== null ||
+      expiresAt !== null ||
+      nextRefreshAt !== null ||
+      lastRefreshedAt !== null ||
+      lastRefreshError !== null
+    ) {
+      throw invalidPayload(`${path} token/refresh metadata must be null when authKind is null`)
+    }
+  } else if (authKind.type === 'STATIC_KEY') {
+    if (status === null) {
+      throw invalidPayload(`${path}.status must not be null for STATIC_KEY authKind`)
+    }
+    if (
+      region !== null ||
+      expiresAt !== null ||
+      nextRefreshAt !== null ||
+      lastRefreshedAt !== null ||
+      lastRefreshError !== null
+    ) {
+      throw invalidPayload(`${path} token/refresh metadata must be null for STATIC_KEY authKind`)
+    }
+    if (!(authKind.secretField in configuration.secrets)) {
+      throw invalidPayload(
+        `${path}.configuration.secrets must contain static key field "${authKind.secretField}"`,
+      )
+    }
+  } else if (authKind.type === 'DEEP_LINK') {
+    if (status === null) {
+      throw invalidPayload(`${path}.status must not be null for DEEP_LINK authKind`)
+    }
+    if (region !== null && !authKind.regionCandidates.includes(region)) {
+      throw invalidPayload(`${path}.region must be one of regionCandidates`)
+    }
+  }
 
   return {
     pluginId,
@@ -212,11 +313,14 @@ export function decodePluginList(value: unknown, path = 'plugins'): PluginDTO[] 
   return arr.map((item, index) => decodePluginDTO(item, `${path}[${index}]`))
 }
 
+const ALLOWED_AUTH_PREPARE_KEYS = new Set(['authAttemptId', 'loginUrl'])
+
 export function decodePluginAuthPrepareDTO(
   value: unknown,
   path = 'authPrepare',
 ): PluginAuthPrepareDTO {
   const rec = requireRecord(value, path)
+  checkUnknownKeys(rec, ALLOWED_AUTH_PREPARE_KEYS, path)
   const authAttemptId = requireNonEmptyString(rec.authAttemptId, `${path}.authAttemptId`)
   const loginUrl = requireNonEmptyString(rec.loginUrl, `${path}.loginUrl`)
   return { authAttemptId, loginUrl }

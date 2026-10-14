@@ -15,8 +15,11 @@ const samplePlugin: PluginDTO = {
   pluginId: 'demo-plugin',
   name: 'Demo Plugin',
   version: '1.0.0',
-  authKind: null,
-  status: null,
+  authKind: {
+    type: 'STATIC_KEY',
+    secretField: 'apiKey',
+  },
+  status: 'CONNECTED',
   region: null,
   expiresAt: null,
   nextRefreshAt: null,
@@ -98,57 +101,95 @@ describe('PluginConfigModal', () => {
     expect(screen.getByText('Rev 3')).toBeInTheDocument()
 
     // Checkbox for boolean
-    const checkbox = screen.getByRole('checkbox', { name: /enabled/i })
+    const checkbox = screen.getByRole('checkbox', { name: 'enabled' })
     expect(checkbox).toBeChecked()
 
     // Exact number tokens rendered
-    expect(screen.getByDisplayValue('9007199254740993123456789')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('1.230000')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('1e1000')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'bigInt' })).toHaveValue('9007199254740993123456789')
+    expect(screen.getByRole('textbox', { name: 'decimal' })).toHaveValue('1.230000')
+    expect(screen.getByRole('textbox', { name: 'exp' })).toHaveValue('1e1000')
 
     // Text inputs and nested objects
-    expect(screen.getByDisplayValue('MySite')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('127.0.0.1')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'siteName' })).toHaveValue('MySite')
+    expect(screen.getByRole('textbox', { name: 'host' })).toHaveValue('127.0.0.1')
+
+    // Array container rendered with raw tokens
+    expect(screen.getByRole('textbox', { name: 'tags' })).toHaveValue('["a","b"]')
 
     // Secrets section
     const secretItem = screen.getByTestId('secret-item-apiKey')
     expect(within(secretItem).getByText('apiKey')).toBeInTheDocument()
     expect(within(secretItem).getByText('Demo API Token')).toBeInTheDocument()
     expect(within(secretItem).getByText('已配置')).toBeInTheDocument()
+
+    // 全局 mutationCache 保持为空
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0)
   })
 
-  it('modifies text inputs and nested objects', async () => {
-    const user = userEvent.setup()
-    renderModal()
-
-    const siteInput = screen.getByDisplayValue('MySite')
-    await user.clear(siteInput)
-    await user.type(siteInput, 'NewSite')
-
-    const hostInput = screen.getByDisplayValue('127.0.0.1')
-    await user.clear(hostInput)
-    await user.type(hostInput, '192.168.1.1')
-
-    const saveBtn = screen.getByRole('button', { name: '保存配置' })
-    await user.click(saveBtn)
-
-    await waitFor(() => {
-      expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
-        'demo-plugin',
-        expect.objectContaining({
-          valuesJson: expect.stringContaining('"siteName":"NewSite"'),
-        }),
-      )
-    })
-  })
-
-  it('modifies boolean and preserves untouched number tokens verbatim on save', async () => {
+  it('supports progressive user typing for negative numbers, decimals, and exponents without bouncing back', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
     renderModal()
 
-    const checkbox = screen.getByRole('checkbox', { name: /enabled/i })
-    await user.click(checkbox)
+    const decInput = screen.getByRole('textbox', { name: 'decimal' })
+    const saveBtn = screen.getByRole('button', { name: '保存配置' })
+
+    // 清空并逐键输入负小数 "-0.54321"
+    await user.clear(decInput)
+    // 键入 "-"：中间态，展示格式错误，保存按钮应禁用
+    await user.type(decInput, '-')
+    expect(decInput).toHaveValue('-')
+    expect(saveBtn).toBeDisabled()
+    expect(screen.getByText('无效的数字格式。')).toBeInTheDocument()
+
+    // 继续键入 "0."：仍是中间态
+    await user.type(decInput, '0.')
+    expect(decInput).toHaveValue('-0.')
+    expect(saveBtn).toBeDisabled()
+
+    // 键入完整合法数字 "54321"
+    await user.type(decInput, '54321')
+    expect(decInput).toHaveValue('-0.54321')
+    expect(screen.queryByText('无效的数字格式。')).not.toBeInTheDocument()
+    expect(saveBtn).not.toBeDisabled()
+
+    await user.click(saveBtn)
+    await waitFor(() => {
+      expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
+        'demo-plugin',
+        expect.objectContaining({
+          valuesJson: expect.stringContaining('"decimal":-0.54321'),
+        }),
+      )
+    })
+
+    // 全局 mutationCache 保持为空
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0)
+  })
+
+  it('strictly validates integer fields and rejects decimals', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    const bigIntInput = screen.getByRole('textbox', { name: 'bigInt' })
+    const saveBtn = screen.getByRole('button', { name: '保存配置' })
+
+    await user.clear(bigIntInput)
+    await user.type(bigIntInput, '123.45') // 尝试输入小数到 integer 字段
+    expect(bigIntInput).toHaveValue('123.45')
+    expect(screen.getByText('无效的整数格式。')).toBeInTheDocument()
+    expect(saveBtn).toBeDisabled()
+  })
+
+  it('edits complex array container with raw JSON preserving big numbers', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
+    renderModal()
+
+    const tagsInput = screen.getByRole('textbox', { name: 'tags' })
+    await user.clear(tagsInput)
+    // 写入包含大数和精确浮点的数组（[ 在 userEvent.type 中需转义为 [[）
+    await user.type(tagsInput, '[[9007199254740993123456789,1.230000]')
 
     const saveBtn = screen.getByRole('button', { name: '保存配置' })
     await user.click(saveBtn)
@@ -157,24 +198,27 @@ describe('PluginConfigModal', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'demo-plugin',
         expect.objectContaining({
-          expectedEpoch: '5',
-          expectedRevision: '3',
-          secretPatch: {
-            apiKey: { operation: 'KEEP' },
-          },
+          valuesJson: expect.stringContaining('[9007199254740993123456789,1.230000]'),
         }),
       )
     })
-
-    const callArgs = vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1]
-    expect(callArgs.valuesJson).toContain('9007199254740993123456789')
-    expect(callArgs.valuesJson).toContain('1.230000')
-    expect(callArgs.valuesJson).toContain('1e1000')
-    expect(callArgs.valuesJson).toContain('"enabled":false')
-    expect(onSuccess).toHaveBeenCalledTimes(1)
   })
 
-  it('manages secret: SET password input and sends operation=SET with non-empty value', async () => {
+  it('hides SET and CLEAR operations for DEEP_LINK plugin secrets', () => {
+    const deepLinkPlugin: PluginDTO = {
+      ...samplePlugin,
+      authKind: { type: 'DEEP_LINK', regionCandidates: ['CN'] },
+    }
+    renderModal(deepLinkPlugin)
+
+    const secretItem = screen.getByTestId('secret-item-apiKey')
+    expect(within(secretItem).queryByRole('button', { name: /Operation for apiKey/i })).not.toBeInTheDocument()
+    expect(
+      within(secretItem).getByText('此插件通过官方登录授权管理凭据。'),
+    ).toBeInTheDocument()
+  })
+
+  it('retains SET secret without trimming or padding and verifies non-empty', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
     renderModal()
@@ -185,10 +229,8 @@ describe('PluginConfigModal', () => {
     await user.click(screen.getByRole('option', { name: '设置新值' }))
 
     const passwordInput = within(secretItem).getByLabelText('New secret for apiKey')
-    expect(passwordInput).toHaveAttribute('type', 'password')
-    expect(passwordInput).toHaveAttribute('autoComplete', 'off')
-
-    await user.type(passwordInput, 'my-super-secret-password-123')
+    // 输入带空格的密码，验证绝不被 trim
+    await user.type(passwordInput, '  secret-with-spaces  ')
 
     const saveBtn = screen.getByRole('button', { name: '保存配置' })
     await user.click(saveBtn)
@@ -198,14 +240,14 @@ describe('PluginConfigModal', () => {
         'demo-plugin',
         expect.objectContaining({
           secretPatch: {
-            apiKey: { operation: 'SET', value: 'my-super-secret-password-123' },
+            apiKey: { operation: 'SET', value: '  secret-with-spaces  ' },
           },
         }),
       )
     })
   })
 
-  it('manages secret: CLEAR with explicit confirmation checkbox before save is enabled', async () => {
+  it('strictly validates CLEAR confirmation on submit', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
     renderModal()
@@ -225,7 +267,6 @@ describe('PluginConfigModal', () => {
     expect(saveBtn).not.toBeDisabled()
 
     await user.click(saveBtn)
-
     await waitFor(() => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'demo-plugin',
@@ -245,7 +286,7 @@ describe('PluginConfigModal', () => {
     )
     renderModal()
 
-    const checkbox = screen.getByRole('checkbox', { name: /enabled/i })
+    const checkbox = screen.getByRole('checkbox', { name: 'enabled' })
     await user.click(checkbox)
 
     const saveBtn = screen.getByRole('button', { name: '保存配置' })
@@ -260,7 +301,21 @@ describe('PluginConfigModal', () => {
     expect(pluginsService.updateConfiguration).toHaveBeenCalledTimes(1)
   })
 
-  it('supports switching between Form Editor and JSON Editor', async () => {
+  it('disables save and warns if revision is missing', () => {
+    const noRevPlugin: PluginDTO = {
+      ...samplePlugin,
+      configuration: {
+        ...samplePlugin.configuration,
+        revision: null,
+      },
+    }
+    renderModal(noRevPlugin)
+
+    expect(screen.getByText('缺少配置修订版本，无法保存配置。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
+  })
+
+  it('switches to JSON editor mode, edits raw JSON, and displays syntax error on invalid JSON', async () => {
     const user = userEvent.setup()
     renderModal()
 
@@ -270,10 +325,82 @@ describe('PluginConfigModal', () => {
     const textarea = screen.getByRole('textbox', { name: /JSON 编辑/i })
     expect(textarea).toBeInTheDocument()
 
-    // Switch back to Form Editor
+    // 键入语法错误的 JSON
+    await user.clear(textarea)
+    await user.type(textarea, '{{"bad":')
+    expect(screen.getByRole('alert')).toHaveTextContent(/JSON 格式无效/i)
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
+
+    // 切换回表单模式
     const formSwitchBtn = screen.getByRole('button', { name: /表单编辑/i })
     await user.click(formSwitchBtn)
-    expect(screen.getByRole('checkbox', { name: /enabled/i })).toBeInTheDocument()
+  })
+
+  it('modifies string input and enum select in form mode', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
+    renderModal()
+
+    // 1. 修改 string 输入框
+    const siteInput = screen.getByRole('textbox', { name: 'siteName' })
+    await user.clear(siteInput)
+    await user.type(siteInput, 'AwesomeSite')
+
+    // 2. 修改 enum 下拉框
+    const modeSelect = screen.getByRole('button', { name: 'mode' })
+    await user.click(modeSelect)
+    await user.click(screen.getByRole('option', { name: 'THOROUGH' }))
+
+    const saveBtn = screen.getByRole('button', { name: '保存配置' })
+    await user.click(saveBtn)
+
+    await waitFor(() => {
+      expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
+        'demo-plugin',
+        expect.objectContaining({
+          valuesJson: expect.stringContaining('"siteName":"AwesomeSite"'),
+        }),
+      )
+    })
+  })
+
+  it('edits dynamic object container with raw snippet and catches syntax errors', async () => {
+    const user = userEvent.setup()
+    const pluginWithOpenObject: PluginDTO = {
+      ...samplePlugin,
+      configuration: {
+        ...samplePlugin.configuration,
+        valuesSchema: JSON.stringify({
+          type: 'object',
+          properties: {
+            customObj: {
+              type: 'object',
+              properties: {},
+              additionalProperties: true,
+              description: 'Open object',
+            },
+          },
+          required: [],
+          additionalProperties: false,
+        }),
+        valuesJson: '{"customObj":{"big":9007199254740993123456789}}',
+      },
+    }
+    renderModal(pluginWithOpenObject)
+
+    const objArea = screen.getByRole('textbox', { name: 'customObj' })
+    expect(objArea).toHaveValue('{"big":9007199254740993123456789}')
+
+    // 输入非法 JSON
+    await user.clear(objArea)
+    await user.type(objArea, 'invalid')
+    expect(screen.getByRole('alert')).toHaveTextContent(/无效的 JSON 容器格式/i)
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
+
+    // 输入合法 JSON
+    await user.clear(objArea)
+    await user.type(objArea, '{{"newVal":1e1000}')
+    expect(screen.queryByText(/无效的 JSON 容器格式/i)).not.toBeInTheDocument()
   })
 
   it('automatically falls back to JSON editor and warns when Schema has unsupported keywords', () => {
@@ -296,20 +423,54 @@ describe('PluginConfigModal', () => {
     expect(screen.getByRole('textbox', { name: /JSON 编辑/i })).toBeInTheDocument()
   })
 
-  it('modifies enum select and number input in form mode', async () => {
+  it('requires non-empty value when setting secret', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    const secretItem = screen.getByTestId('secret-item-apiKey')
+    const opSelect = within(secretItem).getByRole('button', { name: /Operation for apiKey/i })
+    await user.click(opSelect)
+    await user.click(screen.getByRole('option', { name: '设置新值' }))
+
+    const passwordInput = within(secretItem).getByLabelText('New secret for apiKey')
+    // 输入字符然后清空成空字符串
+    await user.type(passwordInput, 'a')
+    await user.clear(passwordInput)
+
+    // 点击保存
+    const saveBtn = screen.getByRole('button', { name: '保存配置' })
+    await user.click(saveBtn)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('秘密凭据 “apiKey” 需要非空值。')
+    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+  })
+
+  it('handles general API errors and closes via cancel button', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.updateConfiguration).mockRejectedValue(new Error('Network error'))
+    renderModal()
+
+    const saveBtn = screen.getByRole('button', { name: '保存配置' })
+    await user.click(saveBtn)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Network error')
+
+    // 点击取消关闭
+    const cancelBtn = screen.getByRole('button', { name: '取消' })
+    await user.click(cancelBtn)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('saves successfully in JSON editor mode', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
     renderModal()
 
-    // Modify enum
-    const modeTrigger = screen.getByRole('button', { name: 'FAST' })
-    await user.click(modeTrigger)
-    await user.click(screen.getByRole('option', { name: 'THOROUGH' }))
-
-    // Modify number input
-    const bigIntInput = screen.getByDisplayValue('9007199254740993123456789')
-    await user.clear(bigIntInput)
-    await user.type(bigIntInput, '888888888888888888')
+    // 切换到 JSON 模式
+    await user.click(screen.getByRole('button', { name: /JSON 编辑/i }))
+    const textarea = screen.getByRole('textbox', { name: /JSON 编辑/i })
+    await user.clear(textarea)
+    await user.type(textarea, '{{"valid":true}')
 
     const saveBtn = screen.getByRole('button', { name: '保存配置' })
     await user.click(saveBtn)
@@ -318,16 +479,16 @@ describe('PluginConfigModal', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'demo-plugin',
         expect.objectContaining({
-          valuesJson: expect.stringContaining('"mode":"THOROUGH"'),
+          valuesJson: '{"valid":true}',
         }),
       )
     })
-    const callArgs = vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1]
-    expect(callArgs.valuesJson).toContain('888888888888888888')
+    expect(onSuccess).toHaveBeenCalledTimes(1)
   })
 
-  it('clears in-memory secrets on unmount', () => {
+  it('clears in-memory secrets on unmount and keeps global mutationCache empty', () => {
     const { unmount } = renderModal()
     unmount()
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0)
   })
 })

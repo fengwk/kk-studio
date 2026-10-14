@@ -83,52 +83,40 @@ describe('plugin-schema parser', () => {
     }
   })
 
-  it('rejects non-object root or malformed JSON', () => {
+  it('rejects non-object root or malformed JSON or duplicate keys', () => {
     expect(parsePluginValuesSchema('not json').ok).toBe(false)
     expect(parsePluginValuesSchema('').ok).toBe(false)
     expect(parsePluginValuesSchema('   ').ok).toBe(false)
     expect(parsePluginValuesSchema('""').ok).toBe(false)
     expect(parsePluginValuesSchema('{"type": "string"}').ok).toBe(false)
+
+    // Duplicate schema keys rejected
+    const dupKeyJson = '{"type": "object", "properties": {}, "properties": {}}'
+    expect(parsePluginValuesSchema(dupKeyJson).ok).toBe(false)
   })
 
-  it('rejects invalid schema structure inside elements', () => {
-    // Array missing items
+  it('strictly validates description, properties, required, enum, and additionalProperties', () => {
+    // 1. description not string
     expect(
       parsePluginValuesSchema(
         JSON.stringify({
           type: 'object',
-          properties: {
-            list: { type: 'array' },
-          },
+          description: 12345,
+          properties: {},
         }),
       ).ok,
     ).toBe(false)
 
-    // Enum not an array
+    // 2. properties missing
     expect(
       parsePluginValuesSchema(
         JSON.stringify({
           type: 'object',
-          properties: {
-            choice: { type: 'string', enum: 'not-array' },
-          },
         }),
       ).ok,
     ).toBe(false)
 
-    // Unsupported schema type
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: {
-            unknownType: { type: 'custom_type' },
-          },
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // Properties not an object
+    // 3. properties not object
     expect(
       parsePluginValuesSchema(
         JSON.stringify({
@@ -138,36 +126,111 @@ describe('plugin-schema parser', () => {
       ).ok,
     ).toBe(false)
 
-    // Required not an array
+    // 4. required contains duplicates
     expect(
       parsePluginValuesSchema(
         JSON.stringify({
           type: 'object',
-          required: 'invalid',
+          properties: { foo: { type: 'string' } },
+          required: ['foo', 'foo'],
         }),
       ).ok,
     ).toBe(false)
 
-    // Element not an object
+    // 5. required references undeclared property
+    const resUndeclared = parsePluginValuesSchema(
+      JSON.stringify({
+        type: 'object',
+        properties: { foo: { type: 'string' } },
+        required: ['bar'],
+      }),
+    )
+    expect(resUndeclared.ok).toBe(false)
+    if (!resUndeclared.ok) {
+      expect(resUndeclared.error).toContain('not defined in properties')
+    }
+
+    // 6. required not an array or has non-string
+    expect(
+      parsePluginValuesSchema(
+        JSON.stringify({
+          type: 'object',
+          properties: { foo: { type: 'string' } },
+          required: 'foo',
+        }),
+      ).ok,
+    ).toBe(false)
+    expect(
+      parsePluginValuesSchema(
+        JSON.stringify({
+          type: 'object',
+          properties: { foo: { type: 'string' } },
+          required: [123],
+        }),
+      ).ok,
+    ).toBe(false)
+
+    // 7. enum is empty or has duplicates or non-strings
     expect(
       parsePluginValuesSchema(
         JSON.stringify({
           type: 'object',
           properties: {
-            bad: 123,
+            mode: { type: 'string', enum: [] },
           },
         }),
       ).ok,
     ).toBe(false)
 
-    // Element missing type
     expect(
       parsePluginValuesSchema(
         JSON.stringify({
           type: 'object',
           properties: {
-            bad: {},
+            mode: { type: 'string', enum: ['A', 'A'] },
           },
+        }),
+      ).ok,
+    ).toBe(false)
+
+    expect(
+      parsePluginValuesSchema(
+        JSON.stringify({
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: 'A' },
+          },
+        }),
+      ).ok,
+    ).toBe(false)
+
+    // 8. additionalProperties not boolean
+    expect(
+      parsePluginValuesSchema(
+        JSON.stringify({
+          type: 'object',
+          properties: {},
+          additionalProperties: 'yes',
+        }),
+      ).ok,
+    ).toBe(false)
+
+    // 9. array missing items
+    expect(
+      parsePluginValuesSchema(
+        JSON.stringify({
+          type: 'object',
+          properties: { list: { type: 'array' } },
+        }),
+      ).ok,
+    ).toBe(false)
+
+    // 10. unknown element type
+    expect(
+      parsePluginValuesSchema(
+        JSON.stringify({
+          type: 'object',
+          properties: { bad: { type: 'custom' } },
         }),
       ).ok,
     ).toBe(false)
