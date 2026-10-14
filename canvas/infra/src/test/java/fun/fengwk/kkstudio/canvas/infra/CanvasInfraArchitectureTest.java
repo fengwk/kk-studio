@@ -20,7 +20,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/** 守护 Canvas Infra 只承载 Canvas Core 的 PostgreSQL/JDBC、codec 与 Function Runtime。 */
+/**
+ * 守护 Canvas Infra 只承载 Canvas Core 的 PostgreSQL/JDBC，以及基于 Canvas Plugin API SPI 的 codec 与 Function
+ * Runtime。
+ */
 class CanvasInfraArchitectureTest {
 
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.canvas.infra";
@@ -28,6 +31,7 @@ class CanvasInfraArchitectureTest {
       Set.of(
           "fun.fengwk.convention4j:convention4j-spring-boot-starter",
           "fun.fengwk.kk-studio:kk-studio-canvas-core",
+          "fun.fengwk.kk-studio:kk-studio-canvas-plugin-api",
           "org.springframework.boot:spring-boot-starter-aspectj",
           "org.springframework.boot:spring-boot-starter-jdbc",
           "tools.jackson.core:jackson-databind");

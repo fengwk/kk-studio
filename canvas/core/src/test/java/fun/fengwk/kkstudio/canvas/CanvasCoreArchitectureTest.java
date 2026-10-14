@@ -12,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -21,16 +20,21 @@ import java.util.stream.Stream;
  * Canvas Core 的轻量级架构守卫，锁定纯领域源码和受控生产依赖边界。
  *
  * <p>Core 允许的唯一生产依赖是 Jackson 3 core/stream：严格 JSON 由它统一承载，Spring/MyBatis/宿主适配必须留在外层模块。
+ *
+ * <p>Function 能力 SPI 由 canvas-plugin-api 承载，Core 不得反向依赖 {@code fun.fengwk.kkstudio.canvas.function}
+ * 包或持有该包的生产源码。
  */
 class CanvasCoreArchitectureTest {
 
   private static final String OWN_PACKAGE_PREFIX = "fun.fengwk.kkstudio.canvas.";
+  private static final String FUNCTION_PACKAGE_PREFIX = "fun.fengwk.kkstudio.canvas.function.";
   private static final List<String> ALLOWED_THIRD_PARTY_IMPORT_PREFIXES =
       List.of("tools.jackson.core.");
   private static final List<String> ALLOWED_PRODUCTION_DEPENDENCIES =
       List.of("tools.jackson.core:jackson-core");
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
+          FUNCTION_PACKAGE_PREFIX,
           "java.sql.",
           "javax.sql.",
           "jakarta.persistence.",
@@ -43,8 +47,6 @@ class CanvasCoreArchitectureTest {
           "org.springframework.");
   private static final Pattern DEPENDENCY_PATTERN =
       Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL);
-  private static final Set<String> GENERATED_DIRS =
-      Set.of(".git", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
 
   @Test
   void mainSourcesUseOnlyJdkCanvasAndJacksonPackages() throws IOException {
@@ -58,6 +60,16 @@ class CanvasCoreArchitectureTest {
     List<String> violations = scanViolations(main);
     assertTrue(
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
+  }
+
+  @Test
+  void productionFunctionSpiPackageMustNotLiveInCore() {
+    // Function 能力 SPI 归属 canvas-plugin-api，Core 生产源码不得再包含 function 包。
+    Path functionPackage =
+        locateModuleRoot().resolve("src/main/java/fun/fengwk/kkstudio/canvas/function");
+    assertFalse(
+        Files.exists(functionPackage),
+        "canvas core must not own the canvas.function SPI package: " + functionPackage);
   }
 
   @Test
@@ -82,24 +94,6 @@ class CanvasCoreArchitectureTest {
         ALLOWED_PRODUCTION_DEPENDENCIES,
         productionDependencies,
         "canvas core production dependencies");
-  }
-
-  @Test
-  void canvasFunctionCatalogHasOneFinalFactSourceAndNoRegistryImplementation() throws IOException {
-    Path repositoryRoot = locateModuleRoot().resolve("../..").normalize();
-    List<Path> catalogSources = mainJavaSources(repositoryRoot, "CanvasFunctionCatalog.java");
-    assertEquals(
-        List.of(
-            repositoryRoot.resolve(
-                "canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/"
-                    + "CanvasFunctionCatalog.java")),
-        catalogSources);
-    assertTrue(
-        mainJavaSources(repositoryRoot, "CanvasFunction" + "ModelRegistry.java").isEmpty(),
-        "Canvas Function model registry source must not exist");
-    assertTrue(
-        implementationSources(repositoryRoot).isEmpty(),
-        "Canvas Function Catalog must not have a second implementation");
   }
 
   private static List<String> scanViolations(Path main) throws IOException {
@@ -137,46 +131,6 @@ class CanvasCoreArchitectureTest {
               });
     }
     return violations;
-  }
-
-  private static List<Path> mainJavaSources(Path repositoryRoot, String fileName)
-      throws IOException {
-    try (Stream<Path> stream = Files.walk(repositoryRoot)) {
-      return stream
-          .filter(path -> isRepositorySource(repositoryRoot, path))
-          .filter(path -> path.toString().replace('\\', '/').contains("/src/main/java/"))
-          .filter(path -> path.getFileName().toString().equals(fileName))
-          .toList();
-    }
-  }
-
-  private static List<Path> implementationSources(Path repositoryRoot) throws IOException {
-    try (Stream<Path> stream = Files.walk(repositoryRoot)) {
-      return stream
-          .filter(path -> isRepositorySource(repositoryRoot, path))
-          .filter(path -> path.toString().replace('\\', '/').contains("/src/main/java/"))
-          .filter(path -> path.toString().endsWith(".java"))
-          .filter(
-              path -> {
-                try {
-                  return Files.readString(path, StandardCharsets.UTF_8)
-                      .contains("implements CanvasFunctionCatalog");
-                } catch (IOException error) {
-                  throw new IllegalStateException(error);
-                }
-              })
-          .toList();
-    }
-  }
-
-  /** 路径任一段命中生成/依赖目录名时不算仓库源文件。 */
-  private static boolean isRepositorySource(Path repositoryRoot, Path path) {
-    for (Path segment : repositoryRoot.relativize(path)) {
-      if (GENERATED_DIRS.contains(segment.toString())) {
-        return false;
-      }
-    }
-    return true;
   }
 
   private static boolean isAllowedImport(String imported) {

@@ -16,6 +16,7 @@ Run           -> 一次执行记录      # 冻结身份与历史区间
 
 本文按使用顺序说明编辑、运行和交接，再给出数据关系与生命周期。全局依赖与执行模型见
 [系统设计](system-design.md)；具体领域契约见 [Canvas Core](modules/canvas-core.md)、
+[Canvas Plugin API](modules/canvas-plugin-api.md)、
 [Canvas Infra](modules/canvas-infra.md)和 [Project](modules/project.md)。
 
 ## Canvas：组织内容与引用
@@ -424,8 +425,9 @@ Thread 与 Run，回写复验 claim 和 Run 坐标。`wake_version` 在请求唤
 
 ## 开发与验证入口
 
-修改 Canvas 命令和 Function 契约先读 [Canvas Core](modules/canvas-core.md)，数据库
-发布与 Worker 读 [Canvas Infra](modules/canvas-infra.md)；修改阶段、预算和交接读
+修改 Canvas 命令先读 [Canvas Core](modules/canvas-core.md)，Function 契约读
+[Canvas Plugin API](modules/canvas-plugin-api.md)，数据库发布与 Worker 读
+[Canvas Infra](modules/canvas-infra.md)；修改阶段、预算和交接读
 [Project](modules/project.md)，产品宿主编排读 [Platform](modules/platform.md)；
 浏览器草稿与问答卡片读 [Frontend](modules/frontend.md)。
 

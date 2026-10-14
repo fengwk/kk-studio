@@ -703,7 +703,7 @@ const CORE_STATE_ENUMS = [
     constants: ['CANVAS_NOT_FOUND', 'IDEMPOTENCY_CONFLICT'],
   },
   {
-    path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionRunException.java',
+    path: 'canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionRunException.java',
     enumName: 'Reason',
     constants: ['NOT_FOUND', 'CONFLICT'],
   },
