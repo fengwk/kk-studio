@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -129,6 +130,78 @@ class AnthropicOpaqueReplayTest {
     assertEquals(2, assistantContent.size());
     assertEquals(expectedNativeBlock, assistantContent.get(0));
     assertEquals("answer", assistantContent.get(1).path("text").asString(""));
+  }
+
+  /**
+   * 测试意图：durable 与 replay payload 的 tool input 按数值语义比对（scale 无关）——{@code 1.0} 与 {@code 1.00}
+   * 是同一数值，不得因数值节点相等对 scale 敏感而误判为不一致；不同数值仍必须拒绝，整数与小数保持分型区别；wire 输出 使用 replay 原文，数值形态不被比较过程改写。
+   */
+  @Test
+  void comparesToolInputNumbersByValueAndKeepsWireTextVerbatim() throws IOException {
+    ObjectNode payload = NODES.objectNode();
+    payload.put("role", "assistant");
+    ObjectNode toolUse = payload.putArray("content").addObject();
+    toolUse.put("type", "tool_use");
+    toolUse.put("id", "toolu_1");
+    toolUse.put("name", "charge");
+    ObjectNode input = toolUse.putObject("input");
+    input.put("amount", new BigDecimal("1.0"));
+    input.putObject("nested").put("fee", new BigDecimal("1.00"));
+    toolUse.putObject("futureMeta").put("trace", "t-1");
+
+    JsonNode content =
+        fallbackContent(
+            replayState(payload),
+            List.of(
+                new ProviderToolCallBlock(
+                    new ProviderToolCall(
+                        "toolu_1", "charge", "{\"amount\":1.00,\"nested\":{\"fee\":1.000}}"))));
+
+    assertEquals(1, content.size());
+    JsonNode replayed = content.get(0);
+    assertEquals("tool_use", replayed.path("type").asString(""));
+    // replay 原生 input 按值透传，opaque 字段完整保留（wire 数值文本保真由 *PrecisionRegressionTest 断言）
+    assertEquals("1.0", replayed.path("input").path("amount").decimalValue().toPlainString());
+    assertEquals(
+        "1.0", replayed.path("input").path("nested").path("fee").decimalValue().toPlainString());
+    assertEquals("t-1", replayed.path("futureMeta").path("trace").asString(""));
+
+    ProviderException valueError =
+        assertReplayRejected(
+            replayState(toolUsePayload(new BigDecimal("0.1234567890123456789012345678"))),
+            List.of(
+                new ProviderToolCallBlock(
+                    new ProviderToolCall(
+                        "toolu_1", "charge", "{\"amount\":0.1234567890123456789012345679}"))));
+    assertEquals(
+        "replay payload tool call arguments do not match durable content", valueError.getMessage());
+
+    ObjectNode integerInput = NODES.objectNode();
+    integerInput.put("role", "assistant");
+    ObjectNode integerUse = integerInput.putArray("content").addObject();
+    integerUse.put("type", "tool_use");
+    integerUse.put("id", "toolu_1");
+    integerUse.put("name", "charge");
+    integerUse.putObject("input").put("amount", 1);
+    ProviderException typeError =
+        assertReplayRejected(
+            replayState(integerInput),
+            List.of(
+                new ProviderToolCallBlock(
+                    new ProviderToolCall("toolu_1", "charge", "{\"amount\":1.0}"))));
+    assertEquals(
+        "replay payload tool call arguments do not match durable content", typeError.getMessage());
+  }
+
+  private static ObjectNode toolUsePayload(BigDecimal amount) {
+    ObjectNode payload = NODES.objectNode();
+    payload.put("role", "assistant");
+    ObjectNode toolUse = payload.putArray("content").addObject();
+    toolUse.put("type", "tool_use");
+    toolUse.put("id", "toolu_1");
+    toolUse.put("name", "charge");
+    toolUse.putObject("input").put("amount", amount);
+    return payload;
   }
 
   /** 测试意图：未携带 delta 的 native block 原样保留，绝不被补造或裁剪字段。 */

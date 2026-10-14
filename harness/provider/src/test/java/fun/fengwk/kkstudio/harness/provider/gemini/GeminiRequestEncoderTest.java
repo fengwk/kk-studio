@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -987,6 +988,98 @@ class GeminiRequestEncoderTest {
     assertEquals(2, parts.size());
     assertEquals("sig_123", parts.get(0).get("thoughtSignature").asString(""));
     assertTrue(parts.get(0).get("thought").asBoolean(false));
+  }
+
+  /**
+   * 意图：durable 与 replay 的 functionCall args 按数值语义比对（scale 无关）——{@code 1.0} 与 {@code 1.00} 视为一致，且原生
+   * part 形态与 opaque 字段完整保留；不同数值或整数与小数分型不同时安全退回 durable 语义编码。
+   */
+  @Test
+  void comparesFunctionCallArgsByValueAndFallsBackWhenNumbersDiffer() throws Exception {
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "model");
+    ArrayNode parts = payload.putArray("parts");
+    ObjectNode call = parts.addObject().putObject("functionCall");
+    call.put("name", "charge");
+    call.put("id", "c1");
+    ObjectNode args = call.putObject("args");
+    args.put("amount", new BigDecimal("1.0"));
+    args.putObject("nested").put("fee", new BigDecimal("1.00"));
+    call.putObject("futureCallField").put("trace", "t-1");
+    ObjectNode textPart = parts.addObject();
+    textPart.put("text", "answer");
+    textPart.putObject("futurePartField").put("sig", "s-1");
+
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            descriptor().affinity("gemini-2.5-flash"),
+            payload);
+    ArrayNode replayedParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    replayState,
+                    List.of(
+                        new ProviderTextBlock("answer"),
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall(
+                                "c1", "charge", "{\"amount\":1.00,\"nested\":{\"fee\":1.000}}"))))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(2, replayedParts.size());
+    JsonNode callOut = replayedParts.get(0).path("functionCall");
+    assertEquals("charge", callOut.path("name").asString(""));
+    // replay 原生 args 按值透传，opaque 字段完整保留（wire 数值文本保真由 *PrecisionRegressionTest 断言）
+    assertEquals("1.0", callOut.path("args").path("amount").decimalValue().toPlainString());
+    assertEquals(
+        "1.0", callOut.path("args").path("nested").path("fee").decimalValue().toPlainString());
+    assertEquals("t-1", callOut.path("futureCallField").path("trace").asString(""));
+    assertEquals("s-1", replayedParts.get(1).path("futurePartField").path("sig").asString(""));
+
+    ArrayNode highPrecisionParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    replayState(argumentCall("0.1234567890123456789012345678")),
+                    List.of(
+                        new ProviderTextBlock("answer"),
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall(
+                                "c1", "charge", "{\"amount\":0.1234567890123456789012345679}"))))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertFalse(highPrecisionParts.get(0).has("functionCall"));
+
+    ArrayNode integerParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    replayState(argumentCall("1")),
+                    List.of(
+                        new ProviderTextBlock("answer"),
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall("c1", "charge", "{\"amount\":1.0}"))))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertFalse(integerParts.get(0).has("functionCall"));
+  }
+
+  private static ObjectNode argumentCall(String amount) {
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "model");
+    ArrayNode parts = payload.putArray("parts");
+    ObjectNode call = parts.addObject().putObject("functionCall");
+    call.put("name", "charge");
+    call.put("id", "c1");
+    call.putObject("args").put("amount", new BigDecimal(amount));
+    parts.addObject().put("text", "answer");
+    return payload;
+  }
+
+  private static ProviderReplayState replayState(ObjectNode payload) {
+    return new ProviderReplayState(
+        ProviderReplayFormat.GEMINI_CONTENT, descriptor().affinity("gemini-2.5-flash"), payload);
   }
 
   /** 意图：affinity 匹配后，未知官方 Part（inlineData）与 part 内未知字段必须 opaque 透传，已知 text 仍与 durable 一致。 */
