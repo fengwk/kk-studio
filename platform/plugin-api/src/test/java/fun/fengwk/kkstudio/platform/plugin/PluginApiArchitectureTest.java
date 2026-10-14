@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.net.URI;
@@ -20,26 +21,39 @@ import java.util.stream.Stream;
 /**
  * Plugin SPI 模块的依赖方向守卫。
  *
- * <p>plugin-api 是 Plugin JAR 与宿主共享的纯契约：主源码只允许 JDK 与 harness-common 值契约，绝不依赖 Spring、数据库、HTTP 客户端或
- * Platform 宿主实现（{@code kk-studio-platform-runtime}）；POM 的生产依赖也必须精确只是 harness-common。
+ * <p>plugin-api 是 Plugin JAR 与宿主共享的纯契约：主源码只允许 JDK、Jackson 3 值模型与 Harness/Canvas 的纯值契约，绝不依赖
+ * Spring、数据库、HTTP 客户端或 Platform 宿主实现（{@code kk-studio-platform-runtime}）；POM 的生产依赖也必须精确匹配该集合。
  */
 class PluginApiArchitectureTest {
 
   private static final String OWN_PACKAGE_PREFIX = "fun.fengwk.kkstudio.platform.plugin.";
 
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
-      List.of("java.", "javax.", "fun.fengwk.kkstudio.harness.common.", OWN_PACKAGE_PREFIX);
+      List.of(
+          "java.",
+          "javax.",
+          "tools.jackson.",
+          "fun.fengwk.kkstudio.harness.common.",
+          "fun.fengwk.kkstudio.harness.contributor.api.",
+          "fun.fengwk.kkstudio.canvas.",
+          OWN_PACKAGE_PREFIX);
 
   private static final List<String> EXPECTED_PRODUCTION_DEPENDENCIES =
-      List.of("fun.fengwk.kk-studio:kk-studio-harness-common");
+      List.of(
+          "fun.fengwk.kk-studio:kk-studio-canvas-plugin-api",
+          "fun.fengwk.kk-studio:kk-studio-harness-common",
+          "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
+          "tools.jackson.core:jackson-databind");
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
+          "org.springframework.",
           "java.sql.",
           "javax.sql.",
           "java.net.http.",
           "java.net." + "HttpURLConnection",
           "java.net." + "URLConnection",
+          "fun.fengwk.kkstudio.platform.runtime.",
           OWN_PACKAGE_PREFIX + "PluginProperties",
           OWN_PACKAGE_PREFIX + "PluginConfiguration",
           OWN_PACKAGE_PREFIX + "credential.PluginCredentialCodec",
@@ -67,9 +81,9 @@ class PluginApiArchitectureTest {
     assertTrue(violations.isEmpty(), () -> "forbidden imports:\n" + String.join("\n", violations));
   }
 
-  /** API 模块的生产依赖精确只是 harness-common，宿主实现与 Spring 依赖只能留在 runtime 叶。 */
+  /** API 模块的生产依赖精确等于纯契约集合，宿主实现与 Spring 依赖只能留在 runtime 叶。 */
   @Test
-  void pluginApiDeclaresOnlyHarnessCommonAsProductionDependency() throws IOException {
+  void pluginApiDeclaresOnlyPureContractProductionDependencies() throws IOException {
     String pom = Files.readString(pluginApiPom(), StandardCharsets.UTF_8);
     List<String> production = new ArrayList<>();
     for (String dependency : dependencyBlocks(pom)) {
@@ -83,12 +97,13 @@ class PluginApiArchitectureTest {
 
   @Test
   void jdkAndOwnPackagePrefixesDoNotAdmitDatabaseHttpOrRuntimeImplementations() {
-    // JDK 和同名 package 白名单不能把数据库、网络客户端或宿主实现误放进纯 API。
+    // JDK 和同名 package 白名单不能把数据库、网络客户端、Spring 或宿主实现误放进纯 API。
     for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
       assertFalse(allowedImport(prefix + "Example"), prefix);
     }
     assertTrue(allowedImport(URI.class.getName()));
     assertTrue(allowedImport(PluginCredentialMaterial.class.getName()));
+    assertTrue(allowedImport(JsonNode.class.getName()));
   }
 
   private static boolean allowedImport(String imported) {
